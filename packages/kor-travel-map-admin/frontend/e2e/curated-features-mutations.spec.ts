@@ -8,10 +8,10 @@ import type { components } from "../src/api/types";
  *
  * 자매 파일 `curated-features.spec.ts`는 라이브 smoke(렌더/필터/페이지 구조)만 덮는다.
  * 본 spec은 시드 후보가 필요한 select/unselect/patch/archive/source-rule patch·apply/
- * pinvi-copy/pagination/empty/error 흐름을 **모든 backend 호출을 mock해 결정적으로** 덮는다.
+ * detail-snapshot/pagination/empty/error 흐름을 **모든 backend 호출을 mock해 결정적으로** 덮는다.
  *
  * 이 콘솔은 항상 4개 GET(curated-features/curated-sources/curated-themes/
- * curated-source-rules)을 발사하고, 첫 행이 자동 선택되면 pinvi-copy GET까지 발사한다.
+ * curated-source-rules)을 발사하고, 첫 행이 자동 선택되면 detail-snapshot GET까지 발사한다.
  * `mockCuratedConsole`가 이 5개 route를 단일 핸들러에서 method+pathname으로 분기해 mock한다
  * (admin-ops.spec.ts house 패턴). live :12701 backend 누수 없음.
  *
@@ -31,9 +31,10 @@ type CuratedSourceRuleResponse =
 type CuratedThemeView = components["schemas"]["CuratedThemeView"];
 type CuratedThemesResponse = components["schemas"]["CuratedThemesResponse"];
 type RuleApplyResponse = components["schemas"]["RuleApplyResponse"];
-type PinviCopyItemView = components["schemas"]["PinviCopyItemView"];
-type PinviCopySnapshotResponse =
-  components["schemas"]["PinviCopySnapshotResponse"];
+type CuratedFeatureDetailItemView =
+  components["schemas"]["CuratedFeatureDetailItemView"];
+type CuratedFeatureDetailSnapshotResponse =
+  components["schemas"]["CuratedFeatureDetailSnapshotResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const FEATURE_A_ID = "curated-feature-aaaa";
@@ -42,13 +43,17 @@ const THEME_ID = "theme-1111";
 const SOURCE_ID = "source-1111";
 const RULE_ID = "rule-1111";
 
+function apiPath(pathname: string): string {
+  return pathname.replace(/^\/api\/proxy/, "");
+}
+
 function makeCuratedFeature(
   overrides: Partial<CuratedFeatureView> = {},
 ): CuratedFeatureView {
   return {
     address: {},
     archived_at: null,
-    copy_version: 1,
+    content_version: 1,
     created_at: MOCK_NOW,
     curated_feature_id: FEATURE_A_ID,
     curation_status: "candidate",
@@ -82,8 +87,8 @@ function makeCuratedFeature(
     theme_id: THEME_ID,
     theme_name: "고궁 산책",
     theme_slug: "palace-walk",
-    pinvi_copy_policy: "manual_review",
-    pinvi_relation: "nearby_option",
+    reuse_policy: "manual_review",
+    curation_relation: "nearby_option",
     updated_at: MOCK_NOW,
     ...overrides,
   };
@@ -155,11 +160,11 @@ function makeCuratedTheme(
   };
 }
 
-function makePinviCopyItem(
-  overrides: Partial<PinviCopyItemView> = {},
-): PinviCopyItemView {
+function makeDetailItem(
+  overrides: Partial<CuratedFeatureDetailItemView> = {},
+): CuratedFeatureDetailItemView {
   return {
-    curated_feature_item_id: "copy-item-1",
+    curated_feature_item_id: "detail-item-1",
     day_index: null,
     feature_id: "python-visitkorea-api::visitkorea_areas::feat-1",
     feature_snapshot: {},
@@ -237,21 +242,21 @@ function ruleApplyResponse(insertedOrUpdated: number): RuleApplyResponse {
   };
 }
 
-function copySnapshotResponse(
-  items: PinviCopyItemView[] = [makePinviCopyItem()],
-): PinviCopySnapshotResponse {
+function detailSnapshotResponse(
+  items: CuratedFeatureDetailItemView[] = [makeDetailItem()],
+): CuratedFeatureDetailSnapshotResponse {
   return {
     data: {
       curated_feature_id: FEATURE_A_ID,
       etag: "etag-0123456789abcdef",
       items,
-      plan: { plan_id: "plan-1" },
+      content: { title: "plan-1" },
       source: { source_id: SOURCE_ID },
       theme: { theme_id: THEME_ID },
       updated_at: MOCK_NOW,
       version: 3,
     },
-    meta: { duration_ms: 1, request_id: "e2e-pinvi-copy" },
+    meta: { duration_ms: 1, request_id: "e2e-detail-snapshot" },
   };
 }
 
@@ -269,7 +274,7 @@ interface ConsoleOptions {
   sources?: CuratedSourceView[];
   themes?: CuratedThemeView[];
   rules?: CuratedSourceRuleView[];
-  copyItems?: PinviCopyItemView[];
+  detailItems?: CuratedFeatureDetailItemView[];
   /** features list GET을 500으로 실패시킨다(에러 배너 검증). */
   featuresError?: boolean;
   /** cursor 분기 — 두번째 페이지 items와 next_cursor를 다르게 반환. */
@@ -286,7 +291,7 @@ interface ConsoleRequests {
   delete: number;
   rulePatch: number;
   ruleApply: number;
-  copy: number;
+  detail: number;
   /** features list GET에 마지막으로 캡처된 query 파라미터. */
   lastPageSize: string | null;
   lastCursor: string | null;
@@ -315,7 +320,7 @@ async function mockCuratedConsole(
   const sources = options.sources ?? [makeCuratedSource()];
   const themes = options.themes ?? [makeCuratedTheme()];
   let rules = [...(options.rules ?? [])];
-  const copyItems = options.copyItems ?? [makePinviCopyItem()];
+  const detailItems = options.detailItems ?? [makeDetailItem()];
 
   const requests: ConsoleRequests = {
     featuresList: 0,
@@ -325,7 +330,7 @@ async function mockCuratedConsole(
     delete: 0,
     rulePatch: 0,
     ruleApply: 0,
-    copy: 0,
+    detail: 0,
     lastPageSize: null,
     lastCursor: null,
     selectBodies: [],
@@ -353,7 +358,13 @@ async function mockCuratedConsole(
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
-    const path = url.pathname;
+    const path = apiPath(url.pathname);
+
+    if (method === "GET" && path.endsWith("/detail-snapshot")) {
+      requests.detail += 1;
+      await fulfillJson(route, detailSnapshotResponse(detailItems));
+      return;
+    }
 
     if (method === "GET" && path === "/v1/admin/curated-features") {
       requests.featuresList += 1;
@@ -441,7 +452,7 @@ async function mockCuratedConsole(
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
-    const path = url.pathname;
+    const path = apiPath(url.pathname);
 
     if (method === "GET" && path === "/v1/admin/curated-source-rules") {
       await fulfillJson(route, rulesResponse(rules));
@@ -488,10 +499,13 @@ async function mockCuratedConsole(
     await fulfillJson(route, themesResponse(themes));
   });
 
-  await page.route("**/v1/curated-features/*/pinvi-copy**", async (route) => {
-    requests.copy += 1;
-    await fulfillJson(route, copySnapshotResponse(copyItems));
-  });
+  await page.route(
+    "**/v1/admin/curated-features/*/detail-snapshot**",
+    async (route) => {
+      requests.detail += 1;
+      await fulfillJson(route, detailSnapshotResponse(detailItems));
+    },
+  );
 
   return requests;
 }
@@ -555,7 +569,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await expect(row.getByRole("button", { name: "select" })).toBeVisible();
   });
 
-  test("curated feature display/copy patch 저장 (PATCH curated-features/{id})", async ({
+  test("curated feature display/detail patch 저장 (PATCH curated-features/{id})", async ({
     page,
   }) => {
     const requests = await mockCuratedConsole(page, {
@@ -569,8 +583,8 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await page.getByLabel("display title").fill("경복궁 야간개장");
     await page.getByLabel("display summary").fill("야간 고궁 산책 추천");
     await page.getByLabel("rank score").fill("4.5");
-    await page.getByLabel("copy policy").selectOption("copy_allowed");
-    await page.getByLabel("PinVi relation").selectOption("primary_stop");
+    await page.getByLabel("reuse policy").selectOption("allowed");
+    await page.getByLabel("curation relation").selectOption("primary_stop");
 
     await page.getByRole("button", { name: "저장" }).click();
 
@@ -579,8 +593,8 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       display_title: "경복궁 야간개장",
       display_summary: "야간 고궁 산책 추천",
       rank_score: 4.5,
-      pinvi_copy_policy: "copy_allowed",
-      pinvi_relation: "primary_stop",
+      reuse_policy: "allowed",
+      curation_relation: "primary_stop",
     });
   });
 
@@ -611,14 +625,14 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     });
   });
 
-  test("copy policy / relation select 옵션 전부 + 로컬 state 반영", async ({
+  test("reuse policy / relation select 옵션 전부 + 로컬 state 반영", async ({
     page,
   }) => {
     await mockCuratedConsole(page, {
       features: [
         makeCuratedFeature({
-          pinvi_copy_policy: "manual_review",
-          pinvi_relation: "nearby_option",
+          reuse_policy: "manual_review",
+          curation_relation: "nearby_option",
         }),
       ],
     });
@@ -626,13 +640,13 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await page.goto("/admin/curated-features");
     await expect(page.getByText("Curated display")).toBeVisible();
 
-    const copyPolicy = page.getByLabel("copy policy");
-    for (const option of ["copy_allowed", "copy_blocked", "manual_review"]) {
-      await copyPolicy.selectOption(option);
-      await expect(copyPolicy).toHaveValue(option);
+    const detailPolicy = page.getByLabel("reuse policy");
+    for (const option of ["allowed", "blocked", "manual_review"]) {
+      await detailPolicy.selectOption(option);
+      await expect(detailPolicy).toHaveValue(option);
     }
 
-    const relation = page.getByLabel("PinVi relation");
+    const relation = page.getByLabel("curation relation");
     for (const option of [
       "primary_stop",
       "food_stop",
@@ -758,21 +772,21 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await expect(page.getByText("7개 후보를 반영했습니다.")).toBeVisible();
   });
 
-  test("PinVi copy snapshot 미리보기 + item 테이블", async ({ page }) => {
+  test("detail snapshot 미리보기 + item 테이블", async ({ page }) => {
     const requests = await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
-      copyItems: [makePinviCopyItem()],
+      detailItems: [makeDetailItem()],
     });
 
     await page.goto("/admin/curated-features");
 
-    // 첫 행 자동 선택 → snapshot 쿼리 enabled → pinvi-copy GET 1회.
-    await expect(page.getByText("PinVi copy preview")).toBeVisible();
-    await expect.poll(() => requests.copy).toBeGreaterThanOrEqual(1);
+    // 첫 행 자동 선택 → snapshot 쿼리 enabled → detail-snapshot GET 1회.
+    await expect(page.getByText("Detail snapshot preview")).toBeVisible();
+    await expect.poll(() => requests.detail).toBeGreaterThanOrEqual(1);
 
     // etag Badge (shortId(etag, 10)).
     await expect(page.getByText(/^etag /)).toBeVisible();
-    // copy item 테이블 헤더 + relation Badge. 'feature' 컬럼은 메인 후보 테이블에도
+    // detail item 테이블 헤더 + relation Badge. 'feature' 컬럼은 메인 후보 테이블에도
     // 있으므로 snapshot 테이블(고유 'order' 헤더 보유)로 스코프해 strict-mode 충돌 회피.
     const snapshotTable = page.getByRole("table").filter({
       has: page.getByRole("columnheader", { name: "order", exact: true }),
@@ -782,20 +796,20 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
         snapshotTable.getByRole("columnheader", { name: column, exact: true }),
       ).toBeVisible();
     }
-    // 'primary_stop'은 copy-policy/relation select의 <option>으로도 존재하므로
+    // 'primary_stop'은 detail-policy/relation select의 <option>으로도 존재하므로
     // snapshot 테이블로 스코프해 strict-mode 충돌을 피한다.
     await expect(snapshotTable.getByText("primary_stop")).toBeVisible();
   });
 
-  test("copy snapshot items 0건 → emptyMessage", async ({ page }) => {
+  test("detail snapshot items 0건 → emptyMessage", async ({ page }) => {
     await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
-      copyItems: [],
+      detailItems: [],
     });
 
     await page.goto("/admin/curated-features");
-    await expect(page.getByText("PinVi copy preview")).toBeVisible();
-    await expect(page.getByText("copy item이 없습니다.")).toBeVisible();
+    await expect(page.getByText("Detail snapshot preview")).toBeVisible();
+    await expect(page.getByText("detail item이 없습니다.")).toBeVisible();
   });
 
   test("cursor 페이지네이션 — 다음/처음 버튼 + cursor 재요청", async ({
@@ -866,16 +880,16 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     ).toBeVisible();
     await expect(
       page.getByText(
-        "후보를 선택하면 display text와 PinVi copy 속성을 편집할 수 있습니다.",
+        "후보를 선택하면 display text와 공개 재사용 속성을 편집할 수 있습니다.",
       ),
     ).toBeVisible();
     await expect(
-      page.getByText("후보를 선택하면 copy snapshot을 조회합니다."),
+      page.getByText("후보를 선택하면 detail snapshot을 조회합니다."),
     ).toBeVisible();
 
-    // selectedFeature null → pinvi-copy 쿼리 disabled → GET 0회.
+    // selectedFeature null → detail-snapshot 쿼리 disabled → GET 0회.
     await expect.poll(() => requests.featuresList).toBeGreaterThanOrEqual(1);
-    expect(requests.copy).toBe(0);
+    expect(requests.detail).toBe(0);
   });
 
   test("features list 500 → role=alert 배너", async ({ page }) => {

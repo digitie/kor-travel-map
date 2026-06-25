@@ -326,7 +326,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         title="kor-travel-map-api",
         version=__version__,
         description=(
-            "Debug + admin REST API for PinVi `kor-travel-map`. "
+            "Debug + admin + public REST API for `kor-travel-map`. "
             "Intranet-only (no auth in code, ADR-005). 운영 범위는 ADR-035 — "
             "/debug, /admin, /ops, /features prefix로 분리."
         ),

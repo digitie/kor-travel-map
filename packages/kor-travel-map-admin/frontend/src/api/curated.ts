@@ -37,20 +37,21 @@ export type CuratedSourceRuleResponse =
 export type CuratedTheme = CuratedSchemas["CuratedThemeView"];
 export type CuratedThemesResponse = CuratedSchemas["CuratedThemesResponse"];
 export type RuleApplyResponse = CuratedSchemas["RuleApplyResponse"];
-export type PinviCopySnapshot = CuratedSchemas["PinviCopySnapshotView"];
-export type PinviCopySnapshotResponse =
-  CuratedSchemas["PinviCopySnapshotResponse"];
+export type CuratedFeatureDetailSnapshot =
+  CuratedSchemas["CuratedFeatureDetailSnapshotView"];
+export type CuratedFeatureDetailSnapshotResponse =
+  CuratedSchemas["CuratedFeatureDetailSnapshotResponse"];
 
 export type CuratedFeatureStatus = Exclude<
   AdminCuratedFeaturesQuery["curation_status"],
   null | undefined
 >;
-export type CuratedPinviCopyPolicy = Exclude<
-  CuratedFeaturePatchRequest["pinvi_copy_policy"],
+export type CuratedReusePolicy = Exclude<
+  CuratedFeaturePatchRequest["reuse_policy"],
   null | undefined
 >;
-export type CuratedPinviRelation = Exclude<
-  CuratedFeaturePatchRequest["pinvi_relation"],
+export type CuratedCurationRelation = Exclude<
+  CuratedFeaturePatchRequest["curation_relation"],
   null | undefined
 >;
 export type CuratedRuleAction = Exclude<
@@ -65,7 +66,7 @@ export type AdminCuratedThemesParams = AdminCuratedThemesQuery;
 
 function invalidateCurated(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["curated-features"] });
-  void queryClient.invalidateQueries({ queryKey: ["curated-feature-copy"] });
+  void queryClient.invalidateQueries({ queryKey: ["curated-feature-detail"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-source-rules"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-sources"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-themes"] });
@@ -176,21 +177,23 @@ export function useAdminCuratedThemes(
   });
 }
 
-async function fetchPinviCopySnapshot(
+async function fetchCuratedFeatureDetailSnapshot(
   curatedFeatureId: string,
   signal?: AbortSignal,
-): Promise<PinviCopySnapshotResponse> {
-  return getJson<PinviCopySnapshotResponse>(
-    `/v1/curated-features/${encodeURIComponent(curatedFeatureId)}/pinvi-copy`,
+): Promise<CuratedFeatureDetailSnapshotResponse> {
+  return getJson<CuratedFeatureDetailSnapshotResponse>(
+    `/v1/admin/curated-features/${encodeURIComponent(
+      curatedFeatureId,
+    )}/detail-snapshot`,
     { signal },
   );
 }
 
-export function usePinviCopySnapshot(curatedFeatureId: string | null) {
-  return useQuery<PinviCopySnapshotResponse, Error>({
-    queryKey: ["curated-feature-copy", curatedFeatureId] as const,
+export function useCuratedFeatureDetailSnapshot(curatedFeatureId: string | null) {
+  return useQuery<CuratedFeatureDetailSnapshotResponse, Error>({
+    queryKey: ["curated-feature-detail", curatedFeatureId] as const,
     queryFn: ({ signal }) =>
-      fetchPinviCopySnapshot(curatedFeatureId as string, signal),
+      fetchCuratedFeatureDetailSnapshot(curatedFeatureId as string, signal),
     enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
     staleTime: 30_000,
   });

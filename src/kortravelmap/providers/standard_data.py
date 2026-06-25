@@ -483,7 +483,7 @@ async def cultural_festivals_to_bundles(
 
     Examples
     --------
-    호출자(PinVi apps 또는 Dagster asset) 측 사용 예시:
+    호출자(external apps 또는 Dagster asset) 측 사용 예시:
 
     >>> from datetime import datetime, timezone, timedelta
     >>> from kortravelmap.providers.standard_data import (
@@ -1144,7 +1144,7 @@ async def special_streets_to_bundles(
 
     특화거리는 개별 POI가 아니라 거리/구역 메타 source다. T-223b에서는 geometry가
     없는 원천 좌표를 ``theme_area_anchor`` place로 보존하고, 후속 curated overlay가
-    PinVi 복사 시 ``pinvi_relation='theme_area_anchor'``로 해석한다.
+    kor-travel-map 복사 시 ``curation_relation='theme_area_anchor'``로 해석한다.
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None

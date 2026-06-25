@@ -520,8 +520,8 @@
             ],
             "title": "Archived At"
           },
-          "copy_version": {
-            "title": "Copy Version",
+          "content_version": {
+            "title": "Content Version",
             "type": "integer"
           },
           "created_at": {
@@ -531,6 +531,10 @@
           },
           "curated_feature_id": {
             "title": "Curated Feature Id",
+            "type": "string"
+          },
+          "curation_relation": {
+            "title": "Curation Relation",
             "type": "string"
           },
           "curation_status": {
@@ -622,14 +626,6 @@
             "title": "Metadata",
             "type": "object"
           },
-          "pinvi_copy_policy": {
-            "title": "Pinvi Copy Policy",
-            "type": "string"
-          },
-          "pinvi_relation": {
-            "title": "Pinvi Relation",
-            "type": "string"
-          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -671,6 +667,10 @@
               }
             ],
             "title": "Rejection Reason"
+          },
+          "reuse_policy": {
+            "title": "Reuse Policy",
+            "type": "string"
           },
           "selected_at": {
             "anyOf": [
@@ -792,9 +792,9 @@
           "curation_status",
           "selection_origin",
           "rank_score",
-          "pinvi_relation",
-          "pinvi_copy_policy",
-          "copy_version",
+          "curation_relation",
+          "reuse_policy",
+          "content_version",
           "metadata",
           "created_at",
           "updated_at"
@@ -834,280 +834,6 @@
           "meta"
         ],
         "title": "CuratedFeaturesResponse",
-        "type": "object"
-      },
-      "CuratedSourceView": {
-        "additionalProperties": false,
-        "description": "curated source metadata view.",
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
-          },
-          "freshness_note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Freshness Note"
-          },
-          "last_checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Checked At"
-          },
-          "last_source_modified_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Modified At"
-          },
-          "license": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "License"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "next_expected_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Expected At"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_status": {
-            "title": "Provider Status",
-            "type": "string"
-          },
-          "row_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Count"
-          },
-          "source_id": {
-            "title": "Source Id",
-            "type": "string"
-          },
-          "source_kind": {
-            "title": "Source Kind",
-            "type": "string"
-          },
-          "source_name": {
-            "title": "Source Name",
-            "type": "string"
-          },
-          "source_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Url"
-          },
-          "update_cycle": {
-            "title": "Update Cycle",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source_id",
-          "provider",
-          "dataset_key",
-          "source_name",
-          "source_kind",
-          "update_cycle",
-          "provider_status",
-          "metadata",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "CuratedSourceView",
-        "type": "object"
-      },
-      "CuratedSourcesData": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/CuratedSourceView"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "CuratedSourcesData",
-        "type": "object"
-      },
-      "CuratedSourcesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CuratedSourcesData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "CuratedSourcesResponse",
-        "type": "object"
-      },
-      "CuratedThemeView": {
-        "additionalProperties": false,
-        "description": "curated theme view.",
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "default_curated": {
-            "title": "Default Curated",
-            "type": "boolean"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "theme_description": {
-            "title": "Theme Description",
-            "type": "string"
-          },
-          "theme_group": {
-            "title": "Theme Group",
-            "type": "string"
-          },
-          "theme_id": {
-            "title": "Theme Id",
-            "type": "string"
-          },
-          "theme_name": {
-            "title": "Theme Name",
-            "type": "string"
-          },
-          "theme_slug": {
-            "title": "Theme Slug",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "visibility": {
-            "title": "Visibility",
-            "type": "string"
-          }
-        },
-        "required": [
-          "theme_id",
-          "theme_slug",
-          "theme_name",
-          "theme_description",
-          "theme_group",
-          "default_curated",
-          "visibility",
-          "metadata",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "CuratedThemeView",
-        "type": "object"
-      },
-      "CuratedThemesData": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/CuratedThemeView"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "CuratedThemesData",
-        "type": "object"
-      },
-      "CuratedThemesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CuratedThemesData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "CuratedThemesResponse",
         "type": "object"
       },
       "FeatureBatchData": {
@@ -2053,149 +1779,6 @@
         "title": "PageMeta",
         "type": "object"
       },
-      "PinviCopyItemView": {
-        "additionalProperties": false,
-        "description": "PinVi curated_plan_pois copy item.",
-        "properties": {
-          "curated_feature_item_id": {
-            "title": "Curated Feature Item Id",
-            "type": "string"
-          },
-          "day_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Day Index"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
-          },
-          "feature_snapshot": {
-            "additionalProperties": true,
-            "title": "Feature Snapshot",
-            "type": "object"
-          },
-          "memo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memo"
-          },
-          "relation": {
-            "title": "Relation",
-            "type": "string"
-          },
-          "sort_order": {
-            "title": "Sort Order",
-            "type": "integer"
-          },
-          "source_record_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Record Key"
-          }
-        },
-        "required": [
-          "curated_feature_item_id",
-          "feature_id",
-          "relation",
-          "sort_order",
-          "feature_snapshot"
-        ],
-        "title": "PinviCopyItemView",
-        "type": "object"
-      },
-      "PinviCopySnapshotResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PinviCopySnapshotView"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "PinviCopySnapshotResponse",
-        "type": "object"
-      },
-      "PinviCopySnapshotView": {
-        "additionalProperties": false,
-        "description": "PinVi import snapshot.",
-        "properties": {
-          "curated_feature_id": {
-            "title": "Curated Feature Id",
-            "type": "string"
-          },
-          "etag": {
-            "title": "Etag",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/PinviCopyItemView"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "plan": {
-            "additionalProperties": true,
-            "title": "Plan",
-            "type": "object"
-          },
-          "source": {
-            "additionalProperties": true,
-            "title": "Source",
-            "type": "object"
-          },
-          "theme": {
-            "additionalProperties": true,
-            "title": "Theme",
-            "type": "object"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "curated_feature_id",
-          "version",
-          "etag",
-          "updated_at",
-          "theme",
-          "plan",
-          "source",
-          "items"
-        ],
-        "title": "PinviCopySnapshotView",
-        "type": "object"
-      },
       "ProblemDetail": {
         "additionalProperties": true,
         "description": "RFC7807 ``application/problem+json`` 에러 본문 (중앙 핸들러 정본, §1.5).\n\n중앙 예외 핸들러(`app._error_response`)가 모든 4xx/5xx를 이 형식으로 통일한다.\n``code``·``request_id``는 소비자 파싱 위치 고정용 top-level 확장 멤버다.",
@@ -3000,7 +2583,7 @@
     },
     "securitySchemes": {
       "ServiceToken": {
-        "description": "PinVi 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
+        "description": "외부 서비스 호출 토큰 (ADR-045 D-1).",
         "in": "header",
         "name": "X-Kor-Travel-Map-Service-Token",
         "type": "apiKey"
@@ -3008,7 +2591,7 @@
     }
   },
   "info": {
-    "description": "PinVi/user-facing subset of kor-travel-map OpenAPI. Internal admin/debug/ops routes are intentionally excluded.",
+    "description": "User-facing subset of kor-travel-map OpenAPI. Internal admin/debug/ops routes are intentionally excluded.",
     "title": "kor-travel-map-user",
     "version": "0.2.0-dev"
   },
@@ -3487,259 +3070,6 @@
         ]
       }
     },
-    "/v1/curated-features/{curated_feature_id}/pinvi-copy": {
-      "get": {
-        "operationId": "get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PinviCopySnapshotResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Get Curated Pinvi Copy Route",
-        "tags": [
-          "curated"
-        ]
-      }
-    },
-    "/v1/curated-sources": {
-      "get": {
-        "operationId": "list_curated_sources_route_v1_curated_sources_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider_status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "implemented",
-                    "provider_needed",
-                    "manual_only",
-                    "deprecated"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 200,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedSourcesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "List Curated Sources Route",
-        "tags": [
-          "curated"
-        ]
-      }
-    },
-    "/v1/curated-themes": {
-      "get": {
-        "operationId": "list_curated_themes_route_v1_curated_themes_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "visibility",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "admin_only",
-                    "public",
-                    "pinvi"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Visibility"
-            }
-          },
-          {
-            "in": "query",
-            "name": "theme_group",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Theme Group"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 200,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedThemesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "List Curated Themes Route",
-        "tags": [
-          "curated"
-        ]
-      }
-    },
     "/v1/features/batch": {
       "post": {
         "operationId": "get_features_batch_v1_features_batch_post",
@@ -4026,7 +3356,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "bbox 안 feature 목록 (PinVi/public envelope)",
+        "summary": "bbox 안 feature 목록 (public envelope)",
         "tags": [
           "features"
         ]
@@ -4266,12 +3596,12 @@
         "operationId": "list_features_nearby_by_target_v1_features_nearby_by_target_get",
         "parameters": [
           {
-            "description": "외부 시스템 이름. 예: pinvi",
+            "description": "외부 시스템 이름. 예: external-app",
             "in": "query",
             "name": "external_system",
             "required": true,
             "schema": {
-              "description": "외부 시스템 이름. 예: pinvi",
+              "description": "외부 시스템 이름. 예: external-app",
               "title": "External System",
               "type": "string"
             }

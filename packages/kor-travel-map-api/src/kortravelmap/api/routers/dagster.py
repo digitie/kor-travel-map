@@ -2,7 +2,7 @@
 
 Dagster webserver 자체 화면은 frontend에서 iframe으로 embed하고, 본 라우터는
 같은 Dagster GraphQL 데이터를 admin UI가 읽기 쉬운 요약 DTO로 변환한다.
-PinVi나 외부 서비스가 Dagster를 직접 제어하지 않는다는 ADR-045 경계를 유지한다.
+외부 서비스가 Dagster를 직접 제어하지 않는다는 ADR-045 경계를 유지한다.
 """
 
 from __future__ import annotations

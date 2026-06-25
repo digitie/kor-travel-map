@@ -1,7 +1,7 @@
-"""``kor-travel-map`` — PinVi 지도 데이터 정규화·저장 함수 라이브러리.
+"""``kor-travel-map`` — 지도 데이터 정규화·저장 함수 라이브러리.
 
 본 패키지는 한국 공공 API(``python-*-api``) 결과를 단일 ``Feature`` 계약으로
-정규화하고 PostgreSQL + PostGIS에 저장한다. ADR-045 이후 PinVi 운영 연동은
+정규화하고 PostgreSQL + PostGIS에 저장한다. ADR-045 이후 외부 운영 연동은
 본 패키지를 직접 import하지 않고 kor-travel-map 독립 프로그램의 OpenAPI를 호출한다.
 본 Python API는 kor-travel-map API/Dagster 내부 구현과 테스트에서 사용한다.
 
@@ -22,7 +22,7 @@ import 경로
 ADR 참조
 --------
 - ADR-002 — async-only API (sync 인터페이스 추가 금지)
-- ADR-045 — PinVi 연계는 OpenAPI, 메인 Python API는 kor-travel-map 내부 구현용
+- ADR-045 — 외부 연계는 OpenAPI, 메인 Python API는 kor-travel-map 내부 구현용
 - ADR-055 — REST API는 별도 패키지 ``kor-travel-map-api``, admin UI는
   ``kor-travel-map-admin/frontend``
 - ADR-054 — ``kor-travel-map`` / ``kortravelmap`` package identity clean cut

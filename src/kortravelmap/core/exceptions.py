@@ -4,7 +4,7 @@
 ``docs/architecture/debug-ui-package.md §6.4 HTTP 매핑``의 원천.
 모든 예외는 ``KorTravelMapError``를 상속한다.
 
-호출자(PinVi / debug-ui)는 본 모듈의 예외만 catch해야 한다. 내부 SQLAlchemy /
+호출자(api / debug-ui)는 본 모듈의 예외만 catch해야 한다. 내부 SQLAlchemy /
 asyncpg / httpx 예외가 새는 일이 없도록 ``infra/``/``providers/``/``client/``
 레이어에서 본 예외로 wrap한다.
 

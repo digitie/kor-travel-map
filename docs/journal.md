@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — Curated API 범용 계약 정리
+
+kor-travel-map은 특정 소비자 제품명을 알지 않는다는 정책에 맞춰 curated feature API/DB 계약을
+범용 명칭으로 정리했다. curated features는 임의 외부 사용자가 목록과 상세를 조회할 수 있는
+공개 데이터 계약이고, 상세 snapshot preview는 admin 운영 도구 전용으로만 남겼다.
+
+- **public API 축소**: user OpenAPI profile의 curated public surface를
+  `/v1/curated-features`, `/v1/curated-features/{curated_feature_id}`만 노출하도록 정리했다.
+  제품 전용 상세 snapshot endpoint와 hidden 호환 route는 제거했다.
+- **DB/API rename**: `feature.curated_features`의 재사용 관련 컬럼은
+  `curation_relation`/`reuse_policy`/`content_version`, snapshot table은
+  `feature.curated_feature_detail_snapshots`로 정리했다. source rule metadata와 snapshot JSON도
+  같은 범용 key로 migration한다.
+- **POI cache metadata**: 외부 POI 식별자는 `external_poi_id`만 받도록 API schema와 JSONB
+  migration을 정리했다.
+- **admin UI/OpenAPI**: admin preview route는
+  `/v1/admin/curated-features/{curated_feature_id}/detail-snapshot`로 이동했고, admin/user
+  TypeScript OpenAPI type을 재생성했다.
+- **검증**: curated/POI API targeted 21건, curated/POI/schema integration 14건, OpenAPI drift,
+  admin/user generated type drift, admin/user type-check, frontend unit 43건, curated mocked e2e
+  22건, ruff, strict mypy, import-linter를 통과했다. 전체 pytest는 1,345건 통과했고,
+  `kor-travel-geo` live reverse geocoder가 400을 반환한 외부 의존 테스트 5건만 별도 실패했다.
+
 ## 2026-06-25 (codex) — KNPS 비매칭코스 route 제외 + N150 env/DB rename
 
 N150 production의 active route에서 `비매칭코스` 1건을 확인했다. source는
@@ -34,21 +57,18 @@ N150 production의 active route에서 `비매칭코스` 1건을 확인했다. so
   실패했으나 단독 재실행 2건 통과했다. full suite 단일 실행은 20분 제한으로 timeout되어
   spec 묶음 단위로 검증했다.
 
-## 2026-06-25 (codex) — Concierge curated source 추가 + PinVi 명칭/DB rename
+## 2026-06-25 (codex) — Concierge curated source 추가 + curated 계약 보강
 
 `kor-travel-concierge`의 YouTube 장소 후보를 curated feature 기본 source로 올리고,
-curated copy 계약의 남은 TripMate 명칭을 PinVi 기준으로 정리했다.
+curated 재사용 계약을 범용 detail snapshot 기준으로 정리했다.
 
 - **concierge source rule**: `kor-travel-concierge-youtube/youtube_place_candidates`를
   `media-places` theme의 `curated` 기본 rule로 등록했다. rule apply 시 `selected_at`을
   채우고, `display_title`은 concierge payload의 `source_title` → playlist/channel title →
   검색어 계열 title 순서로 결정한다.
-- **PinVi rename**: `feature.curated_features`의 `pinvi_relation`/`pinvi_copy_policy`,
-  `feature.curated_pinvi_copy_snapshots`, `/v1/curated-features/{id}/pinvi-copy`를 정식 계약으로
-  전환했다. 운영 전환을 위해 구 `/tripmate-copy` route와 `tripmate_*` metadata 입력은 hidden
-  호환 경로로만 남겼다.
-- **POI cache metadata**: `tripmate_poi_id` JSONB key를 `pinvi_poi_id`로 migration하고, API 입력은
-  옛 key를 받아 새 key로 serialize한다.
+- **curated 재사용 계약**: `feature.curated_features`의 재사용 속성, detail snapshot cache,
+  public/admin endpoint를 제품명 없는 curated feature 계약으로 정리했다.
+- **POI cache metadata**: 외부 target metadata의 POI 식별자는 `external_poi_id`로 serialize한다.
 - **검증**: curated unit/API/Dagster targeted 33건, curated integration 6건, OpenAPI drift check,
   admin/user TypeScript type-check, ruff, strict mypy, import-linter를 통과했다.
 

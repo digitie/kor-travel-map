@@ -6,8 +6,8 @@ DTO 매핑만, SQL 미보유.
 
 엔드포인트:
 - ``GET /features`` — bbox 안 feature 경량 표현 list (지도 뷰포트 로드).
-- ``GET /features/in-bounds`` — PinVi/user용 bbox envelope 응답.
-- ``GET /features/search`` — PinVi/user용 이름/bbox 검색.
+- ``GET /features/in-bounds`` — user용 bbox envelope 응답.
+- ``GET /features/search`` — user용 이름/bbox 검색.
 - ``GET /features/{feature_id}`` — feature 단건 상세.
 - ``POST /features/batch`` — N+1 방지 batch 상세(service read, ServiceToken).
 
@@ -410,7 +410,7 @@ async def list_features_in_bbox(
 @router.get(
     "/in-bounds",
     response_model=FeaturesInBoundsResponse,
-    summary="bbox 안 feature 목록 (PinVi/public envelope)",
+    summary="bbox 안 feature 목록 (public envelope)",
 )
 async def list_public_features_in_bounds(
     request: Request,
@@ -659,7 +659,10 @@ async def list_features_nearby(
 async def list_features_nearby_by_target(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    external_system: Annotated[str, Query(description="외부 시스템 이름. 예: pinvi")],
+    external_system: Annotated[
+        str,
+        Query(description="외부 시스템 이름. 예: external-app"),
+    ],
     target_key: Annotated[str, Query(description="외부 POI 고유 key.")],
     radius_km: Annotated[
         float | None,

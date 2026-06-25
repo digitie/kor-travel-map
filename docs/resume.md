@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — Curated API 범용 계약 정리
+
+- **완료(API 정책)**: public curated API는 임의 외부 사용자가 curated feature 목록/상세를 조회하는
+  범용 계약으로 정리했다. user OpenAPI profile에는 `/v1/curated-features`와
+  `/v1/curated-features/{curated_feature_id}`만 남긴다.
+- **완료(DB/API rename)**: curated 재사용 속성은 `curation_relation`/`reuse_policy`/
+  `content_version`, snapshot table은 `feature.curated_feature_detail_snapshots`로 정리했다.
+  source rule metadata, snapshot JSON, admin UI preview API도 같은 범용 명칭으로 migration한다.
+- **완료(POI metadata)**: POI cache target metadata의 외부 POI 식별자는 `external_poi_id`로만
+  저장·노출한다.
+- **완료(검증)**: targeted curated/POI API 21건, curated/POI/schema integration 14건, OpenAPI
+  drift, generated type drift, admin/user type-check, frontend unit 43건, curated mocked e2e 22건,
+  ruff, strict mypy, import-linter 통과. 전체 pytest는 1,345건 통과, 외부 `kor-travel-geo`
+  live reverse geocoder 400으로 5건 실패.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지 후 N150 배포와 live smoke를 완료한다.
+
 ## 2026-06-25 (codex) — KNPS 비매칭코스 제외 + N150 재검증
 
 - **완료(코드)**: KNPS `knps_trails` 변환에서 `비매칭코스`/`Nonmatching Course`를 공식 route로
@@ -19,13 +35,12 @@
   1건은 최초 묶음 실행에서 실패했지만 단독 재실행 2건 통과했다.
 - **다음 한 작업**: 로컬 전체 게이트 실행 후 PR 생성, CI green 확인, 머지를 완료한다.
 
-## 2026-06-25 (codex) — Concierge curated source + PinVi rename
+## 2026-06-25 (codex) — Concierge curated source + curated 계약 보강
 
 - **완료(map 코드)**: concierge YouTube 장소 후보 provider/dataset을 `media-places` curated source rule로
   seed하고, rule apply가 기본 `curated` 상태와 source title 기반 `display_title`을 만들도록 보강했다.
-- **완료(DB/API rename)**: curated copy 계약을 `pinvi_relation`/`pinvi_copy_policy`,
-  `feature.curated_pinvi_copy_snapshots`, `/pinvi-copy`로 전환했다. 기존 `tripmate` route/key는 전환용
-  hidden 호환 경로로만 유지한다. POI cache target metadata도 `pinvi_poi_id`로 rename한다.
+- **완료(DB/API rename)**: curated 재사용 계약은 제품명 없는 detail snapshot 계약으로 정리한다.
+  POI cache target metadata의 외부 POI 식별자도 범용 key로 표현한다.
 - **완료(concierge 연동)**: concierge export payload에 source target type/value/search query와
   `youtube.source_title`을 추가해 채널명·플레이리스트명·보정 검색어명을 map이 title로 쓸 수 있게 했다.
 - **검증 진행**: map targeted unit/API/Dagster/integration, OpenAPI drift, frontend/user type-check,

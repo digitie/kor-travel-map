@@ -11,7 +11,7 @@ ADR 참조
 - ADR-019 — KST aware datetime
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)
 
-호출자 (PinVi) 측 사용:
+외부 호출자 측 사용:
     >>> from kortravelmap.settings import KorTravelMapSettings
     >>> settings = KorTravelMapSettings()  # 환경변수에서 로딩
     >>> settings.pg_dsn.get_secret_value()

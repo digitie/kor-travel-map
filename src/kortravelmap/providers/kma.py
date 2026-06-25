@@ -528,7 +528,7 @@ def short_forecast_to_weather_values(
 
     Examples
     --------
-    호출자(PinVi Dagster asset 등) 측 사용 예시:
+    호출자(Dagster asset 등) 측 사용 예시:
 
     >>> # client = AsyncKmaClient(...)
     >>> # async for page in client.aiter_short_forecast(nx=60, ny=127, ...):

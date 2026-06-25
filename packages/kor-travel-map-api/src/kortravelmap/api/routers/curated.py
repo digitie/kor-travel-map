@@ -22,7 +22,7 @@ admin_router = APIRouter(prefix="/admin", tags=["admin-curated"])
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
 SelectionOrigin = Literal["source_rule", "admin", "external_api"]
-PinviRelation = Literal[
+CurationRelation = Literal[
     "primary_stop",
     "food_stop",
     "cafe_stop",
@@ -33,8 +33,8 @@ PinviRelation = Literal[
     "family_support",
     "theme_area_anchor",
 ]
-PinviCopyPolicy = Literal["copy_allowed", "copy_blocked", "manual_review"]
-ThemeVisibility = Literal["admin_only", "public", "pinvi"]
+ReusePolicy = Literal["allowed", "blocked", "manual_review"]
+ThemeVisibility = Literal["admin_only", "public"]
 SourceKind = Literal["openapi", "filedata", "standard", "internal", "manual"]
 UpdateCycle = Literal[
     "realtime",
@@ -154,9 +154,9 @@ class CuratedFeatureView(BaseModel):
     rank_score: float
     display_title: str | None = None
     display_summary: str | None = None
-    pinvi_relation: str
-    pinvi_copy_policy: str
-    copy_version: int
+    curation_relation: str
+    reuse_policy: str
+    content_version: int
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -243,8 +243,8 @@ class CuratedFeatureResponse(BaseModel):
     meta: Meta
 
 
-class PinviCopyItemView(BaseModel):
-    """PinVi curated_plan_pois copy item."""
+class CuratedFeatureDetailItemView(BaseModel):
+    """curated feature detail item."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,8 +258,8 @@ class PinviCopyItemView(BaseModel):
     source_record_key: str | None = None
 
 
-class PinviCopySnapshotView(BaseModel):
-    """PinVi import snapshot."""
+class CuratedFeatureDetailSnapshotView(BaseModel):
+    """curated feature detail snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -268,15 +268,15 @@ class PinviCopySnapshotView(BaseModel):
     etag: str
     updated_at: datetime
     theme: dict[str, Any]
-    plan: dict[str, Any]
+    content: dict[str, Any]
     source: dict[str, Any]
-    items: list[PinviCopyItemView]
+    items: list[CuratedFeatureDetailItemView]
 
 
-class PinviCopySnapshotResponse(BaseModel):
+class CuratedFeatureDetailSnapshotResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: PinviCopySnapshotView
+    data: CuratedFeatureDetailSnapshotView
     meta: Meta
 
 
@@ -397,8 +397,8 @@ class CuratedFeatureCreateRequest(BaseModel):
     rank_score: float = 0.0
     display_title: str | None = None
     display_summary: str | None = None
-    pinvi_relation: PinviRelation = "nearby_option"
-    pinvi_copy_policy: PinviCopyPolicy = "manual_review"
+    curation_relation: CurationRelation = "nearby_option"
+    reuse_policy: ReusePolicy = "manual_review"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -410,8 +410,8 @@ class CuratedFeaturePatchRequest(BaseModel):
     rank_score: float | None = None
     display_title: str | None = None
     display_summary: str | None = None
-    pinvi_relation: PinviRelation | None = None
-    pinvi_copy_policy: PinviCopyPolicy | None = None
+    curation_relation: CurationRelation | None = None
+    reuse_policy: ReusePolicy | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -439,17 +439,17 @@ def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
 
 
 def _snapshot_view(
-    row: curated_repo.CuratedPinviCopySnapshot,
-) -> PinviCopySnapshotView:
-    return PinviCopySnapshotView(
+    row: curated_repo.CuratedFeatureDetailSnapshot,
+) -> CuratedFeatureDetailSnapshotView:
+    return CuratedFeatureDetailSnapshotView(
         curated_feature_id=row.curated_feature_id,
         version=row.version,
         etag=row.etag,
         updated_at=row.updated_at,
         theme=row.theme,
-        plan=row.plan,
+        content=row.content,
         source=row.source,
-        items=[PinviCopyItemView(**item.__dict__) for item in row.items],
+        items=[CuratedFeatureDetailItemView(**item.__dict__) for item in row.items],
     )
 
 
@@ -583,39 +583,6 @@ async def get_curated_feature_route(
     )
 
 
-@router.get(
-    "/curated-features/{curated_feature_id}/pinvi-copy",
-    response_model=PinviCopySnapshotResponse,
-)
-async def get_curated_pinvi_copy_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> PinviCopySnapshotResponse:
-    started_at = perf_counter()
-    row = await curated_repo.get_curated_pinvi_copy_snapshot(
-        session,
-        curated_feature_id=curated_feature_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return PinviCopySnapshotResponse(
-        data=_snapshot_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@router.get(
-    "/curated-features/{curated_feature_id}/tripmate-copy",
-    response_model=PinviCopySnapshotResponse,
-    include_in_schema=False,
-)
-async def get_curated_legacy_copy_compat_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> PinviCopySnapshotResponse:
-    return await get_curated_pinvi_copy_route(curated_feature_id, session)
-
-
 @admin_router.get("/curated-features", response_model=CuratedFeaturesResponse)
 async def list_admin_curated_features_route(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -648,6 +615,27 @@ async def list_admin_curated_features_route(
     return CuratedFeaturesResponse(
         data=CuratedFeaturesData(items=[_feature_view(row) for row in page.items]),
         meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
+    )
+
+
+@admin_router.get(
+    "/curated-features/{curated_feature_id}/detail-snapshot",
+    response_model=CuratedFeatureDetailSnapshotResponse,
+)
+async def get_admin_curated_feature_detail_snapshot_route(
+    curated_feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedFeatureDetailSnapshotResponse:
+    started_at = perf_counter()
+    row = await curated_repo.get_curated_feature_detail_snapshot(
+        session,
+        curated_feature_id=curated_feature_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="curated feature 없음")
+    return CuratedFeatureDetailSnapshotResponse(
+        data=_snapshot_view(row),
+        meta=make_meta(started_at=started_at),
     )
 
 

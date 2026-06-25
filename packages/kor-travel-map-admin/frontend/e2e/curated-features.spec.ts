@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
  * `/admin/curated-features` (1192줄 mutation 콘솔) — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.1).
  *
- * 이 콘솔은 select/unselect/patch/archive/source-rule-apply/pinvi-copy 등 6개
+ * 이 콘솔은 select/unselect/patch/archive/source-rule-apply/detail-snapshot 등 6개
  * mutation을 갖지만, **mutation 흐름은 시드된 curated 후보가 필요**하다(빈 DB에선 후보 0).
  * 따라서 본 spec은 `features.spec.ts`와 같은 **라이브 smoke** 패턴으로 렌더·필터·페이지
  * 구조·필터 상호작용만 결정적으로 덮는다. 시드 후보 기반 mutation depth(select/archive/
@@ -31,7 +31,7 @@ test.describe("/admin/curated-features", () => {
 
     // 후보 목록 테이블 컬럼 헤더 — source rules 테이블과 겹치지 않는 고유 컬럼만 단언
     // (source/theme/updated는 두 테이블에 모두 있어 strict-mode 충돌).
-    for (const col of ["status", "feature", "copy", "actions"]) {
+    for (const col of ["status", "feature", "reuse", "actions"]) {
       await expect(
         page.getByRole("columnheader", { name: col, exact: true }),
       ).toBeVisible();

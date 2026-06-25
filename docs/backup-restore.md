@@ -1,7 +1,7 @@
 # 백업/복구 runbook
 
 본 문서는 ADR-040과 ADR-045 D-5 기준 `kor-travel-map` standalone Docker app의
-백업/복구 절차다. 백업 단위는 PinVi와 분리된 **3종 묶음**이다.
+백업/복구 절차다. 백업 단위는 외부 서비스와 분리된 **3종 묶음**이다.
 
 - 애플리케이션 Postgres DB: `kor_travel_map`
 - Dagster metadata Postgres DB: `kor_travel_map_dagster`
@@ -161,7 +161,7 @@ bash scripts/docker-restore-verify.sh
 
 추가 API smoke는 staging DB/volume을 사용하는 env 파일이나 별도 compose project에서
 API를 띄운 뒤 `docs/runbooks/docker-app.md` §6 절차를 수행한다. 운영 stack의 DSN/volume을
-staging 대상으로 바꾸기 전까지 PinVi는 영향받지 않는다.
+staging 대상으로 바꾸기 전까지 외부 서비스는 영향받지 않는다.
 
 ## 7. restore hot-swap env 전환
 

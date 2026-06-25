@@ -17,7 +17,7 @@ type TargetForm = {
 };
 
 const baseValues: TargetForm = {
-  externalSystem: "pinvi",
+  externalSystem: "external-app",
   targetKey: "poi-1",
   lon: "126.978",
   lat: "37.5665",

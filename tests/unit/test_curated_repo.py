@@ -58,7 +58,7 @@ def _theme_row(**overrides: Any) -> dict[str, Any]:
         "theme_description": "책방 후보",
         "theme_group": "books",
         "default_curated": False,
-        "visibility": "pinvi",
+        "visibility": "public",
         "metadata": {"icon": "book-open"},
         "created_at": _NOW,
         "updated_at": _NOW,
@@ -105,7 +105,7 @@ def _rule_row(**overrides: Any) -> dict[str, Any]:
         "default_action": "candidate",
         "priority": 70,
         "enabled": True,
-        "metadata": {"pinvi_relation": "bookstore_stop"},
+        "metadata": {"curation_relation": "bookstore_stop"},
         "created_at": _NOW,
         "updated_at": _NOW,
     }
@@ -147,9 +147,9 @@ def _feature_row(**overrides: Any) -> dict[str, Any]:
         "rank_score": Decimal("70.0"),
         "display_title": None,
         "display_summary": "책방 요약",
-        "pinvi_relation": "bookstore_stop",
-        "pinvi_copy_policy": "copy_allowed",
-        "copy_version": 2,
+        "curation_relation": "bookstore_stop",
+        "reuse_policy": "allowed",
+        "content_version": 2,
         "metadata": {"summary": "metadata 요약"},
         "created_at": _NOW,
         "updated_at": _NOW,
@@ -179,7 +179,7 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
 
     [theme] = await curated_repo.list_curated_themes(
         session,
-        visibility="pinvi",
+        visibility="public",
         theme_group="books",
         limit=999,
     )
@@ -224,14 +224,14 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
     assert feature is not None
     assert feature.lon == 127.007754
 
-    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+    snapshot = await curated_repo.get_curated_feature_detail_snapshot(
         session,
         curated_feature_id=_CURATED_ID,
     )
     assert snapshot is not None
     assert snapshot.etag.startswith("sha256:")
-    assert snapshot.plan["summary"] == "책방 요약"
-    assert snapshot.plan["destination_name"] == "서울특별시 중구"
+    assert snapshot.content["summary"] == "책방 요약"
+    assert snapshot.content["destination_name"] == "서울특별시 중구"
     assert snapshot.items[0].relation == "bookstore_stop"
 
 
@@ -242,15 +242,15 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         [_feature_row()],
         [_feature_row()],
         [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(copy_version=3)],
+        [_feature_row(content_version=3)],
         [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="curated", copy_version=4)],
+        [_feature_row(curation_status="curated", content_version=4)],
         [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="rejected", copy_version=5)],
+        [_feature_row(curation_status="rejected", content_version=5)],
         [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="candidate", copy_version=6)],
+        [_feature_row(curation_status="candidate", content_version=6)],
         [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="archived", archived_at=_NOW, copy_version=7)],
+        [_feature_row(curation_status="archived", archived_at=_NOW, content_version=7)],
         [{"affected_count": 3}],
         [_theme_row()],
         [_theme_row(theme_name="수정 책방")],
@@ -269,8 +269,8 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         source_id=_SOURCE_ID,
         curation_status="curated",
         selected_by="pytest",
-        pinvi_relation="bookstore_stop",
-        pinvi_copy_policy="copy_allowed",
+        curation_relation="bookstore_stop",
+        reuse_policy="allowed",
         metadata={"manual": True},
     )
     assert created.curated_feature_id == _CURATED_ID
@@ -289,11 +289,11 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         updates={
             "display_summary": "patched",
             "metadata": {"patched": True},
-            "pinvi_relation": "bookstore_stop",
+            "curation_relation": "bookstore_stop",
         },
     )
     assert patched is not None
-    assert "copy_version = copy_version + 1" in session.calls[3][0]
+    assert "content_version = content_version + 1" in session.calls[3][0]
 
     for status_name in ("curated", "rejected", "candidate"):
         changed = await curated_repo.set_curated_feature_status(
@@ -322,7 +322,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         theme_slug="bookstores",
         theme_name="책방 여행",
         theme_group="books",
-        visibility="pinvi",
+        visibility="public",
     )
     assert theme.theme_slug == "bookstores"
 
@@ -357,7 +357,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         source_id=_SOURCE_ID,
         dataset_key="datagokr_seoul_bookstores",
         region_scope={"sido_code": "11"},
-        metadata={"pinvi_relation": "bookstore_stop"},
+        metadata={"curation_relation": "bookstore_stop"},
     )
     assert rule.rule_id == _RULE_ID
 
@@ -414,7 +414,7 @@ async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
     swept = await curated_repo.sweep_curated_feature_status(session)
     assert swept.archived == 1
 
-    materialized = await curated_repo.materialize_curated_pinvi_copy_snapshots(
+    materialized = await curated_repo.materialize_curated_feature_detail_snapshots(
         session,
         theme_slug="bookstores",
         limit=1,
@@ -422,13 +422,13 @@ async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
     assert materialized.curated_features_total == 1
     assert materialized.snapshots_materialized == 1
     snapshot_params = session.calls[-1][1]
-    assert snapshot_params["copy_version"] == 2
+    assert snapshot_params["content_version"] == 2
     assert snapshot_params["etag"].startswith("sha256:")
     assert '"curated_feature_id"' in snapshot_params["snapshot_json"]
 
 
 @pytest.mark.asyncio
-async def test_curated_pinvi_snapshot_uses_concierge_source_title() -> None:
+async def test_curated_detail_snapshot_uses_concierge_source_title() -> None:
     session = _FakeSession(
         [
             _feature_row(
@@ -447,13 +447,13 @@ async def test_curated_pinvi_snapshot_uses_concierge_source_title() -> None:
         ]
     )
 
-    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+    snapshot = await curated_repo.get_curated_feature_detail_snapshot(
         session,
         curated_feature_id=_CURATED_ID,
     )
 
     assert snapshot is not None
-    assert snapshot.plan["title"] == "제주 플레이리스트"
+    assert snapshot.content["title"] == "제주 플레이리스트"
 
 
 @pytest.mark.asyncio
@@ -490,11 +490,11 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             curated_feature_id=_CURATED_ID,
             updates={"bad": True},
         )
-    with pytest.raises(ValueError, match="pinvi_copy_policy"):
+    with pytest.raises(ValueError, match="reuse_policy"):
         await curated_repo.update_curated_feature(
             _FakeSession(),
             curated_feature_id=_CURATED_ID,
-            updates={"pinvi_copy_policy": "bad"},
+            updates={"reuse_policy": "bad"},
         )
     with pytest.raises(ValueError, match="curation_status"):
         await curated_repo.set_curated_feature_status(
@@ -512,7 +512,7 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
         is None
     )
     assert (
-        await curated_repo.get_curated_pinvi_copy_snapshot(
+        await curated_repo.get_curated_feature_detail_snapshot(
             missing_session,
             curated_feature_id=_CURATED_ID,
         )

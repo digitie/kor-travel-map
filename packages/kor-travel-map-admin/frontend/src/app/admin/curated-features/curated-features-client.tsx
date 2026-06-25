@@ -31,7 +31,7 @@ import {
   usePatchCuratedFeatureMutation,
   usePatchCuratedSourceRuleMutation,
   useSelectCuratedFeatureMutation,
-  usePinviCopySnapshot,
+  useCuratedFeatureDetailSnapshot,
   useUnselectCuratedFeatureMutation,
   type AdminCuratedFeaturesParams,
   type AdminCuratedSourceRulesParams,
@@ -41,8 +41,8 @@ import {
   type CuratedSource,
   type CuratedSourceRule,
   type CuratedTheme,
-  type CuratedPinviCopyPolicy,
-  type CuratedPinviRelation,
+  type CuratedReusePolicy,
+  type CuratedCurationRelation,
 } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -65,12 +65,12 @@ const CURATION_STATUS_OPTIONS: CuratedFeatureStatus[] = [
   "rejected",
   "archived",
 ];
-const COPY_POLICY_OPTIONS: CuratedPinviCopyPolicy[] = [
-  "copy_allowed",
-  "copy_blocked",
+const REUSE_POLICY_OPTIONS: CuratedReusePolicy[] = [
+  "allowed",
+  "blocked",
   "manual_review",
 ];
-const PINVI_RELATION_OPTIONS: CuratedPinviRelation[] = [
+const CURATION_RELATION_OPTIONS: CuratedCurationRelation[] = [
   "primary_stop",
   "food_stop",
   "cafe_stop",
@@ -120,9 +120,9 @@ function featureStatusVariant(status: string) {
   return "secondary";
 }
 
-function copyPolicyVariant(policy: string) {
-  if (policy === "copy_allowed") return "default";
-  if (policy === "copy_blocked") return "destructive";
+function reusePolicyVariant(policy: string) {
+  if (policy === "allowed") return "default";
+  if (policy === "blocked") return "destructive";
   return "outline";
 }
 
@@ -142,14 +142,14 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   const [title, setTitle] = useState(feature?.display_title ?? "");
   const [summary, setSummary] = useState(feature?.display_summary ?? "");
   const [rankScore, setRankScore] = useState(String(feature?.rank_score ?? 0));
-  const [copyPolicy, setCopyPolicy] =
-    useState<CuratedPinviCopyPolicy>(
-      (feature?.pinvi_copy_policy as CuratedPinviCopyPolicy | undefined) ??
+  const [reusePolicy, setReusePolicy] =
+    useState<CuratedReusePolicy>(
+      (feature?.reuse_policy as CuratedReusePolicy | undefined) ??
         "manual_review",
     );
   const [relation, setRelation] =
-    useState<CuratedPinviRelation>(
-      (feature?.pinvi_relation as CuratedPinviRelation | undefined) ??
+    useState<CuratedCurationRelation>(
+      (feature?.curation_relation as CuratedCurationRelation | undefined) ??
         "nearby_option",
     );
 
@@ -162,8 +162,8 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
         display_title: title.trim().length > 0 ? title.trim() : null,
         display_summary: summary.trim().length > 0 ? summary.trim() : null,
         rank_score: Number(rankScore),
-        pinvi_copy_policy: copyPolicy,
-        pinvi_relation: relation,
+        reuse_policy: reusePolicy,
+        curation_relation: relation,
       },
     });
   };
@@ -171,7 +171,7 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   if (!feature) {
     return (
       <section className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-        후보를 선택하면 display text와 PinVi copy 속성을 편집할 수 있습니다.
+        후보를 선택하면 display text와 공개 재사용 속성을 편집할 수 있습니다.
       </section>
     );
   }
@@ -209,15 +209,15 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
             />
           </label>
           <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">copy policy</span>
+            <span className="text-muted-foreground">reuse policy</span>
             <NativeSelect
               className="w-full"
-              value={copyPolicy}
+              value={reusePolicy}
               onChange={(event) =>
-                setCopyPolicy(event.target.value as CuratedPinviCopyPolicy)
+                setReusePolicy(event.target.value as CuratedReusePolicy)
               }
             >
-              {COPY_POLICY_OPTIONS.map((option) => (
+              {REUSE_POLICY_OPTIONS.map((option) => (
                 <NativeSelectOption key={option} value={option}>
                   {option}
                 </NativeSelectOption>
@@ -226,15 +226,15 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
           </label>
         </div>
         <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">PinVi relation</span>
+          <span className="text-muted-foreground">curation relation</span>
           <NativeSelect
             className="w-full"
             value={relation}
             onChange={(event) =>
-              setRelation(event.target.value as CuratedPinviRelation)
+              setRelation(event.target.value as CuratedCurationRelation)
             }
           >
-            {PINVI_RELATION_OPTIONS.map((option) => (
+            {CURATION_RELATION_OPTIONS.map((option) => (
               <NativeSelectOption key={option} value={option}>
                 {option}
               </NativeSelectOption>
@@ -258,15 +258,15 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   );
 }
 
-type PinviCopyItem = NonNullable<
-  ReturnType<typeof usePinviCopySnapshot>["data"]
+type CuratedFeatureDetailItem = NonNullable<
+  ReturnType<typeof useCuratedFeatureDetailSnapshot>["data"]
 >["data"]["items"][number];
 
-function PinviCopyPreview({ feature }: { feature: CuratedFeature | null }) {
-  const snapshot = usePinviCopySnapshot(feature?.curated_feature_id ?? null);
+function CuratedFeatureDetailPreview({ feature }: { feature: CuratedFeature | null }) {
+  const snapshot = useCuratedFeatureDetailSnapshot(feature?.curated_feature_id ?? null);
   const data = snapshot.data?.data;
 
-  const itemColumns = useMemo<ColumnDef<PinviCopyItem, unknown>[]>(
+  const itemColumns = useMemo<ColumnDef<CuratedFeatureDetailItem, unknown>[]>(
     () => [
       {
         accessorKey: "sort_order",
@@ -308,9 +308,9 @@ function PinviCopyPreview({ feature }: { feature: CuratedFeature | null }) {
     <section className="rounded-lg border bg-background">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="font-medium">PinVi copy preview</div>
+          <div className="font-medium">Detail snapshot preview</div>
           <div className="text-xs text-muted-foreground">
-            copy snapshot과 curated_plan_pois item 미리보기
+            detail snapshot item 미리보기
           </div>
         </div>
         {data ? (
@@ -319,13 +319,13 @@ function PinviCopyPreview({ feature }: { feature: CuratedFeature | null }) {
       </div>
       {!feature ? (
         <div className="p-4 text-sm text-muted-foreground">
-          후보를 선택하면 copy snapshot을 조회합니다.
+          후보를 선택하면 detail snapshot을 조회합니다.
         </div>
       ) : null}
       {snapshot.isLoading ? <Skeleton className="m-4 h-40" /> : null}
       {snapshot.isError ? (
         <Alert className="m-4" variant="destructive">
-          <AlertTitle>copy preview 조회 실패</AlertTitle>
+          <AlertTitle>detail preview 조회 실패</AlertTitle>
           <AlertDescription>{snapshot.error.message}</AlertDescription>
         </Alert>
       ) : null}
@@ -343,12 +343,12 @@ function PinviCopyPreview({ feature }: { feature: CuratedFeature | null }) {
             columns={itemColumns}
             data={data.items}
             getRowId={(item) => item.curated_feature_item_id}
-            emptyMessage="copy item이 없습니다."
+            emptyMessage="detail item이 없습니다."
             manualSorting={false}
           />
           <details>
-            <summary className="cursor-pointer text-sm font-medium">plan</summary>
-            <JsonBlock value={data.plan} />
+            <summary className="cursor-pointer text-sm font-medium">content</summary>
+            <JsonBlock value={data.content} />
           </details>
           <details>
             <summary className="cursor-pointer text-sm font-medium">source</summary>
@@ -784,17 +784,17 @@ export function CuratedFeaturesClient() {
         },
       },
       {
-        id: "copy",
-        header: "copy",
+        id: "reuse",
+        header: "reuse",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
             <div className="flex flex-col gap-1">
-              <Badge variant={copyPolicyVariant(feature.pinvi_copy_policy)}>
-                {feature.pinvi_copy_policy}
+              <Badge variant={reusePolicyVariant(feature.reuse_policy)}>
+                {feature.reuse_policy}
               </Badge>
-              <Badge variant="outline">{feature.pinvi_relation}</Badge>
+              <Badge variant="outline">{feature.curation_relation}</Badge>
             </div>
           );
         },
@@ -969,7 +969,7 @@ export function CuratedFeaturesClient() {
           새로고침
         </Button>
       }
-      description="curated overlay 후보를 검토하고 source rule을 적용하며 PinVi copy snapshot을 확인합니다."
+      description="curated overlay 후보를 검토하고 source rule을 적용하며 detail snapshot을 확인합니다."
       section="Admin"
       title="Curated features"
     >
@@ -1229,8 +1229,8 @@ export function CuratedFeaturesClient() {
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
                     <dt className="text-muted-foreground">selected</dt>
                     <dd>{formatDateTime(selectedFeature.selected_at)}</dd>
-                    <dt className="text-muted-foreground">copy version</dt>
-                    <dd>{selectedFeature.copy_version}</dd>
+                    <dt className="text-muted-foreground">content version</dt>
+                    <dd>{selectedFeature.content_version}</dd>
                     <dt className="text-muted-foreground">rank</dt>
                     <dd>{selectedFeature.rank_score.toFixed(2)}</dd>
                     <dt className="text-muted-foreground">source record</dt>
@@ -1261,7 +1261,7 @@ export function CuratedFeaturesClient() {
               feature={selectedFeature}
               key={selectedFeature?.curated_feature_id ?? "empty-feature"}
             />
-            <PinviCopyPreview feature={selectedFeature} />
+            <CuratedFeatureDetailPreview feature={selectedFeature} />
           </div>
         </div>
 
