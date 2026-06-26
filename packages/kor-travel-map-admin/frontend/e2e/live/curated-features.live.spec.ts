@@ -13,7 +13,7 @@ import * as F from "./_fixtures";
  *   - filters: getByLabel("curated feature search" | "theme filter" |
  *     "provider filter" | "dataset filter" | "curation status filter" |
  *     "page size" | "rule enabled filter")
- *   - column headers: status / feature / copy / actions
+ *   - column headers: status / feature / source / theme / reuse / updated / actions
  *   - count line: /개 표시/ ; source rules: getByText("Source rules")
  *
  * The route has no /{id} detail page — candidate selection is an in-page surface
@@ -66,9 +66,17 @@ test.describe("curated-features live: page load + controls", () => {
   test("page load: candidate table column headers", async ({ page }) => {
     await page.goto(ROUTE);
     await expectConsoleLoaded(page);
-    for (const col of ["status", "feature", "copy", "actions"]) {
+    for (const col of [
+      "status",
+      "feature",
+      "source",
+      "theme",
+      "reuse",
+      "updated",
+      "actions",
+    ]) {
       await expect(
-        page.getByRole("columnheader", { name: col, exact: true }),
+        page.getByRole("columnheader", { name: col, exact: true }).first(),
       ).toBeVisible(TIMEOUT);
     }
   });
