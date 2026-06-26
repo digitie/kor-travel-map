@@ -1495,6 +1495,44 @@ def test_opinet_stations_low_top_area_falls_back_to_sample_grid(
     assert client.closed is True
 
 
+def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={("0101", "B027"): [_FakeStation("A1", "B027")]},
+        around={(127.0, 37.5, "D047"): [_FakeStation("A2", "D047")]},
+    )
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_sample_grid_centers",
+        lambda: iter([(127.0, 37.5)]),
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 2)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+    ]
+    assert client.around_calls == [
+        (127.0, 37.5, 5000, "B027"),
+        (127.0, 37.5, 5000, "D047"),
+        (127.0, 37.5, 5000, "B034"),
+    ]
+    assert client.closed is True
+
+
 def test_opinet_station_price_details_missing_key_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=None,
@@ -1595,6 +1633,48 @@ def test_opinet_station_price_details_low_top_area_falls_back_to_sample_grid(
         ("A1", "B027"),
         ("A1", "D047"),
         ("A2", "B034"),
+    ]
+    client = fake.instances[0]
+    assert client.detail_calls == []
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+    ]
+    assert client.around_calls == [
+        (127.0, 37.5, 5000, "B027"),
+        (127.0, 37.5, 5000, "D047"),
+        (127.0, 37.5, 5000, "B034"),
+    ]
+    assert client.closed is True
+
+
+def test_opinet_station_price_details_low_top_area_partial_falls_back_to_sample_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={("0101", "B027"): [_FakeStation("A1", "B027")]},
+        around={(127.0, 37.5, "D047"): [_FakeStation("A1", "D047")]},
+    )
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_sample_grid_centers",
+        lambda: iter([(127.0, 37.5)]),
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 3)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_station_price_details(settings))
+
+    assert [(r.uni_id, r.product_code) for r in records] == [
+        ("A1", "B027"),
+        ("A1", "D047"),
     ]
     client = fake.instances[0]
     assert client.detail_calls == []

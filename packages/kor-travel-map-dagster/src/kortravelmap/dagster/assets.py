@@ -5,8 +5,9 @@ from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.geocoding import ReverseGeocoder
-from kortravelmap.infra.feature_repo import AirQualityLoadResult, EnrichmentLoadResult
+from kortravelmap.infra.feature_repo import AirQualityLoadResult
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -228,6 +229,13 @@ async def run_feature_price_opinet_stations(
             **result.as_metadata(),
         },
     )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=OPINET_PROVIDER_NAME,
+        dataset_key=OPINET_PRICE_DATASET_KEY,
+        cursor_extra=result.as_metadata(),
+    )
     return result
 
 
@@ -291,6 +299,13 @@ async def run_feature_price_krex_rest_areas(
             "dataset_key": REST_AREA_PRICES_DATASET_KEY,
             **result.as_metadata(),
         },
+    )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+        cursor_extra=result.as_metadata(),
     )
     return result
 
@@ -433,10 +448,21 @@ async def run_feature_place_mois_licenses(
             provider=MOIS_PROVIDER_NAME,
             dataset_key=str(dataset_key),
             bundles=bundles,
+            record_sync_state=False,
         )
         result = batch_result if result is None else result.merge(batch_result)
 
     if result is not None:
+        client = cast(
+            "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
+        )
+        await _record_feature_sync_success(
+            context,
+            client,
+            provider=MOIS_PROVIDER_NAME,
+            dataset_key=str(dataset_key),
+            cursor_extra=_feature_result_cursor_extra(result),
+        )
         return result
     return await _load(
         context,
@@ -797,7 +823,7 @@ async def feature_place_kor_travel_concierge_youtube(
 
 async def run_feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
-) -> EnrichmentLoadResult:
+) -> "FestivalEnrichmentReviewRefreshResult":
     """VisitKorea 축제 record를 적재된 datagokr 축제에 매칭해 enrichment를 적재한다.
 
     feature를 만들지 않는 2차 enrichment(ADR-042) — ``client.load_festival_enrichment``
@@ -806,14 +832,17 @@ async def run_feature_event_visitkorea_enrichment(
     records = await _record_list(context, "visitkorea_festival_events")
     fetched_at = await _fetched_at(context)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    result = await client.load_festival_enrichment(records, fetched_at=fetched_at)
-    context.add_output_metadata(
-        {
-            "enrichments_total": result.enrichments_total,
-            "source_records_inserted": result.source_records_inserted,
-            "source_links_inserted": result.source_links_inserted,
-            "source_links_updated": result.source_links_updated,
-        }
+    result = await client.refresh_festival_enrichment_reviews(
+        records,
+        fetched_at=fetched_at,
+    )
+    context.add_output_metadata(result.as_metadata())
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider="python-visitkorea-api",
+        dataset_key="visitkorea_festival_events",
+        cursor_extra=result.as_metadata(),
     )
     return result
 
@@ -825,7 +854,7 @@ async def run_feature_event_visitkorea_enrichment(
 )
 async def feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
-) -> EnrichmentLoadResult:
+) -> "FestivalEnrichmentReviewRefreshResult":
     return await run_feature_event_visitkorea_enrichment(context)
 
 
@@ -863,6 +892,13 @@ async def run_feature_weather_airkorea_air_quality(
             "dataset_key": DATASET_KEY_AIR_QUALITY,
             **result.as_metadata(),
         },
+    )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=AIRKOREA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_AIR_QUALITY,
+        cursor_extra=result.as_metadata(),
     )
     return result
 
@@ -917,6 +953,13 @@ async def run_feature_weather_krex_rest_areas(
             **result.as_metadata(),
         },
     )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
+        cursor_extra=result.as_metadata(),
+    )
     return result
 
 
@@ -964,6 +1007,7 @@ async def _load(
     provider: str,
     dataset_key: str,
     bundles: list[Any],
+    record_sync_state: bool = True,
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     # bool(True/False) 하위호환 + settings 모드 문자열(strict/drop/off, #376).
@@ -971,13 +1015,64 @@ async def _load(
         "bool | str",
         await _resource_value(context, "strict_address", default="strict"),
     )
-    return await load_feature_bundles_for_dagster(
+    result = await load_feature_bundles_for_dagster(
         context=context,
         client=client,
         bundles=bundles,
         provider=provider,
         dataset_key=dataset_key,
         strict_address=strict_address,
+    )
+    if record_sync_state:
+        await _record_feature_sync_success(
+            context,
+            client,
+            provider=provider,
+            dataset_key=dataset_key,
+            cursor_extra=_feature_result_cursor_extra(result),
+        )
+    return result
+
+
+def _feature_result_cursor_extra(result: DagsterFeatureLoadResult) -> dict[str, object]:
+    return {
+        "bundles_total": result.load.bundles_total,
+        "features_inserted": result.load.features_inserted,
+        "features_updated": result.load.features_updated,
+        "source_records_inserted": result.load.source_records_inserted,
+        "source_links_inserted": result.load.source_links_inserted,
+        "source_links_updated": result.load.source_links_updated,
+    }
+
+
+async def _record_feature_sync_success(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    provider: str,
+    dataset_key: str,
+    cursor_extra: dict[str, object],
+) -> None:
+    record_sync_success = getattr(client, "record_sync_success", None)
+    if not callable(record_sync_success):
+        context.log.warning(
+            "provider sync_state 기록 생략: client가 record_sync_success를 제공하지 않음"
+        )
+        return
+    fetched_at = await _fetched_at(context)
+    try:
+        asset_key = context.asset_key.to_user_string()
+    except Exception:
+        asset_key = "direct_invocation"
+    cursor = {
+        "loaded_at": fetched_at.isoformat(),
+        "asset_key": asset_key,
+        **cursor_extra,
+    }
+    await record_sync_success(
+        provider=provider,
+        dataset_key=dataset_key,
+        cursor=cursor,
     )
 
 

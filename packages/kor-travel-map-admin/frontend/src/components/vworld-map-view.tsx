@@ -479,7 +479,13 @@ function weatherMarkerLabel(
   if (!summary) return null;
   if (typeof summary.value_number === "number") {
     const unit = summary.unit ?? "";
-    if (unit.includes("C") || unit.includes("℃")) {
+    const normalizedUnit = unit.toLowerCase();
+    if (
+      normalizedUnit === "deg_c" ||
+      normalizedUnit.includes("celsius") ||
+      unit.includes("C") ||
+      unit.includes("℃")
+    ) {
       return `${temperatureFormatter.format(summary.value_number)}℃`;
     }
     if (unit.length > 0) {

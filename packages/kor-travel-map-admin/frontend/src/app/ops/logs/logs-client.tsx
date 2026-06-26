@@ -54,17 +54,20 @@ export function LogsClient() {
   const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">("all");
   const [systemSource, setSystemSource] = useState("");
   const [systemCursor, setSystemCursor] = useState<string | null>(null);
+  const [systemPageIndex, setSystemPageIndex] = useState(1);
 
   const [apiMethod, setApiMethod] = useState("");
   const [apiPath, setApiPath] = useState("");
   const [apiMinStatus, setApiMinStatus] = useState("");
   const [apiCursor, setApiCursor] = useState<string | null>(null);
+  const [apiPageIndex, setApiPageIndex] = useState(1);
 
   const [eventJobId, setEventJobId] = useState("");
   const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">("all");
   const [eventProvider, setEventProvider] = useState("");
   const [eventDatasetKey, setEventDatasetKey] = useState("");
   const [eventCursor, setEventCursor] = useState<string | null>(null);
+  const [eventPageIndex, setEventPageIndex] = useState(1);
 
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
@@ -121,6 +124,36 @@ export function LogsClient() {
   const systemItems = systemLogs.data?.data.items ?? [];
   const apiItems = apiLogs.data?.data.items ?? [];
   const eventItems = jobEvents.data?.data.items ?? [];
+  const resetSystemPage = () => {
+    setSystemCursor(null);
+    setSystemPageIndex(1);
+  };
+  const resetApiPage = () => {
+    setApiCursor(null);
+    setApiPageIndex(1);
+  };
+  const resetEventPage = () => {
+    setEventCursor(null);
+    setEventPageIndex(1);
+  };
+  const nextSystemPage = () => {
+    const nextCursor = systemLogs.data?.meta.page?.next_cursor ?? null;
+    if (!nextCursor) return;
+    setSystemCursor(nextCursor);
+    setSystemPageIndex((page) => page + 1);
+  };
+  const nextApiPage = () => {
+    const nextCursor = apiLogs.data?.meta.page?.next_cursor ?? null;
+    if (!nextCursor) return;
+    setApiCursor(nextCursor);
+    setApiPageIndex((page) => page + 1);
+  };
+  const nextEventPage = () => {
+    const nextCursor = jobEvents.data?.meta.page?.next_cursor ?? null;
+    if (!nextCursor) return;
+    setEventCursor(nextCursor);
+    setEventPageIndex((page) => page + 1);
+  };
   const refreshAll = () => {
     void systemLogs.refetch();
     void apiLogs.refetch();
@@ -355,9 +388,9 @@ export function LogsClient() {
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
-                setSystemCursor(null);
-                setApiCursor(null);
-                setEventCursor(null);
+                resetSystemPage();
+                resetApiPage();
+                resetEventPage();
               }}
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
@@ -374,6 +407,9 @@ export function LogsClient() {
             </Badge>
             <Badge variant="outline">
               job events {eventItems.length}
+            </Badge>
+            <Badge variant="outline">
+              page size {pageSize}
             </Badge>
             <Badge variant={live.state === "live" ? "default" : "outline"}>
               live {live.state}
@@ -400,7 +436,7 @@ export function LogsClient() {
                     value={systemQ}
                     onChange={(event) => {
                       setSystemQ(event.target.value);
-                      setSystemCursor(null);
+                      resetSystemPage();
                     }}
                   />
                 </div>
@@ -409,7 +445,7 @@ export function LogsClient() {
                   value={systemLevel}
                   onChange={(event) => {
                     setSystemLevel(event.target.value as SystemLogLevel | "all");
-                    setSystemCursor(null);
+                    resetSystemPage();
                   }}
                 >
                   {LEVELS.map((item) => (
@@ -424,14 +460,15 @@ export function LogsClient() {
                   value={systemSource}
                   onChange={(event) => {
                     setSystemSource(event.target.value);
-                    setSystemCursor(null);
+                    resetSystemPage();
                   }}
                 />
+                <Badge variant="outline">page {systemPageIndex}</Badge>
                 <Button
-                  disabled={!systemCursor}
+                  disabled={systemPageIndex <= 1}
                   type="button"
                   variant="outline"
-                  onClick={() => setSystemCursor(null)}
+                  onClick={resetSystemPage}
                 >
                   첫 페이지
                 </Button>
@@ -439,9 +476,7 @@ export function LogsClient() {
                   disabled={!systemLogs.data?.meta.page?.next_cursor}
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    setSystemCursor(systemLogs.data?.meta.page?.next_cursor ?? null)
-                  }
+                  onClick={nextSystemPage}
                 >
                   다음
                 </Button>
@@ -466,7 +501,7 @@ export function LogsClient() {
                   value={apiMethod}
                   onChange={(event) => {
                     setApiMethod(event.target.value);
-                    setApiCursor(null);
+                    resetApiPage();
                   }}
                 />
                 <Input
@@ -475,7 +510,7 @@ export function LogsClient() {
                   value={apiPath}
                   onChange={(event) => {
                     setApiPath(event.target.value);
-                    setApiCursor(null);
+                    resetApiPage();
                   }}
                 />
                 <Input
@@ -484,14 +519,15 @@ export function LogsClient() {
                   value={apiMinStatus}
                   onChange={(event) => {
                     setApiMinStatus(event.target.value);
-                    setApiCursor(null);
+                    resetApiPage();
                   }}
                 />
+                <Badge variant="outline">page {apiPageIndex}</Badge>
                 <Button
-                  disabled={!apiCursor}
+                  disabled={apiPageIndex <= 1}
                   type="button"
                   variant="outline"
-                  onClick={() => setApiCursor(null)}
+                  onClick={resetApiPage}
                 >
                   첫 페이지
                 </Button>
@@ -499,9 +535,7 @@ export function LogsClient() {
                   disabled={!apiLogs.data?.meta.page?.next_cursor}
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    setApiCursor(apiLogs.data?.meta.page?.next_cursor ?? null)
-                  }
+                  onClick={nextApiPage}
                 >
                   다음
                 </Button>
@@ -526,7 +560,7 @@ export function LogsClient() {
                   value={eventJobId}
                   onChange={(event) => {
                     setEventJobId(event.target.value);
-                    setEventCursor(null);
+                    resetEventPage();
                   }}
                 />
                 <NativeSelect
@@ -536,7 +570,7 @@ export function LogsClient() {
                     setEventLevel(
                       event.target.value as ImportJobEventLevel | "all",
                     );
-                    setEventCursor(null);
+                    resetEventPage();
                   }}
                 >
                   {EVENT_LEVELS.map((item) => (
@@ -551,7 +585,7 @@ export function LogsClient() {
                   value={eventProvider}
                   onChange={(event) => {
                     setEventProvider(event.target.value);
-                    setEventCursor(null);
+                    resetEventPage();
                   }}
                 />
                 <Input
@@ -560,14 +594,15 @@ export function LogsClient() {
                   value={eventDatasetKey}
                   onChange={(event) => {
                     setEventDatasetKey(event.target.value);
-                    setEventCursor(null);
+                    resetEventPage();
                   }}
                 />
+                <Badge variant="outline">page {eventPageIndex}</Badge>
                 <Button
-                  disabled={!eventCursor}
+                  disabled={eventPageIndex <= 1}
                   type="button"
                   variant="outline"
-                  onClick={() => setEventCursor(null)}
+                  onClick={resetEventPage}
                 >
                   첫 페이지
                 </Button>
@@ -575,9 +610,7 @@ export function LogsClient() {
                   disabled={!jobEvents.data?.meta.page?.next_cursor}
                   type="button"
                   variant="outline"
-                  onClick={() =>
-                    setEventCursor(jobEvents.data?.meta.page?.next_cursor ?? null)
-                  }
+                  onClick={nextEventPage}
                 >
                   다음
                 </Button>

@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-27 (codex) — Admin live review 데이터/표시 보강
+
+N150 admin에서 enrichment/dedup review가 0건이고 price/provider/log/curated review 화면의
+운영 판단이 어려운 문제를 점검했다.
+
+- **운영 확인**: KMA weather `TMP` 값은 존재했지만 marker label이 `deg_c` 단위를 섭씨로 인식하지
+  못할 수 있었다. OpiNet price는 여전히 제주/완도권 bbox에 머물렀고, `lowTop10` 부분 응답이 있으면
+  fallback을 타지 않는 것이 원인이었다. enrichment/dedup queue와 ops log 테이블은 운영 DB에서 0건,
+  provider sync state는 KMA만 기록되어 있었다.
+- **Dagster/API 보강**: OpiNet `low_top_area` 부분 성공 시에도 전국 sample fallback을 타도록
+  최소 station 수 기준을 추가했다. VisitKorea enrichment asset은 자동 적재가 아니라 review queue
+  refresh 경로를 호출하게 바꿨고, feature load 계열 asset은 성공 시 provider sync state를 기록한다.
+- **Admin UI 보강**: curated feature review 우측에 위치 지도/좌표/주소/분류 패널과 concierge
+  place-search 결과 패널을 추가했다. admin features, curated features, logs 주요 table에는 현재
+  page/page size 표시와 첫 페이지/다음 페이지 상태를 보강했다. MOIS place feature는 인허가/영업상태/
+  facility_info 특화 패널을 표시한다.
+- **검증**: OpiNet/Dagster provider fetcher targeted pytest, Dagster integration, OpenAPI export test,
+  API ruff, admin frontend type-check/e2e type-check, 변경 파일 ESLint, `git diff --check` 통과.
+  `/admin/enrichment-reviews` live Playwright read-only e2e 34건 통과.
+
 ## 2026-06-26 (codex) — OpiNet fallback 주요 도심 anchor 보강
 
 N150에 `low_top_area`를 배포하고 `feature_price_opinet_stations_job`을 수동 실행했지만

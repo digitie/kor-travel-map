@@ -41,6 +41,9 @@ export type CuratedFeatureDetailSnapshot =
   CuratedSchemas["CuratedFeatureDetailSnapshotView"];
 export type CuratedFeatureDetailSnapshotResponse =
   CuratedSchemas["CuratedFeatureDetailSnapshotResponse"];
+export type CuratedPlaceSearchHit = CuratedSchemas["PlaceSearchHitView"];
+export type CuratedPlaceSearchResponse =
+  CuratedSchemas["CuratedPlaceSearchResponse"];
 
 export type CuratedFeatureStatus = Exclude<
   AdminCuratedFeaturesQuery["curation_status"],
@@ -196,6 +199,40 @@ export function useCuratedFeatureDetailSnapshot(curatedFeatureId: string | null)
       fetchCuratedFeatureDetailSnapshot(curatedFeatureId as string, signal),
     enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
     staleTime: 30_000,
+  });
+}
+
+async function fetchCuratedFeaturePlaceSearch(
+  curatedFeatureId: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<CuratedPlaceSearchResponse> {
+  return getJson<CuratedPlaceSearchResponse>(
+    pathWithQuery(
+      `/v1/admin/curated-features/${encodeURIComponent(
+        curatedFeatureId,
+      )}/place-search`,
+      { q: query },
+    ),
+    { signal },
+  );
+}
+
+export function useCuratedFeaturePlaceSearch(
+  curatedFeatureId: string | null,
+  query: string,
+  enabled: boolean,
+) {
+  return useQuery<CuratedPlaceSearchResponse, Error>({
+    queryKey: ["curated-feature-place-search", curatedFeatureId, query] as const,
+    queryFn: ({ signal }) =>
+      fetchCuratedFeaturePlaceSearch(curatedFeatureId as string, query, signal),
+    enabled:
+      enabled &&
+      curatedFeatureId !== null &&
+      curatedFeatureId.length > 0 &&
+      query.trim().length > 0,
+    staleTime: 60_000,
   });
 }
 
