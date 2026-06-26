@@ -959,8 +959,49 @@ _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
 )
 """``lowTop10``이 빈 응답일 때 쓰는 대한민국 주변 샘플 bbox."""
 
+_OPINET_SAMPLE_ANCHOR_CENTERS: Final[tuple[tuple[float, float], ...]] = (
+    (126.9780, 37.5665),  # 서울
+    (126.7052, 37.4563),  # 인천
+    (127.0286, 37.2636),  # 수원
+    (127.1265, 37.4200),  # 성남
+    (126.8319, 37.6584),  # 고양
+    (127.1776, 37.2411),  # 용인
+    (127.0471, 37.7381),  # 의정부
+    (127.7298, 37.8813),  # 춘천
+    (127.9202, 37.3422),  # 원주
+    (128.8962, 37.7519),  # 강릉
+    (127.3845, 36.3504),  # 대전
+    (127.4890, 36.6424),  # 청주
+    (127.9259, 36.9910),  # 충주
+    (127.1522, 36.8151),  # 천안
+    (127.0046, 36.7898),  # 아산
+    (127.2890, 36.4800),  # 세종
+    (127.1190, 36.4467),  # 공주
+    (127.1480, 35.8242),  # 전주
+    (126.7368, 35.9676),  # 군산
+    (126.9576, 35.9483),  # 익산
+    (126.8514, 35.1595),  # 광주
+    (126.3922, 34.8118),  # 목포
+    (127.6622, 34.7604),  # 여수
+    (127.4872, 34.9506),  # 순천
+    (128.6014, 35.8714),  # 대구
+    (129.3650, 36.0190),  # 포항
+    (128.3446, 36.1195),  # 구미
+    (128.7294, 36.5684),  # 안동
+    (129.2247, 35.8562),  # 경주
+    (129.0756, 35.1796),  # 부산
+    (129.3114, 35.5384),  # 울산
+    (128.6811, 35.2279),  # 창원
+    (128.1076, 35.1800),  # 진주
+    (128.8894, 35.2285),  # 김해
+    (128.6211, 34.8806),  # 거제
+    (126.5312, 33.4996),  # 제주
+    (126.5601, 33.2541),  # 서귀포
+)
+"""Sparse grid가 도심을 비켜갈 때 보강할 전국 주요 도심 fallback anchor."""
+
 _OPINET_SAMPLE_GRID_STEP_DEGREES: Final[float] = 0.4
-"""OpiNet fallback 샘플 그리드 간격. 3개 제품 기준 약 800회 호출."""
+"""OpiNet fallback 샘플 그리드 간격. 도심 anchor 포함 3개 제품 기준 약 900회 호출."""
 
 
 def _opinet_poi_target_bboxes(
@@ -1037,12 +1078,21 @@ def _opinet_sigungu_area_codes(client: Any) -> list[str]:
 
 def _opinet_sample_grid_centers() -> Iterator[tuple[float, float]]:
     """전국 유가 분포용 bounded sample grid center를 반환한다."""
+    seen: set[tuple[float, float]] = set()
+    for lon, lat in _OPINET_SAMPLE_ANCHOR_CENTERS:
+        center = (round(lon, 6), round(lat, 6))
+        seen.add(center)
+        yield center
+
     min_lon, min_lat, max_lon, max_lat = _OPINET_SAMPLE_GRID_BBOX
     lat = min_lat
     while lat <= max_lat:
         lon = min_lon
         while lon <= max_lon:
-            yield (round(lon, 6), round(lat, 6))
+            center = (round(lon, 6), round(lat, 6))
+            if center not in seen:
+                seen.add(center)
+                yield center
             lon += _OPINET_SAMPLE_GRID_STEP_DEGREES
         lat += _OPINET_SAMPLE_GRID_STEP_DEGREES
 
