@@ -1147,6 +1147,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/{feature_id}/contained-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** area feature 안에 포함된 point feature 목록 */
+        get: operations["get_area_contained_features_v1_features__feature_id__contained_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/{feature_id}/price": {
         parameters: {
             query?: never;
@@ -2014,6 +2031,8 @@ export interface components {
             };
             /** Admin Dong Code */
             admin_dong_code?: string | null;
+            /** Area Square Meters */
+            area_square_meters?: number | null;
             /** Category */
             category: string;
             /** Coord Precision Digits */
@@ -2642,6 +2661,26 @@ export interface components {
          */
         ApiCallLogsResponse: {
             data: components["schemas"]["ApiCallLogsListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AreaContainedFeaturesData
+         * @description ``GET /features/{feature_id}/contained-features`` data payload.
+         */
+        AreaContainedFeaturesData: {
+            /** Area Feature Id */
+            area_feature_id: string;
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Items */
+            items: components["schemas"]["FeatureSummary"][];
+        };
+        /**
+         * AreaContainedFeaturesResponse
+         * @description area feature 안에 포함된 point feature 목록 응답.
+         */
+        AreaContainedFeaturesResponse: {
+            data: components["schemas"]["AreaContainedFeaturesData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -3752,6 +3791,10 @@ export interface components {
             event_has_more: boolean;
             /** Events */
             events?: components["schemas"]["DagsterRunEvent"][];
+            /** Failure Events */
+            failure_events?: components["schemas"]["DagsterRunFailure"][];
+            /** Failure Reason */
+            failure_reason?: string | null;
             /** Graphql Url */
             graphql_url: string;
             run?: components["schemas"]["DagsterRunSummary"] | null;
@@ -3774,6 +3817,25 @@ export interface components {
          * @description Dagster run event/failure 요약.
          */
         DagsterRunEvent: {
+            /** Dagster Event Type */
+            dagster_event_type?: string | null;
+            error?: components["schemas"]["DagsterGraphqlError"] | null;
+            /** Event Type */
+            event_type: string;
+            /** Level */
+            level?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Step Id */
+            step_id?: string | null;
+            /** Timestamp */
+            timestamp?: string | null;
+        };
+        /**
+         * DagsterRunFailure
+         * @description Run failure 원인 요약.
+         */
+        DagsterRunFailure: {
             /** Dagster Event Type */
             dagster_event_type?: string | null;
             error?: components["schemas"]["DagsterGraphqlError"] | null;
@@ -4194,6 +4256,11 @@ export interface components {
             address: {
                 [key: string]: unknown;
             };
+            /**
+             * Area Square Meters
+             * @description kind=area이고 geometry가 있으면 면적(m²).
+             */
+            area_square_meters?: number | null;
             /** Category */
             category: string;
             /** Detail */
@@ -4315,6 +4382,8 @@ export interface components {
             price_summary?: components["schemas"]["PricePointOut"][] | null;
             /** Status */
             status: string;
+            /** @description kind=weather일 때 현재기온(T1H/TMP) marker 요약. */
+            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
         /**
          * FeatureUpdatePoint
@@ -6500,6 +6569,34 @@ export interface components {
             value_number?: number | null;
             /** Value Text */
             value_text?: string | null;
+        };
+        /**
+         * WeatherSummaryOut
+         * @description 지도 marker용 최신 현재기온 요약.
+         */
+        WeatherSummaryOut: {
+            /** Forecast Style */
+            forecast_style?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Weather Domain */
+            weather_domain?: string | null;
         };
         /** _DatasetEntry */
         _DatasetEntry: {
@@ -10496,6 +10593,61 @@ export interface operations {
                 };
             };
             /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_area_contained_features_v1_features__feature_id__contained_features_get: {
+        parameters: {
+            query?: {
+                /** @description 포함 feature kind 필터 (반복 가능). 미지정 시 전체. */
+                kind?: string[] | null;
+                page_size?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaContainedFeaturesResponse"];
+                };
+            };
+            /** @description feature_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description area feature가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;

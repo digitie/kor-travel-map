@@ -966,6 +966,17 @@
             ],
             "title": "Admin Dong Code"
           },
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Square Meters"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -2913,6 +2924,58 @@
           "meta"
         ],
         "title": "ApiCallLogsResponse",
+        "type": "object"
+      },
+      "AreaContainedFeaturesData": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/contained-features`` data payload.",
+        "properties": {
+          "area_feature_id": {
+            "title": "Area Feature Id",
+            "type": "string"
+          },
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Square Meters"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "area_feature_id",
+          "items"
+        ],
+        "title": "AreaContainedFeaturesData",
+        "type": "object"
+      },
+      "AreaContainedFeaturesResponse": {
+        "additionalProperties": false,
+        "description": "area feature 안에 포함된 point feature 목록 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AreaContainedFeaturesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AreaContainedFeaturesResponse",
         "type": "object"
       },
       "BackupCommandPlan": {
@@ -6159,6 +6222,24 @@
             "title": "Events",
             "type": "array"
           },
+          "failure_events": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterRunFailure"
+            },
+            "title": "Failure Events",
+            "type": "array"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
           "graphql_url": {
             "title": "Graphql Url",
             "type": "string"
@@ -6289,6 +6370,86 @@
           "event_type"
         ],
         "title": "DagsterRunEvent",
+        "type": "object"
+      },
+      "DagsterRunFailure": {
+        "additionalProperties": false,
+        "description": "Run failure 원인 요약.",
+        "properties": {
+          "dagster_event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Event Type"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DagsterGraphqlError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "event_type"
+        ],
+        "title": "DagsterRunFailure",
         "type": "object"
       },
       "DagsterRunSummary": {
@@ -7392,6 +7553,18 @@
             "title": "Address",
             "type": "object"
           },
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=area이고 geometry가 있으면 면적(m²).",
+            "title": "Area Square Meters"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -7709,6 +7882,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "weather_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=weather일 때 현재기온(T1H/TMP) marker 요약."
           }
         },
         "required": [
@@ -13459,6 +13643,134 @@
           "metric_key"
         ],
         "title": "WeatherMetricOut",
+        "type": "object"
+      },
+      "WeatherSummaryOut": {
+        "additionalProperties": false,
+        "description": "지도 marker용 최신 현재기온 요약.",
+        "properties": {
+          "forecast_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Style"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          },
+          "weather_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weather Domain"
+          }
+        },
+        "required": [
+          "metric_key"
+        ],
+        "title": "WeatherSummaryOut",
         "type": "object"
       },
       "_DatasetEntry": {
@@ -21248,6 +21560,121 @@
           }
         },
         "summary": "feature 단건 상세",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/contained-features": {
+      "get": {
+        "operationId": "get_area_contained_features_v1_features__feature_id__contained_features_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "포함 feature kind 필터 (반복 가능). 미지정 시 전체.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "포함 feature kind 필터 (반복 가능). 미지정 시 전체.",
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AreaContainedFeaturesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "area feature가 아님"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "area feature 안에 포함된 point feature 목록",
         "tags": [
           "features"
         ]

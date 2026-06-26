@@ -379,6 +379,8 @@ export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
 export type FeaturePriceResponse = FeatureSchemas["FeaturePriceResponse"];
 export type PriceCardData = FeatureSchemas["PriceCardData"];
 export type PricePoint = FeatureSchemas["PricePointOut"];
+export type AreaContainedFeaturesResponse =
+  FeatureSchemas["AreaContainedFeaturesResponse"];
 export type FeaturesNearbyResponse = FeatureSchemas["FeaturesNearbyResponse"];
 export type NearbyFeatureSummary = FeatureSchemas["NearbyFeatureSummary"];
 
@@ -471,6 +473,46 @@ export function useFeaturePrice(
     ] as const,
     queryFn: ({ signal }) => fetchFeaturePrice(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+async function fetchAreaContainedFeatures(
+  featureId: string,
+  params: { pageSize?: number; kinds?: string[] } = {},
+  signal?: AbortSignal,
+): Promise<AreaContainedFeaturesResponse> {
+  return getJson<AreaContainedFeaturesResponse>(
+    pathWithQuery(
+      `/v1/features/${encodeURIComponent(featureId)}/contained-features`,
+      {
+        page_size: params.pageSize,
+        kind: params.kinds,
+      },
+    ),
+    { signal },
+  );
+}
+
+export function useAreaContainedFeatures(
+  featureId: string | null,
+  params: { pageSize?: number; kinds?: string[] } = {},
+  options?: { enabled?: boolean },
+) {
+  return useQuery<AreaContainedFeaturesResponse, Error>({
+    queryKey: [
+      "feature",
+      featureId,
+      "contained-features",
+      params.pageSize ?? null,
+      params.kinds?.join(",") ?? "",
+    ] as const,
+    queryFn: ({ signal }) =>
+      fetchAreaContainedFeatures(featureId as string, params, signal),
+    enabled:
+      (options?.enabled ?? true) &&
+      featureId !== null &&
+      featureId.length > 0,
     staleTime: 60_000,
   });
 }

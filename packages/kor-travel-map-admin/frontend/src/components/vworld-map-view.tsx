@@ -360,6 +360,7 @@ export interface ClusterFeatureInput {
   geometry?: unknown;
   area_square_meters?: number | null;
   price_summary?: readonly ClusterPriceSummaryPoint[] | null;
+  weather_summary?: ClusterWeatherSummaryPoint | null;
 }
 
 interface ClusterPriceSummaryPoint {
@@ -368,6 +369,17 @@ interface ClusterPriceSummaryPoint {
   value_number: number;
   unit: string;
   observed_at: string;
+}
+
+interface ClusterWeatherSummaryPoint {
+  metric_key: string;
+  metric_name?: string | null;
+  value_number?: number | null;
+  value_text?: string | null;
+  unit?: string | null;
+  observed_at?: string | null;
+  valid_at?: string | null;
+  issued_at?: string | null;
 }
 
 type GeometryFeatureKind = "route" | "area";
@@ -416,12 +428,14 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
 }
 
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
-  if (feature.kind === "weather") return null;
   return feature.marker_icon ?? null;
 }
 
 const priceFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 0,
+});
+const temperatureFormatter = new Intl.NumberFormat("ko-KR", {
+  maximumFractionDigits: 1,
 });
 
 const FUEL_PRICE_ORDER = ["gasoline", "diesel", "premium_gasoline"] as const;
@@ -459,16 +473,35 @@ function priceMarkerLabel(
     .join("\n");
 }
 
+function weatherMarkerLabel(
+  summary: ClusterWeatherSummaryPoint | null | undefined,
+): string | null {
+  if (!summary) return null;
+  if (typeof summary.value_number === "number") {
+    const unit = summary.unit ?? "";
+    if (unit.includes("C") || unit.includes("℃")) {
+      return `${temperatureFormatter.format(summary.value_number)}℃`;
+    }
+    if (unit.length > 0) {
+      return `${temperatureFormatter.format(summary.value_number)} ${unit}`;
+    }
+    return `${temperatureFormatter.format(summary.value_number)}°`;
+  }
+  return summary.value_text ?? null;
+}
+
 function createFeatureMarkerElement({
   markerIcon,
   markerColor,
   priceLabel,
+  weatherLabel,
   title,
   onClick,
 }: {
   markerIcon?: string | null;
   markerColor?: string | null;
   priceLabel?: string | null;
+  weatherLabel?: string | null;
   title: string;
   onClick?: (event: MouseEvent) => void;
 }): HTMLDivElement {
@@ -478,7 +511,8 @@ function createFeatureMarkerElement({
     size: 24,
     title,
   });
-  if (!priceLabel) {
+  const markerLabel = priceLabel ?? weatherLabel ?? null;
+  if (!markerLabel) {
     if (onClick) {
       icon.style.cursor = "pointer";
       icon.addEventListener("click", onClick);
@@ -488,7 +522,7 @@ function createFeatureMarkerElement({
 
   const color = resolveMarkerColor(markerColor ?? null);
   const wrapper = document.createElement("div");
-  wrapper.title = `${title} ${priceLabel.replace(/\n/g, " ")}`;
+  wrapper.title = `${title} ${markerLabel.replace(/\n/g, " ")}`;
   wrapper.style.display = "flex";
   wrapper.style.alignItems = "center";
   wrapper.style.gap = "4px";
@@ -496,8 +530,8 @@ function createFeatureMarkerElement({
   wrapper.style.userSelect = "none";
 
   const label = document.createElement("div");
-  label.textContent = priceLabel;
-  label.style.minWidth = "58px";
+  label.textContent = markerLabel;
+  label.style.minWidth = priceLabel ? "58px" : "38px";
   label.style.padding = "3px 6px";
   label.style.borderRadius = "6px";
   label.style.background = "rgba(255,255,255,0.96)";
@@ -635,6 +669,9 @@ export function VWorldFeatureClusters({
   const priceSummariesRef = useRef(
     new Map<string, readonly ClusterPriceSummaryPoint[]>(),
   );
+  const weatherSummariesRef = useRef(
+    new Map<string, ClusterWeatherSummaryPoint>(),
+  );
   // 현재 화면에 떠 있는 point/label 마커 element를 feature_id로 추적해, selection 변경
   // 시 마커 풀을 건드리지 않고 outline만 토글한다(#500 (c)).
   const pointElementsRef = useRef(new Map<string, HTMLElement>());
@@ -643,12 +680,17 @@ export function VWorldFeatureClusters({
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
     const summaries = new Map<string, readonly ClusterPriceSummaryPoint[]>();
+    const weatherSummaries = new Map<string, ClusterWeatherSummaryPoint>();
     for (const feature of features) {
       if (feature.price_summary && feature.price_summary.length > 0) {
         summaries.set(feature.feature_id, feature.price_summary);
       }
+      if (feature.weather_summary) {
+        weatherSummaries.set(feature.feature_id, feature.weather_summary);
+      }
     }
     priceSummariesRef.current = summaries;
+    weatherSummariesRef.current = weatherSummaries;
   });
 
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
@@ -997,10 +1039,14 @@ export function VWorldFeatureClusters({
           const priceLabel = priceMarkerLabel(
             priceSummariesRef.current.get(featureId),
           );
+          const weatherLabel = weatherMarkerLabel(
+            weatherSummariesRef.current.get(featureId),
+          );
           const renderKey = JSON.stringify({
             markerIcon,
             markerColor,
             priceLabel,
+            weatherLabel,
           });
           let marker = markers.get(id);
           const wasOnScreen = onScreen.has(id);
@@ -1013,6 +1059,7 @@ export function VWorldFeatureClusters({
               markerIcon,
               markerColor,
               priceLabel,
+              weatherLabel,
               title,
               onClick: () => onSelectRef.current?.(featureId),
             });
@@ -1020,7 +1067,9 @@ export function VWorldFeatureClusters({
             element.setAttribute("role", "button");
             element.setAttribute(
               "aria-label",
-              priceLabel ? `${title} ${priceLabel.replace(/\n/g, " ")}` : title,
+              priceLabel || weatherLabel
+                ? `${title} ${(priceLabel ?? weatherLabel ?? "").replace(/\n/g, " ")}`
+                : title,
             );
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);
@@ -1031,6 +1080,8 @@ export function VWorldFeatureClusters({
             const element = marker.getElement();
             const ariaLabel = priceLabel
               ? `${title} ${priceLabel.replace(/\n/g, " ")}`
+              : weatherLabel
+                ? `${title} ${weatherLabel.replace(/\n/g, " ")}`
               : title;
             if (element.getAttribute("aria-label") !== ariaLabel) {
               element.title = ariaLabel;

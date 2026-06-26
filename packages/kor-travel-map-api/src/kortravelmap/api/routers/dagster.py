@@ -324,6 +324,20 @@ class DagsterRunEvent(BaseModel):
     error: DagsterGraphqlError | None = None
 
 
+class DagsterRunFailure(BaseModel):
+    """Run failure 원인 요약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str
+    message: str | None = None
+    timestamp: str | None = None
+    level: str | None = None
+    step_id: str | None = None
+    dagster_event_type: str | None = None
+    error: DagsterGraphqlError | None = None
+
+
 class DagsterRunDetailData(BaseModel):
     """`GET /ops/dagster/runs/{run_id}` data."""
 
@@ -335,6 +349,8 @@ class DagsterRunDetailData(BaseModel):
     checked_at: datetime
     run: DagsterRunSummary | None = None
     events: list[DagsterRunEvent] = Field(default_factory=list)
+    failure_reason: str | None = None
+    failure_events: list[DagsterRunFailure] = Field(default_factory=list)
     event_cursor: str | None = None
     event_has_more: bool = False
     errors: list[str] = Field(default_factory=list)
@@ -653,6 +669,41 @@ def _parse_run_event(raw_event: object) -> DagsterRunEvent:
     )
 
 
+def _is_failure_event(event: DagsterRunEvent) -> bool:
+    if event.error is not None:
+        return True
+    event_type = (event.dagster_event_type or event.event_type).upper()
+    return event.level == "ERROR" or "FAIL" in event_type
+
+
+def _failure_message(event: DagsterRunEvent) -> str | None:
+    if event.error is not None:
+        if event.error.class_name and event.error.message:
+            return f"{event.error.class_name}: {event.error.message}"
+        if event.error.message:
+            return event.error.message
+        if event.error.class_name:
+            return event.error.class_name
+        return event.error.stack[0] if event.error.stack else None
+    return event.message
+
+
+def _run_failures(events: list[DagsterRunEvent]) -> list[DagsterRunFailure]:
+    return [
+        DagsterRunFailure(
+            event_type=event.event_type,
+            message=_failure_message(event),
+            timestamp=event.timestamp,
+            level=event.level,
+            step_id=event.step_id,
+            dagster_event_type=event.dagster_event_type,
+            error=event.error,
+        )
+        for event in events
+        if _is_failure_event(event)
+    ]
+
+
 def _parse_run_detail(
     raw_run: JsonDict,
     *,
@@ -662,16 +713,22 @@ def _parse_run_detail(
     typename = _string(raw_run.get("__typename"))
     if typename == "Run":
         event_connection = _dict(raw_run.get("eventConnection"))
+        events = [
+            _parse_run_event(raw_event)
+            for raw_event in _list(event_connection.get("events"))
+        ]
+        failure_events = _run_failures(events)
         return DagsterRunDetailData(
             status="ok",
             dagster_url=dagster_urls.dagster_url,
             graphql_url=dagster_urls.graphql_url,
             checked_at=checked_at,
             run=_parse_run_summary(raw_run),
-            events=[
-                _parse_run_event(raw_event)
-                for raw_event in _list(event_connection.get("events"))
-            ],
+            events=events,
+            failure_reason=(
+                failure_events[-1].message if failure_events else None
+            ),
+            failure_events=failure_events,
             event_cursor=_optional_string(event_connection.get("cursor")),
             event_has_more=bool(event_connection.get("hasMore")),
         )

@@ -25,8 +25,8 @@ import {
   type FeatureKind,
   type FeatureSummary,
 } from "@/api/features";
-import { FeaturePricePanel } from "@/components/feature-price-panel";
-import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
+import { AdminShell } from "@/components/admin-shell";
+import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -153,6 +153,11 @@ function FeatureDetailPanel({
               <summary className="cursor-pointer text-sm font-medium">address</summary>
               <JsonBlock value={detailQuery.data.address} />
             </details>
+            <FeatureKindDetailPanel
+              compact
+              feature={detailQuery.data}
+              featureId={featureId}
+            />
             <details>
               <summary className="cursor-pointer text-sm font-medium">detail</summary>
               <JsonBlock value={detailQuery.data.detail} />
@@ -161,11 +166,6 @@ function FeatureDetailPanel({
               <summary className="cursor-pointer text-sm font-medium">urls</summary>
               <JsonBlock value={detailQuery.data.urls} />
             </details>
-            {detailQuery.data.kind === "price" ? (
-              <FeaturePricePanel compact featureId={featureId} />
-            ) : (
-              <FeatureWeatherPanel compact featureId={featureId} />
-            )}
           </>
         ) : null}
       </CardContent>
@@ -280,66 +280,9 @@ export function FeaturesClient() {
     : null;
 
   return (
-    <main className="flex h-screen flex-col bg-muted/30">
-      <header className="flex flex-col gap-3 border-b bg-background px-6 py-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Features</Badge>
-            <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
-              {status}
-            </Badge>
-            {partialMeta ? (
-              <Badge
-                data-testid="features-partial-indicator"
-                title={
-                  partialMeta.failedTiles
-                    ? `${partialMeta.totalTiles ?? "?"}개 tile 중 ${partialMeta.failedTiles}개 실패 — 결과가 일부만 표시됩니다.`
-                    : "일부 tile이 page 한도까지 채워져 feature가 누락되었을 수 있습니다. 더 확대해 좁은 영역을 보세요."
-                }
-                variant="destructive"
-              >
-                부분 결과
-              </Badge>
-            ) : null}
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight">Feature 지도</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div
-            aria-label="kind 필터"
-            className="flex flex-wrap gap-1"
-            data-testid="kind-filter"
-            role="group"
-          >
-            {FEATURE_KINDS.map((kind) => {
-              const active = activeFeatureKinds.has(kind);
-              return (
-                <Button
-                  aria-pressed={active}
-                  key={kind}
-                  size="sm"
-                  type="button"
-                  variant={active ? "default" : "outline"}
-                  onClick={() => toggleFeatureKind(kind)}
-                >
-                  {kind}
-                </Button>
-              );
-            })}
-            {activeFeatureKinds.size > 0 ? (
-              <Button
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={clearFeatureKinds}
-              >
-                초기화
-              </Button>
-            ) : null}
-          </div>
-          <Link className={cn(buttonVariants({ variant: "outline" }))} href="/">
-            홈
-          </Link>
+    <AdminShell
+      actions={
+        <>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/ops/import-jobs"
@@ -375,8 +318,70 @@ export function FeaturesClient() {
             <WorkflowIcon data-icon="inline-start" />
             Dagster
           </Link>
+        </>
+      }
+      description={status}
+      section="Features"
+      title="Feature 지도"
+    >
+      <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
+        <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">Features</Badge>
+            <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
+              {status}
+            </Badge>
+            {partialMeta ? (
+              <Badge
+                data-testid="features-partial-indicator"
+                title={
+                  partialMeta.failedTiles
+                    ? `${partialMeta.totalTiles ?? "?"}개 tile 중 ${partialMeta.failedTiles}개 실패 — 결과가 일부만 표시됩니다.`
+                    : "일부 tile이 page 한도까지 채워져 feature가 누락되었을 수 있습니다. 더 확대해 좁은 영역을 보세요."
+                }
+                variant="destructive"
+              >
+                부분 결과
+              </Badge>
+            ) : null}
+          </div>
         </div>
-      </header>
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            aria-label="kind 필터"
+            className="flex flex-wrap gap-1"
+            data-testid="kind-filter"
+            role="group"
+          >
+            {FEATURE_KINDS.map((kind) => {
+              const active = activeFeatureKinds.has(kind);
+              return (
+                <Button
+                  aria-pressed={active}
+                  key={kind}
+                  size="sm"
+                  type="button"
+                  variant={active ? "default" : "outline"}
+                  onClick={() => toggleFeatureKind(kind)}
+                >
+                  {kind}
+                </Button>
+              );
+            })}
+            {activeFeatureKinds.size > 0 ? (
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={clearFeatureKinds}
+              >
+                초기화
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        </div>
 
       {featuresQuery.isError ? (
         <Alert className="m-4" variant="destructive">
@@ -408,7 +413,7 @@ export function FeaturesClient() {
         </div>
 
         <TabsContent className="min-h-0" value="map">
-          <Card className="relative h-[calc(100vh-12.5rem)] overflow-hidden p-0">
+          <Card className="relative h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden p-0">
             <div
               className="absolute inset-0 h-full w-full"
               style={{
@@ -445,7 +450,7 @@ export function FeaturesClient() {
         </TabsContent>
 
         <TabsContent value="table">
-          <Card className="h-[calc(100vh-12.5rem)] overflow-hidden">
+          <Card className="h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden">
             <CardHeader>
               <CardTitle>이름순 feature</CardTitle>
               <CardDescription>
@@ -466,7 +471,7 @@ export function FeaturesClient() {
                 manualSorting={false}
                 virtualized
                 estimateRowSize={41}
-                containerClassName="h-[calc(100vh-19rem)]"
+                containerClassName="h-[calc(100vh-28rem)] min-h-80"
                 ariaLabel="이름순 feature"
               />
             </CardContent>
@@ -483,6 +488,7 @@ export function FeaturesClient() {
           </AlertDescription>
         </Alert>
       ) : null}
-    </main>
+      </div>
+    </AdminShell>
   );
 }

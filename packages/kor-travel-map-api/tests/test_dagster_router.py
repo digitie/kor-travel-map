@@ -278,6 +278,22 @@ def test_dagster_run_detail_parses_graphql_response(
         "stack": ["traceback"],
         "class_name": "RuntimeError",
     }
+    assert data["failure_reason"] == "RuntimeError: boom"
+    assert data["failure_events"] == [
+        {
+            "event_type": "RunFailureEvent",
+            "message": "RuntimeError: boom",
+            "timestamp": "1710000030.0",
+            "level": "ERROR",
+            "step_id": None,
+            "dagster_event_type": "RUN_FAILURE",
+            "error": {
+                "message": "boom",
+                "stack": ["traceback"],
+                "class_name": "RuntimeError",
+            },
+        }
+    ]
     assert calls == [
         {
             "query": dagster_mod._DAGSTER_RUN_DETAIL_QUERY,

@@ -441,6 +441,103 @@ def test_get_feature_detail_maps_row(
 
 
 @pytest.mark.unit
+def test_get_area_contained_features_maps_rows(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    area_row = {
+        "feature_id": "area1",
+        "kind": "area",
+        "name": "국립공원",
+        "category": "03000000",
+        "lon": 127.0,
+        "lat": 37.5,
+        "area_square_meters": 12345.0,
+        "address": {},
+        "detail": {},
+        "urls": {},
+        "legal_dong_code": None,
+        "sido_code": None,
+        "sigungu_code": None,
+        "marker_icon": None,
+        "marker_color": None,
+        "status": "active",
+        "updated_at": "2026-05-29T00:00:00+09:00",
+        "deleted_at": None,
+    }
+    contained_rows = [
+        {
+            "feature_id": "place1",
+            "kind": "place",
+            "name": "포함 장소",
+            "category": "01000000",
+            "lon": 127.01,
+            "lat": 37.51,
+            "marker_icon": "star",
+            "marker_color": "P-03",
+            "status": "active",
+        }
+    ]
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return area_row
+
+    async def _contained(_session: Any, **kw: Any) -> list[dict[str, Any]]:
+        assert kw["feature_id"] == "area1"
+        assert kw["limit"] == 51
+        return contained_rows
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.feature_repo,
+        "features_contained_in_area",
+        _contained,
+    )
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get(
+            "/v1/features/area1/contained-features",
+            params={"page_size": 51},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["data"]["area_square_meters"] == 12345.0
+        assert body["data"]["items"][0]["feature_id"] == "place1"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_get_area_contained_features_rejects_non_area(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return {"feature_id": "place1", "kind": "place", "deleted_at": None}
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/features/place1/contained-features")
+        assert r.status_code == 422
+        assert "area feature" in r.json()["detail"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_features_batch_returns_items_and_missing(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

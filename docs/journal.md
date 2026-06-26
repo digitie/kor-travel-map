@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-26 (codex) — Feature별 상세 패널 + Dagster 실패 상세 보강
+
+Feature 상세 화면이 non-price feature에도 weather panel을 보여주던 문제를 고치고,
+kind별 특화 상세 화면으로 분리했다.
+
+- **API**: `/v1/features/{feature_id}/contained-features`를 추가해 area polygon 안의 point
+  feature를 반환한다. `/v1/features` summary에는 weather marker용 현재기온(`T1H`/`TMP`) 요약을
+  붙였고, public/admin feature 상세에는 `area_square_meters`를 노출한다.
+- **Admin UI**: `/features`, `/features/{featureId}`, `/admin/features` inspector가 공용
+  `FeatureKindDetailPanel`을 사용한다. weather panel은 weather feature에서만 표시하고, price는
+  이력 그래프, event는 기간/장소, area는 면적/포함 feature, route는 구간 메타를 표시한다.
+- **지도 marker**: weather feature marker에 현재기온 라벨을 붙이고, weather marker icon을
+  `marker_icon` metadata 그대로 사용한다.
+- **좌측 메뉴**: `/features` 지도 화면도 `AdminShell` 안으로 편입하고, 데스크톱 sidebar 접기/펼치기
+  상태를 localStorage에 저장한다.
+- **Dagster**: feature load schedule을 weather 시간당 1회, price 일 2회, 기타 월 1회로 정리했다.
+  run 상세 응답과 admin UI에는 실패 원인 요약/stack 표시를 추가했다.
+- **검증**: 전체 pytest 1,357건, 전체 ruff, import-linter, strict mypy(`src/kortravelmap` +
+  API/Dagster package), admin frontend type-check/lint(기존 warning 7건), OpenAPI generated type
+  drift check, production build(필수 public env 주입), `git diff --check` 통과.
+
 ## 2026-06-26 (codex) — OpiNet low_top_area 운영 빈 응답 fallback
 
 N150에 `OPINET_SCOPE_MODE=low_top_area`를 배포한 뒤 OpiNet price job을 수동 실행했으나

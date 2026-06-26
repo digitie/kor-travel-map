@@ -112,7 +112,7 @@ in-place 갱신한다. (구 ADR-057에서 결정 — 정본 구현 `_item_to_bun
 | 항목 | 값 |
 |------|----|
 | asset 이름 | `feature_place_kor_travel_concierge_youtube` |
-| schedule | `feature_place_kor_travel_concierge_youtube_daily_schedule` |
+| schedule | `feature_place_kor_travel_concierge_youtube_monthly_schedule` |
 | resource 이름 | `kor_travel_concierge_youtube_features` |
 | group | `features_place` |
 

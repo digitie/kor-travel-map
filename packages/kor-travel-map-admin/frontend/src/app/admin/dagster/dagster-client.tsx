@@ -116,6 +116,13 @@ function graphqlErrorText(error: DagsterGraphqlError | null | undefined) {
   return error.message ?? error.class_name ?? error.stack?.[0] ?? "Dagster error";
 }
 
+function graphqlErrorStack(error: DagsterGraphqlError | null | undefined) {
+  if (!error?.stack?.length) {
+    return null;
+  }
+  return error.stack.join("\n");
+}
+
 function SummaryCard({
   title,
   value,
@@ -199,6 +206,16 @@ function TickRows({
             <p className="mt-2 break-words text-destructive">
               {graphqlErrorText(tick.error)}
             </p>
+          ) : null}
+          {graphqlErrorStack(tick.error) ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-destructive">
+                stack
+              </summary>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/10 p-2 text-[11px] text-destructive">
+                {graphqlErrorStack(tick.error)}
+              </pre>
+            </details>
           ) : null}
           {tick.run_ids?.length ? (
             <div className="mt-2 flex flex-wrap gap-1">
@@ -595,6 +612,54 @@ function RunDetailCard({ runId }: { runId: string | null }) {
               <Badge variant="outline">events more</Badge>
             ) : null}
           </div>
+        ) : null}
+
+        {data?.failure_events?.length ? (
+          <Alert variant="destructive">
+            <AlertTriangleIcon data-icon="inline-start" />
+            <AlertTitle>실패 원인</AlertTitle>
+            <AlertDescription>
+              <div className="flex flex-col gap-3">
+                {data.failure_reason ? (
+                  <div className="break-words">{data.failure_reason}</div>
+                ) : null}
+                {data.failure_events.map((event, index) => {
+                  const stack = graphqlErrorStack(event.error);
+                  return (
+                    <div
+                      className="rounded-md bg-background/80 p-3"
+                      key={`${event.event_type}:${event.timestamp ?? index}`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant="destructive">
+                          {event.dagster_event_type ?? event.event_type}
+                        </Badge>
+                        {event.step_id ? (
+                          <span className="font-mono">{event.step_id}</span>
+                        ) : null}
+                        <span>{formatEventTimestamp(event.timestamp)}</span>
+                      </div>
+                      {event.message ? (
+                        <div className="mt-2 break-words text-sm">
+                          {event.message}
+                        </div>
+                      ) : null}
+                      {stack ? (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs">
+                            stack
+                          </summary>
+                          <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-[11px]">
+                            {stack}
+                          </pre>
+                        </details>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </AlertDescription>
+          </Alert>
         ) : null}
 
         {run ? (

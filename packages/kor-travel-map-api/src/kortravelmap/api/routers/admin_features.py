@@ -310,6 +310,7 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     lon: float | None = None
     lat: float | None = None
     coord_precision_digits: int | None = None
+    area_square_meters: float | None = None
     address: dict[str, Any]
     detail: dict[str, Any]
     urls: dict[str, Any]
