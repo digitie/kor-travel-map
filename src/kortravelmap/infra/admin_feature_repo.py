@@ -120,7 +120,6 @@ class AdminFeatureDetailFeature:
     lon: float | None
     lat: float | None
     coord_precision_digits: int | None
-    area_square_meters: float | None
     address: dict[str, Any]
     detail: dict[str, Any]
     urls: dict[str, Any]
@@ -146,6 +145,7 @@ class AdminFeatureDetailFeature:
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
+    area_square_meters: float | None = None
 
 
 @dataclass(frozen=True)
