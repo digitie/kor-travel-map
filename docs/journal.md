@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-26 (codex) — OpiNet low_top_area 운영 빈 응답 fallback
+
+N150에 `OPINET_SCOPE_MODE=low_top_area`를 배포한 뒤 OpiNet price job을 수동 실행했으나
+active price feature가 기존 295건(좌표 있는 OpiNet 196건)에서 늘지 않았다.
+
+- **운영 확인**: Dagster job은 `RUN_SUCCESS`였지만 `feature.feature_price_values` 최근 2시간
+  적재가 0건이었다. 운영 컨테이너에서 `KorTravelMapSettings.opinet_scope_mode`는
+  `low_top_area`로 정상 로드됐다.
+- **provider 응답**: 운영 OpiNet client 기준 `areaCode.do` root가 0건, `lowTop10.do`가 area 유무와
+  상관없이 0건을 반환했다. 수동 확인 시 `aroundAll.do`도 0건이라 당일 provider 응답/제한 이슈
+  가능성이 남았다.
+- **코드 보강**: `low_top_area`가 `areaCode`/`lowTop10`에서 한 건도 얻지 못하면 전국 샘플 그리드의
+  `aroundAll`을 휘발유/경유/고급휘발유 3종으로 호출하는 fallback을 추가했다. 전체 전국 bbox
+  exhaustive scan은 여전히 금지하고, fallback 호출량은 3개 제품 기준 약 800회로 제한한다.
+
 ## 2026-06-26 (codex) — OpiNet price scope 제주 bbox 원인 확인 + 전국 저가 모드
 
 N150 admin 지도에서 유가가 제주도 주변에만 보이는 원인을 확인했다. 운영 Dagster env가

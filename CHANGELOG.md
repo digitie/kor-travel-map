@@ -11,6 +11,8 @@
   일일 한도 초과 위험이 있어, 시군구별 `lowTop10` 저가 목록으로 전국 price feature 분포를 만든다.
 - **ADDED**: `lowTop10` 단일 제품 가격 row를 `kind=price` feature와 `PriceValue`로 적재하는
   변환 경로를 추가했다.
+- **FIXED**: 운영 OpiNet `areaCode`/`lowTop10`이 빈 응답을 반환하는 경우 전국 샘플 그리드의
+  `aroundAll`로 fallback해 `low_top_area`가 0건으로 끝나지 않게 했다.
 - **FIXED**: N150 운영에서 제주/완도 bbox로 고정되어 유가가 해당 권역에만 보이던 원인을 문서화했다.
 
 ### Admin price UI + Dagster 주기 정리 (2026-06-26)
