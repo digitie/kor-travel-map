@@ -77,11 +77,11 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     FeatureLoadScheduleSpec(
         asset=feature_price_opinet_stations,
         job_name="feature_price_opinet_stations_job",
-        schedule_name="feature_price_opinet_stations_hourly_schedule",
-        cron_schedule="18 * * * *",
+        schedule_name="feature_price_opinet_stations_twice_daily_schedule",
+        cron_schedule="18 6,18 * * *",
         provider="opinet",
         dataset_key="opinet_gas_station_prices",
-        description="OpiNet 주유소 price Feature + PriceValue 매시 적재(scope 기반).",
+        description="OpiNet 주유소 price Feature + PriceValue 일 2회 적재(scope 기반).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krex_rest_areas,
@@ -95,11 +95,11 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     FeatureLoadScheduleSpec(
         asset=feature_price_krex_rest_areas,
         job_name="feature_price_krex_rest_areas_job",
-        schedule_name="feature_price_krex_rest_areas_hourly_schedule",
-        cron_schedule="28 * * * *",
+        schedule_name="feature_price_krex_rest_areas_twice_daily_schedule",
+        cron_schedule="28 6,18 * * *",
         provider="krex",
         dataset_key="krex_rest_area_prices",
-        description="KREX 휴게소 유가 price Feature + PriceValue 매시 적재.",
+        description="KREX 휴게소 유가 price Feature + PriceValue 일 2회 적재.",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_notice_krex_traffic_notices,
@@ -187,40 +187,40 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_ultra_short_forecast,
         job_name="feature_weather_kma_ultra_short_forecast_job",
-        schedule_name="feature_weather_kma_ultra_short_forecast_half_hourly_schedule",
-        cron_schedule="20,50 * * * *",
+        schedule_name="feature_weather_kma_ultra_short_forecast_hourly_schedule",
+        cron_schedule="50 * * * *",
         provider="python-kma-api",
         dataset_key="kma_ultra_short_forecast",
-        description="KMA 초단기예보 WeatherValue 30분 간격 적재(발표 HH:30 + 15분 지연 후).",
+        description="KMA 초단기예보 WeatherValue 매시 적재(발표 HH:30 + 15분 지연 후).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_short_forecast,
         job_name="feature_weather_kma_short_forecast_job",
-        schedule_name="feature_weather_kma_short_forecast_3h_schedule",
-        cron_schedule="20 2,5,8,11,14,17,20,23 * * *",
+        schedule_name="feature_weather_kma_short_forecast_hourly_schedule",
+        cron_schedule="20 * * * *",
         provider="python-kma-api",
         dataset_key="kma_short_forecast",
         description=(
-            "KMA 단기예보 WeatherValue 일 8회 적재(발표 02~23시 3시간 간격 + 10분 지연 후)."
+            "KMA 단기예보 WeatherValue 매시 적재(발표 02~23시 3시간 간격 + 지연 후)."
         ),
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_mid_forecast,
         job_name="feature_weather_kma_mid_forecast_job",
-        schedule_name="feature_weather_kma_mid_forecast_twice_daily_schedule",
-        cron_schedule="20 6,18 * * *",
+        schedule_name="feature_weather_kma_mid_forecast_hourly_schedule",
+        cron_schedule="25 * * * *",
         provider="python-kma-api",
         dataset_key="kma_mid_forecast",
-        description="KMA 중기예보(육상+기온) WeatherValue 일 2회 적재(발표 06/18시 + 지연 후).",
+        description="KMA 중기예보(육상+기온) WeatherValue 매시 적재(발표 06/18시 + 지연 후).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_notice_kma_weather_alerts,
         job_name="feature_notice_kma_weather_alerts_job",
-        schedule_name="feature_notice_kma_weather_alerts_daily_schedule",
-        cron_schedule="15 6 * * *",
+        schedule_name="feature_notice_kma_weather_alerts_hourly_schedule",
+        cron_schedule="15 * * * *",
         provider="python-kma-api",
         dataset_key="kma_weather_alerts",
-        description="KMA 기상특보 notice Feature 일 1회 적재(rolling window 멱등 upsert).",
+        description="KMA 기상특보 notice Feature 매시 적재(rolling window 멱등 upsert).",
     ),
     # MCST 파일데이터 (T-220 재배선, #395) — 저빈도 시설 데이터, 주 1회.
     FeatureLoadScheduleSpec(

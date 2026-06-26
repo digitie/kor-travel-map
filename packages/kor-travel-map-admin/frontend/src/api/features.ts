@@ -376,6 +376,9 @@ type FeatureDetailEnvelopeResponse =
 export type FeatureWeatherResponse = FeatureSchemas["FeatureWeatherResponse"];
 export type WeatherCardData = FeatureSchemas["WeatherCardData"];
 export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
+export type FeaturePriceResponse = FeatureSchemas["FeaturePriceResponse"];
+export type PriceCardData = FeatureSchemas["PriceCardData"];
+export type PricePoint = FeatureSchemas["PricePointOut"];
 export type FeaturesNearbyResponse = FeatureSchemas["FeaturesNearbyResponse"];
 export type NearbyFeatureSummary = FeatureSchemas["NearbyFeatureSummary"];
 
@@ -435,6 +438,38 @@ export function useFeatureWeather(
     queryKey: ["feature", featureId, "weather", params.asof ?? null] as const,
     queryFn: ({ signal }) =>
       fetchFeatureWeather(featureId as string, params, signal),
+    enabled: featureId !== null && featureId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+async function fetchFeaturePrice(
+  featureId: string,
+  params: { asof?: string | Date | null; historyLimit?: number } = {},
+  signal?: AbortSignal,
+): Promise<FeaturePriceResponse> {
+  return getJson<FeaturePriceResponse>(
+    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/price`, {
+      asof: params.asof,
+      history_limit: params.historyLimit,
+    }),
+    { signal },
+  );
+}
+
+export function useFeaturePrice(
+  featureId: string | null,
+  params: { asof?: string | Date | null; historyLimit?: number } = {},
+) {
+  return useQuery<FeaturePriceResponse, Error>({
+    queryKey: [
+      "feature",
+      featureId,
+      "price",
+      params.asof ?? null,
+      params.historyLimit ?? null,
+    ] as const,
+    queryFn: ({ signal }) => fetchFeaturePrice(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });

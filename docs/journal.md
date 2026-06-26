@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-26 (codex) — Admin price feature 표시 + Dagster 주기 정리
+
+`kind=price` feature를 열어도 `detail`이 비어 있고 공통 weather panel만 보여 가격 정보가
+표면화되지 않는 문제를 UI/API 양쪽에서 보강했다.
+
+- **API**: `/v1/features/{feature_id}/price`를 추가했다. 응답은 제품별 최신 가격(`current`)과
+  최근 가격 이력(`history`)을 포함한다. `feature.feature_price_values` 조회는 `price_repo`에
+  `build_price_card`로 모았다.
+- **지도 summary**: `/v1/features` bbox 응답의 `FeatureSummary`에 `price_summary`를 추가했다.
+  `feature.feature_price_values`에서 제품별 최신값을 lateral query로 붙여, 지도 marker가 별도
+  N+1 호출 없이 휘발유/경유/고급휘발유 최신 가격을 표시한다.
+- **Admin UI**: `FeaturePricePanel`을 추가했다. `/features` 지도 우측 선택 패널과
+  `/features/{featureId}` 상세 화면에서 `kind=price`일 때 price panel을 보여준다. marker DOM에는
+  `휘/경/고` 가격 라벨을 붙인다. 가격 history 그래프는 사용자가 별도 후속 PR로 요청했다.
+- **Dagster**: OpiNet/KREX price Feature schedule은 일 2회로 낮췄다. KMA/KREX weather 관련
+  schedule은 시간당 1회로 정렬했고, 관련 Dagster/KMA ETL 문서 표를 갱신했다.
+- **OpenAPI/types**: admin/user OpenAPI와 admin frontend/user-client TypeScript generated types를
+  재생성했다.
+- **후속 요청 메모**: PR 머지 후 feature kind별 우측 메뉴를 분리한다. price는 숫자 history 그래프,
+  weather 상세는 weather feature에서만, event는 기간 등 추가정보, route는 구간 상세정보를 표시한다.
+  로그인 후 좌측 메뉴는 모든 화면에서 보이게 하고 닫을 수 있게 한다.
+- **검증**: API targeted pytest 20건, Dagster definitions 10건, OpenAPI drift check, admin frontend
+  type-check, user-client type-check, admin frontend lint(기존 warning 7건), targeted ruff,
+  `git diff --check` 통과.
+
 ## 2026-06-25 (codex) — 가격 시계열 테이블 설계 + OpiNet/KREX 유가 적재
 
 admin Feature UI의 `price` 필터가 0건인 원인을 N150 DB에서 확인했다. 기존 OpiNet 주유소는

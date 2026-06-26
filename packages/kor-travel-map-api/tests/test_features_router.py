@@ -24,7 +24,9 @@ from kortravelmap.api.settings import ApiSettings
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app(ApiSettings()))
+    return TestClient(
+        create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
+    )
 
 
 @pytest.mark.unit
@@ -35,9 +37,11 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/features/search" in spec["paths"]
     assert "/v1/features/nearby" in spec["paths"]
     assert "/v1/features/{feature_id}" in spec["paths"]
+    assert "/v1/features/{feature_id}/price" in spec["paths"]
     assert "/v1/features/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "FeatureSummary" in schemas
+    assert "FeaturePriceResponse" in schemas
     assert "FeaturesInBboxResponse" in schemas
     assert "FeatureDetailResponse" in schemas
     assert "FeatureDetailEnvelopeResponse" in schemas
@@ -144,6 +148,7 @@ def test_list_features_maps_bbox_rows(
             "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
             "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
             "status": "active",
+            "price_summary": None,
         }
     ]
 
@@ -167,6 +172,7 @@ def test_list_features_maps_bbox_rows(
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
         assert body["data"]["items"][0]["lon"] == 126.97
+        assert body["data"]["items"][0]["price_summary"] is None
         assert body["meta"]["page"] == {
             "page_size": 100,
             "next_cursor": None,

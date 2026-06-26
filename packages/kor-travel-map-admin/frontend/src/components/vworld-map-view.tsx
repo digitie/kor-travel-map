@@ -359,6 +359,15 @@ export interface ClusterFeatureInput {
   marker_color?: string | null;
   geometry?: unknown;
   area_square_meters?: number | null;
+  price_summary?: readonly ClusterPriceSummaryPoint[] | null;
+}
+
+interface ClusterPriceSummaryPoint {
+  product_key: string;
+  product_name?: string | null;
+  value_number: number;
+  unit: string;
+  observed_at: string;
 }
 
 type GeometryFeatureKind = "route" | "area";
@@ -409,6 +418,102 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   if (feature.kind === "weather") return null;
   return feature.marker_icon ?? null;
+}
+
+const priceFormatter = new Intl.NumberFormat("ko-KR", {
+  maximumFractionDigits: 0,
+});
+
+const FUEL_PRICE_ORDER = ["gasoline", "diesel", "premium_gasoline"] as const;
+
+function fuelPriceOrder(productKey: string): number {
+  const index = FUEL_PRICE_ORDER.indexOf(
+    productKey as (typeof FUEL_PRICE_ORDER)[number],
+  );
+  return index === -1 ? 99 : index;
+}
+
+function fuelShortLabel(productKey: string, productName: string | null | undefined) {
+  if (productKey === "gasoline") return "휘";
+  if (productKey === "diesel") return "경";
+  if (productKey === "premium_gasoline") return "고";
+  return productName ?? productKey;
+}
+
+function priceMarkerLabel(
+  summary: readonly ClusterPriceSummaryPoint[] | null | undefined,
+): string | null {
+  const points = (summary ?? [])
+    .filter((point) => FUEL_PRICE_ORDER.includes(
+      point.product_key as (typeof FUEL_PRICE_ORDER)[number],
+    ))
+    .sort((a, b) => fuelPriceOrder(a.product_key) - fuelPriceOrder(b.product_key));
+  if (points.length === 0) return null;
+  return points
+    .map(
+      (point) =>
+        `${fuelShortLabel(point.product_key, point.product_name)} ${priceFormatter.format(
+          point.value_number,
+        )}`,
+    )
+    .join("\n");
+}
+
+function createFeatureMarkerElement({
+  markerIcon,
+  markerColor,
+  priceLabel,
+  title,
+  onClick,
+}: {
+  markerIcon?: string | null;
+  markerColor?: string | null;
+  priceLabel?: string | null;
+  title: string;
+  onClick?: (event: MouseEvent) => void;
+}): HTMLDivElement {
+  const icon = createMarkerElement({
+    markerIcon,
+    markerColor,
+    size: 24,
+    title,
+  });
+  if (!priceLabel) {
+    if (onClick) {
+      icon.style.cursor = "pointer";
+      icon.addEventListener("click", onClick);
+    }
+    return icon;
+  }
+
+  const color = resolveMarkerColor(markerColor ?? null);
+  const wrapper = document.createElement("div");
+  wrapper.title = `${title} ${priceLabel.replace(/\n/g, " ")}`;
+  wrapper.style.display = "flex";
+  wrapper.style.alignItems = "center";
+  wrapper.style.gap = "4px";
+  wrapper.style.cursor = onClick ? "pointer" : "default";
+  wrapper.style.userSelect = "none";
+
+  const label = document.createElement("div");
+  label.textContent = priceLabel;
+  label.style.minWidth = "58px";
+  label.style.padding = "3px 6px";
+  label.style.borderRadius = "6px";
+  label.style.background = "rgba(255,255,255,0.96)";
+  label.style.border = `1px solid ${color}`;
+  label.style.boxShadow = "0 1px 4px rgba(0,0,0,0.24)";
+  label.style.color = "#111827";
+  label.style.fontSize = "11px";
+  label.style.fontWeight = "700";
+  label.style.lineHeight = "1.18";
+  label.style.whiteSpace = "pre";
+  label.style.textAlign = "left";
+  label.style.pointerEvents = "none";
+
+  wrapper.append(icon, label);
+  if (onClick) wrapper.addEventListener("click", onClick);
+  return wrapper;
 }
 
 function areaLabel(areaSquareMeters: number | null | undefined): string | null {
@@ -527,6 +632,9 @@ export function VWorldFeatureClusters({
   const map = useContext(VWorldMapContext);
   const onSelectRef = useRef(onSelectFeature);
   const selectedFeatureIdRef = useRef<string | null>(selectedFeatureId);
+  const priceSummariesRef = useRef(
+    new Map<string, readonly ClusterPriceSummaryPoint[]>(),
+  );
   // 현재 화면에 떠 있는 point/label 마커 element를 feature_id로 추적해, selection 변경
   // 시 마커 풀을 건드리지 않고 outline만 토글한다(#500 (c)).
   const pointElementsRef = useRef(new Map<string, HTMLElement>());
@@ -534,6 +642,13 @@ export function VWorldFeatureClusters({
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
+    const summaries = new Map<string, readonly ClusterPriceSummaryPoint[]>();
+    for (const feature of features) {
+      if (feature.price_summary && feature.price_summary.length > 0) {
+        summaries.set(feature.feature_id, feature.price_summary);
+      }
+    }
+    priceSummariesRef.current = summaries;
   });
 
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
@@ -877,26 +992,49 @@ export function VWorldFeatureClusters({
           if (seen.has(id)) continue;
           seen.add(id);
           const title = `${String(props.name)} (${String(props.kind)})`;
+          const markerIcon = (props.marker_icon as string | null) ?? undefined;
+          const markerColor = (props.marker_color as string | null) ?? undefined;
+          const priceLabel = priceMarkerLabel(
+            priceSummariesRef.current.get(featureId),
+          );
+          const renderKey = JSON.stringify({
+            markerIcon,
+            markerColor,
+            priceLabel,
+          });
           let marker = markers.get(id);
-          if (marker === undefined) {
-            const element = createMarkerElement({
-              markerIcon: (props.marker_icon as string | null) ?? undefined,
-              markerColor: (props.marker_color as string | null) ?? undefined,
-              size: 24,
+          const wasOnScreen = onScreen.has(id);
+          if (
+            marker === undefined ||
+            marker.getElement().dataset.renderKey !== renderKey
+          ) {
+            marker?.remove();
+            const element = createFeatureMarkerElement({
+              markerIcon,
+              markerColor,
+              priceLabel,
               title,
               onClick: () => onSelectRef.current?.(featureId),
             });
+            element.dataset.renderKey = renderKey;
             element.setAttribute("role", "button");
-            element.setAttribute("aria-label", title);
+            element.setAttribute(
+              "aria-label",
+              priceLabel ? `${title} ${priceLabel.replace(/\n/g, " ")}` : title,
+            );
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);
+            if (wasOnScreen) marker.addTo(map);
           } else {
             // 캐시 HIT — 위치 갱신 + name/kind 변경 시 title/aria refresh(#500 (a)).
             marker.setLngLat(coords);
             const element = marker.getElement();
-            if (element.getAttribute("aria-label") !== title) {
-              element.title = title;
-              element.setAttribute("aria-label", title);
+            const ariaLabel = priceLabel
+              ? `${title} ${priceLabel.replace(/\n/g, " ")}`
+              : title;
+            if (element.getAttribute("aria-label") !== ariaLabel) {
+              element.title = ariaLabel;
+              element.setAttribute("aria-label", ariaLabel);
             }
           }
           // selection outline은 마커 풀을 건드리지 않고 element에만 토글(#500 (c)).
@@ -904,7 +1042,7 @@ export function VWorldFeatureClusters({
           pointElements.set(featureId, element);
           setSelectedOutline(element, selectedId === featureId);
           next.add(id);
-          if (!onScreen.has(id)) marker.addTo(map);
+          if (!wasOnScreen) marker.addTo(map);
         }
       }
       for (const id of onScreen) {

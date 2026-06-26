@@ -49,6 +49,7 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     # 비버저닝 유지(ADR-048).
     "/v1/features/in-bounds": frozenset({"get"}),
     "/v1/features/{feature_id}": frozenset({"get"}),
+    "/v1/features/{feature_id}/price": frozenset({"get"}),
     "/v1/features/{feature_id}/weather": frozenset({"get"}),
     "/v1/features/search": frozenset({"get"}),
     "/v1/features/nearby": frozenset({"get"}),

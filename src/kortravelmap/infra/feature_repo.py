@@ -333,76 +333,146 @@ LIMIT 1
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = """
 SELECT
-    feature_id, kind, name, category,
-    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
-    marker_icon, marker_color, status
-FROM feature.features
-WHERE deleted_at IS NULL
-  AND coord IS NOT NULL
-  AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+    f.feature_id, f.kind, f.name, f.category,
+    x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+    f.marker_icon, f.marker_color, f.status,
+    ps.price_summary
+FROM feature.features AS f
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'provider', provider,
+            'price_domain', price_domain,
+            'product_key', product_key,
+            'product_name', product_name,
+            'source_product_key', source_product_key,
+            'source_product_name', source_product_name,
+            'value_number', value_number,
+            'unit', unit,
+            'observed_at', observed_at
+        )
+        ORDER BY
+            CASE product_key
+              WHEN 'gasoline' THEN 10
+              WHEN 'diesel' THEN 20
+              WHEN 'premium_gasoline' THEN 30
+              WHEN 'lpg' THEN 40
+              ELSE 100
+            END,
+            product_name NULLS LAST,
+            product_key
+    ) AS price_summary
+    FROM (
+        SELECT DISTINCT ON (product_key)
+            provider, price_domain, product_key, product_name,
+            source_product_key, source_product_name,
+            value_number, unit, observed_at
+        FROM feature.feature_price_values AS pv
+        WHERE pv.feature_id = f.feature_id
+        ORDER BY product_key, observed_at DESC
+    ) AS latest_price
+) AS ps ON f.kind = 'price'
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
-    OR category = ANY(CAST(:categories AS text[]))
+    OR f.category = ANY(CAST(:categories AS text[]))
   )
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
-    OR feature_id > CAST(:cursor_feature_id AS text)
+    OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
-ORDER BY feature_id ASC
+ORDER BY f.feature_id ASC
 LIMIT :limit
 """
 
 _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = """
 SELECT
-    feature_id, kind, name, category,
-    x_extension.ST_X(coord) AS lon,
-    x_extension.ST_Y(coord) AS lat,
-    marker_icon, marker_color, status,
+    f.feature_id, f.kind, f.name, f.category,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    f.marker_icon, f.marker_color, f.status,
+    ps.price_summary,
     CASE
-      WHEN kind = 'route' AND geom IS NOT NULL
-      THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(geom, 0.0001), 6) AS jsonb)
-      WHEN kind = 'area' AND geom IS NOT NULL
+      WHEN f.kind = 'route' AND f.geom IS NOT NULL
+      THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6) AS jsonb)
+      WHEN f.kind = 'area' AND f.geom IS NOT NULL
       THEN CAST(
-        x_extension.ST_AsGeoJSON(x_extension.ST_SimplifyPreserveTopology(geom, 0.0001), 6)
+        x_extension.ST_AsGeoJSON(x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6)
         AS jsonb
       )
       ELSE NULL
     END AS geometry,
     CASE
-      WHEN kind = 'area' AND geom IS NOT NULL
-      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      WHEN f.kind = 'area' AND f.geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
       ELSE NULL
     END AS area_square_meters
-FROM feature.features
-WHERE deleted_at IS NULL
+FROM feature.features AS f
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'provider', provider,
+            'price_domain', price_domain,
+            'product_key', product_key,
+            'product_name', product_name,
+            'source_product_key', source_product_key,
+            'source_product_name', source_product_name,
+            'value_number', value_number,
+            'unit', unit,
+            'observed_at', observed_at
+        )
+        ORDER BY
+            CASE product_key
+              WHEN 'gasoline' THEN 10
+              WHEN 'diesel' THEN 20
+              WHEN 'premium_gasoline' THEN 30
+              WHEN 'lpg' THEN 40
+              ELSE 100
+            END,
+            product_name NULLS LAST,
+            product_key
+    ) AS price_summary
+    FROM (
+        SELECT DISTINCT ON (product_key)
+            provider, price_domain, product_key, product_name,
+            source_product_key, source_product_name,
+            value_number, unit, observed_at
+        FROM feature.feature_price_values AS pv
+        WHERE pv.feature_id = f.feature_id
+        ORDER BY product_key, observed_at DESC
+    ) AS latest_price
+) AS ps ON f.kind = 'price'
+WHERE f.deleted_at IS NULL
   AND (
     (
-      coord IS NOT NULL
-      AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+      f.coord IS NOT NULL
+      AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
     )
     OR (
-      kind IN ('route', 'area')
-      AND geom IS NOT NULL
-      AND geom OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+      f.kind IN ('route', 'area')
+      AND f.geom IS NOT NULL
+      AND f.geom OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
     )
   )
-  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
-    OR category = ANY(CAST(:categories AS text[]))
+    OR f.category = ANY(CAST(:categories AS text[]))
   )
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
-    OR feature_id > CAST(:cursor_feature_id AS text)
+    OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
-ORDER BY feature_id ASC
+ORDER BY f.feature_id ASC
 LIMIT :limit
 """
 
