@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-26 (codex) — OpiNet fallback 도심 anchor hotfix
+
+- **운영 확인**: N150에서 `low_top_area` 배포 후 `feature_price_opinet_stations_job`은 성공했지만
+  price feature는 295건 그대로였고, 좌표 범위도 제주권에 머물렀다. 최근 `PriceValue` 갱신도 0건이었다.
+- **진행 중**: `lowTop10` 빈 응답 fallback이 기존 sparse grid만 쓰던 문제를 보강해, 전국 주요 도심
+  anchor를 먼저 `aroundAll`로 조회한 뒤 기존 grid를 보조로 사용하게 한다.
+- **다음 한 작업**: targeted pytest/ruff/mypy 통과 후 PR을 만들고, CI green이면 머지·N150 재배포·
+  OpiNet price job 재실행으로 price 좌표 범위가 제주권 밖으로 확장되는지 확인한다.
+
 ## 2026-06-26 (codex) — Feature별 상세 패널 + 좌측 메뉴/Dagster 보강
 
 - **완료(API)**: area 포함 feature 조회 API(`/v1/features/{feature_id}/contained-features`)를 추가하고,

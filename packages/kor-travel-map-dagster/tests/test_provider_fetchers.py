@@ -1300,6 +1300,18 @@ def _install_fake_opinet(
     return _FakeOpinetClient
 
 
+def test_opinet_sample_grid_centers_start_with_major_city_anchors() -> None:
+    centers = provider_fetchers._opinet_sample_grid_centers()
+
+    first_centers = [next(centers) for _ in range(3)]
+
+    assert first_centers == [
+        (126.978, 37.5665),
+        (126.7052, 37.4563),
+        (127.0286, 37.2636),
+    ]
+
+
 def test_opinet_stations_disabled_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="disabled"

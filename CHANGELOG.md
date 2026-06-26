@@ -28,6 +28,8 @@
   변환 경로를 추가했다.
 - **FIXED**: 운영 OpiNet `areaCode`/`lowTop10`이 빈 응답을 반환하는 경우 전국 샘플 그리드의
   `aroundAll`로 fallback해 `low_top_area`가 0건으로 끝나지 않게 했다.
+- **FIXED**: OpiNet fallback 샘플이 5km 반경 대비 성겨 전국 도심을 놓칠 수 있어, 주요 도심
+  anchor를 먼저 조회한 뒤 기존 grid를 보조로 사용하게 했다.
 - **FIXED**: N150 운영에서 제주/완도 bbox로 고정되어 유가가 해당 권역에만 보이던 원인을 문서화했다.
 
 ### Admin price UI + Dagster 주기 정리 (2026-06-26)

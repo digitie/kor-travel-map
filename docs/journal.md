@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-26 (codex) — OpiNet fallback 주요 도심 anchor 보강
+
+N150에 `low_top_area`를 배포하고 `feature_price_opinet_stations_job`을 수동 실행했지만
+active price feature가 295건 그대로였고, 좌표 bbox도 `126.1794~126.9535 / 33.2226~34.3038`로
+제주권에 머물렀다. `feature.feature_price_values`도 최근 30분 갱신 0건이었다.
+
+- **원인 보강**: 기존 fallback은 `lowTop10`이 0건일 때만 sparse grid `aroundAll`을 호출한다.
+  5km 반경 대비 grid 간격이 넓어 도심 주유소를 비켜갈 수 있으므로, fallback 후보 앞에 전국 주요
+  도심 anchor를 추가했다.
+- **범위**: 전체 전국 bbox exhaustive scan은 계속 금지한다. 주요 도심 anchor + 기존 grid를 합쳐도
+  휘발유/경유/고급휘발유 3종 기준 약 900회 호출로 일일 한도 안에 둔다.
+
 ## 2026-06-26 (codex) — Feature별 상세 패널 + Dagster 실패 상세 보강
 
 Feature 상세 화면이 non-price feature에도 weather panel을 보여주던 문제를 고치고,
