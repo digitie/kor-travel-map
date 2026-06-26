@@ -243,6 +243,37 @@ CLI `codegraph callers`/`impact`/`callees`. 신규 파일만 추가하고 기존
    `packages/kor-travel-map-api/`의 `kortravelmap.api`에만.
 5. **공간 쿼리 술어에서 `ST_Transform` 금지** — 인덱스 무효화.
 
+## prod 배포 & 보안 감사
+
+**prod(n150) 배포 절차·접속·반복 함정의 정본은 `docs/deploy-runbook.local.md`**
+(gitignore된 로컬 전용, 민감정보 포함; 접속/필수 env는 `docs/prod-access.local.md`).
+배포 전 반드시 읽는다. 이 런북들은 커밋되지 않으므로 **각 git worktree의 `docs/`에도
+같은 경로로 복사**해 둔다(`*.local.md`는 `.gitignore` + `.git/info/exclude`로 무시).
+
+반복적으로 깨져서 강제하는 2건:
+
+- **배포 후 로그인 검증 생략 금지** — prod UI 배포/재생성 뒤 `GET /login 200`만 보지
+  말고 **로그인 POST(200 + Set-Cookie)** 와 UI 컨테이너 auth env
+  (`${#KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH} != 0`)를 확인한다. 근본원인·복구는 런북.
+- **remote 푸시 전 보안 감사 생략 금지** — `git push`(특히 PR 직전) 전에 아래 절차로
+  비밀(API 키·세션 시크릿·비밀번호·prod 호스트/도메인 등)이나 `*.local.md`·`.env*`가
+  스테이징/커밋에 섞이지 않았는지 확인한다. 통과 전에는 푸시하지 않는다.
+
+### remote 푸시 전 보안 감사 (필수 절차)
+
+1. **스테이징 파일 점검** — `git diff --cached --name-only`에 `*.local.md`,
+   `.env`(`.env.example` 제외)·`.env.*`, prod 비밀 파일이 **없어야** 한다.
+2. **일반 비밀 스캔**:
+   ```bash
+   git diff --cached -U0 | grep -nEi '(api[_-]?key|secret|password|passwd|token|pbkdf2_sha256|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)' \
+     && echo '⛔ 의심 항목 — 푸시 중지' || echo '✅ 일반 비밀 패턴 없음'
+   ```
+3. **docs redaction 가드** — `python scripts/check_prod_redaction.py` (tracked docs에
+   prod 도메인/IP 없음; pre-commit·CI에도 박혀 있음).
+4. **프로젝트별 민감값 스캔** — `docs/deploy-runbook.local.md` §6의 "푸시 전 추가 스캔"
+   grep으로 prod 호스트 IP·도메인·SSH 사용자·관리자 비번 등 **map 구체 민감값**도 검색
+   (그 값들은 런북에만 두고 커밋 파일엔 절대 적지 않는다 — `<prod-host>` 등 placeholder만).
+
 ## 작업 후 체크리스트
 
 - [ ] **수정 전 영향도 평가** (MCP `codegraph_explore` 또는 CLI `codegraph
@@ -260,6 +291,8 @@ CLI `codegraph callers`/`impact`/`callees`. 신규 파일만 추가하고 기존
        (디버그 API 라우터 노출 시점부터 적용)
 - [ ] CLI 명령 추가 시 mutex 필요 여부 확인 (ADR-039 — write/bulk/restore는
       advisory lock 박음)
+- [ ] **remote push 전 보안 감사** (§prod 배포 & 보안 감사) — 비밀·`*.local.md`·`.env*`
+      미혼입 확인 후 푸시
 
 ## 검증
 

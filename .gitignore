@@ -64,3 +64,10 @@ alembic/__pycache__/
 node_modules/
 # Windows-side Playwright e2e scratch (frontend WSL + Playwright Windows, #117)
 .e2e-win/
+
+# Local-only sensitive notes (prod 배포 런북 / 접속 — 민감정보 포함) — 커밋 금지.
+# 정본 위치/절차는 AGENTS.md §prod 배포 & 보안 감사. 각 worktree docs/에 수동 복사.
+*.local.md
+docs/deploy-runbook.local.md
+docs/prod-access.local.md
+.security-audit-patterns.local
