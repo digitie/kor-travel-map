@@ -951,6 +951,17 @@ _OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
 _OPINET_LOW_TOP_COUNT: Final[int] = 20
 """OpiNet ``lowTop10`` endpoint 최대 허용 건수."""
 
+_OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
+    124.8,
+    33.1,
+    131.6,
+    38.6,
+)
+"""``lowTop10``이 빈 응답일 때 쓰는 대한민국 주변 샘플 bbox."""
+
+_OPINET_SAMPLE_GRID_STEP_DEGREES: Final[float] = 0.4
+"""OpiNet fallback 샘플 그리드 간격. 3개 제품 기준 약 800회 호출."""
+
 
 def _opinet_poi_target_bboxes(
     settings: KorTravelMapSettings,
@@ -1024,15 +1035,38 @@ def _opinet_sigungu_area_codes(client: Any) -> list[str]:
     return areas
 
 
+def _opinet_sample_grid_centers() -> Iterator[tuple[float, float]]:
+    """전국 유가 분포용 bounded sample grid center를 반환한다."""
+    min_lon, min_lat, max_lon, max_lat = _OPINET_SAMPLE_GRID_BBOX
+    lat = min_lat
+    while lat <= max_lat:
+        lon = min_lon
+        while lon <= max_lon:
+            yield (round(lon, 6), round(lat, 6))
+            lon += _OPINET_SAMPLE_GRID_STEP_DEGREES
+        lat += _OPINET_SAMPLE_GRID_STEP_DEGREES
+
+
+def _opinet_no_data_error_type() -> type[Exception]:
+    """현재 설치된 ``opinet`` 모듈의 빈 응답 예외 타입."""
+    opinet = importlib.import_module("opinet")
+    error_type = getattr(opinet, "OpinetNoDataError", RuntimeError)
+    if isinstance(error_type, type) and issubclass(error_type, Exception):
+        return error_type
+    return RuntimeError
+
+
 def _opinet_low_top_area_stations(
     client: Any, *, dedupe_by_product: bool
 ) -> Iterator[Any]:
     """시군구별 저가 주유소를 stream한다.
 
-    전국 bbox 격자 enumeration은 OpiNet 일일 한도를 초과하므로, 지도 분포용으로
-    ``lowTop10``을 시군구×제품 단위로 호출한다.
+    전국 bbox exhaustive enumeration은 OpiNet 일일 한도를 초과하므로, 지도
+    분포용으로 ``lowTop10``을 시군구×제품 단위로 먼저 호출한다. 운영 API가
+    빈 응답을 반환하면 bounded sample grid의 ``aroundAll``로 fallback한다.
     """
     seen: set[str | tuple[str, str | None]] = set()
+    yielded = 0
     for area in _opinet_sigungu_area_codes(client):
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
             for station in client.get_lowest_price_top20(
@@ -1040,6 +1074,40 @@ def _opinet_low_top_area_stations(
             ):
                 uni_id = getattr(station, "uni_id", None)
                 if not isinstance(uni_id, str):
+                    yielded += 1
+                    yield station
+                    continue
+                sample_key: str | tuple[str, str | None]
+                if dedupe_by_product:
+                    raw_product = getattr(station, "product_code", None)
+                    product = getattr(raw_product, "value", raw_product)
+                    sample_key = (uni_id, str(product) if product is not None else None)
+                else:
+                    sample_key = uni_id
+                if sample_key in seen:
+                    continue
+                seen.add(sample_key)
+                yielded += 1
+                yield station
+    if yielded:
+        return
+
+    no_data_error = _opinet_no_data_error_type()
+    for center_lon, center_lat in _opinet_sample_grid_centers():
+        for product_code in _OPINET_LOW_TOP_PRODUCTS:
+            try:
+                stations = client.search_stations_around(
+                    lon=center_lon,
+                    lat=center_lat,
+                    radius_m=5000,
+                    prodcd=product_code,
+                )
+            except no_data_error:
+                continue
+            for station in stations:
+                uni_id = getattr(station, "uni_id", None)
+                if not isinstance(uni_id, str):
+                    yielded += 1
                     yield station
                     continue
                 key: str | tuple[str, str | None]
@@ -1052,6 +1120,7 @@ def _opinet_low_top_area_stations(
                 if key in seen:
                     continue
                 seen.add(key)
+                yielded += 1
                 yield station
 
 
