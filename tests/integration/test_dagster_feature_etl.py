@@ -36,7 +36,8 @@ _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 2, 12, 0, tzinfo=_KST)
 _TRUNCATE_SQL = (
     "TRUNCATE feature.features, provider_sync.source_records, "
-    "provider_sync.source_links, ops.dedup_review_queue RESTART IDENTITY CASCADE"
+    "provider_sync.source_links, provider_sync.provider_sync_state, "
+    "ops.dedup_review_queue RESTART IDENTITY CASCADE"
 )
 
 

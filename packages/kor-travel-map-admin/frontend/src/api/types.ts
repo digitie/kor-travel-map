@@ -145,6 +145,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curated-features/{curated_feature_id}/place-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Admin Curated Feature Places Route */
+        get: operations["search_admin_curated_feature_places_route_v1_admin_curated_features__curated_feature_id__place_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curated-features/{curated_feature_id}/select": {
         parameters: {
             query?: never;
@@ -3305,6 +3322,26 @@ export interface components {
             data: components["schemas"]["CuratedFeaturesData"];
             meta: components["schemas"]["Meta"];
         };
+        /** CuratedPlaceSearchData */
+        CuratedPlaceSearchData: {
+            /** Errors */
+            errors: {
+                [key: string]: string;
+            };
+            /** Google */
+            google: components["schemas"]["PlaceSearchHitView"][];
+            /** Kakao */
+            kakao: components["schemas"]["PlaceSearchHitView"][];
+            /** Naver */
+            naver: components["schemas"]["PlaceSearchHitView"][];
+            /** Query */
+            query: string;
+        };
+        /** CuratedPlaceSearchResponse */
+        CuratedPlaceSearchResponse: {
+            data: components["schemas"]["CuratedPlaceSearchData"];
+            meta: components["schemas"]["Meta"];
+        };
         /** CuratedSourceCreateRequest */
         CuratedSourceCreateRequest: {
             /** Dataset Key */
@@ -5622,6 +5659,28 @@ export interface components {
             total?: number | null;
         };
         /**
+         * PlaceSearchHitView
+         * @description concierge review place-search normalized hit.
+         */
+        PlaceSearchHitView: {
+            /** Address */
+            address?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Latitude */
+            latitude?: number | null;
+            /** Longitude */
+            longitude?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Provider */
+            provider: string;
+            /** Road Address */
+            road_address?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * PoiCacheTargetListData
          * @description POI/cache target 목록 data.
          */
@@ -7057,6 +7116,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CuratedFeatureDetailSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    search_admin_curated_feature_places_route_v1_admin_curated_features__curated_feature_id__place_search_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+            };
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedPlaceSearchResponse"];
                 };
             };
             /** @description Validation Error */

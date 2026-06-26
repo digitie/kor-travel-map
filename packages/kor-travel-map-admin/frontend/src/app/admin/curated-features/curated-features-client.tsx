@@ -28,6 +28,7 @@ import {
   useAdminCuratedThemes,
   useApplyCuratedSourceRuleMutation,
   useArchiveCuratedFeatureMutation,
+  useCuratedFeaturePlaceSearch,
   usePatchCuratedFeatureMutation,
   usePatchCuratedSourceRuleMutation,
   useSelectCuratedFeatureMutation,
@@ -37,6 +38,7 @@ import {
   type AdminCuratedSourceRulesParams,
   type CuratedFeature,
   type CuratedFeatureStatus,
+  type CuratedPlaceSearchHit,
   type CuratedRuleAction,
   type CuratedSource,
   type CuratedSourceRule,
@@ -55,6 +57,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +85,13 @@ const CURATION_RELATION_OPTIONS: CuratedCurationRelation[] = [
   "theme_area_anchor",
 ];
 const RULE_ACTION_OPTIONS: CuratedRuleAction[] = ["candidate", "curated", "ignore"];
+const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
+const PLACE_SEARCH_PROVIDERS = ["google", "kakao", "naver"] as const;
+const PLACE_SEARCH_PROVIDER_LABELS: Record<string, string> = {
+  google: "Google",
+  kakao: "Kakao",
+  naver: "Naver",
+};
 
 type StatusFilter = CuratedFeatureStatus | "all";
 type EnabledFilter = "all" | "enabled" | "disabled";
@@ -135,6 +145,227 @@ function coordLabel(feature: CuratedFeature): string {
 
 function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
+}
+
+function featureAddressLabel(feature: CuratedFeature): string {
+  const address = feature.address as Record<string, unknown>;
+  for (const key of ["road_address", "jibun_address", "full_address", "address"]) {
+    const value = address[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return "-";
+}
+
+function featureSearchQuery(feature: CuratedFeature | null): string {
+  if (!feature) return "";
+  return (
+    feature.display_title ??
+    feature.feature_name ??
+    feature.source_name ??
+    ""
+  ).trim();
+}
+
+function placeHitAddress(hit: CuratedPlaceSearchHit): string {
+  return hit.road_address ?? hit.address ?? "-";
+}
+
+function CuratedFeatureLocationPanel({
+  feature,
+}: {
+  feature: CuratedFeature | null;
+}) {
+  if (!feature) return null;
+  const hasCoord =
+    typeof feature.lon === "number" && typeof feature.lat === "number";
+
+  return (
+    <section className="rounded-lg border bg-background">
+      <div className="border-b px-4 py-3">
+        <div className="font-medium">Location review</div>
+        <div className="text-xs text-muted-foreground">
+          위치, 주소, 카테고리 확인
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        {hasCoord ? (
+          <div className="relative h-56 overflow-hidden rounded-md border">
+            <VWorldMapView
+              apiKey={VWORLD_KEY}
+              center={[feature.lon as number, feature.lat as number]}
+              className="absolute inset-0 h-full w-full"
+              key={feature.curated_feature_id}
+              navigation
+              scale
+              zoom={14}
+            >
+              <VWorldMarker
+                lngLat={[feature.lon as number, feature.lat as number]}
+                markerColor="#2563eb"
+                selected
+                title={feature.display_title ?? feature.feature_name}
+              />
+            </VWorldMapView>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            좌표가 없어 지도 marker를 표시할 수 없습니다.
+          </div>
+        )}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">coord</dt>
+          <dd className="font-mono">{coordLabel(feature)}</dd>
+          <dt className="text-muted-foreground">address</dt>
+          <dd>{featureAddressLabel(feature)}</dd>
+          <dt className="text-muted-foreground">category</dt>
+          <dd>
+            <Badge variant="outline">{feature.feature_category}</Badge>
+          </dd>
+          <dt className="text-muted-foreground">provider</dt>
+          <dd>
+            {feature.provider} / {feature.dataset_key}
+          </dd>
+        </dl>
+      </div>
+    </section>
+  );
+}
+
+function CuratedPlaceSearchPanel({ feature }: { feature: CuratedFeature | null }) {
+  const patchFeature = usePatchCuratedFeatureMutation();
+  const [query, setQuery] = useState(featureSearchQuery(feature));
+  const [activeQuery, setActiveQuery] = useState(featureSearchQuery(feature));
+  const search = useCuratedFeaturePlaceSearch(
+    feature?.curated_feature_id ?? null,
+    activeQuery,
+    feature !== null && activeQuery.trim().length > 0,
+  );
+
+  if (!feature) return null;
+
+  const providerHits = PLACE_SEARCH_PROVIDERS.map((provider) => ({
+    provider,
+    hits: search.data?.data[provider] ?? [],
+  }));
+  const applyHit = (hit: CuratedPlaceSearchHit) => {
+    patchFeature.mutate({
+      curatedFeatureId: feature.curated_feature_id,
+      body: {
+        display_title: hit.name ?? feature.display_title,
+        metadata: {
+          ...feature.metadata,
+          place_search_review: {
+            provider: hit.provider,
+            query: search.data?.data.query ?? activeQuery,
+            name: hit.name ?? null,
+            address: placeHitAddress(hit),
+            latitude: hit.latitude ?? null,
+            longitude: hit.longitude ?? null,
+            category: hit.category ?? null,
+            reviewed_at: new Date().toISOString(),
+          },
+        },
+      },
+    });
+  };
+
+  return (
+    <section className="rounded-lg border bg-background">
+      <div className="border-b px-4 py-3">
+        <div className="font-medium">Concierge place search</div>
+        <div className="text-xs text-muted-foreground">
+          Google/Kakao/Naver 후보 비교
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setActiveQuery(query.trim());
+          }}
+        >
+          <Input
+            aria-label="place search query"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <Button disabled={search.isFetching} type="submit" variant="outline">
+            <SearchIcon data-icon="inline-start" />
+            검색
+          </Button>
+        </form>
+        {search.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>concierge 검색 실패</AlertTitle>
+            <AlertDescription>{search.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {search.data && Object.keys(search.data.data.errors).length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(search.data.data.errors).map(([provider, message]) => (
+              <Badge key={provider} variant="outline">
+                {provider}: {message}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+        {providerHits.map(({ provider, hits }) => (
+          <div className="rounded-md border" key={provider}>
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <div className="text-sm font-medium">
+                {PLACE_SEARCH_PROVIDER_LABELS[provider]}
+              </div>
+              <Badge variant="secondary">{hits.length}</Badge>
+            </div>
+            {hits.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-muted-foreground">
+                후보가 없습니다.
+              </div>
+            ) : (
+              <div className="divide-y">
+                {hits.map((hit, index) => (
+                  <div
+                    className="flex flex-col gap-2 px-3 py-3"
+                    key={`${provider}-${index}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium">{hit.name ?? "-"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {placeHitAddress(hit)}
+                        </div>
+                      </div>
+                      <Button
+                        disabled={patchFeature.isPending}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={() => applyHit(hit)}
+                      >
+                        반영
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {hit.category ? (
+                        <Badge variant="outline">{hit.category}</Badge>
+                      ) : null}
+                      {typeof hit.longitude === "number" &&
+                      typeof hit.latitude === "number" ? (
+                        <Badge variant="ghost">
+                          {hit.longitude.toFixed(5)}, {hit.latitude.toFixed(5)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
@@ -565,6 +796,7 @@ export function CuratedFeaturesClient() {
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(1);
   const [featureSearch, setFeatureSearch] = useState("");
   const deferredFeatureSearch = useDeferredValue(featureSearch.trim());
   const [selectedCuratedFeatureId, setSelectedCuratedFeatureId] =
@@ -674,7 +906,19 @@ export function CuratedFeaturesClient() {
   const anyFeatureMutationPending =
     selectFeature.isPending || unselectFeature.isPending || archiveFeature.isPending;
 
-  const resetCursor = () => setCursor(null);
+  const resetCursor = () => {
+    setCursor(null);
+    setPageIndex(1);
+  };
+  const goFirstPage = () => {
+    setCursor(null);
+    setPageIndex(1);
+  };
+  const goNextPage = () => {
+    if (!nextCursor) return;
+    setCursor(nextCursor);
+    setPageIndex((page) => page + 1);
+  };
   const refresh = () => {
     void features.refetch();
     void rules.refetch();
@@ -1112,16 +1356,16 @@ export function CuratedFeaturesClient() {
               <div>
                 <div className="font-medium">후보 목록</div>
                 <div className="text-xs text-muted-foreground">
-                  {formatCount(filteredItems.length)}개 표시, page size{" "}
-                  {formatCount(pageSize)}
+                  page {formatCount(pageIndex)} · {formatCount(filteredItems.length)}개
+                  표시 · page size {formatCount(pageSize)}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={cursor === null}
+                  disabled={pageIndex <= 1}
                   type="button"
                   variant="outline"
-                  onClick={() => setCursor(null)}
+                  onClick={goFirstPage}
                 >
                   처음
                 </Button>
@@ -1129,7 +1373,7 @@ export function CuratedFeaturesClient() {
                   disabled={nextCursor === null}
                   type="button"
                   variant="outline"
-                  onClick={() => setCursor(nextCursor)}
+                  onClick={goNextPage}
                 >
                   다음
                 </Button>
@@ -1257,6 +1501,11 @@ export function CuratedFeaturesClient() {
                 </div>
               )}
             </section>
+            <CuratedFeatureLocationPanel feature={selectedFeature} />
+            <CuratedPlaceSearchPanel
+              feature={selectedFeature}
+              key={selectedFeature?.curated_feature_id ?? "empty-place-search"}
+            />
             <FeatureEditor
               feature={selectedFeature}
               key={selectedFeature?.curated_feature_id ?? "empty-feature"}

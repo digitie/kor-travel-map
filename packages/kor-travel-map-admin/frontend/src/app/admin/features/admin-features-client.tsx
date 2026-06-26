@@ -169,6 +169,7 @@ export function AdminFeaturesClient() {
   const [order, setOrder] = useState<SortOrder>("asc");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(1);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
 
   const params = useMemo(
@@ -191,7 +192,19 @@ export function AdminFeaturesClient() {
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
 
-  const resetCursor = () => setCursor(null);
+  const resetCursor = () => {
+    setCursor(null);
+    setPageIndex(1);
+  };
+  const goFirstPage = () => {
+    setCursor(null);
+    setPageIndex(1);
+  };
+  const goNextPage = () => {
+    if (!nextCursor) return;
+    setCursor(nextCursor);
+    setPageIndex((page) => page + 1);
+  };
   const refresh = () => {
     void features.refetch();
   };
@@ -529,6 +542,12 @@ export function AdminFeaturesClient() {
               {formatCount(items.length)} rows
             </Badge>
             <Badge variant="outline">
+              page {formatCount(pageIndex)}
+            </Badge>
+            <Badge variant="outline">
+              page size {formatCount(pageSize)}
+            </Badge>
+            <Badge variant="outline">
               {features.data?.meta.duration_ms ?? 0}ms
             </Badge>
           </div>
@@ -545,11 +564,11 @@ export function AdminFeaturesClient() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={!cursor}
+                  disabled={pageIndex <= 1}
                   size="sm"
                   type="button"
                   variant="outline"
-                  onClick={() => setCursor(null)}
+                  onClick={goFirstPage}
                 >
                   첫 페이지
                 </Button>
@@ -558,7 +577,7 @@ export function AdminFeaturesClient() {
                   size="sm"
                   type="button"
                   variant="outline"
-                  onClick={() => setCursor(nextCursor)}
+                  onClick={goNextPage}
                 >
                   다음
                 </Button>

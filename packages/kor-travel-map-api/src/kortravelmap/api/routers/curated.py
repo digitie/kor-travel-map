@@ -6,8 +6,10 @@ from datetime import date, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra import curated_repo
+from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -280,6 +282,37 @@ class CuratedFeatureDetailSnapshotResponse(BaseModel):
     meta: Meta
 
 
+class PlaceSearchHitView(BaseModel):
+    """concierge review place-search normalized hit."""
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: str
+    name: str | None = None
+    address: str | None = None
+    road_address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    category: str | None = None
+
+
+class CuratedPlaceSearchData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    google: list[PlaceSearchHitView]
+    kakao: list[PlaceSearchHitView]
+    naver: list[PlaceSearchHitView]
+    errors: dict[str, str]
+
+
+class CuratedPlaceSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CuratedPlaceSearchData
+    meta: Meta
+
+
 class RuleApplyData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -460,6 +493,61 @@ def _integrity_error(exc: IntegrityError) -> HTTPException:
     )
 
 
+def _place_search_hits(payload: Any, key: str) -> list[PlaceSearchHitView]:
+    raw_items = payload.get(key) if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        return []
+    hits: list[PlaceSearchHitView] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            hits.append(PlaceSearchHitView.model_validate(item))
+    return hits
+
+
+async def _concierge_place_search(query: str) -> CuratedPlaceSearchData:
+    settings = KorTravelMapSettings()
+    base_url = settings.kor_travel_concierge_base_url
+    api_key = settings.kor_travel_concierge_api_key
+    if base_url is None or api_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "kor-travel-concierge place-search 연동 env가 없습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL/API_KEY를 설정하세요."
+            ),
+        )
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers={"X-API-Key": api_key.get_secret_value()},
+            timeout=10.0,
+        ) as client:
+            response = await client.get("/api/v1/place-search", params={"q": query})
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"concierge place-search 실패: HTTP {exc.response.status_code}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="concierge place-search 호출 실패",
+        ) from exc
+
+    payload = response.json()
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    payload_query = payload.get("query") if isinstance(payload, dict) else None
+    return CuratedPlaceSearchData(
+        query=payload_query if isinstance(payload_query, str) and payload_query else query,
+        google=_place_search_hits(payload, "google"),
+        kakao=_place_search_hits(payload, "kakao"),
+        naver=_place_search_hits(payload, "naver"),
+        errors=errors if isinstance(errors, dict) else {},
+    )
+
+
 async def _feature_or_404(
     session: AsyncSession,
     curated_feature_id: str,
@@ -635,6 +723,32 @@ async def get_admin_curated_feature_detail_snapshot_route(
         raise HTTPException(status_code=404, detail="curated feature 없음")
     return CuratedFeatureDetailSnapshotResponse(
         data=_snapshot_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/curated-features/{curated_feature_id}/place-search",
+    response_model=CuratedPlaceSearchResponse,
+)
+async def search_admin_curated_feature_places_route(
+    curated_feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: Annotated[str | None, Query(min_length=1)] = None,
+) -> CuratedPlaceSearchResponse:
+    started_at = perf_counter()
+    feature = await _feature_or_404(session, curated_feature_id, include_archived=True)
+    query = (
+        q
+        or feature.display_title
+        or feature.feature_name
+        or feature.source_name
+    ).strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="검색어 q가 필요합니다")
+    data = await _concierge_place_search(query)
+    return CuratedPlaceSearchResponse(
+        data=data,
         meta=make_meta(started_at=started_at),
     )
 

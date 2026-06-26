@@ -2,6 +2,7 @@
 
 import {
   CalendarDaysIcon,
+  ClipboardListIcon,
   RouteIcon,
   RulerIcon,
   ShapesIcon,
@@ -47,6 +48,20 @@ function numberValue(detail: DetailRecord, key: string): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function objectValue(detail: DetailRecord, key: string): DetailRecord | null {
+  const value = detail[key];
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as DetailRecord;
+  }
+  return null;
+}
+
+function arrayText(detail: DetailRecord, key: string): string | null {
+  const value = detail[key];
+  if (!Array.isArray(value) || value.length === 0) return null;
+  return value.map((item) => String(item)).join(", ");
 }
 
 function formatArea(value: number | null | undefined): string {
@@ -262,6 +277,94 @@ function RouteDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   );
 }
 
+function isMoisPlaceDetail(feature: FeatureKindDetail): boolean {
+  if (feature.kind !== "place") return false;
+  const payload = objectValue(feature.detail, "payload");
+  const facilityInfo = objectValue(feature.detail, "facility_info");
+  return Boolean(payload?.mng_no || facilityInfo?.service_slug);
+}
+
+function MoisPlaceDetailPanel({ feature }: { feature: FeatureKindDetail }) {
+  const detail = feature.detail;
+  const payload = objectValue(detail, "payload") ?? {};
+  const facilityInfo = objectValue(detail, "facility_info") ?? {};
+  const building = objectValue(facilityInfo, "building");
+  const food = objectValue(facilityInfo, "food");
+  const medical = objectValue(facilityInfo, "medical");
+  const cultureSports = objectValue(facilityInfo, "culture_sports");
+
+  return (
+    <PanelShell
+      description="행정안전부 지방행정 인허가 상세"
+      icon={<ClipboardListIcon className="size-4" />}
+      title="MOIS place"
+    >
+      <div className="flex flex-col gap-4">
+        <InfoRows
+          rows={[
+            ["상호", feature.name],
+            ["인허가 업종", textValue(payload, "title")],
+            ["영업상태", textValue(payload, "status_name")],
+            ["상세상태", textValue(payload, "detail_status_name")],
+            ["인허가일", textValue(detail, "license_date")],
+            ["관리번호", textValue(payload, "mng_no")],
+            ["개방자치단체", textValue(payload, "opn_authority_code")],
+            ["place_kind", textValue(detail, "place_kind")],
+            ["category", feature.category],
+            ["MOIS 분류", textValue(facilityInfo, "category")],
+            ["service_slug", textValue(facilityInfo, "service_slug")],
+            ["세부업종", textValue(facilityInfo, "subtype_name")],
+            ["영업방식", textValue(facilityInfo, "sales_method_name")],
+            ["전화", arrayText(detail, "phones")],
+          ]}
+        />
+        <div className="grid gap-3">
+          {building ? (
+            <details open>
+              <summary className="cursor-pointer text-sm font-medium">
+                facility_info.building
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify(building, null, 2)}
+              </pre>
+            </details>
+          ) : null}
+          {food ? (
+            <details open>
+              <summary className="cursor-pointer text-sm font-medium">
+                facility_info.food
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify(food, null, 2)}
+              </pre>
+            </details>
+          ) : null}
+          {medical ? (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium">
+                facility_info.medical
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify(medical, null, 2)}
+              </pre>
+            </details>
+          ) : null}
+          {cultureSports ? (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium">
+                facility_info.culture_sports
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify(cultureSports, null, 2)}
+              </pre>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    </PanelShell>
+  );
+}
+
 function GenericDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   return (
     <PanelShell
@@ -306,6 +409,9 @@ export function FeatureKindDetailPanel({
   }
   if (feature.kind === "route") {
     return <RouteDetailPanel feature={feature} />;
+  }
+  if (isMoisPlaceDetail(feature)) {
+    return <MoisPlaceDetailPanel feature={feature} />;
   }
   return <GenericDetailPanel feature={feature} />;
 }

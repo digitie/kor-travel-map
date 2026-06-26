@@ -951,6 +951,9 @@ _OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
 _OPINET_LOW_TOP_COUNT: Final[int] = 20
 """OpiNet ``lowTop10`` endpoint 최대 허용 건수."""
 
+_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS: Final[int] = 500
+"""``lowTop10`` 부분 성공을 전국 분포로 보기 위한 최소 station 수."""
+
 _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
     124.8,
     33.1,
@@ -1113,7 +1116,8 @@ def _opinet_low_top_area_stations(
 
     전국 bbox exhaustive enumeration은 OpiNet 일일 한도를 초과하므로, 지도
     분포용으로 ``lowTop10``을 시군구×제품 단위로 먼저 호출한다. 운영 API가
-    빈 응답을 반환하면 bounded sample grid의 ``aroundAll``로 fallback한다.
+    빈 응답 또는 비정상적으로 작은 부분 응답을 반환하면 bounded sample grid의
+    ``aroundAll``로 fallback한다.
     """
     seen: set[str | tuple[str, str | None]] = set()
     yielded = 0
@@ -1139,7 +1143,7 @@ def _opinet_low_top_area_stations(
                 seen.add(sample_key)
                 yielded += 1
                 yield station
-    if yielded:
+    if yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
         return
 
     no_data_error = _opinet_no_data_error_type()

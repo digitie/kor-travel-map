@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-27 (codex) — Admin live review 데이터/표시 보강
+
+- **완료(원인 확인)**: N150에서 KMA `TMP` weather 값은 존재한다. price feature는 OpiNet 부분 응답
+  처리 때문에 여전히 제주/완도권에 머물렀고, enrichment/dedup review queue와 ops log table은 0건,
+  provider sync state는 KMA만 기록되어 있었다.
+- **완료(코드)**: OpiNet `low_top_area` 부분 응답에도 전국 fallback을 타게 했고, VisitKorea
+  enrichment Dagster asset은 review queue refresh 경로를 호출하게 했다. feature load asset은 성공
+  provider sync state를 기록한다.
+- **완료(UI)**: curated review 우측에 위치 지도/상세/concierge place-search 반영 패널을 추가했다.
+  admin features/curated/logs table pagination 정보와 MOIS place 특화 상세 패널을 보강했다.
+- **검증(로컬/live)**: Dagster/API targeted pytest와 ruff, admin frontend type-check/e2e type-check,
+  변경 파일 ESLint, `git diff --check`, `/admin/enrichment-reviews` live Playwright 34건 통과.
+- **다음 한 작업**: PR 생성/CI green 후 N150에 배포하고 OpiNet price, VisitKorea enrichment,
+  dedup refresh, concierge curated source 적재 job을 재실행해 운영 DB row 수와 UI 표시를 재확인한다.
+
 ## 2026-06-26 (codex) — OpiNet fallback 도심 anchor hotfix
 
 - **운영 확인**: N150에서 `low_top_area` 배포 후 `feature_price_opinet_stations_job`은 성공했지만
