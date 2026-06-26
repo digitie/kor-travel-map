@@ -166,12 +166,15 @@ class KorTravelMapSettings(BaseSettings):
         default=None,
         description="OpiNet certkey. source env는 ``OPINET_API_KEY``.",
     )
-    opinet_scope_mode: Literal["disabled", "bbox", "poi_cache_target"] = Field(
+    opinet_scope_mode: Literal[
+        "disabled", "bbox", "poi_cache_target", "low_top_area"
+    ] = Field(
         default="disabled",
         description=(
             "OpiNet 주유소 적재 scope (전국 dump endpoint 부재). ``disabled``(미적재) / "
             "``bbox``(operator bbox 1개) / ``poi_cache_target``(opinet POI cache target "
-            "주변 enumerate). env ``OPINET_SCOPE_MODE``."
+            "주변 enumerate) / ``low_top_area``(전국 시군구별 저가 목록). "
+            "env ``OPINET_SCOPE_MODE``."
         ),
     )
     opinet_scope_bbox: str | None = Field(

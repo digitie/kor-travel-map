@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-26 (codex) — OpiNet price 제주 bbox 원인 + low-top 전국 모드
+
+- **원인 확인**: N150 운영 env가 OpiNet scope를 제주/완도권 bbox
+  `126.15,33.19,126.98,34.21`로 고정하고 있어 좌표 있는 active price feature 196건이 해당
+  권역에만 존재했다. KREX price 99건은 좌표가 없어 지도 marker에 표시되지 않는다.
+- **결정**: OpiNet 전국 bbox 격자 수집은 `aroundAll` 1만 회 이상 호출로 일일 한도 위험이 있어
+  바로 쓰지 않는다.
+- **진행 중**: `OPINET_SCOPE_MODE=low_top_area`를 추가했다. 시군구별 `lowTop10`을
+  휘발유/경유/고급휘발유 3종으로 호출해 quota-safe 전국 저가 유가 분포를 만든다.
+- **검증**: OpiNet provider unit, Dagster provider fetcher, Dagster definitions targeted pytest,
+  수정 파일 ruff, strict mypy 통과.
+- **다음 한 작업**: PR 생성/CI green/머지 후 N150 `KOR_TRAVEL_MAP_OPINET_SCOPE_MODE`를
+  `low_top_area`로 바꾸고 OpiNet place/price asset을 재실행해 전국 분포 smoke를 확인한다.
+
 ## 2026-06-26 (codex) — Admin price feature 표시 + Dagster 주기 정리
 
 - **완료(API)**: `/v1/features/{feature_id}/price`를 추가해 제품별 최신 가격(`current`)과 최근

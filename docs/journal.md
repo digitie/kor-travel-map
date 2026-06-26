@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-26 (codex) — OpiNet price scope 제주 bbox 원인 확인 + 전국 저가 모드
+
+N150 admin 지도에서 유가가 제주도 주변에만 보이는 원인을 확인했다. 운영 Dagster env가
+`KOR_TRAVEL_MAP_OPINET_SCOPE_MODE=bbox`,
+`KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX=126.15,33.19,126.98,34.21`로 고정되어 있어 OpiNet
+수집 자체가 제주/완도권 bbox만 적재하고 있었다.
+
+- **운영 확인**: active OpiNet price feature는 196건이고 좌표 bbox는
+  `126.18~126.95 / 33.22~34.30`으로 제주/완도권에 한정된다. KREX price 99건은 원천에
+  좌표가 없어 지도 marker에 표시되지 않는다.
+- **API 한계**: `python-opinet-api` 확인 결과 OpiNet 공개 API에는 전국 bulk 주유소 목록이 없고,
+  전국 bbox를 `aroundAll` 5km 격자로 덮으면 1만 회 이상 호출되어 일일 한도(1,500회)를 넘을 수
+  있다.
+- **코드 보강**: `OPINET_SCOPE_MODE=low_top_area`를 추가했다. 시군구별 `lowTop10`을
+  휘발유/경유/고급휘발유 3종으로 호출해 전체 주유소는 아니지만 전국 저가 유가 분포를
+  quota-safe하게 생성한다. `lowTop10` Station 단일 제품 가격 row를 `kind=price` anchor와
+  `PriceValue`로 적재하는 변환 경로를 추가했다.
+- **검증**: OpiNet provider unit 19건, Dagster provider fetcher 63건(+1 skip), Dagster definitions
+  포함 targeted pytest 92건(+1 skip), 수정 파일 ruff, strict mypy(`src/kortravelmap` +
+  Dagster package) 통과.
+
 ## 2026-06-26 (codex) — Admin price feature 표시 + Dagster 주기 정리
 
 `kind=price` feature를 열어도 `detail`이 비어 있고 공통 weather panel만 보여 가격 정보가

@@ -1203,20 +1203,31 @@ def test_airkorea_air_quality_iterates_all_sido_and_closes(
 
 
 class _FakeStation:
-    def __init__(self, uni_id: str) -> None:
+    def __init__(self, uni_id: str, product_code: str | None = None) -> None:
         self.uni_id = uni_id
+        self.product_code = product_code
+
+
+class _FakeOpinetArea:
+    def __init__(self, code: str) -> None:
+        self.code = code
 
 
 class _FakeOpinetClient:
     instances: list[_FakeOpinetClient] = []
     stations: list[object] = []
     details: dict[str, object] = {}
+    root_areas: list[_FakeOpinetArea] = []
+    child_areas: dict[str, list[_FakeOpinetArea]] = {}
+    low_top: dict[tuple[str, str], list[object]] = {}
 
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
         self.bbox_calls: list[tuple[float, float, float, float, int]] = []
         self.detail_calls: list[str] = []
+        self.area_calls: list[str | None] = []
+        self.low_top_calls: list[tuple[str, int, str | None]] = []
         _FakeOpinetClient.instances.append(self)
 
     def iter_stations_in_bbox(
@@ -1236,6 +1247,18 @@ class _FakeOpinetClient:
         self.detail_calls.append(uni_id)
         return type(self).details.get(uni_id, object())
 
+    def get_area_codes(self, sido: str | None = None) -> list[_FakeOpinetArea]:
+        self.area_calls.append(sido)
+        if sido is None:
+            return list(type(self).root_areas)
+        return list(type(self).child_areas.get(sido, []))
+
+    def get_lowest_price_top20(
+        self, prodcd: str, cnt: int = 10, area: str | None = None
+    ) -> list[object]:
+        self.low_top_calls.append((prodcd, cnt, area))
+        return list(type(self).low_top.get((area or "", prodcd), []))
+
     def close(self) -> None:
         self.closed = True
 
@@ -1245,10 +1268,16 @@ def _install_fake_opinet(
     *,
     stations: list[object],
     details: dict[str, object] | None = None,
+    root_areas: list[_FakeOpinetArea] | None = None,
+    child_areas: dict[str, list[_FakeOpinetArea]] | None = None,
+    low_top: dict[tuple[str, str], list[object]] | None = None,
 ) -> type[_FakeOpinetClient]:
     _FakeOpinetClient.instances = []
     _FakeOpinetClient.stations = stations
     _FakeOpinetClient.details = details or {}
+    _FakeOpinetClient.root_areas = root_areas or []
+    _FakeOpinetClient.child_areas = child_areas or {}
+    _FakeOpinetClient.low_top = low_top or {}
     module = ModuleType("opinet")
     module.__dict__["OpinetClient"] = _FakeOpinetClient
     monkeypatch.setitem(sys.modules, "opinet", module)
@@ -1365,6 +1394,40 @@ def test_opinet_stations_bbox_enumerates_dedups_closes(
     assert client.closed is True
 
 
+def test_opinet_stations_low_top_area_dedups_by_station(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101"), _FakeOpinetArea("0102")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0101", "D047"): [_FakeStation("A1", "D047")],
+            ("0102", "B034"): [_FakeStation("A2", "B034")],
+        },
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert client.area_calls == [None, "01"]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+        ("B027", 20, "0102"),
+        ("D047", 20, "0102"),
+        ("B034", 20, "0102"),
+    ]
+    assert client.closed is True
+
+
 def test_opinet_station_price_details_missing_key_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=None,
@@ -1397,6 +1460,41 @@ def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
     assert records == [d1, d2]
     client = fake.instances[0]
     assert client.detail_calls == ["A1", "A2"]
+    assert client.closed is True
+
+
+def test_opinet_station_price_details_low_top_area_dedups_by_station_product(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0101", "D047"): [_FakeStation("A1", "D047")],
+            ("0101", "B034"): [_FakeStation("A2", "B034")],
+        },
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_station_price_details(settings))
+
+    assert [(r.uni_id, r.product_code) for r in records] == [
+        ("A1", "B027"),
+        ("A1", "D047"),
+        ("A2", "B034"),
+    ]
+    client = fake.instances[0]
+    assert client.detail_calls == []
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+    ]
     assert client.closed is True
 
 

@@ -945,6 +945,12 @@ _OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = (
 )
 """``provider_overrides`` JSONB 키(``<provider>:<dataset_key>``)."""
 
+_OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
+"""quota-safe 전국 분포용 제품 코드: 휘발유, 경유, 고급휘발유."""
+
+_OPINET_LOW_TOP_COUNT: Final[int] = 20
+"""OpiNet ``lowTop10`` endpoint 최대 허용 건수."""
+
 
 def _opinet_poi_target_bboxes(
     settings: KorTravelMapSettings,
@@ -998,18 +1004,71 @@ def _opinet_bboxes_for_settings(
     return bboxes
 
 
+def _opinet_sigungu_area_codes(client: Any) -> list[str]:
+    """OpiNet 시군구 area code 목록.
+
+    ``lowTop10`` 전국 분포 모드에서 사용한다. 시도별 시군구가 없으면 해당 시도
+    코드를 fallback으로 사용해 호출량을 bounded하게 유지한다.
+    """
+    areas: list[str] = []
+    for sido in client.get_area_codes():
+        sido_code = str(getattr(sido, "code", "")).strip()
+        if not sido_code:
+            continue
+        sigungu_codes = [
+            str(getattr(sigungu, "code", "")).strip()
+            for sigungu in client.get_area_codes(sido_code)
+        ]
+        sigungu_codes = [code for code in sigungu_codes if code]
+        areas.extend(sigungu_codes or [sido_code])
+    return areas
+
+
+def _opinet_low_top_area_stations(
+    client: Any, *, dedupe_by_product: bool
+) -> Iterator[Any]:
+    """시군구별 저가 주유소를 stream한다.
+
+    전국 bbox 격자 enumeration은 OpiNet 일일 한도를 초과하므로, 지도 분포용으로
+    ``lowTop10``을 시군구×제품 단위로 호출한다.
+    """
+    seen: set[str | tuple[str, str | None]] = set()
+    for area in _opinet_sigungu_area_codes(client):
+        for product_code in _OPINET_LOW_TOP_PRODUCTS:
+            for station in client.get_lowest_price_top20(
+                product_code, cnt=_OPINET_LOW_TOP_COUNT, area=area
+            ):
+                uni_id = getattr(station, "uni_id", None)
+                if not isinstance(uni_id, str):
+                    yield station
+                    continue
+                key: str | tuple[str, str | None]
+                if dedupe_by_product:
+                    raw_product = getattr(station, "product_code", None)
+                    product = getattr(raw_product, "value", raw_product)
+                    key = (uni_id, str(product) if product is not None else None)
+                else:
+                    key = uni_id
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield station
+
+
 def fetch_opinet_stations(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
     """OpiNet 주유소 record를 scope(bbox/POI-타깃)별로 stream한다(T-RV-04b).
 
     OpiNet은 전국 dump endpoint가 없어 ``iter_stations_in_bbox``(aroundAll 격자
-    근사)로 영역을 enumerate한다. scope는 ``settings.opinet_scope_mode``:
+    근사) 또는 ``lowTop10`` 지역별 목록으로 영역을 enumerate한다. scope는
+    ``settings.opinet_scope_mode``:
 
     - ``disabled`` — 미적재(guard).
     - ``bbox`` — ``opinet_scope_bbox`` 영역 1개 enumerate.
     - ``poi_cache_target`` — ``ops.poi_cache_targets``의 opinet 활성 target(중심+반경)을
       bbox로 변환해 enumerate(여러 target 간 ``uni_id`` dedup).
+    - ``low_top_area`` — 시군구별 저가 목록으로 전국 분포를 bounded 호출량으로 적재.
 
     sync generator, finally close.
     """
@@ -1020,10 +1079,16 @@ def fetch_opinet_stations(
             "필요하다."
         )
 
-    bboxes = _opinet_bboxes_for_settings(settings)
+    bboxes: list[tuple[float, float, float, float]] | None = None
+    if settings.opinet_scope_mode != "low_top_area":
+        bboxes = _opinet_bboxes_for_settings(settings)
     opinet = cast(Any, importlib.import_module("opinet"))
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
+        if settings.opinet_scope_mode == "low_top_area":
+            yield from _opinet_low_top_area_stations(client, dedupe_by_product=False)
+            return
+        assert bboxes is not None
         yield from _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         )
@@ -1036,7 +1101,12 @@ def fetch_opinet_stations(
 def fetch_opinet_station_price_details(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
-    """현재 OpiNet scope의 주유소 상세(``detailById``)를 stream한다."""
+    """현재 OpiNet scope의 가격 record를 stream한다.
+
+    ``bbox``/``poi_cache_target``은 기존처럼 ``detailById``를 반환하고,
+    ``low_top_area``는 ``lowTop10`` Station row를 반환한다. asset 변환기가 row shape에
+    따라 detail/단일 제품 가격 경로를 고른다.
+    """
     secret = settings.opinet_api_key
     if secret is None:
         raise ProviderCredentialMissing(
@@ -1044,10 +1114,16 @@ def fetch_opinet_station_price_details(
             "(source OPINET_API_KEY)가 필요하다."
         )
 
-    bboxes = _opinet_bboxes_for_settings(settings)
+    bboxes: list[tuple[float, float, float, float]] | None = None
+    if settings.opinet_scope_mode != "low_top_area":
+        bboxes = _opinet_bboxes_for_settings(settings)
     opinet = cast(Any, importlib.import_module("opinet"))
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
+        if settings.opinet_scope_mode == "low_top_area":
+            yield from _opinet_low_top_area_stations(client, dedupe_by_product=True)
+            return
+        assert bboxes is not None
         for station in _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         ):

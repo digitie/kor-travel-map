@@ -91,6 +91,7 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_DATASET_KEY,
     station_details_to_price_features_and_values,
     stations_to_bundles,
+    stations_to_price_features_and_values,
 )
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
@@ -204,11 +205,19 @@ async def run_feature_price_opinet_stations(
     """OpiNet 주유소 상세 가격을 price Feature + PriceValue로 적재한다."""
     records = await _record_list(context, "opinet_station_price_details")
     fetched_at = await _fetched_at(context)
-    bundles, values = await station_details_to_price_features_and_values(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
+    reverse_geocoder = _reverse_geocoder(context)
+    if any(hasattr(record, "prices") for record in records):
+        bundles, values = await station_details_to_price_features_and_values(
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=reverse_geocoder,
+        )
+    else:
+        bundles, values = await stations_to_price_features_and_values(
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=reverse_geocoder,
+        )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     result = await client.load_price_features(bundles, values)
     _add_output_metadata(

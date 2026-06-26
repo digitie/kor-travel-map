@@ -24,6 +24,9 @@ from kortravelmap.providers.opinet import (
 from kortravelmap.providers.opinet import (
     stations_to_bundles as _stations_to_bundles_async,
 )
+from kortravelmap.providers.opinet import (
+    stations_to_price_features_and_values as _station_prices_async,
+)
 
 KST = timezone(timedelta(hours=9))
 
@@ -39,6 +42,12 @@ def station_details_to_price_features_and_values(
     items: Iterable[Any], **kwargs: Any
 ) -> tuple[list[FeatureBundle], list[Any]]:
     return asyncio.run(_price_features_async(items, **kwargs))
+
+
+def stations_to_price_features_and_values(
+    items: Iterable[Any], **kwargs: Any
+) -> tuple[list[FeatureBundle], list[Any]]:
+    return asyncio.run(_station_prices_async(items, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,12 @@ class _StationItem:
     lat: float | None
     tel: str | None = None
     lpg_yn: str | bool | None = None
+    price: int | None = None
+    product_code: str | None = None
+    product_name: str | None = None
+    trade_date: date | None = None
+    trade_time: time | None = None
+    raw: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -316,6 +331,50 @@ def test_station_detail_price_skips_null_price() -> None:
 
     bundles, values = station_details_to_price_features_and_values(
         [detail], fetched_at=_NOW
+    )
+
+    assert bundles == []
+    assert values == []
+
+
+@pytest.mark.unit
+def test_station_price_feature_and_value_from_low_top_station() -> None:
+    station = _StationItem(
+        **{
+            **_S2.__dict__,
+            "price": 1589,
+            "product_code": "B027",
+            "product_name": "휘발유",
+            "raw": {"PRODCD": "B027", "PRICE": "1589"},
+        }
+    )
+
+    bundles, values = stations_to_price_features_and_values(
+        [station], fetched_at=_NOW
+    )
+
+    assert len(bundles) == 1
+    assert len(values) == 1
+    bundle = bundles[0]
+    value = values[0]
+    assert bundle.feature.kind == FeatureKind.PRICE
+    assert bundle.feature.name == "GS칼텍스 부산점 유가"
+    assert bundle.feature.coord is not None
+    assert bundle.source_record.dataset_key == OPINET_PRICE_DATASET_KEY
+    assert bundle.source_record.source_entity_id == "A0000002:B027"
+    assert value.feature_id == bundle.feature.feature_id
+    assert value.product_key == "gasoline"
+    assert value.value_number == 1589
+    assert value.observed_at == _NOW
+
+
+@pytest.mark.unit
+def test_station_price_skips_missing_product_or_price() -> None:
+    missing_price = _StationItem(**{**_S1.__dict__, "product_code": "B027"})
+    missing_product = _StationItem(**{**_S2.__dict__, "price": 1700})
+
+    bundles, values = stations_to_price_features_and_values(
+        [missing_price, missing_product], fetched_at=_NOW
     )
 
     assert bundles == []
