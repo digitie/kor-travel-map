@@ -179,15 +179,16 @@ async def kma_short_forecast_etl(client, async_session):
 `kortravelmap.dagster.kma_weather` — 대상 좌표가 DB에서 나오므로 표준
 record-resource 패턴이 아니라 **asset 직접 구현**(resource는
 `kma_weather_client` = `KmaClient` live 인스턴스 + settings 값 2종). 발표
-스케줄 + 가용 지연(§6)에 cron을 맞췄고, 같은 base 재실행은 cursor가 skip.
+운영 schedule은 시간당 1회로 맞춘다. 원천 발표 주기보다 자주 실행되는 dataset은
+같은 base 재실행을 cursor가 skip한다.
 
 | asset | dataset_key | cron | group |
 |-------|-------------|------|-------|
 | `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `45 * * * *` | `features_weather` |
-| `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `20,50 * * * *` | `features_weather` |
-| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `20 2,5,8,11,14,17,20,23 * * *` | `features_weather` |
-| `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `20 6,18 * * *` | `features_weather` |
-| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `15 6 * * *` | `features_notice` |
+| `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `50 * * * *` | `features_weather` |
+| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `20 * * * *` | `features_weather` |
+| `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `25 * * * *` | `features_weather` |
+| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `15 * * * *` | `features_notice` |
 
 특보(T-219c)는 표준 record-resource 패턴 — `kma_weather_alert_records`
 (getWthrWrnList, 전국 발표관서 108, rolling window

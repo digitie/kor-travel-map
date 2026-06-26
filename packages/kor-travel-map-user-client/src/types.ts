@@ -177,6 +177,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/{feature_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature price card (제품별 최신 가격 + 최근 이력) */
+        get: operations["get_feature_price_v1_features__feature_id__price_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/{feature_id}/weather": {
         parameters: {
             query?: never;
@@ -720,6 +737,14 @@ export interface components {
             };
         };
         /**
+         * FeaturePriceResponse
+         * @description ``GET /features/{feature_id}/price`` 응답.
+         */
+        FeaturePriceResponse: {
+            data: components["schemas"]["PriceCardData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * FeatureSearchData
          * @description 사용자 feature 검색 data payload.
          */
@@ -774,6 +799,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /**
+             * Price Summary
+             * @description kind=price일 때 제품별 최신 가격 요약.
+             */
+            price_summary?: components["schemas"]["PricePointOut"][] | null;
             /** Status */
             status: string;
         };
@@ -975,6 +1005,51 @@ export interface components {
             page_size: number;
             /** Total */
             total?: number | null;
+        };
+        /**
+         * PriceCardData
+         * @description ``GET /features/{feature_id}/price`` data payload.
+         */
+        PriceCardData: {
+            /** Asof */
+            asof?: string | null;
+            /** Current */
+            current: components["schemas"]["PricePointOut"][];
+            /** Feature Id */
+            feature_id: string;
+            /** History */
+            history: components["schemas"]["PricePointOut"][];
+            /** Is Stale */
+            is_stale: boolean;
+            /** Latest At */
+            latest_at?: string | null;
+        };
+        /**
+         * PricePointOut
+         * @description 제품별 가격 1건.
+         */
+        PricePointOut: {
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Price Domain */
+            price_domain: string;
+            /** Product Key */
+            product_key: string;
+            /** Product Name */
+            product_name?: string | null;
+            /** Provider */
+            provider: string;
+            /** Source Product Key */
+            source_product_key?: string | null;
+            /** Source Product Name */
+            source_product_name?: string | null;
+            /** Unit */
+            unit: string;
+            /** Value Number */
+            value_number: number;
         };
         /**
          * ProblemDetail
@@ -1802,6 +1877,53 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_price_v1_features__feature_id__price_get: {
+        parameters: {
+            query?: {
+                /** @description 이 시점 이하 price만 조회. */
+                asof?: string | null;
+                /** @description 최근 price history 반환 개수. */
+                history_limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturePriceResponse"];
                 };
             };
             /** @description Validation Error */

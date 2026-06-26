@@ -1054,6 +1054,24 @@
         "title": "FeatureDetailResponse",
         "type": "object"
       },
+      "FeaturePriceResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/price`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PriceCardData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeaturePriceResponse",
+        "type": "object"
+      },
       "FeatureSearchData": {
         "additionalProperties": false,
         "description": "사용자 feature 검색 data payload.",
@@ -1180,6 +1198,21 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "price_summary": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricePointOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=price일 때 제품별 최신 가격 요약.",
+            "title": "Price Summary"
           },
           "status": {
             "title": "Status",
@@ -1777,6 +1810,140 @@
           "page_size"
         ],
         "title": "PageMeta",
+        "type": "object"
+      },
+      "PriceCardData": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/price`` data payload.",
+        "properties": {
+          "asof": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asof"
+          },
+          "current": {
+            "items": {
+              "$ref": "#/components/schemas/PricePointOut"
+            },
+            "title": "Current",
+            "type": "array"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/PricePointOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "latest_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest At"
+          }
+        },
+        "required": [
+          "feature_id",
+          "current",
+          "history",
+          "is_stale"
+        ],
+        "title": "PriceCardData",
+        "type": "object"
+      },
+      "PricePointOut": {
+        "additionalProperties": false,
+        "description": "제품별 가격 1건.",
+        "properties": {
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "price_domain": {
+            "title": "Price Domain",
+            "type": "string"
+          },
+          "product_key": {
+            "title": "Product Key",
+            "type": "string"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_product_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Product Key"
+          },
+          "source_product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Product Name"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_number": {
+            "title": "Value Number",
+            "type": "number"
+          }
+        },
+        "required": [
+          "provider",
+          "price_domain",
+          "product_key",
+          "value_number",
+          "unit",
+          "observed_at"
+        ],
+        "title": "PricePointOut",
         "type": "object"
       },
       "ProblemDetail": {
@@ -4145,6 +4312,111 @@
           }
         },
         "summary": "feature 단건 상세",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/price": {
+      "get": {
+        "operationId": "get_feature_price_v1_features__feature_id__price_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "이 시점 이하 price만 조회.",
+            "in": "query",
+            "name": "asof",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 시점 이하 price만 조회.",
+              "title": "Asof"
+            }
+          },
+          {
+            "description": "최근 price history 반환 개수.",
+            "in": "query",
+            "name": "history_limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "최근 price history 반환 개수.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "History Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturePriceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature price card (제품별 최신 가격 + 최근 이력)",
         "tags": [
           "features"
         ]

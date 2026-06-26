@@ -20,6 +20,7 @@ import {
   type AdminFeatureDetailData,
   type NearbyFeatureSummary,
 } from "@/api/features";
+import { FeaturePricePanel } from "@/components/feature-price-panel";
 import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -679,7 +680,11 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
           <FilesTable data={data} />
         </div>
         <aside className="flex min-w-0 flex-col gap-4">
-          <FeatureWeatherPanel featureId={featureId} />
+          {feature.kind === "price" ? (
+            <FeaturePricePanel featureId={featureId} />
+          ) : (
+            <FeatureWeatherPanel featureId={featureId} />
+          )}
           <NearbyPanel feature={feature} featureId={featureId} />
           <RawPanels data={data} />
         </aside>

@@ -9,22 +9,60 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
 from kortravelmap.core.ids import make_price_value_key
+from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
 if TYPE_CHECKING:
+    from sqlalchemy import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from kortravelmap.dto.price import PriceValue
 
 __all__ = [
+    "DEFAULT_PRICE_FRESHNESS_SECONDS",
+    "PriceCard",
     "PriceFeatureLoadResult",
+    "PricePoint",
+    "build_price_card",
     "load_price_values",
 ]
+
+DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = 18 * 60 * 60
+"""하루 2회 price ETL 기준 freshness 여유값(12h 주기 + 지연)."""
+
+
+@dataclass(frozen=True)
+class PricePoint:
+    """feature price card의 제품별 가격 1건."""
+
+    provider: str
+    price_domain: str
+    product_key: str
+    product_name: str | None
+    source_product_key: str | None
+    source_product_name: str | None
+    value_number: Decimal
+    unit: str
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
+class PriceCard:
+    """feature 1건의 price card — 최신 제품 가격 + 최근 이력."""
+
+    feature_id: str
+    asof: datetime | None
+    current: list[PricePoint]
+    history: list[PricePoint]
+    latest_at: datetime | None
+    is_stale: bool
 
 
 @dataclass(frozen=True)
@@ -71,6 +109,56 @@ ON CONFLICT (price_value_key) DO UPDATE SET
     updated_at = now()
 """
 
+_PRODUCT_ORDER: Final[dict[str, int]] = {
+    "gasoline": 10,
+    "diesel": 20,
+    "premium_gasoline": 30,
+    "lpg": 40,
+}
+
+_CURRENT_SQL: Final[str] = """
+WITH latest AS (
+    SELECT DISTINCT ON (product_key)
+        provider, price_domain, product_key, product_name,
+        source_product_key, source_product_name,
+        value_number, unit, observed_at
+    FROM feature.feature_price_values
+    WHERE feature_id = :feature_id
+      AND (
+        CAST(:asof AS timestamptz) IS NULL
+        OR observed_at <= CAST(:asof AS timestamptz)
+      )
+    ORDER BY product_key, observed_at DESC
+)
+SELECT *
+FROM latest
+ORDER BY
+    CASE product_key
+      WHEN 'gasoline' THEN 10
+      WHEN 'diesel' THEN 20
+      WHEN 'premium_gasoline' THEN 30
+      WHEN 'lpg' THEN 40
+      ELSE 100
+    END,
+    product_name NULLS LAST,
+    product_key
+"""
+
+_HISTORY_SQL: Final[str] = """
+SELECT
+    provider, price_domain, product_key, product_name,
+    source_product_key, source_product_name,
+    value_number, unit, observed_at
+FROM feature.feature_price_values
+WHERE feature_id = :feature_id
+  AND (
+    CAST(:asof AS timestamptz) IS NULL
+    OR observed_at <= CAST(:asof AS timestamptz)
+  )
+ORDER BY observed_at DESC, product_key
+LIMIT :limit
+"""
+
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
@@ -114,3 +202,70 @@ async def load_price_values(
         return 0
     await session.execute(text(_INSERT_SQL), params)
     return len(params)
+
+
+def _price_point(row: RowMapping) -> PricePoint:
+    return PricePoint(
+        provider=str(row["provider"]),
+        price_domain=str(row["price_domain"]),
+        product_key=str(row["product_key"]),
+        product_name=row["product_name"],
+        source_product_key=row["source_product_key"],
+        source_product_name=row["source_product_name"],
+        value_number=row["value_number"],
+        unit=str(row["unit"]),
+        observed_at=row["observed_at"],
+    )
+
+
+def _sort_current(points: list[PricePoint]) -> list[PricePoint]:
+    return sorted(
+        points,
+        key=lambda point: (
+            _PRODUCT_ORDER.get(point.product_key, 100),
+            point.product_name or "",
+            point.product_key,
+        ),
+    )
+
+
+async def build_price_card(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    asof: datetime | None = None,
+    history_limit: int = 100,
+    freshness_seconds: int = DEFAULT_PRICE_FRESHNESS_SECONDS,
+) -> PriceCard:
+    """feature의 price card — 제품별 최신값과 최근 이력.
+
+    각 ``product_key``에서 ``observed_at`` 최신 1건을 현재 가격으로 고르고,
+    history는 최신 관측순으로 제한한다. card 자체는 feature 존재 여부를 판정하지
+    않는다. 호출 라우터가 필요하면 feature 상세 조회와 조합한다.
+    """
+
+    limit = min(max(history_limit, 1), 500)
+    params = {"feature_id": feature_id, "asof": asof}
+    current_rows = (
+        await session.execute(text(_CURRENT_SQL), params)
+    ).mappings().all()
+    history_rows = (
+        await session.execute(text(_HISTORY_SQL), {**params, "limit": limit})
+    ).mappings().all()
+
+    current = _sort_current([_price_point(row) for row in current_rows])
+    history = [_price_point(row) for row in history_rows]
+    latest_at = max((point.observed_at for point in current), default=None)
+    reference = asof if asof is not None else kst_now()
+    is_stale = (
+        latest_at is None
+        or (reference - latest_at).total_seconds() > freshness_seconds
+    )
+    return PriceCard(
+        feature_id=feature_id,
+        asof=asof,
+        current=current,
+        history=history,
+        latest_at=latest_at,
+        is_stale=is_stale,
+    )

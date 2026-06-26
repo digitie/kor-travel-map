@@ -25,6 +25,7 @@ import {
   type FeatureKind,
   type FeatureSummary,
 } from "@/api/features";
+import { FeaturePricePanel } from "@/components/feature-price-panel";
 import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -160,7 +161,11 @@ function FeatureDetailPanel({
               <summary className="cursor-pointer text-sm font-medium">urls</summary>
               <JsonBlock value={detailQuery.data.urls} />
             </details>
-            <FeatureWeatherPanel compact featureId={featureId} />
+            {detailQuery.data.kind === "price" ? (
+              <FeaturePricePanel compact featureId={featureId} />
+            ) : (
+              <FeatureWeatherPanel compact featureId={featureId} />
+            )}
           </>
         ) : null}
       </CardContent>

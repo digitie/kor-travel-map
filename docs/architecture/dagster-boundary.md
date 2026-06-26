@@ -426,8 +426,11 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 |----------|-----------|------|------|
 | `feature_event_datagokr_cultural_festivals_daily_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 * * *` | 전국문화축제 일 1회 |
 | `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` | OpiNet 주유소 월 1회 |
+| `feature_price_opinet_stations_twice_daily_schedule` | `feature_price_opinet_stations_job` | `18 6,18 * * *` | OpiNet 주유소 유가 일 2회 |
 | `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` | KREX 휴게소 월 1회 |
+| `feature_price_krex_rest_areas_twice_daily_schedule` | `feature_price_krex_rest_areas_job` | `28 6,18 * * *` | KREX 휴게소 유가 일 2회 |
 | `feature_notice_krex_traffic_notices_quarter_hour_schedule` | `feature_notice_krex_traffic_notices_job` | `7,22,37,52 * * * *` | KREX 교통공지 15분 |
+| `feature_weather_krex_rest_areas_hourly_schedule` | `feature_weather_krex_rest_areas_job` | `35 * * * *` | KREX 휴게소 관측 기상 시간당 |
 | `feature_place_krheritage_items_weekly_schedule` | `feature_place_krheritage_items_job` | `15 2 * * 1` | 국가유산 item 주 1회 |
 | `feature_event_krheritage_events_daily_schedule` | `feature_event_krheritage_events_job` | `25 3 * * *` | 국가유산 행사 일 1회 |
 | `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` | MOIS bulk 주 1회 |
@@ -435,10 +438,10 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` | KNPS geometry 반기 1회 |
 | `feature_place_kor_travel_concierge_youtube_daily_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 * * *` | kor-travel-concierge YouTube 후보 일 1회 |
 | `feature_weather_kma_ultra_short_nowcast_hourly_schedule` | `feature_weather_kma_ultra_short_nowcast_job` | `45 * * * *` | KMA 초단기실황 시간당 |
-| `feature_weather_kma_ultra_short_forecast_half_hourly_schedule` | `feature_weather_kma_ultra_short_forecast_job` | `20,50 * * * *` | KMA 초단기예보 30분 |
-| `feature_weather_kma_short_forecast_3h_schedule` | `feature_weather_kma_short_forecast_job` | `20 2,5,8,11,14,17,20,23 * * *` | KMA 단기예보 발표시각 |
-| `feature_weather_kma_mid_forecast_twice_daily_schedule` | `feature_weather_kma_mid_forecast_job` | `20 6,18 * * *` | KMA 중기예보 일 2회 |
-| `feature_notice_kma_weather_alerts_daily_schedule` | `feature_notice_kma_weather_alerts_job` | `15 6 * * *` | KMA 기상특보 일 1회 |
+| `feature_weather_kma_ultra_short_forecast_hourly_schedule` | `feature_weather_kma_ultra_short_forecast_job` | `50 * * * *` | KMA 초단기예보 시간당 |
+| `feature_weather_kma_short_forecast_hourly_schedule` | `feature_weather_kma_short_forecast_job` | `20 * * * *` | KMA 단기예보 시간당 |
+| `feature_weather_kma_mid_forecast_hourly_schedule` | `feature_weather_kma_mid_forecast_job` | `25 * * * *` | KMA 중기예보 시간당 |
+| `feature_notice_kma_weather_alerts_hourly_schedule` | `feature_notice_kma_weather_alerts_job` | `15 * * * *` | KMA 기상특보 시간당 |
 | `feature_place_mcst_culture_weekly_schedule` | `feature_place_mcst_culture_job` | `30 4 * * 2` | MCST 문화 파일데이터 13종 주 1회 |
 | `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |
 | `curated_features_refresh_daily_schedule` | `curated_features_refresh` | `55 4 * * *` | curated overlay metadata/rule/sweep/cache refresh 일 1회 |

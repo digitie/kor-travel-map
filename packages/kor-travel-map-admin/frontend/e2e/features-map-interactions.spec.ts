@@ -17,6 +17,7 @@ type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
 type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
+type FeaturePriceResponse = components["schemas"]["FeaturePriceResponse"];
 
 const FEATURE_ID = "mock-provider::mock-dataset::seoul-place-1";
 const MOCK_NAME = "Seoul Mock Place";
@@ -103,6 +104,31 @@ function makeFeatureWeatherResponse(): FeatureWeatherResponse {
   };
 }
 
+function makeFeaturePriceResponse(): FeaturePriceResponse {
+  const point = {
+    observed_at: "2026-06-26T06:18:00.000Z",
+    price_domain: "opinet_gas_station",
+    product_key: "gasoline",
+    product_name: "휘발유",
+    provider: "python-opinet-api",
+    source_product_key: "B027",
+    source_product_name: "휘발유",
+    unit: "KRW/L",
+    value_number: 1820,
+  };
+  return {
+    data: {
+      asof: null,
+      current: [point],
+      feature_id: FEATURE_ID,
+      history: [point],
+      is_stale: false,
+      latest_at: "2026-06-26T06:18:00.000Z",
+    },
+    meta: makeMeta({ request_id: "e2e-feature-price" }),
+  };
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -114,6 +140,10 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 interface FeaturesRouteOptions {
   /** 200 list 응답으로 돌려줄 feature 목록. */
   items?: FeatureSummary[];
+  /** detail 응답 override. price feature 선택 등 상세 kind가 list와 달라지지 않게 한다. */
+  detail?: FeatureDetailResponse;
+  /** price card 응답 override. */
+  price?: FeaturePriceResponse;
   /** list 쿼리에 강제할 HTTP status (500 등 에러 표면 검증용). */
   listStatus?: number;
   /** 5xx 본문은 envelope이 아니라 plain text(ApiClientError가 response.text() 사용). */
@@ -131,6 +161,7 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
   const requests = {
     list: 0,
     detail: 0,
+    price: 0,
     weather: 0,
     /** list 쿼리마다 url.searchParams.getAll("kind") 기록 — 마지막 요청 shape 검증용. */
     listKinds: [] as string[][],
@@ -147,6 +178,13 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     const url = new URL(request.url());
     if (url.searchParams.has("_rsc")) {
       await route.continue();
+      return;
+    }
+
+    // price: `/v1/features/{id}/price`
+    if (url.pathname.endsWith("/price")) {
+      requests.price += 1;
+      await fulfillJson(route, options.price ?? makeFeaturePriceResponse());
       return;
     }
 
@@ -185,7 +223,10 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       url.pathname.startsWith("/api/proxy/v1/features/")
     ) {
       requests.detail += 1;
-      await fulfillJson(route, makeFeatureDetailEnvelope());
+      await fulfillJson(
+        route,
+        makeFeatureDetailEnvelope(options.detail ?? makeFeatureDetail()),
+      );
       return;
     }
 
@@ -399,6 +440,74 @@ test.describe("/features map interactions", () => {
     // (NOTE: marker(WebGL canvas) 클릭 기반 선택은 의도적으로 out-of-scope — uncertainties.)
     await panel.getByRole("button", { name: "닫기" }).click();
     await expect(page.getByTestId("feature-detail-panel")).toBeHidden();
+  });
+
+  test("price feature — 마커 현재 가격과 우측 price 패널 표시", async ({
+    page,
+  }) => {
+    const priceSummary = [
+      {
+        observed_at: "2026-06-26T06:18:00.000Z",
+        price_domain: "opinet_gas_station",
+        product_key: "gasoline",
+        product_name: "휘발유",
+        provider: "python-opinet-api",
+        source_product_key: "B027",
+        source_product_name: "휘발유",
+        unit: "KRW/L",
+        value_number: 1820,
+      },
+      {
+        observed_at: "2026-06-26T06:18:00.000Z",
+        price_domain: "opinet_gas_station",
+        product_key: "diesel",
+        product_name: "경유",
+        provider: "python-opinet-api",
+        source_product_key: "D047",
+        source_product_name: "경유",
+        unit: "KRW/L",
+        value_number: 1650,
+      },
+      {
+        observed_at: "2026-06-26T06:18:00.000Z",
+        price_domain: "opinet_gas_station",
+        product_key: "premium_gasoline",
+        product_name: "고급휘발유",
+        provider: "python-opinet-api",
+        source_product_key: "B034",
+        source_product_name: "고급휘발유",
+        unit: "KRW/L",
+        value_number: 2050,
+      },
+    ];
+    const requests = await mockFeatureRoutes(page, {
+      detail: makeFeatureDetail({
+        kind: "price",
+        name: "서울주유소 유가",
+      }),
+      items: [
+        makeFeatureSummary({
+          kind: "price",
+          marker_icon: "fuel",
+          name: "서울주유소 유가",
+          price_summary: priceSummary,
+        }),
+      ],
+    });
+
+    await page.goto("/features");
+
+    await expect(page.getByText("휘 1,820")).toBeVisible();
+    await expect(page.getByText("경 1,650")).toBeVisible();
+    await expect(page.getByText("고 2,050")).toBeVisible();
+
+    await page.getByRole("button", { name: /서울주유소 유가.*휘 1,820/ }).click();
+    const panel = page.getByTestId("feature-detail-panel");
+    await expect(panel).toBeVisible();
+    await expect.poll(() => requests.price).toBeGreaterThanOrEqual(1);
+    await expect(panel.getByTestId("feature-price-panel")).toBeVisible();
+    await expect(panel.getByText("휘발유 1,820")).toBeVisible();
+    await expect(panel.getByText("History")).toBeVisible();
   });
 
   test("bbox list 5xx → destructive Alert(role=alert) error surface", async ({

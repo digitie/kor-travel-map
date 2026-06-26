@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-26 (codex) — Admin price feature 표시 + Dagster 주기 정리
+
+- **완료(API)**: `/v1/features/{feature_id}/price`를 추가해 제품별 최신 가격(`current`)과 최근
+  가격 이력(`history`)을 반환한다. `/v1/features` summary에는 price feature용
+  `price_summary`를 붙여 지도 marker가 추가 호출 없이 최신 유가를 표시할 수 있게 했다.
+- **완료(UI)**: admin `/features` 지도 marker가 `price` feature에 대해 휘발유/경유/고급휘발유
+  최신 가격을 표시한다. `price` feature 선택/상세 화면은 `FeaturePricePanel`로 가격 요약과
+  history 표를 보여준다. 가격 history 그래프는 후속 PR 범위다.
+- **완료(Dagster)**: OpiNet/KREX price Feature schedule은 일 2회(`06/18시`)로 조정했고,
+  KMA/KREX weather 관련 schedule은 시간당 1회 기준으로 정렬했다.
+- **완료(OpenAPI/types)**: admin/user OpenAPI와 admin/user TypeScript generated types를 재생성했다.
+- **검증(로컬)**: API targeted pytest 20건, Dagster definitions 10건, OpenAPI drift check,
+  admin frontend type-check, user-client type-check, admin frontend lint(기존 warning 7건), targeted
+  ruff, `git diff --check` 통과.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지 후 후속 UI PR을 진행한다. 후속 범위는 feature
+  kind별 우측 메뉴 분기(price history 그래프, weather는 weather feature 전용, event 기간 표시,
+  route 구간 상세 표시)와 로그인 후 좌측 메뉴의 전 화면 노출/접기 기능이다.
+
 ## 2026-06-25 (codex) — 가격 시계열 테이블 설계 + OpiNet/KREX 유가 적재
 
 - **완료(로컬 설계/코드)**: `feature.feature_price_values`를 추가하고 price anchor

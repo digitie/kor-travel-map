@@ -25,7 +25,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from kortravelmap.infra import feature_repo, weather_repo
+from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
@@ -58,6 +58,22 @@ NearbySort = Literal["distance", "name", "last_updated_at"]
 # ── 응답 schema ────────────────────────────────────────────────────────
 
 
+class PricePointOut(BaseModel):
+    """제품별 가격 1건."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    price_domain: str
+    product_key: str
+    product_name: str | None = None
+    source_product_key: str | None = None
+    source_product_name: str | None = None
+    value_number: float
+    unit: str
+    observed_at: datetime
+
+
 class FeatureSummary(BaseModel):
     """지도/목록용 경량 feature 표현 (bbox 조회 결과 1건)."""
 
@@ -79,6 +95,10 @@ class FeatureSummary(BaseModel):
     area_square_meters: float | None = Field(
         default=None,
         description="include_geometry=true이고 kind=area일 때 면적(m²).",
+    )
+    price_summary: list[PricePointOut] | None = Field(
+        default=None,
+        description="kind=price일 때 제품별 최신 가격 요약.",
     )
 
 
@@ -164,6 +184,28 @@ class FeatureDetailEnvelopeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureDetailResponse
+    meta: Meta
+
+
+class PriceCardData(BaseModel):
+    """``GET /features/{feature_id}/price`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    asof: datetime | None = None
+    current: list[PricePointOut]
+    history: list[PricePointOut]
+    latest_at: datetime | None = None
+    is_stale: bool
+
+
+class FeaturePriceResponse(BaseModel):
+    """``GET /features/{feature_id}/price`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PriceCardData
     meta: Meta
 
 
@@ -329,6 +371,20 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         marker_color=row["marker_color"],
         status=row["status"],
         updated_at=row["updated_at"],
+    )
+
+
+def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
+    return PricePointOut(
+        provider=point.provider,
+        price_domain=point.price_domain,
+        product_key=point.product_key,
+        product_name=point.product_name,
+        source_product_key=point.source_product_key,
+        source_product_name=point.source_product_name,
+        value_number=float(point.value_number),
+        unit=point.unit,
+        observed_at=point.observed_at,
     )
 
 
@@ -842,6 +898,44 @@ async def get_feature_weather(
             asof=card.asof,
             source_styles=card.source_styles,
             metrics=metrics,
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/price",
+    response_model=FeaturePriceResponse,
+    summary="feature price card (제품별 최신 가격 + 최근 이력)",
+)
+async def get_feature_price(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[
+        datetime | None,
+        Query(description="이 시점 이하 price만 조회."),
+    ] = None,
+    history_limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="최근 price history 반환 개수."),
+    ] = 100,
+) -> FeaturePriceResponse:
+    started_at = perf_counter()
+    card = await price_repo.build_price_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        history_limit=history_limit,
+    )
+    return FeaturePriceResponse(
+        data=PriceCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            current=[_price_point_out(point) for point in card.current],
+            history=[_price_point_out(point) for point in card.history],
             latest_at=card.latest_at,
             is_stale=card.is_stale,
         ),

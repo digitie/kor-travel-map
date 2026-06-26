@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Admin price UI + Dagster 주기 정리 (2026-06-26)
+
+- **ADDED**: `/v1/features/{feature_id}/price` API를 추가해 price feature의 제품별 최신 가격과
+  최근 가격 이력을 조회할 수 있게 했다.
+- **ADDED**: admin Feature 지도에서 price marker가 휘발유/경유/고급휘발유 최신 가격을 표시하고,
+  price feature 선택 시 우측 패널에 가격 요약과 history를 표시한다.
+- **CHANGED**: OpiNet/KREX price Feature Dagster schedule은 일 2회로 낮추고, KMA/KREX weather
+  관련 Dagster schedule은 시간당 1회 기준으로 정렬했다.
+
 ### 가격 시계열 테이블 + OpiNet/KREX 유가 적재 (2026-06-25)
 
 - **ADDED**: `feature.feature_price_values` 테이블과 가격값 upsert repository/client를 추가했다.
