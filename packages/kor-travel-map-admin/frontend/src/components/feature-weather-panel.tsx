@@ -109,7 +109,7 @@ export function FeatureWeatherPanel({
             Weather
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            최신 forecast_style별 metric
+            날씨 정보와 최근 업데이트 시간
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -130,7 +130,7 @@ export function FeatureWeatherPanel({
         <div className="flex flex-col gap-3 p-4">
           {data ? (
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-              <dt className="text-muted-foreground">latest</dt>
+              <dt className="text-muted-foreground">최근 업데이트</dt>
               <dd>{formatDateTime(data.latest_at)}</dd>
               <dt className="text-muted-foreground">asof</dt>
               <dd>{formatDateTime(data.asof)}</dd>

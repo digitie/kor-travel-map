@@ -15,12 +15,136 @@ const priceFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 1,
 });
 
+const chartPriceFormatter = new Intl.NumberFormat("ko-KR", {
+  maximumFractionDigits: 0,
+});
+
+const PRODUCT_COLORS: Record<string, string> = {
+  gasoline: "#2563eb",
+  diesel: "#16a34a",
+  premium_gasoline: "#dc2626",
+  lpg: "#9333ea",
+};
+
 function productLabel(point: PricePoint): string {
   return point.product_name ?? point.product_key;
 }
 
 function priceLabel(point: PricePoint): string {
   return `${priceFormatter.format(point.value_number)}${point.unit ? ` ${point.unit}` : ""}`;
+}
+
+function productColor(productKey: string): string {
+  return PRODUCT_COLORS[productKey] ?? "#475569";
+}
+
+function PriceHistoryChart({ history }: { history: PricePoint[] }) {
+  const series = useMemo(() => {
+    const groups = new Map<string, PricePoint[]>();
+    for (const point of history) {
+      const bucket = groups.get(point.product_key) ?? [];
+      bucket.push(point);
+      groups.set(point.product_key, bucket);
+    }
+    return Array.from(groups.entries())
+      .map(([productKey, points]) => ({
+        productKey,
+        label: productLabel(points[0] as PricePoint),
+        points: points
+          .map((point) => ({
+            ...point,
+            timestamp: new Date(point.observed_at).getTime(),
+          }))
+          .filter((point) => Number.isFinite(point.timestamp))
+          .sort((a, b) => a.timestamp - b.timestamp),
+      }))
+      .filter((item) => item.points.length > 0);
+  }, [history]);
+
+  const allPoints = series.flatMap((item) => item.points);
+  if (allPoints.length < 2) {
+    return (
+      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        그래프를 그릴 price history가 부족합니다.
+      </div>
+    );
+  }
+
+  const minTime = Math.min(...allPoints.map((point) => point.timestamp));
+  const maxTime = Math.max(...allPoints.map((point) => point.timestamp));
+  const minPrice = Math.min(...allPoints.map((point) => point.value_number));
+  const maxPrice = Math.max(...allPoints.map((point) => point.value_number));
+  const width = 360;
+  const height = 160;
+  const padX = 36;
+  const padTop = 16;
+  const padBottom = 28;
+  const chartWidth = width - padX * 2;
+  const chartHeight = height - padTop - padBottom;
+  const timeSpan = Math.max(1, maxTime - minTime);
+  const priceSpan = Math.max(1, maxPrice - minPrice);
+  const x = (timestamp: number) => padX + ((timestamp - minTime) / timeSpan) * chartWidth;
+  const y = (value: number) =>
+    padTop + chartHeight - ((value - minPrice) / priceSpan) * chartHeight;
+
+  return (
+    <div className="rounded-md border bg-muted/20 p-3">
+      <svg
+        aria-label="price history graph"
+        className="h-40 w-full"
+        preserveAspectRatio="none"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        <line
+          stroke="hsl(var(--border))"
+          strokeWidth="1"
+          x1={padX}
+          x2={width - padX}
+          y1={padTop + chartHeight}
+          y2={padTop + chartHeight}
+        />
+        <line
+          stroke="hsl(var(--border))"
+          strokeWidth="1"
+          x1={padX}
+          x2={padX}
+          y1={padTop}
+          y2={padTop + chartHeight}
+        />
+        <text fill="currentColor" fontSize="10" x="2" y={padTop + 4}>
+          {chartPriceFormatter.format(maxPrice)}
+        </text>
+        <text fill="currentColor" fontSize="10" x="2" y={padTop + chartHeight}>
+          {chartPriceFormatter.format(minPrice)}
+        </text>
+        {series.map((item) => (
+          <polyline
+            fill="none"
+            key={item.productKey}
+            points={item.points
+              .map((point) => `${x(point.timestamp)},${y(point.value_number)}`)
+              .join(" ")}
+            stroke={productColor(item.productKey)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        {series.map((item) => (
+          <span className="inline-flex items-center gap-1" key={item.productKey}>
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: productColor(item.productKey) }}
+            />
+            {item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function FeaturePricePanel({
@@ -135,6 +259,14 @@ export function FeaturePricePanel({
               </dd>
             </dl>
           ) : null}
+
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <HistoryIcon className="size-4 text-muted-foreground" />
+              Graph
+            </div>
+            <PriceHistoryChart history={history} />
+          </div>
 
           <div className="overflow-auto">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium">

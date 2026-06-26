@@ -927,6 +927,18 @@
             "title": "Address",
             "type": "object"
           },
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=area이고 geometry가 있으면 면적(m²).",
+            "title": "Area Square Meters"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -1217,6 +1229,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "weather_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=weather일 때 현재기온(T1H/TMP) marker 요약."
           }
         },
         "required": [
@@ -2745,6 +2768,134 @@
           "metric_key"
         ],
         "title": "WeatherMetricOut",
+        "type": "object"
+      },
+      "WeatherSummaryOut": {
+        "additionalProperties": false,
+        "description": "지도 marker용 최신 현재기온 요약.",
+        "properties": {
+          "forecast_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Style"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          },
+          "weather_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weather Domain"
+          }
+        },
+        "required": [
+          "metric_key"
+        ],
+        "title": "WeatherSummaryOut",
         "type": "object"
       }
     },

@@ -28,7 +28,7 @@ import {
   type SortOrder,
 } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
-import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
+import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -88,7 +88,7 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   if (!featureId) {
     return (
       <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 feature를 선택하면 상세와 weather panel을 확인할 수 있습니다.
+        table에서 feature를 선택하면 상세와 kind별 패널을 확인할 수 있습니다.
       </div>
     );
   }
@@ -150,7 +150,11 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
           </div>
         ) : null}
       </div>
-      <FeatureWeatherPanel featureId={featureId} />
+      <FeatureKindDetailPanel
+        compact
+        feature={detail.data}
+        featureId={featureId}
+      />
     </div>
   );
 }

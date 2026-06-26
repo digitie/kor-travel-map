@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-26 (codex) — Feature별 상세 패널 + 좌측 메뉴/Dagster 보강
+
+- **완료(API)**: area 포함 feature 조회 API(`/v1/features/{feature_id}/contained-features`)를 추가하고,
+  weather marker용 현재기온 summary와 area 면적 필드를 OpenAPI에 반영했다.
+- **완료(UI)**: feature 상세 패널을 kind별로 분리했다. weather는 weather feature에서만 표시하고,
+  price는 이력 그래프, event는 기간/장소, area는 포함 feature, route는 구간 메타를 보여준다.
+- **완료(지도/메뉴)**: weather marker에 현재기온을 표시하고, `/features` 지도 화면에도 좌측 메뉴를
+  노출했다. 데스크톱 sidebar는 접기/펼치기 상태를 저장한다.
+- **완료(Dagster)**: feature load schedule을 weather 시간당 1회, 유가 일 2회, 기타 월 1회로
+  정리하고, run 상세에 실패 원인/stack 요약을 추가했다.
+- **검증(로컬)**: 전체 pytest 1,357건, 전체 ruff, import-linter, strict mypy, admin frontend
+  type-check/lint, OpenAPI generated type drift check, production build, `git diff --check` 통과.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지 후 N150 배포와 live smoke를 완료한다.
+
 ## 2026-06-26 (codex) — OpiNet price 제주 bbox 원인 + low-top/fallback 전국 모드
 
 - **원인 확인**: N150 운영 env가 OpiNet scope를 제주/완도권 bbox

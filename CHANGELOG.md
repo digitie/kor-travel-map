@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### Feature별 상세 패널 + Dagster 운영 표시 보강 (2026-06-26)
+
+- **ADDED**: feature 상세 패널을 kind별로 분기했다. `weather`는 날씨 정보와 최근 업데이트,
+  `price`는 최신 가격/이력 표/그래프, `event`는 기간·장소·연락처, `area`는 면적과 포함 feature,
+  `route`는 구간 메타를 표시한다.
+- **ADDED**: `/v1/features/{feature_id}/contained-features` API를 추가해 area polygon 안의 point
+  feature 목록을 조회할 수 있게 했다.
+- **CHANGED**: admin 지도 weather marker가 현재기온 요약을 표시하고, weather marker icon을
+  기존 marker metadata대로 렌더한다.
+- **CHANGED**: 로그인 후 사용하는 admin 좌측 메뉴를 `/features` 지도 화면에도 노출하고, 데스크톱에서
+  접고 펼칠 수 있게 했다.
+- **CHANGED**: feature load Dagster schedule을 weather 시간당 1회, 유가 일 2회, 나머지 월 1회로
+  정리했다.
+- **ADDED**: Dagster run 상세에 실패 원인 요약과 stack 표시를 추가했다.
+
 ### OpiNet 전국 저가 유가 scope 추가 (2026-06-26)
 
 - **ADDED**: OpiNet `OPINET_SCOPE_MODE=low_top_area`를 추가했다. 전국 bbox 격자 수집은

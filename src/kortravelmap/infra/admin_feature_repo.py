@@ -145,6 +145,7 @@ class AdminFeatureDetailFeature:
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
+    area_square_meters: float | None = None
 
 
 @dataclass(frozen=True)
@@ -717,6 +718,11 @@ SELECT
     x_extension.ST_X(coord) AS lon,
     x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
+    CASE
+      WHEN kind = 'area' AND geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      ELSE NULL
+    END AS area_square_meters,
     address,
     detail,
     urls,
@@ -898,6 +904,7 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
             if row["coord_precision_digits"] is not None
             else None
         ),
+        area_square_meters=_float_or_none(row.get("area_square_meters")),
         address=_json_object(row["address"]),
         detail=_json_object(row["detail"]),
         urls=_json_object(row["urls"]),

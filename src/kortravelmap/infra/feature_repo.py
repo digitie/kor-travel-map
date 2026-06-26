@@ -69,6 +69,7 @@ __all__ = [
     "find_place_features_without_phone",
     "set_feature_phones",
     "features_in_bbox",
+    "features_contained_in_area",
     "encode_bbox_cursor",
     "search_features",
     "features_nearby_poi_cache_target",
@@ -269,6 +270,11 @@ SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
+    CASE
+      WHEN kind = 'area' AND geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      ELSE NULL
+    END AS area_square_meters,
     x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
@@ -284,6 +290,11 @@ SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
+    CASE
+      WHEN kind = 'area' AND geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      ELSE NULL
+    END AS area_square_meters,
     x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
@@ -336,7 +347,8 @@ SELECT
     f.feature_id, f.kind, f.name, f.category,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon, f.marker_color, f.status,
-    ps.price_summary
+    ps.price_summary,
+    ws.weather_summary
 FROM feature.features AS f
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(
@@ -372,6 +384,38 @@ LEFT JOIN LATERAL (
         ORDER BY product_key, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
+LEFT JOIN LATERAL (
+    SELECT jsonb_build_object(
+        'provider', provider,
+        'weather_domain', weather_domain,
+        'forecast_style', forecast_style,
+        'metric_key', metric_key,
+        'metric_name', metric_name,
+        'value_number', value_number,
+        'value_text', value_text,
+        'unit', unit,
+        'issued_at', issued_at,
+        'valid_at', valid_at,
+        'observed_at', observed_at
+    ) AS weather_summary
+    FROM feature.feature_weather_values AS w
+    WHERE w.feature_id = f.feature_id
+      AND w.metric_key IN ('T1H', 'TMP')
+    ORDER BY
+        CASE w.metric_key
+          WHEN 'T1H' THEN 10
+          WHEN 'TMP' THEN 20
+          ELSE 100
+        END,
+        CASE w.forecast_style
+          WHEN 'observed' THEN 10
+          WHEN 'nowcast' THEN 20
+          WHEN 'ultra_short' THEN 30
+          ELSE 100
+        END,
+        COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
+    LIMIT 1
+) AS ws ON f.kind = 'weather'
 WHERE f.deleted_at IS NULL
   AND f.coord IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
@@ -397,6 +441,7 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon, f.marker_color, f.status,
     ps.price_summary,
+    ws.weather_summary,
     CASE
       WHEN f.kind = 'route' AND f.geom IS NOT NULL
       THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6) AS jsonb)
@@ -447,6 +492,38 @@ LEFT JOIN LATERAL (
         ORDER BY product_key, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
+LEFT JOIN LATERAL (
+    SELECT jsonb_build_object(
+        'provider', provider,
+        'weather_domain', weather_domain,
+        'forecast_style', forecast_style,
+        'metric_key', metric_key,
+        'metric_name', metric_name,
+        'value_number', value_number,
+        'value_text', value_text,
+        'unit', unit,
+        'issued_at', issued_at,
+        'valid_at', valid_at,
+        'observed_at', observed_at
+    ) AS weather_summary
+    FROM feature.feature_weather_values AS w
+    WHERE w.feature_id = f.feature_id
+      AND w.metric_key IN ('T1H', 'TMP')
+    ORDER BY
+        CASE w.metric_key
+          WHEN 'T1H' THEN 10
+          WHEN 'TMP' THEN 20
+          ELSE 100
+        END,
+        CASE w.forecast_style
+          WHEN 'observed' THEN 10
+          WHEN 'nowcast' THEN 20
+          WHEN 'ultra_short' THEN 30
+          ELSE 100
+        END,
+        COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
+    LIMIT 1
+) AS ws ON f.kind = 'weather'
 WHERE f.deleted_at IS NULL
   AND (
     (
@@ -1683,6 +1760,64 @@ async def features_in_bbox(
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+_FEATURES_CONTAINED_IN_AREA_SQL: Final[str] = """
+WITH area_feature AS (
+    SELECT feature_id, geom
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND kind = 'area'
+      AND geom IS NOT NULL
+)
+SELECT
+    f.feature_id,
+    f.kind,
+    f.name,
+    f.category,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    f.marker_icon,
+    f.marker_color,
+    f.status
+FROM area_feature AS a
+JOIN feature.features AS f
+  ON f.deleted_at IS NULL
+ AND f.feature_id <> a.feature_id
+ AND f.coord IS NOT NULL
+ AND a.geom OPERATOR(x_extension.&&) f.coord
+ AND x_extension.ST_Covers(a.geom, f.coord)
+WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
+ORDER BY f.kind ASC, f.name ASC, f.feature_id ASC
+LIMIT :limit
+"""
+
+
+async def features_contained_in_area(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    kinds: Sequence[str] | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """area feature polygon이 포함하는 point feature 목록.
+
+    ADR-012/성능 원칙에 맞춰 area ``geom``과 point ``coord``를 둘 다 4326
+    geometry로 비교하고, ``geom && coord`` bbox prefilter 뒤 ``ST_Covers``를
+    적용한다. ``ST_Transform``을 공간 술어에 넣지 않는다.
+    """
+    rows = (
+        await session.execute(
+            text(_FEATURES_CONTAINED_IN_AREA_SQL),
+            {
+                "feature_id": feature_id,
+                "kinds": _normalized_filter(kinds),
+                "limit": limit,
+            },
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 def _bbox_cursor_feature_id(cursor: str | None) -> str | None:

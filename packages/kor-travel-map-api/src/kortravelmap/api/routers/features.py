@@ -74,6 +74,24 @@ class PricePointOut(BaseModel):
     observed_at: datetime
 
 
+class WeatherSummaryOut(BaseModel):
+    """지도 marker용 최신 현재기온 요약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str | None = None
+    weather_domain: str | None = None
+    forecast_style: str | None = None
+    metric_key: str
+    metric_name: str | None = None
+    value_number: float | None = None
+    value_text: str | None = None
+    unit: str | None = None
+    issued_at: datetime | None = None
+    valid_at: datetime | None = None
+    observed_at: datetime | None = None
+
+
 class FeatureSummary(BaseModel):
     """지도/목록용 경량 feature 표현 (bbox 조회 결과 1건)."""
 
@@ -99,6 +117,10 @@ class FeatureSummary(BaseModel):
     price_summary: list[PricePointOut] | None = Field(
         default=None,
         description="kind=price일 때 제품별 최신 가격 요약.",
+    )
+    weather_summary: WeatherSummaryOut | None = Field(
+        default=None,
+        description="kind=weather일 때 현재기온(T1H/TMP) marker 요약.",
     )
 
 
@@ -130,6 +152,10 @@ class FeatureDetailResponse(BaseModel):
     category: str
     lon: float | None = None
     lat: float | None = None
+    area_square_meters: float | None = Field(
+        default=None,
+        description="kind=area이고 geometry가 있으면 면적(m²).",
+    )
     address: dict[str, Any]
     detail: dict[str, Any]
     urls: dict[str, Any]
@@ -252,6 +278,25 @@ class FeatureSearchResponse(BaseModel):
     meta: Meta
 
 
+class AreaContainedFeaturesData(BaseModel):
+    """``GET /features/{feature_id}/contained-features`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    area_feature_id: str
+    area_square_meters: float | None = None
+    items: list[FeatureSummary]
+
+
+class AreaContainedFeaturesResponse(BaseModel):
+    """area feature 안에 포함된 point feature 목록 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AreaContainedFeaturesData
+    meta: Meta
+
+
 class NearbyTargetSummary(BaseModel):
     """주변 조회 기준 public target summary."""
 
@@ -361,6 +406,7 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         category=row["category"],
         lon=row["lon"],
         lat=row["lat"],
+        area_square_meters=row.get("area_square_meters"),
         address=row["address"],
         detail=row["detail"],
         urls=row["urls"],
@@ -902,6 +948,53 @@ async def get_feature_weather(
             is_stale=card.is_stale,
         ),
         meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/contained-features",
+    response_model=AreaContainedFeaturesResponse,
+    summary="area feature 안에 포함된 point feature 목록",
+    responses={
+        404: {"description": "feature_id 없음"},
+        422: {"description": "area feature가 아님"},
+    },
+)
+async def get_area_contained_features(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    kind: Annotated[
+        list[str] | None,
+        Query(description="포함 feature kind 필터 (반복 가능). 미지정 시 전체."),
+    ] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> AreaContainedFeaturesResponse:
+    started_at = perf_counter()
+    area_row = await feature_repo.get_feature_row(session, feature_id)
+    if area_row is None or area_row["deleted_at"] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    if area_row["kind"] != "area":
+        raise HTTPException(
+            status_code=422,
+            detail=f"area feature가 아닙니다: {feature_id!r}",
+        )
+    rows = await feature_repo.features_contained_in_area(
+        session,
+        feature_id=feature_id,
+        kinds=kind,
+        limit=page_size,
+    )
+    return AreaContainedFeaturesResponse(
+        data=AreaContainedFeaturesData(
+            area_feature_id=feature_id,
+            area_square_meters=area_row.get("area_square_meters"),
+            items=[FeatureSummary(**row) for row in rows],
+        ),
+        meta=make_meta(request, started_at=started_at, page_size=page_size),
     )
 
 

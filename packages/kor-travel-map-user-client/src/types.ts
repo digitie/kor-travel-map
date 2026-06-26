@@ -698,6 +698,11 @@ export interface components {
             address: {
                 [key: string]: unknown;
             };
+            /**
+             * Area Square Meters
+             * @description kind=area이고 geometry가 있으면 면적(m²).
+             */
+            area_square_meters?: number | null;
             /** Category */
             category: string;
             /** Detail */
@@ -806,6 +811,8 @@ export interface components {
             price_summary?: components["schemas"]["PricePointOut"][] | null;
             /** Status */
             status: string;
+            /** @description kind=weather일 때 현재기온(T1H/TMP) marker 요약. */
+            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
         /**
          * FeatureWeatherResponse
@@ -1380,6 +1387,34 @@ export interface components {
             value_number?: number | null;
             /** Value Text */
             value_text?: string | null;
+        };
+        /**
+         * WeatherSummaryOut
+         * @description 지도 marker용 최신 현재기온 요약.
+         */
+        WeatherSummaryOut: {
+            /** Forecast Style */
+            forecast_style?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Weather Domain */
+            weather_domain?: string | null;
         };
     };
     responses: never;

@@ -53,7 +53,14 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            service_token=None,
+            vworld_api_key=None,
+        )
+    )
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
@@ -101,6 +108,7 @@ def _feature_detail() -> AdminFeatureDetail:
         lon=126.9769,
         lat=37.5759,
         coord_precision_digits=5,
+        area_square_meters=None,
         address={"road": "서울특별시 종로구 세종대로 1"},
         detail={"place_kind": "attraction"},
         urls={"homepage": "https://example.test"},

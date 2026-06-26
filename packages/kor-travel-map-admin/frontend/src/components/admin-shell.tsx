@@ -12,6 +12,8 @@ import {
   LinkIcon,
   ListChecksIcon,
   MapIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   UploadCloudIcon,
   RefreshCwIcon,
   RadarIcon,
@@ -23,7 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -71,6 +73,8 @@ const navItems = [
   { href: "/etl", label: "ETL preview", icon: DatabaseIcon },
 ] as const;
 
+const SIDEBAR_COLLAPSED_KEY = "kor-travel-map:sidebar-collapsed";
+
 function isActive(pathname: string, href: string) {
   if (href === "/") {
     return pathname === "/";
@@ -92,44 +96,111 @@ export function AdminShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  });
   const activeHref = navItems
     .filter((item) => isActive(pathname, item.href))
     .toSorted((a, b) => b.href.length - a.href.length)[0]?.href;
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
+
   return (
     <main className="min-h-screen bg-surface-page text-text-primary">
-      <div className="grid min-h-screen min-w-0 lg:grid-cols-[17rem_1fr]">
+      <div
+        className={cn(
+          "grid min-h-screen min-w-0",
+          sidebarCollapsed
+            ? "lg:grid-cols-[4.75rem_1fr]"
+            : "lg:grid-cols-[17rem_1fr]",
+        )}
+      >
         <aside className="min-w-0 border-b border-surface-muted bg-card shadow-[var(--shadow-card)] lg:border-r lg:border-b-0">
-          <div className="flex h-full min-w-0 flex-col gap-5 p-5">
-            <Link className="flex items-center gap-2 text-text-primary" href="/">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
-                <MapIcon className="size-4" />
-              </span>
-              <span className="text-[14px] font-bold">kor-travel-map</span>
-            </Link>
-            <nav className="flex max-w-full gap-1 overflow-x-auto lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:pr-1">
+          <div
+            className={cn(
+              "flex h-full min-w-0 flex-col gap-5 p-5",
+              sidebarCollapsed && "lg:items-center lg:p-3",
+            )}
+          >
+            <div
+              className={cn(
+                "flex w-full items-center justify-between gap-2",
+                sidebarCollapsed && "lg:flex-col",
+              )}
+            >
+              <Link
+                className={cn(
+                  "flex min-w-0 items-center gap-2 text-text-primary",
+                  sidebarCollapsed && "lg:justify-center",
+                )}
+                href="/"
+                title="kor-travel-map"
+              >
+                <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
+                  <MapIcon className="size-4" />
+                </span>
+                <span
+                  className={cn(
+                    "truncate text-[14px] font-bold",
+                    sidebarCollapsed && "lg:hidden",
+                  )}
+                >
+                  kor-travel-map
+                </span>
+              </Link>
+              <button
+                aria-label={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                  "hidden lg:inline-flex",
+                )}
+                title={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
+                type="button"
+                onClick={toggleSidebar}
+              >
+                {sidebarCollapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
+              </button>
+            </div>
+            <nav
+              className={cn(
+                "flex max-w-full gap-1 overflow-x-auto lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:pr-1",
+                sidebarCollapsed && "lg:items-center lg:pr-0",
+              )}
+            >
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = item.href === activeHref;
                 return (
                   <Link
+                    aria-label={sidebarCollapsed ? item.label : undefined}
                     className={cn(
                       buttonVariants({
                         variant: active ? "secondary" : "ghost",
                         size: "sm",
                       }),
                       "justify-start whitespace-nowrap",
+                      sidebarCollapsed && "lg:size-10 lg:justify-center lg:p-0",
                     )}
                     href={item.href}
                     key={item.href}
+                    title={item.label}
                   >
                     <Icon data-icon="inline-start" />
-                    {item.label}
+                    <span className={cn(sidebarCollapsed && "lg:hidden")}>
+                      {item.label}
+                    </span>
                   </Link>
                 );
               })}
             </nav>
-            <ButtonLogout />
+            <ButtonLogout collapsed={sidebarCollapsed} />
           </div>
         </aside>
         <div className="min-w-0">
@@ -161,18 +232,21 @@ export function AdminShell({
   );
 }
 
-function ButtonLogout() {
+function ButtonLogout({ collapsed }: { collapsed: boolean }) {
   return (
     <button
+      aria-label={collapsed ? "로그아웃" : undefined}
       className={cn(
         buttonVariants({ variant: "ghost", size: "sm" }),
         "mt-auto justify-start text-text-secondary",
+        collapsed && "lg:size-10 lg:justify-center lg:p-0",
       )}
+      title="로그아웃"
       type="button"
       onClick={() => void logout()}
     >
       <LogOutIcon data-icon="inline-start" />
-      로그아웃
+      <span className={cn(collapsed && "lg:hidden")}>로그아웃</span>
     </button>
   );
 }

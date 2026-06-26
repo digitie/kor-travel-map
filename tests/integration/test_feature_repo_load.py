@@ -290,6 +290,58 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
     assert float(area["area_square_meters"]) > 0
 
 
+async def test_features_contained_in_area_returns_points_inside_polygon(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category,
+                coord, coord_precision_digits, geom,
+                marker_icon, marker_color, status
+            )
+            VALUES
+            (
+                'f_area_contains_query', 'area', '포함 영역', '03000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
+                6,
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))'
+                    ),
+                    4326
+                ),
+                'park', 'P-06', 'active'
+            ),
+            (
+                'f_area_inside_point', 'place', '안쪽 장소', '01000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.04, 37.54), 4326),
+                6, NULL, 'star', 'P-03', 'active'
+            ),
+            (
+                'f_area_outside_point', 'place', '바깥 장소', '01000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5, 37.9), 4326),
+                6, NULL, 'star', 'P-03', 'active'
+            )
+            """
+        )
+    )
+    await migrated_session.flush()
+
+    rows = await feature_repo.features_contained_in_area(
+        migrated_session,
+        feature_id="f_area_contains_query",
+    )
+    ids = {row["feature_id"] for row in rows}
+
+    assert "f_area_inside_point" in ids
+    assert "f_area_outside_point" not in ids
+    inside = next(row for row in rows if row["feature_id"] == "f_area_inside_point")
+    assert inside["kind"] == "place"
+    assert inside["status"] == "active"
+
+
 async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
     migrated_session: AsyncSession,
 ) -> None:
