@@ -205,8 +205,10 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_MARKER_ICON,
     OpinetPriceItem,
     OpinetStationItem,
+    OpinetStationPriceItem,
     prices_to_values,
     stations_to_bundles,
+    stations_to_price_features_and_values,
 )
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
@@ -362,7 +364,9 @@ __all__ = [
     # opinet (PR#42 prices, PR#43 stations)
     "OpinetPriceItem",
     "OpinetStationItem",
+    "OpinetStationPriceItem",
     "prices_to_values",
+    "stations_to_price_features_and_values",
     "stations_to_bundles",
     "MCST_EXCLUDED_FILE_DATASETS",
     "MCST_FILE_DATASETS",

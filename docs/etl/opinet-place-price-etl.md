@@ -18,12 +18,12 @@
 | marker_icon | `fuel` (maki) |
 | marker_color | `P-08` (주황) |
 | place 갱신 주기 | 월 1회 또는 OpiNet 분기 갱신 |
-| price 갱신 주기 | 일 3회 (`0 6,14,22 * * *`) |
+| price 갱신 주기 | 일 2회 (`18 6,18 * * *`) |
 
 ## 2. 범위 / 책임
 
-- `python-opinet-api`: OpiNet REST 호출, typed model (`StationDetail`,
-  `StationPrice`), pagination, KATEC (EPSG:5181) 좌표 처리.
+- `python-opinet-api`: OpiNet REST 호출, typed model (`Station`,
+  `StationDetail`, `OilPrice`), KATEC (EPSG:5181) 좌표 처리.
 - `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
   `Feature(kind=price)` + `PriceValue`, DB 적재.
 - kor-travel-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
@@ -33,12 +33,16 @@
 ```python
 from kortravelmap.providers.opinet import (
     station_details_to_price_features_and_values,
+    stations_to_price_features_and_values,
     stations_to_bundles,
 )
 
 place_bundles = await stations_to_bundles(station_rows, fetched_at=fetched_at)
 price_bundles, price_values = await station_details_to_price_features_and_values(
     station_detail_rows, fetched_at=fetched_at
+)
+low_top_price_bundles, low_top_price_values = await stations_to_price_features_and_values(
+    low_top_station_rows, fetched_at=fetched_at
 )
 ```
 
@@ -110,33 +114,40 @@ OpiNet 시설 정보:
 `station_details_to_price_features_and_values([detail], ...)`로 변환한 뒤
 `AsyncKorTravelMapClient.load_price_features(...)`에 전달한다.
 
-### 8.2 전체 station 적재
+### 8.2 운영 scope
 
-`python-opinet-api`의 `aiter_all_stations()` 사용:
+OpiNet 공개 API에는 전국/지역 단위 전체 주유소 bulk endpoint가 없다. 공개 5종 중
+좌표가 있는 주유소 row를 주는 경로는 `aroundAll`(반경 5km 이하),
+`lowTop10`(저가 목록), `detailById`(단건)뿐이다.
 
-```python
-async def update_all_stations(opinet_client, map_client, reverse_geocoder):
-    async for batch in _batched(opinet_client.aiter_all_stations(), size=200):
-        bundles = await stations_to_bundles(
-            batch, fetched_at=kst_now(), reverse_geocoder=reverse_geocoder
-        )
-        await map_client.load_feature_bundles(bundles)
-```
+- `OPINET_SCOPE_MODE=bbox`: 운영자가 지정한 bbox를 `aroundAll` 격자로 덮는다. 시군구 등
+  작은 영역용이다. 전국 bbox는 1만 회 이상 호출되어 OpiNet 일일 한도를 넘을 수 있다.
+- `OPINET_SCOPE_MODE=poi_cache_target`: 등록된 active cache target 주변만 `aroundAll`
+  격자로 덮는다.
+- `OPINET_SCOPE_MODE=low_top_area`: 전국 시군구별 `lowTop10`을 휘발유/경유/고급휘발유
+  3종으로 호출한다. 전체 주유소는 아니지만 전국 분포를 OpiNet 일일 한도 안에서 제공한다.
 
 OpiNet 분당 60회 쿼터 — Dagster `ConcurrencyConfig(opinet_api,
 max_concurrent=1)` + provider 라이브러리의 token bucket.
 
-### 8.3 가격 시계열만 갱신 (일 3회)
+### 8.3 가격 시계열만 갱신 (일 2회)
 
-기존 station place feature는 그대로 두고 price anchor feature와 PriceValue를 적재:
+기존 station place feature는 그대로 두고 price anchor feature와 PriceValue를 적재한다.
+`bbox`/`poi_cache_target`은 `detailById`의 제품별 가격을 쓰고, `low_top_area`는
+`lowTop10` Station row의 단일 제품 가격을 같은 price anchor에 누적한다.
 
 ```python
 async def refresh_prices(map_client, settings):
     """현재 모든 station의 최신 가격만 갱신."""
     details = await fetch_opinet_station_price_details(settings)
-    bundles, values = await station_details_to_price_features_and_values(
-        details, fetched_at=kst_now()
-    )
+    if details and hasattr(details[0], "prices"):
+        bundles, values = await station_details_to_price_features_and_values(
+            details, fetched_at=kst_now()
+        )
+    else:
+        bundles, values = await stations_to_price_features_and_values(
+            details, fetched_at=kst_now()
+        )
     await map_client.load_price_features(bundles, values)
 ```
 

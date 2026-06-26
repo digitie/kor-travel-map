@@ -69,11 +69,13 @@ from kortravelmap.geocoding import (
 
 __all__ = [
     "OpinetPriceItem",
+    "OpinetStationPriceItem",
     "OpinetStationDetailItem",
     "OpinetStationDetailPriceItem",
     "OpinetStationItem",
     "prices_to_values",
     "station_details_to_price_features_and_values",
+    "stations_to_price_features_and_values",
     "stations_to_bundles",
     # 메타
     "OPINET_PROVIDER_NAME",
@@ -217,6 +219,29 @@ class OpinetStationDetailPriceItem(Protocol):
 
 
 @runtime_checkable
+class OpinetStationPriceItem(OpinetStationItem, Protocol):
+    """OpiNet ``lowTop10``/``aroundAll`` Station row의 단일 제품 가격 shape."""
+
+    price: str | Decimal | int | float | None
+    """판매가 (KRW/L). None이면 skip."""
+
+    product_code: Any
+    """provider ``ProductCode`` enum 또는 문자열."""
+
+    product_name: str | None
+    """provider 제품명."""
+
+    trade_date: Any
+    """거래일. 없으면 asset ``fetched_at``을 관측시각으로 쓴다."""
+
+    trade_time: Any
+    """거래시각. 없으면 asset ``fetched_at``을 관측시각으로 쓴다."""
+
+    raw: Mapping[str, Any]
+    """provider raw payload."""
+
+
+@runtime_checkable
 class OpinetStationDetailItem(OpinetStationItem, Protocol):
     """OpiNet ``StationDetail`` row shape (station + nested prices)."""
 
@@ -263,6 +288,22 @@ def _product_code_text(value: Any) -> str:
     if isinstance(enum_value, str):
         return enum_value
     return str(value)
+
+
+def _station_product_code_text(item: OpinetStationPriceItem) -> str | None:
+    value = getattr(item, "product_code", None)
+    if value is not None:
+        text = _product_code_text(value).strip()
+        if text and text != "None":
+            return text
+    raw = getattr(item, "raw", {})
+    if isinstance(raw, Mapping):
+        raw_code = raw.get("PRODCD")
+        if raw_code is not None:
+            text = str(raw_code).strip()
+            if text:
+                return text
+    return None
 
 
 def _combine_trade_datetime(trade_date: Any, trade_time: Any) -> datetime:
@@ -563,6 +604,180 @@ async def station_details_to_price_features_and_values(
         bundle, item_values = converted
         bundles.append(bundle)
         values.extend(item_values)
+    return bundles, values
+
+
+# -- lowTop10/aroundAll Station → price Feature + PriceValue --------------
+
+
+def _station_price_observed_at(
+    item: OpinetStationPriceItem, *, fallback: datetime
+) -> datetime:
+    trade_date = getattr(item, "trade_date", None)
+    trade_time = getattr(item, "trade_time", None)
+    if trade_date is not None and trade_time is not None:
+        return _combine_trade_datetime(trade_date, trade_time)
+    return fallback
+
+
+async def _station_price_to_bundle_and_value(
+    item: OpinetStationPriceItem,
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> tuple[FeatureBundle, PriceValue] | None:
+    raw_price = getattr(item, "price", None)
+    prodcd = _station_product_code_text(item)
+    if raw_price is None or prodcd is None:
+        return None
+
+    station_bundle = await _station_item_to_bundle(
+        item,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
+    )
+    station_feature = station_bundle.feature
+    product_key = OPINET_PRODUCT_KEY_MAP.get(prodcd, prodcd.lower())
+    product_name = OPINET_PRODUCT_NAME_KO.get(product_key) or getattr(
+        item, "product_name", None
+    )
+    observed_at = _station_price_observed_at(item, fallback=fetched_at)
+    value_number = _parse_price_value(raw_price)
+    raw = _jsonable_raw(getattr(item, "raw", {}))
+    name_normalized = normalize_korean_text(item.name) or item.name
+
+    raw_data: dict[str, Any] = {
+        "uni_id": item.uni_id,
+        "name": item.name,
+        "brand": _brand_code(item.brand),
+        "address_road": item.address_road,
+        "address_jibun": item.address_jibun,
+        "lon": str(item.lon) if item.lon is not None else None,
+        "lat": str(item.lat) if item.lat is not None else None,
+        "prodcd": prodcd,
+        "product_key": product_key,
+        "price": str(raw_price),
+        "observed_at": observed_at.isoformat(),
+        "raw": raw,
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=OPINET_PROVIDER_NAME,
+        dataset_key=OPINET_PRICE_DATASET_KEY,
+        source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
+        source_entity_id=f"{item.uni_id}:{prodcd}",
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=station_feature.address.bjd_code,
+        kind=FeatureKind.PRICE.value,
+        category=OPINET_STATION_CATEGORY,
+        source_type=f"{OPINET_PROVIDER_NAME}:{OPINET_PRICE_DATASET_KEY}",
+        source_natural_key=item.uni_id,
+    )
+
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.PRICE,
+        name=f"{name_normalized} 유가",
+        coord=station_feature.coord,
+        address=station_feature.address,
+        category=OPINET_STATION_CATEGORY,
+        marker_icon=OPINET_STATION_MARKER_ICON,
+        marker_color=OPINET_STATION_MARKER_COLOR,
+        parent_feature_id=station_feature.feature_id,
+        detail=None,
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
+        dataset_key=OPINET_PRICE_DATASET_KEY,
+        source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
+        source_entity_id=f"{item.uni_id}:{prodcd}",
+        raw_payload_hash=payload_hash,
+        raw_name=item.name,
+        raw_address=item.address_road or item.address_jibun,
+        raw_longitude=(
+            station_feature.coord.lon if station_feature.coord is not None else None
+        ),
+        raw_latitude=(
+            station_feature.coord.lat if station_feature.coord is not None else None
+        ),
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    value = PriceValue(
+        feature_id=feature_id,
+        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
+        price_domain=PriceDomain.OPINET_GAS_STATION,
+        product_key=product_key,
+        product_name=product_name,
+        source_product_key=prodcd,
+        source_product_name=getattr(item, "product_name", None),
+        observed_at=observed_at,
+        value_number=value_number,
+        unit="KRW/L",
+        normalization_version="opinet-v1.0",
+        payload=raw_data,
+        source_record_key=source_record_key,
+    )
+    return (
+        FeatureBundle(
+            feature=feature,
+            source_record=source_record,
+            source_link=source_link,
+        ),
+        value,
+    )
+
+
+async def stations_to_price_features_and_values(
+    items: Iterable[OpinetStationPriceItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> tuple[list[FeatureBundle], list[PriceValue]]:
+    """OpiNet Station 단일 제품 가격 → price-kind Feature + ``PriceValue``.
+
+    ``lowTop10``은 주유소별 전체 가격 detail이 아니라 요청 제품 1개의 가격만
+    반환한다. 이 경로는 그 단일 제품 가격을 같은 price anchor feature에
+    누적해, 전국 저가 주유소 분포를 쿼터 안에서 표시하기 위한 보조 적재다.
+    """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
+    bundles: list[FeatureBundle] = []
+    values: list[PriceValue] = []
+    for item in items:
+        converted = await _station_price_to_bundle_and_value(
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+        )
+        if converted is None:
+            continue
+        bundle, value = converted
+        bundles.append(bundle)
+        values.append(value)
     return bundles, values
 
 
