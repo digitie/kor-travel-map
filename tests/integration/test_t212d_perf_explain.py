@@ -640,6 +640,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "cursor_score": None,
             "cursor_review_id": None,
             "limit_plus_one": 51,
+            "offset_rows": 0,
         },
     )
     _assert_uses_index(dedup, "idx_dedup_status_score")
@@ -656,6 +657,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "cursor_score": None,
             "cursor_review_id": None,
             "limit_plus_one": 51,
+            "offset_rows": 0,
         },
     )
     _assert_uses_index(enrichment, "idx_enrichment_review_status_score")
@@ -674,6 +676,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "cursor_score": None,
             "cursor_review_id": None,
             "limit_plus_one": 51,
+            "offset_rows": 0,
         },
     )
     _assert_uses_index(
@@ -694,6 +697,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "cursor_score": None,
             "cursor_review_id": None,
             "limit_plus_one": 51,
+            "offset_rows": 0,
         },
     )
     _assert_no_seq_scan_on(enrichment_multi_provider, "enrichment_review_queue")
