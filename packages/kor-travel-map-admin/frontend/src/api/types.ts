@@ -977,8 +977,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * ETL preview 가능한 provider + dataset 목록
-         * @description fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.
+         * ETL 카탈로그 provider + dataset 목록
+         * @description 시스템이 ETL 하는 **전 provider×dataset 카탈로그**(`provider_catalog.PROVIDER_DATASET_CATALOG`). fixture 등록 여부와 무관하게 mois/knps/krheritage/mcst 등 모든 provider가 나온다. 각 dataset의 `preview` 필드(`fixture`/`live`/`none`)로 preview 가용성을 확인할 수 있다.
          */
         get: operations["get_providers_v1_debug_etl_providers_get"];
         put?: never;
@@ -1485,7 +1485,13 @@ export interface paths {
         };
         /**
          * provider 운영 상세 목록
-         * @description 전 provider×dataset의 sync state와 refresh policy를 함께 조회한다.
+         * @description 전 카탈로그 provider×dataset을 sync state·refresh policy와 LEFT JOIN 한다.
+         *
+         *     기존에는 ``provider_sync_state``에 row가 있는(=한 번이라도 RUN 된) provider만
+         *     나와서 mois/knps/krheritage처럼 아직 적재되지 않은 provider가 목록에서 빠졌다.
+         *     이제는 ``provider_catalog``의 **feature-load dataset 전체**를 base set으로 두고
+         *     sync state/policy를 LEFT JOIN 해, never-run dataset도 ``status='never_run'`` +
+         *     null timestamp로 노출한다(D-07).
          *
          *     ``/v1/providers``는 사용자/서비스 표면이라 cursor를 계속 숨긴다. 이 endpoint는
          *     admin UI 내부 운영 화면이 쓰는 확장 표면이다.
@@ -1509,6 +1515,10 @@ export interface paths {
         /**
          * provider 운영 상세
          * @description provider의 dataset별 sync state, refresh policy, 최근 update request.
+         *
+         *     이 단건 상세는 기존 동작을 그대로 유지한다 — sync state·policy가 있는 dataset만
+         *     추적하고, 둘 다 없으면 404. 목록(`/ops/providers`)이 never-run 카탈로그 row까지
+         *     노출하는 것과 별개로, 상세는 실제 추적 단위(sync/policy row)에 한정한다.
          */
         get: operations["get_ops_provider_v1_ops_providers__provider__get"];
         put?: never;
@@ -6665,14 +6675,30 @@ export interface components {
             /** Description */
             description: string;
             /**
+             * Feature Kind
+             * @description 산출 Feature 종류 (place/event/notice/price/weather/route/area).
+             */
+            feature_kind: string;
+            /**
+             * Is Feature Load
+             * @description 새 Feature(FeatureBundle) 적재 여부 (WeatherValue/PriceValue는 False).
+             */
+            is_feature_load: boolean;
+            /**
              * Live Supported
              * @description `?source=live` 활성 여부. False면 fixture만 — live 호출은 501. PR#47부터 KMA 3 dataset 활성.
              * @default false
              */
             live_supported: boolean;
             /**
+             * Preview
+             * @description ETL preview 가용성 — `fixture`(오프라인 replay) / `live`(provider 실호출) / `none`(미배선). `none`이면 preview는 'no preview fixture (use live)' 안내(404)로 응답.
+             * @default none
+             */
+            preview: string;
+            /**
              * Variant
-             * @description `FeatureBundle` / `WeatherValue` / `PriceValue`.
+             * @description `FeatureBundle` / `WeatherValue` / `PriceValue`. fixture 미등록 dataset은 카탈로그 feature_kind 기반 추정값.
              */
             variant: string;
         };

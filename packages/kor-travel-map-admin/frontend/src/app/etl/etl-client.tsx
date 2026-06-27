@@ -48,6 +48,17 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+// dataset의 preview 가용성 라벨 (백엔드 preview: fixture/live/none).
+function previewSuffix(preview: string | undefined): string {
+  if (preview === "fixture") {
+    return "preview: fixture";
+  }
+  if (preview === "live") {
+    return "preview: live only";
+  }
+  return "preview: none";
+}
+
 export function EtlPreviewClient() {
   const providersQuery = useProviders();
   const previewMutation = useEtlPreviewMutation();
@@ -65,11 +76,19 @@ export function EtlPreviewClient() {
     control: form.control,
     name: "provider",
   });
+  const dataset = useWatch({
+    control: form.control,
+    name: "dataset",
+  });
   const datasets = useMemo(
     () =>
       providersQuery.data?.data.providers.find((p) => p.provider === provider)
         ?.datasets ?? [],
     [provider, providersQuery.data],
+  );
+  const selectedDataset = useMemo(
+    () => datasets.find((entry) => entry.dataset === dataset) ?? null,
+    [dataset, datasets],
   );
 
   const providerField = form.register("provider");
@@ -182,13 +201,36 @@ export function EtlPreviewClient() {
                             key={entry.dataset}
                             value={entry.dataset}
                           >
-                            {entry.dataset} [{entry.variant}]
+                            {entry.dataset} [{entry.variant}] ·{" "}
+                            {previewSuffix(entry.preview)}
                           </NativeSelectOption>
                         ))}
                       </NativeSelect>
                       <FieldDescription>
-                        provider를 바꾸면 dataset 선택은 초기화됩니다.
+                        provider를 바꾸면 dataset 선택은 초기화됩니다. preview가
+                        none이면 변환 fixture가 없어 미리보기를 만들 수 없습니다.
                       </FieldDescription>
+                      {selectedDataset ? (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <Badge variant="outline">
+                            {selectedDataset.feature_kind}
+                          </Badge>
+                          {selectedDataset.is_feature_load ? (
+                            <Badge variant="secondary">feature load</Badge>
+                          ) : (
+                            <Badge variant="outline">value/enrichment</Badge>
+                          )}
+                          <Badge
+                            variant={
+                              selectedDataset.preview === "none"
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            {previewSuffix(selectedDataset.preview)}
+                          </Badge>
+                        </div>
+                      ) : null}
                       <FieldError errors={[form.formState.errors.dataset]} />
                     </Field>
 

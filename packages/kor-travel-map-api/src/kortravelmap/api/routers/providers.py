@@ -31,6 +31,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.provider_catalog import (
+    catalog_feature_load_entries,
+)
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyRecord,
     provider_refresh_policy_record,
@@ -38,6 +41,10 @@ from kortravelmap.api.provider_refresh_schema import (
 from kortravelmap.api.response import Meta, make_meta
 
 router = APIRouter(tags=["providers"])
+
+# 카탈로그에는 있으나 아직 한 번도 적재되지 않은 (provider, dataset) status.
+# provider_sync_state row가 없는 카탈로그 항목에 부여한다 (D-07 never-run 가시화).
+_NEVER_RUN_STATUS = "never_run"
 
 
 class SyncStateSummary(BaseModel):
@@ -241,10 +248,7 @@ def _dataset_links(provider: str, dataset_key: str) -> list[OpsProviderLink]:
         ),
         OpsProviderLink(
             rel="refresh_policy",
-            href=(
-                "/v1/admin/provider-refresh-policies/"
-                f"{provider_path}/{dataset_path}"
-            ),
+            href=(f"/v1/admin/provider-refresh-policies/{provider_path}/{dataset_path}"),
             label="provider refresh policy",
         ),
     ]
@@ -262,17 +266,17 @@ def _ops_summary(
     dataset_key: str,
     state: SyncState | None,
     policy: ProviderRefreshPolicy | None,
+    sync_scope: str = "default",
+    status_when_unsynced: str = "not_synced",
 ) -> OpsProviderDatasetSummary:
     return OpsProviderDatasetSummary(
         provider=provider,
         dataset_key=dataset_key,
-        sync_scope=state.sync_scope if state is not None else "default",
-        status=state.status if state is not None else "not_synced",
+        sync_scope=state.sync_scope if state is not None else sync_scope,
+        status=state.status if state is not None else status_when_unsynced,
         last_success_at=state.last_success_at if state is not None else None,
         last_failure_at=state.last_failure_at if state is not None else None,
-        consecutive_failures=(
-            state.consecutive_failures if state is not None else 0
-        ),
+        consecutive_failures=(state.consecutive_failures if state is not None else 0),
         next_run_after=state.next_run_after if state is not None else None,
         refresh_policy=_policy_record(policy),
         links=_dataset_links(provider, dataset_key),
@@ -348,7 +352,13 @@ async def list_providers_freshness(
 async def list_ops_providers(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsProvidersResponse:
-    """전 provider×dataset의 sync state와 refresh policy를 함께 조회한다.
+    """전 카탈로그 provider×dataset을 sync state·refresh policy와 LEFT JOIN 한다.
+
+    기존에는 ``provider_sync_state``에 row가 있는(=한 번이라도 RUN 된) provider만
+    나와서 mois/knps/krheritage처럼 아직 적재되지 않은 provider가 목록에서 빠졌다.
+    이제는 ``provider_catalog``의 **feature-load dataset 전체**를 base set으로 두고
+    sync state/policy를 LEFT JOIN 해, never-run dataset도 ``status='never_run'`` +
+    null timestamp로 노출한다(D-07).
 
     ``/v1/providers``는 사용자/서비스 표면이라 cursor를 계속 숨긴다. 이 endpoint는
     admin UI 내부 운영 화면이 쓰는 확장 표면이다.
@@ -357,6 +367,8 @@ async def list_ops_providers(
     states = await sync_state_repo.list_all_sync_states(session)
     policies = await list_provider_refresh_policies(session, limit=500)
     policy_by_key = {_policy_key(policy): policy for policy in policies}
+
+    # 1) sync state가 있는 (provider, dataset, scope) — 기존 동작/필드 보존.
     items = [
         _ops_summary(
             provider=state.provider,
@@ -367,7 +379,10 @@ async def list_ops_providers(
         for state in states
     ]
     state_keys = {_state_key(state) for state in states}
-    for provider, dataset_key in sorted(set(policy_by_key) - state_keys):
+
+    # 2) policy만 있고 sync state 없는 row — 기존 동작 보존.
+    policy_only_keys = sorted(set(policy_by_key) - state_keys)
+    for provider, dataset_key in policy_only_keys:
         items.append(
             _ops_summary(
                 provider=provider,
@@ -376,6 +391,25 @@ async def list_ops_providers(
                 policy=policy_by_key[(provider, dataset_key)],
             )
         )
+
+    # 3) 카탈로그 feature-load dataset 중 sync state·policy 둘 다 없는 never-run
+    #    항목 — status='never_run'으로 노출(이전엔 목록에서 누락됐던 부분).
+    covered_keys = state_keys | set(policy_only_keys)
+    for entry in catalog_feature_load_entries():
+        key = (entry.provider, entry.dataset_key)
+        if key in covered_keys:
+            continue
+        items.append(
+            _ops_summary(
+                provider=entry.provider,
+                dataset_key=entry.dataset_key,
+                state=None,
+                policy=None,
+                sync_scope=entry.sync_scope,
+                status_when_unsynced=_NEVER_RUN_STATUS,
+            )
+        )
+
     return OpsProvidersResponse(
         data=OpsProvidersData(items=items),
         meta=make_meta(started_at=started_at),
@@ -392,12 +426,15 @@ async def get_ops_provider(
     provider: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsProviderDetailResponse:
-    """provider의 dataset별 sync state, refresh policy, 최근 update request."""
+    """provider의 dataset별 sync state, refresh policy, 최근 update request.
+
+    이 단건 상세는 기존 동작을 그대로 유지한다 — sync state·policy가 있는 dataset만
+    추적하고, 둘 다 없으면 404. 목록(`/ops/providers`)이 never-run 카탈로그 row까지
+    노출하는 것과 별개로, 상세는 실제 추적 단위(sync/policy row)에 한정한다.
+    """
     started_at = perf_counter()
     states = await sync_state_repo.list_sync_states(session, provider=provider)
-    policies = await list_provider_refresh_policies(
-        session, provider=provider, limit=500
-    )
+    policies = await list_provider_refresh_policies(session, provider=provider, limit=500)
     states_by_dataset: dict[str, list[SyncState]] = {}
     for state in states:
         states_by_dataset.setdefault(state.dataset_key, []).append(state)

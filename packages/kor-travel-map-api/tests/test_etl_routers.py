@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
+from kortravelmap.api.provider_catalog import list_catalog_providers
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -26,15 +27,57 @@ def _data(response: Any) -> dict[str, Any]:
 
 
 @pytest.mark.unit
-def test_providers_returns_registry(client: TestClient) -> None:
+def test_providers_returns_full_catalog(client: TestClient) -> None:
     response = client.get("/v1/debug/etl/providers")
     assert response.status_code == 200
     body = _data(response)
     providers = body["providers"]
-    # registry에 있는 모든 provider 포함.
-    registry_providers = sorted({e.provider for e in FIXTURE_REGISTRY})
+    # 응답은 fixture가 아닌 전 카탈로그를 반영한다.
     response_providers = sorted(p["provider"] for p in providers)
-    assert response_providers == registry_providers
+    assert response_providers == sorted(list_catalog_providers())
+    # fixture-backed provider는 카탈로그의 부분집합이므로 모두 포함.
+    registry_providers = {e.provider for e in FIXTURE_REGISTRY}
+    assert registry_providers <= set(response_providers)
+
+
+@pytest.mark.unit
+def test_providers_lists_previously_missing_providers(client: TestClient) -> None:
+    """mois/knps/krheritage/mcst가 /etl 목록에 나온다 (이전엔 누락)."""
+    response = client.get("/v1/debug/etl/providers")
+    response_providers = {p["provider"] for p in _data(response)["providers"]}
+    assert {
+        "python-mois-api",
+        "python-knps-api",
+        "python-krheritage-api",
+        "python-mcst-api",
+    } <= response_providers
+
+
+@pytest.mark.unit
+def test_providers_dataset_exposes_preview_availability(client: TestClient) -> None:
+    """각 dataset이 preview 필드(fixture/live/none)를 노출한다."""
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
+    by_provider = {p["provider"]: p for p in body["providers"]}
+    # fixture-backed dataset은 preview=fixture.
+    dg = by_provider["data.go.kr-standard"]
+    festivals = next(d for d in dg["datasets"] if d["dataset"] == "datagokr_cultural_festivals")
+    assert festivals["preview"] == "fixture"
+    # mois bulk는 fixture/live 둘 다 없음 → preview=none.
+    mois = by_provider["python-mois-api"]
+    bulk = next(d for d in mois["datasets"] if d["dataset"] == "mois_license_features_bulk")
+    assert bulk["preview"] == "none"
+    assert bulk["feature_kind"] == "place"
+    assert bulk["is_feature_load"] is True
+
+
+@pytest.mark.unit
+def test_preview_no_fixture_returns_404_use_live(client: TestClient) -> None:
+    """fixture 미등록 카탈로그 dataset preview는 명확한 404(use live), 500 아님."""
+    response = client.post("/v1/debug/etl/python-mois-api/mois_license_features_bulk/preview")
+    assert response.status_code == 404
+    body = response.json()
+    assert "no preview fixture" in body["detail"]
 
 
 @pytest.mark.unit
@@ -77,9 +120,7 @@ def test_provider_datasets_unknown_404(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_datagokr_festival(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
-    )
+    response = client.post("/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview")
     assert response.status_code == 200
     body = _data(response)
     assert body["provider"] == "data.go.kr-standard"
@@ -97,9 +138,7 @@ def test_preview_datagokr_festival(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_kma_short_forecast(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/kma_short_forecast/preview"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/kma_short_forecast/preview")
     assert response.status_code == 200
     body = _data(response)
     assert body["variant"] == "WeatherValue"
@@ -112,9 +151,7 @@ def test_preview_kma_short_forecast(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_kma_nowcast(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/kma_ultra_short_nowcast/preview"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/kma_ultra_short_nowcast/preview")
     body = _data(response)
     assert len(body["items"]) == 5
     assert body["items"][0]["forecast_style"] == "nowcast"
@@ -125,9 +162,7 @@ def test_preview_kma_nowcast(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_opinet_stations(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-opinet-api/opinet_fuel_station_details/preview"
-    )
+    response = client.post("/v1/debug/etl/python-opinet-api/opinet_fuel_station_details/preview")
     body = _data(response)
     assert body["variant"] == "FeatureBundle"
     assert len(body["items"]) == 2
@@ -139,9 +174,7 @@ def test_preview_opinet_stations(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_opinet_prices(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-opinet-api/opinet_gas_station_prices/preview"
-    )
+    response = client.post("/v1/debug/etl/python-opinet-api/opinet_gas_station_prices/preview")
     body = _data(response)
     assert body["variant"] == "PriceValue"
     assert len(body["items"]) == 3
@@ -152,9 +185,7 @@ def test_preview_opinet_prices(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_airkorea_stations(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-airkorea-api/airkorea_stations/preview"
-    )
+    response = client.post("/v1/debug/etl/python-airkorea-api/airkorea_stations/preview")
     body = _data(response)
     assert body["variant"] == "FeatureBundle"
     assert len(body["items"]) == 1
@@ -166,9 +197,7 @@ def test_preview_airkorea_stations(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_airkorea_air_quality(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-airkorea-api/airkorea_air_quality/preview"
-    )
+    response = client.post("/v1/debug/etl/python-airkorea-api/airkorea_air_quality/preview")
     body = _data(response)
     assert body["variant"] == "WeatherValue"
     # PM10/PM2_5/O3/CAI 4종(결측 제외).
@@ -182,9 +211,7 @@ def test_preview_airkorea_air_quality(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_unknown_dataset_404(client: TestClient) -> None:
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/unknown_dataset/preview"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/unknown_dataset/preview")
     assert response.status_code == 404
     body = response.json()
     assert "등록되지 않은" in body["detail"]
@@ -204,9 +231,7 @@ def test_preview_live_source_501_when_loader_missing(
         "kortravelmap.api.routers.etl.find_live_loader",
         lambda *a, **k: None,
     )
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live")
     assert response.status_code == 501
     body = response.json()
     assert "source=live 미구현" in body["detail"]
@@ -215,9 +240,7 @@ def test_preview_live_source_501_when_loader_missing(
 @pytest.mark.unit
 def test_preview_live_kma_503_when_key_missing(client: TestClient) -> None:
     """KMA 단기예보는 live 등록됐지만 .env 키 없으면 503."""
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/kma_short_forecast/preview?source=live"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/kma_short_forecast/preview?source=live")
     assert response.status_code == 503
     body = response.json()
     assert "KMA_SERVICE_KEY 미설정" in body["detail"]
@@ -253,9 +276,7 @@ def test_providers_krex_live_supported(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_live_krex_503_when_key_missing(client: TestClient) -> None:
     """krex는 live 등록됐지만 .env 키 없으면 503."""
-    response = client.post(
-        "/v1/debug/etl/python-krex-api/krex_rest_areas/preview?source=live"
-    )
+    response = client.post("/v1/debug/etl/python-krex-api/krex_rest_areas/preview?source=live")
     assert response.status_code == 503
     body = response.json()
     assert "KREX_SERVICE_KEY 미설정" in body["detail"]
@@ -288,9 +309,7 @@ def test_providers_datagokr_live_supported(client: TestClient) -> None:
     """datagokr_cultural_festivals는 PR#57부터 live_supported=True."""
     response = client.get("/v1/debug/etl/providers")
     body = _data(response)
-    dg = next(
-        p for p in body["providers"] if p["provider"] == "data.go.kr-standard"
-    )
+    dg = next(p for p in body["providers"] if p["provider"] == "data.go.kr-standard")
     live_map = {d["dataset"]: d["live_supported"] for d in dg["datasets"]}
     assert live_map["datagokr_cultural_festivals"] is True
 
@@ -323,9 +342,7 @@ def test_preview_live_kma_alerts_503_when_both_keys_missing(
     """특보현황 live는 data.go.kr serviceKey(primary) 또는 apihub authKey(fallback)
     필요 — 둘 다 미설정 시 503. 두 키 이름 모두 안내 (KMA 소스 정책: data.go.kr 우선).
     """
-    response = client.post(
-        "/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
-    )
+    response = client.post("/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live")
     assert response.status_code == 503
     body = response.json()
     assert "KMA_APIHUB_KEY 미설정" in body["detail"]
@@ -336,8 +353,7 @@ def test_preview_live_kma_alerts_503_when_both_keys_missing(
 def test_preview_invalid_source_query_422(client: TestClient) -> None:
     """source는 Literal['fixture', 'live'] — 그 외는 FastAPI validator가 422."""
     response = client.post(
-        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
-        "?source=bogus"
+        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview?source=bogus"
     )
     assert response.status_code == 422
 
@@ -353,10 +369,7 @@ def test_cors_allows_frontend_origin(client: TestClient) -> None:
         headers={"Origin": "http://localhost:12705"},
     )
     assert response.status_code == 200
-    assert (
-        response.headers.get("access-control-allow-origin")
-        == "http://localhost:12705"
-    )
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:12705"
 
 
 @pytest.mark.unit
@@ -370,10 +383,7 @@ def test_cors_preflight_options(client: TestClient) -> None:
         },
     )
     assert response.status_code == 200
-    assert (
-        response.headers.get("access-control-allow-origin")
-        == "http://localhost:12705"
-    )
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:12705"
 
 
 # ── debug_routes_enabled=False 시 unmount ───────────────────────────

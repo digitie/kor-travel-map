@@ -275,13 +275,116 @@ def test_ops_providers_list_combines_sync_state_and_policy_only_rows(
         response = client.get("/v1/ops/providers")
         assert response.status_code == 200
         items = response.json()["data"]["items"]
-        assert [item["provider"] for item in items] == [
+        # sync-state row 먼저, 그 다음 policy-only row — 순서/필드 보존. (never-run
+        # 카탈로그 row는 그 뒤에 붙으므로 prefix만 검증한다.)
+        assert [item["provider"] for item in items[:2]] == [
             "python-mois-api",
             "python-kma-api",
         ]
         assert items[0]["refresh_policy"]["targeted_policy"] == "allow_targeted"
         assert "cursor" not in items[0]
+        # policy-only row(state 없음)는 not_synced — 기존 동작 보존.
         assert items[1]["status"] == "not_synced"
+        # 카탈로그 never-run row가 추가로 붙는다 (kma_weather_values는 카탈로그에
+        # 없는 합성 dataset이므로 policy-only로 남고, 실제 카탈로그 dataset이
+        # never_run으로 나온다).
+        statuses = {item["status"] for item in items}
+        assert "never_run" in statuses
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_ops_providers_list_includes_never_run_catalog_providers(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sync state·policy가 전혀 없어도 카탈로그 feature-load provider는 노출된다.
+
+    이전엔 provider_sync_state row가 있는 provider만 나와 mois/knps/krheritage가
+    빠졌다. 이제는 never-run dataset이 status='never_run' + null timestamp로 나온다.
+    """
+    from kortravelmap.api.routers import providers as mod
+
+    async def _empty_states(_s: Any) -> list[SyncState]:
+        return []
+
+    async def _empty_policies(_s: Any, **_kw: Any) -> tuple[ProviderRefreshPolicy, ...]:
+        return ()
+
+    monkeypatch.setattr(mod.sync_state_repo, "list_all_sync_states", _empty_states)
+    monkeypatch.setattr(mod, "list_provider_refresh_policies", _empty_policies)
+    _override_session(client)
+    try:
+        response = client.get("/v1/ops/providers")
+        assert response.status_code == 200
+        items = response.json()["data"]["items"]
+        by_key = {(i["provider"], i["dataset_key"]): i for i in items}
+        # 이전엔 누락되던 provider들이 never_run으로 나온다.
+        for provider, dataset_key in (
+            ("python-mois-api", "mois_license_features_bulk"),
+            ("python-knps-api", "knps_visitor_centers"),
+            ("python-krheritage-api", "krheritage_heritage_features"),
+            ("python-mcst-api", "mcst_world_restaurants_csv"),
+        ):
+            row = by_key[(provider, dataset_key)]
+            assert row["status"] == "never_run"
+            assert row["last_success_at"] is None
+            assert row["last_failure_at"] is None
+            assert row["consecutive_failures"] == 0
+            # never-run이어도 운영 링크는 보존.
+            assert {link["rel"] for link in row["links"]} >= {
+                "feature_update_requests",
+                "refresh_policy",
+            }
+        # 가격 시계열(PriceValue, is_feature_load=False)은 never-run 목록에 없다.
+        assert ("python-opinet-api", "opinet_gas_station_prices") not in by_key
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_ops_providers_list_preserves_synced_rows_alongside_never_run(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sync state가 있는 row는 기존 필드/값을 그대로 유지하면서 never-run과 공존한다."""
+    from kortravelmap.api.routers import providers as mod
+
+    ts = datetime(2026, 6, 12, 1, 0, tzinfo=UTC)
+    state = SyncState(
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        sync_scope="default",
+        status="active",
+        cursor={"hidden": True},
+        last_success_at=ts,
+        last_failure_at=None,
+        consecutive_failures=0,
+        next_run_after=ts,
+    )
+
+    async def _states(_s: Any) -> list[SyncState]:
+        return [state]
+
+    async def _policies(_s: Any, **_kw: Any) -> tuple[ProviderRefreshPolicy, ...]:
+        return ()
+
+    monkeypatch.setattr(mod.sync_state_repo, "list_all_sync_states", _states)
+    monkeypatch.setattr(mod, "list_provider_refresh_policies", _policies)
+    _override_session(client)
+    try:
+        response = client.get("/v1/ops/providers")
+        assert response.status_code == 200
+        items = response.json()["data"]["items"]
+        by_key = {(i["provider"], i["dataset_key"]): i for i in items}
+        synced = by_key[("python-mois-api", "mois_license_features_bulk")]
+        assert synced["status"] == "active"
+        assert synced["last_success_at"].startswith("2026-06-12")
+        assert "cursor" not in synced
+        # 같은 provider의 다른 dataset(closed)은 never-run으로 나온다.
+        closed = by_key[("python-mois-api", "mois_license_features_closed")]
+        assert closed["status"] == "never_run"
     finally:
         client.app.dependency_overrides.clear()
 
@@ -329,16 +432,10 @@ def test_ops_provider_detail_includes_cursor_policy_and_recent_requests(
         assert response.status_code == 200
         data = response.json()["data"]
         dataset = data["datasets"][0]
-        assert dataset["sync_states"][0]["cursor"] == {
-            "last_modified": "2026-06-12"
-        }
+        assert dataset["sync_states"][0]["cursor"] == {"last_modified": "2026-06-12"}
         assert dataset["refresh_policy"]["max_concurrent"] == 2
-        assert dataset["recent_update_requests"][0]["request_id"].startswith(
-            "11111111"
-        )
-        assert {
-            link["rel"] for link in dataset["links"]
-        } >= {
+        assert dataset["recent_update_requests"][0]["request_id"].startswith("11111111")
+        assert {link["rel"] for link in dataset["links"]} >= {
             "feature_update_requests",
             "create_feature_update_request",
             "refresh_policy",

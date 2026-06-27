@@ -26,14 +26,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kortravelmap.api.etl_fixtures import (
     FIXTURE_REGISTRY,
-    list_datasets,
-    list_providers,
     run_fixture_preview,
 )
 from kortravelmap.api.etl_live import (
     LIVE_LOADER_REGISTRY,
     LiveLoaderError,
     find_live_loader,
+)
+from kortravelmap.api.provider_catalog import (
+    ProviderDatasetCatalogEntry,
+    catalog_datasets,
+    find_catalog_entry,
+    list_catalog_providers,
 )
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
@@ -57,14 +61,31 @@ class _DatasetEntry(BaseModel):
 
     dataset: str
     variant: str = Field(
-        description="`FeatureBundle` / `WeatherValue` / `PriceValue`.",
+        description=(
+            "`FeatureBundle` / `WeatherValue` / `PriceValue`. fixture 미등록 "
+            "dataset은 카탈로그 feature_kind 기반 추정값."
+        ),
     )
     description: str
+    feature_kind: str = Field(
+        description="산출 Feature 종류 (place/event/notice/price/weather/route/area).",
+    )
+    is_feature_load: bool = Field(
+        description="새 Feature(FeatureBundle) 적재 여부 (WeatherValue/PriceValue는 False).",
+    )
     live_supported: bool = Field(
         default=False,
         description=(
             "`?source=live` 활성 여부. False면 fixture만 — live 호출은 501. "
             "PR#47부터 KMA 3 dataset 활성."
+        ),
+    )
+    preview: str = Field(
+        default="none",
+        description=(
+            "ETL preview 가용성 — `fixture`(오프라인 replay) / `live`(provider "
+            "실호출) / `none`(미배선). `none`이면 preview는 'no preview fixture "
+            "(use live)' 안내(404)로 응답."
         ),
     )
 
@@ -142,19 +163,42 @@ class EtlPreviewResponse(BaseModel):
 # ── helper: build dataset entries ─────────────────────────────────────
 
 
+# fixture variant는 FeatureBundle/WeatherValue/PriceValue 3종. fixture 미등록
+# dataset은 catalog의 is_feature_load/feature_kind로 variant를 추정한다 — feature
+# load면 FeatureBundle, price kind면 PriceValue, weather kind면 WeatherValue.
+def _variant_for(entry: ProviderDatasetCatalogEntry) -> str:
+    if entry.is_feature_load:
+        return "FeatureBundle"
+    if entry.feature_kind == "price":
+        return "PriceValue"
+    if entry.feature_kind == "weather":
+        return "WeatherValue"
+    return "Enrichment"
+
+
 def _dataset_entries(provider: str) -> list[_DatasetEntry]:
-    """registry에서 provider의 dataset entries 생성. ``live_supported``는
-    `etl_live.LIVE_LOADER_REGISTRY`에 매핑 여부로 결정."""
-    return [
-        _DatasetEntry(
-            dataset=e.dataset,
-            variant=e.variant,
-            description=e.description,
-            live_supported=(e.provider, e.dataset) in LIVE_LOADER_REGISTRY,
+    """카탈로그에서 provider의 dataset entries 생성.
+
+    ``preview``는 카탈로그 항목(fixture/live registry 조회)에서, ``variant``/
+    ``description``은 fixture 등록 시 그 메타를, 아니면 카탈로그 라벨/추정 variant를
+    쓴다. ``live_supported``는 `etl_live.LIVE_LOADER_REGISTRY` 매핑 여부.
+    """
+    fixture_by_key = {(e.provider, e.dataset): e for e in FIXTURE_REGISTRY}
+    entries: list[_DatasetEntry] = []
+    for entry in catalog_datasets(provider):
+        fixture = fixture_by_key.get((entry.provider, entry.dataset_key))
+        entries.append(
+            _DatasetEntry(
+                dataset=entry.dataset_key,
+                variant=fixture.variant if fixture else _variant_for(entry),
+                description=fixture.description if fixture else entry.label,
+                feature_kind=entry.feature_kind,
+                is_feature_load=entry.is_feature_load,
+                live_supported=((entry.provider, entry.dataset_key) in LIVE_LOADER_REGISTRY),
+                preview=entry.preview,
+            )
         )
-        for e in FIXTURE_REGISTRY
-        if e.provider == provider
-    ]
+    return entries
 
 
 # ── 라우터 ───────────────────────────────────────────────────────────
@@ -163,20 +207,20 @@ def _dataset_entries(provider: str) -> list[_DatasetEntry]:
 @router.get(
     "/providers",
     response_model=ProvidersResponse,
-    summary="ETL preview 가능한 provider + dataset 목록",
+    summary="ETL 카탈로그 provider + dataset 목록",
     description=(
-        "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 "
-        "lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 "
-        "자동 반영."
+        "시스템이 ETL 하는 **전 provider×dataset 카탈로그**(`provider_catalog."
+        "PROVIDER_DATASET_CATALOG`). fixture 등록 여부와 무관하게 mois/knps/"
+        "krheritage/mcst 등 모든 provider가 나온다. 각 dataset의 `preview` 필드"
+        "(`fixture`/`live`/`none`)로 preview 가용성을 확인할 수 있다."
     ),
 )
 async def get_providers() -> ProvidersResponse:
     started_at = perf_counter()
-    entries: list[_ProviderEntry] = []
-    for provider in list_providers():
-        entries.append(
-            _ProviderEntry(provider=provider, datasets=_dataset_entries(provider))
-        )
+    entries = [
+        _ProviderEntry(provider=provider, datasets=_dataset_entries(provider))
+        for provider in list_catalog_providers()
+    ]
     return ProvidersResponse(
         data=ProvidersData(providers=entries),
         meta=make_meta(started_at=started_at),
@@ -190,17 +234,14 @@ async def get_providers() -> ProvidersResponse:
 )
 async def get_provider_datasets(provider: str) -> ProviderDatasetsResponse:
     started_at = perf_counter()
-    datasets = list_datasets(provider)
+    datasets = _dataset_entries(provider)
     if not datasets:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"등록된 provider 아님: {provider!r}. "
-                f"`/debug/etl/providers`에서 확인."
-            ),
+            detail=(f"등록된 provider 아님: {provider!r}. `/debug/etl/providers`에서 확인."),
         )
     return ProviderDatasetsResponse(
-        data=ProviderDatasetsData(provider=provider, datasets=_dataset_entries(provider)),
+        data=ProviderDatasetsData(provider=provider, datasets=datasets),
         meta=make_meta(started_at=started_at),
     )
 
@@ -230,16 +271,28 @@ async def post_preview(
 ) -> EtlPreviewResponse:
     started_at = perf_counter()
     if source == "live":
-        return await _run_live_preview(
-            provider, dataset, request, started_at=started_at
-        )
+        return await _run_live_preview(provider, dataset, request, started_at=started_at)
 
     try:
         result = await run_fixture_preview(provider, dataset)
     except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        # fixture 미등록 — 카탈로그에 있으면 "use live", 없으면 unknown.
+        catalog_entry = find_catalog_entry(provider, dataset)
+        if catalog_entry is not None:
+            live_hint = (
+                "`?source=live`로 실호출 preview 가능."
+                if catalog_entry.preview == "live"
+                else "live loader도 미배선 — preview 불가."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"no preview fixture (use live): ({provider!r}, "
+                    f"{dataset!r})는 카탈로그에 있으나 fixture 미등록. "
+                    f"{live_hint}"
+                ),
+            ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     result.pop("count", None)
     return EtlPreviewResponse(
@@ -255,16 +308,14 @@ async def _run_live_preview(
     *,
     started_at: float,
 ) -> EtlPreviewResponse:
-    """``?source=live`` 분기 — provider 실 호출 + 변환 결과 응답."""
-    entry = next(
-        (
-            e
-            for e in FIXTURE_REGISTRY
-            if e.provider == provider and e.dataset == dataset
-        ),
-        None,
-    )
-    if entry is None:
+    """``?source=live`` 분기 — provider 실 호출 + 변환 결과 응답.
+
+    카탈로그에 있는 (provider, dataset)이면 fixture 미등록이어도 live preview를
+    허용한다 — variant/description은 fixture가 있으면 그 메타를, 없으면 카탈로그
+    기반 추정/라벨을 쓴다.
+    """
+    catalog_entry = find_catalog_entry(provider, dataset)
+    if catalog_entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
@@ -272,6 +323,12 @@ async def _run_live_preview(
                 f"{dataset!r}). `/debug/etl/providers`에서 확인."
             ),
         )
+    fixture = next(
+        (e for e in FIXTURE_REGISTRY if e.provider == provider and e.dataset == dataset),
+        None,
+    )
+    variant = fixture.variant if fixture else _variant_for(catalog_entry)
+    description = fixture.description if fixture else catalog_entry.label
     loader = find_live_loader(provider, dataset)
     if loader is None:
         raise HTTPException(
@@ -284,9 +341,7 @@ async def _run_live_preview(
         )
 
     # query 파라미터를 그대로 loader에 전달 (provider별 의미는 loader 자체에서).
-    params: dict[str, str] = {
-        k: v for k, v in request.query_params.items() if k != "source"
-    }
+    params: dict[str, str] = {k: v for k, v in request.query_params.items() if k != "source"}
 
     settings = ApiSettings()
     try:
@@ -303,11 +358,11 @@ async def _run_live_preview(
 
     return EtlPreviewResponse(
         data=EtlPreviewData(
-            provider=entry.provider,
-            dataset=entry.dataset,
+            provider=provider,
+            dataset=dataset,
             source="live",
-            variant=entry.variant,
-            description=entry.description,
+            variant=variant,
+            description=description,
             items=items,
         ),
         meta=make_meta(started_at=started_at),
