@@ -112,6 +112,9 @@ __all__ = [
     "rest_areas_to_bundles",
     "rest_area_prices_to_values",
     "rest_area_fuel_price_records_to_features_and_values",
+    "build_rest_area_place_locator",
+    "rest_area_place_locator_from_rows",
+    "RestAreaPlaceLocator",
     "rest_area_weather_to_values",
     "rest_area_weather_records_to_bundles",
     "rest_area_weather_records_to_values",
@@ -122,6 +125,7 @@ __all__ = [
     "REST_AREA_PRICES_DATASET_KEY",
     "REST_AREA_WEATHER_DATASET_KEY",
     "TRAFFIC_NOTICES_DATASET_KEY",
+    "REST_AREA_SOURCE_ENTITY_TYPE",
     "REST_AREA_CATEGORY",
     "TRAFFIC_NOTICE_CATEGORY",
     "REST_AREA_MARKER_ICON",
@@ -146,6 +150,10 @@ TRAFFIC_NOTICES_DATASET_KEY: Final[str] = "krex_traffic_notices"
 _REST_AREA_ENTITY_TYPE: Final[str] = "rest_area"
 _REST_AREA_PRICE_ENTITY_TYPE: Final[str] = "rest_area_price"
 _TRAFFIC_NOTICE_ENTITY_TYPE: Final[str] = "traffic_notice"
+
+REST_AREA_SOURCE_ENTITY_TYPE: Final[str] = _REST_AREA_ENTITY_TYPE
+"""휴게소 place feature의 ``source_entity_type`` 공개 별칭 — 유가 locator 조회
+(`list_primary_place_locator`) 호출자가 private 상수에 의존하지 않게 한다(#547)."""
 
 REST_AREA_CATEGORY: Final[str] = "06040101"
 """`PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX` — 고속도로 휴게소."""
@@ -718,10 +726,95 @@ def _fuel_price_raw(record: KrexRestAreaFuelPriceRecord) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
+def _normalize_match_part(value: str | None) -> str:
+    """`_rest_area_natural_key`와 동일한 성분 정규화(strip→lower)."""
+    return (value or "").strip().lower()
+
+
+def _fuel_price_match_key(record: KrexRestAreaFuelPriceRecord) -> str | None:
+    """유가 record → 휴게소 place 자연키(`name::route_name::direction`) 후보.
+
+    `restarea.fuel_prices` row의 ``service_area_name``+``route_name``+``direction``을
+    place dataset(`tn_pubr_public_rest_area_api`)의 ``_rest_area_natural_key``와
+    **동일하게 정규화**해 매칭 키를 만든다(#547). 두 dataset이 공유하는 안정
+    식별자는 없지만 휴게소명·노선·방향 세 표기는 양쪽에 다 있어, 이름 매칭으로
+    유가 feature가 place feature의 좌표·계층을 상속할 수 있다.
+
+    ``service_area_name``이 비면(이름 매칭 불가) ``None``을 반환해 호출자가
+    좌표 상속을 건너뛰게 한다(coordless fallback). 충돌·rename 단절 tradeoff는
+    place 키와 동일(`KrexRestAreaItem` docstring 참조).
+    """
+    name = _normalize_match_part(record.service_area_name)
+    if not name:
+        return None
+    return "::".join(
+        (
+            name,
+            _normalize_match_part(record.route_name),
+            _normalize_match_part(record.direction),
+        )
+    )
+
+
+# 휴게소 place 매칭 카탈로그: 파생 자연키(`name::route_name::direction`) →
+# (place feature_id, place 좌표). 호출자(dagster price asset 등)가 이미 적재된
+# place feature bundle로 구성해 유가 변환에 주입한다 — provider는 geocoding 계층을
+# 호출하지 않고(레이어 규칙), 좌표는 place feature에서 상속한다(#547).
+RestAreaPlaceLocator = Mapping[str, "tuple[str, Coordinate]"]
+
+
+def build_rest_area_place_locator(
+    place_bundles: Iterable[FeatureBundle],
+) -> dict[str, tuple[str, Coordinate]]:
+    """휴게소 place bundle → 유가 매칭용 locator(`자연키 → (feature_id, 좌표)`).
+
+    `rest_areas_to_bundles` 결과(또는 DB에서 재구성한 동등 bundle)를 받아
+    좌표가 있는 place feature만 ``source_entity_id``(파생 자연키, `name::route_name::
+    direction`) 키로 인덱싱한다. 같은 자연키가 둘 이상이면 첫 좌표를 유지한다
+    (place 키는 이미 dedup 단위 — `KrexRestAreaItem` docstring). 이 locator를
+    `rest_area_fuel_price_records_to_features_and_values`에 넘기면 유가 feature가
+    place 좌표·`parent_feature_id`를 상속해 지도에 렌더된다(#547).
+    """
+    locator: dict[str, tuple[str, Coordinate]] = {}
+    for bundle in place_bundles:
+        feature = bundle.feature
+        coord = feature.coord
+        if coord is None:
+            continue
+        key = bundle.source_record.source_entity_id
+        if not key or key in locator:
+            continue
+        locator[key] = (feature.feature_id, coord)
+    return locator
+
+
+def rest_area_place_locator_from_rows(
+    rows: Iterable[tuple[str, str, float, float]],
+) -> dict[str, tuple[str, Coordinate]]:
+    """``(source_entity_id, feature_id, lon, lat)`` 행 → 유가 매칭용 locator(#547).
+
+    `AsyncKorTravelMapClient.list_primary_place_locator`가 반환하는 DB 행
+    (이미 적재된 휴게소 place feature의 자연키·feature_id·좌표)을 받아
+    `rest_area_fuel_price_records_to_features_and_values`의 ``place_locator`` 형태
+    (`자연키 → (feature_id, Coordinate)`)로 변환한다. lon/lat은
+    `Decimal(str(...))`로 강제해(부동소수 잡음 회피) place 좌표와 동일 정밀도를
+    유지한다. 같은 자연키 중복은 첫 행을 유지한다.
+    """
+    locator: dict[str, tuple[str, Coordinate]] = {}
+    for source_entity_id, feature_id, lon, lat in rows:
+        key = (source_entity_id or "").strip()
+        if not key or key in locator:
+            continue
+        coord = Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
+        locator[key] = (feature_id, coord)
+    return locator
+
+
 def _fuel_price_record_to_bundle_and_values(
     record: KrexRestAreaFuelPriceRecord,
     *,
     fetched_at: datetime,
+    place_locator: RestAreaPlaceLocator | None = None,
 ) -> tuple[FeatureBundle, list[PriceValue]] | None:
     service_area_code = str(record.service_area_code).strip()
     if not service_area_code:
@@ -797,15 +890,30 @@ def _fuel_price_record_to_bundle_and_values(
         return None
 
     road_address = normalize_korean_text(record.address)
+    # #547 — restarea.fuel_prices row에는 lon/lat가 없어 coord=None이면 모든
+    # map/bbox 쿼리(coord IS NOT NULL 요구)에서 누락된다. 휴게소명·노선·방향으로
+    # place feature를 이름 매칭(`_fuel_price_match_key`)해 좌표·계층을 상속받는다.
+    # provider는 geocoding 계층을 호출하지 않는다(레이어 규칙) — 좌표는 이미 적재된
+    # place feature가 출처(호출자가 locator로 주입). 매칭이 없으면 coordless로
+    # 남되 PriceValue는 그대로 적재된다(좌표는 후속 place 적재로 회복 가능).
+    coord: Coordinate | None = None
+    parent_feature_id: str | None = None
+    if place_locator is not None:
+        match_key = _fuel_price_match_key(record)
+        if match_key is not None:
+            matched = place_locator.get(match_key)
+            if matched is not None:
+                parent_feature_id, coord = matched
     feature = Feature(
         feature_id=feature_id,
         kind=FeatureKind.PRICE,
         name=f"{display_name} 유가",
-        coord=None,
+        coord=coord,
         address=Address(road=road_address),
         category=REST_AREA_CATEGORY,
         marker_icon=REST_AREA_PRICE_MARKER_ICON,
         marker_color=REST_AREA_PRICE_MARKER_COLOR,
+        parent_feature_id=parent_feature_id,
         detail=None,
     )
     source_record = SourceRecord(
@@ -816,6 +924,8 @@ def _fuel_price_record_to_bundle_and_values(
         raw_payload_hash=payload_hash,
         raw_name=record.service_area_name,
         raw_address=road_address,
+        raw_longitude=coord.lon if coord is not None else None,
+        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -842,13 +952,27 @@ def rest_area_fuel_price_records_to_features_and_values(
     records: Iterable[KrexRestAreaFuelPriceRecord],
     *,
     fetched_at: datetime,
+    place_locator: RestAreaPlaceLocator | None = None,
 ) -> tuple[list[FeatureBundle], list[PriceValue]]:
-    """KREX 휴게소 유가 snapshot → price Feature + ``PriceValue`` 목록."""
+    """KREX 휴게소 유가 snapshot → price Feature + ``PriceValue`` 목록.
+
+    Parameters
+    ----------
+    place_locator
+        휴게소 place 매칭 카탈로그(`build_rest_area_place_locator` 결과 또는 동등
+        ``Mapping[자연키, (feature_id, Coordinate)]``). 주어지면 유가 record를
+        휴게소명·노선·방향으로 이름 매칭해 매칭된 place feature의 **좌표**와
+        ``parent_feature_id``를 상속한다 — 좌표(lon/lat)가 없는
+        `restarea.fuel_prices` row가 지도/bbox 쿼리(coord IS NOT NULL)에 노출되도록
+        한다(#547). 매칭이 없거나 ``None``이면 유가 feature는 coordless로 남고
+        ``PriceValue``만 적재된다(좌표는 place 적재 후 재변환으로 회복 가능). provider는
+        geocoding 계층을 호출하지 않으며 좌표 출처는 호출자가 주입한 place feature다.
+    """
     bundles: list[FeatureBundle] = []
     values: list[PriceValue] = []
     for record in records:
         converted = _fuel_price_record_to_bundle_and_values(
-            record, fetched_at=fetched_at
+            record, fetched_at=fetched_at, place_locator=place_locator
         )
         if converted is None:
             continue

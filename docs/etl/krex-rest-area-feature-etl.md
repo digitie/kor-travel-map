@@ -95,17 +95,44 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
 
 ## 4. 유가 적재
 
+`restarea.fuel_prices` row에는 **lon/lat가 없다**(주소만 있음). 유가 price-kind
+Feature가 `coord=None`이면 모든 map/bbox 쿼리(`coord IS NOT NULL` 요구)에서
+누락되어 지도에 안 뜬다(#547). 두 dataset은 공유 안정키가 없지만 휴게소명·노선·
+방향 세 표기는 양쪽에 다 있으므로, **이미 적재된 휴게소 place feature의 좌표를
+이름 매칭(`name::route_name::direction` 자연키)으로 상속**해 렌더 가능하게 한다.
+provider는 geocoding 계층을 호출하지 않는다(레이어 규칙) — 좌표 출처는 place feature다.
+
 ```python
-from kortravelmap.providers.krex import rest_area_fuel_price_records_to_features_and_values
+from kortravelmap.providers.krex import (
+    KREX_PROVIDER_NAME,
+    REST_AREA_DATASET_KEY,
+    REST_AREA_SOURCE_ENTITY_TYPE,
+    rest_area_fuel_price_records_to_features_and_values,
+    rest_area_place_locator_from_rows,
+)
 
 async def refresh_rest_area_prices(client, records):
-    bundles, values = rest_area_fuel_price_records_to_features_and_values(
-        records, fetched_at=kst_now()
+    # ① 이미 적재된 휴게소 place feature의 자연키 → (feature_id, 좌표) locator 조회.
+    rows = await client.list_primary_place_locator(
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_DATASET_KEY,
+        source_entity_type=REST_AREA_SOURCE_ENTITY_TYPE,
     )
-    
-    # 유가는 price anchor feature와 PriceValue를 한 transaction에서 적재한다.
+    place_locator = rest_area_place_locator_from_rows(rows)
+
+    # ② 유가 record를 locator와 함께 변환 → 매칭된 유가 feature는 place 좌표·
+    #    parent_feature_id를 상속(coord IS NOT NULL → 렌더 가능). 매칭 실패 시
+    #    coordless로 남되 PriceValue는 그대로 적재(좌표는 후속 place 적재로 회복).
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        records, fetched_at=kst_now(), place_locator=place_locator
+    )
+
+    # ③ 유가는 price anchor feature와 PriceValue를 한 transaction에서 적재한다.
     await client.load_price_features(bundles, values)
 ```
+
+place bundle을 직접 들고 있으면(같은 실행에서 막 적재한 경우) DB 조회 대신
+`build_rest_area_place_locator(place_bundles)`로 locator를 구성해도 된다.
 
 `PriceValue.product_key`: `gasoline` / `diesel` / `lpg` / `premium_gasoline` /
 `kerosene`.
