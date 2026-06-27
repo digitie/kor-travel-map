@@ -147,6 +147,47 @@ function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
+function curatedFeatureHref(curatedFeatureId: string): string {
+  return `/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`;
+}
+
+function isPlaceCandidateProvider(value: string): boolean {
+  return value.toLowerCase().includes("concierge");
+}
+
+function uiLabel(value: string | null | undefined): string {
+  if (!value) return "-";
+  return value
+    .replace(/kor-travel-concierge/gi, "place-candidate")
+    .replace(/concierge/gi, "place-candidate")
+    .replace(/컨시어지/g, "장소 후보");
+}
+
+function providerLabel(value: string | null | undefined): string {
+  return uiLabel(value);
+}
+
+function themeSlugForProvider(
+  provider: string,
+  datasetKey: string,
+  sources: readonly CuratedSource[],
+  rules: readonly CuratedSourceRule[],
+): string | null {
+  if (provider === "all" || !isPlaceCandidateProvider(provider)) {
+    return null;
+  }
+  const sourceIds = new Set(
+    sources
+      .filter(
+        (source) =>
+          source.provider === provider &&
+          (datasetKey === "all" || source.dataset_key === datasetKey),
+      )
+      .map((source) => source.source_id),
+  );
+  return rules.find((rule) => sourceIds.has(rule.source_id))?.theme_slug ?? null;
+}
+
 function featureAddressLabel(feature: CuratedFeature): string {
   const address = feature.address as Record<string, unknown>;
   for (const key of ["road_address", "jibun_address", "full_address", "address"]) {
@@ -170,7 +211,7 @@ function placeHitAddress(hit: CuratedPlaceSearchHit): string {
   return hit.road_address ?? hit.address ?? "-";
 }
 
-function CuratedFeatureLocationPanel({
+export function CuratedFeatureLocationPanel({
   feature,
 }: {
   feature: CuratedFeature | null;
@@ -223,7 +264,7 @@ function CuratedFeatureLocationPanel({
           </dd>
           <dt className="text-muted-foreground">provider</dt>
           <dd>
-            {feature.provider} / {feature.dataset_key}
+            {providerLabel(feature.provider)} / {feature.dataset_key}
           </dd>
         </dl>
       </div>
@@ -231,10 +272,15 @@ function CuratedFeatureLocationPanel({
   );
 }
 
-function CuratedPlaceSearchPanel({ feature }: { feature: CuratedFeature | null }) {
+export function CuratedPlaceSearchPanel({
+  feature,
+}: {
+  feature: CuratedFeature | null;
+}) {
   const patchFeature = usePatchCuratedFeatureMutation();
-  const [query, setQuery] = useState(featureSearchQuery(feature));
-  const [activeQuery, setActiveQuery] = useState(featureSearchQuery(feature));
+  const defaultQuery = featureSearchQuery(feature);
+  const [query, setQuery] = useState(defaultQuery);
+  const [activeQuery, setActiveQuery] = useState("");
   const search = useCuratedFeaturePlaceSearch(
     feature?.curated_feature_id ?? null,
     activeQuery,
@@ -272,7 +318,7 @@ function CuratedPlaceSearchPanel({ feature }: { feature: CuratedFeature | null }
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
-        <div className="font-medium">Concierge place search</div>
+        <div className="font-medium">Place search</div>
         <div className="text-xs text-muted-foreground">
           Google/Kakao/Naver 후보 비교
         </div>
@@ -297,15 +343,20 @@ function CuratedPlaceSearchPanel({ feature }: { feature: CuratedFeature | null }
         </form>
         {search.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>concierge 검색 실패</AlertTitle>
-            <AlertDescription>{search.error.message}</AlertDescription>
+            <AlertTitle>장소 검색 실패</AlertTitle>
+            <AlertDescription>{uiLabel(search.error.message)}</AlertDescription>
           </Alert>
+        ) : null}
+        {!search.data && !search.isFetching && !search.isError ? (
+          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            검색어를 확인하고 검색을 누르세요.
+          </div>
         ) : null}
         {search.data && Object.keys(search.data.data.errors).length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {Object.entries(search.data.data.errors).map(([provider, message]) => (
               <Badge key={provider} variant="outline">
-                {provider}: {message}
+                {provider}: {uiLabel(message)}
               </Badge>
             ))}
           </div>
@@ -368,7 +419,7 @@ function CuratedPlaceSearchPanel({ feature }: { feature: CuratedFeature | null }
   );
 }
 
-function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
+export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   const patchFeature = usePatchCuratedFeatureMutation();
   const [title, setTitle] = useState(feature?.display_title ?? "");
   const [summary, setSummary] = useState(feature?.display_summary ?? "");
@@ -493,7 +544,11 @@ type CuratedFeatureDetailItem = NonNullable<
   ReturnType<typeof useCuratedFeatureDetailSnapshot>["data"]
 >["data"]["items"][number];
 
-function CuratedFeatureDetailPreview({ feature }: { feature: CuratedFeature | null }) {
+export function CuratedFeatureDetailPreview({
+  feature,
+}: {
+  feature: CuratedFeature | null;
+}) {
   const snapshot = useCuratedFeatureDetailSnapshot(feature?.curated_feature_id ?? null);
   const data = snapshot.data?.data;
 
@@ -681,9 +736,11 @@ function RuleEditor({
           <dt className="text-muted-foreground">theme</dt>
           <dd>{theme?.theme_name ?? rule.theme_slug}</dd>
           <dt className="text-muted-foreground">source</dt>
-          <dd>{source?.source_name ?? rule.source_id}</dd>
+          <dd>{uiLabel(source?.source_name ?? rule.source_id)}</dd>
           <dt className="text-muted-foreground">dataset</dt>
           <dd className="break-all font-mono text-xs">{rule.dataset_key}</dd>
+          <dt className="text-muted-foreground">provider</dt>
+          <dd>{providerLabel(rule.provider)}</dd>
         </dl>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="grid gap-1 text-sm">
@@ -866,6 +923,7 @@ export function CuratedFeaturesClient() {
 
   const features = useAdminCuratedFeatures(featureParams);
   const rules = useAdminCuratedSourceRules(ruleParams);
+  const allRules = useAdminCuratedSourceRules({ limit: 500 });
   const selectFeature = useSelectCuratedFeatureMutation();
   const unselectFeature = useUnselectCuratedFeatureMutation();
   const archiveFeature = useArchiveCuratedFeatureMutation();
@@ -892,6 +950,7 @@ export function CuratedFeaturesClient() {
   }, [deferredFeatureSearch, features.data?.data.items]);
 
   const ruleItems = rules.data?.data.items ?? [];
+  const allRuleItems = allRules.data?.data.items ?? [];
   const selectedFeature =
     filteredItems.find(
       (item) => item.curated_feature_id === selectedCuratedFeatureId,
@@ -922,6 +981,7 @@ export function CuratedFeaturesClient() {
   const refresh = () => {
     void features.refetch();
     void rules.refetch();
+    void allRules.refetch();
     void sources.refetch();
     void themes.refetch();
   };
@@ -1003,9 +1063,9 @@ export function CuratedFeaturesClient() {
           const feature = row.original;
           return (
             <div className="max-w-[16rem] whitespace-normal">
-              <div>{feature.source_name}</div>
+              <div>{uiLabel(feature.source_name)}</div>
               <div className="break-all font-mono text-xs text-muted-foreground">
-                {feature.provider}:{feature.dataset_key}
+                {providerLabel(feature.provider)}:{feature.dataset_key}
               </div>
             </div>
           );
@@ -1056,7 +1116,20 @@ export function CuratedFeaturesClient() {
         cell: ({ row }) => {
           const feature = row.original;
           return (
-            <div className="flex w-44 justify-end gap-1 text-right">
+            <div className="flex w-52 justify-end gap-1 text-right">
+              <Link
+                aria-label="curated detail"
+                className={cn(
+                  buttonVariants({
+                    variant: "outline",
+                    size: "icon-sm",
+                  }),
+                )}
+                href={curatedFeatureHref(feature.curated_feature_id)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <EyeIcon />
+              </Link>
               <Link
                 aria-label="feature detail"
                 className={cn(
@@ -1166,9 +1239,9 @@ export function CuratedFeaturesClient() {
           const source = sourceById.get(rule.source_id);
           return (
             <div className="max-w-[18rem] whitespace-normal">
-              <div>{source?.source_name ?? rule.source_id}</div>
+              <div>{uiLabel(source?.source_name ?? rule.source_id)}</div>
               <div className="break-all font-mono text-xs text-muted-foreground">
-                {rule.provider}:{rule.dataset_key}
+                {providerLabel(rule.provider)}:{rule.dataset_key}
               </div>
             </div>
           );
@@ -1202,6 +1275,7 @@ export function CuratedFeaturesClient() {
           disabled={
             features.isFetching ||
             rules.isFetching ||
+            allRules.isFetching ||
             sources.isFetching ||
             themes.isFetching
           }
@@ -1220,6 +1294,7 @@ export function CuratedFeaturesClient() {
       <div className="flex flex-col gap-4">
         {features.isError ||
         rules.isError ||
+        allRules.isError ||
         sources.isError ||
         themes.isError ||
         selectFeature.isError ||
@@ -1231,6 +1306,7 @@ export function CuratedFeaturesClient() {
             <AlertDescription>
               {features.error?.message ??
                 rules.error?.message ??
+                allRules.error?.message ??
                 sources.error?.message ??
                 themes.error?.message ??
                 selectFeature.error?.message ??
@@ -1276,15 +1352,26 @@ export function CuratedFeaturesClient() {
               className="w-full"
               value={provider}
               onChange={(event) => {
-                setProvider(event.target.value);
+                const nextProvider = event.target.value;
+                setProvider(nextProvider);
                 setDatasetKey("all");
+                if (isPlaceCandidateProvider(nextProvider)) {
+                  setThemeSlug(
+                    themeSlugForProvider(
+                      nextProvider,
+                      "all",
+                      sources.data?.data.items ?? [],
+                      allRuleItems.length > 0 ? allRuleItems : ruleItems,
+                    ) ?? "all",
+                  );
+                }
                 resetCursor();
               }}
             >
               <NativeSelectOption value="all">provider 전체</NativeSelectOption>
               {providerOptions.map((option) => (
                 <NativeSelectOption key={option} value={option}>
-                  {option}
+                  {providerLabel(option)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -1293,7 +1380,18 @@ export function CuratedFeaturesClient() {
               className="w-full"
               value={datasetKey}
               onChange={(event) => {
-                setDatasetKey(event.target.value);
+                const nextDatasetKey = event.target.value;
+                setDatasetKey(nextDatasetKey);
+                if (isPlaceCandidateProvider(provider)) {
+                  setThemeSlug(
+                    themeSlugForProvider(
+                      provider,
+                      nextDatasetKey,
+                      sources.data?.data.items ?? [],
+                      allRuleItems.length > 0 ? allRuleItems : ruleItems,
+                    ) ?? "all",
+                  );
+                }
                 resetCursor();
               }}
             >
@@ -1469,6 +1567,28 @@ export function CuratedFeaturesClient() {
                     >
                       {selectedFeature.curation_status}
                     </Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                      )}
+                      href={curatedFeatureHref(
+                        selectedFeature.curated_feature_id,
+                      )}
+                    >
+                      <EyeIcon data-icon="inline-start" />
+                      상세
+                    </Link>
+                    <Link
+                      className={cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }),
+                      )}
+                      href={featureHref(selectedFeature.feature_id)}
+                    >
+                      <ExternalLinkIcon data-icon="inline-start" />
+                      feature
+                    </Link>
                   </div>
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
                     <dt className="text-muted-foreground">selected</dt>

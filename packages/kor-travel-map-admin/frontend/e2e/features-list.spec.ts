@@ -469,16 +469,15 @@ test.describe("admin/features list depth", () => {
     await expect(row).toBeVisible();
 
     const expectedHref = `/features/${encodeURIComponent(featureId)}`;
-    await expect(row.getByRole("link", { name: "open" })).toHaveAttribute(
+    await expect(row.getByRole("link", { name: "detail" })).toHaveAttribute(
       "href",
       expectedHref,
     );
 
-    // row 본문 클릭으로 선택 → inspector header 링크도 같은 href를 가져야 한다.
+    // row 본문 클릭으로 선택 → 우측 preview가 렌더되되 전체 상세 링크는 노출하지 않는다.
     await row.click();
-    const detailLink = page.getByRole("link", { name: "전체 상세" });
-    await expect(detailLink).toBeVisible();
-    await expect(detailLink).toHaveAttribute("href", expectedHref);
+    await expect(page.getByText("Feature detail", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "전체 상세" })).toHaveCount(0);
   });
 
   test("has_issue filter forwarded as boolean query param", async ({

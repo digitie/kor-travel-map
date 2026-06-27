@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### Admin curated/features 후속 보강 (2026-06-27)
+
+- **ADDED**: admin curated feature 단건 상세 화면을 추가했다. 목록 우측 검토 패널과 같은 위치 지도,
+  place 검색, display 편집, detail snapshot preview를 전용 상세 화면에서 사용할 수 있다.
+- **ADDED**: admin features 목록 우측 preview와 `/features/{feature_id}` 상세 화면에 지도 패널을
+  추가했다.
+- **CHANGED**: admin features 목록의 `detail` 버튼은 상세 route로 바로 이동하고, 기존 `전체 상세`
+  버튼은 제거했다.
+- **CHANGED**: curated place 검색은 후보 선택만으로 자동 실행하지 않고, 검색 버튼을 눌렀을 때만
+  호출한다. 후보를 바꾸면 검색어/결과 패널이 새 후보 기준으로 초기화된다.
+- **CHANGED**: curated UI의 `concierge` 표시명은 중립 표시명으로 바꿨고, 해당 provider 선택 시
+  하드코딩된 theme이 아니라 source rule의 실제 theme을 선택한다.
+- **FIXED**: OpiNet `low_top_area`가 일부 지역/제품 no-data 예외로 중단되지 않게 하고, bounded
+  호출 뒤 sample-grid fallback으로 보강한다.
+- **FIXED**: Dagster feature load schedule에 krforest/standard/khoa/krairport/airkorea/visitkorea
+  asset schedule을 추가하고, admin Dagster 화면이 asset group의 뒤쪽 asset을 숨기지 않게 했다.
+
 ### Feature별 상세 패널 + Dagster 운영 표시 보강 (2026-06-26)
 
 - **ADDED**: feature 상세 패널을 kind별로 분기했다. `weather`는 날씨 정보와 최근 업데이트,

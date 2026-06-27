@@ -707,6 +707,22 @@ async def list_admin_curated_features_route(
 
 
 @admin_router.get(
+    "/curated-features/{curated_feature_id}",
+    response_model=CuratedFeatureResponse,
+)
+async def get_admin_curated_feature_route(
+    curated_feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CuratedFeatureResponse:
+    started_at = perf_counter()
+    row = await _feature_or_404(session, curated_feature_id, include_archived=True)
+    return CuratedFeatureResponse(
+        data=_feature_view(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@admin_router.get(
     "/curated-features/{curated_feature_id}/detail-snapshot",
     response_model=CuratedFeatureDetailSnapshotResponse,
 )

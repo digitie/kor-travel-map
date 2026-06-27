@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-27 (codex) — Admin 후속 보강: curated/detail/OpiNet/Dagster
+
+- **완료(UI)**: curated feature place 검색 자동 실행/누적을 끊고 명시 검색으로 변경했다. 화면의
+  `concierge` 표시명은 중립 라벨로 바꿨고, 해당 provider 선택 시 source rule의 실제 theme으로
+  filter가 이동한다.
+- **완료(상세/지도)**: admin curated feature 전용 상세 화면을 추가했다. admin features 목록 우측
+  preview와 `/features/{feature_id}` 상세에는 지도 패널을 추가했고, 목록 `detail` 버튼은 상세
+  route로 바로 이동한다.
+- **완료(Dagster/OpiNet)**: OpiNet `low_top_area` no-data 예외 처리와 호출 상한 이후 fallback을
+  추가했다. Dagster feature load schedule은 누락된 krforest/standard/khoa/krairport/airkorea/
+  visitkorea asset까지 포함하고, admin Dagster 화면은 asset을 4개로 자르지 않는다.
+- **검증(로컬)**: admin frontend type-check/e2e type-check, 변경 파일 ESLint, Dagster/API targeted
+  pytest 84 passed/1 skipped, ruff, OpenAPI export drift test 통과.
+- **다음 한 작업**: PR/CI green 후 N150에 배포하고 OpiNet price job과 누락 Dagster schedule/job
+  노출, curated 상세/검색 UI를 운영 데이터로 smoke 확인한다.
+
 ## 2026-06-27 (codex) — Admin live review 데이터/표시 보강
 
 - **완료(원인 확인)**: N150에서 KMA `TMP` weather 값은 존재한다. price feature는 OpiNet 부분 응답

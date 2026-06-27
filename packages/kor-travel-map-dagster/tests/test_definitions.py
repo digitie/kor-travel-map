@@ -65,6 +65,21 @@ def test_feature_load_assets_have_retry_policy() -> None:
         assert asset_def.op.retry_policy == FEATURE_LOAD_RETRY_POLICY
 
 
+def test_feature_load_assets_have_provider_schedules() -> None:
+    asset_keys = {
+        key.to_user_string()
+        for asset_def in FEATURE_LOAD_ASSETS
+        for key in asset_def.keys
+    }
+    scheduled_asset_keys = {
+        key.to_user_string()
+        for spec in FEATURE_LOAD_SCHEDULE_SPECS
+        for key in spec.asset.keys
+    }
+
+    assert asset_keys <= scheduled_asset_keys
+
+
 def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("feature_update_request_worker").name == (
         "feature_update_request_worker"
