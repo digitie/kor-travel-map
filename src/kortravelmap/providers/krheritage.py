@@ -345,9 +345,12 @@ def _area_geometry_wkt(item: KrHeritageItem) -> str | None:
     return None
 
 
-def _normalized_area_geometry(item: KrHeritageItem) -> tuple[str, Coordinate, Decimal] | None:
-    """Polygon/MultiPolygon 경계를 검증하고 (WKT, centroid, 면적)을 반환한다."""
-    raw_wkt = _area_geometry_wkt(item)
+def _normalize_area_wkt(raw_wkt: str | None) -> tuple[str, Coordinate, Decimal] | None:
+    """이미 읽어 둔 경계 WKT를 검증하고 (WKT, centroid, 면적)을 반환한다.
+
+    원천 WKT를 호출자가 한 번만 읽도록(``_area_geometry_wkt``) 분리한 변형이다.
+    같은 record를 여러 번 변환할 때 GEOS 파싱 중복을 피한다 (#546).
+    """
     if raw_wkt is None:
         return None
     try:
@@ -357,6 +360,11 @@ def _normalized_area_geometry(item: KrHeritageItem) -> tuple[str, Coordinate, De
     except GeometryError:
         return None
     return geom_wkt, centroid, geometry_area_square_meters(geom_wkt)
+
+
+def _normalized_area_geometry(item: KrHeritageItem) -> tuple[str, Coordinate, Decimal] | None:
+    """Polygon/MultiPolygon 경계를 검증하고 (WKT, centroid, 면적)을 반환한다."""
+    return _normalize_area_wkt(_area_geometry_wkt(item))
 
 
 def classify_heritage_kind(item: KrHeritageItem) -> FeatureKind:
@@ -523,7 +531,11 @@ async def _heritage_item_to_bundle(
     if not name:
         return None
 
-    area_geometry = _normalized_area_geometry(item)
+    # 경계 WKT는 record당 한 번만 읽고, normalize 결과(WKT/centroid/면적)도
+    # 한 번만 계산해 kind 결정·geom_wkt 보존·AreaDetail에 재사용한다 (#546 —
+    # 이전에는 _area_geometry_wkt + normalize_geometry가 record당 ~3회 호출됐다).
+    raw_boundary_wkt = _area_geometry_wkt(item)
+    area_geometry = _normalize_area_wkt(raw_boundary_wkt)
     kdcd = (item.key.ccba_kdcd or "").strip()
     kind = (
         FeatureKind.AREA
@@ -550,7 +562,6 @@ async def _heritage_item_to_bundle(
         "manager": item.manager,
         "image_url": item.image_url,
     }
-    raw_boundary_wkt = _area_geometry_wkt(item)
     if raw_boundary_wkt is not None:
         raw_data["geom_wkt"] = raw_boundary_wkt
 

@@ -171,6 +171,36 @@ def test_put_poi_cache_target_uses_transaction(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("legacy_key", ["pinvi_poi_id", "tripmate_poi_id"])
+def test_put_poi_cache_target_accepts_legacy_external_poi_id_aliases(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_key: str,
+) -> None:
+    # #546 — 구 키(pinvi_poi_id/tripmate_poi_id)는 422 대신 external_poi_id로 정규화.
+    from kortravelmap.api.routers import poi_cache_targets as router_mod
+
+    async def _upsert(_session: Any, **kwargs: Any) -> PoiCacheTarget:
+        # validation_alias로 정규화되어 repo에는 external_poi_id로만 전달.
+        assert kwargs["metadata"] == {"external_poi_id": "poi-legacy"}
+        return _target(target_key="poi-legacy")
+
+    monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
+
+    response = client.put(
+        "/v1/admin/poi-cache-targets/external-app/poi-legacy",
+        json={
+            "coord": {"lon": 126.978, "lat": 37.5665},
+            "metadata": {legacy_key: "poi-legacy"},
+        },
+    )
+
+    assert response.status_code == 200
+    # 응답(직렬화)은 external_poi_id만 노출 (구 키 echo 안 함).
+    assert response.json()["data"]["metadata"] == {"external_poi_id": "poi-legacy"}
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "payload",
     [

@@ -16,6 +16,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     upsert_poi_cache_target,
 )
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -110,6 +111,10 @@ class PoiCacheTargetMetadata(BaseModel):
     external_poi_id: str | None = Field(
         default=None,
         max_length=256,
+        # accept-only 구 키 alias (응답은 external_poi_id만 직렬화, #546).
+        validation_alias=AliasChoices(
+            "external_poi_id", "pinvi_poi_id", "tripmate_poi_id"
+        ),
     )
     external_ref: str | None = Field(default=None, max_length=256)
     source_url: str | None = Field(default=None, max_length=2048)

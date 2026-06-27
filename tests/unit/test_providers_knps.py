@@ -305,7 +305,8 @@ def test_park_boundary_area_name_falls_back_to_raw_park_name() -> None:
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.name == "가야산 국립공원"
-    assert b.source_record.raw_name == "가야산 국립공원"
+    # raw_name은 합성("국립공원" 부착) 이전의 verbatim 원천 (#546).
+    assert b.source_record.raw_name == "가야산"
 
 
 def test_protected_area_translates_raw_english_name() -> None:
@@ -317,7 +318,8 @@ def test_protected_area_translates_raw_english_name() -> None:
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.name == "제주도"
-    assert b.source_record.raw_name == "제주도"
+    # raw_name은 영문→한글 번역 이전의 verbatim 원천 (#546).
+    assert b.source_record.raw_name == "Jeju Island"
 
 
 def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
@@ -328,7 +330,8 @@ def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
         raw={"ORIG_NAME": "遊됲룊", "NAME": "Bongpyeong", "MNUM": "PROTECTED-1"},
     )[0]
     assert b.feature.name == "봉평"
-    assert b.source_record.raw_name == "봉평"
+    # record.name이 있으면 그대로 verbatim (#546 — point path와 정합).
+    assert b.source_record.raw_name == "Bongpyeong"
 
 
 def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
@@ -375,6 +378,23 @@ def test_protected_area_translation_table_has_no_latin_letters() -> None:
         re.search(r"[A-Za-z]", translated_name) is None
         for translated_name in KNPS_PROTECTED_AREA_KOREAN_NAMES.values()
     )
+
+
+def test_geometry_raw_name_is_verbatim_not_normalized() -> None:
+    # #546 — raw_name은 normalized(Feature.name)가 아니라 verbatim 원천이어야 한다.
+    # (a) record.name이 있으면 trail 이름을 그대로 보존.
+    trail = _geo_one("knps_trails", _LINE, name="  북한산 둘레길  ")[0]
+    assert trail.feature.name == "북한산 둘레길"  # normalized
+    assert trail.source_record.raw_name == "  북한산 둘레길  "  # verbatim
+    # (b) record.name이 비어 있으면 이름을 끌어온 raw column을 verbatim fallback.
+    park = _geo_one(
+        "knps_park_boundaries",
+        _POLY,
+        name="   ",
+        raw={"NPK_NM": "북한산", "NO": "PARK-9"},
+    )[0]
+    assert park.feature.name == "북한산 국립공원"  # 합성된 normalized
+    assert park.source_record.raw_name == "북한산"  # 합성 이전 verbatim
 
 
 def test_hazard_and_protected_area_kinds() -> None:
