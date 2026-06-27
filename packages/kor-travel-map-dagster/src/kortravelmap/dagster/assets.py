@@ -45,9 +45,11 @@ from kortravelmap.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_DATASET_KEY,
     REST_AREA_PRICES_DATASET_KEY,
+    REST_AREA_SOURCE_ENTITY_TYPE,
     REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICES_DATASET_KEY,
     rest_area_fuel_price_records_to_features_and_values,
+    rest_area_place_locator_from_rows,
     rest_area_weather_records_to_bundles,
     rest_area_weather_records_to_values,
     rest_areas_to_bundles,
@@ -283,14 +285,29 @@ async def feature_place_krex_rest_areas(
 async def run_feature_price_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> PriceFeatureLoadResult:
-    """KREX 휴게소 유가 snapshot을 price Feature + PriceValue로 적재한다."""
+    """KREX 휴게소 유가 snapshot을 price Feature + PriceValue로 적재한다.
+
+    #547 — ``restarea.fuel_prices`` row에는 lon/lat가 없어 유가 feature가
+    coord=None이면 지도/bbox 쿼리에서 누락된다. 이미 적재된 휴게소 place feature의
+    자연키→좌표 locator를 조회해 유가 feature가 place 좌표·``parent_feature_id``를
+    상속하게 한다(geocoding 미경유 — 좌표 출처는 place feature). place가 아직
+    없으면(첫 실행 등) locator가 비어 유가는 coordless로 적재되고, 후속 실행에서
+    place가 적재된 뒤 좌표가 회복된다.
+    """
     records = await _record_list(context, "krex_rest_area_fuel_prices")
     fetched_at = await _fetched_at(context)
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    locator_rows = await client.list_primary_place_locator(
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_DATASET_KEY,
+        source_entity_type=REST_AREA_SOURCE_ENTITY_TYPE,
+    )
+    place_locator = rest_area_place_locator_from_rows(locator_rows)
     bundles, values = rest_area_fuel_price_records_to_features_and_values(
         records,
         fetched_at=fetched_at,
+        place_locator=place_locator,
     )
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     result = await client.load_price_features(bundles, values)
     _add_output_metadata(
         context,

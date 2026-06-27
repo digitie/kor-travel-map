@@ -65,6 +65,7 @@ __all__ = [
     "get_feature_row",
     "get_feature_rows_by_ids",
     "list_active_place_coords",
+    "list_primary_place_locator",
     "get_primary_source_detail",
     "find_place_features_without_phone",
     "set_feature_phones",
@@ -1600,6 +1601,61 @@ async def list_active_place_coords(
         await session.execute(text(_LIST_ACTIVE_PLACE_COORDS_SQL))
     ).all()
     return [(str(row.feature_id), float(row.lon), float(row.lat)) for row in rows]
+
+
+_LIST_PRIMARY_PLACE_LOCATOR_SQL: Final[str] = """
+SELECT
+    sr.source_entity_id,
+    f.feature_id,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat
+FROM feature.features f
+JOIN provider_sync.source_links sl
+  ON sl.feature_id = f.feature_id AND sl.is_primary_source
+JOIN provider_sync.source_records sr
+  ON sr.source_record_key = sl.source_record_key
+WHERE f.deleted_at IS NULL
+  AND f.kind = 'place'
+  AND f.coord IS NOT NULL
+  AND sr.provider = :provider
+  AND sr.dataset_key = :dataset_key
+  AND sr.source_entity_type = :source_entity_type
+ORDER BY f.feature_id
+"""
+
+
+async def list_primary_place_locator(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+) -> list[tuple[str, str, float, float]]:
+    """primary place feature의 ``(source_entity_id, feature_id, lon, lat)`` 전량 (#547).
+
+    primary source가 ``(provider, dataset_key, source_entity_type)``이고 좌표가 있는
+    place feature를 ``source_entity_id``(provider 파생 자연키)와 함께 반환한다. 좌표가
+    없는 row나 미존재 매핑은 제외된다.
+
+    호출자(Dagster 휴게소 유가 asset)는 이 목록으로 휴게소명·노선·방향 자연키 →
+    (place feature_id, 좌표) locator를 구성해, lon/lat가 없는 유가 record가 place
+    좌표·``parent_feature_id``를 상속하게 한다 — geocoding 계층을 거치지 않고
+    이미 적재된 place feature를 좌표 출처로 쓴다(레이어 규칙 준수).
+    """
+    rows = (
+        await session.execute(
+            text(_LIST_PRIMARY_PLACE_LOCATOR_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+            },
+        )
+    ).all()
+    return [
+        (str(row.source_entity_id), str(row.feature_id), float(row.lon), float(row.lat))
+        for row in rows
+    ]
 
 
 async def get_primary_source_detail(

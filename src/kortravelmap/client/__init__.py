@@ -126,6 +126,9 @@ from kortravelmap.infra.feature_repo import (
     list_active_place_coords as repo_list_active_place_coords,
 )
 from kortravelmap.infra.feature_repo import (
+    list_primary_place_locator as repo_list_primary_place_locator,
+)
+from kortravelmap.infra.feature_repo import (
     search_features as repo_search_features,
 )
 from kortravelmap.infra.feature_update_executor import (
@@ -1433,6 +1436,29 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session:
             return await repo_list_active_place_coords(session)
+
+    async def list_primary_place_locator(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+    ) -> list[tuple[str, str, float, float]]:
+        """primary place feature의 ``(source_entity_id, feature_id, lon, lat)`` 전량 (read, #547).
+
+        ``(provider, dataset_key, source_entity_type)`` primary source이고 좌표가 있는
+        place feature를 provider 파생 자연키(``source_entity_id``)와 함께 반환한다.
+        호출자(Dagster 휴게소 유가 asset)가 이 목록으로 휴게소명·노선·방향 자연키 →
+        (feature_id, 좌표) locator를 구성해 lon/lat 없는 유가 record가 place 좌표·
+        ``parent_feature_id``를 상속하게 한다(geocoding 미경유 — 좌표 출처는 place).
+        """
+        async with self._session_factory() as session:
+            return await repo_list_primary_place_locator(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+            )
 
     # ─── weather card (T-213e) ───────────────────────────────────────────────
 

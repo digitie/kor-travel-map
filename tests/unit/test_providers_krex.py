@@ -28,7 +28,9 @@ from kortravelmap.providers.krex import (
     REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
     TRAFFIC_NOTICES_DATASET_KEY,
+    build_rest_area_place_locator,
     rest_area_fuel_price_records_to_features_and_values,
+    rest_area_place_locator_from_rows,
     rest_area_prices_to_values,
     rest_area_weather_records_to_values,
     rest_area_weather_to_values,
@@ -346,6 +348,157 @@ def test_fuel_price_records_create_price_feature_and_values() -> None:
     assert bundle.source_record.dataset_key == REST_AREA_PRICES_DATASET_KEY
     assert [value.product_key for value in values] == ["gasoline", "diesel"]
     assert {value.feature_id for value in values} == {bundle.feature.feature_id}
+
+
+# ── #547 휴게소 유가 feature 좌표/계층 상속 (렌더 가능성 회귀) ──────────
+
+
+def _fuel_record_for(
+    place: _RestArea, *, service_area_code: str
+) -> _FuelPriceRecord:
+    """place와 동일한 휴게소명/노선/방향을 갖는 유가 record (이름 매칭 대상)."""
+    return _FuelPriceRecord(
+        service_area_code=service_area_code,
+        route_name=place.route_name,
+        direction=place.direction,
+        oil_company="EX-OIL",
+        service_area_name=place.name,
+        phone_number=place.phone_number,
+        address="충남 서산시",  # row엔 주소만, lon/lat 없음.
+        gasoline_price=1710,
+        diesel_price=1599,
+        lpg_price=None,
+        raw={"serviceAreaCode": service_area_code},
+    )
+
+
+@pytest.mark.unit
+def test_fuel_price_inherits_place_coord_and_parent() -> None:
+    """#547 — place locator 매칭 시 유가 feature가 place 좌표·parent를 상속.
+
+    `restarea.fuel_prices` row엔 lon/lat가 없어 coord=None이면 모든 bbox/map
+    쿼리(coord IS NOT NULL)에서 누락된다. 휴게소명·노선·방향 이름 매칭으로
+    place 좌표를 상속하면 coord가 채워져 렌더 가능해지고, parent_feature_id로
+    place feature에 연결된다.
+    """
+    place_bundles = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
+    place_feature = place_bundles[0].feature
+    locator = build_rest_area_place_locator(place_bundles)
+    assert _NK_SEOSAN in locator
+
+    record = _fuel_record_for(_RA_SEOSAN, service_area_code="A0001")
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=_NOW, place_locator=locator
+    )
+    [bundle] = bundles
+    price_feature = bundle.feature
+    # 좌표 상속 → coord IS NOT NULL → bbox/map 쿼리에 노출(렌더 가능).
+    assert price_feature.coord is not None
+    assert price_feature.coord.lon == place_feature.coord.lon
+    assert price_feature.coord.lat == place_feature.coord.lat
+    # 계층 연결.
+    assert price_feature.parent_feature_id == place_feature.feature_id
+    # source_record raw 좌표도 상속 좌표로 채워짐(추적성).
+    assert bundle.source_record.raw_longitude == place_feature.coord.lon
+    assert bundle.source_record.raw_latitude == place_feature.coord.lat
+    # PriceValue는 그대로(좌표 상속과 무관하게 유가값 생성).
+    assert [v.product_key for v in values] == ["gasoline", "diesel"]
+
+
+@pytest.mark.unit
+def test_fuel_price_coordless_when_no_place_match() -> None:
+    """매칭 place가 없으면 coordless fallback — PriceValue는 그대로 적재.
+
+    place locator를 안 주거나(``None``) 키가 안 맞으면 기존 동작(coord=None,
+    parent 없음)을 유지한다. 유가값(PriceValue)은 좌표와 무관하게 생성되어
+    좌표는 후속 place 적재로 회복 가능하다.
+    """
+    place_bundles = rest_areas_to_bundles([_RA_GYEONGJU], fetched_at=_NOW)
+    locator = build_rest_area_place_locator(place_bundles)
+    # 서산 유가 record인데 locator엔 경주만 있음 → 매칭 실패.
+    record = _fuel_record_for(_RA_SEOSAN, service_area_code="A0001")
+
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=_NOW, place_locator=locator
+    )
+    [bundle] = bundles
+    assert bundle.feature.coord is None
+    assert bundle.feature.parent_feature_id is None
+    assert [v.product_key for v in values] == ["gasoline", "diesel"]
+
+    # locator 미주입(None)이면 기존 동작과 동일(coordless).
+    bundles_none, _ = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=_NOW
+    )
+    assert bundles_none[0].feature.coord is None
+    assert bundles_none[0].feature.parent_feature_id is None
+
+
+@pytest.mark.unit
+def test_fuel_price_match_key_normalizes_like_place_key() -> None:
+    """매칭 키는 place 자연키와 동일 정규화(strip→lower) — 표기 흔들림 흡수."""
+    place_bundles = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
+    locator = build_rest_area_place_locator(place_bundles)
+    # 대소문자/공백만 다른 휴게소명/노선/방향도 같은 키로 매칭.
+    noisy = _FuelPriceRecord(
+        service_area_code="A0001",
+        route_name=" 서해안고속도로 ",
+        direction="부산방향",
+        oil_company=None,
+        service_area_name=" 서산휴게소 ",
+        phone_number=None,
+        address="충남 서산시",
+        gasoline_price=1700,
+        diesel_price=None,
+        lpg_price=None,
+        raw={},
+    )
+    [bundle], _ = rest_area_fuel_price_records_to_features_and_values(
+        [noisy], fetched_at=_NOW, place_locator=locator
+    )
+    assert bundle.feature.coord is not None
+    assert bundle.feature.parent_feature_id == place_bundles[0].feature.feature_id
+
+
+@pytest.mark.unit
+def test_rest_area_place_locator_from_rows_builds_coordinate() -> None:
+    """DB row(`(source_entity_id, feature_id, lon, lat)`) → locator 변환.
+
+    `AsyncKorTravelMapClient.list_primary_place_locator`가 반환하는 행을
+    유가 변환 locator로 변환하고, 그 locator로 유가 feature가 좌표를 상속하는지.
+    """
+    rows = [(_NK_SEOSAN, "f_seosan_place", 126.6500, 36.7800)]
+    locator = rest_area_place_locator_from_rows(rows)
+    assert _NK_SEOSAN in locator
+    feature_id, coord = locator[_NK_SEOSAN]
+    assert feature_id == "f_seosan_place"
+    assert coord.lon == Decimal("126.65")
+    assert coord.lat == Decimal("36.78")
+
+    record = _fuel_record_for(_RA_SEOSAN, service_area_code="A0001")
+    [bundle], _ = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=_NOW, place_locator=locator
+    )
+    assert bundle.feature.coord is not None
+    assert bundle.feature.coord.lon == Decimal("126.65")
+    assert bundle.feature.parent_feature_id == "f_seosan_place"
+
+
+@pytest.mark.unit
+def test_build_locator_skips_coordless_place() -> None:
+    """좌표 없는 place는 locator에서 제외(상속할 좌표가 없음)."""
+    coordless = _RestArea(
+        name="무좌표휴게소",
+        route_name="중부고속도로",
+        direction="하행",
+        lat=None,
+        lon=None,
+        phone_number=None,
+    )
+    place_bundles = rest_areas_to_bundles([coordless, _RA_SEOSAN], fetched_at=_NOW)
+    locator = build_rest_area_place_locator(place_bundles)
+    assert _NK_SEOSAN in locator
+    assert "무좌표휴게소::중부고속도로::하행" not in locator
 
 
 # ── rest_area_weather → WeatherValue (observed) ────────────────────
