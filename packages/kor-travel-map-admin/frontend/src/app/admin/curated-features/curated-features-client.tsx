@@ -300,6 +300,7 @@ export function CuratedPlaceSearchPanel({
         curatedFeatureId: feature.curated_feature_id,
         body: {
           display_title: hit.name ?? feature.display_title,
+          reuse_policy: "allowed",
           metadata: {
             ...feature.metadata,
             place_search_review: {

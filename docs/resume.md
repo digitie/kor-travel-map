@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-27 (codex) — Curated place-search 반영 정책 수정
+
+- **완료(UI)**: `/admin/curated-features`의 place-search 결과 `반영`이 `display_title`과
+  metadata만 저장하던 문제를 고쳐, `reuse_policy=allowed`도 함께 PATCH하도록 했다.
+- **완료(e2e)**: manual_review 후보에서 검색 결과를 반영하면 PATCH body, REUSE 행 badge,
+  editor select가 모두 `allowed`로 바뀌는 mocked Playwright 회귀 테스트를 추가했다.
+- **검증(로컬)**: admin frontend type-check, 변경 파일 ESLint, curated mutations mocked e2e 21건,
+  `git diff --check` 통과.
+- **다음 한 작업**: N150 배포 뒤 운영 데이터에서 manual_review 후보 1건으로 place-search 반영 smoke를
+  확인한다.
+
 ## 2026-06-27 (codex) — Feature update request UI live e2e
 
 - **완료(UI/e2e)**: `/admin/feature-update-requests` live Playwright spec을 추가했다. form controls,

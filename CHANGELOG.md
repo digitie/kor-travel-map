@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Curated place-search 반영 정책 수정 (2026-06-27)
+
+- **FIXED**: admin curated feature에서 장소 검색 결과를 `반영`하면 `reuse_policy`가
+  `allowed`로 함께 저장되어 REUSE 컬럼과 편집 패널이 즉시 갱신되도록 했다.
+
 ### Feature update request UI live e2e 보강 (2026-06-27)
 
 - **CHANGED**: feature update request create/run-now 및 ops-live update request 이벤트가 feature 지도,
