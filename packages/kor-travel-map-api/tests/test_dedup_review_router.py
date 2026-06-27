@@ -50,7 +50,14 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            service_token=None,
+            vworld_api_key=None,
+        )
+    )
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session

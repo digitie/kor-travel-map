@@ -54,10 +54,18 @@ class EnrichmentReviewRecord(BaseModel):
     target_category: str | None = None
     target_lon: float | None = None
     target_lat: float | None = None
+    target_start_date: str | None = None
+    target_end_date: str | None = None
     source_provider: str
     source_dataset_key: str
     source_entity_id: str
     source_name: str
+    source_lon: float | None = None
+    source_lat: float | None = None
+    source_start_date: str | None = None
+    source_end_date: str | None = None
+    distance_m: float | None = None
+    spatial_score: float | None = None
     decision_reason: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
@@ -124,10 +132,18 @@ def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
         target_category=row.target_category,
         target_lon=row.target_lon,
         target_lat=row.target_lat,
+        target_start_date=row.target_start_date,
+        target_end_date=row.target_end_date,
         source_provider=row.source_provider,
         source_dataset_key=row.source_dataset_key,
         source_entity_id=row.source_entity_id,
         source_name=row.source_name,
+        source_lon=row.source_lon,
+        source_lat=row.source_lat,
+        source_start_date=row.source_start_date,
+        source_end_date=row.source_end_date,
+        distance_m=row.distance_m,
+        spatial_score=row.spatial_score,
         decision_reason=row.decision_reason,
         reviewed_by=row.reviewed_by,
         reviewed_at=row.reviewed_at,

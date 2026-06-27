@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-27 (codex) — Enrichment/Dedup review 검수 테이블 보강
+
+Enrichment review와 Dedup review 테이블을 운영 검수자가 같은 화면에서 더 촘촘하게 좁혀 보고,
+좌표·거리·기간 차이를 바로 판단할 수 있게 보강했다.
+
+- **API/저장소**: enrichment review 목록 응답에 datagokr 대상 feature의 좌표/기간, visitkorea
+  source 좌표/기간, 두 좌표 사이 `distance_m`, 거리 기반 `spatial_score`를 추가했다. VisitKorea
+  enrichment source record에는 TourAPI 좌표를 보존하도록 했다.
+- **Admin UI**: enrichment/dedup review에 검색, 상태/성격별 필터, score band, page size,
+  cursor pagination을 추가했다. enrichment 테이블은 대상/source 기간과 거리 컬럼을 표시하고,
+  좌표가 있는 행은 하나의 VWorld 지도에서 datagokr/visitkorea 마커와 이름을 함께 확인한다.
+- **e2e/live**: mocked Playwright에 enrichment 필터·페이지네이션·지도, dedup 전용 필터·페이지네이션
+  회귀 테스트를 추가했고, N150 live spec에도 두 review 화면의 필터/페이지네이션/지도 smoke를 보강했다.
+- **검증**: Python unit 1109건, enrichment repository integration 9건, API/router targeted 28건,
+  ruff, mypy, import-linter, admin frontend lint/type-check/gen:types, Vitest 45건, mocked review e2e
+  21건 통과.
+
 ## 2026-06-27 (codex) — Curated place-search 반영 정책 수정
 
 Admin curated feature에서 manual_review 후보의 place-search 결과를 `반영`해도 REUSE가

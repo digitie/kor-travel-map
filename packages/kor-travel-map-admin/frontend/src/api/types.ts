@@ -4191,6 +4191,8 @@ export interface components {
             created_at: string;
             /** Decision Reason */
             decision_reason?: string | null;
+            /** Distance M */
+            distance_m?: number | null;
             /** Name Score */
             name_score: number;
             /** Review Id */
@@ -4201,16 +4203,28 @@ export interface components {
             reviewed_by?: string | null;
             /** Source Dataset Key */
             source_dataset_key: string;
+            /** Source End Date */
+            source_end_date?: string | null;
             /** Source Entity Id */
             source_entity_id: string;
+            /** Source Lat */
+            source_lat?: number | null;
+            /** Source Lon */
+            source_lon?: number | null;
             /** Source Name */
             source_name: string;
             /** Source Provider */
             source_provider: string;
+            /** Source Start Date */
+            source_start_date?: string | null;
+            /** Spatial Score */
+            spatial_score?: number | null;
             /** Status */
             status: string;
             /** Target Category */
             target_category?: string | null;
+            /** Target End Date */
+            target_end_date?: string | null;
             /** Target Feature Id */
             target_feature_id: string;
             /** Target Kind */
@@ -4221,6 +4235,8 @@ export interface components {
             target_lon?: number | null;
             /** Target Name */
             target_name: string;
+            /** Target Start Date */
+            target_start_date?: string | null;
         };
         /**
          * EtlPreviewData

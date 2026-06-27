@@ -298,6 +298,8 @@ class _VkItem:
     addr1: str | None = "서울특별시 영등포구"
     area_code: str | None = "1"
     sigungu_code: str | None = "19"
+    map_x: float | None = 126.9245
+    map_y: float | None = 37.526
     event_start_date: str | None = "20260405"
     event_end_date: str | None = "20260412"
     tel: str | None = None
