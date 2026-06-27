@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-27 (codex) — Admin curated/features/Dagster 후속 보강
+
+Admin live 확인 뒤 남은 curated review, feature 상세, OpiNet, Dagster 노출 문제를 보강했다.
+
+- **Curated UI**: place 검색은 후보 선택만으로 자동 호출하지 않고 검색 버튼을 눌렀을 때만 호출하게
+  바꿨다. 후보 전환 시 검색어와 결과 패널이 새 후보 기준으로 초기화된다. 화면 표시에서
+  `kor-travel-concierge`/`concierge` 문구는 중립 표시명으로 바꿨고, provider 선택 시 source rule의
+  실제 theme을 따라가게 했다.
+- **상세 화면**: admin curated feature 단건 상세 route를 추가하고, 기존 우측 검토 패널(지도,
+  place search, display 편집, detail snapshot)을 전용 상세 화면에서도 재사용한다. admin features
+  목록/상세에는 지도 preview를 추가하고, 목록의 `detail` 버튼은 `/features/{feature_id}` 상세로
+  바로 이동하게 바꿨다.
+- **OpiNet/Dagster**: OpiNet `low_top_area`의 no-data 예외를 건너뛰고 일정 호출 수 뒤 sample-grid
+  fallback으로 보강한다. Dagster feature load schedule에 krforest/standard/khoa/krairport/
+  airkorea/visitkorea 누락 asset을 추가하고, admin Dagster 화면은 asset group 내부 asset을 모두
+  표시한다.
+- **검증**: admin frontend type-check/e2e type-check, 변경 파일 ESLint, Dagster/API targeted pytest,
+  ruff, OpenAPI export drift test 통과.
+
 ## 2026-06-27 (codex) — Admin live review 데이터/표시 보강
 
 N150 admin에서 enrichment/dedup review가 0건이고 price/provider/log/curated review 화면의

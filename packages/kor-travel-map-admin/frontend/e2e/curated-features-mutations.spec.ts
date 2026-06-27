@@ -35,6 +35,8 @@ type CuratedFeatureDetailItemView =
   components["schemas"]["CuratedFeatureDetailItemView"];
 type CuratedFeatureDetailSnapshotResponse =
   components["schemas"]["CuratedFeatureDetailSnapshotResponse"];
+type CuratedPlaceSearchResponse =
+  components["schemas"]["CuratedPlaceSearchResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const FEATURE_A_ID = "curated-feature-aaaa";
@@ -260,6 +262,29 @@ function detailSnapshotResponse(
   };
 }
 
+function placeSearchResponse(query: string): CuratedPlaceSearchResponse {
+  return {
+    data: {
+      errors: {},
+      google: [
+        {
+          address: "서울 종로구",
+          category: "tourist_attraction",
+          latitude: 37.5796,
+          longitude: 126.977,
+          name: query,
+          provider: "google",
+          road_address: null,
+        },
+      ],
+      kakao: [],
+      naver: [],
+      query,
+    },
+    meta: { duration_ms: 1, request_id: "e2e-place-search" },
+  };
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -292,9 +317,12 @@ interface ConsoleRequests {
   rulePatch: number;
   ruleApply: number;
   detail: number;
+  placeSearch: number;
+  featureDetail: number;
   /** features list GET에 마지막으로 캡처된 query 파라미터. */
   lastPageSize: string | null;
   lastCursor: string | null;
+  lastPlaceSearchQuery: string | null;
   selectBodies: unknown[];
   unselectBodies: unknown[];
   patchBodies: unknown[];
@@ -331,8 +359,11 @@ async function mockCuratedConsole(
     rulePatch: 0,
     ruleApply: 0,
     detail: 0,
+    placeSearch: 0,
+    featureDetail: 0,
     lastPageSize: null,
     lastCursor: null,
+    lastPlaceSearchQuery: null,
     selectBodies: [],
     unselectBodies: [],
     patchBodies: [],
@@ -366,6 +397,16 @@ async function mockCuratedConsole(
       return;
     }
 
+    if (method === "GET" && path.endsWith("/place-search")) {
+      requests.placeSearch += 1;
+      requests.lastPlaceSearchQuery = url.searchParams.get("q");
+      await fulfillJson(
+        route,
+        placeSearchResponse(url.searchParams.get("q") ?? ""),
+      );
+      return;
+    }
+
     if (method === "GET" && path === "/v1/admin/curated-features") {
       requests.featuresList += 1;
       requests.lastPageSize = url.searchParams.get("page_size");
@@ -393,6 +434,19 @@ async function mockCuratedConsole(
         return;
       }
       await fulfillJson(route, featuresResponse(features, null));
+      return;
+    }
+
+    if (method === "GET" && path.startsWith("/v1/admin/curated-features/")) {
+      requests.featureDetail += 1;
+      const id = decodeURIComponent(path.split("/").at(-1) ?? "");
+      await fulfillJson(
+        route,
+        featureResponse(
+          features.find((item) => item.curated_feature_id === id) ??
+            makeCuratedFeature({ curated_feature_id: id }),
+        ),
+      );
       return;
     }
 
@@ -511,6 +565,21 @@ async function mockCuratedConsole(
 }
 
 test.describe("/admin/curated-features mutations (route-mocked)", () => {
+  test("curated detail 링크가 전용 상세 화면으로 이동", async ({ page }) => {
+    const requests = await mockCuratedConsole(page, {
+      features: [makeCuratedFeature()],
+    });
+
+    await page.goto("/admin/curated-features");
+    await page.getByRole("link", { name: "curated detail" }).first().click();
+
+    await expect(page).toHaveURL(new RegExp(`/admin/curated-features/${FEATURE_A_ID}$`));
+    await expect(page.getByText("Curated feature detail")).toBeVisible();
+    await expect(page.getByText("Location review")).toBeVisible();
+    await expect(page.getByText("Place search")).toBeVisible();
+    await expect.poll(() => requests.featureDetail).toBe(1);
+  });
+
   test("후보 select → curated 전환 (POST /select + invalidate refetch)", async ({
     page,
   }) => {
@@ -596,6 +665,37 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       reuse_policy: "allowed",
       curation_relation: "primary_stop",
     });
+  });
+
+  test("place 검색은 행 선택으로 자동 누적 실행하지 않고 명시 검색만 호출", async ({
+    page,
+  }) => {
+    const requests = await mockCuratedConsole(page, {
+      features: [
+        makeCuratedFeature({ curated_feature_id: FEATURE_A_ID, feature_name: "경복궁" }),
+        makeCuratedFeature({
+          curated_feature_id: FEATURE_B_ID,
+          feature_id: "python-visitkorea-api::visitkorea_areas::feat-2",
+          feature_name: "창덕궁",
+        }),
+      ],
+    });
+
+    await page.goto("/admin/curated-features");
+    await expect(page.getByText("Place search")).toBeVisible();
+    await expect(page.getByLabel("place search query")).toHaveValue("경복궁");
+    await expect.poll(() => requests.placeSearch).toBe(0);
+
+    await page.getByLabel("place search query").fill("경복궁 야간");
+    await page.getByRole("button", { name: "검색" }).click();
+    await expect.poll(() => requests.placeSearch).toBe(1);
+    expect(requests.lastPlaceSearchQuery).toBe("경복궁 야간");
+    await expect(page.getByText("경복궁 야간")).toBeVisible();
+
+    await page.getByRole("row", { name: /창덕궁/ }).click();
+    await expect(page.getByLabel("place search query")).toHaveValue("창덕궁");
+    await expect(page.getByText("검색어를 확인하고 검색을 누르세요.")).toBeVisible();
+    await expect.poll(() => requests.placeSearch).toBe(1);
   });
 
   test("빈 display title/summary는 null로 전송 (trim 후 length 0)", async ({

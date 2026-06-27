@@ -69,6 +69,7 @@ export type AdminCuratedThemesParams = AdminCuratedThemesQuery;
 
 function invalidateCurated(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["curated-features"] });
+  void queryClient.invalidateQueries({ queryKey: ["curated-feature"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-feature-detail"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-source-rules"] });
   void queryClient.invalidateQueries({ queryKey: ["curated-sources"] });
@@ -99,6 +100,26 @@ export function useAdminCuratedFeatures(params: AdminCuratedFeaturesParams) {
   return useQuery<CuratedFeaturesResponse, Error>({
     queryKey: ["curated-features", params] as const,
     queryFn: ({ signal }) => fetchAdminCuratedFeatures(params, signal),
+    staleTime: 30_000,
+  });
+}
+
+async function fetchAdminCuratedFeature(
+  curatedFeatureId: string,
+  signal?: AbortSignal,
+): Promise<CuratedFeatureResponse> {
+  return getJson<CuratedFeatureResponse>(
+    `/v1/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`,
+    { signal },
+  );
+}
+
+export function useAdminCuratedFeature(curatedFeatureId: string | null) {
+  return useQuery<CuratedFeatureResponse, Error>({
+    queryKey: ["curated-feature", curatedFeatureId] as const,
+    queryFn: ({ signal }) =>
+      fetchAdminCuratedFeature(curatedFeatureId as string, signal),
+    enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
     staleTime: 30_000,
   });
 }

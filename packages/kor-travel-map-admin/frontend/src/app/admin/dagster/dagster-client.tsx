@@ -328,8 +328,8 @@ function RepositoryList({
                   <span className="text-sm font-medium">{group.group_name}</span>
                   <Badge variant="secondary">{group.asset_count}</Badge>
                 </div>
-                <div className="mt-2 flex flex-col gap-1">
-                  {group.assets.slice(0, 4).map((asset) => (
+                <div className="mt-2 flex max-h-48 flex-col gap-1 overflow-auto pr-1">
+                  {group.assets.map((asset) => (
                     <span
                       key={asset}
                       className="truncate font-mono text-xs text-muted-foreground"
@@ -337,11 +337,6 @@ function RepositoryList({
                       {asset}
                     </span>
                   ))}
-                  {group.assets.length > 4 ? (
-                    <span className="text-xs text-muted-foreground">
-                      +{group.assets.length - 4}
-                    </span>
-                  ) : null}
                 </div>
               </div>
             ))}

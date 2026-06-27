@@ -24,6 +24,7 @@ import {
   useFeatureDetail,
   type AdminFeatureRecord,
   type AdminFeatureSort,
+  type FeatureDetail,
   type FeatureKind,
   type SortOrder,
 } from "@/api/features";
@@ -39,6 +40,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +61,7 @@ const SORT_OPTIONS: AdminFeatureSort[] = [
   "provider",
   "issue_count",
 ];
+const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 
 type FeatureStatusFilter = (typeof FEATURE_STATUSES)[number] | "all";
 type HasIssueFilter = "all" | "yes" | "no";
@@ -82,6 +85,39 @@ function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
+function FeatureLocationMap({ feature }: { feature: FeatureDetail | null | undefined }) {
+  const hasCoord =
+    typeof feature?.lon === "number" && typeof feature?.lat === "number";
+  if (!hasCoord) {
+    return (
+      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        좌표가 없어 지도 marker를 표시할 수 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-52 overflow-hidden rounded-md border">
+      <VWorldMapView
+        apiKey={VWORLD_KEY}
+        center={[feature.lon as number, feature.lat as number]}
+        className="absolute inset-0 h-full w-full"
+        key={feature.feature_id}
+        navigation
+        scale
+        zoom={14}
+      >
+        <VWorldMarker
+          lngLat={[feature.lon as number, feature.lat as number]}
+          markerColor="#2563eb"
+          selected
+          title={feature.name}
+        />
+      </VWorldMapView>
+    </div>
+  );
+}
+
 function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   const detail = useFeatureDetail(featureId);
 
@@ -103,13 +139,6 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
               {featureId}
             </div>
           </div>
-          <Link
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-            href={featureDetailHref(featureId)}
-          >
-            <ExternalLinkIcon data-icon="inline-start" />
-            전체 상세
-          </Link>
         </div>
         {detail.isLoading ? <Skeleton className="m-4 h-48" /> : null}
         {detail.isError ? (
@@ -128,6 +157,7 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
                 <Badge variant="outline">{detail.data.category}</Badge>
               </div>
             </div>
+            <FeatureLocationMap feature={detail.data} />
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
@@ -346,26 +376,28 @@ export function AdminFeaturesClient() {
           const feature = row.original;
           return (
             <div className="flex flex-wrap gap-1">
+              <Link
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                href={featureDetailHref(feature.feature_id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <ExternalLinkIcon data-icon="inline-start" />
+                detail
+              </Link>
               <Button
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={(event) => {
                   event.stopPropagation();
                   setSelectedFeatureId(feature.feature_id);
                 }}
               >
                 <EyeIcon data-icon="inline-start" />
-                detail
+                preview
               </Button>
-              <Link
-                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                href={featureDetailHref(feature.feature_id)}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <ExternalLinkIcon data-icon="inline-start" />
-                open
-              </Link>
               <Button
                 disabled={
                   deactivate.isPending ||

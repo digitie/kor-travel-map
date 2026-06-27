@@ -9,7 +9,7 @@ import type { components } from "../src/api/types";
  * 본 페이지는 **admin 상세 라우트** `/v1/admin/features/{id}`를 쓴다(공개 라우트 아님).
  * 임의 featureId는 빈 DB에서 404이므로 admin 상세 GET + nearby + weather를 mock한다.
  * (감사 보고서의 "지도/AddressMatchReport/raw JSON 토글/재검증"은 실제 컴포넌트엔 없다 —
- * 실제 섹션은 Sources/Issues/Overrides/History/Files + Weather/Nearby/Raw(<details>)다.)
+ * 실제 섹션은 Sources/Issues/Overrides/History/Files + Weather/Map/Nearby/Raw(<details>)다.)
  *
  * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 실행 검증은 Windows 런 필요.
  */
@@ -146,7 +146,14 @@ test.describe("/features/[featureId]", () => {
     await expect(page.getByText("coord", { exact: true })).toBeVisible();
     // 메인 섹션 타이틀(detail view scope — 헤더 nav의 동명 링크 'Issues'와 구분).
     const detailView = page.getByTestId("feature-detail-view");
-    for (const section of ["Sources", "Issues", "Overrides", "History", "Files"]) {
+    for (const section of [
+      "Sources",
+      "Issues",
+      "Overrides",
+      "History",
+      "Files",
+      "Map",
+    ]) {
       await expect(detailView.getByText(section, { exact: true })).toBeVisible();
     }
     // Raw <details> disclosure.

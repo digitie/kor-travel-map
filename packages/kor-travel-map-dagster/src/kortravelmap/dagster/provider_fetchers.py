@@ -954,6 +954,9 @@ _OPINET_LOW_TOP_COUNT: Final[int] = 20
 _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS: Final[int] = 500
 """``lowTop10`` 부분 성공을 전국 분포로 보기 위한 최소 station 수."""
 
+_OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS: Final[int] = 180
+"""``lowTop10`` area×product 호출 상한. 이후 sample grid fallback으로 보강한다."""
+
 _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
     124.8,
     33.1,
@@ -1040,7 +1043,7 @@ def _opinet_bboxes_for_settings(
     if mode == "disabled":
         raise ProviderCredentialMissing(
             "opinet 적재 비활성(opinet_scope_mode=disabled). "
-            "OPINET_SCOPE_MODE=bbox|poi_cache_target 설정이 필요하다."
+            "OPINET_SCOPE_MODE=bbox|poi_cache_target|low_top_area 설정이 필요하다."
         )
     if mode == "bbox":
         if settings.opinet_scope_bbox is None:
@@ -1121,11 +1124,22 @@ def _opinet_low_top_area_stations(
     """
     seen: set[str | tuple[str, str | None]] = set()
     yielded = 0
+    low_top_calls = 0
+    no_data_error = _opinet_no_data_error_type()
     for area in _opinet_sigungu_area_codes(client):
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
-            for station in client.get_lowest_price_top20(
-                product_code, cnt=_OPINET_LOW_TOP_COUNT, area=area
-            ):
+            if low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS:
+                break
+            low_top_calls += 1
+            try:
+                stations = client.get_lowest_price_top20(
+                    product_code,
+                    cnt=_OPINET_LOW_TOP_COUNT,
+                    area=area,
+                )
+            except no_data_error:
+                continue
+            for station in stations:
                 uni_id = getattr(station, "uni_id", None)
                 if not isinstance(uni_id, str):
                     yielded += 1
@@ -1143,10 +1157,11 @@ def _opinet_low_top_area_stations(
                 seen.add(sample_key)
                 yielded += 1
                 yield station
+        if low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS:
+            break
     if yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
         return
 
-    no_data_error = _opinet_no_data_error_type()
     for center_lon, center_lat in _opinet_sample_grid_centers():
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
             try:

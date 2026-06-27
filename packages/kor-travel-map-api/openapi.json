@@ -14601,6 +14601,56 @@
           "admin-curated"
         ]
       },
+      "get": {
+        "operationId": "get_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
       "patch": {
         "operationId": "patch_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__patch",
         "parameters": [

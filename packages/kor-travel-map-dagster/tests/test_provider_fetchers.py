@@ -1213,14 +1213,18 @@ class _FakeOpinetArea:
         self.code = code
 
 
+class _FakeOpinetNoDataError(RuntimeError):
+    pass
+
+
 class _FakeOpinetClient:
     instances: list[_FakeOpinetClient] = []
     stations: list[object] = []
     details: dict[str, object] = {}
     root_areas: list[_FakeOpinetArea] = []
     child_areas: dict[str, list[_FakeOpinetArea]] = {}
-    low_top: dict[tuple[str, str], list[object]] = {}
-    around: dict[tuple[float, float, str], list[object]] = {}
+    low_top: dict[tuple[str, str], list[object] | Exception] = {}
+    around: dict[tuple[float, float, str], list[object] | Exception] = {}
 
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
@@ -1259,7 +1263,10 @@ class _FakeOpinetClient:
         self, prodcd: str, cnt: int = 10, area: str | None = None
     ) -> list[object]:
         self.low_top_calls.append((prodcd, cnt, area))
-        return list(type(self).low_top.get((area or "", prodcd), []))
+        value = type(self).low_top.get((area or "", prodcd), [])
+        if isinstance(value, Exception):
+            raise value
+        return list(value)
 
     def search_stations_around(
         self,
@@ -1271,7 +1278,10 @@ class _FakeOpinetClient:
         **_kw: Any,
     ) -> list[object]:
         self.around_calls.append((lon, lat, radius_m, prodcd))
-        return list(type(self).around.get((lon, lat, prodcd), []))
+        value = type(self).around.get((lon, lat, prodcd), [])
+        if isinstance(value, Exception):
+            raise value
+        return list(value)
 
     def close(self) -> None:
         self.closed = True
@@ -1284,8 +1294,8 @@ def _install_fake_opinet(
     details: dict[str, object] | None = None,
     root_areas: list[_FakeOpinetArea] | None = None,
     child_areas: dict[str, list[_FakeOpinetArea]] | None = None,
-    low_top: dict[tuple[str, str], list[object]] | None = None,
-    around: dict[tuple[float, float, str], list[object]] | None = None,
+    low_top: dict[tuple[str, str], list[object] | Exception] | None = None,
+    around: dict[tuple[float, float, str], list[object] | Exception] | None = None,
 ) -> type[_FakeOpinetClient]:
     _FakeOpinetClient.instances = []
     _FakeOpinetClient.stations = stations
@@ -1296,6 +1306,7 @@ def _install_fake_opinet(
     _FakeOpinetClient.around = around or {}
     module = ModuleType("opinet")
     module.__dict__["OpinetClient"] = _FakeOpinetClient
+    module.__dict__["OpinetNoDataError"] = _FakeOpinetNoDataError
     monkeypatch.setitem(sys.modules, "opinet", module)
     return _FakeOpinetClient
 
@@ -1524,6 +1535,79 @@ def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
         ("B027", 20, "0101"),
         ("D047", 20, "0101"),
         ("B034", 20, "0101"),
+    ]
+    assert client.around_calls == [
+        (127.0, 37.5, 5000, "B027"),
+        (127.0, 37.5, 5000, "D047"),
+        (127.0, 37.5, 5000, "B034"),
+    ]
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_ignores_no_data_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={
+            ("0101", "B027"): _FakeOpinetNoDataError("empty"),
+            ("0101", "D047"): [_FakeStation("A1", "D047")],
+        },
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 1)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1"]
+    client = fake.instances[0]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+    ]
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_call_budget_uses_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={
+            "01": [
+                _FakeOpinetArea("0101"),
+                _FakeOpinetArea("0102"),
+                _FakeOpinetArea("0103"),
+            ]
+        },
+        around={(127.0, 37.5, "B027"): [_FakeStation("A1", "B027")]},
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS", 2)
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 2)
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_sample_grid_centers",
+        lambda: iter([(127.0, 37.5)]),
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1"]
+    client = fake.instances[0]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
     ]
     assert client.around_calls == [
         (127.0, 37.5, 5000, "B027"),

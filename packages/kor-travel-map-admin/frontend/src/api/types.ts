@@ -117,7 +117,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Admin Curated Feature Route */
+        get: operations["get_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__get"];
         put?: never;
         post?: never;
         /** Delete Admin Curated Feature Route */
@@ -6984,6 +6985,46 @@ export interface operations {
                 "application/json": components["schemas"]["CuratedFeatureCreateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

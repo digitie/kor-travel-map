@@ -26,6 +26,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatDateTime, shortId } from "@/lib/format";
 
 type SourceRow = AdminFeatureDetailData["sources"][number];
@@ -36,6 +37,7 @@ type VersionRow = AdminFeatureDetailData["versions"][number];
 type ChangeRequestRow = AdminFeatureDetailData["change_requests"][number];
 
 const EMPTY_MESSAGE = "데이터가 없습니다.";
+const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 
 function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
@@ -584,6 +586,43 @@ function NearbyPanel({
   );
 }
 
+function FeatureMapPanel({
+  feature,
+}: {
+  feature: AdminFeatureDetailData["feature"];
+}) {
+  const hasCoord = typeof feature.lon === "number" && typeof feature.lat === "number";
+
+  return (
+    <Section icon={MapPinIcon} title="Map">
+      {hasCoord ? (
+        <div className="relative h-64 overflow-hidden rounded-md border">
+          <VWorldMapView
+            apiKey={VWORLD_KEY}
+            center={[feature.lon as number, feature.lat as number]}
+            className="absolute inset-0 h-full w-full"
+            key={feature.feature_id}
+            navigation
+            scale
+            zoom={14}
+          >
+            <VWorldMarker
+              lngLat={[feature.lon as number, feature.lat as number]}
+              markerColor="#2563eb"
+              selected
+              title={feature.name}
+            />
+          </VWorldMapView>
+        </div>
+      ) : (
+        <div className="text-sm text-muted-foreground">
+          좌표가 없어 지도 marker를 표시할 수 없습니다.
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function RawPanels({ data }: { data: AdminFeatureDetailData }) {
   return (
     <Section icon={LinkIcon} title="Raw">
@@ -679,6 +718,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
           <FilesTable data={data} />
         </div>
         <aside className="flex min-w-0 flex-col gap-4">
+          <FeatureMapPanel feature={feature} />
           <FeatureKindDetailPanel feature={feature} featureId={featureId} />
           <NearbyPanel feature={feature} featureId={featureId} />
           <RawPanels data={data} />

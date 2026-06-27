@@ -16,9 +16,8 @@ import * as F from "./_fixtures";
  *   - column headers: status / feature / source / theme / reuse / updated / actions
  *   - count line: /개 표시/ ; source rules: getByText("Source rules")
  *
- * The route has no /{id} detail page — candidate selection is an in-page surface
- * and the detail external link targets /features/{id}. We therefore exercise the
- * curated-features list route read-only and assert on stable landmarks.
+ * The list also exposes an admin /{id} detail page, but this live smoke stays
+ * read-only on the list route and asserts on stable landmarks.
  */
 
 const TIMEOUT = { timeout: 15000 } as const;
