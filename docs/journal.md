@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-27 (codex) — Feature update request live e2e 보강
+
+Feature update request UI의 live e2e와 에러 케이스를 보강하고, update request 완료/재요청 이벤트가
+feature 지도 계열 query를 다시 읽도록 연결했다.
+
+- **UI/e2e**: `/admin/feature-update-requests` live spec을 추가해 form controls, validation error,
+  실제 API dry-run preview, `/features` 지도 화면의 `Update` 진입 링크를 확인한다.
+- **에러 케이스**: mocked list/create e2e에 lon 필수, lat 범위, radius 최소값 validation과 create API
+  422 alert 케이스를 추가했다.
+- **지도 반영**: feature update request create/run-now 및 ops-live `feature_update_requests`/단건 topic이
+  `features`, `feature`, `admin-features` query를 invalidate하게 했다. `/features` mocked map spec은
+  새 ops-live 구독이 라이브 WS 잡음을 만들지 않도록 inert WS를 설치한다.
+- **검증**: admin frontend type-check, 변경 파일 ESLint, mocked update request Playwright 8건,
+  live feature-update-request Playwright 5건, `git diff --check` 통과. `src/api/live.test.ts`는 추가했지만
+  현재 WSL `node_modules`에 `@vitejs/plugin-react`가 없어 Vitest를 실행하지 못했고, `npm install`
+  보강도 NTFS `node_modules` 권한(EACCES)으로 중단했다.
+
+## 2026-06-27 (codex) — Curated place search provider 직접 호출
+
+Admin curated feature의 주소/POI 검색이 kor-travel-concierge의 검색 API를 경유하지 않도록
+FastAPI backend에서 Kakao Local, NAVER Search, Google Places API를 직접 호출하게 바꿨다.
+
+- **API**: `/v1/admin/curated-features/{id}/place-search`는 provider별 키가 있는 경우 해당 API를
+  병렬 호출하고, 키 누락/호출 실패는 provider별 `errors`에 담아 반환한다.
+- **설정**: `KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY`,
+  `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID`, `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET`,
+  `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY`를 settings에 추가했다. 기존 짧은 env 이름은
+  `scripts/load-env.sh`와 `docker-compose.yml`에서 `KOR_TRAVEL_MAP_*`로 매핑한다.
+- **검증**: direct provider 호출 정규화/키 누락 단위 테스트와 변경 파일 ruff 통과.
+
 ## 2026-06-27 (codex) — Admin curated/features/Dagster 후속 보강
 
 Admin live 확인 뒤 남은 curated review, feature 상세, OpiNet, Dagster 노출 문제를 보강했다.

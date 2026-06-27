@@ -153,6 +153,36 @@ class KorTravelMapSettings(BaseSettings):
         value = self.kor_travel_geo_api_key.get_secret_value().strip()
         return value or None
 
+    # ── Admin on-demand address/POI search ────────────────────────────────
+    kakao_local_rest_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Admin curated feature place search용 Kakao Local REST API key. "
+            "env ``KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY``."
+        ),
+    )
+    naver_search_client_id: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Admin curated feature place search용 NAVER Search API client id. "
+            "env ``KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID``."
+        ),
+    )
+    naver_search_client_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Admin curated feature place search용 NAVER Search API client secret. "
+            "env ``KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET``."
+        ),
+    )
+    google_places_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Admin curated feature place search용 Google Places API key. "
+            "env ``KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY``."
+        ),
+    )
+
     # ── Provider API credentials (Dagster resource wiring, ADR-044/045) ──
     data_go_kr_service_key: SecretStr | None = Field(
         default=None,

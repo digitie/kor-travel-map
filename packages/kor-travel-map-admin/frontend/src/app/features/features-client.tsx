@@ -25,6 +25,7 @@ import {
   type FeatureKind,
   type FeatureSummary,
 } from "@/api/features";
+import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -174,6 +175,8 @@ function FeatureDetailPanel({
 }
 
 export function FeaturesClient() {
+  useOpsLiveInvalidation({ topics: ["feature_update_requests"] });
+
   const viewport = useMapStore((state) => state.viewport);
   const setViewport = useMapStore((state) => state.setViewport);
   const featureViewMode = useMapStore((state) => state.featureViewMode);

@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(admin-ops.spec
 // idiom). 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약
@@ -237,6 +238,10 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
 }
 
 test.describe("/features map interactions", () => {
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+  });
+
   test("map<->table 탭 토글 — 두 뷰가 같은 bbox 데이터를 공유", async ({ page }) => {
     await mockFeatureRoutes(page);
 

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Feature update request UI live e2e 보강 (2026-06-27)
+
+- **CHANGED**: feature update request create/run-now 및 ops-live update request 이벤트가 feature 지도,
+  feature 상세, admin features 목록 query를 invalidate해 갱신 결과가 지도 화면에도 반영되도록 했다.
+- **ADDED**: admin feature update request live e2e에 실제 API dry-run preview, validation error,
+  `/features` 지도 화면의 `Update` 진입 링크 확인을 추가했다.
+- **ADDED**: mocked update request e2e에 form validation과 API 422 에러 alert 케이스를 추가했다.
+
 ### Admin curated/features 후속 보강 (2026-06-27)
 
 - **ADDED**: admin curated feature 단건 상세 화면을 추가했다. 목록 우측 검토 패널과 같은 위치 지도,
@@ -15,6 +23,12 @@
   버튼은 제거했다.
 - **CHANGED**: curated place 검색은 후보 선택만으로 자동 실행하지 않고, 검색 버튼을 눌렀을 때만
   호출한다. 후보를 바꾸면 검색어/결과 패널이 새 후보 기준으로 초기화된다.
+- **CHANGED**: curated place 검색 backend는 kor-travel-concierge를 거치지 않고 Kakao Local,
+  NAVER Search, Google Places API를 직접 호출한다. 주소/POI 검색용 env는
+  `KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY`,
+  `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID`,
+  `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET`,
+  `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY`다.
 - **CHANGED**: curated UI의 `concierge` 표시명은 중립 표시명으로 바꿨고, 해당 provider 선택 시
   하드코딩된 theme이 아니라 source rule의 실제 theme을 선택한다.
 - **FIXED**: OpiNet `low_top_area`가 일부 지역/제품 no-data 예외로 중단되지 않게 하고, bounded
