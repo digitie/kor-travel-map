@@ -5671,7 +5671,7 @@ export interface components {
         };
         /**
          * PlaceSearchHitView
-         * @description concierge review place-search normalized hit.
+         * @description external place-search normalized hit.
          */
         PlaceSearchHitView: {
             /** Address */
