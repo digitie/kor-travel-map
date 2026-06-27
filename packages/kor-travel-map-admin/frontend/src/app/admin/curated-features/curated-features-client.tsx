@@ -20,6 +20,7 @@ import {
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { toast } from "sonner";
 
 import {
   useAdminCuratedFeatures,
@@ -294,25 +295,50 @@ export function CuratedPlaceSearchPanel({
     hits: search.data?.data[provider] ?? [],
   }));
   const applyHit = (hit: CuratedPlaceSearchHit) => {
-    patchFeature.mutate({
-      curatedFeatureId: feature.curated_feature_id,
-      body: {
-        display_title: hit.name ?? feature.display_title,
-        metadata: {
-          ...feature.metadata,
-          place_search_review: {
-            provider: hit.provider,
-            query: search.data?.data.query ?? activeQuery,
-            name: hit.name ?? null,
-            address: placeHitAddress(hit),
-            latitude: hit.latitude ?? null,
-            longitude: hit.longitude ?? null,
-            category: hit.category ?? null,
-            reviewed_at: new Date().toISOString(),
+    patchFeature.mutate(
+      {
+        curatedFeatureId: feature.curated_feature_id,
+        body: {
+          display_title: hit.name ?? feature.display_title,
+          metadata: {
+            ...feature.metadata,
+            place_search_review: {
+              provider: hit.provider,
+              query: search.data?.data.query ?? activeQuery,
+              name: hit.name ?? null,
+              address: placeHitAddress(hit),
+              latitude: hit.latitude ?? null,
+              longitude: hit.longitude ?? null,
+              category: hit.category ?? null,
+              reviewed_at: new Date().toISOString(),
+            },
           },
         },
       },
-    });
+      {
+        onSuccess: () => {
+          const coord =
+            hit.latitude != null && hit.longitude != null
+              ? ` · ${hit.latitude.toFixed(5)}, ${hit.longitude.toFixed(5)}`
+              : "";
+          toast.success("반영 완료", {
+            description: (
+              <div className="grid gap-0.5 text-xs">
+                <div>display title: {hit.name ?? "—"}</div>
+                <div>
+                  {hit.provider} · {placeHitAddress(hit)}
+                  {coord}
+                </div>
+                {hit.category ? <div>분류: {hit.category}</div> : null}
+              </div>
+            ),
+          });
+        },
+        onError: (error) => {
+          toast.error("반영 실패", { description: uiLabel(error.message) });
+        },
+      },
+    );
   };
 
   return (
@@ -438,16 +464,36 @@ export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!feature) return;
-    patchFeature.mutate({
-      curatedFeatureId: feature.curated_feature_id,
-      body: {
-        display_title: title.trim().length > 0 ? title.trim() : null,
-        display_summary: summary.trim().length > 0 ? summary.trim() : null,
-        rank_score: Number(rankScore),
-        reuse_policy: reusePolicy,
-        curation_relation: relation,
+    patchFeature.mutate(
+      {
+        curatedFeatureId: feature.curated_feature_id,
+        body: {
+          display_title: title.trim().length > 0 ? title.trim() : null,
+          display_summary: summary.trim().length > 0 ? summary.trim() : null,
+          rank_score: Number(rankScore),
+          reuse_policy: reusePolicy,
+          curation_relation: relation,
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          toast.success("저장 완료", {
+            description: (
+              <div className="grid gap-0.5 text-xs">
+                <div>display title: {title.trim() || "—"}</div>
+                <div>display summary: {summary.trim() || "—"}</div>
+                <div>
+                  rank {Number(rankScore)} · {reusePolicy} · {relation}
+                </div>
+              </div>
+            ),
+          });
+        },
+        onError: (error) => {
+          toast.error("저장 실패", { description: uiLabel(error.message) });
+        },
+      },
+    );
   };
 
   if (!feature) {
