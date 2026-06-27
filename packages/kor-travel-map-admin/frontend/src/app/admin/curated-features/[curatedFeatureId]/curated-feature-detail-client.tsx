@@ -129,9 +129,12 @@ export function CuratedFeatureDetailClient({
                   feature={item}
                   key={`${item.curated_feature_id}:place-search`}
                 />
+                {/* updated_at in the key remounts the editor after a patch
+                    (place-search 반영 / 저장) so its inputs re-sync to the
+                    refetched feature instead of showing stale useState. */}
                 <FeatureEditor
                   feature={item}
-                  key={`${item.curated_feature_id}:editor`}
+                  key={`${item.curated_feature_id}:${item.updated_at}:editor`}
                 />
               </aside>
             </div>

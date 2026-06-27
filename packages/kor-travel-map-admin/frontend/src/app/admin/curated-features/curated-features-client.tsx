@@ -1622,13 +1622,18 @@ export function CuratedFeaturesClient() {
               )}
             </section>
             <CuratedFeatureLocationPanel feature={selectedFeature} />
+            {/* Sibling keys MUST be distinct (`:place-search` vs `:editor`): the
+                same key on two siblings duplicates React keys and stacks the
+                panel instead of resetting it on reselect. The editor key adds
+                updated_at so it remounts and re-syncs its inputs after a
+                patch/save (same curated_feature_id, new data). */}
             <CuratedPlaceSearchPanel
               feature={selectedFeature}
-              key={selectedFeature?.curated_feature_id ?? "empty-place-search"}
+              key={`${selectedFeature?.curated_feature_id ?? "empty"}:place-search`}
             />
             <FeatureEditor
               feature={selectedFeature}
-              key={selectedFeature?.curated_feature_id ?? "empty-feature"}
+              key={`${selectedFeature?.curated_feature_id ?? "empty"}:${selectedFeature?.updated_at ?? ""}:editor`}
             />
             <CuratedFeatureDetailPreview feature={selectedFeature} />
           </div>
