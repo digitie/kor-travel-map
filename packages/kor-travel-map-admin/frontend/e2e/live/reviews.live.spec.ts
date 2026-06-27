@@ -260,18 +260,19 @@ test.describe("reviews live — issues keyset pagination controls", () => {
   });
 });
 
-// Enrichment page exposes labelled prev/next pager buttons (이전/다음 페이지).
+// Enrichment page exposes labelled top/bottom pager buttons.
 const ENRICH = PAGES[2];
 const DEDUP = PAGES[1];
 
 test.describe("reviews live — enrichment pager controls", () => {
-  test("/admin/enrichment-reviews 이전/다음 페이지 buttons present", async ({
+  test("/admin/enrichment-reviews top/bottom pager buttons present", async ({
     page,
   }) => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
-    await expect(page.getByLabel("이전 페이지")).toBeVisible({ timeout: T });
-    await expect(page.getByLabel("다음 페이지")).toBeVisible({ timeout: T });
+    await expect(page.getByLabel("이전 페이지")).toHaveCount(2, { timeout: T });
+    await expect(page.getByLabel("다음 페이지")).toHaveCount(2, { timeout: T });
+    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2, { timeout: T });
   });
 
   test("/admin/enrichment-reviews 이전 페이지 disabled on page 1", async ({
@@ -280,16 +281,23 @@ test.describe("reviews live — enrichment pager controls", () => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
     // empty queue, first page → 이전 페이지 disabled.
-    await expect(page.getByLabel("이전 페이지")).toBeDisabled({ timeout: T });
+    await expect(page.getByLabel("이전 페이지").first()).toBeDisabled({
+      timeout: T,
+    });
   });
 
-  test("/admin/enrichment-reviews 다음 페이지 disabled when empty", async ({
+  test("/admin/enrichment-reviews next/last disabled when empty", async ({
     page,
   }) => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
-    // PRESENCE=0 → no next_cursor → 다음 페이지 disabled.
-    await expect(page.getByLabel("다음 페이지")).toBeDisabled({ timeout: T });
+    // PRESENCE=0 → totalPages=1 → 다음/마지막 페이지 disabled.
+    await expect(page.getByLabel("다음 페이지").first()).toBeDisabled({
+      timeout: T,
+    });
+    await expect(page.getByLabel("마지막 페이지").first()).toBeDisabled({
+      timeout: T,
+    });
   });
 });
 
@@ -363,9 +371,18 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
   test("/admin/dedup-reviews pager controls present", async ({ page }) => {
     await page.goto(DEDUP.route);
     await expectPageLoaded(page, DEDUP);
-    await expect(page.getByLabel("dedup 이전 페이지")).toBeVisible({ timeout: T });
-    await expect(page.getByLabel("dedup 다음 페이지")).toBeVisible({ timeout: T });
-    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled({ timeout: T });
+    await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2, {
+      timeout: T,
+    });
+    await expect(page.getByLabel("dedup 다음 페이지")).toHaveCount(2, {
+      timeout: T,
+    });
+    await expect(page.getByLabel("dedup 마지막 페이지")).toHaveCount(2, {
+      timeout: T,
+    });
+    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeDisabled({
+      timeout: T,
+    });
   });
 
   for (const term of F.SEARCH_TERMS.slice(0, 8)) {

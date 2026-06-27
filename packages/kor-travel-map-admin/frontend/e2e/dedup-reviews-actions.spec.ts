@@ -83,7 +83,7 @@ function makeDedupReview(
 
 function listResponse(
   items: DedupReviewRecord[],
-  options: { nextCursor?: string | null; pageSize?: number } = {},
+  options: { nextCursor?: string | null; pageSize?: number; total?: number } = {},
 ): DedupReviewListResponse {
   return {
     data: { items },
@@ -92,7 +92,7 @@ function listResponse(
       page: {
         page_size: options.pageSize ?? 100,
         next_cursor: options.nextCursor ?? null,
-        total: items.length,
+        total: options.total ?? items.length,
       },
       request_id: "e2e-dedup-list",
     },
@@ -241,15 +241,17 @@ async function mockDedupReviews(
       handle.requests.lastListUrl = url;
       handle.requests.listUrls.push(url);
       const pageSize = Number(url.searchParams.get("page_size") ?? 100);
-      const cursor = url.searchParams.get("cursor");
       const rows = filteredRows(url);
-      const nextCursor = cursor ? null : rows.length > pageSize ? "cursor-page-2" : null;
-      const start = cursor === "cursor-page-2" ? pageSize : 0;
+      const pageIndex = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+      const start = (pageIndex - 1) * pageSize;
+      const nextCursor =
+        rows.length > start + pageSize ? `cursor-page-${pageIndex + 1}` : null;
       await fulfillJson(
         route,
         listResponse(rows.slice(start, start + pageSize), {
           nextCursor,
           pageSize,
+          total: rows.length,
         }),
       );
       return;
@@ -310,9 +312,10 @@ test.describe("admin/dedup-reviews actions", () => {
       page.getByRole("row", { name: /DEDUP_A_alpha/ }),
     ).toBeVisible();
 
-    // 기본 목록 쿼리: page_size=100 하드코딩, cursor 없음, status='pending'.
+    // 기본 목록 쿼리: page_size=100, page=1, cursor 없음, status='pending'.
     const firstList = handle.requests.lastListUrl;
     expect(firstList?.searchParams.get("page_size")).toBe("100");
+    expect(firstList?.searchParams.get("page")).toBe("1");
     expect(firstList?.searchParams.has("cursor")).toBe(false);
     expect(firstList?.searchParams.getAll("status")).toEqual(["pending"]);
 
@@ -613,7 +616,7 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(last?.searchParams.get("page_size")).toBe("25");
   });
 
-  test("page-size select drives cursor pagination controls", async ({ page }) => {
+  test("page-size select drives page pagination controls", async ({ page }) => {
     const rows = Array.from({ length: 26 }, (_value, index) =>
       makeDedupReview({
         feature_a: makeDedupFeature({
@@ -630,21 +633,32 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.goto("/admin/dedup-reviews");
     await page.getByLabel("dedup page size").selectOption("25");
 
-    await expect(page.getByText(/페이지 1 · 25건/)).toBeVisible();
-    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled();
-    await expect(page.getByLabel("dedup 다음 페이지")).toBeEnabled();
+    await expect(
+      page.getByText(/페이지 1 \/ 2 · 총 26건 · 현재 25건/),
+    ).toHaveCount(2);
+    await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 다음 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 마지막 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 다음 페이지").first()).toBeEnabled();
+    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeEnabled();
 
-    await page.getByLabel("dedup 다음 페이지").click();
+    await page.getByLabel("dedup 다음 페이지").first().click();
     await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.get("cursor"))
-      .toBe("cursor-page-2");
-    await expect(page.getByText(/페이지 2 · 1건/)).toBeVisible();
+      .poll(() => handle.requests.lastListUrl?.searchParams.get("page"))
+      .toBe("2");
+    await expect(
+      page.getByText(/페이지 2 \/ 2 · 총 26건 · 현재 1건/),
+    ).toHaveCount(2);
     await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toBeVisible();
-    await expect(page.getByLabel("dedup 다음 페이지")).toBeDisabled();
-    await expect(page.getByLabel("dedup 이전 페이지")).toBeEnabled();
+    await expect(page.getByLabel("dedup 다음 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeEnabled();
 
-    await page.getByRole("button", { name: "첫 페이지" }).click();
-    await expect(page.getByText(/페이지 1 · 25건/)).toBeVisible();
+    await page.getByLabel("dedup 첫 페이지").first().click();
+    await expect(
+      page.getByText(/페이지 1 \/ 2 · 총 26건 · 현재 25건/),
+    ).toHaveCount(2);
   });
 
   test("empty list renders the dedup empty message", async ({ page }) => {
@@ -656,8 +670,15 @@ test.describe("admin/dedup-reviews actions", () => {
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
     ).toBeVisible();
     await expect(page.getByText("dedup review가 없습니다.")).toBeVisible();
-    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled();
-    await expect(page.getByLabel("dedup 다음 페이지")).toBeDisabled();
+    await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 다음 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 마지막 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 다음 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeDisabled();
+    await expect(
+      page.getByText(/페이지 1 \/ 1 · 총 0건 · 현재 0건/),
+    ).toHaveCount(2);
     for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
       await expect(
         page.getByRole("columnheader", { name: column }),

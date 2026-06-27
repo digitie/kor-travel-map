@@ -45,6 +45,9 @@ class _Result:
             return None
         return type("Row", (), self._rows[0])()
 
+    def scalar_one(self) -> Any:
+        return next(iter(self._rows[0].values()))
+
 
 class _Session:
     def __init__(self, results: list[_Result]) -> None:
@@ -420,7 +423,12 @@ def test_dedup_cursor_and_row_mapping() -> None:
 
 @pytest.mark.asyncio
 async def test_list_dedup_reviews_and_decision() -> None:
-    session = _Session([_Result([_dedup_row(_REVIEW_KEY_1), _dedup_row(_REVIEW_KEY_2)])])
+    session = _Session(
+        [
+            _Result([{"total_count": 2}]),
+            _Result([_dedup_row(_REVIEW_KEY_1), _dedup_row(_REVIEW_KEY_2)]),
+        ]
+    )
 
     page = await repo.list_dedup_reviews(
         session,  # type: ignore[arg-type]
@@ -431,9 +439,12 @@ async def test_list_dedup_reviews_and_decision() -> None:
 
     assert len(page.items) == 1
     assert page.next_cursor is not None
-    params = session.calls[0]["params"]
+    assert page.total_count == 2
+    params = session.calls[1]["params"]
     assert params["providers"] == ["python-mois-api"]
     assert params["min_score"] == 80
+    assert params["limit_plus_one"] == 2
+    assert params["offset_rows"] == 0
 
     changed = await repo.set_dedup_review_decision(
         _Session([_Result([{"review_id": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]

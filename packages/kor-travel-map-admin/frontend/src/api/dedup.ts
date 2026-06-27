@@ -60,6 +60,7 @@ function fetchDedupReviews(
       max_score: params.max_score,
       q: params.q,
       page_size: params.page_size,
+      page: params.page,
       cursor: params.cursor,
     }),
     { signal },

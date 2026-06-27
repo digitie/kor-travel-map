@@ -7793,6 +7793,7 @@ export interface operations {
                 max_score?: number | null;
                 q?: string | null;
                 page_size?: number;
+                page?: number;
                 cursor?: string | null;
             };
             header?: never;
@@ -7902,6 +7903,7 @@ export interface operations {
                 max_score?: number | null;
                 q?: string | null;
                 page_size?: number;
+                page?: number;
                 cursor?: string | null;
             };
             header?: never;

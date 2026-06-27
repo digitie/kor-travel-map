@@ -566,6 +566,7 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
     for _ in range(3):
         page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
         assert len(page.items) == 1
+        assert page.total_count == 3
         assert page.items[0].total_score_cursor == "90.01"
         seen.append(page.items[0].review_id)
         cursor = page.next_cursor
@@ -576,3 +577,9 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
         "00000000-0000-0000-0000-000000000001",
     ]
     assert cursor is None
+
+    page_2 = await list_dedup_reviews(session, page_size=2, page=2)
+    assert page_2.total_count == 3
+    assert [item.review_id for item in page_2.items] == [
+        "00000000-0000-0000-0000-000000000001"
+    ]

@@ -15,6 +15,7 @@ from .curated_features import (
     CURATED_FEATURE_JOBS,
     CURATED_FEATURE_SCHEDULES,
 )
+from .feature_update_runner import feature_update_runner_resource
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .mcst_features import MCST_FEATURE_ASSETS
@@ -97,6 +98,7 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
 
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
+    "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
     "reverse_geocoder": reverse_geocoder_resource,
     "kma_weather_client": kma_weather_client_resource,
