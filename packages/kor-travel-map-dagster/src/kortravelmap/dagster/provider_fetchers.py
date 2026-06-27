@@ -957,6 +957,16 @@ _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS: Final[int] = 500
 _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS: Final[int] = 180
 """``lowTop10`` area×product 호출 상한. 이후 sample grid fallback으로 보강한다."""
 
+_OPINET_RUN_CALL_BUDGET: Final[int] = 600
+"""``low_top_area`` 한 run이 쓸 수 있는 OpiNet 호출 hard cap(#545).
+
+``get_area_codes`` + ``lowTop10`` + ``aroundAll``(``search_stations_around``)을
+모두 합산해 이 값을 넘으면 enumeration을 즉시 중단한다. OpiNet 무료키 일일 한도는
+1,500회/일이고 가격 asset은 하루 1회 적재이므로 600/run이면 월간 place job과 같은
+경로가 같은 날 한 번 더 돌아도(=1,200) 한도 아래로 유지된다. ``lowTop10`` 상한
+(180) + ``get_area_codes``(~19)을 제외하면 grid fallback에 ~400회가 남아 빈 운영
+상태의 분포 보강도 가능하다."""
+
 _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
     124.8,
     33.1,
@@ -1062,17 +1072,58 @@ def _opinet_bboxes_for_settings(
     return bboxes
 
 
-def _opinet_sigungu_area_codes(client: Any) -> list[str]:
+class _OpinetCallBudget:
+    """``low_top_area`` run의 OpiNet 호출 수를 추적하는 hard cap(#545).
+
+    ``get_area_codes`` + ``lowTop10`` + ``aroundAll`` 호출을 한 카운터로 합산한다.
+    각 호출 **직전** ``spend()``로 차감하고, 남은 예산이 없으면 ``exhausted``가
+    ``True``가 되어 enumeration을 즉시 멈춘다. cap을 0 이하로 주면(또는 None)
+    무제한으로 동작한다(테스트/특수 운영용).
+    """
+
+    __slots__ = ("_remaining", "_unbounded")
+
+    def __init__(self, limit: int | None) -> None:
+        if limit is None or limit <= 0:
+            self._unbounded = True
+            self._remaining = 0
+        else:
+            self._unbounded = False
+            self._remaining = int(limit)
+
+    @property
+    def exhausted(self) -> bool:
+        return not self._unbounded and self._remaining <= 0
+
+    def spend(self) -> bool:
+        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``."""
+        if self._unbounded:
+            return True
+        if self._remaining <= 0:
+            return False
+        self._remaining -= 1
+        return True
+
+
+def _opinet_sigungu_area_codes(
+    client: Any, *, budget: _OpinetCallBudget | None = None
+) -> list[str]:
     """OpiNet 시군구 area code 목록.
 
     ``lowTop10`` 전국 분포 모드에서 사용한다. 시도별 시군구가 없으면 해당 시도
-    코드를 fallback으로 사용해 호출량을 bounded하게 유지한다.
+    코드를 fallback으로 사용해 호출량을 bounded하게 유지한다. ``budget``이 주어지면
+    각 ``get_area_codes`` 호출을 run 예산에서 차감하고, 소진되면 지금까지 모은 area를
+    반환하고 조기 종료한다(#545).
     """
     areas: list[str] = []
+    if budget is not None and not budget.spend():
+        return areas
     for sido in client.get_area_codes():
         sido_code = str(getattr(sido, "code", "")).strip()
         if not sido_code:
             continue
+        if budget is not None and not budget.spend():
+            break
         sigungu_codes = [
             str(getattr(sigungu, "code", "")).strip()
             for sigungu in client.get_area_codes(sido_code)
@@ -1112,6 +1163,26 @@ def _opinet_no_data_error_type() -> type[Exception]:
     return RuntimeError
 
 
+def _opinet_rate_limit_error_type() -> type[Exception]:
+    """현재 설치된 ``opinet`` 모듈의 호출 한도 초과 예외 타입(#545).
+
+    호출 budget(``_OPINET_RUN_CALL_BUDGET``)이 보수적 안전망이지만, 서버가 먼저
+    429/한도 초과를 알리면 ``OpinetRateLimitError``로 즉시 enumeration을 중단한다.
+    ``OpinetNoDataError``와 달리 빈 응답이 아니라 quota 신호이므로 area/product를
+    더 돌지 않고 빠져나간다. 모듈이 해당 예외를 노출하지 않으면(구버전) 절대
+    매칭되지 않는 sentinel을 반환해 호출부 ``except``를 무력화한다.
+    """
+    opinet = importlib.import_module("opinet")
+    error_type = getattr(opinet, "OpinetRateLimitError", None)
+    if isinstance(error_type, type) and issubclass(error_type, Exception):
+        return error_type
+
+    class _UnreachableOpinetRateLimit(Exception):
+        """``OpinetRateLimitError`` 미노출 시 매칭되지 않는 sentinel."""
+
+    return _UnreachableOpinetRateLimit
+
+
 def _opinet_low_top_area_stations(
     client: Any, *, dedupe_by_product: bool
 ) -> Iterator[Any]:
@@ -1121,14 +1192,54 @@ def _opinet_low_top_area_stations(
     분포용으로 ``lowTop10``을 시군구×제품 단위로 먼저 호출한다. 운영 API가
     빈 응답 또는 비정상적으로 작은 부분 응답을 반환하면 bounded sample grid의
     ``aroundAll``로 fallback한다.
+
+    호출량 가드(#545):
+
+    - run당 hard budget(``_OPINET_RUN_CALL_BUDGET``)으로 ``get_area_codes`` +
+      ``lowTop10`` + ``aroundAll`` 호출을 합산해 초과 시 즉시 중단한다.
+    - ``lowTop10``이 충분히(``_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS``) 산출되면
+      grid fallback을 **건너뛴다**(부분 성공 후 전체 grid를 도는 케이스 차단).
+    - 서버가 먼저 ``OpinetRateLimitError``를 던지면 enumeration을 조기 종료한다.
     """
     seen: set[str | tuple[str, str | None]] = set()
     yielded = 0
     low_top_calls = 0
     no_data_error = _opinet_no_data_error_type()
-    for area in _opinet_sigungu_area_codes(client):
+    rate_limit_error = _opinet_rate_limit_error_type()
+    budget = _OpinetCallBudget(_OPINET_RUN_CALL_BUDGET)
+
+    def _dedupe_key(station: Any) -> str | tuple[str, str | None] | None:
+        uni_id = getattr(station, "uni_id", None)
+        if not isinstance(uni_id, str):
+            return None
+        if not dedupe_by_product:
+            return uni_id
+        raw_product = getattr(station, "product_code", None)
+        product = getattr(raw_product, "value", raw_product)
+        return (uni_id, str(product) if product is not None else None)
+
+    def _emit(stations: Any) -> Iterator[Any]:
+        nonlocal yielded
+        for station in stations:
+            key = _dedupe_key(station)
+            if key is None:
+                yielded += 1
+                yield station
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            yielded += 1
+            yield station
+
+    rate_limited = False
+    for area in _opinet_sigungu_area_codes(client, budget=budget):
+        if budget.exhausted:
+            break
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
             if low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS:
+                break
+            if not budget.spend():
                 break
             low_top_calls += 1
             try:
@@ -1139,31 +1250,28 @@ def _opinet_low_top_area_stations(
                 )
             except no_data_error:
                 continue
-            for station in stations:
-                uni_id = getattr(station, "uni_id", None)
-                if not isinstance(uni_id, str):
-                    yielded += 1
-                    yield station
-                    continue
-                sample_key: str | tuple[str, str | None]
-                if dedupe_by_product:
-                    raw_product = getattr(station, "product_code", None)
-                    product = getattr(raw_product, "value", raw_product)
-                    sample_key = (uni_id, str(product) if product is not None else None)
-                else:
-                    sample_key = uni_id
-                if sample_key in seen:
-                    continue
-                seen.add(sample_key)
-                yielded += 1
-                yield station
-        if low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS:
+            except rate_limit_error:
+                rate_limited = True
+                break
+            yield from _emit(stations)
+        if (
+            rate_limited
+            or budget.exhausted
+            or low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS
+        ):
             break
-    if yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
+
+    # 부분 성공이라도 분포 임계치를 넘겼으면 grid fallback을 돌지 않는다(#545).
+    # budget이 이미 소진됐어도 grid를 시작하지 않는다.
+    if rate_limited or budget.exhausted or yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
         return
 
     for center_lon, center_lat in _opinet_sample_grid_centers():
+        if budget.exhausted:
+            break
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
+            if not budget.spend():
+                break
             try:
                 stations = client.search_stations_around(
                     lon=center_lon,
@@ -1173,24 +1281,9 @@ def _opinet_low_top_area_stations(
                 )
             except no_data_error:
                 continue
-            for station in stations:
-                uni_id = getattr(station, "uni_id", None)
-                if not isinstance(uni_id, str):
-                    yielded += 1
-                    yield station
-                    continue
-                key: str | tuple[str, str | None]
-                if dedupe_by_product:
-                    raw_product = getattr(station, "product_code", None)
-                    product = getattr(raw_product, "value", raw_product)
-                    key = (uni_id, str(product) if product is not None else None)
-                else:
-                    key = uni_id
-                if key in seen:
-                    continue
-                seen.add(key)
-                yielded += 1
-                yield station
+            except rate_limit_error:
+                return
+            yield from _emit(stations)
 
 
 def fetch_opinet_stations(

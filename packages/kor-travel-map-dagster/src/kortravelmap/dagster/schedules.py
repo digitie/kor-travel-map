@@ -86,11 +86,15 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     FeatureLoadScheduleSpec(
         asset=feature_price_opinet_stations,
         job_name="feature_price_opinet_stations_job",
-        schedule_name="feature_price_opinet_stations_twice_daily_schedule",
-        cron_schedule="18 6,18 * * *",
+        schedule_name="feature_price_opinet_stations_daily_schedule",
+        # #545: low_top_area scope의 lowTop10/aroundAll 호출이 OpiNet 무료키 일일
+        # 한도(1,500/일)를 압박하므로 가격 적재를 1일 1회로 낮춘다. fetcher의
+        # run당 hard budget(_OPINET_RUN_CALL_BUDGET=600)과 함께 두 layer 가드로
+        # 월간 place job과 같은 날 겹쳐도 한도 아래를 유지한다.
+        cron_schedule="18 18 * * *",
         provider="opinet",
         dataset_key="opinet_gas_station_prices",
-        description="OpiNet 주유소 price Feature + PriceValue 일 2회 적재(scope 기반).",
+        description="OpiNet 주유소 price Feature + PriceValue 일 1회 적재(scope 기반).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krex_rest_areas,
