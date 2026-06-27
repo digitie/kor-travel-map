@@ -1161,9 +1161,10 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
-    // cursor 페이지네이션 컨트롤(#299).
-    await expect(page.getByLabel("이전 페이지")).toBeVisible();
-    await expect(page.getByLabel("다음 페이지")).toBeVisible();
+    // 상/하단 페이지네이션 컨트롤.
+    await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
   });
 
   test("/v1/admin/feature-update-requests", async ({ page }) => {

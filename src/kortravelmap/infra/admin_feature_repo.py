@@ -395,6 +395,7 @@ class DedupReviewPage:
 
     items: tuple[DedupReviewRow, ...]
     next_cursor: str | None
+    total_count: int
 
 
 _ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
@@ -2038,6 +2039,93 @@ WHERE (
   )
 ORDER BY total_score DESC, review_id DESC
 LIMIT :limit_plus_one
+OFFSET :offset_rows
+"""
+
+
+_DEDUP_REVIEW_COUNT_SQL: Final[str] = """
+WITH reviews AS MATERIALIZED (
+    SELECT
+        q.review_id,
+        q.feature_id_a,
+        q.feature_id_b
+    FROM ops.dedup_review_queue AS q
+    WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+      AND (
+        CAST(:min_score AS numeric) IS NULL
+        OR q.total_score >= CAST(:min_score AS numeric)
+      )
+      AND (
+        CAST(:max_score AS numeric) IS NULL
+        OR q.total_score <= CAST(:max_score AS numeric)
+      )
+),
+expanded AS (
+    SELECT
+        r.*,
+        fa.name AS name_a,
+        fa.kind AS kind_a,
+        fa.category AS category_a,
+        psa.provider AS provider_a,
+        psa.dataset_key AS dataset_key_a,
+        fb.name AS name_b,
+        fb.kind AS kind_b,
+        fb.category AS category_b,
+        psb.provider AS provider_b,
+        psb.dataset_key AS dataset_key_b
+    FROM reviews AS r
+    JOIN feature.features AS fa ON fa.feature_id = r.feature_id_a
+    JOIN feature.features AS fb ON fb.feature_id = r.feature_id_b
+    LEFT JOIN LATERAL (
+        SELECT sr.provider, sr.dataset_key
+        FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_records AS sr
+          ON sr.source_record_key = sl.source_record_key
+        WHERE sl.feature_id = fa.feature_id
+          AND sl.is_primary_source
+        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+        LIMIT 1
+    ) AS psa ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT sr.provider, sr.dataset_key
+        FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_records AS sr
+          ON sr.source_record_key = sl.source_record_key
+        WHERE sl.feature_id = fb.feature_id
+          AND sl.is_primary_source
+        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+        LIMIT 1
+    ) AS psb ON TRUE
+)
+SELECT count(*)::integer AS total_count
+FROM expanded
+WHERE (
+    CAST(:q_like AS text) IS NULL
+    OR feature_id_a ILIKE CAST(:q_like AS text)
+    OR feature_id_b ILIKE CAST(:q_like AS text)
+    OR name_a ILIKE CAST(:q_like AS text)
+    OR name_b ILIKE CAST(:q_like AS text)
+)
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR provider_a = ANY(CAST(:providers AS text[]))
+    OR provider_b = ANY(CAST(:providers AS text[]))
+  )
+  AND (
+    CAST(:dataset_keys AS text[]) IS NULL
+    OR dataset_key_a = ANY(CAST(:dataset_keys AS text[]))
+    OR dataset_key_b = ANY(CAST(:dataset_keys AS text[]))
+  )
+  AND (
+    CAST(:kinds AS text[]) IS NULL
+    OR kind_a = ANY(CAST(:kinds AS text[]))
+    OR kind_b = ANY(CAST(:kinds AS text[]))
+  )
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR category_a = ANY(CAST(:categories AS text[]))
+    OR category_b = ANY(CAST(:categories AS text[]))
+  )
 """
 
 
@@ -2134,26 +2222,42 @@ async def list_dedup_reviews(
     max_score: float | None = None,
     q: str | None = None,
     page_size: int = 50,
+    page: int = 1,
     cursor: str | None = None,
 ) -> DedupReviewPage:
-    """Dedup review 목록을 점수 내림차순 cursor로 조회한다."""
+    """Dedup review 목록을 점수 내림차순으로 조회한다."""
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
+    if page <= 0:
+        raise ValueError("page must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
+    params: dict[str, Any] = {
+        "statuses": _normalize_values(statuses),
+        "providers": _normalize_values(providers),
+        "dataset_keys": _normalize_values(dataset_keys),
+        "kinds": _normalize_values(kinds),
+        "categories": _normalize_values(categories),
+        "min_score": min_score,
+        "max_score": max_score,
+        "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+    }
+    total_count = int(
+        (
+            await session.execute(
+                text(_DEDUP_REVIEW_COUNT_SQL),
+                params,
+            )
+        ).scalar_one()
+    )
+    offset_rows = 0 if cursor is not None else (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(_DEDUP_REVIEW_SQL),
             {
-                "statuses": _normalize_values(statuses),
-                "providers": _normalize_values(providers),
-                "dataset_keys": _normalize_values(dataset_keys),
-                "kinds": _normalize_values(kinds),
-                "categories": _normalize_values(categories),
-                "min_score": min_score,
-                "max_score": max_score,
-                "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+                **params,
                 "limit_plus_one": effective_limit + 1,
+                "offset_rows": offset_rows,
                 **_dedup_cursor_params(cursor),
             },
         )
@@ -2164,7 +2268,11 @@ async def list_dedup_reviews(
         if len(rows) > effective_limit and items
         else None
     )
-    return DedupReviewPage(items=items, next_cursor=next_cursor)
+    return DedupReviewPage(
+        items=items,
+        next_cursor=next_cursor,
+        total_count=total_count,
+    )
 
 
 _SET_DEDUP_DECISION_SQL: Final[str] = """
@@ -2300,6 +2408,7 @@ class EnrichmentReviewPage:
 
     items: tuple[EnrichmentReviewRow, ...]
     next_cursor: str | None
+    total_count: int
 
 
 _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER: Final[str] = """
@@ -2375,6 +2484,7 @@ WITH reviews AS MATERIALIZED (
     )
     ORDER BY q.name_score DESC, q.review_id DESC
     LIMIT :limit_plus_one
+    OFFSET :offset_rows
 )
 SELECT
     q.review_id,
@@ -2475,6 +2585,30 @@ LIMIT :limit_plus_one
 """
 
 
+def _enrichment_review_count_sql(status_filter: str, provider_filter: str) -> str:
+    return f"""
+SELECT count(*)::integer AS total_count
+FROM ops.enrichment_review_queue AS q
+{status_filter.rstrip()}
+      AND (
+        CAST(:min_score AS numeric) IS NULL
+        OR q.name_score >= CAST(:min_score AS numeric)
+      )
+      AND (
+        CAST(:max_score AS numeric) IS NULL
+        OR q.name_score <= CAST(:max_score AS numeric)
+      )
+{provider_filter.rstrip()}
+      AND (
+        CAST(:q_like AS text) IS NULL
+        OR q.target_feature_id ILIKE CAST(:q_like AS text)
+        OR q.target_name ILIKE CAST(:q_like AS text)
+        OR q.source_name ILIKE CAST(:q_like AS text)
+        OR q.source_entity_id ILIKE CAST(:q_like AS text)
+      )
+"""
+
+
 _ENRICHMENT_REVIEW_SQL: Final[str] = _enrichment_review_sql(
     _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
     _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER
@@ -2494,6 +2628,30 @@ _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL: Final[str] = _enrichment_review_sql(
 _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL: Final[str] = _enrichment_review_sql(
     _ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER,
     _ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_COUNT_SQL: Final[str] = _enrichment_review_count_sql(
+    _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_STATUS_COUNT_SQL: Final[str] = _enrichment_review_count_sql(
+    _ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_PROVIDER_COUNT_SQL: Final[str] = _enrichment_review_count_sql(
+    _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_STATUS_PROVIDER_COUNT_SQL: Final[str] = (
+    _enrichment_review_count_sql(
+        _ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER,
+        _ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER,
+    )
+)
+_ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_COUNT_SQL: Final[str] = (
+    _enrichment_review_count_sql(
+        _ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER,
+        _ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER,
+    )
 )
 
 
@@ -2577,40 +2735,63 @@ async def list_enrichment_reviews(
     max_score: float | None = None,
     q: str | None = None,
     page_size: int = 50,
+    page: int = 1,
     cursor: str | None = None,
 ) -> EnrichmentReviewPage:
-    """축제 enrichment review 목록을 name_score 내림차순 cursor로 조회한다."""
+    """축제 enrichment review 목록을 name_score 내림차순으로 조회한다."""
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
+    if page <= 0:
+        raise ValueError("page must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
     status_values = _normalize_values(statuses)
     provider_values = _normalize_values(providers)
-    status_value = status_values[0] if status_values and len(status_values) == 1 else None
+    status_value = (
+        status_values[0] if status_values and len(status_values) == 1 else None
+    )
     provider_value = (
         provider_values[0] if provider_values and len(provider_values) == 1 else None
     )
     review_sql = _ENRICHMENT_REVIEW_SQL
+    count_sql = _ENRICHMENT_REVIEW_COUNT_SQL
     if status_value is not None and provider_value is not None:
         review_sql = _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL
+        count_sql = _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_COUNT_SQL
     elif status_values is not None and provider_values is not None:
         review_sql = _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL
+        count_sql = _ENRICHMENT_REVIEW_STATUS_PROVIDER_COUNT_SQL
     elif status_values is not None:
         review_sql = _ENRICHMENT_REVIEW_STATUS_SQL
+        count_sql = _ENRICHMENT_REVIEW_STATUS_COUNT_SQL
     elif provider_values is not None:
         review_sql = _ENRICHMENT_REVIEW_PROVIDER_SQL
+        count_sql = _ENRICHMENT_REVIEW_PROVIDER_COUNT_SQL
+    params: dict[str, Any] = {
+        "statuses": status_values,
+        "status": status_value,
+        "providers": provider_values,
+        "provider": provider_value,
+        "min_score": min_score,
+        "max_score": max_score,
+        "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+    }
+    total_count = int(
+        (
+            await session.execute(
+                text(count_sql),
+                params,
+            )
+        ).scalar_one()
+    )
+    offset_rows = 0 if cursor is not None else (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(review_sql),
             {
-                "statuses": status_values,
-                "status": status_value,
-                "providers": provider_values,
-                "provider": provider_value,
-                "min_score": min_score,
-                "max_score": max_score,
-                "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+                **params,
                 "limit_plus_one": effective_limit + 1,
+                "offset_rows": offset_rows,
                 **_enrichment_cursor_params(cursor),
             },
         )
@@ -2621,4 +2802,8 @@ async def list_enrichment_reviews(
         if len(rows) > effective_limit and items
         else None
     )
-    return EnrichmentReviewPage(items=items, next_cursor=next_cursor)
+    return EnrichmentReviewPage(
+        items=items,
+        next_cursor=next_cursor,
+        total_count=total_count,
+    )

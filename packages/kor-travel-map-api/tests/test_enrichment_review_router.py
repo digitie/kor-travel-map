@@ -111,7 +111,12 @@ def test_list_enrichment_reviews_passes_filters(
         assert kwargs["providers"] == ["python-visitkorea-api"]
         assert kwargs["min_score"] == 70
         assert kwargs["page_size"] == 25
-        return EnrichmentReviewPage(items=(_review_row(),), next_cursor="next")
+        assert kwargs["page"] == 3
+        return EnrichmentReviewPage(
+            items=(_review_row(),),
+            next_cursor="next",
+            total_count=42,
+        )
 
     monkeypatch.setattr(router_mod, "list_enrichment_reviews", _list)
 
@@ -122,6 +127,7 @@ def test_list_enrichment_reviews_passes_filters(
             "provider": "python-visitkorea-api",
             "min_score": "70",
             "page_size": "25",
+            "page": "3",
         },
     )
 
@@ -136,7 +142,7 @@ def test_list_enrichment_reviews_passes_filters(
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "next",
-        "total": None,
+        "total": 42,
     }
 
 

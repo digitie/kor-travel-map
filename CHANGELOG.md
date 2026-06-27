@@ -5,12 +5,22 @@
 
 ## [Unreleased]
 
+### Feature update request queue 실행 복구 (2026-06-28)
+
+- **FIXED**: Dagster `feature_update_request_worker`가 기본 `feature_update_runner` 리소스를
+  받지 못해 update request가 계속 queue에 머물던 문제를 수정했다. worker는 이제 queued/run-now
+  요청을 provider/dataset별 기존 feature load asset 실행으로 dispatch한다.
+
 ### Enrichment/Dedup review 검수 UX 보강 (2026-06-27)
 
 - **ADDED**: enrichment review 테이블에 검색, provider/status/score band/page size 필터와 cursor
   pagination을 추가했다.
 - **ADDED**: dedup review 테이블에 검색, status/kind/provider/dataset/category/score band/page size
   필터와 cursor pagination을 추가했다.
+- **ADDED**: enrichment/dedup review 테이블의 상단과 하단에 첫/이전/다음/마지막 페이지 버튼,
+  현재 페이지, 총 페이지, 총 아이템 수, 현재 페이지 아이템 수를 표시한다.
+- **CHANGED**: enrichment/dedup review 목록 API는 page 번호 조회와 전체 count(`meta.page.total`)를
+  제공한다. 기존 cursor 응답은 호환용으로 유지한다.
 - **ADDED**: enrichment review 목록 응답과 UI에 datagokr 대상 feature와 visitkorea source의
   좌표·기간, 두 좌표 사이 거리(`distance_m`), 거리 기반 유사도(`spatial_score`)를 표시한다.
 - **ADDED**: enrichment review 행에서 지도 버튼을 누르면 하나의 VWorld 지도에 datagokr와

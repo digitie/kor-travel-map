@@ -201,11 +201,12 @@ async def list_reviews(
     max_score: Annotated[float | None, Query(ge=0, le=100)] = None,
     q: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=500)] = 50,
+    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
     cursor: Annotated[str | None, Query()] = None,
 ) -> DedupReviewListResponse:
     started_at = perf_counter()
     try:
-        page: DedupReviewPage = await list_dedup_reviews(
+        review_page: DedupReviewPage = await list_dedup_reviews(
             session,
             statuses=review_status if review_status is not None else ("pending",),
             providers=provider,
@@ -216,19 +217,21 @@ async def list_reviews(
             max_score=max_score,
             q=q,
             page_size=page_size,
+            page=page_number,
             cursor=cursor,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return DedupReviewListResponse(
         data=DedupReviewListData(
-            items=[_record(item) for item in page.items],
+            items=[_record(item) for item in review_page.items],
         ),
         meta=make_meta(
             request,
             started_at=started_at,
             page_size=page_size,
-            next_cursor=page.next_cursor,
+            next_cursor=review_page.next_cursor,
+            total=review_page.total_count,
         ),
     )
 

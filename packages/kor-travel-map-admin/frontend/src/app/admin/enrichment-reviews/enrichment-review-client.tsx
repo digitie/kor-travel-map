@@ -76,6 +76,10 @@ function formatPeriod(
   return `${left} ~ ${right}`;
 }
 
+function formatCount(value: number | null | undefined): string {
+  return typeof value === "number" ? value.toLocaleString("ko-KR") : "-";
+}
+
 export function EnrichmentReviewClient() {
   const [q, setQ] = useState("");
   const [provider, setProvider] = useState("");
@@ -83,13 +87,10 @@ export function EnrichmentReviewClient() {
   const [status, setStatus] = useState<EnrichmentStatus | "all">("pending");
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
-  // cursorStack: 2페이지부터의 cursor 누적(1페이지는 cursor 없음). 마지막이 현재 페이지.
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [pageIndex, setPageIndex] = useState(1);
   const [mapReviewId, setMapReviewId] = useState<string | null>(null);
   const deferredQ = useDeferredValue(q.trim());
   const deferredProvider = useDeferredValue(provider.trim());
-  const currentCursor =
-    cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
   const bounds = scoreBounds(scoreFilter);
   const reviewParams = useMemo(
     () => ({
@@ -99,14 +100,14 @@ export function EnrichmentReviewClient() {
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
-      cursor: currentCursor,
+      page: pageIndex,
     }),
     [
       bounds.max,
       bounds.min,
-      currentCursor,
       deferredProvider,
       deferredQ,
+      pageIndex,
       pageSize,
       status,
     ],
@@ -115,23 +116,44 @@ export function EnrichmentReviewClient() {
   const decision = useEnrichmentDecisionMutation();
 
   const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
-  const pageIndex = cursorStack.length + 1;
+  const items = reviews.data?.data.items ?? [];
+  const totalItems = reviews.data?.meta.page?.total ?? null;
+  const totalPages =
+    typeof totalItems === "number"
+      ? Math.max(1, Math.ceil(totalItems / pageSize))
+      : null;
+  const hasNextPage =
+    totalPages === null ? Boolean(nextCursor) : pageIndex < totalPages;
+  const hasPreviousPage = pageIndex > 1;
 
-  const resetCursor = () => {
-    setCursorStack([]); // 필터 바뀌면 1페이지로.
+  const resetPage = () => {
+    setPageIndex(1); // 필터 바뀌면 1페이지로.
     setMapReviewId(null);
   };
   const changeStatus = (value: EnrichmentStatus | "all") => {
     setStatus(value);
-    resetCursor();
+    resetPage();
   };
   const goFirst = () => {
-    resetCursor();
+    resetPage();
+  };
+  const goLast = () => {
+    if (totalPages !== null) {
+      setPageIndex(totalPages);
+      setMapReviewId(null);
+    }
   };
   const goNext = () => {
-    if (nextCursor) setCursorStack((stack) => [...stack, nextCursor]);
+    if (!hasNextPage) return;
+    setPageIndex((current) =>
+      totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
+    );
+    setMapReviewId(null);
   };
-  const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
+  const goPrev = () => {
+    setPageIndex((current) => Math.max(1, current - 1));
+    setMapReviewId(null);
+  };
 
   const decide = (reviewId: string, value: EnrichmentDecision) => {
     decision.mutate({
@@ -144,8 +166,60 @@ export function EnrichmentReviewClient() {
     });
   };
 
-  const items = reviews.data?.data.items ?? [];
   const mapReview = items.find((item) => item.review_id === mapReviewId) ?? null;
+  const renderPagination = (placement: "top" | "bottom") => (
+    <nav
+      aria-label={`enrichment pagination ${placement}`}
+      className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <span className="text-sm text-muted-foreground">
+        페이지 {pageIndex} / {totalPages ?? "-"} · 총 {formatCount(totalItems)}건
+        · 현재 {formatCount(items.length)}건
+      </span>
+      <div className="flex flex-wrap gap-1">
+        <Button
+          aria-label="첫 페이지"
+          disabled={!hasPreviousPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goFirst}
+        >
+          첫 페이지
+        </Button>
+        <Button
+          aria-label="이전 페이지"
+          disabled={!hasPreviousPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goPrev}
+        >
+          이전
+        </Button>
+        <Button
+          aria-label="다음 페이지"
+          disabled={!hasNextPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goNext}
+        >
+          다음
+        </Button>
+        <Button
+          aria-label="마지막 페이지"
+          disabled={totalPages === null || !hasNextPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goLast}
+        >
+          마지막 페이지
+        </Button>
+      </div>
+    </nav>
+  );
   type ReviewRow = NonNullable<typeof reviews.data>["data"]["items"][number];
   const columns = useMemo<ColumnDef<ReviewRow, unknown>[]>(
     () => [
@@ -349,7 +423,7 @@ export function EnrichmentReviewClient() {
                 value={q}
                 onChange={(event) => {
                   setQ(event.target.value);
-                  resetCursor();
+                  resetPage();
                 }}
               />
             </div>
@@ -372,7 +446,7 @@ export function EnrichmentReviewClient() {
               value={provider}
               onChange={(event) => {
                 setProvider(event.target.value);
-                resetCursor();
+                resetPage();
               }}
             />
             <NativeSelect
@@ -380,7 +454,7 @@ export function EnrichmentReviewClient() {
               value={scoreFilter}
               onChange={(event) => {
                 setScoreFilter(event.target.value as ScoreFilter);
-                resetCursor();
+                resetPage();
               }}
             >
               {SCORE_FILTERS.map((item) => (
@@ -394,7 +468,7 @@ export function EnrichmentReviewClient() {
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
-                resetCursor();
+                resetPage();
               }}
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
@@ -481,6 +555,8 @@ export function EnrichmentReviewClient() {
           </section>
         ) : null}
 
+        {renderPagination("top")}
+
         <DataTable
           columns={columns}
           data={items}
@@ -490,43 +566,7 @@ export function EnrichmentReviewClient() {
           containerClassName="overflow-auto rounded-lg border bg-background"
         />
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-muted-foreground">
-            페이지 {pageIndex} · {reviews.data?.data.items.length ?? 0}건
-            {nextCursor ? " (다음 페이지 있음)" : ""}
-          </span>
-          <div className="flex gap-1">
-            <Button
-              disabled={cursorStack.length === 0 || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goFirst}
-            >
-              첫 페이지
-            </Button>
-            <Button
-              aria-label="이전 페이지"
-              disabled={cursorStack.length === 0 || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goPrev}
-            >
-              이전
-            </Button>
-            <Button
-              aria-label="다음 페이지"
-              disabled={!nextCursor || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goNext}
-            >
-              다음
-            </Button>
-          </div>
-        </div>
+        {renderPagination("bottom")}
       </div>
     </AdminShell>
   );

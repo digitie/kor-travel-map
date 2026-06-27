@@ -125,7 +125,12 @@ def test_list_dedup_reviews_passes_filters(
         assert kwargs["providers"] == ["python-mois-api"]
         assert kwargs["min_score"] == 80
         assert kwargs["page_size"] == 25
-        return DedupReviewPage(items=(_review_row(),), next_cursor="next")
+        assert kwargs["page"] == 2
+        return DedupReviewPage(
+            items=(_review_row(),),
+            next_cursor="next",
+            total_count=37,
+        )
 
     monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
 
@@ -136,6 +141,7 @@ def test_list_dedup_reviews_passes_filters(
             "provider": "python-mois-api",
             "min_score": "80",
             "page_size": "25",
+            "page": "2",
         },
     )
 
@@ -145,7 +151,7 @@ def test_list_dedup_reviews_passes_filters(
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "next",
-        "total": None,
+        "total": 37,
     }
 
 

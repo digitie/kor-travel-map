@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Feature update request queue 실행 복구
+
+- **완료(Dagster)**: `feature_update_runner` 기본 resource를 등록해
+  `feature_update_request_worker`가 missing resource 대신 실제 provider/dataset asset dispatcher를
+  받도록 했다.
+- **완료(실행 경로)**: run-now/queued request는 기존 queue/sensor/worker 구조를 유지하면서,
+  OpiNet·KREX·KMA·AirKorea 등 live fetcher가 있는 provider dataset을 lazy resource로 실행한다.
+- **완료(테스트)**: runner dispatch 단위 테스트와 Definitions 기본 resource 등록 회귀 테스트를 추가했다.
+- **검증(로컬)**: `pytest` targeted 21건, 변경 파일 `ruff`, `mypy --python-version 3.12` 3파일 통과.
+  기본 mypy 실행은 현 환경의 `numpy` stub/Python version 설정 충돌로 중단된다.
+- **다음 한 작업**: PR/CI green 후 N150에 배포하고, update requests에서 KMA weather 또는 OpiNet price
+  run-now 요청이 `running`/`done`으로 전환되는지 Dagster run과 admin UI에서 확인한다.
+
+## 2026-06-28 (codex) — Review 테이블 페이지네이션 상/하단 보강
+
+- **완료(API)**: dedup/enrichment review 목록에 `page` 쿼리와 `meta.page.total`을 추가했다.
+  기존 `cursor`는 호환용으로 유지한다.
+- **완료(UI)**: Dedup review와 Enrichment review 테이블의 바로 위/아래에 동일한 페이지바를 배치했다.
+  첫/이전/다음/마지막 페이지 이동과 `현재 페이지 / 총 페이지`, 총 아이템 수, 현재 페이지 아이템 수를
+  표시한다.
+- **완료(e2e)**: mocked review e2e는 page 번호 전진, 상/하단 버튼 2벌, 마지막 페이지 버튼,
+  빈 목록 비활성 상태를 검증한다. admin review smoke도 페이지바 2벌을 확인한다.
+- **검증(로컬)**: targeted ruff, mypy 3파일, router/unit pytest 20건, SQL integration 2건,
+  OpenAPI drift check, admin frontend type-check/lint, mocked review e2e 21건, review smoke e2e 2건 통과.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지 후 N150 배포와 live review e2e로 운영 화면을 확인한다.
+
 ## 2026-06-27 (codex) — Enrichment/Dedup review 검수 UX 보강
 
 - **완료(API)**: enrichment review 목록에 대상/source 좌표·기간, 거리(`distance_m`), 거리 기반

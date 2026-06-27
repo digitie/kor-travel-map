@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Feature update request queue 실행 복구
+
+Update requests 메뉴에서 provider 요청과 run-now 요청이 queue에만 쌓이고 실제 provider 적재가
+진행되지 않던 문제를 Dagster worker 쪽에서 수정했다.
+
+- **Dagster**: `feature_update_runner` 기본 resource를 추가하고, worker가 queued/run-now request를
+  provider/dataset별 기존 feature load asset 실행으로 dispatch하도록 연결했다.
+- **Provider 범위**: OpiNet 유가, KREX 유가/기상, KMA 실황·예보·특보, AirKorea 대기질을 포함해
+  현재 live fetcher가 연결된 주요 provider asset을 lazy resource 방식으로 실행한다.
+- **회귀 테스트**: runner dispatch 단위 테스트와 Definitions 기본 resource 등록 테스트를 추가했다.
+- **검증**: targeted pytest 21건, 변경 파일 ruff, `mypy --python-version 3.12` 3파일 통과.
+  기본 mypy 설정은 현재 `numpy` stub의 Python 3.12 `type` 문법과 충돌해 중단되는 것을 확인했다.
+
+## 2026-06-28 (codex) — Review 테이블 페이지네이션 상/하단 보강
+
+Dedup review와 Enrichment review 테이블의 페이지 이동을 cursor-only UI에서 page 번호 기반 UI로
+보강했다.
+
+- **API/저장소**: dedup/enrichment review 목록에 `page` 쿼리와 `meta.page.total`을 추가했다.
+  기존 `cursor`는 호환용으로 유지하고, page 조회는 `OFFSET`과 전체 count를 함께 반환한다.
+- **Admin UI**: 두 review 테이블 바로 위와 아래에 동일한 페이지바를 표시한다. 첫/이전/다음/마지막
+  페이지 버튼과 `페이지 n / total · 총 x건 · 현재 y건` 요약을 보여준다.
+- **e2e**: mocked Playwright에서 page 쿼리 전진, 상/하단 페이지바 2벌, 마지막 페이지 버튼,
+  빈 목록 비활성 상태를 검증하도록 보강했다.
+- **검증**: targeted ruff, mypy 3파일, router/unit pytest 20건, SQL integration 2건,
+  OpenAPI drift check, admin frontend type-check/lint, mocked review e2e 21건, review smoke e2e 2건 통과.
+
 ## 2026-06-27 (codex) — Enrichment/Dedup review 검수 테이블 보강
 
 Enrichment review와 Dedup review 테이블을 운영 검수자가 같은 화면에서 더 촘촘하게 좁혀 보고,

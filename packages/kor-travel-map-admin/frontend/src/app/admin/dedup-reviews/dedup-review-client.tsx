@@ -72,6 +72,10 @@ function formatDistance(value: number | null | undefined): string {
   return `${value.toFixed(1)}m`;
 }
 
+function formatCount(value: number | null | undefined): string {
+  return typeof value === "number" ? value.toLocaleString("ko-KR") : "-";
+}
+
 /**
  * master 자동 선정 추천(`core.scoring.select_master` 1순위 = 좌표 보유)의 클라이언트
  * 힌트. backend가 좌표→updated_at→provider 우선순위로 최종 결정하므로 여기서는 운영자
@@ -93,13 +97,11 @@ export function DedupReviewClient() {
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [mergeKey, setMergeKey] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [pageIndex, setPageIndex] = useState(1);
   const deferredQ = useDeferredValue(q.trim());
   const deferredProvider = useDeferredValue(provider.trim());
   const deferredDatasetKey = useDeferredValue(datasetKey.trim());
   const deferredCategory = useDeferredValue(category.trim());
-  const currentCursor =
-    cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
   const bounds = scoreBounds(scoreFilter);
   const reviewParams = useMemo(
     () => ({
@@ -113,17 +115,17 @@ export function DedupReviewClient() {
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
-      cursor: currentCursor,
+      page: pageIndex,
     }),
     [
       bounds.max,
       bounds.min,
-      currentCursor,
       deferredCategory,
       deferredDatasetKey,
       deferredProvider,
       deferredQ,
       kind,
+      pageIndex,
       pageSize,
       status,
     ],
@@ -131,17 +133,42 @@ export function DedupReviewClient() {
   const reviews = useDedupReviews(reviewParams);
   const decision = useDedupDecisionMutation();
   const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
-  const pageIndex = cursorStack.length + 1;
+  const items = reviews.data?.data.items ?? [];
+  const totalItems = reviews.data?.meta.page?.total ?? null;
+  const totalPages =
+    typeof totalItems === "number"
+      ? Math.max(1, Math.ceil(totalItems / pageSize))
+      : null;
+  const hasNextPage =
+    totalPages === null ? Boolean(nextCursor) : pageIndex < totalPages;
+  const hasPreviousPage = pageIndex > 1;
 
-  const resetCursor = () => {
-    setCursorStack([]);
+  const resetPage = () => {
+    setPageIndex(1);
+    setMergeKey(null);
     setRowSelection({});
   };
-  const goFirst = () => resetCursor();
-  const goNext = () => {
-    if (nextCursor) setCursorStack((stack) => [...stack, nextCursor]);
+  const goFirst = () => resetPage();
+  const goLast = () => {
+    if (totalPages !== null) {
+      setPageIndex(totalPages);
+      setMergeKey(null);
+      setRowSelection({});
+    }
   };
-  const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
+  const goNext = () => {
+    if (!hasNextPage) return;
+    setPageIndex((current) =>
+      totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
+    );
+    setMergeKey(null);
+    setRowSelection({});
+  };
+  const goPrev = () => {
+    setPageIndex((current) => Math.max(1, current - 1));
+    setMergeKey(null);
+    setRowSelection({});
+  };
 
   const decide = useCallback((reviewId: string, value: DedupDecision) => {
     decision.mutate({
@@ -175,7 +202,59 @@ export function DedupReviewClient() {
     );
   }, [decision]);
 
-  const items = reviews.data?.data.items ?? [];
+  const renderPagination = (placement: "top" | "bottom") => (
+    <nav
+      aria-label={`dedup pagination ${placement}`}
+      className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <span className="text-sm text-muted-foreground">
+        페이지 {pageIndex} / {totalPages ?? "-"} · 총 {formatCount(totalItems)}건
+        · 현재 {formatCount(items.length)}건
+      </span>
+      <div className="flex flex-wrap gap-1">
+        <Button
+          aria-label="dedup 첫 페이지"
+          disabled={!hasPreviousPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goFirst}
+        >
+          첫 페이지
+        </Button>
+        <Button
+          aria-label="dedup 이전 페이지"
+          disabled={!hasPreviousPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goPrev}
+        >
+          이전
+        </Button>
+        <Button
+          aria-label="dedup 다음 페이지"
+          disabled={!hasNextPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goNext}
+        >
+          다음
+        </Button>
+        <Button
+          aria-label="dedup 마지막 페이지"
+          disabled={totalPages === null || !hasNextPage || reviews.isFetching}
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={goLast}
+        >
+          마지막 페이지
+        </Button>
+      </div>
+    </nav>
+  );
   const columns = useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
     () => [
       {
@@ -395,7 +474,7 @@ export function DedupReviewClient() {
                 value={q}
                 onChange={(event) => {
                   setQ(event.target.value);
-                  resetCursor();
+                  resetPage();
                 }}
               />
             </div>
@@ -404,7 +483,7 @@ export function DedupReviewClient() {
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as DedupStatus | "all");
-                resetCursor();
+                resetPage();
               }}
             >
               {statuses.map((item) => (
@@ -418,7 +497,7 @@ export function DedupReviewClient() {
               value={kind}
               onChange={(event) => {
                 setKind(event.target.value as DedupKindFilter);
-                resetCursor();
+                resetPage();
               }}
             >
               <NativeSelectOption value="all">all kinds</NativeSelectOption>
@@ -434,7 +513,7 @@ export function DedupReviewClient() {
               value={provider}
               onChange={(event) => {
                 setProvider(event.target.value);
-                resetCursor();
+                resetPage();
               }}
             />
             <Input
@@ -443,7 +522,7 @@ export function DedupReviewClient() {
               value={datasetKey}
               onChange={(event) => {
                 setDatasetKey(event.target.value);
-                resetCursor();
+                resetPage();
               }}
             />
             <Input
@@ -452,7 +531,7 @@ export function DedupReviewClient() {
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value);
-                resetCursor();
+                resetPage();
               }}
             />
             <NativeSelect
@@ -460,7 +539,7 @@ export function DedupReviewClient() {
               value={scoreFilter}
               onChange={(event) => {
                 setScoreFilter(event.target.value as ScoreFilter);
-                resetCursor();
+                resetPage();
               }}
             >
               {SCORE_FILTERS.map((item) => (
@@ -474,7 +553,7 @@ export function DedupReviewClient() {
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
-                resetCursor();
+                resetPage();
               }}
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
@@ -485,6 +564,8 @@ export function DedupReviewClient() {
             </NativeSelect>
           </div>
         </section>
+
+        {renderPagination("top")}
 
         <DataTable
           columns={columns}
@@ -533,43 +614,7 @@ export function DedupReviewClient() {
           }}
         />
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-muted-foreground">
-            페이지 {pageIndex} · {reviews.data?.data.items.length ?? 0}건
-            {nextCursor ? " (다음 페이지 있음)" : ""}
-          </span>
-          <div className="flex gap-1">
-            <Button
-              disabled={cursorStack.length === 0 || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goFirst}
-            >
-              첫 페이지
-            </Button>
-            <Button
-              aria-label="dedup 이전 페이지"
-              disabled={cursorStack.length === 0 || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goPrev}
-            >
-              이전
-            </Button>
-            <Button
-              aria-label="dedup 다음 페이지"
-              disabled={!nextCursor || reviews.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={goNext}
-            >
-              다음
-            </Button>
-          </div>
-        </div>
+        {renderPagination("bottom")}
       </div>
     </AdminShell>
   );

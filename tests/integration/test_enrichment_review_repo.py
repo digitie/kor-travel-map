@@ -290,6 +290,7 @@ async def test_list_enrichment_reviews_admin_query(
 
     page = await list_enrichment_reviews(migrated_session, statuses=("pending",))
     assert len(page.items) == 2
+    assert page.total_count == 2
     # name_score 내림차순.
     assert page.items[0].name_score >= page.items[1].name_score
     top = page.items[0]
@@ -310,15 +311,26 @@ async def test_list_enrichment_reviews_admin_query(
     assert top.spatial_score is not None
     assert 60 < top.spatial_score <= 100
 
+    page_2 = await list_enrichment_reviews(
+        migrated_session,
+        statuses=("pending",),
+        page_size=1,
+        page=2,
+    )
+    assert len(page_2.items) == 1
+    assert page_2.total_count == 2
+
     # provider 필터.
     filtered = await list_enrichment_reviews(
         migrated_session, providers=("python-visitkorea-api",)
     )
     assert len(filtered.items) == 2
+    assert filtered.total_count == 2
     none_match = await list_enrichment_reviews(
         migrated_session, providers=("python-knps-api",)
     )
     assert none_match.items == ()
+    assert none_match.total_count == 0
 
 
 async def test_fk_requires_existing_target_feature(

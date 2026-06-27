@@ -105,6 +105,15 @@ def test_feature_update_job_and_sensors_registered() -> None:
     )
 
 
+def test_feature_update_runner_default_resource_registered() -> None:
+    top_level_resources = defs.get_repository_def().get_top_level_resources()
+
+    resource_def = top_level_resources["feature_update_runner"]
+
+    assert resource_def.description
+    assert "asset dispatcher" in resource_def.description
+
+
 def test_repository_loads_all_definitions() -> None:
     """repository 전체 로드 회귀 (#384).
 
