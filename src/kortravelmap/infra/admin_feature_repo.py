@@ -2275,10 +2275,18 @@ class EnrichmentReviewRow:
     target_category: str | None
     target_lon: float | None
     target_lat: float | None
+    target_start_date: str | None
+    target_end_date: str | None
     source_provider: str
     source_dataset_key: str
     source_entity_id: str
     source_name: str
+    source_lon: float | None
+    source_lat: float | None
+    source_start_date: str | None
+    source_end_date: str | None
+    distance_m: float | None
+    spatial_score: float | None
     decision_reason: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
@@ -2335,6 +2343,7 @@ WITH reviews AS MATERIALIZED (
         q.source_dataset_key,
         q.source_entity_id,
         q.source_name,
+        q.source_record,
         q.decision_reason,
         q.reviewed_by,
         q.reviewed_at,
@@ -2384,9 +2393,83 @@ SELECT
     f.kind AS target_kind,
     f.category AS target_category,
     x_extension.ST_X(f.coord) AS target_lon,
-    x_extension.ST_Y(f.coord) AS target_lat
+    x_extension.ST_Y(f.coord) AS target_lat,
+    f.detail ->> 'starts_on' AS target_start_date,
+    f.detail ->> 'ends_on' AS target_end_date,
+    src.source_lon,
+    src.source_lat,
+    src.source_start_date,
+    src.source_end_date,
+    dist.distance_m,
+    CASE
+        WHEN dist.distance_m IS NULL THEN NULL
+        ELSE (exp(-(dist.distance_m / 50.0)) * 100.0)::double precision
+    END AS spatial_score
 FROM reviews AS q
 LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN LATERAL (
+    SELECT
+        CASE
+            WHEN raw.source_lon_text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+            THEN raw.source_lon_text::double precision
+            ELSE NULL
+        END AS source_lon,
+        CASE
+            WHEN raw.source_lat_text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+            THEN raw.source_lat_text::double precision
+            ELSE NULL
+        END AS source_lat,
+        COALESCE(
+            q.source_record #>> '{{raw_data,event_start_date}}',
+            q.source_record #>> '{{raw_data,eventstartdate}}',
+            q.source_record #>> '{{raw_data,start_date}}'
+        ) AS source_start_date,
+        COALESCE(
+            q.source_record #>> '{{raw_data,event_end_date}}',
+            q.source_record #>> '{{raw_data,eventenddate}}',
+            q.source_record #>> '{{raw_data,end_date}}'
+        ) AS source_end_date
+    FROM (
+        SELECT
+            NULLIF(
+                COALESCE(
+                    q.source_record ->> 'raw_longitude',
+                    q.source_record #>> '{{raw_data,map_x}}',
+                    q.source_record #>> '{{raw_data,mapx}}',
+                    q.source_record #>> '{{raw_data,longitude}}'
+                ),
+                ''
+            ) AS source_lon_text,
+            NULLIF(
+                COALESCE(
+                    q.source_record ->> 'raw_latitude',
+                    q.source_record #>> '{{raw_data,map_y}}',
+                    q.source_record #>> '{{raw_data,mapy}}',
+                    q.source_record #>> '{{raw_data,latitude}}'
+                ),
+                ''
+            ) AS source_lat_text
+    ) AS raw
+) AS src ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        CASE
+            WHEN f.coord_5179 IS NULL
+              OR src.source_lon IS NULL
+              OR src.source_lat IS NULL
+            THEN NULL
+            ELSE x_extension.ST_Distance(
+                f.coord_5179,
+                x_extension.ST_Transform(
+                    x_extension.ST_SetSRID(
+                        x_extension.ST_MakePoint(src.source_lon, src.source_lat),
+                        4326
+                    ),
+                    5179
+                )
+            )::double precision
+        END AS distance_m
+) AS dist ON TRUE
 ORDER BY q.name_score DESC, q.review_id DESC
 LIMIT :limit_plus_one
 """
@@ -2458,10 +2541,26 @@ def _enrichment_review_row(row: Any) -> EnrichmentReviewRow:
         target_lat=(
             float(row["target_lat"]) if row["target_lat"] is not None else None
         ),
+        target_start_date=row["target_start_date"],
+        target_end_date=row["target_end_date"],
         source_provider=str(row["source_provider"]),
         source_dataset_key=str(row["source_dataset_key"]),
         source_entity_id=str(row["source_entity_id"]),
         source_name=str(row["source_name"]),
+        source_lon=(
+            float(row["source_lon"]) if row["source_lon"] is not None else None
+        ),
+        source_lat=(
+            float(row["source_lat"]) if row["source_lat"] is not None else None
+        ),
+        source_start_date=row["source_start_date"],
+        source_end_date=row["source_end_date"],
+        distance_m=(
+            float(row["distance_m"]) if row["distance_m"] is not None else None
+        ),
+        spatial_score=(
+            float(row["spatial_score"]) if row["spatial_score"] is not None else None
+        ),
         decision_reason=row["decision_reason"],
         reviewed_by=row["reviewed_by"],
         reviewed_at=row["reviewed_at"],

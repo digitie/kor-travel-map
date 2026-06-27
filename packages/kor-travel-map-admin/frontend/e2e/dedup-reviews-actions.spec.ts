@@ -23,6 +23,10 @@ const REVIEW_ID_2 = "dedup-review-0002-aaaa-bbbb-cccc-000000000002";
 const FEATURE_A_ID = "python-mois-api::mois_license::DEDUP_A_alpha";
 const FEATURE_B_ID = "python-visitkorea-api::vk_place::DEDUP_B_beta";
 
+function apiPathname(url: URL): string {
+  return url.pathname.replace(/^\/api\/proxy/, "");
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -77,12 +81,19 @@ function makeDedupReview(
   };
 }
 
-function listResponse(items: DedupReviewRecord[]): DedupReviewListResponse {
+function listResponse(
+  items: DedupReviewRecord[],
+  options: { nextCursor?: string | null; pageSize?: number } = {},
+): DedupReviewListResponse {
   return {
     data: { items },
     meta: {
       duration_ms: 1,
-      page: { page_size: 100, next_cursor: null, total: items.length },
+      page: {
+        page_size: options.pageSize ?? 100,
+        next_cursor: options.nextCursor ?? null,
+        total: items.length,
+      },
       request_id: "e2e-dedup-list",
     },
   };
@@ -132,6 +143,7 @@ interface DedupMockHandle {
     bodies: DedupReviewDecisionRequest[];
     paths: string[];
     lastListUrl: URL | null;
+    listUrls: URL[];
   };
   /** mutex 시나리오용 — PATCH 라우트를 직접 열어둘 때 호출해 보류 중인 응답을 풀어준다. */
   releasePatch: () => void;
@@ -153,7 +165,14 @@ async function mockDedupReviews(
   } = {},
 ): Promise<DedupMockHandle> {
   const handle: DedupMockHandle = {
-    requests: { list: 0, patch: 0, bodies: [], paths: [], lastListUrl: null },
+    requests: {
+      list: 0,
+      patch: 0,
+      bodies: [],
+      paths: [],
+      lastListUrl: null,
+      listUrls: [],
+    },
     releasePatch: () => {},
   };
 
@@ -175,31 +194,76 @@ async function mockDedupReviews(
     return base.filter((review) => review.status === status);
   }
 
+  function filteredRows(url: URL): DedupReviewRecord[] {
+    const statuses = url.searchParams.getAll("status");
+    const status = statuses.length > 0 ? statuses[0] : null;
+    const q = url.searchParams.get("q")?.toLowerCase();
+    const providers = url.searchParams.getAll("provider");
+    const datasets = url.searchParams.getAll("dataset_key");
+    const kinds = url.searchParams.getAll("kind");
+    const categories = url.searchParams.getAll("category");
+    const minScore = Number(url.searchParams.get("min_score") ?? Number.NaN);
+    const maxScore = Number(url.searchParams.get("max_score") ?? Number.NaN);
+    return rowsForStatus(status).filter((review) => {
+      const features = [review.feature_a, review.feature_b];
+      const text = [
+        review.review_id,
+        ...features.flatMap((feature) => [feature.feature_id, feature.name]),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return (
+        (!q || text.includes(q)) &&
+        (providers.length === 0 ||
+          features.some((feature) => providers.includes(feature.provider ?? ""))) &&
+        (datasets.length === 0 ||
+          features.some((feature) => datasets.includes(feature.dataset_key ?? ""))) &&
+        (kinds.length === 0 ||
+          features.some((feature) => kinds.includes(feature.kind))) &&
+        (categories.length === 0 ||
+          features.some((feature) => categories.includes(feature.category))) &&
+        (Number.isNaN(minScore) || review.total_score >= minScore) &&
+        (Number.isNaN(maxScore) || review.total_score <= maxScore)
+      );
+    });
+  }
+
   await page.route("**/v1/admin/dedup-reviews**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const path = apiPathname(url);
 
     if (
       request.method() === "GET" &&
-      url.pathname === "/v1/admin/dedup-reviews"
+      path === "/v1/admin/dedup-reviews"
     ) {
       handle.requests.list += 1;
       handle.requests.lastListUrl = url;
-      const statuses = url.searchParams.getAll("status");
-      const status = statuses.length > 0 ? statuses[0] : null;
-      await fulfillJson(route, listResponse(rowsForStatus(status)));
+      handle.requests.listUrls.push(url);
+      const pageSize = Number(url.searchParams.get("page_size") ?? 100);
+      const cursor = url.searchParams.get("cursor");
+      const rows = filteredRows(url);
+      const nextCursor = cursor ? null : rows.length > pageSize ? "cursor-page-2" : null;
+      const start = cursor === "cursor-page-2" ? pageSize : 0;
+      await fulfillJson(
+        route,
+        listResponse(rows.slice(start, start + pageSize), {
+          nextCursor,
+          pageSize,
+        }),
+      );
       return;
     }
 
     if (
       request.method() === "PATCH" &&
-      url.pathname.startsWith("/v1/admin/dedup-reviews/")
+      path.startsWith("/v1/admin/dedup-reviews/")
     ) {
       handle.requests.patch += 1;
       const body = request.postDataJSON() as DedupReviewDecisionRequest;
       handle.requests.bodies.push(body);
       const reviewId = decodeURIComponent(
-        url.pathname.slice("/v1/admin/dedup-reviews/".length),
+        path.slice("/v1/admin/dedup-reviews/".length),
       );
       handle.requests.paths.push(reviewId);
       const review =
@@ -494,6 +558,95 @@ test.describe("admin/dedup-reviews actions", () => {
       .toBe(false);
   });
 
+  test("search and dedup-specific filters are sent as GET params", async ({
+    page,
+  }) => {
+    const filterReview = makeDedupReview({
+      total_score: 95,
+      feature_a: makeDedupFeature({
+        category: "02020101",
+        dataset_key: "mois_license",
+        feature_id: "python-mois-api::mois_license::DEDUP_A_filter",
+        kind: "place",
+        name: "DEDUP_A_filter",
+        provider: "python-mois-api",
+      }),
+      review_id: "dedup-review-filter-aaaa-bbbb-cccc-000000000010",
+    });
+    const otherReview = makeDedupReview({
+      total_score: 40,
+      feature_a: makeDedupFeature({
+        category: "01010100",
+        dataset_key: "vk_event",
+        feature_id: "python-visitkorea-api::vk_event::DEDUP_A_other",
+        kind: "event",
+        name: "DEDUP_A_other",
+        provider: "python-visitkorea-api",
+      }),
+      review_id: "dedup-review-filter-aaaa-bbbb-cccc-000000000011",
+    });
+    const handle = await mockDedupReviews(page, {
+      byStatus: { pending: [filterReview, otherReview] },
+    });
+
+    await page.goto("/admin/dedup-reviews");
+    await page.getByLabel("dedup search").fill("filter");
+    await page.getByLabel("dedup kind").selectOption("place");
+    await page.getByLabel("dedup provider").fill("python-mois-api");
+    await page.getByLabel("dedup dataset").fill("mois_license");
+    await page.getByLabel("dedup category").fill("02020101");
+    await page.getByLabel("dedup score filter").selectOption("high");
+    await page.getByLabel("dedup page size").selectOption("25");
+
+    await expect(page.getByRole("row", { name: /DEDUP_A_filter/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /DEDUP_A_other/ })).toHaveCount(0);
+
+    await expect
+      .poll(() => handle.requests.lastListUrl?.searchParams.get("q"))
+      .toBe("filter");
+    const last = handle.requests.lastListUrl;
+    expect(last?.searchParams.getAll("kind")).toEqual(["place"]);
+    expect(last?.searchParams.getAll("provider")).toEqual(["python-mois-api"]);
+    expect(last?.searchParams.getAll("dataset_key")).toEqual(["mois_license"]);
+    expect(last?.searchParams.getAll("category")).toEqual(["02020101"]);
+    expect(last?.searchParams.get("min_score")).toBe("90");
+    expect(last?.searchParams.get("page_size")).toBe("25");
+  });
+
+  test("page-size select drives cursor pagination controls", async ({ page }) => {
+    const rows = Array.from({ length: 26 }, (_value, index) =>
+      makeDedupReview({
+        feature_a: makeDedupFeature({
+          feature_id: `python-mois-api::mois_license::DEDUP_A_page_${index}`,
+          name: `DEDUP_A_page_${index}`,
+        }),
+        review_id: `dedup-review-page-${String(index).padStart(4, "0")}-aaaa-bbbb-cccc`,
+      }),
+    );
+    const handle = await mockDedupReviews(page, {
+      byStatus: { pending: rows },
+    });
+
+    await page.goto("/admin/dedup-reviews");
+    await page.getByLabel("dedup page size").selectOption("25");
+
+    await expect(page.getByText(/페이지 1 · 25건/)).toBeVisible();
+    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled();
+    await expect(page.getByLabel("dedup 다음 페이지")).toBeEnabled();
+
+    await page.getByLabel("dedup 다음 페이지").click();
+    await expect
+      .poll(() => handle.requests.lastListUrl?.searchParams.get("cursor"))
+      .toBe("cursor-page-2");
+    await expect(page.getByText(/페이지 2 · 1건/)).toBeVisible();
+    await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toBeVisible();
+    await expect(page.getByLabel("dedup 다음 페이지")).toBeDisabled();
+    await expect(page.getByLabel("dedup 이전 페이지")).toBeEnabled();
+
+    await page.getByRole("button", { name: "첫 페이지" }).click();
+    await expect(page.getByText(/페이지 1 · 25건/)).toBeVisible();
+  });
+
   test("empty list renders the dedup empty message", async ({ page }) => {
     await mockDedupReviews(page, { byStatus: { pending: [] } });
 
@@ -503,6 +656,8 @@ test.describe("admin/dedup-reviews actions", () => {
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
     ).toBeVisible();
     await expect(page.getByText("dedup review가 없습니다.")).toBeVisible();
+    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled();
+    await expect(page.getByLabel("dedup 다음 페이지")).toBeDisabled();
     for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
       await expect(
         page.getByRole("columnheader", { name: column }),
@@ -516,9 +671,10 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.route("**/v1/admin/dedup-reviews**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      const path = apiPathname(url);
       if (
         request.method() === "GET" &&
-        url.pathname === "/v1/admin/dedup-reviews"
+        path === "/v1/admin/dedup-reviews"
       ) {
         await route.fulfill({ status: 500, body: "" });
         return;

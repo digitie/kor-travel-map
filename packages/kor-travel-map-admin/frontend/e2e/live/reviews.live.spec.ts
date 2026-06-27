@@ -53,7 +53,7 @@ const PAGES: ReviewPage[] = [
     empty: "enrichment review가 없습니다.",
     statusLabel: "enrichment status",
     statuses: ["pending", "accepted", "rejected", "ignored", "all"],
-    sortHeaders: ["score", "status", "created"],
+    sortHeaders: ["score", "distance", "status", "created"],
   },
   {
     route: "/admin/feature-update-requests",
@@ -262,6 +262,7 @@ test.describe("reviews live — issues keyset pagination controls", () => {
 
 // Enrichment page exposes labelled prev/next pager buttons (이전/다음 페이지).
 const ENRICH = PAGES[2];
+const DEDUP = PAGES[1];
 
 test.describe("reviews live — enrichment pager controls", () => {
   test("/admin/enrichment-reviews 이전/다음 페이지 buttons present", async ({
@@ -289,6 +290,148 @@ test.describe("reviews live — enrichment pager controls", () => {
     await expectPageLoaded(page, ENRICH);
     // PRESENCE=0 → no next_cursor → 다음 페이지 disabled.
     await expect(page.getByLabel("다음 페이지")).toBeDisabled({ timeout: T });
+  });
+});
+
+test.describe("reviews live — enrichment search/filter/page-size dimensions", () => {
+  for (const term of F.SEARCH_TERMS.slice(0, 8)) {
+    test(`/admin/enrichment-reviews search "${term}"`, async ({ page }) => {
+      await page.goto(ENRICH.route);
+      await expectPageLoaded(page, ENRICH);
+      const search = page.getByLabel("enrichment search");
+      await expect(search).toBeVisible({ timeout: T });
+      await search.fill(term);
+      await expect(search).toHaveValue(term, { timeout: T });
+      await expectEmptyOrTable(page, ENRICH);
+    });
+  }
+
+  for (const size of F.PAGE_SIZES) {
+    test(`/admin/enrichment-reviews page size ${size}`, async ({ page }) => {
+      await page.goto(ENRICH.route);
+      await expectPageLoaded(page, ENRICH);
+      const sizeSelect = page.getByLabel("enrichment page size");
+      await expect(sizeSelect).toBeVisible({ timeout: T });
+      await sizeSelect.selectOption(String(size));
+      await expectPageLoaded(page, ENRICH);
+      await expectEmptyOrTable(page, ENRICH);
+    });
+  }
+
+  for (const score of ["all", "high", "middle", "low"]) {
+    test(`/admin/enrichment-reviews score=${score}`, async ({ page }) => {
+      await page.goto(ENRICH.route);
+      await expectPageLoaded(page, ENRICH);
+      const scoreSelect = page.getByLabel("enrichment score filter");
+      await expect(scoreSelect).toBeVisible({ timeout: T });
+      await scoreSelect.selectOption(score);
+      await expectPageLoaded(page, ENRICH);
+      await expectEmptyOrTable(page, ENRICH);
+    });
+  }
+
+  test("/admin/enrichment-reviews provider filter input", async ({ page }) => {
+    await page.goto(ENRICH.route);
+    await expectPageLoaded(page, ENRICH);
+    const provider = page.getByLabel("enrichment provider");
+    await expect(provider).toBeVisible({ timeout: T });
+    await provider.fill("python-visitkorea-api");
+    await expect(provider).toHaveValue("python-visitkorea-api", { timeout: T });
+    await expectEmptyOrTable(page, ENRICH);
+  });
+
+  test("/admin/enrichment-reviews map button conditional smoke", async ({ page }) => {
+    await page.goto(ENRICH.route);
+    await expectPageLoaded(page, ENRICH);
+    const mapButtons = page.getByRole("button", { name: "지도" });
+    const firstMapButton = mapButtons.first();
+    if ((await mapButtons.count()) > 0 && (await firstMapButton.isEnabled())) {
+      await firstMapButton.click();
+      await expect(page.getByLabel("enrichment coordinate map")).toBeVisible({
+        timeout: T,
+      });
+      await expect(page.getByTestId("enrichment-review-map")).toBeVisible({
+        timeout: T,
+      });
+    } else {
+      await expectEmptyOrTable(page, ENRICH);
+    }
+  });
+});
+
+test.describe("reviews live — dedup search/filter/page-size dimensions", () => {
+  test("/admin/dedup-reviews pager controls present", async ({ page }) => {
+    await page.goto(DEDUP.route);
+    await expectPageLoaded(page, DEDUP);
+    await expect(page.getByLabel("dedup 이전 페이지")).toBeVisible({ timeout: T });
+    await expect(page.getByLabel("dedup 다음 페이지")).toBeVisible({ timeout: T });
+    await expect(page.getByLabel("dedup 이전 페이지")).toBeDisabled({ timeout: T });
+  });
+
+  for (const term of F.SEARCH_TERMS.slice(0, 8)) {
+    test(`/admin/dedup-reviews search "${term}"`, async ({ page }) => {
+      await page.goto(DEDUP.route);
+      await expectPageLoaded(page, DEDUP);
+      const search = page.getByLabel("dedup search");
+      await expect(search).toBeVisible({ timeout: T });
+      await search.fill(term);
+      await expect(search).toHaveValue(term, { timeout: T });
+      await expectEmptyOrTable(page, DEDUP);
+    });
+  }
+
+  for (const size of F.PAGE_SIZES) {
+    test(`/admin/dedup-reviews page size ${size}`, async ({ page }) => {
+      await page.goto(DEDUP.route);
+      await expectPageLoaded(page, DEDUP);
+      const sizeSelect = page.getByLabel("dedup page size");
+      await expect(sizeSelect).toBeVisible({ timeout: T });
+      await sizeSelect.selectOption(String(size));
+      await expectPageLoaded(page, DEDUP);
+      await expectEmptyOrTable(page, DEDUP);
+    });
+  }
+
+  for (const kind of ["all", ...F.KINDS.slice(0, 4)]) {
+    test(`/admin/dedup-reviews kind=${kind}`, async ({ page }) => {
+      await page.goto(DEDUP.route);
+      await expectPageLoaded(page, DEDUP);
+      const kindSelect = page.getByLabel("dedup kind");
+      await expect(kindSelect).toBeVisible({ timeout: T });
+      await kindSelect.selectOption(kind);
+      await expectPageLoaded(page, DEDUP);
+      await expectEmptyOrTable(page, DEDUP);
+    });
+  }
+
+  for (const score of ["all", "high", "middle", "low"]) {
+    test(`/admin/dedup-reviews score=${score}`, async ({ page }) => {
+      await page.goto(DEDUP.route);
+      await expectPageLoaded(page, DEDUP);
+      const scoreSelect = page.getByLabel("dedup score filter");
+      await expect(scoreSelect).toBeVisible({ timeout: T });
+      await scoreSelect.selectOption(score);
+      await expectPageLoaded(page, DEDUP);
+      await expectEmptyOrTable(page, DEDUP);
+    });
+  }
+
+  test("/admin/dedup-reviews provider/dataset/category inputs", async ({ page }) => {
+    await page.goto(DEDUP.route);
+    await expectPageLoaded(page, DEDUP);
+    await page.getByLabel("dedup provider").fill("python-mois-api");
+    await page.getByLabel("dedup dataset").fill("mois_license");
+    await page.getByLabel("dedup category").fill("01070300");
+    await expect(page.getByLabel("dedup provider")).toHaveValue("python-mois-api", {
+      timeout: T,
+    });
+    await expect(page.getByLabel("dedup dataset")).toHaveValue("mois_license", {
+      timeout: T,
+    });
+    await expect(page.getByLabel("dedup category")).toHaveValue("01070300", {
+      timeout: T,
+    });
+    await expectEmptyOrTable(page, DEDUP);
   });
 });
 

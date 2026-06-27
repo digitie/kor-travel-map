@@ -19,6 +19,10 @@ type PageMeta = components["schemas"]["PageMeta"];
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const ENRICHMENT_GLOB = "**/v1/admin/enrichment-reviews**";
 
+function apiPathname(url: URL): string {
+  return url.pathname.replace(/^\/api\/proxy/, "");
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -38,9 +42,19 @@ function makeReview(
     source_entity_id: "vk-entity-0001",
     source_name: "Source POI",
     source_provider: "python-visitkorea-api",
+    source_lat: 37.526,
+    source_lon: 126.9245,
+    source_start_date: "20260405",
+    source_end_date: "20260412",
+    spatial_score: 74.2,
     status: "pending",
     target_feature_id: "datagokr::festivals::target-0001",
+    target_lat: 37.5261,
+    target_lon: 126.9244,
     target_name: "Target POI",
+    target_start_date: "2026-04-05",
+    target_end_date: "2026-04-12",
+    distance_m: 14.2,
     ...overrides,
   };
 }
@@ -106,6 +120,7 @@ async function mockEnrichmentReviews(
     list: 0,
     patch: 0,
     listStatuses: [] as string[][],
+    listUrls: [] as URL[],
     patchBodies: [] as EnrichmentReviewDecisionRequest[],
     patchPathnames: [] as string[],
   };
@@ -118,20 +133,43 @@ async function mockEnrichmentReviews(
       requests.list += 1;
       const wanted = url.searchParams.getAll("status");
       requests.listStatuses.push(wanted);
-      const items =
+      requests.listUrls.push(url);
+      const q = url.searchParams.get("q")?.toLowerCase();
+      const providers = url.searchParams.getAll("provider");
+      const minScore = Number(url.searchParams.get("min_score") ?? Number.NaN);
+      const maxScore = Number(url.searchParams.get("max_score") ?? Number.NaN);
+      const byStatus =
         wanted.length === 0
           ? records
           : records.filter((item) => wanted.includes(item.status));
+      const items = byStatus.filter((item) => {
+        const text = [
+          item.review_id,
+          item.target_feature_id,
+          item.target_name,
+          item.source_name,
+          item.source_entity_id,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return (
+          (!q || text.includes(q)) &&
+          (providers.length === 0 || providers.includes(item.source_provider)) &&
+          (Number.isNaN(minScore) || item.name_score >= minScore) &&
+          (Number.isNaN(maxScore) || item.name_score <= maxScore)
+        );
+      });
       await fulfillJson(route, listResponse(items));
       return;
     }
 
     if (request.method() === "PATCH") {
       requests.patch += 1;
-      requests.patchPathnames.push(url.pathname);
+      const path = apiPathname(url);
+      requests.patchPathnames.push(path);
       const body = request.postDataJSON() as EnrichmentReviewDecisionRequest;
       requests.patchBodies.push(body);
-      const reviewId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const reviewId = decodeURIComponent(path.split("/").at(-1) ?? "");
       const target = records.find((item) => item.review_id === reviewId);
       if (!target) {
         await fulfillJson(route, { detail: "not found" }, 404);
@@ -335,6 +373,76 @@ test.describe("admin/enrichment-reviews actions", () => {
     await expect(page.getByRole("row", { name: /Page1 Review/ })).toBeVisible();
   });
 
+  test("search, provider, score and page-size controls are sent as GET filters", async ({
+    page,
+  }) => {
+    const requests = await mockEnrichmentReviews(page, {
+      initial: [
+        makeReview({
+          review_id: "enrich-filter-1",
+          name_score: 92,
+          target_name: "Filter Target",
+          source_name: "Filter Source",
+          source_provider: "python-visitkorea-api",
+        }),
+        makeReview({
+          review_id: "enrich-filter-2",
+          name_score: 65,
+          target_name: "Other Target",
+          source_name: "Other Source",
+          source_provider: "python-other-api",
+        }),
+      ],
+    });
+
+    await page.goto("/admin/enrichment-reviews");
+    await page.getByLabel("enrichment search").fill("Filter");
+    await page.getByLabel("enrichment provider").fill("python-visitkorea-api");
+    await page.getByLabel("enrichment score filter").selectOption("high");
+    await page.getByLabel("enrichment page size").selectOption("25");
+
+    await expect(page.getByRole("row", { name: /Filter Target/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /Other Target/ })).toHaveCount(0);
+    await expect
+      .poll(() => requests.listUrls.at(-1)?.searchParams.get("q"))
+      .toBe("Filter");
+    const last = requests.listUrls.at(-1);
+    expect(last?.searchParams.getAll("provider")).toEqual([
+      "python-visitkorea-api",
+    ]);
+    expect(last?.searchParams.get("min_score")).toBe("90");
+    expect(last?.searchParams.get("page_size")).toBe("25");
+  });
+
+  test("map button opens one VWorld map with datagokr and visitkorea labels", async ({
+    page,
+  }) => {
+    const review = makeReview({
+      review_id: "enrich-map-1",
+      target_name: "Datagokr Map Festival",
+      source_name: "Visitkorea Map Festival",
+      target_lon: 126.9244,
+      target_lat: 37.5261,
+      source_lon: 126.9245,
+      source_lat: 37.526,
+      distance_m: 14.2,
+    });
+    await mockEnrichmentReviews(page, { initial: [review] });
+
+    await page.goto("/admin/enrichment-reviews");
+    const row = page.getByRole("row", { name: /Datagokr Map Festival/ });
+    await expect(row).toBeVisible();
+
+    await row.getByRole("button", { name: "지도" }).click();
+
+    const map = page.getByLabel("enrichment coordinate map");
+    await expect(map).toBeVisible();
+    await expect(map.getByText("Datagokr Map Festival")).toBeVisible();
+    await expect(map.getByText("Visitkorea Map Festival")).toBeVisible();
+    await expect(map.getByText(/14\.2m/)).toBeVisible();
+    await expect(page.getByTestId("enrichment-review-map")).toBeVisible();
+  });
+
   test("compare cells render 1차 datagokr target vs 2차 visitkorea source", async ({
     page,
   }) => {
@@ -363,7 +471,9 @@ test.describe("admin/enrichment-reviews actions", () => {
     await expect(row.getByText(/python-visitkorea-api/)).toBeVisible();
     await expect(row.getByText(/vk-entity-12345/)).toBeVisible();
     // name_score: toFixed(1).
-    await expect(row.getByText("8.5")).toBeVisible();
+    await expect(row.getByText("name 8.5")).toBeVisible();
+    await expect(row.getByText("distance 74.2")).toBeVisible();
+    await expect(row.getByText("2026-04-05 ~ 2026-04-12").first()).toBeVisible();
   });
 
   test("empty list shows placeholder and disables both pager buttons", async ({

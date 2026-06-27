@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
+from geoalchemy2.elements import WKTElement
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
@@ -56,7 +57,12 @@ def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 �
         kind="event",
         name=name,
         category=_FESTIVAL_CAT,
-        detail={},
+        coord=WKTElement("POINT(126.9244 37.5261)", srid=4326),
+        coord_precision_digits=6,
+        detail={
+            "starts_on": "2026-04-05",
+            "ends_on": "2026-04-12",
+        },
     )
 
 
@@ -72,6 +78,8 @@ class _Item:
         self.addr1 = "서울특별시 영등포구"
         self.area_code = "1"
         self.sigungu_code = "19"
+        self.map_x = 126.9245
+        self.map_y = 37.526
         self.event_start_date = "20260405"
         self.event_end_date = "20260412"
         self.tel = None
@@ -288,7 +296,19 @@ async def test_list_enrichment_reviews_admin_query(
     # 1차 feature를 join해 kind/category를 채운다.
     assert top.target_kind == "event"
     assert top.target_category == _FESTIVAL_CAT
+    assert top.target_lon == pytest.approx(126.9244)
+    assert top.target_lat == pytest.approx(37.5261)
+    assert top.target_start_date == "2026-04-05"
+    assert top.target_end_date == "2026-04-12"
     assert top.source_provider == "python-visitkorea-api"
+    assert top.source_lon == pytest.approx(126.9245)
+    assert top.source_lat == pytest.approx(37.526)
+    assert top.source_start_date == "20260405"
+    assert top.source_end_date == "20260412"
+    assert top.distance_m is not None
+    assert 0 < top.distance_m < 20
+    assert top.spatial_score is not None
+    assert 60 < top.spatial_score <= 100
 
     # provider 필터.
     filtered = await list_enrichment_reviews(

@@ -44,6 +44,8 @@ class _Item:
     addr1: str | None
     area_code: str | None
     sigungu_code: str | None
+    map_x: float | None
+    map_y: float | None
     event_start_date: str | None
     event_end_date: str | None
     tel: str | None
@@ -82,6 +84,8 @@ _ITEM1 = _Item(
     addr1="서울특별시 영등포구 여의공원로 120",
     area_code="1",
     sigungu_code="19",
+    map_x=126.9245,
+    map_y=37.526,
     event_start_date="20260405",
     event_end_date="20260412",
     tel="02-2670-3114",
@@ -100,6 +104,8 @@ _ITEM2 = _Item(
     addr1="부산광역시 해운대구 해운대해변로 264",
     area_code="6",
     sigungu_code="16",
+    map_x=129.1603,
+    map_y=35.1587,
     event_start_date="20260801",
     event_end_date="20260805",
     tel=None,
@@ -165,6 +171,10 @@ def test_enrichment_source_record_no_feature() -> None:
     assert sr.raw_data["first_image"] == "http://tong.visitkorea.or.kr/img1.jpg"
     assert sr.raw_data["overview"] == "여의도 일대 봄꽃 축제 상세 설명."
     assert sr.raw_data["content_id"] == "2747929"
+    assert str(sr.raw_longitude) == "126.9245"
+    assert str(sr.raw_latitude) == "37.526"
+    assert sr.raw_data["map_x"] == 126.9245
+    assert sr.raw_data["map_y"] == 37.526
     # datetime modified_time은 원시 TourAPI 표기(YYYYMMDDHHMMSS) 문자열로
     # 정규화돼 source_version/raw_data 모두에 들어간다 (JSON 직렬화 안전).
     assert sr.source_version == "20260301120000"

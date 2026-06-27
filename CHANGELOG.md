@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Enrichment/Dedup review 검수 UX 보강 (2026-06-27)
+
+- **ADDED**: enrichment review 테이블에 검색, provider/status/score band/page size 필터와 cursor
+  pagination을 추가했다.
+- **ADDED**: dedup review 테이블에 검색, status/kind/provider/dataset/category/score band/page size
+  필터와 cursor pagination을 추가했다.
+- **ADDED**: enrichment review 목록 응답과 UI에 datagokr 대상 feature와 visitkorea source의
+  좌표·기간, 두 좌표 사이 거리(`distance_m`), 거리 기반 유사도(`spatial_score`)를 표시한다.
+- **ADDED**: enrichment review 행에서 지도 버튼을 누르면 하나의 VWorld 지도에 datagokr와
+  visitkorea 좌표를 각 source 이름 marker로 함께 표시한다.
+- **CHANGED**: VisitKorea enrichment source record가 TourAPI 좌표를 보존해 review 거리/지도 표시가
+  source payload만으로 가능하게 했다.
+
 ### Curated place-search 반영 정책 수정 (2026-06-27)
 
 - **FIXED**: admin curated feature에서 장소 검색 결과를 `반영`하면 `reuse_policy`가

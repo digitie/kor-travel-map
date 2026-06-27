@@ -5,8 +5,8 @@ import {
   type Row,
   type RowSelectionState,
 } from "@tanstack/react-table";
-import { CheckIcon, MergeIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CheckIcon, MergeIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
 import {
   type DedupDecision,
@@ -21,6 +21,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
+import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
@@ -33,6 +34,43 @@ const statuses: Array<DedupStatus | "all"> = [
   "ignored",
   "all",
 ];
+const DEDUP_KINDS = [
+  "place",
+  "event",
+  "notice",
+  "price",
+  "weather",
+  "route",
+  "area",
+] as const;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+const SCORE_FILTERS = [
+  { value: "all", label: "score all" },
+  { value: "high", label: "score >= 90", min: 90 },
+  { value: "middle", label: "score 70-90", min: 70, max: 90 },
+  { value: "low", label: "score < 70", max: 70 },
+] as const;
+
+type DedupKindFilter = (typeof DEDUP_KINDS)[number] | "all";
+type ScoreFilter = (typeof SCORE_FILTERS)[number]["value"];
+
+function scoreBounds(value: ScoreFilter): { min?: number; max?: number } {
+  const found = SCORE_FILTERS.find((item) => item.value === value);
+  return {
+    min: found && "min" in found ? found.min : undefined,
+    max: found && "max" in found ? found.max : undefined,
+  };
+}
+
+function formatScore(value: number): string {
+  return value.toFixed(1);
+}
+
+function formatDistance(value: number | null | undefined): string {
+  if (typeof value !== "number") return "-";
+  if (value >= 1000) return `${(value / 1000).toFixed(2)}km`;
+  return `${value.toFixed(1)}m`;
+}
 
 /**
  * master 자동 선정 추천(`core.scoring.select_master` 1순위 = 좌표 보유)의 클라이언트
@@ -44,16 +82,68 @@ function hasCoord(feature: DedupFeatureRecord): boolean {
 }
 
 export function DedupReviewClient() {
+  const [q, setQ] = useState("");
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
+  const [kind, setKind] = useState<DedupKindFilter>("all");
+  const [provider, setProvider] = useState("");
+  const [datasetKey, setDatasetKey] = useState("");
+  const [category, setCategory] = useState("");
+  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
+  const [pageSize, setPageSize] =
+    useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [mergeKey, setMergeKey] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-  const reviews = useDedupReviews({
-    status: status === "all" ? undefined : [status],
-    page_size: 100,
-  });
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const deferredQ = useDeferredValue(q.trim());
+  const deferredProvider = useDeferredValue(provider.trim());
+  const deferredDatasetKey = useDeferredValue(datasetKey.trim());
+  const deferredCategory = useDeferredValue(category.trim());
+  const currentCursor =
+    cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
+  const bounds = scoreBounds(scoreFilter);
+  const reviewParams = useMemo(
+    () => ({
+      status: status === "all" ? undefined : [status],
+      kind: kind === "all" ? undefined : [kind],
+      provider: deferredProvider.length > 0 ? [deferredProvider] : undefined,
+      dataset_key:
+        deferredDatasetKey.length > 0 ? [deferredDatasetKey] : undefined,
+      category: deferredCategory.length > 0 ? [deferredCategory] : undefined,
+      min_score: bounds.min,
+      max_score: bounds.max,
+      q: deferredQ.length > 0 ? deferredQ : undefined,
+      page_size: pageSize,
+      cursor: currentCursor,
+    }),
+    [
+      bounds.max,
+      bounds.min,
+      currentCursor,
+      deferredCategory,
+      deferredDatasetKey,
+      deferredProvider,
+      deferredQ,
+      kind,
+      pageSize,
+      status,
+    ],
+  );
+  const reviews = useDedupReviews(reviewParams);
   const decision = useDedupDecisionMutation();
+  const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
+  const pageIndex = cursorStack.length + 1;
 
-  const decide = (reviewId: string, value: DedupDecision) => {
+  const resetCursor = () => {
+    setCursorStack([]);
+    setRowSelection({});
+  };
+  const goFirst = () => resetCursor();
+  const goNext = () => {
+    if (nextCursor) setCursorStack((stack) => [...stack, nextCursor]);
+  };
+  const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
+
+  const decide = useCallback((reviewId: string, value: DedupDecision) => {
     decision.mutate({
       reviewKey: reviewId,
       body: {
@@ -62,13 +152,13 @@ export function DedupReviewClient() {
         reviewed_by: "local-admin",
       },
     });
-  };
+  }, [decision]);
 
   /**
    * merge 확정. ``masterFeatureId``가 없으면 backend가 ``select_master``로 자동 선정한다.
    * 성공/실패와 무관하게 inline master 선택 패널을 닫는다.
    */
-  const merge = (reviewId: string, masterFeatureId?: string) => {
+  const merge = useCallback((reviewId: string, masterFeatureId?: string) => {
     decision.mutate(
       {
         reviewKey: reviewId,
@@ -83,7 +173,7 @@ export function DedupReviewClient() {
       },
       { onSettled: () => setMergeKey(null) },
     );
-  };
+  }, [decision]);
 
   const items = reviews.data?.data.items ?? [];
   const columns = useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
@@ -102,7 +192,11 @@ export function DedupReviewClient() {
         accessorKey: "total_score",
         header: "score",
         cell: ({ row }) => (
-          <span className="font-mono">{row.original.total_score.toFixed(1)}</span>
+          <div className="space-y-1 font-mono text-xs">
+            <div>total {formatScore(row.original.total_score)}</div>
+            <div>name {formatScore(row.original.name_score)}</div>
+            <div>distance {formatScore(row.original.spatial_score)}</div>
+          </div>
         ),
       },
       {
@@ -137,11 +231,7 @@ export function DedupReviewClient() {
         accessorKey: "distance_m",
         header: "distance",
         cell: ({ row }) => (
-          <span className="font-mono">
-            {typeof row.original.distance_m === "number"
-              ? `${row.original.distance_m.toFixed(1)}m`
-              : "-"}
-          </span>
+          <span className="font-mono">{formatDistance(row.original.distance_m)}</span>
         ),
       },
       {
@@ -264,7 +354,7 @@ export function DedupReviewClient() {
         },
       },
     ],
-    [decision.isPending, mergeKey],
+    [decide, decision.isPending, merge, mergeKey],
   );
 
   return (
@@ -294,17 +384,107 @@ export function DedupReviewClient() {
           </Alert>
         )}
 
-        <NativeSelect
-          aria-label="dedup status"
-          value={status}
-          onChange={(event) => setStatus(event.target.value as DedupStatus | "all")}
-        >
-          {statuses.map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+        <section className="rounded-lg border bg-background p-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,14rem)_minmax(10rem,14rem)_minmax(8rem,12rem)_auto_auto]">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                aria-label="dedup search"
+                className="pl-8"
+                placeholder="feature id, name"
+                value={q}
+                onChange={(event) => {
+                  setQ(event.target.value);
+                  resetCursor();
+                }}
+              />
+            </div>
+            <NativeSelect
+              aria-label="dedup status"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as DedupStatus | "all");
+                resetCursor();
+              }}
+            >
+              {statuses.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="dedup kind"
+              value={kind}
+              onChange={(event) => {
+                setKind(event.target.value as DedupKindFilter);
+                resetCursor();
+              }}
+            >
+              <NativeSelectOption value="all">all kinds</NativeSelectOption>
+              {DEDUP_KINDS.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Input
+              aria-label="dedup provider"
+              placeholder="provider"
+              value={provider}
+              onChange={(event) => {
+                setProvider(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="dedup dataset"
+              placeholder="dataset"
+              value={datasetKey}
+              onChange={(event) => {
+                setDatasetKey(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="dedup category"
+              placeholder="category"
+              value={category}
+              onChange={(event) => {
+                setCategory(event.target.value);
+                resetCursor();
+              }}
+            />
+            <NativeSelect
+              aria-label="dedup score filter"
+              value={scoreFilter}
+              onChange={(event) => {
+                setScoreFilter(event.target.value as ScoreFilter);
+                resetCursor();
+              }}
+            >
+              {SCORE_FILTERS.map((item) => (
+                <NativeSelectOption key={item.value} value={item.value}>
+                  {item.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="dedup page size"
+              value={String(pageSize)}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value) as typeof pageSize);
+                resetCursor();
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+        </section>
 
         <DataTable
           columns={columns}
@@ -352,6 +532,44 @@ export function DedupReviewClient() {
             );
           }}
         />
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-muted-foreground">
+            페이지 {pageIndex} · {reviews.data?.data.items.length ?? 0}건
+            {nextCursor ? " (다음 페이지 있음)" : ""}
+          </span>
+          <div className="flex gap-1">
+            <Button
+              disabled={cursorStack.length === 0 || reviews.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={goFirst}
+            >
+              첫 페이지
+            </Button>
+            <Button
+              aria-label="dedup 이전 페이지"
+              disabled={cursorStack.length === 0 || reviews.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={goPrev}
+            >
+              이전
+            </Button>
+            <Button
+              aria-label="dedup 다음 페이지"
+              disabled={!nextCursor || reviews.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={goNext}
+            >
+              다음
+            </Button>
+          </div>
+        </div>
       </div>
     </AdminShell>
   );

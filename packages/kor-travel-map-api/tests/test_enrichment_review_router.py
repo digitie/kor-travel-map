@@ -44,7 +44,14 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            service_token=None,
+            vworld_api_key=None,
+        )
+    )
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
@@ -65,10 +72,18 @@ def _review_row() -> EnrichmentReviewRow:
         target_category="01010100",
         target_lon=126.9,
         target_lat=37.5,
+        target_start_date="2026-04-05",
+        target_end_date="2026-04-12",
         source_provider="python-visitkorea-api",
         source_dataset_key="visitkorea_festival_events",
         source_entity_id="2747929",
         source_name="서울 봄꽃",
+        source_lon=126.9001,
+        source_lat=37.5001,
+        source_start_date="20260405",
+        source_end_date="20260412",
+        distance_m=12.5,
+        spatial_score=77.88,
         decision_reason=None,
         reviewed_by=None,
         reviewed_at=None,
@@ -114,6 +129,10 @@ def test_list_enrichment_reviews_passes_filters(
     body = response.json()
     assert body["data"]["items"][0]["review_id"] == "review-1"
     assert body["data"]["items"][0]["source_name"] == "서울 봄꽃"
+    assert body["data"]["items"][0]["distance_m"] == 12.5
+    assert body["data"]["items"][0]["spatial_score"] == 77.88
+    assert body["data"]["items"][0]["target_start_date"] == "2026-04-05"
+    assert body["data"]["items"][0]["source_start_date"] == "20260405"
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "next",

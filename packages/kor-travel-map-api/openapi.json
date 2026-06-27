@@ -7338,6 +7338,17 @@
             ],
             "title": "Decision Reason"
           },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
           "name_score": {
             "title": "Name Score",
             "type": "number"
@@ -7373,9 +7384,42 @@
             "title": "Source Dataset Key",
             "type": "string"
           },
+          "source_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source End Date"
+          },
           "source_entity_id": {
             "title": "Source Entity Id",
             "type": "string"
+          },
+          "source_lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Lat"
+          },
+          "source_lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Lon"
           },
           "source_name": {
             "title": "Source Name",
@@ -7384,6 +7428,28 @@
           "source_provider": {
             "title": "Source Provider",
             "type": "string"
+          },
+          "source_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Start Date"
+          },
+          "spatial_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spatial Score"
           },
           "status": {
             "title": "Status",
@@ -7399,6 +7465,17 @@
               }
             ],
             "title": "Target Category"
+          },
+          "target_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target End Date"
           },
           "target_feature_id": {
             "title": "Target Feature Id",
@@ -7440,6 +7517,17 @@
           "target_name": {
             "title": "Target Name",
             "type": "string"
+          },
+          "target_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Start Date"
           }
         },
         "required": [

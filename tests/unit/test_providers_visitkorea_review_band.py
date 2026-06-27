@@ -36,6 +36,8 @@ class _Item:
     addr1: str | None = None
     area_code: str | None = None
     sigungu_code: str | None = None
+    map_x: float | None = None
+    map_y: float | None = None
     event_start_date: str | None = None
     event_end_date: str | None = None
     tel: str | None = None

@@ -43,6 +43,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Final, Protocol, Self, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -118,6 +119,12 @@ class VisitKoreaFestivalItem(Protocol):
 
     sigungu_code: str | None
     """TourAPI 시군구코드 (법정동코드 아님 — raw_data만)."""
+
+    map_x: float | None
+    """WGS84 경도 (TourAPI ``mapx`` / python-visitkorea-api ``map_x``)."""
+
+    map_y: float | None
+    """WGS84 위도 (TourAPI ``mapy`` / python-visitkorea-api ``map_y``)."""
 
     event_start_date: str | None
     """축제 시작일 (YYYYMMDD 문자열, raw_data 보존)."""
@@ -205,13 +212,14 @@ class _FestivalMatch:
 class ScoringFestivalMatcher:
     """``FestivalMatcher`` 기본 구현 — 이름 Jaro-Winkler 유사도(ADR-016)로 매칭.
 
-    ``VisitKoreaFestivalItem`` Protocol은 좌표/법정동코드를 노출하지 않으므로(area_code/
-    sigungu_code는 TourAPI 자체 코드라 datagokr bjd와 직접 비교 불가) **이름 유사도만**
-    쓴다. ``name_threshold`` 이상이면서 최고점인 후보를 매칭한다(동점이면 먼저 등장한
-    후보). 매칭 실패 시 ``None``.
+    ``VisitKoreaFestivalItem`` Protocol의 ``area_code``/``sigungu_code``는 TourAPI 자체
+    코드라 datagokr bjd와 직접 비교하지 않고, 매칭 자체는 **이름 유사도만** 쓴다.
+    ``name_threshold`` 이상이면서 최고점인 후보를 매칭한다(동점이면 먼저 등장한 후보).
+    매칭 실패 시 ``None``.
 
     축제명은 보통 변별력이 높아 이름-only 매칭으로도 정밀도가 충분하다. 기본 임계값은
-    보수적으로 0.90(false positive 회피). 좌표 기반 보강은 Protocol 확장 후속.
+    보수적으로 0.90(false positive 회피). 좌표는 수동 검토 UI의 거리/지도 비교용으로
+    ``SourceRecord``에 보존한다.
     """
 
     def __init__(
@@ -312,6 +320,18 @@ def _modified_time_str(value: datetime | str | None) -> str | None:
     return text or None
 
 
+def _decimal_or_none(value: object) -> Decimal | None:
+    """provider 좌표값을 ``SourceRecord``용 Decimal로 보존한다."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
 def _item_to_enrichment(
     item: VisitKoreaFestivalItem,
     match: FestivalMatch,
@@ -321,6 +341,8 @@ def _item_to_enrichment(
     """한 visitkorea item + 매칭 결과 → 한 ``FestivalEnrichment``. 모듈 private."""
 
     modified_time = _modified_time_str(item.modified_time)
+    map_x = getattr(item, "map_x", None)
+    map_y = getattr(item, "map_y", None)
 
     # 1) Raw payload (canonical JSON 직렬화 가능한 dict). 이미지/overview 등
     #    enrichment 콘텐츠는 여기에 보존 — FeatureFileSource DTO는 후속 PR.
@@ -333,6 +355,8 @@ def _item_to_enrichment(
         "addr1": item.addr1,
         "area_code": item.area_code,
         "sigungu_code": item.sigungu_code,
+        "map_x": map_x,
+        "map_y": map_y,
         "event_start_date": item.event_start_date,
         "event_end_date": item.event_end_date,
         "tel": normalize_phone_number(item.tel),
@@ -360,6 +384,8 @@ def _item_to_enrichment(
         source_version=modified_time,
         raw_name=normalize_korean_text(item.title),
         raw_address=normalize_korean_text(item.addr1),
+        raw_longitude=_decimal_or_none(map_x),
+        raw_latitude=_decimal_or_none(map_y),
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-27 (codex) — Enrichment/Dedup review 검수 UX 보강
+
+- **완료(API)**: enrichment review 목록에 대상/source 좌표·기간, 거리(`distance_m`), 거리 기반
+  유사도(`spatial_score`)를 추가했다. VisitKorea enrichment source record도 TourAPI 좌표를 보존한다.
+- **완료(UI)**: enrichment/dedup review 테이블에 검색, 상태/성격별 필터, score band, page size,
+  cursor pagination을 추가했다. enrichment 테이블은 시작-종료 날짜와 거리 컬럼을 표시하고, 좌표가
+  있는 행은 하나의 VWorld 지도에 datagokr/visitkorea 마커와 이름을 함께 보여준다.
+- **완료(e2e)**: mocked review e2e에 enrichment 필터·페이지네이션·지도와 dedup 전용
+  필터·페이지네이션 회귀 테스트를 추가했다. N150 live spec에도 두 review 화면의 필터/페이지네이션/
+  지도 smoke를 추가했다.
+- **검증(로컬)**: Python unit 1109건, enrichment repository integration 9건, API/router targeted
+  28건, ruff, mypy, import-linter, admin frontend lint/type-check/gen:types, Vitest 45건, mocked review
+  e2e 21건 통과.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지 후 N150에 배포하고 live review e2e로 운영 화면을
+  평가한다.
+
 ## 2026-06-27 (codex) — Curated place-search 반영 정책 수정
 
 - **완료(UI)**: `/admin/curated-features`의 place-search 결과 `반영`이 `display_title`과
