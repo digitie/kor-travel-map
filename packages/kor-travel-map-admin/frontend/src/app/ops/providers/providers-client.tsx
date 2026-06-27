@@ -86,7 +86,15 @@ function sameDataset(item: OpsProviderDatasetSummary, selection: ProviderSelecti
   );
 }
 
+function isNeverRun(item: OpsProviderDatasetSummary): boolean {
+  return item.status === "never_run";
+}
+
 function isStale(item: OpsProviderDatasetSummary): boolean {
+  // never-run dataset은 "한 번도 안 돈" 별도 상태 — stale(오래됨)로 세지 않는다.
+  if (isNeverRun(item)) {
+    return false;
+  }
   if (!item.last_success_at) {
     return true;
   }
@@ -611,14 +619,28 @@ export function ProvidersFreshnessClient() {
     const stale = items.filter(
       (item) => item.consecutive_failures === 0 && isStale(item),
     );
+    const neverRun = items.filter((item) => isNeverRun(item));
     const policies = items.filter((item) => item.refresh_policy);
     return {
       providers: providerNames.size,
       failing,
       stale,
+      neverRun,
       policies: policies.length,
     };
   }, [items]);
+
+  // never-run dataset은 단건 상세(sync/policy row)가 없어 404가 정상 — 이때
+  // detail 에러를 목록 상단에 블로킹 alert로 띄우지 않는다.
+  const activeIsNeverRun = useMemo(
+    () =>
+      activeSelection
+        ? (items.find((item) => sameDataset(item, activeSelection))?.status ??
+            "") === "never_run"
+        : false,
+    [activeSelection, items],
+  );
+  const showDetailError = detail.isError && !activeIsNeverRun;
 
   type ProviderRow = NonNullable<typeof providers.data>["data"]["items"][number];
   const columns = useMemo<ColumnDef<ProviderRow, unknown>[]>(
@@ -746,7 +768,7 @@ export function ProvidersFreshnessClient() {
       title="Providers"
     >
       <div className="flex flex-col gap-4">
-        {providers.isError || detail.isError ? (
+        {providers.isError || showDetailError ? (
           <Alert variant="destructive">
             <AlertTitle>provider 조회 실패</AlertTitle>
             <AlertDescription>
@@ -766,6 +788,9 @@ export function ProvidersFreshnessClient() {
           </Badge>
           <Badge variant="outline">
             stale(&gt;{STALE_AFTER_HOURS}h) {formatCount(summary.stale.length)}
+          </Badge>
+          <Badge variant="outline">
+            never-run {formatCount(summary.neverRun.length)}
           </Badge>
         </section>
 
