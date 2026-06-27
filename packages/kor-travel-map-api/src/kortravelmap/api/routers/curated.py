@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import html
+import re
+from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
@@ -10,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra import curated_repo
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +58,18 @@ ProviderStatus = Literal[
     "deprecated",
 ]
 RuleAction = Literal["candidate", "curated", "ignore"]
+
+PLACE_SEARCH_LIMIT = 5
+KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
+GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+GOOGLE_PLACES_FIELD_MASK = (
+    "places.displayName,"
+    "places.formattedAddress,"
+    "places.location,"
+    "places.primaryTypeDisplayName"
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 class CuratedThemeView(BaseModel):
@@ -283,7 +299,7 @@ class CuratedFeatureDetailSnapshotResponse(BaseModel):
 
 
 class PlaceSearchHitView(BaseModel):
-    """concierge review place-search normalized hit."""
+    """external place-search normalized hit."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -493,58 +509,252 @@ def _integrity_error(exc: IntegrityError) -> HTTPException:
     )
 
 
-def _place_search_hits(payload: Any, key: str) -> list[PlaceSearchHitView]:
-    raw_items = payload.get(key) if isinstance(payload, dict) else None
+def _secret_value(secret: SecretStr | None) -> str | None:
+    if secret is None:
+        return None
+    value = secret.get_secret_value().strip()
+    return value or None
+
+
+def _clean_place_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = html.unescape(_HTML_TAG_RE.sub("", value)).strip()
+    return text or None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _naver_wgs84_coord(value: Any) -> float | None:
+    coord = _float_or_none(value)
+    if coord is None:
+        return None
+    if abs(coord) > 180:
+        return coord / 10_000_000
+    return coord
+
+
+def _google_display_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _clean_place_text(value.get("text"))
+    return _clean_place_text(value)
+
+
+async def _search_kakao_places(
+    client: httpx.AsyncClient,
+    *,
+    api_key: str,
+    query: str,
+) -> list[PlaceSearchHitView]:
+    response = await client.get(
+        KAKAO_LOCAL_KEYWORD_URL,
+        headers={"Authorization": f"KakaoAK {api_key}"},
+        params={"query": query, "size": PLACE_SEARCH_LIMIT},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    raw_items = payload.get("documents") if isinstance(payload, dict) else None
     if not isinstance(raw_items, list):
         return []
+
     hits: list[PlaceSearchHitView] = []
     for item in raw_items:
-        if isinstance(item, dict):
-            hits.append(PlaceSearchHitView.model_validate(item))
+        if not isinstance(item, dict):
+            continue
+        hits.append(
+            PlaceSearchHitView(
+                provider="kakao",
+                name=_clean_place_text(item.get("place_name")),
+                address=_clean_place_text(item.get("address_name")),
+                road_address=_clean_place_text(item.get("road_address_name")),
+                latitude=_float_or_none(item.get("y")),
+                longitude=_float_or_none(item.get("x")),
+                category=_clean_place_text(item.get("category_name")),
+            )
+        )
     return hits
 
 
-async def _concierge_place_search(query: str) -> CuratedPlaceSearchData:
+async def _search_naver_places(
+    client: httpx.AsyncClient,
+    *,
+    client_id: str,
+    client_secret: str,
+    query: str,
+) -> list[PlaceSearchHitView]:
+    response = await client.get(
+        NAVER_LOCAL_SEARCH_URL,
+        headers={
+            "X-Naver-Client-Id": client_id,
+            "X-Naver-Client-Secret": client_secret,
+        },
+        params={"query": query, "display": PLACE_SEARCH_LIMIT},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        return []
+
+    hits: list[PlaceSearchHitView] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        hits.append(
+            PlaceSearchHitView(
+                provider="naver",
+                name=_clean_place_text(item.get("title")),
+                address=_clean_place_text(item.get("address")),
+                road_address=_clean_place_text(item.get("roadAddress")),
+                latitude=_naver_wgs84_coord(item.get("mapy")),
+                longitude=_naver_wgs84_coord(item.get("mapx")),
+                category=_clean_place_text(item.get("category")),
+            )
+        )
+    return hits
+
+
+async def _search_google_places(
+    client: httpx.AsyncClient,
+    *,
+    api_key: str,
+    query: str,
+) -> list[PlaceSearchHitView]:
+    response = await client.post(
+        GOOGLE_PLACES_TEXT_SEARCH_URL,
+        headers={
+            "X-Goog-Api-Key": api_key,
+            "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK,
+        },
+        json={
+            "textQuery": query,
+            "languageCode": "ko",
+            "regionCode": "KR",
+            "maxResultCount": PLACE_SEARCH_LIMIT,
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    raw_items = payload.get("places") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        return []
+
+    hits: list[PlaceSearchHitView] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        location = item.get("location")
+        primary_type = item.get("primaryTypeDisplayName")
+        hits.append(
+            PlaceSearchHitView(
+                provider="google",
+                name=_google_display_text(item.get("displayName")),
+                address=_clean_place_text(item.get("formattedAddress")),
+                road_address=None,
+                latitude=_float_or_none(location.get("latitude"))
+                if isinstance(location, dict)
+                else None,
+                longitude=_float_or_none(location.get("longitude"))
+                if isinstance(location, dict)
+                else None,
+                category=_google_display_text(primary_type),
+            )
+        )
+    return hits
+
+
+async def _capture_place_search(
+    provider: str,
+    awaitable: Awaitable[list[PlaceSearchHitView]],
+) -> tuple[str, list[PlaceSearchHitView], str | None]:
+    try:
+        return provider, await awaitable, None
+    except httpx.HTTPStatusError as exc:
+        return provider, [], f"HTTP {exc.response.status_code}"
+    except httpx.HTTPError:
+        return provider, [], "호출 실패"
+    except ValueError:
+        return provider, [], "응답 파싱 실패"
+
+
+async def _direct_place_search(query: str) -> CuratedPlaceSearchData:
     settings = KorTravelMapSettings()
-    base_url = settings.kor_travel_concierge_base_url
-    api_key = settings.kor_travel_concierge_api_key
-    if base_url is None or api_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "kor-travel-concierge place-search 연동 env가 없습니다. "
-                "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL/API_KEY를 설정하세요."
-            ),
+    google_key = _secret_value(settings.google_places_api_key)
+    kakao_key = _secret_value(settings.kakao_local_rest_api_key)
+    naver_client_id = _secret_value(settings.naver_search_client_id)
+    naver_client_secret = _secret_value(settings.naver_search_client_secret)
+
+    google: list[PlaceSearchHitView] = []
+    kakao: list[PlaceSearchHitView] = []
+    naver: list[PlaceSearchHitView] = []
+    errors: dict[str, str] = {}
+
+    if google_key is None:
+        errors["google"] = "KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY env가 없습니다."
+    if kakao_key is None:
+        errors["kakao"] = "KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY env가 없습니다."
+    if naver_client_id is None or naver_client_secret is None:
+        errors["naver"] = (
+            "KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID/SECRET env가 없습니다."
         )
 
-    try:
-        async with httpx.AsyncClient(
-            base_url=base_url.rstrip("/"),
-            headers={"X-API-Key": api_key.get_secret_value()},
-            timeout=10.0,
-        ) as client:
-            response = await client.get("/api/v1/place-search", params={"q": query})
-            response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"concierge place-search 실패: HTTP {exc.response.status_code}",
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="concierge place-search 호출 실패",
-        ) from exc
+    tasks: list[Awaitable[tuple[str, list[PlaceSearchHitView], str | None]]] = []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        if google_key is not None:
+            tasks.append(
+                _capture_place_search(
+                    "google",
+                    _search_google_places(client, api_key=google_key, query=query),
+                )
+            )
+        if kakao_key is not None:
+            tasks.append(
+                _capture_place_search(
+                    "kakao",
+                    _search_kakao_places(client, api_key=kakao_key, query=query),
+                )
+            )
+        if naver_client_id is not None and naver_client_secret is not None:
+            tasks.append(
+                _capture_place_search(
+                    "naver",
+                    _search_naver_places(
+                        client,
+                        client_id=naver_client_id,
+                        client_secret=naver_client_secret,
+                        query=query,
+                    ),
+                )
+            )
+        results = await asyncio.gather(*tasks) if tasks else []
 
-    payload = response.json()
-    errors = payload.get("errors") if isinstance(payload, dict) else None
-    payload_query = payload.get("query") if isinstance(payload, dict) else None
+    for provider, hits, error in results:
+        if error is not None:
+            errors[provider] = error
+        elif provider == "google":
+            google = hits
+        elif provider == "kakao":
+            kakao = hits
+        elif provider == "naver":
+            naver = hits
+
     return CuratedPlaceSearchData(
-        query=payload_query if isinstance(payload_query, str) and payload_query else query,
-        google=_place_search_hits(payload, "google"),
-        kakao=_place_search_hits(payload, "kakao"),
-        naver=_place_search_hits(payload, "naver"),
-        errors=errors if isinstance(errors, dict) else {},
+        query=query,
+        google=google,
+        kakao=kakao,
+        naver=naver,
+        errors=errors,
     )
 
 
@@ -762,7 +972,7 @@ async def search_admin_curated_feature_places_route(
     ).strip()
     if not query:
         raise HTTPException(status_code=400, detail="검색어 q가 필요합니다")
-    data = await _concierge_place_search(query)
+    data = await _direct_place_search(query)
     return CuratedPlaceSearchResponse(
         data=data,
         meta=make_meta(started_at=started_at),

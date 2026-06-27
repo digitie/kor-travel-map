@@ -4,6 +4,8 @@
 발급/호출 정책 reference다. 공공 provider 호출은 `python-*-api` provider
 라이브러리에 위임한다(ADR-006). 예외적으로 `kor-travel-concierge-youtube`는 형제 앱
 `kor-travel-concierge`의 REST export를 kor-travel-map Dagster가 직접 pull한다(ADR-053).
+또한 admin curated feature의 주소/POI 검색은 curation source와 독립된 on-demand 조회라서
+kor-travel-map API backend가 Kakao Local, NAVER Search, Google Places API를 직접 호출한다.
 
 본 문서는 운영자/에이전트가 어떤 키를 어디서 발급받고 어디에 두는지 한 곳에서
 확인할 수 있도록 한다.
@@ -34,9 +36,12 @@
 | `PUBLIC_DATA_SERVICE_KEY` | 동일 | 동일 | 폴백 2 |
 | `SERVICE_KEY` | 동일 | 동일 | 폴백 3 |
 | `KAKAO_LOCAL_REST_API_KEY` | kakao-local-api | Kakao Developers | `Authorization: KakaoAK {KEY}` |
+| `KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY` | admin curated place search | Kakao Developers | backend 직접 호출용. `scripts/load-env.sh`가 `KAKAO_LOCAL_REST_API_KEY`에서 매핑 |
 | `NAVER_SEARCH_CLIENT_ID` | naver-search-api | NAVER Developers | 헤더 `X-Naver-Client-Id` |
 | `NAVER_SEARCH_CLIENT_SECRET` | 동일 | 동일 | 헤더 `X-Naver-Client-Secret` |
+| `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID` / `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET` | admin curated place search | NAVER Developers | backend 직접 호출용. 짧은 이름에서 매핑 가능 |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
+| `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY` | admin curated place search | Google Cloud Console (Places API New) | backend 직접 호출용. `GOOGLE_PLACES_API_KEY`에서 매핑 가능 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
@@ -116,24 +121,31 @@ data.go.kr 직접 다운로드 URL (atchFileId + fileDetailSn + insertDataPrcus)
 
 1. https://developers.kakao.com 앱 생성
 2. REST API 키 발급
-3. `KAKAO_LOCAL_REST_API_KEY` 환경변수
-4. 호출: `Authorization: KakaoAK {KEY}` 헤더
+3. provider library 호환 키는 `KAKAO_LOCAL_REST_API_KEY`, admin curated place search 직접 호출은
+   `KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY` 환경변수에 저장한다.
+4. `scripts/load-env.sh`/`docker-compose.yml`은 짧은 이름을 `KOR_TRAVEL_MAP_*`로 매핑한다.
+5. 호출: `Authorization: KakaoAK {KEY}` 헤더
 
 ### 3.10 NAVER Search
 
 1. https://developers.naver.com/apps 앱 등록
 2. "검색" API 활성화
 3. Client ID, Client Secret 발급
-4. `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET`
+4. provider library 호환 키는 `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET`, admin curated
+   place search 직접 호출은 `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID`,
+   `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET` 환경변수에 저장한다.
+5. `scripts/load-env.sh`/`docker-compose.yml`은 짧은 이름을 `KOR_TRAVEL_MAP_*`로 매핑한다.
 
 ### 3.11 Google Places API (New)
 
 1. Google Cloud Console → 프로젝트 생성 → "Places API (New)" 활성화
 2. API 키 생성 (제한 권장: HTTP referrer 또는 IP)
-3. `GOOGLE_PLACES_API_KEY` 환경변수
-4. 호출 시 **Field Mask 필수** (`X-Goog-FieldMask`) — 전화번호만 받으려면
+3. provider library 호환 키는 `GOOGLE_PLACES_API_KEY`, admin curated place search 직접 호출은
+   `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY` 환경변수에 저장한다.
+4. `scripts/load-env.sh`/`docker-compose.yml`은 짧은 이름을 `KOR_TRAVEL_MAP_*`로 매핑한다.
+5. 호출 시 **Field Mask 필수** (`X-Goog-FieldMask`) — 전화번호만 받으려면
    `places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber`
-5. 비용 발생 가능 — 호출 빈도 관리
+6. 비용 발생 가능 — 호출 빈도 관리
 
 ### 3.12 data.go.kr 표준데이터
 

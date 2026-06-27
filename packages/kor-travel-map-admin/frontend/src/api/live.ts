@@ -67,6 +67,12 @@ function topicId(topic: string, prefix: string) {
   return topic.slice(prefix.length);
 }
 
+function invalidateFeatureSurfaces(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: ["features"] });
+  void queryClient.invalidateQueries({ queryKey: ["feature"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
+}
+
 function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   if (topic === "import_jobs") {
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
@@ -96,6 +102,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["feature-update-requests"],
     });
+    invalidateFeatureSurfaces(queryClient);
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     void queryClient.invalidateQueries({ queryKey: ["providers"] });
@@ -112,6 +119,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["feature-update-requests"],
     });
+    invalidateFeatureSurfaces(queryClient);
     void queryClient.invalidateQueries({ queryKey: ["providers"] });
     void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
     return;
@@ -137,6 +145,8 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
   }
 }
+
+export const __testing = { invalidateLiveTopic };
 
 function parseLiveMessage(raw: string): OpsLiveMessage | null {
   try {

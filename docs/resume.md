@@ -1,5 +1,44 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-27 (codex) — Curated place-search 반영 정책 수정
+
+- **완료(UI)**: `/admin/curated-features`의 place-search 결과 `반영`이 `display_title`과
+  metadata만 저장하던 문제를 고쳐, `reuse_policy=allowed`도 함께 PATCH하도록 했다.
+- **완료(e2e)**: manual_review 후보에서 검색 결과를 반영하면 PATCH body, REUSE 행 badge,
+  editor select가 모두 `allowed`로 바뀌는 mocked Playwright 회귀 테스트를 추가했다.
+- **검증(로컬)**: admin frontend type-check, 변경 파일 ESLint, curated mutations mocked e2e 21건,
+  `git diff --check` 통과.
+- **다음 한 작업**: N150 배포 뒤 운영 데이터에서 manual_review 후보 1건으로 place-search 반영 smoke를
+  확인한다.
+
+## 2026-06-27 (codex) — Feature update request UI live e2e
+
+- **완료(UI/e2e)**: `/admin/feature-update-requests` live Playwright spec을 추가했다. form controls,
+  validation errors, 실제 API dry-run preview, `/features` 지도 화면의 `Update` 링크 이동을 확인한다.
+- **완료(에러 케이스)**: mocked update request e2e에 lon 필수, lat 범위, radius 최소값, create API
+  422 alert 케이스를 추가했다.
+- **완료(지도 반영)**: update request create/run-now와 ops-live `feature_update_requests` 이벤트가
+  `features`/`feature`/`admin-features` query를 invalidate해 feature 지도와 상세/목록이 재조회되도록
+  연결했다.
+- **검증(로컬/live)**: admin frontend type-check, 변경 파일 ESLint, mocked update request e2e 8건,
+  live update request e2e 5건, `git diff --check` 통과. Vitest unit은 WSL `node_modules`의
+  `@vitejs/plugin-react` 누락 및 NTFS 권한 문제로 실행하지 못했다.
+- **다음 한 작업**: WSL Node 의존성 설치 상태를 복구한 뒤 `src/api/live.test.ts`를 포함한 frontend
+  unit test를 재실행하고, 필요하면 features map WebGL 초기화 실패 원인을 별도 점검한다.
+
+## 2026-06-27 (codex) — Curated place search provider 직접 호출
+
+- **완료(API)**: admin curated feature 주소/POI 검색은 kor-travel-concierge를 경유하지 않고 Kakao
+  Local, NAVER Search, Google Places API를 직접 호출한다. provider별 키 누락/호출 실패는 `errors`
+  필드에 담아 반환한다.
+- **완료(설정)**: `KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY`,
+  `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID`, `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET`,
+  `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY`를 settings/env 예시에 추가했고, 기존 짧은 env 이름은
+  load-env/compose에서 매핑한다.
+- **검증(로컬)**: `tests/unit/test_curated_routes.py` 3건과 변경 파일 ruff 통과.
+- **다음 한 작업**: 실제 운영 env에 위 provider 키가 들어간 상태로 API 컨테이너를 재배포하고,
+  curated feature detail에서 검색 결과가 provider별로 표시되는지 smoke 확인한다.
+
 ## 2026-06-27 (codex) — Admin 후속 보강: curated/detail/OpiNet/Dagster
 
 - **완료(UI)**: curated feature place 검색 자동 실행/누적을 끊고 명시 검색으로 변경했다. 화면의
@@ -24,7 +63,7 @@
 - **완료(코드)**: OpiNet `low_top_area` 부분 응답에도 전국 fallback을 타게 했고, VisitKorea
   enrichment Dagster asset은 review queue refresh 경로를 호출하게 했다. feature load asset은 성공
   provider sync state를 기록한다.
-- **완료(UI)**: curated review 우측에 위치 지도/상세/concierge place-search 반영 패널을 추가했다.
+- **완료(UI)**: curated review 우측에 위치 지도/상세/place-search 반영 패널을 추가했다.
   admin features/curated/logs table pagination 정보와 MOIS place 특화 상세 패널을 보강했다.
 - **검증(로컬/live)**: Dagster/API targeted pytest와 ruff, admin frontend type-check/e2e type-check,
   변경 파일 ESLint, `git diff --check`, `/admin/enrichment-reviews` live Playwright 34건 통과.

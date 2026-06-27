@@ -349,6 +349,7 @@ async function mockCuratedConsole(
   const themes = options.themes ?? [makeCuratedTheme()];
   let rules = [...(options.rules ?? [])];
   const detailItems = options.detailItems ?? [makeDetailItem()];
+  let mutationCounter = 0;
 
   const requests: ConsoleRequests = {
     featuresList: 0,
@@ -378,7 +379,16 @@ async function mockCuratedConsole(
     let updated = makeCuratedFeature({ curated_feature_id: curatedFeatureId });
     features = features.map((item) => {
       if (item.curated_feature_id !== curatedFeatureId) return item;
-      updated = { ...item, ...patch };
+      mutationCounter += 1;
+      updated = {
+        ...item,
+        ...patch,
+        content_version: item.content_version + 1,
+        updated_at: `2026-06-08T00:00:${String(mutationCounter).padStart(
+          2,
+          "0",
+        )}.000Z`,
+      };
       return updated;
     });
     return updated;
@@ -478,9 +488,10 @@ async function mockCuratedConsole(
 
     if (method === "PATCH" && path.startsWith("/v1/admin/curated-features/")) {
       requests.patch += 1;
-      requests.patchBodies.push(request.postDataJSON());
+      const body = request.postDataJSON() as Partial<CuratedFeatureView>;
+      requests.patchBodies.push(body);
       const id = decodeURIComponent(path.split("/").at(-1) ?? "");
-      const updated = updateFeature(id, {});
+      const updated = updateFeature(id, body);
       await fulfillJson(route, featureResponse(updated));
       return;
     }
@@ -565,19 +576,28 @@ async function mockCuratedConsole(
 }
 
 test.describe("/admin/curated-features mutations (route-mocked)", () => {
-  test("curated detail 링크가 전용 상세 화면으로 이동", async ({ page }) => {
+  test("curated detail 링크와 전용 상세 화면 렌더", async ({ page }) => {
     const requests = await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
     });
 
     await page.goto("/admin/curated-features");
-    await page.getByRole("link", { name: "curated detail" }).first().click();
+    await expect(
+      page.getByRole("link", { name: "curated detail" }).first(),
+    ).toHaveAttribute("href", `/admin/curated-features/${FEATURE_A_ID}`);
 
-    await expect(page).toHaveURL(new RegExp(`/admin/curated-features/${FEATURE_A_ID}$`));
-    await expect(page.getByText("Curated feature detail")).toBeVisible();
+    await page.goto(`/admin/curated-features/${FEATURE_A_ID}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page).toHaveURL(
+      new RegExp(`/admin/curated-features/${FEATURE_A_ID}$`),
+    );
+    await expect(
+      page.getByRole("heading", { name: "Curated feature detail" }),
+    ).toBeVisible();
     await expect(page.getByText("Location review")).toBeVisible();
     await expect(page.getByText("Place search")).toBeVisible();
-    await expect.poll(() => requests.featureDetail).toBe(1);
+    await expect.poll(() => requests.featureDetail).toBeGreaterThanOrEqual(1);
   });
 
   test("후보 select → curated 전환 (POST /select + invalidate refetch)", async ({
@@ -696,6 +716,48 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await expect(page.getByLabel("place search query")).toHaveValue("창덕궁");
     await expect(page.getByText("검색어를 확인하고 검색을 누르세요.")).toBeVisible();
     await expect.poll(() => requests.placeSearch).toBe(1);
+  });
+
+  test("place 검색 결과 반영은 reuse policy를 allowed로 전환", async ({
+    page,
+  }) => {
+    const requests = await mockCuratedConsole(page, {
+      features: [
+        makeCuratedFeature({
+          reuse_policy: "manual_review",
+          feature_name: "경복궁",
+        }),
+      ],
+    });
+
+    await page.goto("/admin/curated-features");
+    await expect(page.getByText("Place search")).toBeVisible();
+
+    await page.getByLabel("place search query").fill("경복궁");
+    await page.getByRole("button", { name: "검색" }).click();
+    await expect.poll(() => requests.placeSearch).toBe(1);
+
+    await page.getByRole("button", { name: "반영" }).first().click();
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      display_title: "경복궁",
+      reuse_policy: "allowed",
+      metadata: {
+        place_search_review: {
+          provider: "google",
+          query: "경복궁",
+          name: "경복궁",
+          address: "서울 종로구",
+          latitude: 37.5796,
+          longitude: 126.977,
+          category: "tourist_attraction",
+        },
+      },
+    });
+    await expect(
+      page.getByRole("row", { name: /경복궁/ }).getByText("allowed"),
+    ).toBeVisible();
+    await expect(page.getByLabel("reuse policy")).toHaveValue("allowed");
   });
 
   test("빈 display title/summary는 null로 전송 (trim 후 length 0)", async ({

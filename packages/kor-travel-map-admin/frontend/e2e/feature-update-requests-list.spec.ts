@@ -104,7 +104,11 @@ interface FeatureUpdateMocks {
  */
 async function mockFeatureUpdateRequests(
   page: Page,
-  options: { initial?: FeatureUpdateRequestRecord[] } = {},
+  options: {
+    initial?: FeatureUpdateRequestRecord[];
+    createStatus?: number;
+    createErrorBody?: unknown;
+  } = {},
 ): Promise<FeatureUpdateMocks> {
   let items = [...(options.initial ?? [])];
   const mocks: FeatureUpdateMocks = {
@@ -148,6 +152,14 @@ async function mockFeatureUpdateRequests(
       mocks.create += 1;
       const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
       mocks.createBodies.push(body);
+      if (options.createStatus && options.createStatus >= 400) {
+        await fulfillJson(
+          route,
+          options.createErrorBody ?? { detail: "feature update create failed" },
+          options.createStatus,
+        );
+        return;
+      }
       // dry-run preview는 request_id 없이 반환(actions 컬럼이 'dry-run' 텍스트 렌더).
       const created = body.dry_run
         ? makeRequest({
@@ -396,6 +408,44 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await expect(errorAlert).toBeVisible();
     // ApiClientError.message: "GET /v1/... 실패 (HTTP 500) ...".
     await expect(page.getByText(/HTTP 500/)).toBeVisible();
+  });
+
+  test("form validation errors: lon required + lat range + radius min block POST", async ({
+    page,
+  }) => {
+    const mocks = await mockFeatureUpdateRequests(page);
+
+    await page.goto("/admin/feature-update-requests");
+
+    await page.getByLabel("lon").fill("");
+    await page.getByLabel("lat").fill("44");
+    await page.getByLabel("radius km").fill("0.01");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
+    await expect(page.getByText("위도는 33~43 범위여야 합니다.")).toBeVisible();
+    await expect(page.getByText("반경은 0.1 이상이어야 합니다.")).toBeVisible();
+    expect(mocks.create).toBe(0);
+  });
+
+  test("create API 422 -> 요청 생성 실패 alert + HTTP detail", async ({
+    page,
+  }) => {
+    const mocks = await mockFeatureUpdateRequests(page, {
+      createStatus: 422,
+      createErrorBody: { detail: "radius_km must be less than or equal to 500" },
+    });
+
+    await page.goto("/admin/feature-update-requests");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => mocks.create).toBe(1);
+    const errorAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "요청 생성 실패" });
+    await expect(errorAlert).toBeVisible();
+    await expect(errorAlert).toContainText("HTTP 422");
+    await expect(errorAlert).toContainText("radius_km");
   });
 
   test("row -> detail deeplink: request column link href uses full id, text is shortId", async ({

@@ -55,6 +55,12 @@ export type FeatureUpdateRequestCancelRequest =
 export type FeatureUpdateRequestRunNowRequest =
   FeatureUpdateSchemas["FeatureUpdateRequestRunNowRequest"];
 
+function invalidateFeatureSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ["features"] });
+  void queryClient.invalidateQueries({ queryKey: ["feature"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
+}
+
 function fetchFeatureUpdateRequests(
   params: FeatureUpdateRequestListParams = {},
   signal?: AbortSignal,
@@ -151,10 +157,13 @@ export function useCreateFeatureUpdateRequestMutation() {
     FeatureUpdateRequestCreateRequest
   >({
     mutationFn: createFeatureUpdateRequest,
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
         queryKey: ["feature-update-requests"],
       });
+      if (!variables.dry_run) {
+        invalidateFeatureSurfaces(queryClient);
+      }
       void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       void queryClient.invalidateQueries({ queryKey: ["providers"] });
@@ -205,6 +214,7 @@ export function useRunFeatureUpdateRequestNowMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["feature-update-requests"],
       });
+      invalidateFeatureSurfaces(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       void queryClient.invalidateQueries({ queryKey: ["providers"] });
