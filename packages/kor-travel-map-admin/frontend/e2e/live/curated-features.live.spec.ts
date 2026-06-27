@@ -359,3 +359,35 @@ test.describe("curated-features live: search by category code", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Row selection → inline place-search panel resets (regression).
+// A duplicate React key on the panel vs editor siblings used to STACK the
+// place-search panel on reselect (so the keyword never changed). Selecting a
+// different candidate must keep exactly one panel and reset the keyword to the
+// newly selected feature. Non-destructive: row selection is client state only.
+// ---------------------------------------------------------------------------
+test.describe("curated-features live: row selection resets place-search panel", () => {
+  test("selecting different candidates keeps one panel + updates keyword", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+    await expectConsoleLoaded(page);
+    const rows = page.locator("table").first().locator("tbody tr");
+    const rowCount = await rows.count();
+    test.skip(rowCount < 2, "needs >=2 candidate rows");
+
+    const keyword = page.getByLabel("place search query");
+    // Click the status cell (index 1), not the bulk-select checkbox (index 0),
+    // so the row's onRowClick selects the inline detail panel.
+    await rows.nth(0).locator("td").nth(1).click();
+    await expect(keyword).toHaveCount(1, TIMEOUT);
+    const firstKeyword = await keyword.inputValue();
+
+    await rows.nth(1).locator("td").nth(1).click();
+    // Exactly one place-search panel — no duplicate-key stacking ...
+    await expect(keyword).toHaveCount(1, TIMEOUT);
+    // ... and the keyword reset to the newly selected feature.
+    await expect(keyword).not.toHaveValue(firstKeyword, TIMEOUT);
+  });
+});
