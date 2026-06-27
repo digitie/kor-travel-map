@@ -426,7 +426,7 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 |----------|-----------|------|------|
 | `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` | 전국문화축제 월 1회 |
 | `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` | OpiNet 주유소 월 1회 |
-| `feature_price_opinet_stations_twice_daily_schedule` | `feature_price_opinet_stations_job` | `18 6,18 * * *` | OpiNet 주유소 유가 일 2회 |
+| `feature_price_opinet_stations_daily_schedule` | `feature_price_opinet_stations_job` | `18 18 * * *` | OpiNet 주유소 유가 일 1회(#545 quota guard) |
 | `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` | KREX 휴게소 월 1회 |
 | `feature_price_krex_rest_areas_twice_daily_schedule` | `feature_price_krex_rest_areas_job` | `28 6,18 * * *` | KREX 휴게소 유가 일 2회 |
 | `feature_notice_krex_traffic_notices_monthly_schedule` | `feature_notice_krex_traffic_notices_job` | `7 3 1 * *` | KREX 교통공지 월 1회 |

@@ -1217,6 +1217,10 @@ class _FakeOpinetNoDataError(RuntimeError):
     pass
 
 
+class _FakeOpinetRateLimitError(RuntimeError):
+    pass
+
+
 class _FakeOpinetClient:
     instances: list[_FakeOpinetClient] = []
     stations: list[object] = []
@@ -1307,6 +1311,7 @@ def _install_fake_opinet(
     module = ModuleType("opinet")
     module.__dict__["OpinetClient"] = _FakeOpinetClient
     module.__dict__["OpinetNoDataError"] = _FakeOpinetNoDataError
+    module.__dict__["OpinetRateLimitError"] = _FakeOpinetRateLimitError
     monkeypatch.setitem(sys.modules, "opinet", module)
     return _FakeOpinetClient
 
@@ -1614,6 +1619,170 @@ def test_opinet_stations_low_top_area_call_budget_uses_fallback(
         (127.0, 37.5, 5000, "D047"),
         (127.0, 37.5, 5000, "B034"),
     ]
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run hard budget(#545)는 area+lowTop10 호출을 합산해 초과 시 grid 진입 전에 중단."""
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101"), _FakeOpinetArea("0102")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0101", "D047"): [_FakeStation("A2", "D047")],
+        },
+        around={(127.0, 37.5, "B027"): [_FakeStation("Z9", "B027")]},
+    )
+    # budget=4: get_area_codes(root)=1, get_area_codes("01")=1, lowTop10 2건 → 소진.
+    monkeypatch.setattr(provider_fetchers, "_OPINET_RUN_CALL_BUDGET", 4)
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 99)
+    grid_called = False
+
+    def _grid() -> Iterator[tuple[float, float]]:
+        nonlocal grid_called
+        grid_called = True
+        yield (127.0, 37.5)
+
+    monkeypatch.setattr(provider_fetchers, "_opinet_sample_grid_centers", _grid)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    # 2 get_area_codes + 2 lowTop10 = budget(4) 소진. 3번째 product/grid 미호출.
+    assert client.area_calls == [None, "01"]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+    ]
+    assert client.around_calls == []
+    assert grid_called is False
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_skips_grid_when_sufficient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """lowTop10이 임계치 이상이면 부분 성공이어도 grid fallback을 건너뛴다(#545)."""
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0101", "D047"): [_FakeStation("A2", "D047")],
+        },
+        around={(127.0, 37.5, "B027"): [_FakeStation("Z9", "B027")]},
+    )
+    # 2 station yield >= threshold(2) → grid skip.
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 2)
+    grid_called = False
+
+    def _grid() -> Iterator[tuple[float, float]]:
+        nonlocal grid_called
+        grid_called = True
+        yield (127.0, 37.5)
+
+    monkeypatch.setattr(provider_fetchers, "_opinet_sample_grid_centers", _grid)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert grid_called is False
+    assert client.around_calls == []
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """임계치 미달 부분 성공 station도 yield되고, 그 뒤 grid로 보강한다(#545)."""
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={("0101", "B027"): [_FakeStation("A1", "B027")]},
+        around={(127.0, 37.5, "D047"): [_FakeStation("A2", "D047")]},
+    )
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_sample_grid_centers",
+        lambda: iter([(127.0, 37.5)]),
+    )
+    # 1 lowTop10 station < threshold(5) → grid fallback도 실행, 부분 성공 유지.
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 5)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+        ("B034", 20, "0101"),
+    ]
+    assert client.around_calls == [
+        (127.0, 37.5, 5000, "B027"),
+        (127.0, 37.5, 5000, "D047"),
+        (127.0, 37.5, 5000, "B034"),
+    ]
+    assert client.closed is True
+
+
+def test_opinet_stations_low_top_area_rate_limit_stops_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """서버가 OpinetRateLimitError를 던지면 lowTop10 중단 + grid 진입 안 함(#545)."""
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0101", "D047"): _FakeOpinetRateLimitError("daily limit"),
+        },
+        around={(127.0, 37.5, "B027"): [_FakeStation("Z9", "B027")]},
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 99)
+    grid_called = False
+
+    def _grid() -> Iterator[tuple[float, float]]:
+        nonlocal grid_called
+        grid_called = True
+        yield (127.0, 37.5)
+
+    monkeypatch.setattr(provider_fetchers, "_opinet_sample_grid_centers", _grid)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    assert [r.uni_id for r in records] == ["A1"]
+    client = fake.instances[0]
+    assert client.low_top_calls == [
+        ("B027", 20, "0101"),
+        ("D047", 20, "0101"),
+    ]
+    assert grid_called is False
+    assert client.around_calls == []
     assert client.closed is True
 
 
