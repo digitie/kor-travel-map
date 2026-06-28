@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Dedup review count 성능 보강 (2026-06-29)
+
+- **FIXED**: dedup review 목록 count가 provider/dataset/kind/category/q 필터가 없을 때
+  feature/source join을 materialize하지 않고 `ops.dedup_review_queue`에서 status/score 조건만으로
+  집계하도록 했다.
+- **ADDED**: dedup review fast count SQL의 EXPLAIN 테스트를 추가해 `idx_dedup_status_score` 사용과
+  queue table 단독 계획을 고정했다.
+
 ### Admin backup delete 계약과 live e2e 안전 게이트 (2026-06-29)
 
 - **ADDED**: `DELETE /v1/admin/backups/{backup_id}`를 추가해 backup artifact 디렉터리를

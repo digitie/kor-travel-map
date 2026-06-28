@@ -440,6 +440,7 @@ async def test_list_dedup_reviews_and_decision() -> None:
     assert len(page.items) == 1
     assert page.next_cursor is not None
     assert page.total_count == 2
+    assert session.calls[0]["statement"] == repo._DEDUP_REVIEW_COUNT_SQL
     params = session.calls[1]["params"]
     assert params["providers"] == ["python-mois-api"]
     assert params["min_score"] == 80
@@ -453,6 +454,26 @@ async def test_list_dedup_reviews_and_decision() -> None:
         reviewed_by="local-admin",
     )
     assert changed is True
+
+
+@pytest.mark.asyncio
+async def test_list_dedup_reviews_uses_fast_count_without_expansion_filters() -> None:
+    session = _Session(
+        [
+            _Result([{"total_count": 1}]),
+            _Result([_dedup_row(_REVIEW_KEY_1)]),
+        ]
+    )
+
+    page = await repo.list_dedup_reviews(
+        session,  # type: ignore[arg-type]
+        min_score=80,
+        page_size=1,
+    )
+
+    assert page.total_count == 1
+    assert session.calls[0]["statement"] == repo._DEDUP_REVIEW_FAST_COUNT_SQL
+    assert "JOIN feature.features" not in session.calls[0]["statement"]
 
     unchanged = await repo.set_dedup_review_decision(
         _Session([_Result([])]),  # type: ignore[arg-type]

@@ -338,6 +338,14 @@ def _index_names(plan: dict[str, Any]) -> set[str]:
     }
 
 
+def _relation_names(plan: dict[str, Any]) -> set[str]:
+    return {
+        str(node["Relation Name"])
+        for node in _walk_plan(plan)
+        if node.get("Relation Name") is not None
+    }
+
+
 def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
     used = _index_names(plan)
     assert set(expected) & used, f"expected one of {expected}, used={sorted(used)}"
@@ -644,6 +652,18 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
         },
     )
     _assert_uses_index(dedup, "idx_dedup_status_score")
+
+    dedup_count = await _explain_json(
+        migrated_session,
+        admin_feature_repo._DEDUP_REVIEW_FAST_COUNT_SQL,  # noqa: PLC2701
+        {
+            "statuses": ["pending"],
+            "min_score": None,
+            "max_score": None,
+        },
+    )
+    _assert_uses_index(dedup_count, "idx_dedup_status_score")
+    assert _relation_names(dedup_count) == {"dedup_review_queue"}
 
     enrichment = await _explain_json(
         migrated_session,

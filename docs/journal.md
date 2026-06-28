@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Dedup review count fast path 보강
+
+#566 지적에 따라 dedup review 목록의 count 경로를 정리했다.
+
+- **count fast path**: provider/dataset/kind/category/q 같은 확장 필터가 없으면
+  `feature.features`와 `provider_sync` LATERAL join을 타지 않고 `ops.dedup_review_queue`에서
+  status/score 조건만으로 count한다.
+- **성능 회귀 가드**: T-212d EXPLAIN 테스트에 fast count SQL을 추가해 `idx_dedup_status_score` 사용과
+  relation set이 `dedup_review_queue` 하나뿐임을 단언한다.
+- **검증**: 관련 unit 9건, T-212d 대상 EXPLAIN integration 1건, 변경 파일 ruff를 통과했다.
+
 ## 2026-06-29 (codex) — PR #564 사후 리뷰 반영: live write 게이트와 catalog 정직성
 
 PR #564 상세 리뷰의 #569/#574 지적을 반영해 admin live e2e의 기본 실행 안전성과 catalog 표현을

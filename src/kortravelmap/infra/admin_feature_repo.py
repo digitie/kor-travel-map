@@ -27,7 +27,7 @@ from kortravelmap.infra.merge_repo import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2281,6 +2281,21 @@ WHERE (
 """
 
 
+_DEDUP_REVIEW_FAST_COUNT_SQL: Final[str] = """
+SELECT count(*)::integer AS total_count
+FROM ops.dedup_review_queue AS q
+WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+  AND (
+    CAST(:min_score AS numeric) IS NULL
+    OR q.total_score >= CAST(:min_score AS numeric)
+  )
+  AND (
+    CAST(:max_score AS numeric) IS NULL
+    OR q.total_score <= CAST(:max_score AS numeric)
+  )
+"""
+
+
 _DEDUP_REVIEW_DETAIL_SQL: Final[str] = """
 SELECT
     q.review_id::text AS review_id,
@@ -2332,6 +2347,17 @@ def _dedup_cursor_params(cursor: str | None) -> dict[str, Any]:
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid dedup review cursor") from exc
     return {"cursor_score": score, "cursor_review_id": payload["review_id"]}
+
+
+def _dedup_review_count_sql(params: Mapping[str, Any]) -> str:
+    """필터 확장이 필요 없으면 queue table만 세는 count SQL을 고른다."""
+
+    if all(
+        params[key] is None
+        for key in ("providers", "dataset_keys", "kinds", "categories", "q_like")
+    ):
+        return _DEDUP_REVIEW_FAST_COUNT_SQL
+    return _DEDUP_REVIEW_COUNT_SQL
 
 
 def _encode_dedup_cursor(item: DedupReviewRow) -> str:
@@ -2422,7 +2448,7 @@ async def list_dedup_reviews(
     total_count = int(
         (
             await session.execute(
-                text(_DEDUP_REVIEW_COUNT_SQL),
+                text(_dedup_review_count_sql(params)),
                 params,
             )
         ).scalar_one()
