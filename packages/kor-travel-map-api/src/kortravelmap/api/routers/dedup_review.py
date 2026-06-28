@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.infra.admin_feature_repo import (
     DedupFeatureSummary,
+    DedupReviewDetail,
     DedupReviewPage,
     DedupReviewRow,
+    ReviewFeatureDetail,
+    ReviewSourceDetail,
+    get_dedup_review_detail,
     list_dedup_reviews,
     merge_dedup_review,
     set_dedup_review_decision,
@@ -32,6 +36,7 @@ __all__ = [
     "router",
     "DedupReviewRecord",
     "DedupReviewListResponse",
+    "DedupReviewDetailResponse",
     "DedupReviewDecisionRequest",
     "DedupReviewDecisionResponse",
 ]
@@ -92,6 +97,87 @@ class DedupReviewListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DedupReviewListData
+    meta: Meta
+
+
+class ReviewSourceDetailRecord(BaseModel):
+    """Review 상세 source record/link snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_record_key: str
+    provider: str
+    dataset_key: str
+    source_entity_type: str
+    source_entity_id: str
+    source_version: str | None = None
+    raw_name: str | None = None
+    raw_address: str | None = None
+    raw_longitude: float | None = None
+    raw_latitude: float | None = None
+    raw_payload_hash: str
+    raw_data: dict[str, Any]
+    fetched_at: datetime | None = None
+    imported_at: datetime | None = None
+    expires_at: datetime | None = None
+    source_role: str | None = None
+    match_method: str | None = None
+    confidence: int | None = None
+    is_primary_source: bool | None = None
+    linked_at: datetime | None = None
+
+
+class ReviewFeatureDetailRecord(BaseModel):
+    """Review 상세 feature snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float | None = None
+    lat: float | None = None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    urls: dict[str, Any]
+    raw_refs: list[dict[str, Any]]
+    marker_icon: str | None = None
+    marker_color: str | None = None
+    data_origin: str
+    data_version: int
+    created_at: datetime
+    updated_at: datetime
+    sources: list[ReviewSourceDetailRecord]
+
+
+class DedupReviewDetailData(BaseModel):
+    """Dedup review 상세 비교 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: str
+    status: str
+    total_score: float
+    name_score: float
+    spatial_score: float
+    category_score: float
+    distance_m: float | None = None
+    decision_reason: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    feature_a: ReviewFeatureDetailRecord
+    feature_b: ReviewFeatureDetailRecord
+
+
+class DedupReviewDetailResponse(BaseModel):
+    """``GET /admin/dedup-reviews/{review_id}`` response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: DedupReviewDetailData
     meta: Meta
 
 
@@ -158,6 +244,51 @@ def _record(row: DedupReviewRow) -> DedupReviewRecord:
         reviewed_by=row.reviewed_by,
         reviewed_at=row.reviewed_at,
         created_at=row.created_at,
+    )
+
+
+def _source_detail(row: ReviewSourceDetail) -> ReviewSourceDetailRecord:
+    return ReviewSourceDetailRecord.model_validate(row, from_attributes=True)
+
+
+def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
+    return ReviewFeatureDetailRecord(
+        feature_id=row.feature_id,
+        kind=row.kind,
+        name=row.name,
+        category=row.category,
+        status=row.status,
+        lon=row.lon,
+        lat=row.lat,
+        address=row.address,
+        detail=row.detail,
+        urls=row.urls,
+        raw_refs=row.raw_refs,
+        marker_icon=row.marker_icon,
+        marker_color=row.marker_color,
+        data_origin=row.data_origin,
+        data_version=row.data_version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        sources=[_source_detail(source) for source in row.sources],
+    )
+
+
+def _detail(row: DedupReviewDetail) -> DedupReviewDetailData:
+    return DedupReviewDetailData(
+        review_id=row.review_id,
+        status=row.status,
+        total_score=row.total_score,
+        name_score=row.name_score,
+        spatial_score=row.spatial_score,
+        category_score=row.category_score,
+        distance_m=row.distance_m,
+        decision_reason=row.decision_reason,
+        reviewed_by=row.reviewed_by,
+        reviewed_at=row.reviewed_at,
+        created_at=row.created_at,
+        feature_a=_feature_detail(row.feature_a),
+        feature_b=_feature_detail(row.feature_b),
     )
 
 
@@ -233,6 +364,29 @@ async def list_reviews(
             next_cursor=review_page.next_cursor,
             total=review_page.total_count,
         ),
+    )
+
+
+@router.get(
+    "/{review_id}",
+    response_model=DedupReviewDetailResponse,
+    responses={404: {"description": "review_id 없음"}},
+)
+async def get_review_detail(
+    request: Request,
+    review_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DedupReviewDetailResponse:
+    started_at = perf_counter()
+    detail = await get_dedup_review_detail(session, review_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"dedup review 없음: {review_id!r}",
+        )
+    return DedupReviewDetailResponse(
+        data=_detail(detail),
+        meta=make_meta(request, started_at=started_at),
     )
 
 

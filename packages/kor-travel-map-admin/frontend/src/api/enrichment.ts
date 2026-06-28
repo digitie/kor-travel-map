@@ -22,6 +22,8 @@ export type EnrichmentReviewRecord =
   EnrichmentSchemas["EnrichmentReviewRecord"];
 export type EnrichmentReviewListResponse =
   EnrichmentSchemas["EnrichmentReviewListResponse"];
+export type EnrichmentReviewDetailResponse =
+  EnrichmentSchemas["EnrichmentReviewDetailResponse"];
 export type EnrichmentReviewListParams = Omit<
   EnrichmentReviewListQuery,
   "cursor" | "provider" | "q" | "status"
@@ -65,10 +67,29 @@ function decideEnrichmentReview(
   );
 }
 
+function fetchEnrichmentReviewDetail(
+  reviewKey: string,
+  signal?: AbortSignal,
+): Promise<EnrichmentReviewDetailResponse> {
+  return getJson<EnrichmentReviewDetailResponse>(
+    `/v1/admin/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
+    { signal },
+  );
+}
+
 export function useEnrichmentReviews(params: EnrichmentReviewListParams = {}) {
   return useQuery<EnrichmentReviewListResponse, Error>({
     queryKey: ["enrichment-reviews", params],
     queryFn: ({ signal }) => fetchEnrichmentReviews(params, signal),
+    staleTime: 15_000,
+  });
+}
+
+export function useEnrichmentReviewDetail(reviewKey: string | null) {
+  return useQuery<EnrichmentReviewDetailResponse, Error>({
+    enabled: reviewKey !== null,
+    queryKey: ["enrichment-reviews", "detail", reviewKey],
+    queryFn: ({ signal }) => fetchEnrichmentReviewDetail(reviewKey ?? "", signal),
     staleTime: 15_000,
   });
 }
@@ -83,6 +104,9 @@ export function useEnrichmentDecisionMutation() {
     mutationFn: ({ reviewKey, body }) => decideEnrichmentReview(reviewKey, body),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["enrichment-reviews"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["enrichment-reviews", "detail"],
+      });
       void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       // accept는 1차 feature에 enrichment source를 추가하므로 feature 캐시도 무효화.

@@ -9,8 +9,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.infra.admin_feature_repo import (
+    EnrichmentReviewDetail,
     EnrichmentReviewPage,
     EnrichmentReviewRow,
+    ReviewFeatureDetail,
+    ReviewSourceDetail,
 )
 from kortravelmap.infra.enrichment_review_repo import EnrichmentDecisionResult
 from kortravelmap.infra.feature_repo import EnrichmentLoadResult
@@ -91,12 +94,88 @@ def _review_row() -> EnrichmentReviewRow:
     )
 
 
+def _target_detail(detail: dict[str, Any] | None = None) -> ReviewFeatureDetail:
+    now = datetime(2026, 6, 8, tzinfo=UTC)
+    return ReviewFeatureDetail(
+        feature_id="f_festival",
+        kind="event",
+        name="서울 봄꽃 축제",
+        category="01010100",
+        status="active",
+        lon=126.9,
+        lat=37.5,
+        address={"legal": "서울"},
+        detail=detail if detail is not None else {"starts_on": "2026-04-05"},
+        urls={"homepage": "https://example.invalid"},
+        raw_refs=[],
+        marker_icon=None,
+        marker_color=None,
+        data_origin="provider",
+        data_version=1,
+        created_at=now,
+        updated_at=now,
+        sources=(),
+    )
+
+
+def _source_detail() -> ReviewSourceDetail:
+    now = datetime(2026, 6, 8, tzinfo=UTC)
+    return ReviewSourceDetail(
+        source_record_key="sr-vk",
+        provider="python-visitkorea-api",
+        dataset_key="visitkorea_festival_events",
+        source_entity_type="festival",
+        source_entity_id="2747929",
+        source_version=None,
+        raw_name="서울 봄꽃",
+        raw_address="서울",
+        raw_longitude=126.9001,
+        raw_latitude=37.5001,
+        raw_payload_hash="hash-vk",
+        raw_data={"eventstartdate": "20260405", "eventenddate": "20260412"},
+        fetched_at=now,
+        imported_at=now,
+        expires_at=None,
+    )
+
+
+def _review_detail(*, target_detail: dict[str, Any] | None = None) -> EnrichmentReviewDetail:
+    now = datetime(2026, 6, 8, tzinfo=UTC)
+    has_target_detail = bool(target_detail if target_detail is not None else True)
+    return EnrichmentReviewDetail(
+        review_id="review-1",
+        status="pending",
+        name_score=82.0,
+        target_feature_id="f_festival",
+        target_name="서울 봄꽃 축제",
+        source_provider="python-visitkorea-api",
+        source_dataset_key="visitkorea_festival_events",
+        source_entity_id="2747929",
+        source_name="서울 봄꽃",
+        target_start_date="2026-04-05",
+        target_end_date="2026-04-12",
+        source_start_date="20260405",
+        source_end_date="20260412",
+        distance_m=12.5,
+        spatial_score=77.88,
+        decision_reason=None,
+        reviewed_by=None,
+        reviewed_at=None,
+        created_at=now,
+        target=_target_detail(target_detail),
+        source=_source_detail(),
+        target_detail_available=has_target_detail,
+        default_detail_source="target" if has_target_detail else "visitkorea",
+    )
+
+
 @pytest.mark.unit
 def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/v1/admin/enrichment-reviews" in spec["paths"]
     assert "/v1/admin/enrichment-reviews/{review_id}" in spec["paths"]
     assert "EnrichmentReviewRecord" in spec["components"]["schemas"]
+    assert "EnrichmentReviewDetailResponse" in spec["components"]["schemas"]
 
 
 @pytest.mark.unit
@@ -147,6 +226,68 @@ def test_list_enrichment_reviews_passes_filters(
 
 
 @pytest.mark.unit
+def test_get_enrichment_review_detail_returns_compare_payload(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import enrichment_review as router_mod
+
+    async def _get(_session: Any, review_id: str) -> EnrichmentReviewDetail | None:
+        assert review_id == "review-1"
+        return _review_detail()
+
+    monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
+
+    response = client.get("/v1/admin/enrichment-reviews/review-1")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["target"]["name"] == "서울 봄꽃 축제"
+    assert data["source"]["raw_name"] == "서울 봄꽃"
+    assert data["default_detail_source"] == "target"
+    assert data["target_detail_available"] is True
+    assert data["distance_m"] == 12.5
+
+
+@pytest.mark.unit
+def test_get_enrichment_review_detail_defaults_to_visitkorea_without_clean_detail(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import enrichment_review as router_mod
+
+    async def _get(_session: Any, _review_id: str) -> EnrichmentReviewDetail | None:
+        return _review_detail(target_detail={})
+
+    monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
+
+    response = client.get("/v1/admin/enrichment-reviews/review-1")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["target_detail_available"] is False
+    assert data["default_detail_source"] == "visitkorea"
+
+
+@pytest.mark.unit
+def test_get_enrichment_review_detail_missing_returns_404(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import enrichment_review as router_mod
+
+    async def _get(_session: Any, _review_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
+
+    response = client.get("/v1/admin/enrichment-reviews/missing")
+
+    assert response.status_code == 404
+    assert "enrichment review 없음" in response.json()["detail"]
+
+
+@pytest.mark.unit
 def test_patch_accepted_applies_and_uses_transaction(
     client: TestClient,
     session: _FakeSession,
@@ -160,6 +301,7 @@ def test_patch_accepted_applies_and_uses_transaction(
         assert review_id == "review-1"
         assert decision == "accepted"
         assert kwargs["reviewed_by"] == "local-admin"
+        assert kwargs["reason"] == "같은 축제; detail_source=visitkorea"
         return EnrichmentDecisionResult(
             review_id="review-1",
             decision="accepted",
@@ -180,6 +322,7 @@ def test_patch_accepted_applies_and_uses_transaction(
         json={
             "decision": "accepted",
             "decision_reason": "같은 축제",
+            "selected_detail_source": "visitkorea",
             "reviewed_by": "local-admin",
         },
     )

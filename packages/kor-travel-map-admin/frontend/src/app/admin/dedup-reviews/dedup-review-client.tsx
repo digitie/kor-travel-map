@@ -11,9 +11,11 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import {
   type DedupDecision,
   type DedupFeatureRecord,
+  type DedupReviewDetailResponse,
   type DedupReviewRecord,
   type DedupStatus,
   useDedupDecisionMutation,
+  useDedupReviewDetail,
   useDedupReviews,
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
@@ -24,6 +26,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<DedupStatus | "all"> = [
@@ -44,6 +47,7 @@ const DEDUP_KINDS = [
   "area",
 ] as const;
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const SCORE_FILTERS = [
   { value: "all", label: "score all" },
   { value: "high", label: "score >= 90", min: 90 },
@@ -85,6 +89,187 @@ function hasCoord(feature: DedupFeatureRecord): boolean {
   return typeof feature.lon === "number" && typeof feature.lat === "number";
 }
 
+type DedupReviewDetail = DedupReviewDetailResponse["data"];
+type DetailFeature = DedupReviewDetail["feature_a"];
+
+function formatMaybe(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  return JSON.stringify(value);
+}
+
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
+      {JSON.stringify(value ?? {}, null, 2)}
+    </pre>
+  );
+}
+
+function DetailMetric({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm">{formatMaybe(value)}</dd>
+    </div>
+  );
+}
+
+function FeatureDetailPanel({
+  accentClassName,
+  feature,
+  label,
+}: {
+  accentClassName: string;
+  feature: DetailFeature;
+  label: string;
+}) {
+  const primarySource = feature.sources.find((source) => source.is_primary_source);
+  return (
+    <section className="min-w-0 rounded-lg border bg-background p-4">
+      <div className="mb-3">
+        <div className={`text-xs font-medium ${accentClassName}`}>{label}</div>
+        <h3 className="break-words text-base font-semibold">{feature.name}</h3>
+        <div className="break-all font-mono text-xs text-muted-foreground">
+          {feature.feature_id}
+        </div>
+      </div>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <DetailMetric label="kind" value={feature.kind} />
+        <DetailMetric label="category" value={feature.category} />
+        <DetailMetric label="status" value={feature.status} />
+        <DetailMetric label="origin" value={feature.data_origin} />
+        <DetailMetric label="lon" value={feature.lon?.toFixed(6)} />
+        <DetailMetric label="lat" value={feature.lat?.toFixed(6)} />
+        <DetailMetric label="primary provider" value={primarySource?.provider} />
+        <DetailMetric label="primary entity" value={primarySource?.source_entity_id} />
+      </dl>
+      <div className="mt-4 space-y-3">
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">detail</div>
+          <JsonBlock value={feature.detail} />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">address</div>
+          <JsonBlock value={feature.address} />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">sources</div>
+          <JsonBlock value={feature.sources} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DedupDetailDialog({
+  detail,
+  error,
+  isLoading,
+  onClose,
+}: {
+  detail: DedupReviewDetail | undefined;
+  error: Error | null;
+  isLoading: boolean;
+  onClose: () => void;
+}) {
+  const featureA = detail?.feature_a;
+  const featureB = detail?.feature_b;
+  const hasMap =
+    typeof featureA?.lon === "number" &&
+    typeof featureA.lat === "number" &&
+    typeof featureB?.lon === "number" &&
+    typeof featureB.lat === "number";
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/45 p-4">
+      <div
+        aria-label="dedup review detail"
+        aria-modal="true"
+        className="w-full max-w-6xl rounded-lg border bg-background shadow-xl"
+        role="dialog"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h2 className="text-lg font-semibold">Dedup 상세 비교</h2>
+            <div className="text-sm text-muted-foreground">
+              {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
+            </div>
+          </div>
+          <Button size="sm" type="button" variant="ghost" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+        <div className="space-y-4 p-4">
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground">불러오는 중</div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertTitle>상세 조회 실패</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          ) : detail && featureA && featureB ? (
+            <>
+              <dl className="grid gap-3 rounded-lg border bg-muted/40 p-3 sm:grid-cols-5">
+                <DetailMetric label="total" value={formatScore(detail.total_score)} />
+                <DetailMetric label="name" value={formatScore(detail.name_score)} />
+                <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
+                <DetailMetric label="category" value={formatScore(detail.category_score)} />
+                <DetailMetric label="distance" value={formatDistance(detail.distance_m)} />
+              </dl>
+              {hasMap ? (
+                <section className="overflow-hidden rounded-lg border">
+                  <div className="border-b px-4 py-2 text-sm font-medium">
+                    위치 비교
+                  </div>
+                  <div className="relative h-80 min-h-72">
+                    <VWorldMapView
+                      apiKey={VWORLD_KEY}
+                      center={[
+                        ((featureA.lon ?? 0) + (featureB.lon ?? 0)) / 2,
+                        ((featureA.lat ?? 0) + (featureB.lat ?? 0)) / 2,
+                      ]}
+                      className="absolute inset-0 h-full w-full"
+                      key={detail.review_id}
+                      navigation
+                      scale
+                      testId="dedup-detail-map"
+                      zoom={14}
+                    >
+                      <VWorldMarker
+                        lngLat={[featureA.lon ?? 0, featureA.lat ?? 0]}
+                        markerColor="#2563eb"
+                        selected
+                        title={`Feature A: ${featureA.name}`}
+                      />
+                      <VWorldMarker
+                        lngLat={[featureB.lon ?? 0, featureB.lat ?? 0]}
+                        markerColor="#dc2626"
+                        title={`Feature B: ${featureB.name}`}
+                      />
+                    </VWorldMapView>
+                  </div>
+                </section>
+              ) : null}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <FeatureDetailPanel
+                  accentClassName="text-blue-700"
+                  feature={featureA}
+                  label="Feature A"
+                />
+                <FeatureDetailPanel
+                  accentClassName="text-red-700"
+                  feature={featureB}
+                  label="Feature B"
+                />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DedupReviewClient() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
@@ -96,6 +281,7 @@ export function DedupReviewClient() {
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [mergeKey, setMergeKey] = useState<string | null>(null);
+  const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pageIndex, setPageIndex] = useState(1);
   const deferredQ = useDeferredValue(q.trim());
@@ -131,6 +317,7 @@ export function DedupReviewClient() {
     ],
   );
   const reviews = useDedupReviews(reviewParams);
+  const detail = useDedupReviewDetail(detailReviewId);
   const decision = useDedupDecisionMutation();
   const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
   const items = reviews.data?.data.items ?? [];
@@ -146,6 +333,7 @@ export function DedupReviewClient() {
   const resetPage = () => {
     setPageIndex(1);
     setMergeKey(null);
+    setDetailReviewId(null);
     setRowSelection({});
   };
   const goFirst = () => resetPage();
@@ -153,6 +341,7 @@ export function DedupReviewClient() {
     if (totalPages !== null) {
       setPageIndex(totalPages);
       setMergeKey(null);
+      setDetailReviewId(null);
       setRowSelection({});
     }
   };
@@ -162,11 +351,13 @@ export function DedupReviewClient() {
       totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
     );
     setMergeKey(null);
+    setDetailReviewId(null);
     setRowSelection({});
   };
   const goPrev = () => {
     setPageIndex((current) => Math.max(1, current - 1));
     setMergeKey(null);
+    setDetailReviewId(null);
     setRowSelection({});
   };
 
@@ -314,20 +505,6 @@ export function DedupReviewClient() {
         ),
       },
       {
-        accessorKey: "status",
-        header: "status",
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
-      },
-      {
-        accessorKey: "created_at",
-        header: "created",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.created_at)}
-          </span>
-        ),
-      },
-      {
         id: "actions",
         header: "actions",
         enableSorting: false,
@@ -335,7 +512,10 @@ export function DedupReviewClient() {
           const item = row.original;
           return item.status === "pending" ? (
             mergeKey === item.review_id ? (
-              <div className="flex flex-col gap-1">
+              <div
+                className="flex flex-col gap-1"
+                onClick={(event) => event.stopPropagation()}
+              >
                 <span className="text-xs text-muted-foreground">
                   master 선택 (병합 시 나머지는 master로 흡수)
                 </span>
@@ -385,7 +565,10 @@ export function DedupReviewClient() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-1">
+              <div
+                className="flex flex-wrap gap-1"
+                onClick={(event) => event.stopPropagation()}
+              >
                 <Button
                   disabled={decision.isPending}
                   size="sm"
@@ -432,6 +615,20 @@ export function DedupReviewClient() {
           );
         },
       },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
     ],
     [decide, decision.isPending, merge, mergeKey],
   );
@@ -462,6 +659,15 @@ export function DedupReviewClient() {
             </AlertDescription>
           </Alert>
         )}
+
+        {detailReviewId ? (
+          <DedupDetailDialog
+            detail={detail.data?.data}
+            error={detail.error ?? null}
+            isLoading={detail.isLoading}
+            onClose={() => setDetailReviewId(null)}
+          />
+        ) : null}
 
         <section className="rounded-lg border bg-background p-4">
           <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,14rem)_minmax(10rem,14rem)_minmax(8rem,12rem)_auto_auto]">
@@ -575,6 +781,8 @@ export function DedupReviewClient() {
           emptyMessage="dedup review가 없습니다."
           manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
+          onRowClick={(row) => setDetailReviewId(row.review_id)}
+          isRowActive={(row) => row.review_id === detailReviewId}
           enableRowSelection={(row) => row.original.status === "pending"}
           rowSelection={rowSelection}
           onRowSelectionChange={setRowSelection}

@@ -6,8 +6,10 @@ import { useDeferredValue, useMemo, useState } from "react";
 
 import {
   type EnrichmentDecision,
+  type EnrichmentReviewDetailResponse,
   type EnrichmentStatus,
   useEnrichmentDecisionMutation,
+  useEnrichmentReviewDetail,
   useEnrichmentReviews,
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
@@ -80,6 +82,253 @@ function formatCount(value: number | null | undefined): string {
   return typeof value === "number" ? value.toLocaleString("ko-KR") : "-";
 }
 
+type EnrichmentReviewDetail = EnrichmentReviewDetailResponse["data"];
+type EnrichmentDetailSource = EnrichmentReviewDetail["default_detail_source"];
+
+function formatMaybe(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  return JSON.stringify(value);
+}
+
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
+      {JSON.stringify(value ?? {}, null, 2)}
+    </pre>
+  );
+}
+
+function DetailMetric({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="break-words text-sm">{formatMaybe(value)}</dd>
+    </div>
+  );
+}
+
+function EnrichmentDetailDialog({
+  detail,
+  error,
+  isLoading,
+  isPending,
+  onAccept,
+  onClose,
+  onSelectDetailSource,
+  selectedDetailSource,
+}: {
+  detail: EnrichmentReviewDetail | undefined;
+  error: Error | null;
+  isLoading: boolean;
+  isPending: boolean;
+  onAccept: () => void;
+  onClose: () => void;
+  onSelectDetailSource: (value: EnrichmentDetailSource) => void;
+  selectedDetailSource: EnrichmentDetailSource | null;
+}) {
+  const target = detail?.target;
+  const source = detail?.source;
+  const hasMap =
+    typeof target?.lon === "number" &&
+    typeof target.lat === "number" &&
+    typeof source?.raw_longitude === "number" &&
+    typeof source.raw_latitude === "number";
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/45 p-4">
+      <div
+        aria-label="enrichment review detail"
+        aria-modal="true"
+        className="w-full max-w-6xl rounded-lg border bg-background shadow-xl"
+        role="dialog"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h2 className="text-lg font-semibold">Enrichment 상세 비교</h2>
+            <div className="text-sm text-muted-foreground">
+              {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
+            </div>
+          </div>
+          <Button size="sm" type="button" variant="ghost" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+        <div className="space-y-4 p-4">
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground">불러오는 중</div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertTitle>상세 조회 실패</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          ) : detail && target && source ? (
+            <>
+              <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
+                <dl className="grid flex-1 gap-3 sm:grid-cols-4">
+                  <DetailMetric label="name" value={formatScore(detail.name_score)} />
+                  <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
+                  <DetailMetric label="distance" value={formatDistance(detail.distance_m)} />
+                  <DetailMetric
+                    label="default"
+                    value={detail.default_detail_source}
+                  />
+                </dl>
+                <div className="flex flex-wrap items-center gap-2">
+                  <NativeSelect
+                    aria-label="enrichment detail source"
+                    value={selectedDetailSource ?? detail.default_detail_source}
+                    onChange={(event) =>
+                      onSelectDetailSource(
+                        event.target.value as EnrichmentDetailSource,
+                      )
+                    }
+                  >
+                    <NativeSelectOption
+                      disabled={!detail.target_detail_available}
+                      value="target"
+                    >
+                      정리된 datagokr
+                    </NativeSelectOption>
+                    <NativeSelectOption value="visitkorea">
+                      visitkorea
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <Button
+                    disabled={detail.status !== "pending" || isPending}
+                    size="sm"
+                    type="button"
+                    variant="default"
+                    onClick={onAccept}
+                  >
+                    <CheckIcon data-icon="inline-start" />
+                    accept
+                  </Button>
+                </div>
+              </div>
+              {hasMap ? (
+                <section className="overflow-hidden rounded-lg border">
+                  <div className="border-b px-4 py-2 text-sm font-medium">
+                    위치 비교
+                  </div>
+                  <div className="relative h-80 min-h-72">
+                    <VWorldMapView
+                      apiKey={VWORLD_KEY}
+                      center={[
+                        ((target.lon ?? 0) + (source.raw_longitude ?? 0)) / 2,
+                        ((target.lat ?? 0) + (source.raw_latitude ?? 0)) / 2,
+                      ]}
+                      className="absolute inset-0 h-full w-full"
+                      key={detail.review_id}
+                      navigation
+                      scale
+                      testId="enrichment-detail-map"
+                      zoom={14}
+                    >
+                      <VWorldMarker
+                        lngLat={[target.lon ?? 0, target.lat ?? 0]}
+                        markerColor="#2563eb"
+                        selected
+                        title={`datagokr: ${target.name}`}
+                      />
+                      <VWorldMarker
+                        lngLat={[source.raw_longitude ?? 0, source.raw_latitude ?? 0]}
+                        markerColor="#dc2626"
+                        title={`visitkorea: ${source.raw_name ?? detail.source_name}`}
+                      />
+                    </VWorldMapView>
+                  </div>
+                </section>
+              ) : null}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <section className="min-w-0 rounded-lg border bg-background p-4">
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-blue-700">
+                      1차 datagokr
+                    </div>
+                    <h3 className="break-words text-base font-semibold">
+                      {target.name}
+                    </h3>
+                    <div className="break-all font-mono text-xs text-muted-foreground">
+                      {target.feature_id}
+                    </div>
+                  </div>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailMetric label="kind" value={target.kind} />
+                    <DetailMetric label="category" value={target.category} />
+                    <DetailMetric
+                      label="period"
+                      value={formatPeriod(
+                        detail.target_start_date,
+                        detail.target_end_date,
+                      )}
+                    />
+                    <DetailMetric label="status" value={target.status} />
+                    <DetailMetric label="lon" value={target.lon?.toFixed(6)} />
+                    <DetailMetric label="lat" value={target.lat?.toFixed(6)} />
+                  </dl>
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <div className="mb-1 text-xs font-medium text-muted-foreground">
+                        detail
+                      </div>
+                      <JsonBlock value={target.detail} />
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs font-medium text-muted-foreground">
+                        address
+                      </div>
+                      <JsonBlock value={target.address} />
+                    </div>
+                  </div>
+                </section>
+                <section className="min-w-0 rounded-lg border bg-background p-4">
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-red-700">
+                      2차 visitkorea
+                    </div>
+                    <h3 className="break-words text-base font-semibold">
+                      {source.raw_name ?? detail.source_name}
+                    </h3>
+                    <div className="break-all font-mono text-xs text-muted-foreground">
+                      {source.provider} · {source.source_entity_id}
+                    </div>
+                  </div>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <DetailMetric label="dataset" value={source.dataset_key} />
+                    <DetailMetric
+                      label="period"
+                      value={formatPeriod(
+                        detail.source_start_date,
+                        detail.source_end_date,
+                      )}
+                    />
+                    <DetailMetric
+                      label="lon"
+                      value={source.raw_longitude?.toFixed(6)}
+                    />
+                    <DetailMetric
+                      label="lat"
+                      value={source.raw_latitude?.toFixed(6)}
+                    />
+                    <DetailMetric label="address" value={source.raw_address} />
+                    <DetailMetric label="record" value={source.source_record_key} />
+                  </dl>
+                  <div className="mt-4">
+                    <div className="mb-1 text-xs font-medium text-muted-foreground">
+                      raw_data
+                    </div>
+                    <JsonBlock value={source.raw_data} />
+                  </div>
+                </section>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function EnrichmentReviewClient() {
   const [q, setQ] = useState("");
   const [provider, setProvider] = useState("");
@@ -89,6 +338,9 @@ export function EnrichmentReviewClient() {
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [pageIndex, setPageIndex] = useState(1);
   const [mapReviewId, setMapReviewId] = useState<string | null>(null);
+  const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
+  const [selectedDetailSource, setSelectedDetailSource] =
+    useState<EnrichmentDetailSource | null>(null);
   const deferredQ = useDeferredValue(q.trim());
   const deferredProvider = useDeferredValue(provider.trim());
   const bounds = scoreBounds(scoreFilter);
@@ -113,6 +365,7 @@ export function EnrichmentReviewClient() {
     ],
   );
   const reviews = useEnrichmentReviews(reviewParams);
+  const detail = useEnrichmentReviewDetail(detailReviewId);
   const decision = useEnrichmentDecisionMutation();
 
   const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
@@ -129,6 +382,8 @@ export function EnrichmentReviewClient() {
   const resetPage = () => {
     setPageIndex(1); // 필터 바뀌면 1페이지로.
     setMapReviewId(null);
+    setDetailReviewId(null);
+    setSelectedDetailSource(null);
   };
   const changeStatus = (value: EnrichmentStatus | "all") => {
     setStatus(value);
@@ -141,6 +396,8 @@ export function EnrichmentReviewClient() {
     if (totalPages !== null) {
       setPageIndex(totalPages);
       setMapReviewId(null);
+      setDetailReviewId(null);
+      setSelectedDetailSource(null);
     }
   };
   const goNext = () => {
@@ -149,21 +406,35 @@ export function EnrichmentReviewClient() {
       totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
     );
     setMapReviewId(null);
+    setDetailReviewId(null);
+    setSelectedDetailSource(null);
   };
   const goPrev = () => {
     setPageIndex((current) => Math.max(1, current - 1));
     setMapReviewId(null);
+    setDetailReviewId(null);
+    setSelectedDetailSource(null);
   };
 
-  const decide = (reviewId: string, value: EnrichmentDecision) => {
+  const decide = (
+    reviewId: string,
+    value: EnrichmentDecision,
+    detailSource?: EnrichmentDetailSource | null,
+  ) => {
     decision.mutate({
       reviewKey: reviewId,
       body: {
         decision: value,
         decision_reason: `admin-ui ${value}`,
+        selected_detail_source: detailSource ?? undefined,
         reviewed_by: "local-admin",
       },
     });
+  };
+
+  const openDetail = (reviewId: string) => {
+    setDetailReviewId(reviewId);
+    setSelectedDetailSource(null);
   };
 
   const mapReview = items.find((item) => item.review_id === mapReviewId) ?? null;
@@ -322,7 +593,10 @@ export function EnrichmentReviewClient() {
             typeof item.source_lon === "number" &&
             typeof item.source_lat === "number";
           return item.status === "pending" ? (
-            <div className="flex flex-wrap gap-1">
+            <div
+              className="flex flex-wrap gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
               <Button
                 disabled={!hasMapCoords}
                 size="sm"
@@ -364,7 +638,10 @@ export function EnrichmentReviewClient() {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-1">
+            <div
+              className="flex flex-wrap items-center gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
               <Button
                 disabled={!hasMapCoords}
                 size="sm"
@@ -411,6 +688,30 @@ export function EnrichmentReviewClient() {
             </AlertDescription>
           </Alert>
         )}
+
+        {detailReviewId ? (
+          <EnrichmentDetailDialog
+            detail={detail.data?.data}
+            error={detail.error ?? null}
+            isLoading={detail.isLoading}
+            isPending={decision.isPending}
+            selectedDetailSource={selectedDetailSource}
+            onAccept={() =>
+              decide(
+                detailReviewId,
+                "accepted",
+                selectedDetailSource ??
+                  detail.data?.data.default_detail_source ??
+                  "visitkorea",
+              )
+            }
+            onClose={() => {
+              setDetailReviewId(null);
+              setSelectedDetailSource(null);
+            }}
+            onSelectDetailSource={setSelectedDetailSource}
+          />
+        ) : null}
 
         <section className="rounded-lg border bg-background p-4">
           <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_minmax(12rem,16rem)_auto_auto]">
@@ -564,6 +865,8 @@ export function EnrichmentReviewClient() {
           isLoading={reviews.isLoading}
           emptyMessage="enrichment review가 없습니다."
           containerClassName="overflow-auto rounded-lg border bg-background"
+          onRowClick={(row) => openDetail(row.review_id)}
+          isRowActive={(row) => row.review_id === detailReviewId}
         />
 
         {renderPagination("bottom")}

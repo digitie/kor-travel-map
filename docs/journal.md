@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Review 상세 비교 다이얼로그 추가
+
+Dedup review와 Enrichment review에서 테이블 요약만으로 판단하기 어려운 후보를 행 클릭으로 상세 비교할
+수 있게 했다.
+
+- **API/저장소**: dedup/enrichment review 단건 상세 조회 API를 추가했다. 상세 응답은 양쪽 feature/source
+  상세 JSON, raw source payload, 좌표, 거리/score, 기간 정보를 함께 반환한다.
+- **Admin UI**: dedup/enrichment 테이블 행 클릭 시 상세 비교 다이얼로그를 열고, 두 자료의 핵심 필드와
+  raw/detail JSON, 하나의 VWorld 지도에 표시한 두 좌표를 함께 보여준다.
+- **Enrichment 선택**: 축제 enrichment 상세에서 관리자가 `정리된 datagokr` 또는 `visitkorea` 상세를
+  선택할 수 있게 했다. 정리된 target detail이 비어 있으면 VisitKorea를 기본값으로 선택하고, accept
+  요청에는 선택 source를 함께 기록한다.
+- **검증**: 전체 pytest 1367건, 전체 ruff, `mypy src/kortravelmap`, import-linter, OpenAPI drift check,
+  admin frontend type-check/lint/gen:types:check, mocked review Playwright e2e 23건 통과.
+
 ## 2026-06-28 (codex) — Feature update request queue 실행 복구
 
 Update requests 메뉴에서 provider 요청과 run-now 요청이 queue에만 쌓이고 실제 provider 적재가
