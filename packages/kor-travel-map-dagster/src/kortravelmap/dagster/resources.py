@@ -25,6 +25,7 @@ from kortravelmap.infra.file_store import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 
+from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
 from .provider_fetchers import (
@@ -65,6 +66,7 @@ __all__ = [
     "build_provider_record_guard_resource",
     "build_provider_record_live_resource",
     "create_s3_client_from_settings",
+    "datagokr_file_data_dataset_key_resource",
     "kma_datagokr_client_resource",
     "kma_weather_client_resource",
     "kor_travel_map_client_resource",
@@ -407,6 +409,39 @@ def build_provider_record_live_resource(
     return _resource
 
 
+_DATAGOKR_FILE_DATA_CONFIG_SCHEMA = {
+    "dataset_key": DagsterField(
+        str,
+        default_value="",
+        is_required=False,
+        description=(
+            "실행할 data.go.kr curated fileData dataset_key. 비어 있으면 "
+            "KorTravelMapSettings.datagokr_file_data_dataset_key를 사용한다."
+        ),
+    )
+}
+
+
+def _datagokr_file_data_dataset_key(
+    context: InitResourceContext, settings: KorTravelMapSettings
+) -> str:
+    configured = context.resource_config.get("dataset_key")
+    return str(configured or settings.datagokr_file_data_dataset_key)
+
+
+@resource(
+    config_schema=_DATAGOKR_FILE_DATA_CONFIG_SCHEMA,
+    description=(
+        "data.go.kr curated fileData dataset_key 값. Schedule run_config가 있으면 "
+        "그 값을 우선하고, 없으면 KorTravelMapSettings 기본값을 쓴다."
+    ),
+)
+def datagokr_file_data_dataset_key_resource(
+    context: InitResourceContext,
+) -> str:
+    return _datagokr_file_data_dataset_key(context, KorTravelMapSettings())
+
+
 PROVIDER_RECORD_RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
     spec.resource_key: build_provider_record_guard_resource(spec)
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -665,14 +700,41 @@ _DATAGOKR_FILE_DATA_SPEC: ProviderRecordResourceSpec = next(
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
     if spec.resource_key == "datagokr_file_data_records"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_file_data_records"] = (
-    build_provider_record_live_resource(
-        _DATAGOKR_FILE_DATA_SPEC,
-        lambda settings: fetch_datagokr_file_data_records(
-            settings,
-            dataset_key=settings.datagokr_file_data_dataset_key,
-        ),
+
+
+@resource(
+    config_schema=_DATAGOKR_FILE_DATA_CONFIG_SCHEMA,
+    description=(
+        "datagokr_file_data_records provider record live fetcher "
+        "(python-datagokr-api, datagokr_file_data)."
+    ),
+)
+def _datagokr_file_data_records_resource(
+    context: InitResourceContext,
+) -> Iterable[Any] | AsyncIterator[Any]:
+    settings = KorTravelMapSettings()
+    has_required_settings = all(
+        getattr(settings, setting_name) is not None
+        for setting_name in _DATAGOKR_FILE_DATA_SPEC.setting_names
     )
+    if not has_required_settings:
+        raise RuntimeError(
+            _provider_guard_message(
+                _DATAGOKR_FILE_DATA_SPEC,
+                has_required_settings=False,
+            )
+        )
+    records = fetch_datagokr_file_data_records(
+        settings,
+        dataset_key=_datagokr_file_data_dataset_key(context, settings),
+    )
+    if isinstance(records, Iterator):
+        return _ProviderRecordIterable(records)
+    return records
+
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_file_data_records"] = (
+    _datagokr_file_data_records_resource
 )
 
 _KHOA_BEACHES_SPEC: ProviderRecordResourceSpec = next(

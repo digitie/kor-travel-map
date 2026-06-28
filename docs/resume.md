@@ -1,14 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #568 data.go.kr curated fileData 4종 schedule 보강
+
+- **진행 중**: data.go.kr curated fileData 4개 dataset마다 별도 Dagster monthly schedule을 만들고,
+  각 schedule이 `datagokr_file_data_records`와 `datagokr_file_data_dataset_key` resource에 같은
+  dataset_key를 주입하도록 했다.
+- **진행 중**: fileData resource는 schedule `run_config` dataset_key를 우선하고, config가 없으면 기존
+  `KorTravelMapSettings.datagokr_file_data_dataset_key` 기본값을 유지한다.
+- **검증**: Dagster definitions/resource 테스트 22건, feature-update runner 테스트 7건, Dagster package
+  mypy를 통과했다.
+- **다음 한 작업**: ruff/대상 pytest 최종 확인, 보안 감사 후 PR을 올려 CI green 뒤 merge하고 #568을 닫는다.
+
 ## 2026-06-29 (codex) — #567 Enrichment detail source audit-only 계약 명시
 
-- **진행 중**: enrichment 상세 비교 다이얼로그의 `정리된 datagokr`/`visitkorea` 선택이 적용 데이터를
+- **완료**: enrichment 상세 비교 다이얼로그의 `정리된 datagokr`/`visitkorea` 선택이 적용 데이터를
   바꾸는 것처럼 보이지 않도록 UI 문구를 기록용으로 낮추고, detail/decision API 응답에
   `detail_source_effect: "audit_only"`를 추가했다.
-- **진행 중**: `PATCH /v1/admin/enrichment-reviews/{review_id}` 응답은 요청의
+- **완료**: `PATCH /v1/admin/enrichment-reviews/{review_id}` 응답은 요청의
   `selected_detail_source`를 함께 반환해 선택값이 decision reason audit marker로 기록됐는지 확인할 수 있다.
-- **다음 한 작업**: OpenAPI/frontend 타입을 재생성하고 API/frontend 타입·대상 테스트를 통과시킨 뒤 PR을
-  올려 CI green 후 merge하고 #567을 닫는다.
+- **완료(PR)**: PR #578을 squash merge했고 #567은 닫혔다.
 
 ## 2026-06-29 (codex) — #566 Dedup review count 성능 보강
 

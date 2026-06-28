@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
+
+from kortravelmap.providers.datagokr_file_data import (
+    DATAGOKR_FILEDATA_DATASETS,
+    DATAGOKR_FILEDATA_PROVIDER_NAME,
+)
 
 from dagster import AssetsDefinition, DefaultScheduleStatus, ScheduleDefinition, define_asset_job
 
@@ -64,6 +70,51 @@ class FeatureLoadScheduleSpec:
     provider: str
     dataset_key: str
     description: str
+    run_config: Mapping[str, Any] | None = None
+
+
+_DATAGOKR_FILEDATA_MONTHLY_CRONS: Final[tuple[str, ...]] = (
+    "52 4 4 * *",
+    "53 4 4 * *",
+    "54 4 4 * *",
+    "56 4 4 * *",
+)
+"""curated fileData 4개 dataset을 매월 4일 새벽에 순차 적재한다."""
+
+
+def _datagokr_file_data_run_config(dataset_key: str) -> dict[str, Any]:
+    return {
+        "resources": {
+            "datagokr_file_data_dataset_key": {
+                "config": {"dataset_key": dataset_key},
+            },
+            "datagokr_file_data_records": {
+                "config": {"dataset_key": dataset_key},
+            },
+        }
+    }
+
+
+def _datagokr_file_data_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
+    return tuple(
+        FeatureLoadScheduleSpec(
+            asset=feature_place_datagokr_file_data,
+            job_name=f"feature_place_{dataset_key}_job",
+            schedule_name=f"feature_place_{dataset_key}_monthly_schedule",
+            cron_schedule=cron_schedule,
+            provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            description=(
+                f"data.go.kr curated fileData {dataset.label} place Feature 월 1회 적재."
+            ),
+            run_config=_datagokr_file_data_run_config(dataset_key),
+        )
+        for cron_schedule, (dataset_key, dataset) in zip(
+            _DATAGOKR_FILEDATA_MONTHLY_CRONS,
+            DATAGOKR_FILEDATA_DATASETS.items(),
+            strict=True,
+        )
+    )
 
 
 FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
@@ -233,15 +284,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         dataset_key="standard_special_streets",
         description="전국지역특화거리표준데이터 place anchor Feature 월 1회 적재.",
     ),
-    FeatureLoadScheduleSpec(
-        asset=feature_place_datagokr_file_data,
-        job_name="feature_place_datagokr_file_data_job",
-        schedule_name="feature_place_datagokr_file_data_monthly_schedule",
-        cron_schedule="52 4 4 * *",
-        provider="python-datagokr-api",
-        dataset_key="datagokr_file_data",
-        description="data.go.kr curated fileData place Feature 월 1회 적재.",
-    ),
+    *_datagokr_file_data_schedule_specs(),
     FeatureLoadScheduleSpec(
         asset=feature_place_khoa_beaches,
         job_name="feature_place_khoa_beaches_job",
@@ -373,6 +416,7 @@ FEATURE_LOAD_SCHEDULES: Final = [
         cron_schedule=spec.cron_schedule,
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
+        run_config=spec.run_config,
         tags={
             **SYSTEM_SCHEDULE_TAGS,
             "kor_travel_map.provider": spec.provider,

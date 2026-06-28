@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### data.go.kr curated fileData 월간 schedule 보강 (2026-06-29)
+
+- **FIXED**: `DATAGOKR_FILEDATA_DATASETS` 4종 중 기본 dataset 1개만 월간 schedule로 적재되던
+  문제를 수정했다. 이제 dataset별 schedule 4개가 같은 `feature_place_datagokr_file_data` asset에
+  각 dataset_key resource config를 주입해 모두 월 1회 실행한다.
+- **CHANGED**: `datagokr_file_data_records`와 `datagokr_file_data_dataset_key` Dagster resource는
+  schedule `run_config`의 `dataset_key`를 우선 사용하고, config가 없을 때만 settings 기본값을 쓴다.
+
 ### Enrichment detail source audit 계약 명시 (2026-06-29)
 
 - **FIXED**: enrichment 상세 비교 다이얼로그의 `정리된 datagokr`/`visitkorea` 선택이 실제
