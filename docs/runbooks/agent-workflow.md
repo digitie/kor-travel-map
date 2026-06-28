@@ -4,9 +4,9 @@
 한 PR = CI green 후 머지. 에이전트별로 다른 값(worktree, `sandbox/<agent>`)은
 [README §2 표](./README.md#2-에이전트별-분기-공유-표)를 본다.
 
-> 요지: **NTFS worktree를 source of truth로 두고, 순수 Git을 제외한 작업은 WSL에서
-> `/mnt/f/...` 경로로 실행한 뒤 PR로 머지한다.** Playwright e2e만 Windows 호스트
-> 브라우저에서 실행한다.
+> 요지: **Git/codegraph를 포함한 모든 개발 명령은 Linux/WSL에서
+> `/mnt/f/...` 경로로 실행한 뒤 PR로 머지한다.** Playwright e2e는 n150 Linux에서
+> 우선 실행하고, n150에서 불가할 때만 Windows 호스트 브라우저로 fallback한다.
 
 ## 1. 진입 (5분)
 
@@ -29,10 +29,10 @@ git -C <worktree> switch -c feat/<topic> main      # 또는 origin/main
   `docs/*`·`chore/*` 브랜치. (실수로 `sandbox/<agent>`에 커밋했으면
   [failure-patterns §B1](./agent-failure-patterns.md) 복구법.)
 
-## 3. 편집 (NTFS worktree, WSL 실행)
+## 3. 편집 (Linux/WSL 실행)
 
-- 코드/문서는 **NTFS worktree**가 원본이다. 다만 `rg`/`sed`/`python`/`uv`/`npm`/
-  `docker`/`gh` 같은 순수 Git 외 명령은 WSL에서
+- 코드/문서는 agent별 worktree에서 수정한다. `git`/`gh`/`codegraph`/`rg`/`sed`/
+  `python`/`uv`/`npm`/`docker` 등 모든 개발 명령은 WSL에서
   `/mnt/f/dev/kor-travel-map-<agent>`로 이동해 실행한다. provider 라이브러리
   (`python-*-api`)는 `/mnt/f/dev/` 로컬 우선 조회(ADR-044) — GitHub 404는
   "미존재" 근거 아님.
@@ -57,8 +57,9 @@ cd /mnt/f/dev/kor-travel-map-<agent>
   `python packages/kor-travel-map-api/scripts/export_openapi.py --profile all`
   로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
   재생성본을 NTFS로 복사해 커밋.
-- **Playwright e2e**는 하이브리드: 서버(backend `:12701` + frontend `:12705`)는 WSL,
-  Playwright(chromium)는 **Windows 호스트**에서. `docs/dev-environment.md` §8.1.
+- **Playwright e2e**는 n150 Linux에서 우선 실행한다. n150에서 실행할 수 없을 때만
+  Windows host Chromium fallback을 사용한다. fallback 때도 서버(backend `:12701` +
+  frontend `:12705`)는 WSL에서 실행한다. `docs/dev-environment.md` §8.1.
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).
 
@@ -75,10 +76,9 @@ gh pr create --base main --head feat/<topic> --title ... --body ...
   4 kept / M passed`)를 적되, **반드시 실행해서 본 수치만**. 안 돌린 결과를 적지
   않는다([failure-patterns §A2](./agent-failure-patterns.md)).
 - 커밋 trailer: `Co-Authored-By:` 한 줄. PR 본문 끝: `🤖 Generated with ...`.
-- Windows Git을 WSL 비대화 세션에서 쓸 때 `rebase --continue`/`merge --continue`는
-  Vim이 열려 멈출 수 있다. 항상 명령 단위 editor 우회 옵션을 붙인다:
-  `git.exe -C <worktree> -c core.editor=true rebase --continue`
-  ([failure-patterns §B4](./agent-failure-patterns.md)).
+- `git`도 Linux/WSL에서 실행한다. 기존 worktree가 Windows 경로 기반 `.git` 포인터 때문에
+  WSL `git`에서 인식되지 않으면 [failure-patterns §B4](./agent-failure-patterns.md)대로
+  worktree metadata를 Linux 경로로 고친다.
 
 ## 6. CI green → 머지
 

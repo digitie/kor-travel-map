@@ -9,11 +9,13 @@ const artifactRoot =
 /**
  * Playwright e2e — kor-travel-map debug UI frontend (#117).
  *
- * 실행 모델 (사용자 지시): **debug UI는 WSL에서 기동, Playwright는 Windows에서 실행**.
+ * 실행 모델: **debug UI는 Linux/WSL에서 기동, Playwright는 n150 Linux에서 우선 실행**.
  *   - WSL: backend `uvicorn kortravelmap.api.app:app --port 12701`
  *           + frontend `npm run dev` (next dev :12705).
- *   - Windows: `npm run e2e` (본 config). 브라우저(Windows)의 localhost는 WSL2
- *           localhost-forwarding으로 WSL :12705/:12701에 도달한다.
+ *   - n150 Linux: `npm run e2e` (본 config).
+ *   - Windows fallback: n150에서 실행할 수 없을 때만 `npm run e2e`를 실행한다.
+ *           브라우저(Windows)의 localhost는 WSL2 localhost-forwarding으로
+ *           WSL :12705/:12701에 도달한다.
  *
  * 서버는 외부(WSL)에서 떠 있다고 가정하므로 `webServer`를 두지 않는다.
  * baseURL은 `E2E_BASE_URL` env로 override 가능 (기본 http://127.0.0.1:12705 —

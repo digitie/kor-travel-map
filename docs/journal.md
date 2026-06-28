@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Linux/WSL 개발 실행 정책 정리
+
+개발 실행 위치 정책을 Windows Git 예외 기반에서 Linux/WSL 단일 실행 원칙으로 정리했다.
+
+- **환경 정본**: `AGENTS.md`, `SKILL.md`, `README.md`, `docs/dev-environment.md`에서
+  `git`/`gh`/`codegraph`를 포함한 모든 개발 명령을 Linux/WSL에서 실행하도록 수정했다.
+- **Runbook**: agent workflow, codegraph worktree, failure patterns, runbook index의 Windows Git
+  전제를 제거하고, Windows 경로 기반 worktree metadata 복구 절차를 추가했다.
+- **Playwright**: debug UI e2e는 n150 Linux 환경 우선, n150에서 불가할 때만 Windows browser
+  fallback으로 실행하도록 frontend README와 Playwright config 주석까지 문서화했다.
+- **검증**: 문서 변경만 수행했으며 `git diff --check`를 실행했다.
+
 ## 2026-06-28 (codex) — Review 상세 비교 다이얼로그 추가
 
 Dedup review와 Enrichment review에서 테이블 요약만으로 판단하기 어려운 후보를 행 클릭으로 상세 비교할

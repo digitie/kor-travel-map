@@ -62,9 +62,9 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 
 ## 개발
 
-Frontend 개발 서버는 **WSL에서 실행**한다. Windows에서 직접 `npm run dev` /
-`npm run start`를 돌리지 않는다. Windows는 e2e 검증 시 Playwright Chromium 실행
-용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program Files/nodejs/...`를
+Frontend 개발 서버는 **Linux/WSL에서 실행**한다. Windows에서 직접 `npm run dev` /
+`npm run start`를 돌리지 않는다. Windows는 n150에서 Playwright e2e를 실행할 수 없을 때의
+fallback 용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program Files/nodejs/...`를
 가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
 
 ```bash
@@ -150,31 +150,31 @@ npm run doctor
 
 ## e2e (Playwright)
 
-> ⚠️ **Playwright e2e는 Windows 호스트에서 실행한다 (WSL 아님).**
-> 실행 모델: debug UI 서버(backend `uvicorn … :12701` + frontend
-> `next start :12705`)는 **WSL ext4**에서 띄우고, **Playwright
-> (`npx playwright test`)는 Windows에서** 돌린다. WSL2
+> **Playwright e2e는 n150 Linux 환경에서 우선 실행한다.**
+> debug UI 서버(backend `uvicorn … :12701` + frontend `next start :12705`)는
+> Linux/WSL에서 띄우고, n150에서 브라우저 실행·접속·권한 문제로 검증할 수 없을 때만
+> Windows host browser를 fallback으로 사용한다. Windows fallback에서는 WSL2
 > `localhostForwarding=true` 덕분에 Windows의 `http://127.0.0.1:12705`(frontend)
-> / `:12701`(backend) 요청이 WSL 서버에 그대로 도달한다.
->
-> **이유**: WSL Ubuntu에는 Playwright chromium 구동에 필요한 system lib
-> (`libasound.so.2` 등)가 없고, `sudo`가 비밀번호를 요구해 WSL 안에서의
-> `playwright install-deps` 자동 설치가 불가하다. Windows에는 node + chromium이
-> 이미 갖춰져 있어 **e2e는 Windows에서 수행하는 것을 표준**으로 한다.
-> (`playwright.config.ts`는 `webServer`를 두지 않아 서버가 외부(WSL)에 떠 있다고
-> 가정한다.)
+> / `:12701`(backend) 요청이 WSL 서버에 도달한다.
+> (`playwright.config.ts`는 `webServer`를 두지 않아 서버가 외부에 떠 있다고 가정한다.)
 
-```powershell
+```bash
 # 1) WSL 셸에서 서버 2개 기동 (frontend도 WSL에서 실행)
 #    backend : .venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12701
 #    frontend: npm run start   # next start :12705
 
-# 2) Windows(PowerShell)에서는 Playwright만 실행
-cd packages\kor-travel-map-admin\frontend
+# 2) n150 Linux에서 Playwright 실행
+cd packages/kor-travel-map-admin/frontend
 npm install              # 최초 1회 (workspace deps)
 npm run e2e:install      # chromium 설치 (최초 1회)
 npm run e2e              # playwright test (servers는 WSL에 떠 있어야 함)
 npm run e2e:ui           # --ui 모드
+```
+
+```powershell
+# n150에서 실행할 수 없을 때만 Windows fallback
+cd packages\kor-travel-map-admin\frontend
+npm run e2e
 ```
 
 baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:12705`).

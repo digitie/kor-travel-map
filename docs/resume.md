@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Linux/WSL 개발 실행 정책
+
+- **완료(환경 정책)**: `git`/`gh`/`codegraph`를 포함한 모든 개발 명령을 Linux/WSL에서 실행하도록
+  `AGENTS.md`, `SKILL.md`, `README.md`, `docs/dev-environment.md`를 정리했다.
+- **완료(runbook)**: agent workflow, codegraph worktree, failure patterns, runbook index의 Windows Git
+  전제를 제거하고, Windows 경로 기반 worktree metadata 복구 절차를 추가했다.
+- **완료(e2e 정책)**: Playwright e2e는 n150 Linux 우선, n150에서 불가할 때만 Windows browser
+  fallback으로 실행하도록 frontend README와 Playwright config 주석까지 문서화했다.
+- **검증(로컬)**: 문서 변경만 수행했으며 `git diff --check`를 실행했다.
+- **다음 한 작업**: PR 생성, CI green 확인 후 머지한다.
+
 ## 2026-06-28 (codex) — Review 상세 비교 다이얼로그
 
 - **완료(API)**: `/admin/dedup-reviews/{review_id}`와 `/admin/enrichment-reviews/{review_id}` 상세

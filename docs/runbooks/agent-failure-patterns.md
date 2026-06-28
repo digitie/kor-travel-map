@@ -72,29 +72,24 @@
 - **회피**: `git add`에 **관련 파일만 명시**(`git add -A` 지양). 커밋 전 `git status -sb`
   확인.
 
-### B4 — Windows Git rebase/merge continue가 Vim을 열고 멈춤
+### B4 — WSL `git`이 worktree를 repo로 인식하지 못함
 
-- **증상**: WSL 비대화 세션에서 `git.exe ... rebase --continue` 또는
-  `merge --continue` 실행 후 `Vim: Warning: Output is not to a terminal` 메시지가
-  나오고 프로세스가 대기한다.
-- **원인**: Windows Git의 editor 설정이 비대화 환경에서도 실행된다. 단순
-  `GIT_EDITOR=true git.exe ...`는 Windows Git/셸 경계에서 기대대로 적용되지 않을 수
-  있다.
-- **회피**: continue류 명령은 처음부터 editor를 명령 단위로 우회한다.
+- **증상**: WSL에서 `git status` 실행 시 `.git/worktrees/...` 경로를 찾지 못하거나
+  `fatal: not a git repository`가 나온다. 메시지에 `F:/dev/...` 같은 Windows 경로가
+  섞여 있을 수 있다.
+- **원인**: 과거 Windows Git 기준으로 만든 worktree의 `.git` 파일 또는
+  `.git/worktrees/<name>/gitdir`가 Windows 경로를 가리킨다. 2026-06-28 이후 원칙은
+  Linux/WSL `git` 실행이므로 이 포인터도 `/mnt/f/...` 경로여야 한다.
+- **복구**: 추적 파일이 아니라 worktree metadata만 수정한다.
   ```
-  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true rebase --continue
-  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true merge --continue
+  sed -n '1p' .git
+  sed -n '1p' /mnt/f/dev/kor-travel-map/.git/worktrees/<worktree-name>/gitdir
   ```
-- **복구**: 이미 멈췄으면 해당 `git.exe ... rebase --continue` 프로세스를 종료한 뒤
-  위 명령으로 재실행한다.
-  ```
-  ps -ef | rg "git.exe .*rebase --continue|git.exe .*merge --continue"
-  kill <pid>
-  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true rebase --continue
-  ```
-- **원칙**: AI agent는 rebase/merge continue에서 항상 `-c core.editor=true`를 붙인다.
-  커밋 메시지를 바꿀 필요가 없으면 `commit --amend --no-edit`,
-  `merge --no-edit`처럼 non-interactive 옵션을 우선한다.
+  `.git`은 `gitdir: /mnt/f/dev/kor-travel-map/.git/worktrees/<worktree-name>`,
+  `gitdir` 파일은 `/mnt/f/dev/kor-travel-map-<agent>/.git` 형태로 고친 뒤
+  `git status --short --branch`를 다시 확인한다.
+- **원칙**: Windows `git.exe`로 우회하지 않는다. rebase/merge/commit/push도 WSL
+  `git`으로 실행한다.
 
 ## C. 도메인 계약 (자연키 / 스키마 / upstream)
 
@@ -312,13 +307,14 @@
 
 ### F9 — Playwright 실행 위치 혼동
 
-- **증상**: WSL에서 `npm run e2e`를 돌리려 하거나, Windows에서 frontend 서버까지
-  띄우려 한다.
-- **정본**: 서버 2개는 WSL, Playwright Chromium만 Windows.
+- **증상**: Windows에서 frontend 서버까지 띄우거나, n150 검증 가능 여부를 확인하지 않고
+  바로 Windows Playwright를 실행한다.
+- **정본**: Playwright Chromium은 n150 Linux에서 우선 실행한다. n150에서 실행할 수 없을 때만
+  Windows fallback을 쓴다.
   - WSL: backend `:12701`, frontend `:12705`.
-  - Windows PowerShell: `cd packages\kor-travel-map-admin\frontend; npm run e2e`.
-  `playwright.config.ts`에는 `webServer`가 없으므로, Windows e2e 전 WSL 서버가 이미
-  떠 있어야 한다.
+  - n150 Linux: `cd packages/kor-travel-map-admin/frontend && npm run e2e`.
+  - Windows fallback: `cd packages\kor-travel-map-admin\frontend; npm run e2e`.
+  `playwright.config.ts`에는 `webServer`가 없으므로, fallback 전 WSL 서버가 이미 떠 있어야 한다.
 
 ### F10 — Windows stale Node가 `:12705`을 점유해 Playwright가 다른 서버를 봄
 
