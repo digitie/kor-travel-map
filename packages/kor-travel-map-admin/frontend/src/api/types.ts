@@ -343,7 +343,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Review Detail */
+        get: operations["get_review_detail_v1_admin_dedup_reviews__review_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -377,7 +378,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Review Detail */
+        get: operations["get_review_detail_v1_admin_enrichment_reviews__review_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4071,6 +4073,47 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * DedupReviewDetailData
+         * @description Dedup review 상세 비교 data.
+         */
+        DedupReviewDetailData: {
+            /** Category Score */
+            category_score: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decision Reason */
+            decision_reason?: string | null;
+            /** Distance M */
+            distance_m?: number | null;
+            feature_a: components["schemas"]["ReviewFeatureDetailRecord"];
+            feature_b: components["schemas"]["ReviewFeatureDetailRecord"];
+            /** Name Score */
+            name_score: number;
+            /** Review Id */
+            review_id: string;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /** Spatial Score */
+            spatial_score: number;
+            /** Status */
+            status: string;
+            /** Total Score */
+            total_score: number;
+        };
+        /**
+         * DedupReviewDetailResponse
+         * @description ``GET /admin/dedup-reviews/{review_id}`` response.
+         */
+        DedupReviewDetailResponse: {
+            data: components["schemas"]["DedupReviewDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * DedupReviewListData
          * @description Dedup review list data.
          */
@@ -4154,6 +4197,8 @@ export interface components {
             decision_reason?: string | null;
             /** Reviewed By */
             reviewed_by?: string | null;
+            /** Selected Detail Source */
+            selected_detail_source?: ("target" | "visitkorea") | null;
         };
         /**
          * EnrichmentReviewDecisionResponse
@@ -4161,6 +4206,70 @@ export interface components {
          */
         EnrichmentReviewDecisionResponse: {
             data: components["schemas"]["EnrichmentReviewDecisionData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * EnrichmentReviewDetailData
+         * @description Enrichment review 상세 비교 data.
+         */
+        EnrichmentReviewDetailData: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decision Reason */
+            decision_reason?: string | null;
+            /**
+             * Default Detail Source
+             * @enum {string}
+             */
+            default_detail_source: "target" | "visitkorea";
+            /** Distance M */
+            distance_m?: number | null;
+            /** Name Score */
+            name_score: number;
+            /** Review Id */
+            review_id: string;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            source: components["schemas"]["ReviewSourceDetailRecord"];
+            /** Source Dataset Key */
+            source_dataset_key: string;
+            /** Source End Date */
+            source_end_date?: string | null;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Provider */
+            source_provider: string;
+            /** Source Start Date */
+            source_start_date?: string | null;
+            /** Spatial Score */
+            spatial_score?: number | null;
+            /** Status */
+            status: string;
+            target: components["schemas"]["ReviewFeatureDetailRecord"];
+            /** Target Detail Available */
+            target_detail_available: boolean;
+            /** Target End Date */
+            target_end_date?: string | null;
+            /** Target Feature Id */
+            target_feature_id: string;
+            /** Target Name */
+            target_name: string;
+            /** Target Start Date */
+            target_start_date?: string | null;
+        };
+        /**
+         * EnrichmentReviewDetailResponse
+         * @description ``GET /admin/enrichment-reviews/{review_id}`` response.
+         */
+        EnrichmentReviewDetailResponse: {
+            data: components["schemas"]["EnrichmentReviewDetailData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -6506,6 +6615,110 @@ export interface components {
             /** Rustfs Volume */
             rustfs_volume: string;
         };
+        /**
+         * ReviewFeatureDetailRecord
+         * @description Review 상세 feature snapshot.
+         */
+        ReviewFeatureDetailRecord: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Category */
+            category: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Data Origin */
+            data_origin: string;
+            /** Data Version */
+            data_version: number;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Feature Id */
+            feature_id: string;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat?: number | null;
+            /** Lon */
+            lon?: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name: string;
+            /** Raw Refs */
+            raw_refs: {
+                [key: string]: unknown;
+            }[];
+            /** Sources */
+            sources: components["schemas"]["ReviewSourceDetailRecord"][];
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Urls */
+            urls: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ReviewSourceDetailRecord
+         * @description Review 상세 source record/link snapshot.
+         */
+        ReviewSourceDetailRecord: {
+            /** Confidence */
+            confidence?: number | null;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Imported At */
+            imported_at?: string | null;
+            /** Is Primary Source */
+            is_primary_source?: boolean | null;
+            /** Linked At */
+            linked_at?: string | null;
+            /** Match Method */
+            match_method?: string | null;
+            /** Provider */
+            provider: string;
+            /** Raw Address */
+            raw_address?: string | null;
+            /** Raw Data */
+            raw_data: {
+                [key: string]: unknown;
+            };
+            /** Raw Latitude */
+            raw_latitude?: number | null;
+            /** Raw Longitude */
+            raw_longitude?: number | null;
+            /** Raw Name */
+            raw_name?: string | null;
+            /** Raw Payload Hash */
+            raw_payload_hash: string;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Entity Type */
+            source_entity_type: string;
+            /** Source Record Key */
+            source_record_key: string;
+            /** Source Role */
+            source_role?: string | null;
+            /** Source Version */
+            source_version?: string | null;
+        };
         /** RuleApplyData */
         RuleApplyData: {
             /** Inserted Or Updated */
@@ -7831,6 +8044,55 @@ export interface operations {
             };
         };
     };
+    get_review_detail_v1_admin_dedup_reviews__review_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedupReviewDetailResponse"];
+                };
+            };
+            /** @description review_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     decide_review_v1_admin_dedup_reviews__review_id__patch: {
         parameters: {
             query?: never;
@@ -7919,6 +8181,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrichmentReviewListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_review_detail_v1_admin_enrichment_reviews__review_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentReviewDetailResponse"];
+                };
+            };
+            /** @description review_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */

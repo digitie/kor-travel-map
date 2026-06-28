@@ -14,8 +14,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.infra.admin_feature_repo import (
+    EnrichmentReviewDetail,
     EnrichmentReviewPage,
     EnrichmentReviewRow,
+    ReviewFeatureDetail,
+    ReviewSourceDetail,
+    get_enrichment_review_detail,
     list_enrichment_reviews,
 )
 from kortravelmap.infra.enrichment_review_repo import decide_enrichment_review
@@ -24,11 +28,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.routers.dedup_review import (
+    ReviewFeatureDetailRecord,
+    ReviewSourceDetailRecord,
+)
 
 __all__ = [
     "router",
     "EnrichmentReviewRecord",
     "EnrichmentReviewListResponse",
+    "EnrichmentReviewDetailResponse",
     "EnrichmentReviewDecisionRequest",
     "EnrichmentReviewDecisionResponse",
 ]
@@ -38,6 +47,7 @@ router = APIRouter(prefix="/admin/enrichment-reviews", tags=["admin-enrichment"]
 
 EnrichmentStatus = Literal["pending", "accepted", "rejected", "ignored"]
 EnrichmentDecision = Literal["accepted", "rejected", "ignored"]
+EnrichmentDetailSource = Literal["target", "visitkorea"]
 
 
 class EnrichmentReviewRecord(BaseModel):
@@ -89,6 +99,45 @@ class EnrichmentReviewListResponse(BaseModel):
     meta: Meta
 
 
+class EnrichmentReviewDetailData(BaseModel):
+    """Enrichment review 상세 비교 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_id: str
+    status: str
+    name_score: float
+    target_feature_id: str
+    target_name: str
+    source_provider: str
+    source_dataset_key: str
+    source_entity_id: str
+    source_name: str
+    target_start_date: str | None = None
+    target_end_date: str | None = None
+    source_start_date: str | None = None
+    source_end_date: str | None = None
+    distance_m: float | None = None
+    spatial_score: float | None = None
+    decision_reason: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    target: ReviewFeatureDetailRecord
+    source: ReviewSourceDetailRecord
+    target_detail_available: bool
+    default_detail_source: EnrichmentDetailSource
+
+
+class EnrichmentReviewDetailResponse(BaseModel):
+    """``GET /admin/enrichment-reviews/{review_id}`` response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: EnrichmentReviewDetailData
+    meta: Meta
+
+
 class EnrichmentReviewDecisionRequest(BaseModel):
     """``PATCH /admin/enrichment-reviews/{review_id}`` body."""
 
@@ -96,6 +145,7 @@ class EnrichmentReviewDecisionRequest(BaseModel):
 
     decision: EnrichmentDecision
     decision_reason: str | None = Field(default=None, min_length=1)
+    selected_detail_source: EnrichmentDetailSource | None = None
     reviewed_by: str | None = None
 
 
@@ -151,6 +201,70 @@ def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
     )
 
 
+def _source_detail(row: ReviewSourceDetail) -> ReviewSourceDetailRecord:
+    return ReviewSourceDetailRecord.model_validate(row, from_attributes=True)
+
+
+def _feature_detail(row: ReviewFeatureDetail) -> ReviewFeatureDetailRecord:
+    return ReviewFeatureDetailRecord(
+        feature_id=row.feature_id,
+        kind=row.kind,
+        name=row.name,
+        category=row.category,
+        status=row.status,
+        lon=row.lon,
+        lat=row.lat,
+        address=row.address,
+        detail=row.detail,
+        urls=row.urls,
+        raw_refs=row.raw_refs,
+        marker_icon=row.marker_icon,
+        marker_color=row.marker_color,
+        data_origin=row.data_origin,
+        data_version=row.data_version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        sources=[_source_detail(source) for source in row.sources],
+    )
+
+
+def _detail(row: EnrichmentReviewDetail) -> EnrichmentReviewDetailData:
+    return EnrichmentReviewDetailData(
+        review_id=row.review_id,
+        status=row.status,
+        name_score=row.name_score,
+        target_feature_id=row.target_feature_id,
+        target_name=row.target_name,
+        source_provider=row.source_provider,
+        source_dataset_key=row.source_dataset_key,
+        source_entity_id=row.source_entity_id,
+        source_name=row.source_name,
+        target_start_date=row.target_start_date,
+        target_end_date=row.target_end_date,
+        source_start_date=row.source_start_date,
+        source_end_date=row.source_end_date,
+        distance_m=row.distance_m,
+        spatial_score=row.spatial_score,
+        decision_reason=row.decision_reason,
+        reviewed_by=row.reviewed_by,
+        reviewed_at=row.reviewed_at,
+        created_at=row.created_at,
+        target=_feature_detail(row.target),
+        source=_source_detail(row.source),
+        target_detail_available=row.target_detail_available,
+        default_detail_source=row.default_detail_source,
+    )
+
+
+def _reason_with_detail_source(
+    reason: str | None, selected_detail_source: EnrichmentDetailSource | None
+) -> str | None:
+    if selected_detail_source is None:
+        return reason
+    marker = f"detail_source={selected_detail_source}"
+    return f"{reason}; {marker}" if reason else marker
+
+
 @router.get("", response_model=EnrichmentReviewListResponse)
 async def list_reviews(
     request: Request,
@@ -196,6 +310,29 @@ async def list_reviews(
     )
 
 
+@router.get(
+    "/{review_id}",
+    response_model=EnrichmentReviewDetailResponse,
+    responses={404: {"description": "review_id 없음"}},
+)
+async def get_review_detail(
+    request: Request,
+    review_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EnrichmentReviewDetailResponse:
+    started_at = perf_counter()
+    detail = await get_enrichment_review_detail(session, review_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"enrichment review 없음: {review_id!r}",
+        )
+    return EnrichmentReviewDetailResponse(
+        data=_detail(detail),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
 @router.patch(
     "/{review_id}",
     response_model=EnrichmentReviewDecisionResponse,
@@ -214,7 +351,10 @@ async def decide_review(
             review_id,
             body.decision,
             reviewed_by=body.reviewed_by,
-            reason=body.decision_reason,
+            reason=_reason_with_detail_source(
+                body.decision_reason,
+                body.selected_detail_source,
+            ),
         )
     if not result.changed:
         raise HTTPException(

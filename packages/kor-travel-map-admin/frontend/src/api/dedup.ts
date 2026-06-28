@@ -22,6 +22,8 @@ export type DedupFeatureRecord = DedupSchemas["DedupFeatureRecord"];
 export type DedupReviewRecord = DedupSchemas["DedupReviewRecord"];
 export type DedupReviewListResponse =
   DedupSchemas["DedupReviewListResponse"];
+export type DedupReviewDetailResponse =
+  DedupSchemas["DedupReviewDetailResponse"];
 export type DedupReviewListParams = Omit<
   DedupReviewListQuery,
   | "category"
@@ -77,10 +79,29 @@ function decideDedupReview(
   );
 }
 
+function fetchDedupReviewDetail(
+  reviewKey: string,
+  signal?: AbortSignal,
+): Promise<DedupReviewDetailResponse> {
+  return getJson<DedupReviewDetailResponse>(
+    `/v1/admin/dedup-reviews/${encodeURIComponent(reviewKey)}`,
+    { signal },
+  );
+}
+
 export function useDedupReviews(params: DedupReviewListParams = {}) {
   return useQuery<DedupReviewListResponse, Error>({
     queryKey: ["dedup-reviews", params],
     queryFn: ({ signal }) => fetchDedupReviews(params, signal),
+    staleTime: 15_000,
+  });
+}
+
+export function useDedupReviewDetail(reviewKey: string | null) {
+  return useQuery<DedupReviewDetailResponse, Error>({
+    enabled: reviewKey !== null,
+    queryKey: ["dedup-reviews", "detail", reviewKey],
+    queryFn: ({ signal }) => fetchDedupReviewDetail(reviewKey ?? "", signal),
     staleTime: 15_000,
   });
 }
@@ -95,6 +116,7 @@ export function useDedupDecisionMutation() {
     mutationFn: ({ reviewKey, body }) => decideDedupReview(reviewKey, body),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["dedup-reviews"] });
+      void queryClient.invalidateQueries({ queryKey: ["dedup-reviews", "detail"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       if (data.data.master_feature_id) {

@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Review 상세 비교 다이얼로그
+
+- **완료(API)**: `/admin/dedup-reviews/{review_id}`와 `/admin/enrichment-reviews/{review_id}` 상세
+  조회 API를 추가했다. 응답은 양쪽 feature/source 상세, raw payload, 좌표, 기간, 거리/score를 포함한다.
+- **완료(UI)**: Dedup review와 Enrichment review 테이블 행 클릭 시 상세 비교 다이얼로그를 열고,
+  두 자료의 핵심 필드/detail/raw JSON과 하나의 지도에 표시한 두 좌표를 보여준다.
+- **완료(Enrichment 선택)**: 축제 enrichment 상세에서 `정리된 datagokr`와 `visitkorea` 중 사용할
+  상세 source를 고를 수 있다. 정리된 target detail이 없으면 VisitKorea가 기본 선택되며, accept 요청에
+  선택값을 기록한다.
+- **검증(로컬)**: 전체 pytest 1367건, 전체 `ruff`, `mypy src/kortravelmap`, import-linter,
+  OpenAPI drift check, admin frontend `type-check`/대상 ESLint/`gen:types:check`,
+  Windows Playwright mocked review e2e 23건 통과.
+- **다음 한 작업**: PR 생성/CI green 후 머지하고, N150 배포 뒤 운영 데이터에서 dedup/enrichment 행
+  클릭 상세와 enrichment 선택 fallback을 smoke 확인한다.
+
 ## 2026-06-28 (codex) — Feature update request queue 실행 복구
 
 - **완료(Dagster)**: `feature_update_runner` 기본 resource를 등록해

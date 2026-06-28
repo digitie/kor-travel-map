@@ -43,9 +43,13 @@ __all__ = [
     "AdminFeatureDetailVersion",
     "DedupReviewPage",
     "DedupReviewRow",
+    "DedupReviewDetail",
     "DedupFeatureSummary",
     "EnrichmentReviewPage",
     "EnrichmentReviewRow",
+    "EnrichmentReviewDetail",
+    "ReviewFeatureDetail",
+    "ReviewSourceDetail",
     "FeatureDeactivateResult",
     "FeatureStateConflict",
     "FeatureOverride",
@@ -57,6 +61,8 @@ __all__ = [
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "get_dedup_review_detail",
+    "get_enrichment_review_detail",
     "list_admin_features",
     "list_dedup_reviews",
     "list_enrichment_reviews",
@@ -396,6 +402,75 @@ class DedupReviewPage:
     items: tuple[DedupReviewRow, ...]
     next_cursor: str | None
     total_count: int
+
+
+@dataclass(frozen=True)
+class ReviewSourceDetail:
+    """Review 상세 비교에 표시할 source record/link snapshot."""
+
+    source_record_key: str
+    provider: str
+    dataset_key: str
+    source_entity_type: str
+    source_entity_id: str
+    source_version: str | None
+    raw_name: str | None
+    raw_address: str | None
+    raw_longitude: float | None
+    raw_latitude: float | None
+    raw_payload_hash: str
+    raw_data: dict[str, Any]
+    fetched_at: Any
+    imported_at: Any
+    expires_at: Any
+    source_role: str | None = None
+    match_method: str | None = None
+    confidence: int | None = None
+    is_primary_source: bool | None = None
+    linked_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ReviewFeatureDetail:
+    """Review 상세 비교에 표시할 feature core + source 목록."""
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float | None
+    lat: float | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    urls: dict[str, Any]
+    raw_refs: list[dict[str, Any]]
+    marker_icon: str | None
+    marker_color: str | None
+    data_origin: str
+    data_version: int
+    created_at: datetime
+    updated_at: datetime
+    sources: tuple[ReviewSourceDetail, ...]
+
+
+@dataclass(frozen=True)
+class DedupReviewDetail:
+    """Dedup review 상세 비교 aggregate."""
+
+    review_id: str
+    status: str
+    total_score: float
+    name_score: float
+    spatial_score: float
+    category_score: float
+    distance_m: float | None
+    decision_reason: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    feature_a: ReviewFeatureDetail
+    feature_b: ReviewFeatureDetail
 
 
 _ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
@@ -1100,6 +1175,83 @@ async def get_admin_feature_detail(
         change_requests=tuple(_feature_change_row(row) for row in change_requests),
         files=await _list_admin_feature_files(session, feature_id),
     )
+
+
+def _review_source_detail(row: AdminFeatureDetailSource) -> ReviewSourceDetail:
+    return ReviewSourceDetail(
+        source_record_key=row.source_record_key,
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        source_entity_type=row.source_entity_type,
+        source_entity_id=row.source_entity_id,
+        source_version=row.source_version,
+        source_role=row.source_role,
+        match_method=row.match_method,
+        confidence=row.confidence,
+        is_primary_source=row.is_primary_source,
+        raw_name=row.raw_name,
+        raw_address=row.raw_address,
+        raw_longitude=row.raw_longitude,
+        raw_latitude=row.raw_latitude,
+        raw_payload_hash=row.raw_payload_hash,
+        raw_data=row.raw_data,
+        fetched_at=row.fetched_at,
+        imported_at=row.imported_at,
+        expires_at=row.expires_at,
+        linked_at=row.linked_at,
+    )
+
+
+def _review_source_from_record(value: Any) -> ReviewSourceDetail:
+    record = _json_object(value)
+    return ReviewSourceDetail(
+        source_record_key=str(record.get("source_record_key") or ""),
+        provider=str(record.get("provider") or ""),
+        dataset_key=str(record.get("dataset_key") or ""),
+        source_entity_type=str(record.get("source_entity_type") or ""),
+        source_entity_id=str(record.get("source_entity_id") or ""),
+        source_version=record.get("source_version"),
+        raw_name=record.get("raw_name"),
+        raw_address=record.get("raw_address"),
+        raw_longitude=_float_or_none(record.get("raw_longitude")),
+        raw_latitude=_float_or_none(record.get("raw_latitude")),
+        raw_payload_hash=str(record.get("raw_payload_hash") or ""),
+        raw_data=_json_object(record.get("raw_data")),
+        fetched_at=record.get("fetched_at"),
+        imported_at=record.get("imported_at"),
+        expires_at=record.get("expires_at"),
+    )
+
+
+def _review_feature_detail(row: AdminFeatureDetail) -> ReviewFeatureDetail:
+    feature = row.feature
+    return ReviewFeatureDetail(
+        feature_id=feature.feature_id,
+        kind=feature.kind,
+        name=feature.name,
+        category=feature.category,
+        status=feature.status,
+        lon=feature.lon,
+        lat=feature.lat,
+        address=feature.address,
+        detail=feature.detail,
+        urls=feature.urls,
+        raw_refs=feature.raw_refs,
+        marker_icon=feature.marker_icon,
+        marker_color=feature.marker_color,
+        data_origin=feature.data_origin,
+        data_version=feature.data_version,
+        created_at=feature.created_at,
+        updated_at=feature.updated_at,
+        sources=tuple(_review_source_detail(source) for source in row.sources),
+    )
+
+
+async def _get_review_feature_detail(
+    session: AsyncSession, feature_id: str
+) -> ReviewFeatureDetail | None:
+    detail = await get_admin_feature_detail(session, feature_id)
+    return _review_feature_detail(detail) if detail is not None else None
 
 
 async def list_admin_features(
@@ -2129,6 +2281,31 @@ WHERE (
 """
 
 
+_DEDUP_REVIEW_DETAIL_SQL: Final[str] = """
+SELECT
+    q.review_id::text AS review_id,
+    q.status,
+    q.total_score,
+    q.name_score,
+    q.spatial_score,
+    q.category_score,
+    q.feature_id_a,
+    q.feature_id_b,
+    q.decision_reason,
+    q.reviewed_by,
+    q.reviewed_at,
+    q.created_at,
+    CASE
+        WHEN fa.coord_5179 IS NULL OR fb.coord_5179 IS NULL THEN NULL
+        ELSE x_extension.ST_Distance(fa.coord_5179, fb.coord_5179)::double precision
+    END AS distance_m
+FROM ops.dedup_review_queue AS q
+JOIN feature.features AS fa ON fa.feature_id = q.feature_id_a
+JOIN feature.features AS fb ON fb.feature_id = q.feature_id_b
+WHERE q.review_id = :review_id
+"""
+
+
 def _dedup_cursor_payload(cursor: str | None) -> dict[str, Any]:
     if cursor is None:
         return {}
@@ -2275,6 +2452,38 @@ async def list_dedup_reviews(
     )
 
 
+async def get_dedup_review_detail(
+    session: AsyncSession, review_id: str
+) -> DedupReviewDetail | None:
+    """Dedup review 상세 비교 데이터를 조회한다."""
+    row = (
+        await session.execute(text(_DEDUP_REVIEW_DETAIL_SQL), {"review_id": review_id})
+    ).mappings().first()
+    if row is None:
+        return None
+
+    feature_a = await _get_review_feature_detail(session, str(row["feature_id_a"]))
+    feature_b = await _get_review_feature_detail(session, str(row["feature_id_b"]))
+    if feature_a is None or feature_b is None:
+        return None
+
+    return DedupReviewDetail(
+        review_id=str(row["review_id"]),
+        status=str(row["status"]),
+        total_score=_score(row["total_score"]),
+        name_score=_score(row["name_score"]),
+        spatial_score=_score(row["spatial_score"]),
+        category_score=_score(row["category_score"]),
+        distance_m=_float_or_none(row["distance_m"]),
+        decision_reason=row["decision_reason"],
+        reviewed_by=row["reviewed_by"],
+        reviewed_at=row["reviewed_at"],
+        created_at=row["created_at"],
+        feature_a=feature_a,
+        feature_b=feature_b,
+    )
+
+
 _SET_DEDUP_DECISION_SQL: Final[str] = """
 UPDATE ops.dedup_review_queue
 SET status = :decision,
@@ -2409,6 +2618,35 @@ class EnrichmentReviewPage:
     items: tuple[EnrichmentReviewRow, ...]
     next_cursor: str | None
     total_count: int
+
+
+@dataclass(frozen=True)
+class EnrichmentReviewDetail:
+    """Enrichment review 상세 비교 aggregate."""
+
+    review_id: str
+    status: str
+    name_score: float
+    target_feature_id: str
+    target_name: str
+    source_provider: str
+    source_dataset_key: str
+    source_entity_id: str
+    source_name: str
+    target_start_date: str | None
+    target_end_date: str | None
+    source_start_date: str | None
+    source_end_date: str | None
+    distance_m: float | None
+    spatial_score: float | None
+    decision_reason: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    target: ReviewFeatureDetail
+    source: ReviewSourceDetail
+    target_detail_available: bool
+    default_detail_source: str
 
 
 _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER: Final[str] = """
@@ -2654,6 +2892,103 @@ _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_COUNT_SQL: Final[str] = (
     )
 )
 
+_ENRICHMENT_REVIEW_DETAIL_SQL: Final[str] = """
+SELECT
+    q.review_id::text AS review_id,
+    q.status,
+    q.name_score,
+    q.target_feature_id,
+    q.target_name,
+    q.source_provider,
+    q.source_dataset_key,
+    q.source_entity_id,
+    q.source_name,
+    q.source_record,
+    q.decision_reason,
+    q.reviewed_by,
+    q.reviewed_at,
+    q.created_at,
+    f.detail ->> 'starts_on' AS target_start_date,
+    f.detail ->> 'ends_on' AS target_end_date,
+    src.source_start_date,
+    src.source_end_date,
+    dist.distance_m,
+    CASE
+        WHEN dist.distance_m IS NULL THEN NULL
+        ELSE (exp(-(dist.distance_m / 50.0)) * 100.0)::double precision
+    END AS spatial_score
+FROM ops.enrichment_review_queue AS q
+LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN LATERAL (
+    SELECT
+        CASE
+            WHEN raw.source_lon_text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+            THEN raw.source_lon_text::double precision
+            ELSE NULL
+        END AS source_lon,
+        CASE
+            WHEN raw.source_lat_text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+            THEN raw.source_lat_text::double precision
+            ELSE NULL
+        END AS source_lat,
+        COALESCE(
+            q.source_record #>> '{{raw_data,event_start_date}}',
+            q.source_record #>> '{{raw_data,eventstartdate}}',
+            q.source_record #>> '{{raw_data,start_date}}'
+        ) AS source_start_date,
+        COALESCE(
+            q.source_record #>> '{{raw_data,event_end_date}}',
+            q.source_record #>> '{{raw_data,eventenddate}}',
+            q.source_record #>> '{{raw_data,end_date}}'
+        ) AS source_end_date
+    FROM (
+        SELECT
+            NULLIF(
+                COALESCE(
+                    q.source_record ->> 'raw_longitude',
+                    q.source_record #>> '{{raw_data,map_x}}',
+                    q.source_record #>> '{{raw_data,mapx}}',
+                    q.source_record #>> '{{raw_data,longitude}}'
+                ),
+                ''
+            ) AS source_lon_text,
+            NULLIF(
+                COALESCE(
+                    q.source_record ->> 'raw_latitude',
+                    q.source_record #>> '{{raw_data,map_y}}',
+                    q.source_record #>> '{{raw_data,mapy}}',
+                    q.source_record #>> '{{raw_data,latitude}}'
+                ),
+                ''
+            ) AS source_lat_text
+    ) AS raw
+) AS src ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        CASE
+            WHEN f.coord_5179 IS NULL
+              OR src.source_lon IS NULL
+              OR src.source_lat IS NULL
+            THEN NULL
+            ELSE x_extension.ST_Distance(
+                f.coord_5179,
+                x_extension.ST_Transform(
+                    x_extension.ST_SetSRID(
+                        x_extension.ST_MakePoint(src.source_lon, src.source_lat),
+                        4326
+                    ),
+                    5179
+                )
+            )::double precision
+        END AS distance_m
+) AS dist ON TRUE
+WHERE q.review_id = :review_id
+"""
+
+
+def _has_review_detail(value: dict[str, Any]) -> bool:
+    return any(item not in (None, "", [], {}) for item in value.values())
+
 
 def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
     payload = _dedup_cursor_payload(cursor)
@@ -2806,4 +3141,52 @@ async def list_enrichment_reviews(
         items=items,
         next_cursor=next_cursor,
         total_count=total_count,
+    )
+
+
+async def get_enrichment_review_detail(
+    session: AsyncSession, review_id: str
+) -> EnrichmentReviewDetail | None:
+    """축제 enrichment review 상세 비교 데이터를 조회한다."""
+    row = (
+        await session.execute(
+            text(_ENRICHMENT_REVIEW_DETAIL_SQL),
+            {"review_id": review_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return None
+
+    target = await _get_review_feature_detail(session, str(row["target_feature_id"]))
+    if target is None:
+        return None
+
+    source = _review_source_from_record(row["source_record"])
+    target_detail_available = _has_review_detail(target.detail)
+    return EnrichmentReviewDetail(
+        review_id=str(row["review_id"]),
+        status=str(row["status"]),
+        name_score=_score(row["name_score"]),
+        target_feature_id=str(row["target_feature_id"]),
+        target_name=str(row["target_name"]),
+        source_provider=str(row["source_provider"]),
+        source_dataset_key=str(row["source_dataset_key"]),
+        source_entity_id=str(row["source_entity_id"]),
+        source_name=str(row["source_name"]),
+        target_start_date=row["target_start_date"],
+        target_end_date=row["target_end_date"],
+        source_start_date=row["source_start_date"],
+        source_end_date=row["source_end_date"],
+        distance_m=_float_or_none(row["distance_m"]),
+        spatial_score=_float_or_none(row["spatial_score"]),
+        decision_reason=row["decision_reason"],
+        reviewed_by=row["reviewed_by"],
+        reviewed_at=row["reviewed_at"],
+        created_at=row["created_at"],
+        target=target,
+        source=source,
+        target_detail_available=target_detail_available,
+        default_detail_source=(
+            "target" if target_detail_available else "visitkorea"
+        ),
     )

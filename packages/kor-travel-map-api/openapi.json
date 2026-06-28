@@ -7029,6 +7029,123 @@
         "title": "DedupReviewDecisionResponse",
         "type": "object"
       },
+      "DedupReviewDetailData": {
+        "additionalProperties": false,
+        "description": "Dedup review 상세 비교 data.",
+        "properties": {
+          "category_score": {
+            "title": "Category Score",
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
+          "feature_a": {
+            "$ref": "#/components/schemas/ReviewFeatureDetailRecord"
+          },
+          "feature_b": {
+            "$ref": "#/components/schemas/ReviewFeatureDetailRecord"
+          },
+          "name_score": {
+            "title": "Name Score",
+            "type": "number"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "spatial_score": {
+            "title": "Spatial Score",
+            "type": "number"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_score": {
+            "title": "Total Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "review_id",
+          "status",
+          "total_score",
+          "name_score",
+          "spatial_score",
+          "category_score",
+          "created_at",
+          "feature_a",
+          "feature_b"
+        ],
+        "title": "DedupReviewDetailData",
+        "type": "object"
+      },
+      "DedupReviewDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/dedup-reviews/{review_id}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DedupReviewDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DedupReviewDetailResponse",
+        "type": "object"
+      },
       "DedupReviewListData": {
         "additionalProperties": false,
         "description": "Dedup review list data.",
@@ -7256,6 +7373,21 @@
               }
             ],
             "title": "Reviewed By"
+          },
+          "selected_detail_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "target",
+                  "visitkorea"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Detail Source"
           }
         },
         "required": [
@@ -7280,6 +7412,207 @@
           "meta"
         ],
         "title": "EnrichmentReviewDecisionResponse",
+        "type": "object"
+      },
+      "EnrichmentReviewDetailData": {
+        "additionalProperties": false,
+        "description": "Enrichment review 상세 비교 data.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "default_detail_source": {
+            "enum": [
+              "target",
+              "visitkorea"
+            ],
+            "title": "Default Detail Source",
+            "type": "string"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
+          "name_score": {
+            "title": "Name Score",
+            "type": "number"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ReviewSourceDetailRecord"
+          },
+          "source_dataset_key": {
+            "title": "Source Dataset Key",
+            "type": "string"
+          },
+          "source_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source End Date"
+          },
+          "source_entity_id": {
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_provider": {
+            "title": "Source Provider",
+            "type": "string"
+          },
+          "source_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Start Date"
+          },
+          "spatial_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spatial Score"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ReviewFeatureDetailRecord"
+          },
+          "target_detail_available": {
+            "title": "Target Detail Available",
+            "type": "boolean"
+          },
+          "target_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target End Date"
+          },
+          "target_feature_id": {
+            "title": "Target Feature Id",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "target_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Start Date"
+          }
+        },
+        "required": [
+          "review_id",
+          "status",
+          "name_score",
+          "target_feature_id",
+          "target_name",
+          "source_provider",
+          "source_dataset_key",
+          "source_entity_id",
+          "source_name",
+          "created_at",
+          "target",
+          "source",
+          "target_detail_available",
+          "default_detail_source"
+        ],
+        "title": "EnrichmentReviewDetailData",
+        "type": "object"
+      },
+      "EnrichmentReviewDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/enrichment-reviews/{review_id}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EnrichmentReviewDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "EnrichmentReviewDetailResponse",
         "type": "object"
       },
       "EnrichmentReviewListData": {
@@ -13437,6 +13770,335 @@
         "title": "RestoreTargets",
         "type": "object"
       },
+      "ReviewFeatureDetailRecord": {
+        "additionalProperties": false,
+        "description": "Review 상세 feature snapshot.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_origin": {
+            "title": "Data Origin",
+            "type": "string"
+          },
+          "data_version": {
+            "title": "Data Version",
+            "type": "integer"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "raw_refs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Raw Refs",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSourceDetailRecord"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "urls": {
+            "additionalProperties": true,
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "status",
+          "address",
+          "detail",
+          "urls",
+          "raw_refs",
+          "data_origin",
+          "data_version",
+          "created_at",
+          "updated_at",
+          "sources"
+        ],
+        "title": "ReviewFeatureDetailRecord",
+        "type": "object"
+      },
+      "ReviewSourceDetailRecord": {
+        "additionalProperties": false,
+        "description": "Review 상세 source record/link snapshot.",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "is_primary_source": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Primary Source"
+          },
+          "linked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked At"
+          },
+          "match_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Method"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "raw_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Address"
+          },
+          "raw_data": {
+            "additionalProperties": true,
+            "title": "Raw Data",
+            "type": "object"
+          },
+          "raw_latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Latitude"
+          },
+          "raw_longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Longitude"
+          },
+          "raw_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Name"
+          },
+          "raw_payload_hash": {
+            "title": "Raw Payload Hash",
+            "type": "string"
+          },
+          "source_entity_id": {
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_entity_type": {
+            "title": "Source Entity Type",
+            "type": "string"
+          },
+          "source_record_key": {
+            "title": "Source Record Key",
+            "type": "string"
+          },
+          "source_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Role"
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version"
+          }
+        },
+        "required": [
+          "source_record_key",
+          "provider",
+          "dataset_key",
+          "source_entity_type",
+          "source_entity_id",
+          "raw_payload_hash",
+          "raw_data"
+        ],
+        "title": "ReviewSourceDetailRecord",
+        "type": "object"
+      },
       "RuleApplyData": {
         "additionalProperties": false,
         "properties": {
@@ -16038,6 +16700,66 @@
       }
     },
     "/v1/admin/dedup-reviews/{review_id}": {
+      "get": {
+        "operationId": "get_review_detail_v1_admin_dedup_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "review_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Review Detail",
+        "tags": [
+          "admin-dedup"
+        ]
+      },
       "patch": {
         "operationId": "decide_review_v1_admin_dedup_reviews__review_id__patch",
         "parameters": [
@@ -16300,6 +17022,66 @@
       }
     },
     "/v1/admin/enrichment-reviews/{review_id}": {
+      "get": {
+        "operationId": "get_review_detail_v1_admin_enrichment_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "review_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Review Detail",
+        "tags": [
+          "admin-enrichment"
+        ]
+      },
       "patch": {
         "operationId": "decide_review_v1_admin_enrichment_reviews__review_id__patch",
         "parameters": [

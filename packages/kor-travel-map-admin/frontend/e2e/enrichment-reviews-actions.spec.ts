@@ -7,12 +7,18 @@ import type { components } from "../src/api/types";
 type EnrichmentReviewRecord = components["schemas"]["EnrichmentReviewRecord"];
 type EnrichmentReviewListResponse =
   components["schemas"]["EnrichmentReviewListResponse"];
+type EnrichmentReviewDetailResponse =
+  components["schemas"]["EnrichmentReviewDetailResponse"];
 type EnrichmentReviewDecisionRequest =
   components["schemas"]["EnrichmentReviewDecisionRequest"];
 type EnrichmentReviewDecisionResponse =
   components["schemas"]["EnrichmentReviewDecisionResponse"];
 type EnrichmentReviewDecisionData =
   components["schemas"]["EnrichmentReviewDecisionData"];
+type ReviewFeatureDetailRecord =
+  components["schemas"]["ReviewFeatureDetailRecord"];
+type ReviewSourceDetailRecord =
+  components["schemas"]["ReviewSourceDetailRecord"];
 type Meta = components["schemas"]["Meta"];
 type PageMeta = components["schemas"]["PageMeta"];
 
@@ -103,6 +109,105 @@ function decisionResponse(
   };
 }
 
+function makeTargetDetail(
+  review: EnrichmentReviewRecord,
+  detail: Record<string, unknown> = {
+    organizer: "datagokr organizer",
+    starts_on: "2026-04-05",
+  },
+): ReviewFeatureDetailRecord {
+  return {
+    address: { label: "datagokr address" },
+    category: review.target_category ?? "A02080100",
+    created_at: MOCK_NOW,
+    data_origin: "provider",
+    data_version: 1,
+    detail,
+    feature_id: review.target_feature_id,
+    kind: review.target_kind ?? "event",
+    lat: review.target_lat,
+    lon: review.target_lon,
+    marker_color: null,
+    marker_icon: null,
+    name: review.target_name,
+    raw_refs: [],
+    sources: [],
+    status: "active",
+    updated_at: MOCK_NOW,
+    urls: { homepage: "https://datagokr.example.invalid" },
+  };
+}
+
+function makeVisitkoreaSource(review: EnrichmentReviewRecord): ReviewSourceDetailRecord {
+  return {
+    confidence: null,
+    dataset_key: review.source_dataset_key,
+    expires_at: null,
+    fetched_at: MOCK_NOW,
+    imported_at: MOCK_NOW,
+    is_primary_source: null,
+    linked_at: null,
+    match_method: null,
+    provider: review.source_provider,
+    raw_address: "visitkorea address",
+    raw_data: {
+      eventenddate: review.source_end_date,
+      eventstartdate: review.source_start_date,
+      mapx: review.source_lon,
+      mapy: review.source_lat,
+      title: review.source_name,
+    },
+    raw_latitude: review.source_lat,
+    raw_longitude: review.source_lon,
+    raw_name: review.source_name,
+    raw_payload_hash: `${review.source_entity_id}-hash`,
+    source_entity_id: review.source_entity_id,
+    source_entity_type: "festival",
+    source_record_key: `${review.source_entity_id}-source`,
+    source_role: null,
+    source_version: null,
+  };
+}
+
+function detailResponse(
+  review: EnrichmentReviewRecord,
+  options: { targetDetail?: Record<string, unknown> } = {},
+): EnrichmentReviewDetailResponse {
+  const targetDetail = options.targetDetail ?? {
+    organizer: "datagokr organizer",
+    starts_on: "2026-04-05",
+  };
+  const targetDetailAvailable = Object.keys(targetDetail).length > 0;
+  return {
+    data: {
+      created_at: review.created_at,
+      decision_reason: review.decision_reason,
+      default_detail_source: targetDetailAvailable ? "target" : "visitkorea",
+      distance_m: review.distance_m,
+      name_score: review.name_score,
+      review_id: review.review_id,
+      reviewed_at: review.reviewed_at,
+      reviewed_by: review.reviewed_by,
+      source: makeVisitkoreaSource(review),
+      source_dataset_key: review.source_dataset_key,
+      source_end_date: review.source_end_date,
+      source_entity_id: review.source_entity_id,
+      source_name: review.source_name,
+      source_provider: review.source_provider,
+      source_start_date: review.source_start_date,
+      spatial_score: review.spatial_score,
+      status: review.status,
+      target: makeTargetDetail(review, targetDetail),
+      target_detail_available: targetDetailAvailable,
+      target_end_date: review.target_end_date,
+      target_feature_id: review.target_feature_id,
+      target_name: review.target_name,
+      target_start_date: review.target_start_date,
+    },
+    meta: makeMeta(),
+  };
+}
+
 /**
  * Stateful list + PATCH decision mock.
  *
@@ -113,7 +218,10 @@ function decisionResponse(
  */
 async function mockEnrichmentReviews(
   page: Page,
-  options: { initial: EnrichmentReviewRecord[] },
+  options: {
+    detailTargetDetails?: Record<string, Record<string, unknown>>;
+    initial: EnrichmentReviewRecord[];
+  },
 ) {
   const records = [...options.initial];
   const requests = {
@@ -130,6 +238,22 @@ async function mockEnrichmentReviews(
     const url = new URL(request.url());
 
     if (request.method() === "GET") {
+      const path = apiPathname(url);
+      if (path.startsWith("/v1/admin/enrichment-reviews/")) {
+        const reviewId = decodeURIComponent(
+          path.slice("/v1/admin/enrichment-reviews/".length),
+        );
+        const review =
+          records.find((item) => item.review_id === reviewId) ??
+          makeReview({ review_id: reviewId });
+        await fulfillJson(
+          route,
+          detailResponse(review, {
+            targetDetail: options.detailTargetDetails?.[reviewId],
+          }),
+        );
+        return;
+      }
       requests.list += 1;
       const wanted = url.searchParams.getAll("status");
       requests.listStatuses.push(wanted);
@@ -232,6 +356,48 @@ async function mockPageNumberPages(
  * compare cell 렌더·empty·error** 동작 depth를 추가한다(중복 smoke 금지).
  */
 test.describe("admin/enrichment-reviews actions", () => {
+  test("row click opens detail dialog and falls back to visitkorea when target detail is empty", async ({
+    page,
+  }) => {
+    const review = makeReview({
+      review_id: "enrich-detail-fallback-1",
+      source_name: "Visitkorea Detail Festival",
+      target_name: "Datagokr Detail Festival",
+    });
+    const requests = await mockEnrichmentReviews(page, {
+      detailTargetDetails: { [review.review_id]: {} },
+      initial: [review],
+    });
+
+    await page.goto("/admin/enrichment-reviews");
+    const row = page.getByRole("row", { name: /Datagokr Detail Festival/ });
+    await expect(row).toBeVisible();
+
+    await row.click();
+
+    const dialog = page.getByRole("dialog", {
+      name: "enrichment review detail",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("1차 datagokr")).toBeVisible();
+    await expect(dialog.getByText("2차 visitkorea")).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "Visitkorea Detail Festival" }),
+    ).toBeVisible();
+    await expect(page.getByTestId("enrichment-detail-map")).toBeVisible();
+    await expect(page.getByLabel("enrichment detail source")).toHaveValue(
+      "visitkorea",
+    );
+
+    await dialog.getByRole("button", { name: "accept" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      decision: "accepted",
+      selected_detail_source: "visitkorea",
+    } satisfies Partial<EnrichmentReviewDecisionRequest>);
+  });
+
   test("accept fires PATCH decision and row flips to 완료", async ({ page }) => {
     const review = makeReview({
       review_id: "enrich-accept-1",

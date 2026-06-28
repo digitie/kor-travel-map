@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Review 상세 비교 다이얼로그 (2026-06-28)
+
+- **ADDED**: Dedup review와 Enrichment review 행을 클릭하면 두 자료의 feature/source 상세,
+  raw/detail JSON, 거리/score, 기간을 비교하는 다이얼로그를 표시한다.
+- **ADDED**: 두 review 상세 다이얼로그는 하나의 VWorld 지도에 양쪽 좌표와 이름 marker를 함께 표시한다.
+- **ADDED**: 축제 enrichment 상세에서 관리자가 `정리된 datagokr` 또는 `visitkorea` 데이터를 선택할 수
+  있고, 정리된 target detail이 없으면 VisitKorea가 기본 선택된다.
+- **CHANGED**: enrichment accept 요청은 선택된 상세 source를 decision reason에 함께 기록한다.
+
 ### Feature update request queue 실행 복구 (2026-06-28)
 
 - **FIXED**: Dagster `feature_update_request_worker`가 기본 `feature_update_runner` 리소스를

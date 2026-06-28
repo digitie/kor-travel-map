@@ -8,12 +8,18 @@ type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
 type DedupReviewListResponse =
   components["schemas"]["DedupReviewListResponse"];
+type DedupReviewDetailResponse =
+  components["schemas"]["DedupReviewDetailResponse"];
 type DedupReviewDecisionRequest =
   components["schemas"]["DedupReviewDecisionRequest"];
 type DedupReviewDecisionResponse =
   components["schemas"]["DedupReviewDecisionResponse"];
 type DedupReviewDecisionData =
   components["schemas"]["DedupReviewDecisionData"];
+type ReviewFeatureDetailRecord =
+  components["schemas"]["ReviewFeatureDetailRecord"];
+type ReviewSourceDetailRecord =
+  components["schemas"]["ReviewSourceDetailRecord"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 
@@ -124,6 +130,86 @@ function decisionResponse(
   return {
     data,
     meta: { duration_ms: 1, request_id: "e2e-dedup-decision" },
+  };
+}
+
+function makeReviewSource(
+  feature: DedupFeatureRecord,
+): ReviewSourceDetailRecord {
+  return {
+    confidence: 100,
+    dataset_key: feature.dataset_key ?? "dataset",
+    expires_at: null,
+    fetched_at: MOCK_NOW,
+    imported_at: MOCK_NOW,
+    is_primary_source: true,
+    linked_at: MOCK_NOW,
+    match_method: "natural_key",
+    provider: feature.provider ?? "provider",
+    raw_address: `${feature.name} address`,
+    raw_data: {
+      address: `${feature.name} address`,
+      name: feature.name,
+      phone: "02-0000-0000",
+    },
+    raw_latitude: feature.lat,
+    raw_longitude: feature.lon,
+    raw_name: feature.name,
+    raw_payload_hash: `${feature.feature_id}-hash`,
+    source_entity_id: `${feature.feature_id}-entity`,
+    source_entity_type: feature.kind,
+    source_record_key: `${feature.feature_id}-source`,
+    source_role: "primary",
+    source_version: null,
+  };
+}
+
+function makeReviewFeatureDetail(
+  feature: DedupFeatureRecord,
+): ReviewFeatureDetailRecord {
+  return {
+    address: { label: `${feature.name} address` },
+    category: feature.category,
+    created_at: MOCK_NOW,
+    data_origin: "provider",
+    data_version: 1,
+    detail: {
+      memo: `${feature.name} detail`,
+      phone: "02-0000-0000",
+    },
+    feature_id: feature.feature_id,
+    kind: feature.kind,
+    lat: feature.lat,
+    lon: feature.lon,
+    marker_color: null,
+    marker_icon: null,
+    name: feature.name,
+    raw_refs: [],
+    sources: [makeReviewSource(feature)],
+    status: "active",
+    updated_at: MOCK_NOW,
+    urls: { homepage: "https://example.invalid" },
+  };
+}
+
+function detailResponse(review: DedupReviewRecord): DedupReviewDetailResponse {
+  return {
+    data: {
+      category_score: review.category_score,
+      created_at: review.created_at,
+      decision_reason: review.decision_reason,
+      distance_m: review.distance_m,
+      feature_a: makeReviewFeatureDetail(review.feature_a),
+      feature_b: makeReviewFeatureDetail(review.feature_b),
+      name_score: review.name_score,
+      review_id: review.review_id,
+      reviewed_at: review.reviewed_at,
+      reviewed_by: review.reviewed_by,
+      spatial_score: review.spatial_score,
+      status: review.status,
+      total_score: review.total_score,
+    },
+    meta: { duration_ms: 1, request_id: "e2e-dedup-detail" },
   };
 }
 
@@ -258,6 +344,20 @@ async function mockDedupReviews(
     }
 
     if (
+      request.method() === "GET" &&
+      path.startsWith("/v1/admin/dedup-reviews/")
+    ) {
+      const reviewId = decodeURIComponent(
+        path.slice("/v1/admin/dedup-reviews/".length),
+      );
+      const review =
+        pending.find((item) => item.review_id === reviewId) ??
+        makeDedupReview({ review_id: reviewId });
+      await fulfillJson(route, detailResponse(review));
+      return;
+    }
+
+    if (
       request.method() === "PATCH" &&
       path.startsWith("/v1/admin/dedup-reviews/")
     ) {
@@ -298,6 +398,40 @@ async function mockDedupReviews(
  * accept/reject/ignore/merge(수동·자동)·취소·mutex·status filter·empty·error·bulk.
  */
 test.describe("admin/dedup-reviews actions", () => {
+  test("row click opens detail compare dialog with map and raw fields", async ({
+    page,
+  }) => {
+    const review = makeDedupReview({
+      feature_a: makeDedupFeature({
+        lat: 37.5664,
+        lon: 126.9781,
+        name: "DEDUP_A_detail",
+      }),
+      feature_b: makeDedupFeature({
+        lat: 37.5665,
+        lon: 126.978,
+        name: "DEDUP_B_detail",
+        provider: "python-visitkorea-api",
+      }),
+      review_id: "dedup-review-detail-aaaa-bbbb-cccc-000000000020",
+    });
+    await mockDedupReviews(page, { byStatus: { pending: [review] } });
+
+    await page.goto("/admin/dedup-reviews");
+    const row = page.getByRole("row", { name: /DEDUP_A_detail/ });
+    await expect(row).toBeVisible();
+
+    await row.click();
+
+    const dialog = page.getByRole("dialog", { name: "dedup review detail" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Feature A")).toBeVisible();
+    await expect(dialog.getByText("Feature B")).toBeVisible();
+    await expect(dialog).toContainText("DEDUP_A_detail detail");
+    await expect(dialog).toContainText("DEDUP_B_detail detail");
+    await expect(page.getByTestId("dedup-detail-map")).toBeVisible();
+  });
+
   test("accept decision PATCHes decision=accepted and collapses to 완료", async ({
     page,
   }) => {
@@ -611,7 +745,9 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(last?.searchParams.getAll("kind")).toEqual(["place"]);
     expect(last?.searchParams.getAll("provider")).toEqual(["python-mois-api"]);
     expect(last?.searchParams.getAll("dataset_key")).toEqual(["mois_license"]);
-    expect(last?.searchParams.getAll("category")).toEqual(["02020101"]);
+    await expect
+      .poll(() => handle.requests.lastListUrl?.searchParams.getAll("category"))
+      .toEqual(["02020101"]);
     expect(last?.searchParams.get("min_score")).toBe("90");
     expect(last?.searchParams.get("page_size")).toBe("25");
   });
