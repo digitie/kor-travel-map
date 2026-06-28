@@ -46,6 +46,7 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(
         create_app(
             ApiSettings(
+                admin_proxy_secret=None,
                 backup_root=tmp_path,
                 backup_project_root=tmp_path,
                 backup_command_enabled=False,
@@ -60,6 +61,7 @@ def test_admin_backup_routes_mounted_in_openapi(client: TestClient) -> None:
 
     assert "/v1/admin/backups" in spec["paths"]
     assert "/v1/admin/backups/{backup_id}" in spec["paths"]
+    assert "delete" in spec["paths"]["/v1/admin/backups/{backup_id}"]
     assert "/v1/admin/restore/{backup_id}" in spec["paths"]
     assert "/v1/admin/restore/{backup_id}/swap" in spec["paths"]
     assert "/v1/admin/backups/restore/{backup_id}" not in spec["paths"]
@@ -99,6 +101,51 @@ def test_get_backup_rejects_invalid_id(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_delete_backup_removes_artifact(tmp_path: Path) -> None:
+    _write_artifact(tmp_path, "delete-me")
+    client = TestClient(
+        create_app(
+            ApiSettings(
+                admin_proxy_secret=None,
+                backup_root=tmp_path,
+                backup_project_root=tmp_path,
+                backup_command_enabled=False,
+            )
+        )
+    )
+
+    response = client.delete("/v1/admin/backups/delete-me")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["deleted"] is True
+    assert body["data"]["item"]["backup_id"] == "delete-me"
+    assert not (tmp_path / "delete-me").exists()
+    assert client.get("/v1/admin/backups/delete-me").status_code == 404
+
+
+@pytest.mark.unit
+def test_delete_backup_requires_destructive_gate(tmp_path: Path) -> None:
+    _write_artifact(tmp_path, "keep-me")
+    client = TestClient(
+        create_app(
+            ApiSettings(
+                admin_destructive_enabled=False,
+                admin_proxy_secret=None,
+                backup_root=tmp_path,
+                backup_project_root=tmp_path,
+                backup_command_enabled=False,
+            )
+        )
+    )
+
+    response = client.delete("/v1/admin/backups/keep-me")
+
+    assert response.status_code == 403
+    assert (tmp_path / "keep-me").is_dir()
+
+
+@pytest.mark.unit
 def test_execute_backup_requires_opt_in(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/backups",
@@ -118,10 +165,11 @@ def test_execute_backup_uses_command_runner(
 
     _write_artifact(tmp_path, "manual")
     app = create_app(
-        ApiSettings(
-            backup_root=tmp_path,
-            backup_project_root=tmp_path,
-            backup_command_enabled=True,
+            ApiSettings(
+                admin_proxy_secret=None,
+                backup_root=tmp_path,
+                backup_project_root=tmp_path,
+                backup_command_enabled=True,
         )
     )
     seen: dict[str, Any] = {}
@@ -186,10 +234,11 @@ def test_execute_restore_swap_uses_command_runner(
 
     _write_artifact(tmp_path, "backup-1")
     app = create_app(
-        ApiSettings(
-            backup_root=tmp_path,
-            backup_project_root=tmp_path,
-            backup_command_enabled=True,
+            ApiSettings(
+                admin_proxy_secret=None,
+                backup_root=tmp_path,
+                backup_project_root=tmp_path,
+                backup_command_enabled=True,
         )
     )
     seen: dict[str, Any] = {}

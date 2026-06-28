@@ -27,6 +27,9 @@ const CREATE_NAME = `E2E Admin Feature ${RUN_ID}`;
 const UPDATED_NAME = `E2E Admin Feature ${RUN_ID} updated`;
 const REJECTED_NAME = `E2E Admin Feature ${RUN_ID} rejected`;
 const BASE_REASON = `live ui e2e admin features ${RUN_ID}`;
+const EXECUTE_ADMIN_FEATURES_WRITE =
+  process.env.E2E_ADMIN_WRITE === "1" ||
+  process.env.E2E_ADMIN_FEATURES_WRITE === "1";
 
 test.describe.configure({ mode: "serial" });
 
@@ -308,6 +311,10 @@ test.describe("/admin/features + feature change requests live write workflow", (
   test("새 작성, 승인, 목록/상세 반영, 수정 승인/거절, 비활성화, 삭제 승인까지 실제 서비스에 반영된다", async ({
     page,
   }) => {
+    test.skip(
+      !EXECUTE_ADMIN_FEATURES_WRITE,
+      "E2E_ADMIN_FEATURES_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 feature write flow를 실행",
+    );
     test.setTimeout(FLOW_TIMEOUT);
 
     let addRequestId: string | null = null;

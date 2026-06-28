@@ -36,6 +36,8 @@ type AdminAuthEventResponse = {
 
 const T = { timeout: 15_000 } as const;
 const FLOW_TIMEOUT = 60_000;
+const EXECUTE_SETTINGS_WRITE =
+  process.env.E2E_ADMIN_WRITE === "1" || process.env.E2E_SETTINGS_WRITE === "1";
 
 test.describe.configure({ mode: "serial" });
 test.use({ screenshot: "off", trace: "off" });
@@ -88,10 +90,11 @@ async function expectSettingsReady(page: Page): Promise<void> {
 
 async function listPublicApiKeys(
   page: Page,
+  pageSize = 200,
 ): Promise<PublicApiKeyRecord[]> {
   const response = await browserFetch<PublicApiKeyListResponse>(
     page,
-    "/v1/admin/public-api-keys?page_size=100",
+    `/v1/admin/public-api-keys?page_size=${pageSize}`,
   );
   expect(response.status).toBe(200);
   return response.body?.data.items ?? [];
@@ -109,6 +112,18 @@ async function revokePublicApiKey(
   expect([200, 404]).toContain(response.status);
 }
 
+async function revokeActivePublicApiKeysByLabel(
+  page: Page,
+  label: string,
+): Promise<void> {
+  const items = await listPublicApiKeys(page);
+  for (const item of items) {
+    if (item.label === label && item.state === "active") {
+      await revokePublicApiKey(page, item.public_api_key_id);
+    }
+  }
+}
+
 test.describe("/admin/settings live write", () => {
   test("settings page loads key and audit tables", async ({ page }) => {
     await page.goto("/admin/settings");
@@ -120,6 +135,10 @@ test.describe("/admin/settings live write", () => {
   test("UI creates a public API key, API sees it, then UI/API see revoke", async ({
     page,
   }) => {
+    test.skip(
+      !EXECUTE_SETTINGS_WRITE,
+      "E2E_SETTINGS_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 public API key write flow를 실행",
+    );
     const runId = `live-settings-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -180,10 +199,15 @@ test.describe("/admin/settings live write", () => {
       if (createdId) {
         await revokePublicApiKey(page, createdId);
       }
+      await revokeActivePublicApiKeysByLabel(page, label);
     }
   });
 
   test("API-created auth audit event appears in Settings UI", async ({ page }) => {
+    test.skip(
+      !EXECUTE_SETTINGS_WRITE,
+      "E2E_SETTINGS_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 삭제 불가 audit event write flow를 실행",
+    );
     const requestId = `live-settings-audit-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2, 8)}`;

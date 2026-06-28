@@ -3014,6 +3014,43 @@
         "title": "BackupCommandPlan",
         "type": "object"
       },
+      "BackupDeleteData": {
+        "additionalProperties": false,
+        "description": "Deleted backup artifact snapshot.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "item": {
+            "$ref": "#/components/schemas/BackupRecord"
+          }
+        },
+        "required": [
+          "deleted",
+          "item"
+        ],
+        "title": "BackupDeleteData",
+        "type": "object"
+      },
+      "BackupDeleteResponse": {
+        "additionalProperties": false,
+        "description": "``DELETE /admin/backups/{backup_id}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BackupDeleteData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "BackupDeleteResponse",
+        "type": "object"
+      },
       "BackupDetailResponse": {
         "additionalProperties": false,
         "description": "``GET /admin/backups/{backup_id}`` response.",
@@ -15034,6 +15071,57 @@
       }
     },
     "/v1/admin/backups/{backup_id}": {
+      "delete": {
+        "description": "Delete one backup artifact directory.",
+        "operationId": "delete_backup_v1_admin_backups__backup_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Delete Backup",
+        "tags": [
+          "admin-backups"
+        ]
+      },
       "get": {
         "description": "Return one backup artifact.",
         "operationId": "get_backup_v1_admin_backups__backup_id__get",

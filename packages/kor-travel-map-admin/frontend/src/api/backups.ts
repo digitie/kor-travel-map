@@ -4,13 +4,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, postJson } from "./client";
+import { deleteJson, getJson, postJson } from "./client";
 import type { components } from "./types";
 
 type BackupSchemas = components["schemas"];
 
 export type BackupRecord = BackupSchemas["BackupRecord"];
 export type BackupListResponse = BackupSchemas["BackupListResponse"];
+export type BackupDeleteResponse = BackupSchemas["BackupDeleteResponse"];
 export type BackupOperationResponse = BackupSchemas["BackupOperationResponse"];
 export type BackupRunRequest = BackupSchemas["BackupRunRequest"];
 export type RestoreRunRequest = BackupSchemas["RestoreRunRequest"];
@@ -22,6 +23,12 @@ function fetchBackups(signal?: AbortSignal): Promise<BackupListResponse> {
 
 function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> {
   return postJson<BackupOperationResponse>("/v1/admin/backups", body);
+}
+
+function deleteBackup(backupId: string): Promise<BackupDeleteResponse> {
+  return deleteJson<BackupDeleteResponse>(
+    `/v1/admin/backups/${encodeURIComponent(backupId)}`,
+  );
 }
 
 function restoreBackup({
@@ -62,6 +69,16 @@ export function useCreateBackupMutation() {
   const queryClient = useQueryClient();
   return useMutation<BackupOperationResponse, Error, BackupRunRequest>({
     mutationFn: createBackup,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
+    },
+  });
+}
+
+export function useDeleteBackupMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<BackupDeleteResponse, Error, string>({
+    mutationFn: deleteBackup,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
     },

@@ -1,13 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — PR #564 사후 리뷰 반영
+
+- **진행 중**: #569/#574 반영 브랜치에서 admin live e2e 실제 write spec을 opt-in 게이트 뒤로 옮겼다.
+  feature write는 `E2E_ADMIN_FEATURES_WRITE=1` 또는 `E2E_ADMIN_WRITE=1`, Settings write/audit은
+  `E2E_SETTINGS_WRITE=1` 또는 `E2E_ADMIN_WRITE=1`일 때만 실행한다.
+- **진행 중**: scenario catalog의 13,651건 수치를 실행 커버리지 단언으로 쓰지 않도록 threshold 테스트와
+  문서 표현을 정리했다. 대표 route smoke는 catalog의 `live_smoke` 항목을 실제 네비게이션으로 돈다.
+- **진행 중**: backup artifact 정리용 `DELETE /v1/admin/backups/{backup_id}` 계약을 추가하고
+  `openapi.json`/frontend generated type/API hook을 갱신했다.
+- **다음 한 작업**: 로컬 API/frontend 타입·lint·대상 pytest를 통과시킨 뒤 PR을 올리고 CI green 후 머지한다.
+
 ## 2026-06-28 (codex) — Admin UI 전체 live e2e 시나리오 평가
 
 - **완료(catalog)**: Admin UI와 public reflection 표면을 24개 surface로 나누고, route smoke/write
   contract/admin feature matrix/features map/detail/curated/logs/reviews/change request/category cross 축을
-  합쳐 13,651건의 논리 live e2e 시나리오 catalog를 추가했다.
+  합쳐 13,651건의 논리 live e2e surface taxonomy catalog를 추가했다.
 - **완료(write 반영)**: `/admin/settings`에서 public API key 생성 → API list 확인 → UI revoke →
   API/UI revoked 확인, API auth audit event 생성 → Settings UI 확인 흐름을 새 serial live spec으로
-  추가했다. 기존 feature change request write 흐름과 함께 Admin UI↔API↔public detail 반영을 끝까지 본다.
+  추가했다. 2026-06-29 후속 반영 이후 이 실제 write spec은 opt-in일 때만 실행한다.
 - **완료(수정)**: n150 live fixture feature id를 현재 active id로 갱신했고, curated 후보 0건 상태에서
   empty-state row를 실제 후보로 오인하던 문제를 candidate row test id로 수정했다. Settings route/nav/문서
   누락도 보강했다.

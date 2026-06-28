@@ -2,14 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — PR #564 사후 리뷰 반영: live write 게이트와 catalog 정직성
+
+PR #564 상세 리뷰의 #569/#574 지적을 반영해 admin live e2e의 기본 실행 안전성과 catalog 표현을
+정리했다.
+
+- **write 게이트**: `admin-features-change-requests-write.live.spec.ts`는
+  `E2E_ADMIN_FEATURES_WRITE=1` 또는 `E2E_ADMIN_WRITE=1`, `settings-write.live.spec.ts`는
+  `E2E_SETTINGS_WRITE=1` 또는 `E2E_ADMIN_WRITE=1`일 때만 실제 mutation을 수행한다. Settings
+  public API key 테스트는 생성 응답 대기 실패 시나리오를 줄이기 위해 같은 label의 active key를
+  `finally`에서 한 번 더 revoke한다. 삭제 불가 auth audit event는 opt-in 밖에서는 생성하지 않는다.
+- **catalog 정직성**: 13,651건 count를 실행 커버리지처럼 단언하던 threshold 검증을 제거하고,
+  route smoke가 실제 catalog의 `live_smoke` 항목을 따라 돌도록 바꿨다. 문서 표현도
+  “열거된 surface taxonomy”로 정리했다.
+- **risk/API 계약**: backup artifact 정리를 위해 `DELETE /v1/admin/backups/{backup_id}` API 계약을
+  추가하고 OpenAPI/frontend generated type을 갱신했다. scenario catalog의 write API는 path substring이
+  아니라 명시 `method/path/risk` metadata로 destructive를 분류한다.
+
 ## 2026-06-28 (codex) — Admin UI 전체 live e2e 시나리오 catalog 보강
 
-Admin UI 전체 표면을 대상으로 10,000건 이상을 목표로 한 live e2e 시나리오 catalog와 실제 write 반영
-검증을 보강했다.
+Admin UI 전체 표면을 대상으로 live e2e 시나리오 catalog와 실제 write 반영 검증을 보강했다.
 
 - **시나리오 catalog**: home/public features/admin features/change requests/curated/issues/import jobs/
   providers/consistency/logs/reviews/update requests/POI targets/offline uploads/backups/dagster/settings/ETL
-  preview를 포함해 13,651건의 논리 시나리오를 산출한다.
+  preview를 포함해 13,651건의 논리 시나리오 taxonomy를 산출한다.
 - **실제 write 반영**: 기존 feature add/update/deactivate/delete 승인 흐름에 더해 Settings에서 public API
   key 생성·API 조회·UI revoke·API/UI revoked 확인, API로 생성한 auth audit event의 Settings UI 노출을
   추가했다.

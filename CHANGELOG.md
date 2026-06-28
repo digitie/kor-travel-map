@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin backup delete 계약과 live e2e 안전 게이트 (2026-06-29)
+
+- **ADDED**: `DELETE /v1/admin/backups/{backup_id}`를 추가해 backup artifact 디렉터리를
+  삭제할 수 있게 했다. 이 엔드포인트는 `admin_destructive_enabled` kill-switch를 따른다.
+- **CHANGED**: admin live e2e의 실제 write spec은 기본 full run에서 실행하지 않고,
+  `E2E_ADMIN_FEATURES_WRITE=1`, `E2E_SETTINGS_WRITE=1` 또는 `E2E_ADMIN_WRITE=1` opt-in이
+  있을 때만 실행한다.
+- **CHANGED**: admin live scenario catalog의 큰 count는 실행 커버리지가 아니라 surface taxonomy로
+  문서화하고, destructive risk는 HTTP method/path/risk metadata로 분류한다.
+
 ### Refreshable provider catalog와 MOIS detail runner (2026-06-28)
 
 - **CHANGED**: `/ops/providers` never-run 목록이 새 Feature 생성 여부(`is_feature_load`)가 아니라

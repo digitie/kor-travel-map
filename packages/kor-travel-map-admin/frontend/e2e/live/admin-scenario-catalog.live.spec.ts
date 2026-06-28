@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   ADMIN_SURFACES,
-  EXPECTED_MIN_ADMIN_LIVE_SCENARIOS,
+  type AdminLiveScenario,
   buildAdminLiveScenarioCatalog,
   summarizeAdminLiveScenarioCatalog,
 } from "./admin-scenario-catalog";
@@ -13,7 +13,9 @@ const READY = { timeout: 15_000 } as const;
 function smokeRoute(route: string): string | null {
   if (route.includes("{feature_id}")) {
     const featureId = F.FEATURE_IDS[0];
-    return featureId ? route.replace("{feature_id}", encodeURIComponent(featureId)) : null;
+    return featureId
+      ? route.replace("{feature_id}", encodeURIComponent(featureId))
+      : null;
   }
   if (route.includes("{curated_feature_id}")) {
     const curatedId = F.CURATED_IDS[0];
@@ -31,14 +33,26 @@ function smokeRoute(route: string): string | null {
   return route;
 }
 
+function firstLiveSmokeScenarioPerSurface(
+  scenarios: readonly AdminLiveScenario[],
+): AdminLiveScenario[] {
+  const seen = new Set<string>();
+  return scenarios.filter((scenario) => {
+    if (scenario.mode !== "live_smoke" || seen.has(scenario.surface)) {
+      return false;
+    }
+    seen.add(scenario.surface);
+    return true;
+  });
+}
+
 test.describe("admin live scenario catalog", () => {
-  test("catalog enumerates at least 10,000 admin UI/API scenarios", () => {
+  test("catalog taxonomy has route, API, reflection, and risk metadata", () => {
     const scenarios = buildAdminLiveScenarioCatalog();
     const summary = summarizeAdminLiveScenarioCatalog(scenarios);
+    const ids = new Set(scenarios.map((scenario) => scenario.id));
 
-    expect(summary.total).toBeGreaterThanOrEqual(
-      EXPECTED_MIN_ADMIN_LIVE_SCENARIOS,
-    );
+    expect(ids.size).toBe(scenarios.length);
     expect(summary.byRisk.read).toBeGreaterThan(0);
     expect(summary.byRisk.write).toBeGreaterThan(0);
     expect(summary.byRisk.destructive).toBeGreaterThan(0);
@@ -63,16 +77,30 @@ test.describe("admin live scenario catalog", () => {
     page,
   }) => {
     test.setTimeout(90_000);
+    const scenarios = firstLiveSmokeScenarioPerSurface(
+      buildAdminLiveScenarioCatalog(),
+    );
+    const headingBySurface = new Map(
+      ADMIN_SURFACES.map((surface) => [surface.id, surface.readyHeading]),
+    );
 
-    for (const surface of ADMIN_SURFACES) {
-      const route = smokeRoute(surface.route);
+    for (const scenario of scenarios) {
+      const route = smokeRoute(scenario.route);
       if (!route) {
+        continue;
+      }
+      const heading = headingBySurface.get(scenario.surface);
+      expect(heading, `${scenario.surface} should have a heading`).toBeDefined();
+      if (!heading) {
         continue;
       }
       await page.goto(route);
       await expect(
-        page.getByRole("heading", { level: 1, name: surface.readyHeading }),
-        `${surface.id} should render ${surface.readyHeading}`,
+        page.getByRole("heading", {
+          level: 1,
+          name: heading,
+        }),
+        `${scenario.id} should render ${scenario.surface}`,
       ).toBeVisible(READY);
     }
   });
