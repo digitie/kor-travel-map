@@ -2,6 +2,40 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Admin features/change requests UI live write e2e 추가
+
+`/admin/features`, `/admin/features/new`, `/admin/features/change-requests`를 하나의 실제
+read/write live UI 흐름으로 묶는 e2e 시나리오를 추가했다.
+
+- **시나리오**: change request 화면의 form/filter/table/detail 표면을 확인한 뒤, 새 feature 작성 화면에서
+  실제 add 요청을 만들고 승인한다. 이어 admin features 목록 검색/필터/preview/detail 링크, update 승인,
+  update 거절(실제 feature 미변경), deactivate, delete 승인, public detail 404까지 확인한다.
+- **실제 반영 검증**: 각 write 뒤 `/api/proxy`를 통한 admin/public API 조회로 DB 반영을 확인한다.
+  생성/수정은 public 상세에 노출되는지, 삭제 뒤에는 admin 상세가 `deleted`이고 public 상세가 404인지 확인한다.
+- **운영 검색 차이 반영**: live change request 목록 검색은 payload `name`/`request_id`가 아니라
+  `feature_id`/`reason` 중심임을 확인하고, spec 검색 기준을 운영 SQL 계약에 맞춰 조정했다.
+- **n150 검증**: 새 write live spec은 공식 Playwright Docker image + host network에서 2 passed.
+  기존 admin features read-only live 목록 suite도 333 passed. 실패 재시도에서 생긴 synthetic feature까지
+  점검해 `user_request::e2e_admin_features::live-*` 활성/미삭제 feature가 0건임을 확인했다.
+
+## 2026-06-28 (codex) — Backup/restore UI live e2e 실제 실행 경로 추가
+
+`/admin/backups`에 대해 read-only smoke가 아니라 실제 backup/restore 실행까지 갈 수 있는 live e2e
+시나리오를 추가했다.
+
+- **시나리오**: 실행 옵션 기본값, invalid backup id 오류 alert, backup command plan, 실제 cold backup
+  artifact 생성, 생성 artifact 기준 staging restore plan/execute, hot-swap plan, 선택적 swap command
+  execute를 직렬 spec으로 묶었다.
+- **가드**: 실제 backup/restore는 `E2E_BACKUP_RESTORE_EXECUTE=1`, swap command 실행은
+  `E2E_BACKUP_RESTORE_EXECUTE_SWAP=1`일 때만 동작한다. `swap 즉시 적용`은
+  `E2E_BACKUP_RESTORE_EXECUTE_SWAP_APPLY=1`일 때만 켠다.
+- **n150 검증**: n150 host는 Playwright bundled Chromium deps가 없어 공식 Playwright Docker image를
+  host network로 실행했다. 기본 run은 4 passed / 5 skipped, execute/apply run은 9 passed.
+- **n150 execute/apply**: API command enable + runner mount를 붙여 실제 backup artifact 생성,
+  staging DB/RustFS volume restore, swap `apply=true` 요청까지 UI live e2e로 통과시켰다. apply는
+  API 요청 응답 이후 helper 컨테이너가 map API/UI/Dagster를 restore env로 재기동하는 방식으로 분리했다.
+  apply 뒤 map 컨테이너 healthy, API/Dagster restore DB DSN 전환, 로그인 POST 200 + Set-Cookie를 확인했다.
+
 ## 2026-06-28 (codex) — Refreshable provider catalog와 MOIS detail runner 정렬
 
 `is_feature_load=False`인 PriceValue/WeatherValue/detail 보강 dataset이 Dagster runner로 실행 가능한데도

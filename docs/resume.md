@@ -1,5 +1,38 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Admin features/change requests UI live write e2e
+
+- **완료(e2e)**: `/admin/features/new` → `/admin/features/change-requests` → `/admin/features`를 잇는
+  실제 write live spec을 추가했다. add 요청 생성/승인, admin/public 상세 반영, 목록 검색/필터/preview/detail,
+  update 승인, update 거절 후 미변경 확인, deactivate, delete 승인, public detail 404까지 직렬로 검증한다.
+- **완료(서비스 반영)**: write 동작 뒤에는 UI assertion만 보지 않고 `/api/proxy` admin/public API를
+  브라우저 세션으로 조회해 실제 서비스 상태를 확인한다. 실패 시 `finally`에서 테스트 feature 삭제 승인을
+  시도하도록 cleanup도 넣었다.
+- **n150 실행**: 새 write live spec은 n150의 공식 Playwright Docker image에서 2 passed. admin features
+  read-only 목록 suite도 333 passed로 함께 확인했다.
+- **cleanup 확인**: n150 DB에서 `user_request::e2e_admin_features::live-*` synthetic feature를 점검해
+  모두 `deleted` 상태이며 활성/미삭제 feature가 0건임을 확인했다.
+- **다음 한 작업**: 이 branch의 backup/restore live e2e와 admin features/change requests live e2e 변경을
+  PR로 올리고, CI green 확인 뒤 머지한다.
+
+## 2026-06-28 (codex) — Backup/restore UI live e2e 실제 실행 시나리오
+
+- **완료(e2e)**: `/admin/backups` live spec을 추가해 실행 옵션 기본값, invalid backup id 오류,
+  backup command plan, 실제 backup execute, 생성 artifact 기준 restore plan/execute,
+  swap plan, 선택적 swap execute를 직렬 시나리오로 검증한다.
+- **안전장치**: 실제 backup/restore는 `E2E_BACKUP_RESTORE_EXECUTE=1`일 때만 돌고, swap command 실행은
+  별도 `E2E_BACKUP_RESTORE_EXECUTE_SWAP=1`일 때만 돈다. `swap 즉시 적용`은
+  `E2E_BACKUP_RESTORE_EXECUTE_SWAP_APPLY=1`일 때만 켠다.
+- **n150 실행**: n150 host에는 Playwright browser runtime deps가 없어 공식 Playwright Docker image
+  + host network로 실행했다. 기본 run은 4 passed / 5 skipped, execute/apply run은 9 passed.
+- **n150 execute/apply**: n150 API에 backup command enable과 runner mount를 붙여 UI에서 실제
+  backup artifact 생성, staging DB/RustFS volume restore, swap `apply=true` 요청까지 통과시켰다.
+  apply helper 재기동 뒤 map API/UI/Dagster 컨테이너가 healthy이고, API/Dagster DSN이 restore DB를
+  바라보는 것을 확인했다. 배포 후 로그인 POST도 200 + Set-Cookie로 확인했다.
+- **다음 한 작업**: n150에 임시로 붙인 backup/restore runner를 정식 배포 모델로 정리한다. 특히
+  docker-manager 배포에서 restore swap apply를 API 요청 생명주기 밖 helper로 실행하는 방식을 문서화하고,
+  정식 스크립트/compose 설정으로 승격할지 결정한다.
+
 ## 2026-06-28 (codex) — Refreshable provider catalog / MOIS detail runner
 
 - **완료(분류)**: `is_feature_load`는 새 `FeatureBundle` 생성 여부로 유지하고, Dagster feature update

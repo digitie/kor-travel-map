@@ -13,7 +13,8 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 /**
  * prod-target 가드 (#501): live config은 baseURL을 `E2E_BASE_URL`로 자유롭게
  * override할 수 있어, 실수로 prod(map.<domain>) 같은 비-로컬 호스트를 가리킨 채
- * 1,700+ 시나리오를 풀 병렬로 돌릴 위험이 있다(read-only라도 부하). resolve된
+ * 1,700+ 시나리오를 풀 병렬로 돌릴 위험이 있다. 대부분 read-only이며 일부
+ * plan-only POST는 host command를 실행하지 않지만, 그래도 resolve된
  * 호스트가 로컬이 아니면 `E2E_LIVE_ALLOW_PROD=1` 명시 opt-in 없이는 config 평가
  * 시점에 throw해 실행을 막는다.
  */
@@ -41,7 +42,7 @@ function isLocalHost(hostname: string): boolean {
   if (!isLocalHost(hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
       `[playwright.live] E2E_BASE_URL host "${hostname}"가 비-로컬(prod 등)입니다. ` +
-        `라이브 e2e는 read-only지만 실수 방지를 위해 비-로컬 대상은 명시 opt-in이 ` +
+        `라이브 e2e는 비파괴 시나리오지만 실수 방지를 위해 비-로컬 대상은 명시 opt-in이 ` +
         `필요합니다. 의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.`,
     );
   }
@@ -51,8 +52,9 @@ function isLocalHost(hostname: string): boolean {
  * Playwright e2e — **LIVE(비-mock) 시나리오 전용** config (`e2e/live/**`).
  *
  * 기본 config(playwright.config.ts)는 mock suite로 `e2e/live/**`를 testIgnore한다.
- * 본 config는 라이브 배포 대상(prod 등)에 실데이터로 1,700+ 비파괴 read-only
- * 시나리오를 돌린다. 데이터/뷰는 `e2e/live/_fixtures.ts`(prod 스냅샷)에서 온다 —
+ * 본 config는 라이브 배포 대상(prod 등)에 실데이터로 1,700+ 비파괴 시나리오를
+ * 돌린다. 기본은 read-only이고, 백업/업데이트 요청은 execute=false 또는 dry-run
+ * 같은 plan-only 경로만 허용한다. 데이터/뷰는 `e2e/live/_fixtures.ts`(prod 스냅샷)에서 온다 —
  * fixtures는 배포의 실 API에서 재생성 가능(원본 스크립트는 PR 설명 참조).
  *
  * 실행(로컬 기본 — http://127.0.0.1:12705):
