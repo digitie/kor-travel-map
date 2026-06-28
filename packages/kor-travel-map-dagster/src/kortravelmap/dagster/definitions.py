@@ -23,6 +23,7 @@ from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
+    datagokr_file_data_dataset_key_resource,
     kma_datagokr_client_resource,
     kma_weather_client_resource,
     kor_travel_map_client_resource,
@@ -95,7 +96,6 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "kma_weather_extra_points": "kma_weather_extra_points",
     "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
     "kma_mid_region_features": "kma_mid_region_features",
-    "datagokr_file_data_dataset_key": "datagokr_file_data_dataset_key",
     "strict_address": "dagster_address_validation",
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""
@@ -107,6 +107,7 @@ DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "reverse_geocoder": reverse_geocoder_resource,
     "kma_weather_client": kma_weather_client_resource,
     "kma_datagokr_client": kma_datagokr_client_resource,
+    "datagokr_file_data_dataset_key": datagokr_file_data_dataset_key_resource,
     **PROVIDER_RECORD_RESOURCE_DEFINITIONS,
 }
 """환경변수 기반 실제 구현을 제공하는 기본 Dagster resource."""

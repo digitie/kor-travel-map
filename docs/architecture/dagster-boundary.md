@@ -80,6 +80,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_weather_kma_short_forecast` | `kma_short_forecast` | `kma_short_forecast` | `features_weather` |
 | `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `kma_mid_forecast` | `features_weather` |
 | `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
+| `feature_place_datagokr_file_data` | `datagokr_file_data_records` + `datagokr_file_data_dataset_key` | `datagokr_*` fileData 4종 (`DATAGOKR_FILEDATA_DATASETS`) | `features_place` |
 | `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
 
 curated overlay asset(`curated_source_metadata` / `curated_feature_candidates` /
@@ -91,9 +92,11 @@ curated overlay asset(`curated_source_metadata` / `curated_feature_candidates` /
 현재 §10 정기 schedule이 없다(on-demand 전용 — Dagster UI/API 수동 실행 또는 feature
 update request로만 적재).
 
-`kortravelmap.providers.datagokr_file_data`는 설계상 직접 feature 적재 asset이
-없다(누락 아님). 그 fileData source는 `curated_source_rules`를 통해 curated
-overlay로 들어간다(`docs/curated-features.md`).
+`kortravelmap.providers.datagokr_file_data`는 공용
+`feature_place_datagokr_file_data` asset 하나를 사용한다. 정기 실행은
+`DATAGOKR_FILEDATA_DATASETS`의 4개 dataset별 schedule이 같은 asset에 서로 다른
+`datagokr_file_data_dataset_key`/`datagokr_file_data_records` resource config를 주입해
+월 1회 적재한다.
 
 공통 resource:
 

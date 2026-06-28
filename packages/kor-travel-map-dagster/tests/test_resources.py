@@ -193,6 +193,50 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     assert http.closed
 
 
+def test_datagokr_file_data_dataset_key_resource_prefers_run_config() -> None:
+    resource_fn = cast(
+        "Callable[[object], str]",
+        resources.datagokr_file_data_dataset_key_resource.resource_fn,
+    )
+
+    result = resource_fn(
+        build_init_resource_context(
+            config={"dataset_key": "datagokr_jeju_local_restaurants"}
+        )
+    )
+
+    assert result == "datagokr_jeju_local_restaurants"
+
+
+def test_datagokr_file_data_records_resource_uses_configured_dataset_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY", "service-key")
+    calls: list[str] = []
+    sentinel = [object()]
+
+    def _fake_fetch(
+        _settings: KorTravelMapSettings, *, dataset_key: str
+    ) -> list[object]:
+        calls.append(dataset_key)
+        return sentinel
+
+    monkeypatch.setattr(resources, "fetch_datagokr_file_data_records", _fake_fetch)
+    resource_def = resources.PROVIDER_RECORD_RESOURCE_DEFINITIONS[
+        "datagokr_file_data_records"
+    ]
+    resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
+
+    result = resource_fn(
+        build_init_resource_context(
+            config={"dataset_key": "datagokr_ansan_world_restaurants"}
+        )
+    )
+
+    assert result is sentinel
+    assert calls == ["datagokr_ansan_world_restaurants"]
+
+
 def test_provider_record_resource_env_mapping() -> None:
     specs = {spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS}
 

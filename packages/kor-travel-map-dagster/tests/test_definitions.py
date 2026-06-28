@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from dagster import DefaultScheduleStatus
+from dagster import DefaultScheduleStatus, build_schedule_context
+from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
 
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS, FEATURE_LOAD_RETRY_POLICY
 from kortravelmap.dagster.definitions import defs
@@ -197,6 +198,32 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert schedule.tags["kor_travel_map.schedule_scope"] == "system"
         assert schedule.tags["kor_travel_map.provider"] == spec.provider
         assert schedule.tags["kor_travel_map.dataset_key"] == spec.dataset_key
+
+
+def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:
+    specs = {
+        spec.dataset_key: spec
+        for spec in FEATURE_LOAD_SCHEDULE_SPECS
+        if spec.dataset_key in DATAGOKR_FILEDATA_DATASETS
+    }
+
+    assert set(specs) == set(DATAGOKR_FILEDATA_DATASETS)
+
+    for dataset_key, spec in specs.items():
+        schedule = defs.resolve_schedule_def(spec.schedule_name)
+        assert schedule.tags["kor_travel_map.dataset_key"] == dataset_key
+        tick = schedule.evaluate_tick(build_schedule_context())
+        assert len(tick.run_requests) == 1
+        assert tick.run_requests[0].run_config == {
+            "resources": {
+                "datagokr_file_data_dataset_key": {
+                    "config": {"dataset_key": dataset_key},
+                },
+                "datagokr_file_data_records": {
+                    "config": {"dataset_key": dataset_key},
+                },
+            }
+        }
 
 
 def test_mois_localdata_source_sync_schedule_registered() -> None:

@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — data.go.kr curated fileData 4종 월간 schedule 보강
+
+#568 지적에 따라 단일 기본 dataset만 돌던 fileData 월간 schedule을 dataset별로 분리했다.
+
+- **schedule**: `DATAGOKR_FILEDATA_DATASETS` 4개 dataset마다 별도 job/schedule spec을 만들고,
+  같은 `feature_place_datagokr_file_data` asset에 dataset_key run config를 주입한다.
+- **resource**: `datagokr_file_data_records`와 `datagokr_file_data_dataset_key` resource가 schedule
+  `run_config`의 dataset_key를 우선 사용하도록 바꿨다. config가 없으면 기존 settings 기본값을 유지한다.
+- **검증**: Dagster definitions/resource 테스트 22건, feature-update runner 테스트 7건, Dagster package
+  mypy를 통과했다.
+
 ## 2026-06-29 (codex) — Enrichment detail source audit-only 계약 명시
 
 #567 지적에 따라 enrichment 상세 비교 다이얼로그의 detail source 선택 의미를 정직하게 낮췄다.
