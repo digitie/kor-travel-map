@@ -36,7 +36,7 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 - **frontend 정본**: Next.js 16 + React 19 + `maplibre-gl` + in-repo VWorld style
   builder(`src/lib/vworld-style.ts`). maplibre-vworld-js dep는 #476(T-MAP-VWORLD-04)에서
   제거됨 — ADR-036(v0.1.3 핀)은 무효, 정본은 `docs/architecture/debug-ui-package.md`.
-  Windows Playwright e2e.
+  Playwright e2e는 n150 Linux 환경 우선, Windows 호스트 브라우저는 fallback.
 - **coverage gate**: ADR-032 단계 상향 일정(Sprint 4 기준 `fail_under=80`).
 - **provider 9단계 구현 순서**(ADR-034): 축제 → 날씨 → 유가 → 휴게소 →
   국립공원/트래킹 → 국가유산 → **MOIS 인허가** → 휴양림/수목원 → 박물관/미술관.
@@ -62,7 +62,8 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 - **provider 로컬 우선 조회 (ADR-044)**: 형제 `python-*-api`는
   `F:\dev\`(WSL `~/dev/`) 로컬 체크아웃을 `Glob`/`Read`로 **먼저** 조회, GitHub fetch는
   로컬에 없을 때만 fallback. 데이터 정합성 1차 책임은 각 provider 라이브러리.
-- **개발 환경**(Windows Git 원본 + WSL 실행 + Windows Playwright e2e): `docs/dev-environment.md`.
+- **개발 환경**(Linux/WSL git·gh·codegraph 단일 실행 + n150 우선 Playwright e2e):
+  `docs/dev-environment.md`.
 - **worktree + codegraph + MCP 등록**(`Feature` DTO / `make_feature_id` / provider 변환
   수정 전 `codegraph_explore`로 영향도 선평가): `docs/codegraph-worktree.md`. Claude Code용
   MCP 서버는 `.mcp.json`에 등록(`codegraph`/`filesystem`).

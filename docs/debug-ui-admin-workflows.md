@@ -1621,7 +1621,8 @@ PostGIS testcontainers에서 검증:
 
 ### 21.3 Frontend e2e
 
-Windows Playwright 표준 실행 모델을 따른다.
+Playwright e2e는 n150 Linux 환경에서 우선 실행한다. n150에서 실행할 수 없을 때만
+Windows 호스트 브라우저를 fallback으로 사용하며, 서버는 Linux/WSL/Docker에서 유지한다.
 
 필수 시나리오:
 

@@ -38,9 +38,9 @@ worktree.md`). 새 세션 진입 후 컨텍스트 확보 직전에 자기 worktr
 
 ```bash
 # 어떤 AI 에이전트인지에 따라:
-git.exe -C F:/dev/kor-travel-map-codex status       # ChatGPT Codex
-git.exe -C F:/dev/kor-travel-map-claude status      # Claude Code
-git.exe -C F:/dev/kor-travel-map-antigravity status # Google Antigravity 2.0
+cd /mnt/f/dev/kor-travel-map-codex && git status       # ChatGPT Codex
+cd /mnt/f/dev/kor-travel-map-claude && git status      # Claude Code
+cd /mnt/f/dev/kor-travel-map-antigravity && git status # Google Antigravity 2.0
 ```
 
 worktree가 아직 없으면 `docs/codegraph-worktree.md` §3 "최초 setup" 참조.
@@ -320,16 +320,16 @@ GitHub branch protection (운영자 수동 설정):
 6. `docs/journal.md` + `docs/resume.md` 업데이트 (+ ADR/CHANGELOG/OpenAPI
    해당 시)
 
-## 9. Windows Git vs WSL 실행 흐름
+## 9. Linux/WSL 단일 실행 흐름
 
-- 브랜치 전환, 커밋, push 같은 순수 Git 명령은 Windows NTFS worktree에서
-  Windows Git(`git.exe`)로 수행해도 된다.
-- 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·`gh`/GitHub CLI는 WSL에서
-  `/mnt/f/dev/kor-travel-map-<agent>`로 이동해 실행한다.
-- Playwright e2e만 Windows 호스트에서 실행한다. 서버는 WSL/Docker 기준이다.
+- 브랜치 전환, 커밋, push 같은 Git 명령도 Linux/WSL `git`으로 수행한다.
+- 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·`gh`/GitHub CLI·`codegraph`는
+  모두 WSL에서 `/mnt/f/dev/kor-travel-map-<agent>`로 이동해 실행한다.
+- Playwright e2e는 n150 Linux 환경에서 먼저 실행한다. n150에서 실행할 수 없을 때만
+  Windows 호스트 브라우저를 fallback으로 사용한다. 서버는 Linux/WSL/Docker 기준이다.
 - `data/`는 NTFS에 보관하고 git에는 넣지 않는다.
-- WSL ext4 mirror는 대량 I/O 성능·격리 필요 시의 선택 경로다. Git source of truth는
-  NTFS다.
+- WSL ext4 mirror는 대량 I/O 성능·격리 필요 시의 선택 경로다. 일반 개발은 NTFS
+  worktree의 WSL 마운트 경로(`/mnt/f/...`)에서 실행한다.
 
 상세 절차는 `docs/dev-environment.md`.
 
