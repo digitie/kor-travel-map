@@ -1,15 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #570 Linux/WSL 개발 실행 정책 문서 정합성 보정
+
+- **진행 중**: `docs/agent-guide.md`의 Windows `git.exe` 예시와 Windows Git 허용 문구를 제거하고,
+  Linux/WSL `git`·`gh`·`codegraph` 단일 실행 기준으로 §9를 재작성했다.
+- **진행 중**: `CLAUDE.md`와 `docs/debug-ui-admin-workflows.md`의 Windows Playwright 표준 문구를
+  n150 Linux 우선, Windows 호스트 브라우저 fallback 기준으로 고쳤다.
+- **다음 한 작업**: 문서 내 잔여 `git.exe`/Windows Playwright 표준 문구를 재검색하고 lint 성격의
+  whitespace check 후 PR을 올려 CI green 뒤 merge하고 #570을 닫는다.
+
 ## 2026-06-29 (codex) — #568 data.go.kr curated fileData 4종 schedule 보강
 
-- **진행 중**: data.go.kr curated fileData 4개 dataset마다 별도 Dagster monthly schedule을 만들고,
+- **완료**: data.go.kr curated fileData 4개 dataset마다 별도 Dagster monthly schedule을 만들고,
   각 schedule이 `datagokr_file_data_records`와 `datagokr_file_data_dataset_key` resource에 같은
   dataset_key를 주입하도록 했다.
-- **진행 중**: fileData resource는 schedule `run_config` dataset_key를 우선하고, config가 없으면 기존
+- **완료**: fileData resource는 schedule `run_config` dataset_key를 우선하고, config가 없으면 기존
   `KorTravelMapSettings.datagokr_file_data_dataset_key` 기본값을 유지한다.
 - **검증**: Dagster definitions/resource 테스트 22건, feature-update runner 테스트 7건, Dagster package
   mypy를 통과했다.
-- **다음 한 작업**: ruff/대상 pytest 최종 확인, 보안 감사 후 PR을 올려 CI green 뒤 merge하고 #568을 닫는다.
+- **완료(PR)**: PR #579를 squash merge했고 #568은 닫혔다.
 
 ## 2026-06-29 (codex) — #567 Enrichment detail source audit-only 계약 명시
 

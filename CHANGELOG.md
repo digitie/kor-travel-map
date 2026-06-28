@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### Agent 개발 환경 문서 정합성 보정 (2026-06-29)
+
+- **FIXED**: `docs/agent-guide.md`, `CLAUDE.md`, `docs/debug-ui-admin-workflows.md`에 남아 있던
+  Windows Git/Windows Playwright 표준 문구를 Linux/WSL git 단일 실행과 n150 Linux-first
+  Playwright 정책으로 정리했다.
+
 ### data.go.kr curated fileData 월간 schedule 보강 (2026-06-29)
 
 - **FIXED**: `DATAGOKR_FILEDATA_DATASETS` 4종 중 기본 dataset 1개만 월간 schedule로 적재되던

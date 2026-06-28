@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Linux/WSL 개발 실행 정책 문서 정합성 보정
+
+#570 지적에 따라 옛 Windows Git/Windows Playwright 표준 문구를 제거했다.
+
+- **agent-guide**: worktree 진입 예시를 WSL `/mnt/f/...` + Linux `git`으로 바꾸고, §9를
+  Linux/WSL 단일 실행 흐름으로 재작성했다.
+- **CLAUDE/debug UI 문서**: Playwright e2e 기준을 n150 Linux 우선, Windows 호스트 브라우저는
+  fallback으로 정리했다.
+
 ## 2026-06-29 (codex) — data.go.kr curated fileData 4종 월간 schedule 보강
 
 #568 지적에 따라 단일 기본 dataset만 돌던 fileData 월간 schedule을 dataset별로 분리했다.
