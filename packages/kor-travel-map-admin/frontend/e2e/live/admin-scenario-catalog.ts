@@ -1,7 +1,5 @@
 import * as F from "./_fixtures";
 
-export const EXPECTED_MIN_ADMIN_LIVE_SCENARIOS = 10_000;
-
 export type AdminLiveScenarioRisk =
   | "read"
   | "write"
@@ -13,12 +11,24 @@ export type AdminLiveScenarioMode =
   | "live_smoke"
   | "live_write";
 
+export type AdminWriteApiMethod = "POST" | "PATCH" | "PUT" | "DELETE";
+export type AdminWriteApiRisk = Extract<
+  AdminLiveScenarioRisk,
+  "write" | "destructive"
+>;
+
+export type AdminWriteApi = {
+  method: AdminWriteApiMethod;
+  path: string;
+  risk: AdminWriteApiRisk;
+};
+
 export type AdminSurface = {
   id: string;
   route: string;
   readyHeading: string;
   readApis: readonly string[];
-  writeApis: readonly string[];
+  writeApis: readonly AdminWriteApi[];
   reflectedSurfaces: readonly string[];
 };
 
@@ -57,6 +67,14 @@ const REVIEW_STATUSES = [
   "merged",
 ] as const;
 const CHANGE_ACTIONS = ["add", "update", "delete"] as const;
+
+function writeApi(
+  method: AdminWriteApiMethod,
+  path: string,
+  risk: AdminWriteApiRisk = "write",
+): AdminWriteApi {
+  return { method, path, risk };
+}
 
 export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
@@ -102,7 +120,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/features/{feature_id}",
       "/v1/features/{feature_id}",
     ],
-    writeApis: ["/v1/admin/features/{feature_id}/deactivate"],
+    writeApis: [
+      writeApi("POST", "/v1/admin/features/{feature_id}/deactivate"),
+      writeApi("PATCH", "/v1/admin/features/{feature_id}"),
+      writeApi("DELETE", "/v1/admin/features/{feature_id}", "destructive"),
+    ],
     reflectedSurfaces: ["/features", "/features/{feature_id}"],
   },
   {
@@ -111,9 +133,15 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Feature change requests",
     readApis: ["/v1/admin/features/change-requests"],
     writeApis: [
-      "/v1/admin/features",
-      "/v1/admin/features/change-requests/{request_id}/approve",
-      "/v1/admin/features/change-requests/{request_id}/reject",
+      writeApi("POST", "/v1/admin/features"),
+      writeApi(
+        "POST",
+        "/v1/admin/features/change-requests/{request_id}/approve",
+      ),
+      writeApi(
+        "POST",
+        "/v1/admin/features/change-requests/{request_id}/reject",
+      ),
     ],
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
   },
@@ -122,7 +150,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/admin/features/new",
     readyHeading: "New feature",
     readApis: ["/v1/features/nearby"],
-    writeApis: ["/v1/admin/features"],
+    writeApis: [writeApi("POST", "/v1/admin/features")],
     reflectedSurfaces: [
       "/admin/features/change-requests",
       "/admin/features",
@@ -140,9 +168,15 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/curated-themes",
     ],
     writeApis: [
-      "/v1/admin/curated-features/{curated_feature_id}",
-      "/v1/admin/curated-source-rules/{rule_id}",
-      "/v1/curated-features/{curated_feature_id}/pinvi-copy",
+      writeApi("POST", "/v1/admin/curated-features"),
+      writeApi("PATCH", "/v1/admin/curated-features/{curated_feature_id}"),
+      writeApi(
+        "DELETE",
+        "/v1/admin/curated-features/{curated_feature_id}",
+        "destructive",
+      ),
+      writeApi("PATCH", "/v1/admin/curated-source-rules/{rule_id}"),
+      writeApi("POST", "/v1/curated-features/{curated_feature_id}/pinvi-copy"),
     ],
     reflectedSurfaces: ["/admin/curated-features/{curated_feature_id}"],
   },
@@ -152,8 +186,12 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Curated feature detail",
     readApis: ["/v1/admin/curated-features/{curated_feature_id}"],
     writeApis: [
-      "/v1/admin/curated-features/{curated_feature_id}",
-      "/v1/admin/curated-features/{curated_feature_id}/place-search",
+      writeApi("PATCH", "/v1/admin/curated-features/{curated_feature_id}"),
+      writeApi(
+        "DELETE",
+        "/v1/admin/curated-features/{curated_feature_id}",
+        "destructive",
+      ),
     ],
     reflectedSurfaces: ["/admin/curated-features"],
   },
@@ -162,7 +200,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/admin/issues",
     readyHeading: "Issues",
     readApis: ["/v1/admin/issues", "/v1/admin/issues/{issue_id}"],
-    writeApis: ["/v1/admin/issues/{issue_id}"],
+    writeApis: [writeApi("PATCH", "/v1/admin/issues/{issue_id}")],
     reflectedSurfaces: ["/features/{feature_id}", "/ops/consistency"],
   },
   {
@@ -181,7 +219,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/import-jobs/{job_id}",
       "/v1/ops/import-jobs/{job_id}/events",
     ],
-    writeApis: ["/v1/ops/import-jobs/{job_id}/cancel"],
+    writeApis: [writeApi("POST", "/v1/ops/import-jobs/{job_id}/cancel")],
     reflectedSurfaces: ["/ops/import-jobs", "/ops/logs"],
   },
   {
@@ -194,8 +232,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/provider-refresh-policies",
     ],
     writeApis: [
-      "/v1/admin/provider-refresh-policies/{provider}/{dataset_key}",
-      "/v1/admin/feature-update-requests",
+      writeApi(
+        "PUT",
+        "/v1/admin/provider-refresh-policies/{provider}/{dataset_key}",
+      ),
+      writeApi("POST", "/v1/admin/feature-update-requests"),
     ],
     reflectedSurfaces: ["/admin/feature-update-requests", "/ops/logs"],
   },
@@ -228,7 +269,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/admin/dedup-reviews",
     readyHeading: "Dedup review",
     readApis: ["/v1/admin/dedup-reviews", "/v1/admin/dedup-reviews/{review_id}"],
-    writeApis: ["/v1/admin/dedup-reviews/{review_id}"],
+    writeApis: [writeApi("PATCH", "/v1/admin/dedup-reviews/{review_id}")],
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
   },
   {
@@ -239,7 +280,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/enrichment-reviews",
       "/v1/admin/enrichment-reviews/{review_id}",
     ],
-    writeApis: ["/v1/admin/enrichment-reviews/{review_id}"],
+    writeApis: [writeApi("PATCH", "/v1/admin/enrichment-reviews/{review_id}")],
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
   },
   {
@@ -248,9 +289,15 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Feature update requests",
     readApis: ["/v1/admin/feature-update-requests"],
     writeApis: [
-      "/v1/admin/feature-update-requests",
-      "/v1/admin/feature-update-requests/{request_id}/cancel",
-      "/v1/admin/feature-update-requests/{request_id}/run-now",
+      writeApi("POST", "/v1/admin/feature-update-requests"),
+      writeApi(
+        "POST",
+        "/v1/admin/feature-update-requests/{request_id}/cancel",
+      ),
+      writeApi(
+        "POST",
+        "/v1/admin/feature-update-requests/{request_id}/run-now",
+      ),
     ],
     reflectedSurfaces: ["/ops/import-jobs", "/ops/providers", "/features"],
   },
@@ -260,8 +307,14 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Feature update request",
     readApis: ["/v1/admin/feature-update-requests/{request_id}"],
     writeApis: [
-      "/v1/admin/feature-update-requests/{request_id}/cancel",
-      "/v1/admin/feature-update-requests/{request_id}/run-now",
+      writeApi(
+        "POST",
+        "/v1/admin/feature-update-requests/{request_id}/cancel",
+      ),
+      writeApi(
+        "POST",
+        "/v1/admin/feature-update-requests/{request_id}/run-now",
+      ),
     ],
     reflectedSurfaces: ["/admin/feature-update-requests", "/ops/import-jobs"],
   },
@@ -271,8 +324,16 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "POI cache targets",
     readApis: ["/v1/admin/poi-cache-targets", "/v1/features/nearby/by-target"],
     writeApis: [
-      "/v1/admin/poi-cache-targets/{external_system}/{target_key}",
-      "/v1/admin/feature-update-requests",
+      writeApi(
+        "PUT",
+        "/v1/admin/poi-cache-targets/{external_system}/{target_key}",
+      ),
+      writeApi(
+        "DELETE",
+        "/v1/admin/poi-cache-targets/{external_system}/{target_key}",
+        "destructive",
+      ),
+      writeApi("POST", "/v1/admin/feature-update-requests"),
     ],
     reflectedSurfaces: ["/features", "/admin/feature-update-requests"],
   },
@@ -286,10 +347,14 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/offline-uploads/{upload_id}/validation",
     ],
     writeApis: [
-      "/v1/admin/offline-uploads",
-      "/v1/admin/offline-uploads/{upload_id}/validate",
-      "/v1/admin/offline-uploads/{upload_id}/load",
-      "/v1/admin/offline-uploads/{upload_id}",
+      writeApi("POST", "/v1/admin/offline-uploads"),
+      writeApi("POST", "/v1/admin/offline-uploads/{upload_id}/validate"),
+      writeApi("POST", "/v1/admin/offline-uploads/{upload_id}/load"),
+      writeApi(
+        "DELETE",
+        "/v1/admin/offline-uploads/{upload_id}",
+        "destructive",
+      ),
     ],
     reflectedSurfaces: ["/ops/import-jobs", "/ops/logs"],
   },
@@ -299,10 +364,10 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Backups",
     readApis: ["/v1/admin/backups", "/v1/admin/backups/{backup_id}"],
     writeApis: [
-      "/v1/admin/backups",
-      "/v1/admin/restore/{backup_id}",
-      "/v1/admin/restore/{backup_id}/swap",
-      "/v1/admin/backups/{backup_id}",
+      writeApi("POST", "/v1/admin/backups"),
+      writeApi("DELETE", "/v1/admin/backups/{backup_id}", "destructive"),
+      writeApi("POST", "/v1/admin/restore/{backup_id}", "destructive"),
+      writeApi("POST", "/v1/admin/restore/{backup_id}/swap", "destructive"),
     ],
     reflectedSurfaces: ["/ops/logs", "/"],
   },
@@ -314,7 +379,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/dagster/summary",
       "/v1/ops/dagster/runs/{run_id}",
     ],
-    writeApis: ["/v1/ops/dagster/nux-seen"],
+    writeApis: [writeApi("POST", "/v1/ops/dagster/nux-seen")],
     reflectedSurfaces: ["/ops/import-jobs", "/ops/providers"],
   },
   {
@@ -323,9 +388,9 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Settings",
     readApis: ["/v1/admin/public-api-keys", "/v1/admin/auth-events"],
     writeApis: [
-      "/v1/admin/public-api-keys",
-      "/v1/admin/public-api-keys/{public_api_key_id}/revoke",
-      "/v1/admin/auth-events",
+      writeApi("POST", "/v1/admin/public-api-keys"),
+      writeApi("POST", "/v1/admin/public-api-keys/{public_api_key_id}/revoke"),
+      writeApi("POST", "/v1/admin/auth-events"),
     ],
     reflectedSurfaces: ["/admin/settings", "/ops/logs"],
   },
@@ -382,16 +447,14 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
     }
     for (const writeApi of surface.writeApis) {
       addScenario(scenarios, {
-        apiExpectation: writeApi,
-        idParts: ["write-contract", surface.id, writeApi],
+        apiExpectation: `${writeApi.method} ${writeApi.path}`,
+        idParts: ["write-contract", surface.id, writeApi.method, writeApi.path],
         mode: "catalog",
         reflectedSurface: surface.reflectedSurfaces[0] ?? surface.route,
-        risk: writeApi.includes("delete") || writeApi.includes("restore")
-          ? "destructive"
-          : "write",
+        risk: writeApi.risk,
         route: surface.route,
         surface: surface.id,
-        uiAction: `write action is reflected after ${writeApi}`,
+        uiAction: `write action is reflected after ${writeApi.method} ${writeApi.path}`,
       });
     }
   }

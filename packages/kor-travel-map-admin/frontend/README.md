@@ -178,10 +178,12 @@ npm run e2e
 ```
 
 baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:12705`).
-live config는 `admin-scenario-catalog.ts`로 10,000개 이상의 admin UI/API 논리 케이스를
-생성해 route/API/write 반영 표면을 점검하고, 일부 spec은 실제 생성·승인·폐기 같은
-write flow까지 수행한다. 백업/restore처럼 blast radius가 큰 실행은 별도
-`E2E_BACKUP_RESTORE_EXECUTE*` opt-in이 필요하다. 자세한 실행 모델은
+live config는 `admin-scenario-catalog.ts`로 admin UI/API route·write·교차 반영 조합을
+열거하지만, 이 수치는 실행 커버리지가 아니라 surface taxonomy다. 대표 route smoke는
+catalog의 `live_smoke` 항목을 실제 네비게이션으로 돌고, 실제 생성·승인·폐기 같은
+mutation spec은 `E2E_ADMIN_FEATURES_WRITE=1`, `E2E_SETTINGS_WRITE=1` 또는 공통
+`E2E_ADMIN_WRITE=1` opt-in이 있을 때만 실행한다. 백업/restore처럼 blast radius가 큰
+실행은 별도 `E2E_BACKUP_RESTORE_EXECUTE*` opt-in이 필요하다. 자세한 실행 모델은
 `playwright.live.config.ts` 상단 주석 참고.
 
 Windows localhost relay가 stale listener 정리 뒤 바로 복구되지 않으면 WSL IP와 같은

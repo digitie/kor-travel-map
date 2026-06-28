@@ -13,7 +13,7 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 /**
  * prod-target 가드 (#501): live config은 baseURL을 `E2E_BASE_URL`로 자유롭게
  * override할 수 있어, 실수로 prod(map.<domain>) 같은 비-로컬 호스트를 가리킨 채
- * 10,000+ admin UI/API 시나리오 카탈로그와 실제 write flow를 돌릴 위험이 있다.
+ * admin UI/API 시나리오 taxonomy와 opt-in 실제 write flow를 돌릴 위험이 있다.
  * 비-로컬 대상은 의도 확인을 위해 `E2E_LIVE_ALLOW_PROD=1` 명시 opt-in 없이는
  * config 평가 시점에 throw해 실행을 막는다.
  */
@@ -41,7 +41,7 @@ function isLocalHost(hostname: string): boolean {
   if (!isLocalHost(hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
       `[playwright.live] E2E_BASE_URL host "${hostname}"가 비-로컬(prod 등)입니다. ` +
-        `라이브 e2e는 비파괴 시나리오지만 실수 방지를 위해 비-로컬 대상은 명시 opt-in이 ` +
+        `라이브 e2e는 실데이터를 읽고 일부 spec은 별도 opt-in 시 write도 수행하므로 비-로컬 대상은 명시 opt-in이 ` +
         `필요합니다. 의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.`,
     );
   }
@@ -52,10 +52,13 @@ function isLocalHost(hostname: string): boolean {
  *
  * 기본 config(playwright.config.ts)는 mock suite로 `e2e/live/**`를 testIgnore한다.
  * 본 config는 라이브 배포 대상(prod 등)에 실데이터로 admin UI/API 시나리오를
- * 돌린다. `admin-scenario-catalog.ts`는 10,000+ 논리 케이스를 생성하고,
- * write spec은 생성/승인/폐기처럼 되돌릴 수 있는 실제 mutation을 포함한다.
- * 백업/restore처럼 blast radius가 큰 실행은 별도 `E2E_BACKUP_RESTORE_EXECUTE*`
- * opt-in으로 제한한다. 데이터/뷰는 `e2e/live/_fixtures.ts`(prod 스냅샷)에서 온다 —
+ * 돌린다. `admin-scenario-catalog.ts`는 실행 커버리지 수치가 아니라 route/API/
+ * reflection 조합을 열거하는 surface taxonomy이고, 대표 route smoke만 이 catalog의
+ * live_smoke 항목을 실제 네비게이션으로 돈다. 실제 mutation spec은
+ * `E2E_ADMIN_FEATURES_WRITE=1`, `E2E_SETTINGS_WRITE=1` 또는 공통
+ * `E2E_ADMIN_WRITE=1` opt-in이 있을 때만 실행한다. 백업/restore처럼 blast radius가
+ * 큰 실행은 별도 `E2E_BACKUP_RESTORE_EXECUTE*` opt-in으로 제한한다. 데이터/뷰는
+ * `e2e/live/_fixtures.ts`(prod 스냅샷)에서 온다 —
  * fixtures는 배포의 실 API에서 재생성 가능(원본 스크립트는 PR 설명 참조).
  *
  * 실행(로컬 기본 — http://127.0.0.1:12705):

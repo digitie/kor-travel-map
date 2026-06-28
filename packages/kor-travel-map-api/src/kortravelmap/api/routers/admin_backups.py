@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from kortravelmap.infra.backup import (
     BackupArtifact,
     BackupArtifactError,
@@ -25,6 +26,7 @@ from kortravelmap.infra.backup import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from kortravelmap.api.auth import require_admin_destructive_enabled
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -33,6 +35,7 @@ __all__ = [
     "restore_router",
     "BackupListResponse",
     "BackupDetailResponse",
+    "BackupDeleteResponse",
     "BackupOperationResponse",
 ]
 
@@ -94,6 +97,24 @@ class BackupListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: BackupListData
+    meta: Meta
+
+
+class BackupDeleteData(BaseModel):
+    """Deleted backup artifact snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deleted: bool
+    item: BackupRecord
+
+
+class BackupDeleteResponse(BaseModel):
+    """``DELETE /admin/backups/{backup_id}`` response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: BackupDeleteData
     meta: Meta
 
 
@@ -250,6 +271,17 @@ def _command_disabled() -> HTTPException:
     )
 
 
+def _delete_failed(exc: OSError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "code": "BACKUP_DELETE_FAILED",
+            "message": "backup artifact 삭제에 실패했습니다.",
+            "details": {"error": str(exc)},
+        },
+    )
+
+
 def _script_path(settings: ApiSettings, script: Path) -> Path:
     if script.is_absolute():
         return script
@@ -338,6 +370,34 @@ async def get_backup(request: Request, backup_id: str) -> BackupDetailResponse:
         raise _backup_error(exc) from exc
     return BackupDetailResponse(
         data=_record(artifact),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@router.delete(
+    "/{backup_id}",
+    response_model=BackupDeleteResponse,
+    dependencies=[Depends(require_admin_destructive_enabled)],
+)
+async def delete_backup(request: Request, backup_id: str) -> BackupDeleteResponse:
+    """Delete one backup artifact directory."""
+    started_at = perf_counter()
+    settings = _settings(request)
+    try:
+        safe_id = validate_backup_id(backup_id)
+    except BackupArtifactError as exc:
+        raise _invalid_backup_id(exc) from exc
+    try:
+        artifact = backup_artifact(settings.backup_root, safe_id)
+    except BackupArtifactError as exc:
+        raise _backup_error(exc) from exc
+    deleted_item = _record(artifact)
+    try:
+        shutil.rmtree(artifact.path)
+    except OSError as exc:
+        raise _delete_failed(exc) from exc
+    return BackupDeleteResponse(
+        data=BackupDeleteData(deleted=True, item=deleted_item),
         meta=make_meta(started_at=started_at),
     )
 

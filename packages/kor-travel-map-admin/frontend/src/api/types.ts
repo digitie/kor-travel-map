@@ -86,7 +86,11 @@ export interface paths {
         get: operations["get_backup_v1_admin_backups__backup_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Backup
+         * @description Delete one backup artifact directory.
+         */
+        delete: operations["delete_backup_v1_admin_backups__backup_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2728,6 +2732,23 @@ export interface components {
             env: {
                 [key: string]: string;
             };
+        };
+        /**
+         * BackupDeleteData
+         * @description Deleted backup artifact snapshot.
+         */
+        BackupDeleteData: {
+            /** Deleted */
+            deleted: boolean;
+            item: components["schemas"]["BackupRecord"];
+        };
+        /**
+         * BackupDeleteResponse
+         * @description ``DELETE /admin/backups/{backup_id}`` response.
+         */
+        BackupDeleteResponse: {
+            data: components["schemas"]["BackupDeleteData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * BackupDetailResponse
@@ -7158,6 +7179,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    delete_backup_v1_admin_backups__backup_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupDeleteResponse"];
                 };
             };
             /** @description Validation Error */
