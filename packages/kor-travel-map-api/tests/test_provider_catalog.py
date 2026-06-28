@@ -97,6 +97,13 @@ def test_feature_load_entries_are_subset() -> None:
     fl_keys = {(e.provider, e.dataset_key) for e in entries}
     assert ("python-mois-api", "mois_license_features_bulk") in fl_keys
     assert ("python-opinet-api", "opinet_gas_station_prices") not in fl_keys
+    # AirKorea는 station 단독 dataset이 아니라 air_quality asset이 측정소 Feature와
+    # WeatherValue를 함께 적재한다.
+    assert ("python-airkorea-api", "airkorea_stations") not in fl_keys
+    assert ("python-airkorea-api", "airkorea_air_quality") in fl_keys
+    # T-223b curated source도 feature update runner가 직접 실행할 수 있어야 한다.
+    assert ("data.go.kr-standard", "standard_special_streets") in fl_keys
+    assert ("python-datagokr-api", "datagokr_seoul_bookstores") in fl_keys
     # 정렬 보장.
     assert entries == sorted(entries, key=lambda e: (e.provider, e.dataset_key))
 

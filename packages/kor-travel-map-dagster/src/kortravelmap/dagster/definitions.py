@@ -59,6 +59,9 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "standard_museums",
     "standard_tourist_attractions",
     "standard_parking_lots",
+    "standard_special_streets",
+    "datagokr_file_data_records",
+    "datagokr_file_data_dataset_key",
     "khoa_beaches",
     "krairport_airports",
     "airkorea_stations",
@@ -92,6 +95,7 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "kma_weather_extra_points": "kma_weather_extra_points",
     "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
     "kma_mid_region_features": "kma_mid_region_features",
+    "datagokr_file_data_dataset_key": "datagokr_file_data_dataset_key",
     "strict_address": "dagster_address_validation",
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""

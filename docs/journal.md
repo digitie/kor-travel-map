@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Feature update AirKorea/OpiNet 및 누락 Dagster 자산 보강
+
+Feature update requests에서 AirKorea/OpiNet 요청이 실패하던 원인을 수정하고,
+카탈로그상 feature load 대상이지만 Dagster runner가 받지 못하던 provider/dataset 불일치를 정리했다.
+
+- **AirKorea**: provider catalog의 feature-load 대상을 standalone `airkorea_stations`가 아니라
+  실제 Dagster asset인 `airkorea_air_quality`로 정렬했다. 기존 `airkorea_stations` 요청도 같은
+  asset으로 실행되도록 runner alias를 남겼다.
+- **OpiNet**: Dagster feature update 실행 전에 `KOR_TRAVEL_MAP_OPINET_API_KEY` 누락을 명확한
+  `ProviderCredentialMissing`으로 실패시키도록 해 provider client 내부 인증 오류 대신 운영자가
+  바로 이해할 수 있는 메시지를 남긴다.
+- **누락 Dagster**: MOIS history/closed, `standard_special_streets`, data.go.kr curated fileData 4종을
+  feature update runner가 실행할 수 있게 했다. 지역특화거리와 fileData 공용 Dagster asset/resource/
+  schedule도 추가했다.
+- **회귀 방지**: `catalog_feature_load_entries()`의 모든 항목이 runner spec에 포함되는지 확인하는
+  계약 테스트를 추가했다.
+- **검증**: 카탈로그/runner drift 점검에서 missing 0건 확인, Dagster 테스트 199건 통과, API provider
+  router/catalog 테스트 19건 통과, 전체 `ruff check .`, 대상 mypy 통과.
+
 ## 2026-06-28 (codex) — Linux/WSL 개발 실행 정책 정리
 
 개발 실행 위치 정책을 Windows Git 예외 기반에서 Linux/WSL 단일 실행 원칙으로 정리했다.
