@@ -15,6 +15,7 @@ from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_PROVIDER_NAME,
 )
 from kortravelmap.providers.mois import (
+    DATASET_KEY_BULK,
     DATASET_KEY_CLOSED,
     DATASET_KEY_DETAIL,
     DATASET_KEY_HISTORY,
@@ -172,7 +173,7 @@ def test_default_runner_accepts_airkorea_stations_alias() -> None:
     assert spec.asset_key == "feature_weather_airkorea_air_quality"
 
 
-def test_default_runner_accepts_mois_non_bulk_datasets() -> None:
+def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -184,11 +185,16 @@ def test_default_runner_accepts_mois_non_bulk_datasets() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
     )
 
+    bulk_spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+        _scope(provider=MOIS_PROVIDER_NAME, dataset_key=DATASET_KEY_BULK)
+    )
+    assert bulk_spec.asset_key == "feature_place_mois_licenses"
+
     for dataset_key in (DATASET_KEY_HISTORY, DATASET_KEY_CLOSED, DATASET_KEY_DETAIL):
-        spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
-            _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
-        )
-        assert spec.asset_key == "feature_place_mois_licenses"
+        with pytest.raises(RuntimeError, match="지원하지 않는 provider/dataset"):
+            runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+                _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
+            )
 
 
 def test_default_runner_accepts_datagokr_file_data_datasets() -> None:

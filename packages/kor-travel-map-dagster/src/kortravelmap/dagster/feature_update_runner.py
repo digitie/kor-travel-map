@@ -64,9 +64,6 @@ from kortravelmap.providers.krheritage import DATASET_KEY_HERITAGE as KRHERITAGE
 from kortravelmap.providers.krheritage import PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME
 from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PROVIDER_NAME
 from kortravelmap.providers.mois import DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY
-from kortravelmap.providers.mois import DATASET_KEY_CLOSED as MOIS_CLOSED_DATASET_KEY
-from kortravelmap.providers.mois import DATASET_KEY_DETAIL as MOIS_DETAIL_DATASET_KEY
-from kortravelmap.providers.mois import DATASET_KEY_HISTORY as MOIS_HISTORY_DATASET_KEY
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.providers.opinet import (
     OPINET_PRICE_DATASET_KEY,
@@ -643,14 +640,7 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
     ),
     FeatureUpdateRunnerSpec(
         provider=MOIS_PROVIDER_NAME,
-        dataset_keys=frozenset(
-            {
-                MOIS_BULK_DATASET_KEY,
-                MOIS_HISTORY_DATASET_KEY,
-                MOIS_CLOSED_DATASET_KEY,
-                MOIS_DETAIL_DATASET_KEY,
-            }
-        ),
+        dataset_keys=frozenset({MOIS_BULK_DATASET_KEY}),
         run=run_feature_place_mois_licenses,
         resources=_mois_resources,
         asset_key="feature_place_mois_licenses",
