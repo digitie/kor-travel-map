@@ -8085,7 +8085,6 @@ export interface operations {
                 q?: string | null;
                 page_size?: number;
                 page?: number;
-                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -8244,7 +8243,6 @@ export interface operations {
                 q?: string | null;
                 page_size?: number;
                 page?: number;
-                cursor?: string | null;
             };
             header?: never;
             path?: never;

@@ -27,7 +27,6 @@ export type DedupReviewDetailResponse =
 export type DedupReviewListParams = Omit<
   DedupReviewListQuery,
   | "category"
-  | "cursor"
   | "dataset_key"
   | "kind"
   | "provider"
@@ -35,7 +34,6 @@ export type DedupReviewListParams = Omit<
   | "status"
 > & {
   category?: string[];
-  cursor?: string;
   dataset_key?: string[];
   kind?: string[];
   provider?: string[];
@@ -63,7 +61,6 @@ function fetchDedupReviews(
       q: params.q,
       page_size: params.page_size,
       page: params.page,
-      cursor: params.cursor,
     }),
     { signal },
   );

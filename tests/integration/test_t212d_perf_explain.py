@@ -365,32 +365,28 @@ async def _walk_dedup_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
-    cursor: str | None = None
-    for _ in range(100):
+    for page_number in range(1, 101):
         page = await admin_feature_repo.list_dedup_reviews(
-            session, page_size=page_size, cursor=cursor
+            session, page_size=page_size, page=page_number
         )
         seen.extend(item.review_id for item in page.items)
-        if page.next_cursor is None:
+        if len(seen) >= page.total_count or not page.items:
             return seen
-        cursor = page.next_cursor
-    raise AssertionError("dedup review cursor did not terminate")
+    raise AssertionError("dedup review page walk did not terminate")
 
 
 async def _walk_enrichment_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
-    cursor: str | None = None
-    for _ in range(100):
+    for page_number in range(1, 101):
         page = await admin_feature_repo.list_enrichment_reviews(
-            session, page_size=page_size, cursor=cursor
+            session, page_size=page_size, page=page_number
         )
         seen.extend(item.review_id for item in page.items)
-        if page.next_cursor is None:
+        if len(seen) >= page.total_count or not page.items:
             return seen
-        cursor = page.next_cursor
-    raise AssertionError("enrichment review cursor did not terminate")
+    raise AssertionError("enrichment review page walk did not terminate")
 
 
 async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
@@ -543,7 +539,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
     _assert_no_seq_scan_on(admin_features_by_name, "features")
 
 
-async def test_t212d_ops_and_review_lists_use_keyset_indexes(
+async def test_t212d_ops_and_review_lists_use_expected_indexes(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_live_like_perf_data(migrated_session)
@@ -645,9 +641,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "cursor_score": None,
-            "cursor_review_id": None,
-            "limit_plus_one": 51,
+            "limit": 51,
             "offset_rows": 0,
         },
     )
@@ -674,9 +668,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "cursor_score": None,
-            "cursor_review_id": None,
-            "limit_plus_one": 51,
+            "limit": 51,
             "offset_rows": 0,
         },
     )
@@ -693,9 +685,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "cursor_score": None,
-            "cursor_review_id": None,
-            "limit_plus_one": 51,
+            "limit": 51,
             "offset_rows": 0,
         },
     )
@@ -714,9 +704,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "cursor_score": None,
-            "cursor_review_id": None,
-            "limit_plus_one": 51,
+            "limit": 51,
             "offset_rows": 0,
         },
     )
@@ -803,7 +791,7 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
     _assert_uses_index(f8, "pk_features")
 
 
-async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
+async def test_t212d_page_queries_keep_uuid_tie_breakers(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_live_like_perf_data(migrated_session)
@@ -812,9 +800,8 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
         migrated_session, page_size=5
     )
     assert len(dedup_page.items) == 5
-    assert dedup_page.next_cursor is not None
     dedup_next = await admin_feature_repo.list_dedup_reviews(
-        migrated_session, page_size=5, cursor=dedup_page.next_cursor
+        migrated_session, page_size=5, page=2
     )
     assert {item.review_id for item in dedup_page.items}.isdisjoint(
         {item.review_id for item in dedup_next.items}
@@ -824,9 +811,8 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
         migrated_session, page_size=5
     )
     assert len(enrichment_page.items) == 5
-    assert enrichment_page.next_cursor is not None
     enrichment_next = await admin_feature_repo.list_enrichment_reviews(
-        migrated_session, page_size=5, cursor=enrichment_page.next_cursor
+        migrated_session, page_size=5, page=2
     )
     assert {item.review_id for item in enrichment_page.items}.isdisjoint(
         {item.review_id for item in enrichment_next.items}
@@ -867,9 +853,3 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
     )
     assert enrichment_seen == enrichment_expected
     assert len(enrichment_seen) == len(set(enrichment_seen))
-
-    with pytest.raises(ValueError, match="invalid dedup review cursor"):
-        await admin_feature_repo.list_dedup_reviews(
-            migrated_session,
-            cursor="eyJyZXZpZXdfa2V5Ijoibm90LXV1aWQiLCJ0b3RhbF9zY29yZSI6IjgwIn0",
-        )

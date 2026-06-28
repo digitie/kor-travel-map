@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Dedup/Enrichment review page-only 계약 정리
+
+#571 지적에 따라 review 목록의 이중 pagination 계약을 제거했다.
+
+- **API 계약**: `GET /v1/admin/dedup-reviews`와 `GET /v1/admin/enrichment-reviews`의
+  `cursor` query parameter를 제거하고 `page`/`page_size`/`meta.page.total` 기반 계약만 남겼다.
+- **repository/UI**: dedup/enrichment review repository의 cursor decode/encode 경로와 `next_cursor`
+  계산을 삭제하고, admin UI의 죽은 `nextCursor` fallback도 total 기반 page 이동으로 단순화했다.
+- **회귀 가드**: 같은 score에서 `review_id DESC` tie-breaker가 page 순회에서도 빠짐없이 유지되는지
+  integration/EXPLAIN 테스트를 갱신했다.
+
 ## 2026-06-29 (codex) — Linux/WSL 개발 실행 정책 문서 정합성 보정
 
 #570 지적에 따라 옛 Windows Git/Windows Playwright 표준 문구를 제거했다.

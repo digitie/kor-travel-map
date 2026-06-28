@@ -373,15 +373,13 @@ export function EnrichmentReviewClient() {
   const detail = useEnrichmentReviewDetail(detailReviewId);
   const decision = useEnrichmentDecisionMutation();
 
-  const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
   const items = reviews.data?.data.items ?? [];
   const totalItems = reviews.data?.meta.page?.total ?? null;
   const totalPages =
     typeof totalItems === "number"
       ? Math.max(1, Math.ceil(totalItems / pageSize))
       : null;
-  const hasNextPage =
-    totalPages === null ? Boolean(nextCursor) : pageIndex < totalPages;
+  const hasNextPage = totalPages !== null && pageIndex < totalPages;
   const hasPreviousPage = pageIndex > 1;
 
   const resetPage = () => {
@@ -512,7 +510,7 @@ export function EnrichmentReviewClient() {
       {
         accessorKey: "name_score",
         header: "score",
-        // keyset cursor 목록(next_cursor) — 서버 정렬 유지, client 정렬 끔(#502).
+        // 서버 page 목록 — 서버 정렬 유지, client 정렬 끔(#502).
         enableSorting: false,
         cell: ({ row }) => (
           <div className="space-y-1 font-mono text-xs">

@@ -199,9 +199,9 @@ def test_list_dedup_reviews_passes_filters(
         assert kwargs["min_score"] == 80
         assert kwargs["page_size"] == 25
         assert kwargs["page"] == 2
+        assert "cursor" not in kwargs
         return DedupReviewPage(
             items=(_review_row(),),
-            next_cursor="next",
             total_count=37,
         )
 
@@ -223,7 +223,7 @@ def test_list_dedup_reviews_passes_filters(
     assert body["data"]["items"][0]["review_id"] == "review-1"
     assert body["meta"]["page"] == {
         "page_size": 25,
-        "next_cursor": "next",
+        "next_cursor": None,
         "total": 37,
     }
 

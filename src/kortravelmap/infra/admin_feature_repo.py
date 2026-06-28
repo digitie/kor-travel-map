@@ -12,9 +12,8 @@ import unicodedata
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final, Literal
-from uuid import UUID
 
 from sqlalchemy import text
 
@@ -392,7 +391,6 @@ class DedupReviewRow:
     reviewed_by: str | None
     reviewed_at: datetime | None
     created_at: datetime
-    total_score_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -400,7 +398,6 @@ class DedupReviewPage:
     """Dedup review page."""
 
     items: tuple[DedupReviewRow, ...]
-    next_cursor: str | None
     total_count: int
 
 
@@ -2106,13 +2103,6 @@ WITH reviews AS MATERIALIZED (
         CAST(:max_score AS numeric) IS NULL
         OR q.total_score <= CAST(:max_score AS numeric)
       )
-      AND (
-        CAST(:cursor_score AS numeric) IS NULL
-        OR (q.total_score, q.review_id) < (
-            CAST(:cursor_score AS numeric),
-            CAST(:cursor_review_id AS uuid)
-        )
-      )
     ORDER BY q.total_score DESC, q.review_id DESC
 ),
 expanded AS (
@@ -2190,7 +2180,7 @@ WHERE (
     OR category_b = ANY(CAST(:categories AS text[]))
   )
 ORDER BY total_score DESC, review_id DESC
-LIMIT :limit_plus_one
+LIMIT :limit
 OFFSET :offset_rows
 """
 
@@ -2321,34 +2311,6 @@ WHERE q.review_id = :review_id
 """
 
 
-def _dedup_cursor_payload(cursor: str | None) -> dict[str, Any]:
-    if cursor is None:
-        return {}
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("invalid dedup review cursor") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("invalid dedup review cursor")
-    if not isinstance(payload.get("review_id"), str):
-        raise ValueError("invalid dedup review cursor")
-    return payload
-
-
-def _dedup_cursor_params(cursor: str | None) -> dict[str, Any]:
-    payload = _dedup_cursor_payload(cursor)
-    if not payload:
-        return {"cursor_score": None, "cursor_review_id": None}
-    try:
-        score = str(payload["total_score"])
-        Decimal(score)
-        UUID(str(payload["review_id"]))
-    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
-        raise ValueError("invalid dedup review cursor") from exc
-    return {"cursor_score": score, "cursor_review_id": payload["review_id"]}
-
-
 def _dedup_review_count_sql(params: Mapping[str, Any]) -> str:
     """필터 확장이 필요 없으면 queue table만 세는 count SQL을 고른다."""
 
@@ -2358,21 +2320,6 @@ def _dedup_review_count_sql(params: Mapping[str, Any]) -> str:
     ):
         return _DEDUP_REVIEW_FAST_COUNT_SQL
     return _DEDUP_REVIEW_COUNT_SQL
-
-
-def _encode_dedup_cursor(item: DedupReviewRow) -> str:
-    raw = json.dumps(
-        {
-            "review_id": item.review_id,
-            "total_score": (
-                item.total_score_cursor
-                if item.total_score_cursor is not None
-                else str(Decimal(str(item.total_score)))
-            ),
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 def _score(value: Any) -> float:
@@ -2400,7 +2347,6 @@ def _dedup_review_row(row: Any) -> DedupReviewRow:
         name_score=_score(row["name_score"]),
         spatial_score=_score(row["spatial_score"]),
         category_score=_score(row["category_score"]),
-        total_score_cursor=str(row["total_score"]),
         feature_a=_dedup_feature(row, "a"),
         feature_b=_dedup_feature(row, "b"),
         distance_m=(
@@ -2426,7 +2372,6 @@ async def list_dedup_reviews(
     q: str | None = None,
     page_size: int = 50,
     page: int = 1,
-    cursor: str | None = None,
 ) -> DedupReviewPage:
     """Dedup review 목록을 점수 내림차순으로 조회한다."""
     if page_size <= 0:
@@ -2453,27 +2398,20 @@ async def list_dedup_reviews(
             )
         ).scalar_one()
     )
-    offset_rows = 0 if cursor is not None else (page - 1) * effective_limit
+    offset_rows = (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(_DEDUP_REVIEW_SQL),
             {
                 **params,
-                "limit_plus_one": effective_limit + 1,
+                "limit": effective_limit,
                 "offset_rows": offset_rows,
-                **_dedup_cursor_params(cursor),
             },
         )
     ).mappings().all()
-    items = tuple(_dedup_review_row(row) for row in rows[:effective_limit])
-    next_cursor = (
-        _encode_dedup_cursor(items[-1])
-        if len(rows) > effective_limit and items
-        else None
-    )
+    items = tuple(_dedup_review_row(row) for row in rows)
     return DedupReviewPage(
         items=items,
-        next_cursor=next_cursor,
         total_count=total_count,
     )
 
@@ -2634,7 +2572,6 @@ class EnrichmentReviewRow:
     reviewed_by: str | None
     reviewed_at: datetime | None
     created_at: datetime
-    name_score_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2642,7 +2579,6 @@ class EnrichmentReviewPage:
     """Enrichment review page."""
 
     items: tuple[EnrichmentReviewRow, ...]
-    next_cursor: str | None
     total_count: int
 
 
@@ -2739,15 +2675,8 @@ WITH reviews AS MATERIALIZED (
         OR q.source_name ILIKE CAST(:q_like AS text)
         OR q.source_entity_id ILIKE CAST(:q_like AS text)
       )
-      AND (
-        CAST(:cursor_score AS numeric) IS NULL
-        OR (q.name_score, q.review_id) < (
-            CAST(:cursor_score AS numeric),
-            CAST(:cursor_review_id AS uuid)
-        )
-    )
     ORDER BY q.name_score DESC, q.review_id DESC
-    LIMIT :limit_plus_one
+    LIMIT :limit
     OFFSET :offset_rows
 )
 SELECT
@@ -2845,7 +2774,7 @@ LEFT JOIN LATERAL (
         END AS distance_m
 ) AS dist ON TRUE
 ORDER BY q.name_score DESC, q.review_id DESC
-LIMIT :limit_plus_one
+LIMIT :limit
 """
 
 
@@ -3016,40 +2945,11 @@ def _has_review_detail(value: dict[str, Any]) -> bool:
     return any(item not in (None, "", [], {}) for item in value.values())
 
 
-def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
-    payload = _dedup_cursor_payload(cursor)
-    if not payload:
-        return {"cursor_score": None, "cursor_review_id": None}
-    try:
-        score = str(payload["name_score"])
-        Decimal(score)
-        UUID(str(payload["review_id"]))
-    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
-        raise ValueError("invalid enrichment review cursor") from exc
-    return {"cursor_score": score, "cursor_review_id": payload["review_id"]}
-
-
-def _encode_enrichment_cursor(item: EnrichmentReviewRow) -> str:
-    raw = json.dumps(
-        {
-            "review_id": item.review_id,
-            "name_score": (
-                item.name_score_cursor
-                if item.name_score_cursor is not None
-                else str(Decimal(str(item.name_score)))
-            ),
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
 def _enrichment_review_row(row: Any) -> EnrichmentReviewRow:
     return EnrichmentReviewRow(
         review_id=str(row["review_id"]),
         status=str(row["status"]),
         name_score=_score(row["name_score"]),
-        name_score_cursor=str(row["name_score"]),
         target_feature_id=str(row["target_feature_id"]),
         target_name=str(row["target_name"]),
         target_kind=row["target_kind"],
@@ -3097,7 +2997,6 @@ async def list_enrichment_reviews(
     q: str | None = None,
     page_size: int = 50,
     page: int = 1,
-    cursor: str | None = None,
 ) -> EnrichmentReviewPage:
     """축제 enrichment review 목록을 name_score 내림차순으로 조회한다."""
     if page_size <= 0:
@@ -3145,27 +3044,20 @@ async def list_enrichment_reviews(
             )
         ).scalar_one()
     )
-    offset_rows = 0 if cursor is not None else (page - 1) * effective_limit
+    offset_rows = (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(review_sql),
             {
                 **params,
-                "limit_plus_one": effective_limit + 1,
+                "limit": effective_limit,
                 "offset_rows": offset_rows,
-                **_enrichment_cursor_params(cursor),
             },
         )
     ).mappings().all()
-    items = tuple(_enrichment_review_row(row) for row in rows[:effective_limit])
-    next_cursor = (
-        _encode_enrichment_cursor(items[-1])
-        if len(rows) > effective_limit and items
-        else None
-    )
+    items = tuple(_enrichment_review_row(row) for row in rows)
     return EnrichmentReviewPage(
         items=items,
-        next_cursor=next_cursor,
         total_count=total_count,
     )
 
