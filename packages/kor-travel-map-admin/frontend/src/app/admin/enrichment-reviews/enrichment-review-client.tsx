@@ -169,13 +169,18 @@ function EnrichmentDetailDialog({
                   <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
                   <DetailMetric label="distance" value={formatDistance(detail.distance_m)} />
                   <DetailMetric
-                    label="default"
+                    label="audit default"
                     value={detail.default_detail_source}
                   />
                 </dl>
                 <div className="flex flex-wrap items-center gap-2">
+                  <span className="sr-only" id="enrichment-detail-source-note">
+                    선택값은 accept 적용 데이터 변경 없이 decision reason에 기록됩니다.
+                  </span>
                   <NativeSelect
-                    aria-label="enrichment detail source"
+                    aria-describedby="enrichment-detail-source-note"
+                    aria-label="enrichment detail source audit note"
+                    title="선택값은 적용 데이터 변경 없이 decision reason에 기록됩니다."
                     value={selectedDetailSource ?? detail.default_detail_source}
                     onChange={(event) =>
                       onSelectDetailSource(
@@ -187,10 +192,10 @@ function EnrichmentDetailDialog({
                       disabled={!detail.target_detail_available}
                       value="target"
                     >
-                      정리된 datagokr
+                      기록: 정리된 datagokr
                     </NativeSelectOption>
                     <NativeSelectOption value="visitkorea">
-                      visitkorea
+                      기록: visitkorea
                     </NativeSelectOption>
                   </NativeSelect>
                   <Button
@@ -675,7 +680,7 @@ export function EnrichmentReviewClient() {
           새로고침
         </Button>
       }
-      description="축제 enrichment 매칭(visitkorea 2차 → datagokr 1차)을 운영자가 검토합니다. accept하면 1차 축제에 visitkorea source가 enrichment로 연결됩니다."
+      description="축제 enrichment 매칭(visitkorea 2차 → datagokr 1차)을 운영자가 검토합니다. accept하면 1차 축제에 visitkorea source가 enrichment로 연결되고, 상세 source 선택값은 decision reason에 기록됩니다."
       section="Admin"
       title="Enrichment review"
     >

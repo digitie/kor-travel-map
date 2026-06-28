@@ -1,11 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #567 Enrichment detail source audit-only 계약 명시
+
+- **진행 중**: enrichment 상세 비교 다이얼로그의 `정리된 datagokr`/`visitkorea` 선택이 적용 데이터를
+  바꾸는 것처럼 보이지 않도록 UI 문구를 기록용으로 낮추고, detail/decision API 응답에
+  `detail_source_effect: "audit_only"`를 추가했다.
+- **진행 중**: `PATCH /v1/admin/enrichment-reviews/{review_id}` 응답은 요청의
+  `selected_detail_source`를 함께 반환해 선택값이 decision reason audit marker로 기록됐는지 확인할 수 있다.
+- **다음 한 작업**: OpenAPI/frontend 타입을 재생성하고 API/frontend 타입·대상 테스트를 통과시킨 뒤 PR을
+  올려 CI green 후 merge하고 #567을 닫는다.
+
 ## 2026-06-29 (codex) — #566 Dedup review count 성능 보강
 
-- **진행 중**: dedup review 목록 count가 확장 필터 없이 호출될 때 `feature.features`/`provider_sync`
+- **완료**: dedup review 목록 count가 확장 필터 없이 호출될 때 `feature.features`/`provider_sync`
   join을 materialize하지 않고 `ops.dedup_review_queue`만 count하도록 fast path를 추가했다.
-- **검증**: 관련 unit 9건, T-212d EXPLAIN 대상 테스트 1건, 변경 파일 ruff를 통과했다.
-- **다음 한 작업**: PR을 올려 CI green 확인 뒤 merge하고 #566을 닫는다.
+- **검증**: 관련 unit 9건, T-212d EXPLAIN 대상 테스트 1건, 변경 파일 ruff와 CI를 통과했다.
+- **완료(PR)**: PR #577을 squash merge했고 #566은 닫혔다.
 
 ## 2026-06-29 (codex) — PR #564 사후 리뷰 반영
 

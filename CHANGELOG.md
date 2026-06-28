@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Enrichment detail source audit 계약 명시 (2026-06-29)
+
+- **FIXED**: enrichment 상세 비교 다이얼로그의 `정리된 datagokr`/`visitkorea` 선택이 실제
+  enrichment 적용 데이터를 바꾸는 것처럼 보이던 foot-gun을 제거했다. UI는 이 선택을 기록용으로
+  표시하고, API 응답은 `detail_source_effect: "audit_only"`를 내려준다.
+- **CHANGED**: `PATCH /v1/admin/enrichment-reviews/{review_id}` 응답에
+  `selected_detail_source`와 `detail_source_effect`를 추가해 선택값이 decision reason audit marker로만
+  쓰인다는 계약을 OpenAPI에 명시했다.
+
 ### Dedup review count 성능 보강 (2026-06-29)
 
 - **FIXED**: dedup review 목록 count가 provider/dataset/kind/category/q 필터가 없을 때
@@ -48,9 +57,10 @@
 - **ADDED**: Dedup review와 Enrichment review 행을 클릭하면 두 자료의 feature/source 상세,
   raw/detail JSON, 거리/score, 기간을 비교하는 다이얼로그를 표시한다.
 - **ADDED**: 두 review 상세 다이얼로그는 하나의 VWorld 지도에 양쪽 좌표와 이름 marker를 함께 표시한다.
-- **ADDED**: 축제 enrichment 상세에서 관리자가 `정리된 datagokr` 또는 `visitkorea` 데이터를 선택할 수
-  있고, 정리된 target detail이 없으면 VisitKorea가 기본 선택된다.
-- **CHANGED**: enrichment accept 요청은 선택된 상세 source를 decision reason에 함께 기록한다.
+- **ADDED**: 축제 enrichment 상세에서 관리자가 decision reason에 기록할 `정리된 datagokr` 또는
+  `visitkorea` source를 선택할 수 있고, 정리된 target detail이 없으면 VisitKorea가 기본 선택된다.
+- **CHANGED**: enrichment accept 요청은 선택된 상세 source를 decision reason에 함께 기록한다. 이 선택은
+  실제 enrichment source link 적용 데이터는 바꾸지 않는다.
 
 ### Feature update request queue 실행 복구 (2026-06-28)
 

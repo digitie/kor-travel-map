@@ -48,6 +48,7 @@ router = APIRouter(prefix="/admin/enrichment-reviews", tags=["admin-enrichment"]
 EnrichmentStatus = Literal["pending", "accepted", "rejected", "ignored"]
 EnrichmentDecision = Literal["accepted", "rejected", "ignored"]
 EnrichmentDetailSource = Literal["target", "visitkorea"]
+EnrichmentDetailSourceEffect = Literal["audit_only"]
 
 
 class EnrichmentReviewRecord(BaseModel):
@@ -127,6 +128,7 @@ class EnrichmentReviewDetailData(BaseModel):
     source: ReviewSourceDetailRecord
     target_detail_available: bool
     default_detail_source: EnrichmentDetailSource
+    detail_source_effect: EnrichmentDetailSourceEffect = "audit_only"
 
 
 class EnrichmentReviewDetailResponse(BaseModel):
@@ -145,7 +147,13 @@ class EnrichmentReviewDecisionRequest(BaseModel):
 
     decision: EnrichmentDecision
     decision_reason: str | None = Field(default=None, min_length=1)
-    selected_detail_source: EnrichmentDetailSource | None = None
+    selected_detail_source: EnrichmentDetailSource | None = Field(
+        default=None,
+        description=(
+            "운영자가 비교 다이얼로그에서 선택한 상세 source. 현재 accept 적용 데이터는 "
+            "바꾸지 않고 decision_reason audit marker로만 기록한다."
+        ),
+    )
     reviewed_by: str | None = None
 
 
@@ -158,6 +166,8 @@ class EnrichmentReviewDecisionData(BaseModel):
     decision: EnrichmentDecision
     changed: bool
     applied: bool
+    selected_detail_source: EnrichmentDetailSource | None = None
+    detail_source_effect: EnrichmentDetailSourceEffect = "audit_only"
     source_links_inserted: int | None = None
     source_links_updated: int | None = None
 
@@ -253,6 +263,7 @@ def _detail(row: EnrichmentReviewDetail) -> EnrichmentReviewDetailData:
         source=_source_detail(row.source),
         target_detail_available=row.target_detail_available,
         default_detail_source=row.default_detail_source,
+        detail_source_effect="audit_only",
     )
 
 
@@ -367,6 +378,8 @@ async def decide_review(
             decision=body.decision,
             changed=result.changed,
             applied=result.applied,
+            selected_detail_source=body.selected_detail_source,
+            detail_source_effect="audit_only",
             source_links_inserted=(
                 result.load.source_links_inserted if result.load is not None else None
             ),

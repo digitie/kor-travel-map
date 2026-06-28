@@ -176,6 +176,18 @@ def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None
     assert "/v1/admin/enrichment-reviews/{review_id}" in spec["paths"]
     assert "EnrichmentReviewRecord" in spec["components"]["schemas"]
     assert "EnrichmentReviewDetailResponse" in spec["components"]["schemas"]
+    assert (
+        spec["components"]["schemas"]["EnrichmentReviewDetailData"]["properties"][
+            "detail_source_effect"
+        ]["const"]
+        == "audit_only"
+    )
+    assert (
+        spec["components"]["schemas"]["EnrichmentReviewDecisionData"]["properties"][
+            "detail_source_effect"
+        ]["const"]
+        == "audit_only"
+    )
 
 
 @pytest.mark.unit
@@ -245,6 +257,7 @@ def test_get_enrichment_review_detail_returns_compare_payload(
     assert data["target"]["name"] == "서울 봄꽃 축제"
     assert data["source"]["raw_name"] == "서울 봄꽃"
     assert data["default_detail_source"] == "target"
+    assert data["detail_source_effect"] == "audit_only"
     assert data["target_detail_available"] is True
     assert data["distance_m"] == 12.5
 
@@ -331,6 +344,8 @@ def test_patch_accepted_applies_and_uses_transaction(
     data = response.json()["data"]
     assert data["changed"] is True
     assert data["applied"] is True
+    assert data["selected_detail_source"] == "visitkorea"
+    assert data["detail_source_effect"] == "audit_only"
     assert data["source_links_inserted"] == 1
     assert session.begin_count == 1
 
@@ -359,6 +374,8 @@ def test_patch_reject_does_not_apply(
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["applied"] is False
+    assert data["selected_detail_source"] is None
+    assert data["detail_source_effect"] == "audit_only"
     assert data["source_links_inserted"] is None
 
 

@@ -7339,9 +7339,30 @@
             "title": "Decision",
             "type": "string"
           },
+          "detail_source_effect": {
+            "const": "audit_only",
+            "default": "audit_only",
+            "title": "Detail Source Effect",
+            "type": "string"
+          },
           "review_id": {
             "title": "Review Id",
             "type": "string"
+          },
+          "selected_detail_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "target",
+                  "visitkorea"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Detail Source"
           },
           "source_links_inserted": {
             "anyOf": [
@@ -7424,6 +7445,7 @@
                 "type": "null"
               }
             ],
+            "description": "운영자가 비교 다이얼로그에서 선택한 상세 source. 현재 accept 적용 데이터는 바꾸지 않고 decision_reason audit marker로만 기록한다.",
             "title": "Selected Detail Source"
           }
         },
@@ -7477,6 +7499,12 @@
               "visitkorea"
             ],
             "title": "Default Detail Source",
+            "type": "string"
+          },
+          "detail_source_effect": {
+            "const": "audit_only",
+            "default": "audit_only",
+            "title": "Detail Source Effect",
             "type": "string"
           },
           "distance_m": {
