@@ -27,9 +27,9 @@ v1 구현은 `v1` 브랜치 보존, main은 v2로 재시작(ADR-001). v1 referen
 식별자(import root `kortravelmap` / DB `kor_travel_map` / CLI `ktmctl` /
 env prefix `KOR_TRAVEL_MAP_*` 등) 정본 표 → `AGENTS.md` §식별자.
 
-### 개발 환경 (PC, WSL)
+### 개발 환경 (Linux/WSL)
 
-정본 → `docs/dev-environment.md` + `AGENTS.md` §"개발 환경 정책 (PC, WSL)".
+정본 → `docs/dev-environment.md` + `AGENTS.md` §"개발 환경 정책 (Linux/WSL)".
 
 ### 에이전트 worktree + codegraph
 

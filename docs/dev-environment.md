@@ -1,12 +1,13 @@
-# 개발 환경 셋업 (Windows Git + WSL 실행 기준)
+# 개발 환경 셋업 (Linux/WSL 실행 기준)
 
 본 문서는 `kor-travel-map`(`kortravelmap`)을 PC에서 개발할 때 필요한 시스템
-의존성과 셋업 순서를 정리한다. **Windows NTFS worktree를 Git 원본으로 두되,
-순수 `git` 명령을 제외한 파일 조회·수정·테스트·빌드·Docker·GitHub CLI 작업은
-WSL에서 `/mnt/f/dev/kor-travel-map-<agent>` 경로로 실행한다**는 정책
-(`AGENTS.md` §"개발 환경 정책 (PC, WSL)", `SKILL.md` §"개발 환경 (PC,
-WSL)", `README.md` §"개발 환경 (PC, WSL)")을 전제로 한다. Playwright e2e만
-Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
+의존성과 셋업 순서를 정리한다. **Git/codegraph를 포함한 모든 개발 명령은 Linux
+환경에서 실행한다.** Windows PC에서는 NTFS worktree를 보관 위치로 두더라도 WSL의
+`/mnt/f/dev/kor-travel-map-<agent>` 경로에서 Linux `git`/`gh`/`codegraph`와 개발 도구를
+실행한다는 정책(`AGENTS.md` §"개발 환경 정책 (Linux/WSL)", `SKILL.md`
+§"개발 환경 (Linux/WSL)", `README.md` §"빠른 시작")을 전제로 한다.
+Playwright e2e는 n150 Linux 환경에서 우선 실행하고, n150에서 실행할 수 없을 때만
+Windows 호스트 브라우저를 fallback으로 사용한다. 형제 라이브러리
 (`kor-travel-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
 
 ## 0. dev vs prod 구분 (기본 = dev)
@@ -25,7 +26,7 @@ Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
 ### 고정 포트 + 내부 주소
 
 dev는 `127.0.0.1`의 12xxx 고정 포트만 쓴다. 호스트 프로세스 stack(`run-admin-stack.sh`)의
-bind host 기본도 `127.0.0.1`이다. Windows Playwright e2e처럼 WSL 밖에서 접근해야 할 때만
+bind host 기본도 `127.0.0.1`이다. Windows fallback Playwright e2e처럼 WSL 밖에서 접근해야 할 때만
 `KOR_TRAVEL_MAP_API_BIND_HOST=0.0.0.0`(및 `_ADMIN_WEB_BIND_HOST`/`_DAGSTER_BIND_HOST`)로
 명시 opt-in한다.
 
@@ -70,38 +71,39 @@ external Postgres host port override는 보존한다.
 
 ### 1.1 실행 위치 강제 규칙
 
-2026-06-12 이후 PC 개발 세션의 기본 실행 위치는 WSL이다.
+2026-06-28 이후 PC 개발 세션의 실행 위치는 Git/codegraph를 포함해 WSL/Linux로 통일한다.
 
-- Windows PowerShell/CMD에서 허용되는 작업은 `git.exe status/fetch/switch/add/commit/push`
-  같은 순수 Git 명령뿐이다.
-- `rg`, `sed`, `python`, `uv`, `pytest`, `ruff`, `mypy`, `npm`, `node`, `docker`,
-  `docker compose`, `curl`, `gh`, 문서/코드 수정 스크립트는 WSL에서 실행한다.
+- `git`, `gh`, `codegraph`, `rg`, `sed`, `python`, `uv`, `pytest`, `ruff`, `mypy`,
+  `npm`, `node`, `docker`, `docker compose`, `curl`, 문서/코드 수정 스크립트는 모두
+  WSL/Linux에서 실행한다.
+- Windows PowerShell/CMD는 n150을 사용할 수 없는 Playwright fallback처럼 명시된 예외에만
+  사용한다. 일반 개발용 `git.exe`/Windows Node/npm은 사용하지 않는다.
 - WSL 경로는 agent worktree의 NTFS 마운트 경로를 직접 사용한다. 예:
   `/mnt/f/dev/kor-travel-map-codex`.
-- Playwright e2e는 예외다. 서버는 WSL/Docker에서 띄우고, `chromium` 실행은 Windows
-  호스트에서 수행한다.
+- Playwright e2e는 n150 Linux에서 먼저 실행한다. n150 접근/브라우저 실행이 불가할 때만
+  Windows 호스트 브라우저로 fallback한다.
 
 ## 2. 파일 위치 정책
 
 | 종류 | 위치 |
 |------|------|
-| 코드/git | NTFS — `F:\dev\kor-travel-map\` 또는 agent worktree |
-| Python/Node 실행 | WSL — `/mnt/f/dev/kor-travel-map-<agent>` |
+| 코드 보관 | NTFS — `F:\dev\kor-travel-map\` 또는 agent worktree |
+| Git/Python/Node 실행 | WSL/Linux — `/mnt/f/dev/kor-travel-map-<agent>` |
 | 데이터 (`data/`) | NTFS — `F:\dev\kor-travel-map\data\` (또는 별도 외장) |
 | 산출물 (`artifacts/`) | NTFS (백업 자동 sync) |
 | 테스트 실행/샌드박스 | 기본 WSL `/mnt/f/...`; ext4 복사는 성능·격리 필요 시에만 |
 
 ### 2.1 WSL 실행 정책
 
-코드는 NTFS 드라이브(`F:\dev\kor-travel-map`)에서 형상관리와 일반 편집이
-이루어진다. 단, 실제 명령 실행은 WSL에서 `/mnt/f/dev/kor-travel-map-<agent>`를
-현재 디렉토리로 잡고 수행한다. Windows Git(`git.exe`)은 브랜치 전환, 커밋, push 같은
-순수 Git 작업에만 사용한다. PostGIS testcontainers, Docker compose, Python/Node
-도구, GitHub CLI, 문서 수정 스크립트는 모두 WSL에서 실행한다.
+코드는 NTFS 드라이브(`F:\dev\kor-travel-map`)에 보관할 수 있지만, 실제 명령 실행은
+WSL에서 `/mnt/f/dev/kor-travel-map-<agent>`를 현재 디렉토리로 잡고 수행한다.
+브랜치 전환, 커밋, push 같은 Git 작업도 Windows `git.exe`가 아니라 Linux `git`으로
+실행한다. PostGIS testcontainers, Docker compose, Python/Node 도구, GitHub CLI, 문서
+수정 스크립트도 모두 WSL에서 실행한다.
 
 agent별 worktree (`F:\dev\kor-travel-map-codex` / `F:\dev\kor-travel-map-claude` /
-`F:\dev\kor-travel-map-antigravity`)에서도 동일하게 NTFS 소스 기준으로 git 브랜치를
-운영하고, Git 외 작업은 WSL 마운트 경로에서 실행한다.
+`F:\dev\kor-travel-map-antigravity`)에서도 동일하게 WSL 마운트 경로에서 git 브랜치를
+운영하고 개발 도구를 실행한다.
 
 ### 2.2 NTFS → ext4 동기 (선택)
 
@@ -119,7 +121,7 @@ rsync -a --delete \
   ~/dev/kor-travel-map/
 ```
 
-`data/`와 `.git`은 NTFS가 원본(Source of Truth)이므로 sync에서 제외합니다.
+`data/`는 NTFS 보관 원본이고 `.git`은 worktree 메타데이터이므로 sync에서 제외한다.
 
 ### 2.3 `scripts/*.sh` 실행 셸
 
@@ -132,10 +134,10 @@ Windows PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
 
 - **WSL 셸**: 권장 경로. Docker Desktop WSL2 backend, WSL Node/npm, Linux optional
   dependency와 가장 잘 맞는다.
-- **Git Bash**: Windows에서 npm script만 실행해야 할 때의 보조 경로. `bash`가
-  `PATH`에 있어야 하며, Docker Desktop CLI가 같은 셸에서 보여야 한다.
-- **PowerShell**: Playwright e2e처럼 Windows에서 실행해야 하는 명령만 사용한다.
-  Docker/admin stack 스크립트는 PowerShell에서 직접 호출하지 말고 WSL 또는 Git Bash
+- **Git Bash**: 일반 개발 경로가 아니다. WSL 장애 조사처럼 사람이 명시적으로 선택한
+  보조 경로에서만 사용한다.
+- **PowerShell**: n150을 사용할 수 없는 Playwright fallback처럼 Windows에서 실행해야 하는
+  명령만 사용한다. Docker/admin stack 스크립트는 PowerShell에서 직접 호출하지 말고 WSL
   셸에서 실행한다.
 
 예:
@@ -154,16 +156,12 @@ wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:build"
 ## 3. 초기 셋업 (코드 작성 단계 진입 시)
 
 ```bash
-# 1) Windows NTFS 개발 디렉토리에서 메인 repo 클론
-cd F:\dev
+# 1) WSL에서 NTFS 마운트 개발 디렉토리에 메인 repo 클론
+cd /mnt/f/dev
 git clone https://github.com/digitie/kor-travel-map.git
 cd kor-travel-map
 
-# 2) Git 외 셋업은 WSL에서 NTFS worktree를 직접 사용
-wsl
-cd /mnt/f/dev/kor-travel-map
-
-# 3) WSL 셸로 전환 후 시스템 의존성 셋업 (GeoPandas/loaders용)
+# 2) 시스템 의존성 셋업 (GeoPandas/loaders용)
 sudo apt update
 sudo apt install -y \
   build-essential \
@@ -286,40 +284,38 @@ pytest -q
 pytest -m slow -q
 ```
 
-### 8.1 디버그 UI Playwright e2e — **서버는 WSL, Playwright는 Windows**
+### 8.1 디버그 UI Playwright e2e — **n150 우선, Windows fallback**
 
-debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 **하이브리드
-토폴로지**로 실행한다:
+debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 n150 Linux 환경에서 우선
+실행한다. n150에서 브라우저 실행·접속·권한 문제로 검증할 수 없을 때만 Windows
+호스트 브라우저를 fallback으로 사용한다.
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
 | backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12701` |
 | frontend (Next.js) | **WSL `/mnt/f` worktree** | `npm run start` (`next start :12705`) |
-| **Playwright (chromium)** | **Windows** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |
+| **Playwright (chromium)** | **n150 Linux 우선** | `cd packages/kor-travel-map-admin/frontend && npm run e2e` |
+| **Playwright fallback** | **Windows** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |
 
-Frontend 실행(`npm run dev`/`npm run start`)은 WSL 고정이다. Windows에서는 frontend
-서버를 띄우지 않고, e2e 검증용 Playwright만 실행한다.
+Frontend 실행(`npm run dev`/`npm run start`)은 Linux/WSL 고정이다. Windows fallback에서는
+frontend 서버를 띄우지 않고, e2e 검증용 Playwright만 실행한다.
 실행 전 WSL 셸에서 `which node`/`which npm`이 `/home/.../.nvm/...` 같은 WSL 경로를
 가리키는지 확인한다. `/mnt/c/Program Files/nodejs/...`가 나오면 Windows Node가
 섞인 상태라 Linux optional native dependency(`@next/swc`, `lightningcss` 등)가
 틀어질 수 있으므로 WSL nvm Node를 먼저 활성화한다.
 
-WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:12705` /
-`:12701` 요청이 WSL 서버에 도달한다. `playwright.config.ts`는 `webServer`를
-두지 않으므로 서버 2개는 미리 WSL에 떠 있어야 한다.
+Windows fallback에서는 WSL2 `localhostForwarding=true`로 Windows의
+`http://127.0.0.1:12705` / `:12701` 요청이 WSL 서버에 도달한다.
+`playwright.config.ts`는 `webServer`를 두지 않으므로 서버 2개는 미리 WSL에 떠 있어야 한다.
 단, Windows에서 과거에 띄운 Node 서버가 `127.0.0.1:12705`을 점유하고 있으면
 Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Windows에서
 `netstat -ano | findstr :12705` → `Get-Process -Id <PID>`로 `ProcessName`이
 `wslrelay`인지 확인한다. `node`(`C:\Program Files\nodejs\node.exe`)면 해당 PID를
 종료하고 WSL frontend를 다시 띄운다.
 
-> **왜 Playwright만 Windows인가**: WSL Ubuntu에는 chromium 구동에 필요한
-> system lib(`libasound.so.2` 등)가 없고 `sudo`가 비밀번호를 요구해 WSL 내
-> `playwright install-deps` 자동 설치가 불가하다. Windows에는 node + chromium이
-> 이미 갖춰져 있다. 따라서 **pytest(단위/통합)는 WSL, Playwright e2e는
-> Windows**가 표준이다. (WSL에서 굳이 돌리려면 `sudo apt-get install -y
-> libasound2t64 libnss3 libnspr4 …` 또는 `npx playwright install-deps`를 수동
-> 실행해야 하나, 권장 경로는 Windows 실행.)
+> **왜 n150 우선인가**: 운영 UI에 가까운 Linux 브라우저 환경에서 e2e를 먼저 검증해
+> Windows-only dependency와 localhost forwarding 착시를 줄인다. Windows 실행은 n150에서
+> 실행할 수 없을 때의 보조 검증 경로다.
 
 자세히는 `packages/kor-travel-map-admin/frontend/README.md` §"e2e (Playwright)"
 + `frontend/playwright.config.ts` 상단 주석.
@@ -360,12 +356,12 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
 
 ## 9. lint / type
 
-Sprint 5부터 local commit에는 `.pre-commit-config.yaml`을 사용한다. hook 설치는
-Git metadata가 있는 NTFS worktree에서 **Windows Git/Git Bash 기준**으로 실행한다.
-WSL `/mnt/f/...` 경로에서 WSL `git`으로 실행하면 worktree를 repo로 인식하지 못할 수
-있고, WSL ext4 rsync sandbox는 `.git`을 제외하므로 설치 대상이 아니다.
+Sprint 5부터 local commit에는 `.pre-commit-config.yaml`을 사용한다. hook 설치도
+Linux/WSL `git` 기준으로 실행한다. WSL `/mnt/f/...` 경로에서 worktree를 repo로
+인식하지 못하면 `.git` 파일과 worktree metadata가 Windows 경로(`F:/...`)를 가리키는지
+먼저 확인하고 `/mnt/f/...` 경로로 고친다.
 
-Git Bash 또는 Windows shell에서 pre-commit CLI가 보이는 상태로 다음을 한 번 실행한다.
+WSL 셸에서 pre-commit CLI가 보이는 상태로 다음을 한 번 실행한다.
 
 ```bash
 pre-commit install
