@@ -7,14 +7,18 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
-from kortravelmap.api.provider_catalog import catalog_feature_load_entries
+from kortravelmap.api.provider_catalog import catalog_refreshable_entries
 from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshScope
 from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_STATIONS
 from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_DATASETS,
     DATAGOKR_FILEDATA_PROVIDER_NAME,
 )
-from kortravelmap.providers.mois import DATASET_KEY_CLOSED, DATASET_KEY_HISTORY
+from kortravelmap.providers.mois import (
+    DATASET_KEY_CLOSED,
+    DATASET_KEY_DETAIL,
+    DATASET_KEY_HISTORY,
+)
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.providers.opinet import OPINET_PROVIDER_NAME, OPINET_STATION_DATASET_KEY
 from kortravelmap.settings import KorTravelMapSettings
@@ -168,7 +172,7 @@ def test_default_runner_accepts_airkorea_stations_alias() -> None:
     assert spec.asset_key == "feature_weather_airkorea_air_quality"
 
 
-def test_default_runner_accepts_mois_incremental_datasets() -> None:
+def test_default_runner_accepts_mois_non_bulk_datasets() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -180,7 +184,7 @@ def test_default_runner_accepts_mois_incremental_datasets() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
     )
 
-    for dataset_key in (DATASET_KEY_HISTORY, DATASET_KEY_CLOSED):
+    for dataset_key in (DATASET_KEY_HISTORY, DATASET_KEY_CLOSED, DATASET_KEY_DETAIL):
         spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
             _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
         )
@@ -206,7 +210,7 @@ def test_default_runner_accepts_datagokr_file_data_datasets() -> None:
         assert spec.asset_key == "feature_place_datagokr_file_data"
 
 
-def test_default_runner_supports_all_catalog_feature_load_entries() -> None:
+def test_default_runner_supports_all_catalog_refreshable_entries() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -222,11 +226,11 @@ def test_default_runner_supports_all_catalog_feature_load_entries() -> None:
         for spec in runner._specs  # noqa: SLF001 - catalog/runner drift 회귀 테스트
         for dataset_key in spec.dataset_keys
     }
-    feature_load = {
-        (entry.provider, entry.dataset_key) for entry in catalog_feature_load_entries()
+    refreshable = {
+        (entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries()
     }
 
-    assert sorted(feature_load - supported) == []
+    assert sorted(refreshable - supported) == []
 
 
 async def test_opinet_missing_key_fails_before_provider_client_auth_error() -> None:

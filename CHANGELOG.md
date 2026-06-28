@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Refreshable provider catalog와 MOIS detail runner (2026-06-28)
+
+- **CHANGED**: `/ops/providers` never-run 목록이 새 Feature 생성 여부(`is_feature_load`)가 아니라
+  Dagster feature update request 실행 가능 여부(`is_refreshable`) 기준으로 표시된다.
+- **ADDED**: MOIS `mois_license_detail` feature update runner dispatch를 추가했다. 상세 API는
+  detail source record를 우선 조회하고 없으면 기존 bulk source record로 fallback한다.
+- **CHANGED**: OpiNet 가격, KREX 가격/기상, KMA 예보/실황, VisitKorea 축제 보강처럼
+  `is_feature_load=False`이지만 runner가 있는 dataset도 운영 실행 목록에 표시된다.
+- **UNCHANGED**: 전화번호 보강(`place_phone_enrichment`)은 운영 runner 대상에 추가하지 않는다.
+
 ### Feature update provider/Dagster 정렬 (2026-06-28)
 
 - **FIXED**: AirKorea feature update 대상이 standalone `airkorea_stations`로 노출되어 Dagster runner에서

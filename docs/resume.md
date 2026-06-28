@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Refreshable provider catalog / MOIS detail runner
+
+- **완료(분류)**: `is_feature_load`는 새 `FeatureBundle` 생성 여부로 유지하고, Dagster feature update
+  request로 실행 가능한지는 `is_refreshable`로 분리했다.
+- **완료(노출)**: `/ops/providers` never-run 목록은 `catalog_refreshable_entries()` 기준으로 바꿔
+  OpiNet 가격, KREX 가격/기상, KMA 예보/실황, VisitKorea 축제 보강처럼 `is_feature_load=False`이지만
+  runner가 있는 dataset을 운영 실행 목록에 표시한다.
+- **완료(MOIS detail)**: `mois_license_detail`을 refreshable로 전환하고, 기존 MOIS Dagster asset runner가
+  `dataset_key=mois_license_detail` 요청을 받을 수 있게 했다. 상세 API는 detail source record 우선,
+  bulk source record fallback으로 조회한다.
+- **유지(전화번호 보강)**: `place_phone_enrichment`는 runner/운영 실행 목록에 추가하지 않았다.
+- **검증(로컬)**: refreshable catalog 56개와 runner spec 비교에서 누락 0건,
+  `runner_not_in_catalog` 0건 확인. 관련 pytest 32건, 변경 파일 `ruff`, 대상 mypy 통과.
+- **다음 한 작업**: PR 생성, CI green 확인 후 머지하고 N150 배포 뒤 `/ops/providers`에서 MOIS detail과
+  non-feature-load 실행 대상이 queue/run/done으로 전환되는지 UI e2e로 확인한다.
+
 ## 2026-06-28 (codex) — Feature update provider/Dagster 정렬
 
 - **완료(원인)**: AirKorea 실패는 UI/catalog가 `airkorea_stations`를 feature-load 대상으로 노출했지만

@@ -1,9 +1,10 @@
 """``kortravelmap.api.routers.mois_detail`` — MOIS 인허가 on-demand 상세.
 
 SPRINT-4 §2.1 **Step D** — 디버그 UI에서 사용자가 명시 트리거하는 단건 상세
-(``mois_license_detail``). **캐시만, 적재 없음**: 이미 적재된 MOIS feature의
+(``mois_license_detail``). API 라우터는 읽기 전용이며, Dagster detail 적재 결과를
+우선 조회하고 없으면 bulk source record로 fallback한다. 이미 적재된 MOIS feature의
 원본 provider payload(``source_records.raw_data``) + feature core를 조립해 반환하고,
-프로세스 내 TTL 캐시에 담는다(반복 클릭 시 재조회 회피). DB write는 일절 없다.
+프로세스 내 TTL 캐시에 담는다(반복 클릭 시 재조회 회피).
 
 ``license_id``는 MOIS 인허가 feature의 ``source_entity_id`` = ``{slug}::{mng_no}``
 (bulk 적재 자연키, ADR-009).
@@ -22,7 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from kortravelmap.infra import feature_repo
-from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL, PROVIDER_NAME
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,7 +84,7 @@ def _cache_get(license_id: str) -> MoisLicenseDetailData | None:
 @router.get(
     "/{license_id}",
     response_model=MoisLicenseDetailResponse,
-    summary="MOIS 인허가 on-demand 상세 (Step D, 캐시만)",
+    summary="MOIS 인허가 on-demand 상세 (Step D, detail 우선)",
     responses={404: {"description": "license_id(source_entity_id) 미적재"}},
 )
 async def get_mois_license_detail(
@@ -98,13 +99,17 @@ async def get_mois_license_detail(
             meta=make_meta(started_at=started_at),
         )
 
-    row = await feature_repo.get_primary_source_detail(
-        session,
-        provider=PROVIDER_NAME,
-        dataset_key=DATASET_KEY_BULK,
-        source_entity_type=_MOIS_ENTITY_TYPE,
-        source_entity_id=license_id,
-    )
+    row: dict[str, Any] | None = None
+    for dataset_key in (DATASET_KEY_DETAIL, DATASET_KEY_BULK):
+        row = await feature_repo.get_primary_source_detail(
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            source_entity_type=_MOIS_ENTITY_TYPE,
+            source_entity_id=license_id,
+        )
+        if row is not None:
+            break
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

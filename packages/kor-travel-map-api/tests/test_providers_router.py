@@ -299,7 +299,7 @@ def test_ops_providers_list_includes_never_run_catalog_providers(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """sync state·policy가 전혀 없어도 카탈로그 feature-load provider는 노출된다.
+    """sync state·policy가 전혀 없어도 카탈로그 refreshable provider는 노출된다.
 
     이전엔 provider_sync_state row가 있는 provider만 나와 mois/knps/krheritage가
     빠졌다. 이제는 never-run dataset이 status='never_run' + null timestamp로 나온다.
@@ -337,8 +337,23 @@ def test_ops_providers_list_includes_never_run_catalog_providers(
                 "feature_update_requests",
                 "refresh_policy",
             }
-        # 가격 시계열(PriceValue, is_feature_load=False)은 never-run 목록에 없다.
-        assert ("python-opinet-api", "opinet_gas_station_prices") not in by_key
+        # PriceValue/WeatherValue/detail 보강처럼 Feature를 새로 만들지 않아도
+        # Dagster runner가 있으면 운영 실행 목록에 노출한다.
+        for provider, dataset_key in (
+            ("python-mois-api", "mois_license_detail"),
+            ("python-opinet-api", "opinet_gas_station_prices"),
+            ("python-krex-api", "krex_rest_area_prices"),
+            ("python-krex-api", "krex_rest_area_weather"),
+            ("python-visitkorea-api", "visitkorea_festival_events"),
+        ):
+            row = by_key[(provider, dataset_key)]
+            assert row["status"] == "never_run"
+            assert {link["rel"] for link in row["links"]} >= {
+                "feature_update_requests",
+                "refresh_policy",
+            }
+        # 전화번호 보강은 아직 운영 runner 대상이 아니다.
+        assert ("python-visitkorea-api", "place_phone_enrichment") not in by_key
     finally:
         client.app.dependency_overrides.clear()
 
