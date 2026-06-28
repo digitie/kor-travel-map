@@ -1,5 +1,12 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #566 Dedup review count 성능 보강
+
+- **진행 중**: dedup review 목록 count가 확장 필터 없이 호출될 때 `feature.features`/`provider_sync`
+  join을 materialize하지 않고 `ops.dedup_review_queue`만 count하도록 fast path를 추가했다.
+- **검증**: 관련 unit 9건, T-212d EXPLAIN 대상 테스트 1건, 변경 파일 ruff를 통과했다.
+- **다음 한 작업**: PR을 올려 CI green 확인 뒤 merge하고 #566을 닫는다.
+
 ## 2026-06-29 (codex) — PR #564 사후 리뷰 반영
 
 - **진행 중**: #569/#574 반영 브랜치에서 admin live e2e 실제 write spec을 opt-in 게이트 뒤로 옮겼다.
