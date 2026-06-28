@@ -1586,6 +1586,7 @@ export function CuratedFeaturesClient() {
               onRowClick={(feature) =>
                 setSelectedCuratedFeatureId(feature.curated_feature_id)
               }
+              rowTestId={() => "curated-feature-row"}
               isRowActive={(feature) =>
                 feature.curated_feature_id ===
                 selectedFeature?.curated_feature_id

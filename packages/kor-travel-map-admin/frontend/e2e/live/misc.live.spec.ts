@@ -4,8 +4,8 @@ import * as F from "./_fixtures";
 /**
  * LIVE (non-mock) misc smoke — prod 실데이터(1.09M features) 직격.
  *
- * 영역(key=misc): 홈(/), /admin/dagster, /etl, /admin/features/change-requests,
- * /admin/features/new. 모든 시나리오는 read-only(GET)만 — page.goto + 읽기 assertion +
+ * 영역(key=misc): 홈(/), /admin/dagster, /admin/settings, /etl,
+ * /admin/features/change-requests, /admin/features/new. 모든 시나리오는 read-only(GET)만 — page.goto + 읽기 assertion +
  * 비파괴 click(nav 링크 / 탭 / kind·status 필터 / 페이지크기 select / 정렬 헤더 /
  * 페이지네이션) + 검색창 타이핑(GET 조회)에 한정한다. 제출/저장/적용/삭제/실행 류 버튼은
  * 절대 클릭하지 않는다.
@@ -36,6 +36,7 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "Offline uploads", href: "/admin/offline-uploads" },
   { label: "Backups", href: "/admin/backups" },
   { label: "Dagster", href: "/admin/dagster" },
+  { label: "Settings", href: "/admin/settings" },
   { label: "ETL preview", href: "/etl" },
 ];
 
@@ -146,7 +147,7 @@ test.describe("misc live — home (/)", () => {
     ).toBeVisible(TIMEOUT);
   });
 
-  // nav 링크 18개 각각: visible + href 정확.
+  // nav 링크 19개 각각: visible + href 정확.
   for (const item of NAV_ITEMS) {
     test(`home nav visible+href: ${item.label}`, async ({ page }) => {
       await page.goto("/");

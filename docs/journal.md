@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Admin UI 전체 live e2e 시나리오 catalog 보강
+
+Admin UI 전체 표면을 대상으로 10,000건 이상을 목표로 한 live e2e 시나리오 catalog와 실제 write 반영
+검증을 보강했다.
+
+- **시나리오 catalog**: home/public features/admin features/change requests/curated/issues/import jobs/
+  providers/consistency/logs/reviews/update requests/POI targets/offline uploads/backups/dagster/settings/ETL
+  preview를 포함해 13,651건의 논리 시나리오를 산출한다.
+- **실제 write 반영**: 기존 feature add/update/deactivate/delete 승인 흐름에 더해 Settings에서 public API
+  key 생성·API 조회·UI revoke·API/UI revoked 확인, API로 생성한 auth audit event의 Settings UI 노출을
+  추가했다.
+- **발견 및 수정**: n150 DB에서 404가 나던 오래된 feature fixture를 현재 active id로 갱신했고,
+  curated 후보가 0건일 때 empty row를 후보로 오인하던 spec을 `curated-feature-row` test id 기준으로
+  고쳤다. Settings route/nav/문서 누락도 보강했다.
+- **n150 검증**: 공식 Playwright Docker image + host network에서 full live suite 수정본
+  1,828 passed / 5 skipped / 0 failed (34.1분)를 확인했다. 로컬 `type-check:e2e`, frontend `lint`
+  (0 errors, 기존 warnings 6개), `git diff --check`도 통과했다.
+
 ## 2026-06-28 (codex) — Admin features/change requests UI live write e2e 추가
 
 `/admin/features`, `/admin/features/new`, `/admin/features/change-requests`를 하나의 실제
