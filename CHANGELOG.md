@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Review 목록 page-only 계약 정리 (2026-06-29)
+
+- **CHANGED**: `GET /v1/admin/dedup-reviews`와
+  `GET /v1/admin/enrichment-reviews`에서 사용되지 않던 `cursor` query parameter를 제거하고,
+  `page`/`page_size`/`meta.page.total` 기반 계약으로 일원화했다.
+- **FIXED**: review 목록 repository와 admin UI에 남아 있던 죽은 `next_cursor` 분기를 제거해
+  page 번호 이동과 API 계약이 같은 모델을 사용하도록 맞췄다.
+
 ### Agent 개발 환경 문서 정합성 보정 (2026-06-29)
 
 - **FIXED**: `docs/agent-guide.md`, `CLAUDE.md`, `docs/debug-ui-admin-workflows.md`에 남아 있던

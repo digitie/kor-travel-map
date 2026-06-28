@@ -203,9 +203,9 @@ def test_list_enrichment_reviews_passes_filters(
         assert kwargs["min_score"] == 70
         assert kwargs["page_size"] == 25
         assert kwargs["page"] == 3
+        assert "cursor" not in kwargs
         return EnrichmentReviewPage(
             items=(_review_row(),),
-            next_cursor="next",
             total_count=42,
         )
 
@@ -232,7 +232,7 @@ def test_list_enrichment_reviews_passes_filters(
     assert body["data"]["items"][0]["source_start_date"] == "20260405"
     assert body["meta"]["page"] == {
         "page_size": 25,
-        "next_cursor": "next",
+        "next_cursor": None,
         "total": 42,
     }
 

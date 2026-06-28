@@ -26,9 +26,8 @@ export type EnrichmentReviewDetailResponse =
   EnrichmentSchemas["EnrichmentReviewDetailResponse"];
 export type EnrichmentReviewListParams = Omit<
   EnrichmentReviewListQuery,
-  "cursor" | "provider" | "q" | "status"
+  "provider" | "q" | "status"
 > & {
-  cursor?: string;
   provider?: string[];
   q?: string;
   status?: EnrichmentStatus[];
@@ -51,7 +50,6 @@ function fetchEnrichmentReviews(
       q: params.q,
       page_size: params.page_size,
       page: params.page,
-      cursor: params.cursor,
     }),
     { signal },
   );

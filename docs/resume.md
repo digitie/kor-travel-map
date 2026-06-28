@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #571 Dedup/Enrichment review page-only 계약 정리
+
+- **완료**: `GET /v1/admin/dedup-reviews`와 `GET /v1/admin/enrichment-reviews`의 이중
+  pagination 계약을 제거해 `cursor` query parameter 없이 `page`/`page_size`/`meta.page.total`만
+  사용하도록 바꿨다.
+- **완료**: repository의 review cursor decode/encode 경로, `next_cursor` 산출, UI의 죽은
+  `nextCursor` fallback을 삭제했다.
+- **검증**: 변경 파일 `ruff`, 대상 mypy 3파일, OpenAPI drift check, frontend `gen:types:check`/
+  `type-check`/`lint`(0 errors, 기존 warnings 6개), 대상 pytest 29건을 통과했다.
+- **다음 한 작업**: PR을 올리고 CI green 후 머지해 #571을 닫는다.
+
 ## 2026-06-29 (codex) — #570 Linux/WSL 개발 실행 정책 문서 정합성 보정
 
 - **진행 중**: `docs/agent-guide.md`의 Windows `git.exe` 예시와 Windows Git 허용 문구를 제거하고,

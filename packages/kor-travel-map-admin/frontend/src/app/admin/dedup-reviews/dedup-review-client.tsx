@@ -319,15 +319,13 @@ export function DedupReviewClient() {
   const reviews = useDedupReviews(reviewParams);
   const detail = useDedupReviewDetail(detailReviewId);
   const decision = useDedupDecisionMutation();
-  const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
   const items = reviews.data?.data.items ?? [];
   const totalItems = reviews.data?.meta.page?.total ?? null;
   const totalPages =
     typeof totalItems === "number"
       ? Math.max(1, Math.ceil(totalItems / pageSize))
       : null;
-  const hasNextPage =
-    totalPages === null ? Boolean(nextCursor) : pageIndex < totalPages;
+  const hasNextPage = totalPages !== null && pageIndex < totalPages;
   const hasPreviousPage = pageIndex > 1;
 
   const resetPage = () => {

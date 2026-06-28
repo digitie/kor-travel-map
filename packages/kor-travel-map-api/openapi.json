@@ -16759,22 +16759,6 @@
               "title": "Page",
               "type": "integer"
             }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
           }
         ],
         "responses": {
@@ -17080,22 +17064,6 @@
               "minimum": 1,
               "title": "Page",
               "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
             }
           }
         ],

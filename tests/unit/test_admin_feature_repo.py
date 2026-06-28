@@ -404,21 +404,12 @@ async def test_deactivate_feature_with_and_without_override() -> None:
     assert exc_info.value.target_status == "inactive"
 
 
-def test_dedup_cursor_and_row_mapping() -> None:
+def test_dedup_row_mapping() -> None:
     item = repo._dedup_review_row(_dedup_row())
-    cursor = repo._encode_dedup_cursor(item)
 
-    assert repo._dedup_cursor_params(cursor) == {
-        "cursor_score": "90",
-        "cursor_review_id": _REVIEW_KEY_1,
-    }
-    assert item.total_score_cursor == "90"
     assert item.feature_a.feature_id == "feature-a"
     assert item.feature_b.lon is None
     assert item.distance_m is None
-
-    with pytest.raises(ValueError, match="invalid dedup review cursor"):
-        repo._dedup_cursor_params("bad")
 
 
 @pytest.mark.asyncio
@@ -426,7 +417,7 @@ async def test_list_dedup_reviews_and_decision() -> None:
     session = _Session(
         [
             _Result([{"total_count": 2}]),
-            _Result([_dedup_row(_REVIEW_KEY_1), _dedup_row(_REVIEW_KEY_2)]),
+            _Result([_dedup_row(_REVIEW_KEY_1)]),
         ]
     )
 
@@ -438,13 +429,12 @@ async def test_list_dedup_reviews_and_decision() -> None:
     )
 
     assert len(page.items) == 1
-    assert page.next_cursor is not None
     assert page.total_count == 2
     assert session.calls[0]["statement"] == repo._DEDUP_REVIEW_COUNT_SQL
     params = session.calls[1]["params"]
     assert params["providers"] == ["python-mois-api"]
     assert params["min_score"] == 80
-    assert params["limit_plus_one"] == 2
+    assert params["limit"] == 1
     assert params["offset_rows"] == 0
 
     changed = await repo.set_dedup_review_decision(

@@ -517,23 +517,23 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
                 )
 
 
-async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
+async def test_list_dedup_reviews_page_walks_same_score_without_gaps(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
     for feature_id in (
-        "feature-admin-cursor-a",
-        "feature-admin-cursor-b",
-        "feature-admin-cursor-c",
-        "feature-admin-cursor-d",
+        "feature-admin-page-a",
+        "feature-admin-page-b",
+        "feature-admin-page-c",
+        "feature-admin-page-d",
     ):
         session.add(_feature_row(feature_id, name=feature_id))
     await session.flush()
     reviews = [
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000003",
-            feature_id_a="feature-admin-cursor-a",
-            feature_id_b="feature-admin-cursor-b",
+            feature_id_a="feature-admin-page-a",
+            feature_id_b="feature-admin-page-b",
             total_score=Decimal("90.01"),
             name_score=95,
             spatial_score=80,
@@ -541,8 +541,8 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
         ),
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000002",
-            feature_id_a="feature-admin-cursor-a",
-            feature_id_b="feature-admin-cursor-c",
+            feature_id_a="feature-admin-page-a",
+            feature_id_b="feature-admin-page-c",
             total_score=Decimal("90.01"),
             name_score=94,
             spatial_score=80,
@@ -550,8 +550,8 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
         ),
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000001",
-            feature_id_a="feature-admin-cursor-a",
-            feature_id_b="feature-admin-cursor-d",
+            feature_id_a="feature-admin-page-a",
+            feature_id_b="feature-admin-page-d",
             total_score=Decimal("90.01"),
             name_score=93,
             spatial_score=80,
@@ -562,21 +562,19 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
     await session.flush()
 
     seen: list[str] = []
-    cursor: str | None = None
-    for _ in range(3):
-        page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
+    for page_number in range(1, 4):
+        page = await list_dedup_reviews(
+            session, page_size=1, page=page_number
+        )
         assert len(page.items) == 1
         assert page.total_count == 3
-        assert page.items[0].total_score_cursor == "90.01"
         seen.append(page.items[0].review_id)
-        cursor = page.next_cursor
 
     assert seen == [
         "00000000-0000-0000-0000-000000000003",
         "00000000-0000-0000-0000-000000000002",
         "00000000-0000-0000-0000-000000000001",
     ]
-    assert cursor is None
 
     page_2 = await list_dedup_reviews(session, page_size=2, page=2)
     assert page_2.total_count == 3
