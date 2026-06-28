@@ -37,6 +37,7 @@ __all__ = [
     "fetch_airkorea_air_quality",
     "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
+    "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
     "fetch_kma_weather_alerts",
     "fetch_knps_geometry_records",
@@ -56,6 +57,7 @@ __all__ = [
     "fetch_opinet_station_price_details",
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
+    "fetch_standard_special_streets",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_visitkorea_festival_events",
@@ -626,6 +628,50 @@ def fetch_standard_tourist_attractions(
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
         yield from client.tourist_attraction.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_standard_special_streets(
+    settings: KorTravelMapSettings,
+) -> Iterator[Any]:
+    """전국지역특화거리표준데이터 record를 datagokr public client로 stream한다."""
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "standard special streets live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    datagokr = cast(Any, importlib.import_module("datagokr"))
+    client = datagokr.DataGoKrClient(api_key=api_key)
+    try:
+        yield from client.special_street.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_datagokr_file_data_records(
+    settings: KorTravelMapSettings,
+    *,
+    dataset_key: str,
+) -> Iterator[Any]:
+    """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다."""
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "data.go.kr fileData live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    datagokr = cast(Any, importlib.import_module("datagokr"))
+    client = datagokr.DataGoKrClient(api_key=api_key)
+    try:
+        yield from client.file_data.iter_all(dataset_key)
     finally:
         client.close()
 

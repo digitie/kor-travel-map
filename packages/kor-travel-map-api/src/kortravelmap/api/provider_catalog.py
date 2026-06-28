@@ -365,14 +365,14 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         dataset_key=DATASET_KEY_STATIONS,
         feature_kind="weather",
         label="대기질 측정소 (weather-kind Feature)",
-        is_feature_load=True,
+        is_feature_load=False,
     ),
     _entry(
         provider=AIRKOREA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_AIR_QUALITY,
         feature_kind="weather",
-        label="대기질 측정값 (오염물질별 WeatherValue, observed)",
-        is_feature_load=False,
+        label="대기질 측정소 + 측정값 (weather Feature + WeatherValue)",
+        is_feature_load=True,
     ),
     # ── 한국석유공사 (OpiNet) ────────────────────────────────────────────
     _entry(

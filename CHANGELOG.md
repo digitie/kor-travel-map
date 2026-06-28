@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Feature update provider/Dagster 정렬 (2026-06-28)
+
+- **FIXED**: AirKorea feature update 대상이 standalone `airkorea_stations`로 노출되어 Dagster runner에서
+  unsupported provider/dataset으로 실패하던 문제를 수정했다. UI/catalog는 `airkorea_air_quality`를
+  feature-load 대상으로 노출하고, 기존 station 요청은 같은 asset alias로 실행한다.
+- **FIXED**: OpiNet feature update에서 API key 누락 시 provider client 내부 인증 오류 대신
+  `KOR_TRAVEL_MAP_OPINET_API_KEY` 누락 메시지로 실패하도록 했다.
+- **ADDED**: MOIS history/closed, 전국지역특화거리표준데이터, data.go.kr curated fileData 4종의
+  feature update runner dispatch와 Dagster asset/resource/schedule 연결을 추가했다.
+
 ### Review 상세 비교 다이얼로그 (2026-06-28)
 
 - **ADDED**: Dedup review와 Enrichment review 행을 클릭하면 두 자료의 feature/source 상세,

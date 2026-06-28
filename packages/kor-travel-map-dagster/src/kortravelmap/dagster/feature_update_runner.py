@@ -18,7 +18,15 @@ from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
 )
-from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_AIR_QUALITY
+from kortravelmap.providers.airkorea import (
+    AIRKOREA_PROVIDER_NAME,
+    DATASET_KEY_AIR_QUALITY,
+    DATASET_KEY_STATIONS,
+)
+from kortravelmap.providers.datagokr_file_data import (
+    DATAGOKR_FILEDATA_DATASETS,
+    DATAGOKR_FILEDATA_PROVIDER_NAME,
+)
 from kortravelmap.providers.khoa import DATASET_KEY_BEACHES, KHOA_PROVIDER_NAME
 from kortravelmap.providers.kma import (
     KMA_MID_FORECAST_DATASET_KEY,
@@ -56,6 +64,8 @@ from kortravelmap.providers.krheritage import DATASET_KEY_HERITAGE as KRHERITAGE
 from kortravelmap.providers.krheritage import PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME
 from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PROVIDER_NAME
 from kortravelmap.providers.mois import DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY
+from kortravelmap.providers.mois import DATASET_KEY_CLOSED as MOIS_CLOSED_DATASET_KEY
+from kortravelmap.providers.mois import DATASET_KEY_HISTORY as MOIS_HISTORY_DATASET_KEY
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.providers.opinet import (
     OPINET_PRICE_DATASET_KEY,
@@ -66,6 +76,7 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
+    DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     STANDARD_DATA_PROVIDER_NAME,
 )
@@ -80,6 +91,7 @@ from .assets import (
     run_feature_event_visitkorea_enrichment,
     run_feature_geometry_knps_records,
     run_feature_notice_krex_traffic_notices,
+    run_feature_place_datagokr_file_data,
     run_feature_place_khoa_beaches,
     run_feature_place_knps_points,
     run_feature_place_kor_travel_concierge_youtube,
@@ -92,6 +104,7 @@ from .assets import (
     run_feature_place_opinet_stations,
     run_feature_place_standard_museums,
     run_feature_place_standard_parking_lots,
+    run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
     run_feature_price_krex_rest_areas,
     run_feature_price_opinet_stations,
@@ -107,9 +120,11 @@ from .kma_weather import (
 )
 from .mcst_features import run_feature_place_mcst_culture
 from .provider_fetchers import (
+    ProviderCredentialMissing,
     fetch_airkorea_air_quality,
     fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
+    fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
     fetch_kma_weather_alerts,
     fetch_knps_geometry_records,
@@ -130,6 +145,7 @@ from .provider_fetchers import (
     fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
+    fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
@@ -357,6 +373,26 @@ def _records(resource_key: str, fetch: Callable[[KorTravelMapSettings], object])
     return _factory
 
 
+def _opinet_records(
+    resource_key: str,
+    fetch: Callable[[KorTravelMapSettings], object],
+    *,
+    label: str,
+) -> ResourceFactory:
+    def _factory(
+        settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> RunnerResources:
+        if settings.opinet_api_key is None:
+            raise ProviderCredentialMissing(
+                f"{label} feature update에는 KOR_TRAVEL_MAP_OPINET_API_KEY "
+                "(source OPINET_API_KEY)가 필요하다."
+            )
+        return RunnerResources({resource_key: fetch(settings)})
+
+    return _factory
+
+
 def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
@@ -401,6 +437,22 @@ def _airkorea_resources(
         {
             "airkorea_stations": fetch_airkorea_stations(settings),
             "airkorea_air_quality": fetch_airkorea_air_quality(settings),
+        }
+    )
+
+
+def _datagokr_file_data_resources(
+    settings: KorTravelMapSettings,
+    scope: ProviderDatasetRefreshScope,
+) -> RunnerResources:
+    dataset_key = scope.dataset_key
+    return RunnerResources(
+        {
+            "datagokr_file_data_records": fetch_datagokr_file_data_records(
+                settings,
+                dataset_key=dataset_key,
+            ),
+            "datagokr_file_data_dataset_key": dataset_key,
         }
     )
 
@@ -526,15 +578,21 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         provider=OPINET_PROVIDER_NAME,
         dataset_keys=frozenset({OPINET_STATION_DATASET_KEY}),
         run=run_feature_place_opinet_stations,
-        resources=_records("opinet_stations", fetch_opinet_stations),
+        resources=_opinet_records(
+            "opinet_stations",
+            fetch_opinet_stations,
+            label="OpiNet station",
+        ),
         asset_key="feature_place_opinet_stations",
     ),
     FeatureUpdateRunnerSpec(
         provider=OPINET_PROVIDER_NAME,
         dataset_keys=frozenset({OPINET_PRICE_DATASET_KEY}),
         run=run_feature_price_opinet_stations,
-        resources=_records(
-            "opinet_station_price_details", fetch_opinet_station_price_details
+        resources=_opinet_records(
+            "opinet_station_price_details",
+            fetch_opinet_station_price_details,
+            label="OpiNet price",
         ),
         asset_key="feature_price_opinet_stations",
     ),
@@ -584,7 +642,13 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
     ),
     FeatureUpdateRunnerSpec(
         provider=MOIS_PROVIDER_NAME,
-        dataset_keys=frozenset({MOIS_BULK_DATASET_KEY}),
+        dataset_keys=frozenset(
+            {
+                MOIS_BULK_DATASET_KEY,
+                MOIS_HISTORY_DATASET_KEY,
+                MOIS_CLOSED_DATASET_KEY,
+            }
+        ),
         run=run_feature_place_mois_licenses,
         resources=_mois_resources,
         asset_key="feature_place_mois_licenses",
@@ -643,6 +707,20 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         asset_key="feature_place_standard_parking_lots",
     ),
     FeatureUpdateRunnerSpec(
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_keys=frozenset({DATASET_KEY_SPECIAL_STREETS}),
+        run=run_feature_place_standard_special_streets,
+        resources=_records("standard_special_streets", fetch_standard_special_streets),
+        asset_key="feature_place_standard_special_streets",
+    ),
+    FeatureUpdateRunnerSpec(
+        provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
+        dataset_keys=frozenset(DATAGOKR_FILEDATA_DATASETS),
+        run=run_feature_place_datagokr_file_data,
+        resources=_datagokr_file_data_resources,
+        asset_key="feature_place_datagokr_file_data",
+    ),
+    FeatureUpdateRunnerSpec(
         provider=KHOA_PROVIDER_NAME,
         dataset_keys=frozenset({DATASET_KEY_BEACHES}),
         run=run_feature_place_khoa_beaches,
@@ -677,7 +755,7 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
     ),
     FeatureUpdateRunnerSpec(
         provider=AIRKOREA_PROVIDER_NAME,
-        dataset_keys=frozenset({DATASET_KEY_AIR_QUALITY}),
+        dataset_keys=frozenset({DATASET_KEY_AIR_QUALITY, DATASET_KEY_STATIONS}),
         run=run_feature_weather_airkorea_air_quality,
         resources=_airkorea_resources,
         asset_key="feature_weather_airkorea_air_quality",

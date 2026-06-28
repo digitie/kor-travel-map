@@ -31,6 +31,7 @@ from .provider_fetchers import (
     fetch_airkorea_air_quality,
     fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
+    fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
     fetch_kma_weather_alerts,
     fetch_knps_geometry_records,
@@ -51,6 +52,7 @@ from .provider_fetchers import (
     fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
+    fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
@@ -226,6 +228,24 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="datagokr_parking_lots",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="standard_special_streets",
+        provider_package="python-datagokr-api",
+        dataset_key="standard_special_streets",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="datagokr_file_data_records",
+        provider_package="python-datagokr-api",
+        dataset_key="datagokr_file_data",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note=(
+            "curated fileData 4종 공용 resource. Dagster asset은 "
+            "datagokr_file_data_dataset_key resource로 실제 dataset_key를 받는다."
+        ),
     ),
     ProviderRecordResourceSpec(
         resource_key="khoa_beaches",
@@ -625,6 +645,33 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_parking_lots"] = (
     build_provider_record_live_resource(
         _STANDARD_PARKING_SPEC,
         fetch_standard_parking_lots,
+    )
+)
+
+_STANDARD_SPECIAL_STREETS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "standard_special_streets"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_special_streets"] = (
+    build_provider_record_live_resource(
+        _STANDARD_SPECIAL_STREETS_SPEC,
+        fetch_standard_special_streets,
+    )
+)
+
+_DATAGOKR_FILE_DATA_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "datagokr_file_data_records"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_file_data_records"] = (
+    build_provider_record_live_resource(
+        _DATAGOKR_FILE_DATA_SPEC,
+        lambda settings: fetch_datagokr_file_data_records(
+            settings,
+            dataset_key=settings.datagokr_file_data_dataset_key,
+        ),
     )
 )
 

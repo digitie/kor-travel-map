@@ -337,6 +337,13 @@ class KorTravelMapSettings(BaseSettings):
             "KNPS geometry(route/area) feature-load asset이 적재할 file dataset key."
         ),
     )
+    datagokr_file_data_dataset_key: str = Field(
+        default="datagokr_seoul_bookstores",
+        description=(
+            "data.go.kr curated fileData 공용 feature-load asset이 적재할 dataset key. "
+            "feature update runner는 요청 scope의 dataset_key로 이 값을 덮어쓴다."
+        ),
+    )
     kor_travel_concierge_base_url: str | None = Field(
         default=None,
         description=(

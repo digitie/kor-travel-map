@@ -15,6 +15,10 @@ from kortravelmap.providers.airkorea import (
     air_quality_stations_to_bundles,
     air_quality_to_weather_values,
 )
+from kortravelmap.providers.datagokr_file_data import (
+    DATAGOKR_FILEDATA_PROVIDER_NAME,
+    file_data_rows_to_bundles,
+)
 from kortravelmap.providers.khoa import (
     DATASET_KEY_BEACHES,
     KHOA_PROVIDER_NAME,
@@ -100,11 +104,13 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
+    DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     STANDARD_DATA_PROVIDER_NAME,
     cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
+    special_streets_to_bundles,
     tourist_attractions_to_bundles,
 )
 
@@ -727,6 +733,69 @@ async def feature_place_standard_parking_lots(
     return await run_feature_place_standard_parking_lots(context)
 
 
+async def run_feature_place_standard_special_streets(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국지역특화거리표준데이터 record를 place anchor Feature로 적재한다."""
+    records = await _record_list(context, "standard_special_streets")
+    fetched_at = await _fetched_at(context)
+    bundles = await special_streets_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_SPECIAL_STREETS,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_special_streets"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_standard_special_streets(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_standard_special_streets(context)
+
+
+async def run_feature_place_datagokr_file_data(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """data.go.kr curated fileData raw row를 dataset별 place Feature로 적재한다."""
+    dataset_key = str(await _resource_value(context, "datagokr_file_data_dataset_key"))
+    records = await _record_list(context, "datagokr_file_data_records")
+    fetched_at = await _fetched_at(context)
+    bundles = await file_data_rows_to_bundles(
+        records,
+        dataset_key=dataset_key,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS
+    | {"datagokr_file_data_records", "datagokr_file_data_dataset_key"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_datagokr_file_data(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_datagokr_file_data(context)
+
+
 async def run_feature_place_khoa_beaches(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1008,6 +1077,8 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,
+    feature_place_standard_special_streets,
+    feature_place_datagokr_file_data,
     feature_place_khoa_beaches,
     feature_place_krairport_airports,
     feature_place_kor_travel_concierge_youtube,

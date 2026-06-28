@@ -7,7 +7,16 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from kortravelmap.api.provider_catalog import catalog_feature_load_entries
 from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshScope
+from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_STATIONS
+from kortravelmap.providers.datagokr_file_data import (
+    DATAGOKR_FILEDATA_DATASETS,
+    DATAGOKR_FILEDATA_PROVIDER_NAME,
+)
+from kortravelmap.providers.mois import DATASET_KEY_CLOSED, DATASET_KEY_HISTORY
+from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
+from kortravelmap.providers.opinet import OPINET_PROVIDER_NAME, OPINET_STATION_DATASET_KEY
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster.feature_update_runner import (
@@ -15,6 +24,7 @@ from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateRunnerSpec,
     RunnerResources,
 )
+from kortravelmap.dagster.provider_fetchers import ProviderCredentialMissing
 
 
 @dataclass(frozen=True)
@@ -137,3 +147,104 @@ async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None
 
     with pytest.raises(RuntimeError, match="지원하지 않는 provider/dataset"):
         await runner(object(), _scope(provider="unknown", dataset_key="missing"))
+
+
+def test_default_runner_accepts_airkorea_stations_alias() -> None:
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+    )
+
+    spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+        _scope(provider=AIRKOREA_PROVIDER_NAME, dataset_key=DATASET_KEY_STATIONS)
+    )
+
+    assert spec.asset_key == "feature_weather_airkorea_air_quality"
+
+
+def test_default_runner_accepts_mois_incremental_datasets() -> None:
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+    )
+
+    for dataset_key in (DATASET_KEY_HISTORY, DATASET_KEY_CLOSED):
+        spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+            _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
+        )
+        assert spec.asset_key == "feature_place_mois_licenses"
+
+
+def test_default_runner_accepts_datagokr_file_data_datasets() -> None:
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+    )
+
+    for dataset_key in DATAGOKR_FILEDATA_DATASETS:
+        spec = runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
+            _scope(provider=DATAGOKR_FILEDATA_PROVIDER_NAME, dataset_key=dataset_key)
+        )
+        assert spec.asset_key == "feature_place_datagokr_file_data"
+
+
+def test_default_runner_supports_all_catalog_feature_load_entries() -> None:
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+    )
+    supported = {
+        (spec.provider, dataset_key)
+        for spec in runner._specs  # noqa: SLF001 - catalog/runner drift 회귀 테스트
+        for dataset_key in spec.dataset_keys
+    }
+    feature_load = {
+        (entry.provider, entry.dataset_key) for entry in catalog_feature_load_entries()
+    }
+
+    assert sorted(feature_load - supported) == []
+
+
+async def test_opinet_missing_key_fails_before_provider_client_auth_error() -> None:
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": object(),
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": "off",
+        },
+        log=_Log(),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(
+            opinet_api_key=None
+        ),
+    )
+
+    with pytest.raises(ProviderCredentialMissing, match="KOR_TRAVEL_MAP_OPINET_API_KEY"):
+        await runner(
+            object(),
+            _scope(provider=OPINET_PROVIDER_NAME, dataset_key=OPINET_STATION_DATASET_KEY),
+        )

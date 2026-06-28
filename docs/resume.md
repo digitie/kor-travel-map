@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Feature update provider/Dagster 정렬
+
+- **완료(원인)**: AirKorea 실패는 UI/catalog가 `airkorea_stations`를 feature-load 대상으로 노출했지만
+  Dagster runner는 `airkorea_air_quality`만 지원해서 발생했다. OpiNet 실패는 Dagster runtime에
+  `KOR_TRAVEL_MAP_OPINET_API_KEY`가 비어 있어 provider client 인증 오류가 난 것이었다.
+- **완료(수정)**: AirKorea catalog는 `airkorea_air_quality`를 feature-load 대상으로 정렬하고,
+  기존 `airkorea_stations` 요청은 같은 asset alias로 실행한다. OpiNet은 key 누락을 runner 단계에서
+  명확한 credential 오류로 실패시킨다.
+- **완료(누락 Dagster)**: MOIS history/closed, `standard_special_streets`, data.go.kr curated fileData
+  4종을 feature update runner에 추가했다. 지역특화거리와 fileData 공용 Dagster asset/resource/schedule을
+  추가했다.
+- **완료(전체 점검)**: provider catalog의 `is_feature_load=True` 47개와 runner spec을 비교해 runner
+  미지원 0건을 확인했고, 이 비교를 회귀 테스트로 고정했다.
+- **검증(로컬)**: `ruff check .`, 대상 mypy, Dagster 테스트 199건(1 skipped), API provider
+  catalog/router 테스트 19건 통과. API router 테스트는 현재 셸 인증 env 때문에
+  `KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED=false`를 명시해 실행했다.
+- **다음 한 작업**: PR/CI green 후 N150에 배포하고, UI e2e로 feature update 요청이 queue에 들어가고
+  Dagster 실행으로 성공 완료되며 반복 작업이 정상 노출/실행되는지 확인한다.
+
 ## 2026-06-28 (codex) — Linux/WSL 개발 실행 정책
 
 - **완료(환경 정책)**: `git`/`gh`/`codegraph`를 포함한 모든 개발 명령을 Linux/WSL에서 실행하도록
