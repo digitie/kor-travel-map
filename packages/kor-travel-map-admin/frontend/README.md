@@ -178,7 +178,11 @@ npm run e2e
 ```
 
 baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:12705`).
-자세한 실행 모델은 `playwright.config.ts` 상단 주석 참고.
+live config는 `admin-scenario-catalog.ts`로 10,000개 이상의 admin UI/API 논리 케이스를
+생성해 route/API/write 반영 표면을 점검하고, 일부 spec은 실제 생성·승인·폐기 같은
+write flow까지 수행한다. 백업/restore처럼 blast radius가 큰 실행은 별도
+`E2E_BACKUP_RESTORE_EXECUTE*` opt-in이 필요하다. 자세한 실행 모델은
+`playwright.live.config.ts` 상단 주석 참고.
 
 Windows localhost relay가 stale listener 정리 뒤 바로 복구되지 않으면 WSL IP와 같은
 고정 포트로 검증한다. 이때 frontend를 띄울 때도 브라우저가 접근할 수 있는 API/
@@ -230,6 +234,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/feature-update-requests/[request_id]` | `/v1/admin/feature-update-requests/{request_id}`, `WS /v1/ops/live` | 구현됨. scope/matched_scope/job/Dagster 상세, cancel/run-now |
 | `/admin/poi-cache-targets` | `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/dagster` | `/v1/ops/dagster/summary`, `/v1/ops/dagster/runs/{run_id}`, `/v1/ops/dagster/nux-seen` | 구현됨. Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed |
+| `/admin/settings` | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` | 구현됨. public API key 생성/폐기와 로그인 감사 로그 조회 |
 | `/etl` | `/v1/debug/etl/*` | 구현됨. fixture/live ETL preview |
 | `/admin/features/new` | `/v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 | 구현됨. 수동 feature 작성 change request + 지도 좌표/geocode/reverse/중복 후보 |
 | `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/{id}/weather`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/weather/nearby |

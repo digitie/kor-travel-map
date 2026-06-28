@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-28 (codex) — Admin UI 전체 live e2e 시나리오 평가
+
+- **완료(catalog)**: Admin UI와 public reflection 표면을 24개 surface로 나누고, route smoke/write
+  contract/admin feature matrix/features map/detail/curated/logs/reviews/change request/category cross 축을
+  합쳐 13,651건의 논리 live e2e 시나리오 catalog를 추가했다.
+- **완료(write 반영)**: `/admin/settings`에서 public API key 생성 → API list 확인 → UI revoke →
+  API/UI revoked 확인, API auth audit event 생성 → Settings UI 확인 흐름을 새 serial live spec으로
+  추가했다. 기존 feature change request write 흐름과 함께 Admin UI↔API↔public detail 반영을 끝까지 본다.
+- **완료(수정)**: n150 live fixture feature id를 현재 active id로 갱신했고, curated 후보 0건 상태에서
+  empty-state row를 실제 후보로 오인하던 문제를 candidate row test id로 수정했다. Settings route/nav/문서
+  누락도 보강했다.
+- **검증(n150)**: full live suite 수정본은 공식 Playwright Docker image + host network에서
+  1,828 passed / 5 skipped / 0 failed (34.1분)로 통과했다.
+- **검증(로컬)**: `npm -w packages/kor-travel-map-admin/frontend run type-check:e2e`,
+  `npm -w packages/kor-travel-map-admin/frontend run lint`(0 errors, 기존 warnings 6개),
+  `git diff --check`를 통과했다.
+- **다음 한 작업**: PR을 올리고 CI green 및 review 조건을 확인한 뒤 머지한다.
+
 ## 2026-06-28 (codex) — Admin features/change requests UI live write e2e
 
 - **완료(e2e)**: `/admin/features/new` → `/admin/features/change-requests` → `/admin/features`를 잇는

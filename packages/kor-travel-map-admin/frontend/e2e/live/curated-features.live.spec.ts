@@ -373,7 +373,7 @@ test.describe("curated-features live: row selection resets place-search panel", 
   }) => {
     await page.goto(ROUTE);
     await expectConsoleLoaded(page);
-    const rows = page.locator("table").first().locator("tbody tr");
+    const rows = page.getByTestId("curated-feature-row");
     const rowCount = await rows.count();
     test.skip(rowCount < 2, "needs >=2 candidate rows");
 

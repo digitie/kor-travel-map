@@ -123,6 +123,7 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
 | `/ops/providers` (refresh policy 편집) | provider별 update 주기/rate limit 정책 (별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/provider-refresh-policies` REST는 backend-only) | `/admin/provider-refresh-policies` |
 | `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
+| `/admin/settings` | public API key 생성/폐기와 admin 로그인 감사 이벤트 조회 | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` |
 | `/` (운영 홈 summary) | feature/source/job/dedup/issue/consistency summary (별도 frontend 경로로 만들지 않고 운영 홈 `/`에서 소비한다. `/ops/metrics` REST는 backend-only) | `/ops/metrics` |
 | `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
 | `/ops/logs` | system/API/job event 로그 | `/ops/system-logs`, `/ops/api-call-logs`, `/ops/import-job-events` |
@@ -134,7 +135,7 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 - **Providers**: `/ops/providers` (provider 목록 + 상세 + 강제 실행/refresh policy 편집).
 - **Jobs**: `/ops/import-jobs`, job 상세, offline upload job.
 - **Review**: `/admin/dedup-reviews`, `/admin/enrichment-reviews`, missing data queue, consistency samples.
-- **Ops**: `/admin/dagster`, `/ops/logs`, `/ops/consistency`, `/ops/metrics`.
+- **Ops**: `/admin/dagster`, `/admin/settings`, `/ops/logs`, `/ops/consistency`, `/ops/metrics`.
 - **Debug**: `/debug/etl`.
 
 ### 4.3 현재 구현과 남은 연결부 (2026-06-11)
@@ -143,8 +144,8 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 `/admin/features/change-requests`, `/admin/issues`, `/admin/dedup-reviews`,
 `/admin/enrichment-reviews`, `/admin/feature-update-requests`,
 `/admin/poi-cache-targets`, `/admin/offline-uploads`, `/admin/backups`,
-`/admin/dagster`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`, `/ops/providers`,
-`/ops/consistency`, `/ops/logs`다.
+`/admin/dagster`, `/admin/settings`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`,
+`/ops/providers`, `/ops/consistency`, `/ops/logs`다.
 
 T-221 종료 기준으로 admin UI/UX 시나리오 연결성의 핵심 gap은 닫았다. 후속은 T-222
 공개 해수욕장/축제 뷰 API부터 진행한다.
