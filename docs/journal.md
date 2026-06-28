@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Enrichment detail source audit-only 계약 명시
+
+#567 지적에 따라 enrichment 상세 비교 다이얼로그의 detail source 선택 의미를 정직하게 낮췄다.
+
+- **API 계약**: enrichment detail/decision 응답에 `detail_source_effect: "audit_only"`를 추가하고,
+  decision 응답은 요청의 `selected_detail_source`를 함께 반환한다.
+- **UI 문구**: 상세 다이얼로그의 source 선택 옵션을 `기록:` prefix로 표시하고, 접근성 설명/tooltip도
+  실제 적용 데이터 변경 없이 decision reason에 기록되는 선택임을 명시한다.
+- **문서 정리**: changelog의 기존 “데이터 선택” 표현을 audit-only 기록 선택으로 바로잡았다.
+
 ## 2026-06-29 (codex) — Dedup review count fast path 보강
 
 #566 지적에 따라 dedup review 목록의 count 경로를 정리했다.

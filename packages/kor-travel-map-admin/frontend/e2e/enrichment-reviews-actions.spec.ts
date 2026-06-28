@@ -95,13 +95,16 @@ function listResponse(
 function decisionResponse(
   review: EnrichmentReviewRecord,
   decision: EnrichmentReviewDecisionData["decision"],
+  selectedDetailSource: EnrichmentReviewDecisionData["selected_detail_source"],
 ): EnrichmentReviewDecisionResponse {
   return {
     data: {
       applied: decision === "accepted",
       changed: true,
       decision,
+      detail_source_effect: "audit_only",
       review_id: review.review_id,
+      selected_detail_source: selectedDetailSource,
       source_links_inserted: decision === "accepted" ? 1 : 0,
       source_links_updated: 0,
     },
@@ -183,6 +186,7 @@ function detailResponse(
       created_at: review.created_at,
       decision_reason: review.decision_reason,
       default_detail_source: targetDetailAvailable ? "target" : "visitkorea",
+      detail_source_effect: "audit_only",
       distance_m: review.distance_m,
       name_score: review.name_score,
       review_id: review.review_id,
@@ -302,7 +306,14 @@ async function mockEnrichmentReviews(
       target.status = body.decision;
       target.decision_reason = body.decision_reason ?? null;
       target.reviewed_by = body.reviewed_by ?? null;
-      await fulfillJson(route, decisionResponse(target, body.decision));
+      await fulfillJson(
+        route,
+        decisionResponse(
+          target,
+          body.decision,
+          body.selected_detail_source ?? null,
+        ),
+      );
       return;
     }
 

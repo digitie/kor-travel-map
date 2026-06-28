@@ -4197,8 +4197,16 @@ export interface components {
              * @enum {string}
              */
             decision: "accepted" | "rejected" | "ignored";
+            /**
+             * Detail Source Effect
+             * @default audit_only
+             * @constant
+             */
+            detail_source_effect: "audit_only";
             /** Review Id */
             review_id: string;
+            /** Selected Detail Source */
+            selected_detail_source?: ("target" | "visitkorea") | null;
             /** Source Links Inserted */
             source_links_inserted?: number | null;
             /** Source Links Updated */
@@ -4218,7 +4226,10 @@ export interface components {
             decision_reason?: string | null;
             /** Reviewed By */
             reviewed_by?: string | null;
-            /** Selected Detail Source */
+            /**
+             * Selected Detail Source
+             * @description 운영자가 비교 다이얼로그에서 선택한 상세 source. 현재 accept 적용 데이터는 바꾸지 않고 decision_reason audit marker로만 기록한다.
+             */
             selected_detail_source?: ("target" | "visitkorea") | null;
         };
         /**
@@ -4246,6 +4257,12 @@ export interface components {
              * @enum {string}
              */
             default_detail_source: "target" | "visitkorea";
+            /**
+             * Detail Source Effect
+             * @default audit_only
+             * @constant
+             */
+            detail_source_effect: "audit_only";
             /** Distance M */
             distance_m?: number | null;
             /** Name Score */
