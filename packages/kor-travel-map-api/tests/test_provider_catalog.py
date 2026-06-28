@@ -128,8 +128,12 @@ def test_refreshable_entries_include_non_feature_load_runner_targets() -> None:
     assert ("python-krex-api", "krex_rest_area_weather") in keys
     assert ("python-visitkorea-api", "visitkorea_festival_events") in keys
 
-    # MOIS detail은 Feature를 새로 만들지는 않지만 Dagster로 보강 적재한다.
-    assert ("python-mois-api", "mois_license_detail") in keys
+    # MOIS history/closed/detail은 아직 feature-update runner가 안전하게 실행할
+    # 전용 source/fetcher가 없으므로 운영 실행 목록에서 제외한다.
+    assert ("python-mois-api", "mois_license_features_bulk") in keys
+    assert ("python-mois-api", "mois_license_features_history") not in keys
+    assert ("python-mois-api", "mois_license_features_closed") not in keys
+    assert ("python-mois-api", "mois_license_detail") not in keys
     # 전화번호 보강은 수동/후속 보강 계열이므로 운영 실행 목록에서 제외한다.
     assert ("python-visitkorea-api", "place_phone_enrichment") not in keys
     # AirKorea station 단독 dataset은 air_quality 통합 asset의 backward-compatible

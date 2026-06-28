@@ -337,10 +337,9 @@ def test_ops_providers_list_includes_never_run_catalog_providers(
                 "feature_update_requests",
                 "refresh_policy",
             }
-        # PriceValue/WeatherValue/detail 보강처럼 Feature를 새로 만들지 않아도
+        # PriceValue/WeatherValue 보강처럼 Feature를 새로 만들지 않아도
         # Dagster runner가 있으면 운영 실행 목록에 노출한다.
         for provider, dataset_key in (
-            ("python-mois-api", "mois_license_detail"),
             ("python-opinet-api", "opinet_gas_station_prices"),
             ("python-krex-api", "krex_rest_area_prices"),
             ("python-krex-api", "krex_rest_area_weather"),
@@ -352,6 +351,14 @@ def test_ops_providers_list_includes_never_run_catalog_providers(
                 "feature_update_requests",
                 "refresh_policy",
             }
+        # MOIS history/closed/detail은 전용 runner가 준비되기 전까지 운영
+        # refresh 대상에서 제외한다.
+        for dataset_key in (
+            "mois_license_features_history",
+            "mois_license_features_closed",
+            "mois_license_detail",
+        ):
+            assert ("python-mois-api", dataset_key) not in by_key
         # 전화번호 보강은 아직 운영 runner 대상이 아니다.
         assert ("python-visitkorea-api", "place_phone_enrichment") not in by_key
     finally:
@@ -397,9 +404,14 @@ def test_ops_providers_list_preserves_synced_rows_alongside_never_run(
         assert synced["status"] == "active"
         assert synced["last_success_at"].startswith("2026-06-12")
         assert "cursor" not in synced
-        # 같은 provider의 다른 dataset(closed)은 never-run으로 나온다.
-        closed = by_key[("python-mois-api", "mois_license_features_closed")]
-        assert closed["status"] == "never_run"
+        # 같은 provider라도 MOIS non-bulk dataset은 전용 runner가 준비되기 전까지
+        # never-run 후보로 노출하지 않는다.
+        for dataset_key in (
+            "mois_license_features_history",
+            "mois_license_features_closed",
+            "mois_license_detail",
+        ):
+            assert ("python-mois-api", dataset_key) not in by_key
     finally:
         client.app.dependency_overrides.clear()
 
