@@ -5,6 +5,7 @@ DB 무관 단위 테스트 (``get_primary_source_detail`` monkeypatch):
 - ``features_routes_enabled=False`` 시 unmount
 - 미적재 license_id → 404
 - 적재된 license_id → 상세 매핑 + 프로세스 캐시 히트(2회차 cached=True)
+- detail dataset 미적재 시 bulk source record fallback
 
 실 DB round-trip은 메인 lib 통합 테스트(``feature_repo.get_primary_source_detail``)에서.
 """
@@ -82,7 +83,7 @@ def test_mois_detail_returns_and_caches(
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import mois_detail as mod
 
-    calls = {"n": 0}
+    calls: list[str] = []
     detail = {
         "feature_id": "f_x",
         "name": "한식당 가나다",
@@ -96,7 +97,7 @@ def test_mois_detail_returns_and_caches(
     }
 
     async def _detail(_session: Any, **_kw: Any) -> dict[str, Any]:
-        calls["n"] += 1
+        calls.append(_kw["dataset_key"])
         return detail
 
     monkeypatch.setattr(mod.feature_repo, "get_primary_source_detail", _detail)
@@ -119,6 +120,50 @@ def test_mois_detail_returns_and_caches(
         r2 = client.get(f"/v1/debug/mois-license/{lid}")
         assert r2.status_code == 200
         assert r2.json()["data"]["cached"] is True
-        assert calls["n"] == 1  # repo는 1회만 호출
+        assert calls == ["mois_license_detail"]  # repo는 1회만 호출
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_mois_detail_falls_back_to_bulk_source_record(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import mois_detail as mod
+
+    calls: list[str] = []
+    detail = {
+        "feature_id": "f_x",
+        "name": "한식당 가나다",
+        "category": "02010100",
+        "status": "active",
+        "lon": 126.97,
+        "lat": 37.56,
+        "address": {"road": "서울 종로구"},
+        "detail": {"place_kind": "restaurant"},
+        "raw_data": {"BPLC_NM": "한식당 가나다", "mng_no": "A1"},
+    }
+
+    async def _detail(_session: Any, **_kw: Any) -> dict[str, Any] | None:
+        calls.append(_kw["dataset_key"])
+        if _kw["dataset_key"] == "mois_license_detail":
+            return None
+        return detail
+
+    monkeypatch.setattr(mod.feature_repo, "get_primary_source_detail", _detail)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/debug/mois-license/general_restaurants::A1")
+        assert r.status_code == 200
+        assert r.json()["data"]["feature_id"] == "f_x"
+        assert calls == [
+            "mois_license_detail",
+            "mois_license_features_bulk",
+        ]
     finally:
         client.app.dependency_overrides.clear()

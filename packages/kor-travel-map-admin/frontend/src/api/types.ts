@@ -1035,7 +1035,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** MOIS 인허가 on-demand 상세 (Step D, 캐시만) */
+        /** MOIS 인허가 on-demand 상세 (Step D, detail 우선) */
         get: operations["get_mois_license_detail_v1_debug_mois_license__license_id__get"];
         put?: never;
         post?: never;

@@ -15,6 +15,7 @@ from kortravelmap.api.provider_catalog import (
     PROVIDER_DATASET_CATALOG,
     catalog_datasets,
     catalog_feature_load_entries,
+    catalog_refreshable_entries,
     find_catalog_entry,
     list_catalog_providers,
 )
@@ -105,6 +106,35 @@ def test_feature_load_entries_are_subset() -> None:
     assert ("data.go.kr-standard", "standard_special_streets") in fl_keys
     assert ("python-datagokr-api", "datagokr_seoul_bookstores") in fl_keys
     # 정렬 보장.
+    assert entries == sorted(entries, key=lambda e: (e.provider, e.dataset_key))
+
+
+@pytest.mark.unit
+def test_refreshable_entries_include_non_feature_load_runner_targets() -> None:
+    """운영 적재 대상은 새 Feature 생성 여부와 별도다."""
+    entries = catalog_refreshable_entries()
+    assert all(e.is_refreshable for e in entries)
+    keys = {(e.provider, e.dataset_key) for e in entries}
+
+    # FeatureBundle 적재 항목은 기본적으로 refreshable이다.
+    assert {
+        (e.provider, e.dataset_key) for e in catalog_feature_load_entries()
+    } <= keys
+
+    # WeatherValue/PriceValue/enrichment처럼 Feature를 만들지 않아도 로드 대상이다.
+    assert ("python-kma-api", "kma_short_forecast") in keys
+    assert ("python-opinet-api", "opinet_gas_station_prices") in keys
+    assert ("python-krex-api", "krex_rest_area_prices") in keys
+    assert ("python-krex-api", "krex_rest_area_weather") in keys
+    assert ("python-visitkorea-api", "visitkorea_festival_events") in keys
+
+    # MOIS detail은 Feature를 새로 만들지는 않지만 Dagster로 보강 적재한다.
+    assert ("python-mois-api", "mois_license_detail") in keys
+    # 전화번호 보강은 수동/후속 보강 계열이므로 운영 실행 목록에서 제외한다.
+    assert ("python-visitkorea-api", "place_phone_enrichment") not in keys
+    # AirKorea station 단독 dataset은 air_quality 통합 asset의 backward-compatible
+    # alias일 뿐, 운영 목록에는 중복 노출하지 않는다.
+    assert ("python-airkorea-api", "airkorea_stations") not in keys
     assert entries == sorted(entries, key=lambda e: (e.provider, e.dataset_key))
 
 

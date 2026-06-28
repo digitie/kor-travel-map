@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
 from kortravelmap.api.provider_catalog import (
-    catalog_feature_load_entries,
+    catalog_refreshable_entries,
 )
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyRecord,
@@ -392,10 +392,12 @@ async def list_ops_providers(
             )
         )
 
-    # 3) 카탈로그 feature-load dataset 중 sync state·policy 둘 다 없는 never-run
-    #    항목 — status='never_run'으로 노출(이전엔 목록에서 누락됐던 부분).
+    # 3) 카탈로그상 Dagster feature update request로 실행 가능한 dataset 중
+    #    sync state·policy 둘 다 없는 never-run 항목 — status='never_run'으로 노출.
+    #    FeatureBundle이 아닌 PriceValue/WeatherValue/enrichment load도 운영 적재
+    #    단위이므로 is_feature_load 대신 is_refreshable 기준을 쓴다.
     covered_keys = state_keys | set(policy_only_keys)
-    for entry in catalog_feature_load_entries():
+    for entry in catalog_refreshable_entries():
         key = (entry.provider, entry.dataset_key)
         if key in covered_keys:
             continue

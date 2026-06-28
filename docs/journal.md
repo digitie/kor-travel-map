@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-28 (codex) — Refreshable provider catalog와 MOIS detail runner 정렬
+
+`is_feature_load=False`인 PriceValue/WeatherValue/detail 보강 dataset이 Dagster runner로 실행 가능한데도
+`/ops/providers` never-run 목록에서 빠지는 문제를 정리했다.
+
+- **카탈로그 분리**: `is_feature_load`와 별도로 `is_refreshable`을 추가해, 새 Feature를 만들지 않는
+  OpiNet/KREX/KMA/VisitKorea 보강 계열도 feature update request 실행 목록에 노출되게 했다.
+- **MOIS detail**: `mois_license_detail`을 refreshable로 전환하고 기존 MOIS license asset runner가
+  해당 dataset_key를 받을 수 있게 했다. 상세 API는 detail source record를 먼저 조회하고, 없으면 기존
+  bulk source record로 fallback한다.
+- **유지 항목**: 전화번호 보강(`place_phone_enrichment`)과 AirKorea station alias는 운영 실행 목록에
+  노출하지 않도록 유지했다.
+- **검증**: refreshable catalog 56개와 Dagster runner spec 비교에서 누락 0건을 확인했다. 관련 pytest
+  32건, 변경 파일 ruff, 대상 mypy를 통과했다.
+
 ## 2026-06-28 (codex) — Feature update AirKorea/OpiNet 및 누락 Dagster 자산 보강
 
 Feature update requests에서 AirKorea/OpiNet 요청이 실패하던 원인을 수정하고,

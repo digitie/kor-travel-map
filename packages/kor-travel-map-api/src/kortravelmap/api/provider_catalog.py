@@ -132,6 +132,7 @@ __all__ = [
     "list_catalog_providers",
     "catalog_datasets",
     "catalog_feature_load_entries",
+    "catalog_refreshable_entries",
     "find_catalog_entry",
 ]
 
@@ -160,6 +161,10 @@ class ProviderDatasetCatalogEntry:
     is_feature_load:
         새 Feature(FeatureBundle)를 적재하면 True. WeatherValue/PriceValue/
         enrichment-only 경로는 False.
+    is_refreshable:
+        Dagster feature update request로 실행 가능한 적재/갱신 단위이면 True.
+        ``is_feature_load=False``인 PriceValue/WeatherValue/enrichment도 여기에
+        포함될 수 있다. 아직 runner가 없는 수동 보강/alias 항목은 False.
     preview:
         ETL preview 가용성 — import 시점에 fixture/live registry 조회로 결정.
     """
@@ -170,6 +175,7 @@ class ProviderDatasetCatalogEntry:
     sync_scope: str
     label: str
     is_feature_load: bool
+    is_refreshable: bool
     preview: PreviewKind
 
 
@@ -198,6 +204,7 @@ def _entry(
     feature_kind: str,
     label: str,
     is_feature_load: bool,
+    is_refreshable: bool | None = None,
     sync_scope: str = "default",
 ) -> ProviderDatasetCatalogEntry:
     return ProviderDatasetCatalogEntry(
@@ -207,6 +214,7 @@ def _entry(
         sync_scope=sync_scope,
         label=label,
         is_feature_load=is_feature_load,
+        is_refreshable=is_feature_load if is_refreshable is None else is_refreshable,
         preview=_preview_for(provider, dataset_key),
     )
 
@@ -318,6 +326,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         sync_scope="target_grids",
         label="KMA 단기예보 (getVilageFcst, 3시간×5일)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -326,6 +335,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         sync_scope="target_grids",
         label="KMA 초단기실황 (getUltraSrtNcst, 관측)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -334,6 +344,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         sync_scope="target_grids",
         label="KMA 초단기예보 (getUltraSrtFcst, 30분×6시간)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -342,6 +353,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         sync_scope="mid_region",
         label="KMA 중기예보 (getMidLandFcst + getMidTa, 3~10일)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -366,6 +378,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="weather",
         label="대기질 측정소 (weather-kind Feature)",
         is_feature_load=False,
+        is_refreshable=False,
     ),
     _entry(
         provider=AIRKOREA_PROVIDER_NAME,
@@ -388,6 +401,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="price",
         label="OpiNet 유가 시계열 (PriceValue)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     # ── 한국도로공사 (krex) ──────────────────────────────────────────────
     _entry(
@@ -403,6 +417,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="price",
         label="휴게소 food/fuel 가격 시계열 (PriceValue)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KREX_PROVIDER_NAME,
@@ -410,6 +425,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="weather",
         label="휴게소 관측 기상 (observed WeatherValue + weather Feature)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=KREX_PROVIDER_NAME,
@@ -484,6 +500,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="place",
         label="MOIS 인허가 상세(detail) 보강",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     # ── VisitKorea / 전화번호 enrichment ─────────────────────────────────
     _entry(
@@ -492,6 +509,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="event",
         label="VisitKorea 축제 enrichment (datagokr 1차에 2차 보강)",
         is_feature_load=False,
+        is_refreshable=True,
     ),
     _entry(
         provider=VISITKOREA_PROVIDER_NAME,
@@ -499,6 +517,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         feature_kind="place",
         label="전화번호 보강 (place detail.phones; candidate: kakao/naver/google)",
         is_feature_load=False,
+        is_refreshable=False,
     ),
     # ── kor-travel-concierge YouTube ─────────────────────────────────────
     _entry(
@@ -546,11 +565,19 @@ def catalog_datasets(provider: str) -> list[ProviderDatasetCatalogEntry]:
 def catalog_feature_load_entries() -> list[ProviderDatasetCatalogEntry]:
     """새 Feature를 적재하는 (FeatureBundle) 항목만, provider→dataset 정렬.
 
-    `/ops/providers`는 운영 표면이라 새 Feature를 적재하는 dataset(=
-    provider_sync_state로 추적되는 단위)만 LEFT JOIN 대상으로 삼는다.
+    WeatherValue/PriceValue/enrichment처럼 Feature를 만들지 않는 실행 단위는
+    ``catalog_refreshable_entries``에서 다룬다.
     """
     return sorted(
         (e for e in PROVIDER_DATASET_CATALOG if e.is_feature_load),
+        key=lambda e: (e.provider, e.dataset_key),
+    )
+
+
+def catalog_refreshable_entries() -> list[ProviderDatasetCatalogEntry]:
+    """Dagster feature update request로 실행 가능한 항목만, provider→dataset 정렬."""
+    return sorted(
+        (e for e in PROVIDER_DATASET_CATALOG if e.is_refreshable),
         key=lambda e: (e.provider, e.dataset_key),
     )
 
