@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — n150 full live e2e long-tail 안정화
+
+n150 write/destructive full live e2e는 1차 재실행에서 1,869 passed / 12 flaky / 17 skipped /
+7 failed / 5 did not run으로 끝났다. 실패 원인은 제품 동작 회귀보다는 full 부하에서 드러난
+live spec 동기화 문제였다.
+
+- **e2e**: Dagster run detail과 features map detail의 중복 텍스트 strict locator를 `.first()`로 좁혔다.
+- **e2e**: import-jobs live navigation은 `ERR_NETWORK_CHANGED`/timeout을 짧게 retry하는 `gotoLive`
+  helper를 거치도록 정리했다.
+- **e2e**: ETL provider catalog 로딩은 n150 full 부하를 고려해 ETL 구간 timeout만 45초로 늘렸다.
+- **e2e**: enrichment review deep pagination은 5분 response wait로 hang하지 않도록 response 관측을
+  짧게 제한하고 UI disabled state 검증을 유지했다.
+- **검증**: 실패 축 targeted 재실행은 12 passed로 통과했다.
+
 ## 2026-06-29 (codex) — Enrichment review detail live smoke 클릭 안정화
 
 n150 targeted review live e2e에서 enrichment 목록/score=all 조회는 통과했지만, 상세 다이얼로그

@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — n150 full live e2e long-tail 안정화
+
+- **완료**: PR #588을 CI green 후 머지했고, n150 UI는 새 image로 재빌드/재생성했다.
+- **완료**: n150 full live e2e 1차 재실행은 1,869 passed / 12 flaky / 17 skipped / 7 failed /
+  5 did not run으로 종료했다.
+- **완료**: 실패 7건은 strict duplicate locator, import-jobs navigation `ERR_NETWORK_CHANGED`, ETL
+  provider catalog loading wait, enrichment deep pagination response wait로 분해했고 spec 안정화를 적용했다.
+- **검증**: 실패 축 targeted 재실행은 12 passed로 통과했다.
+- **다음 한 작업**: 안정화 변경을 PR/CI/머지한 뒤 full n150 live e2e를 다시 실행한다.
+
 ## 2026-06-29 (codex) — Enrichment review detail live smoke 클릭 안정화
 
 - **완료**: PR #586으로 backup/restore destructive 실행 경로 분리 변경을 CI green 후 머지했다.

@@ -415,7 +415,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       // 자동 선택 run의 상세 본문이 같은 run을 가리킨다(ok일 때) — backend 반영 확인.
       if (autoDetailBody.data.status === "ok" && autoDetailBody.data.run) {
         expect(autoDetailBody.data.run.run_id).toBe(fallbackId);
-        await expect(runDetailCard.getByText(fallbackId)).toBeVisible(T);
+        await expect(runDetailCard.getByText(fallbackId).first()).toBeVisible(T);
       } else {
         // not_found/unavailable여도 Run detail 카드는 상태 배지/안내를 렌더한다.
         await expect(
@@ -443,7 +443,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
           (await targetDetailResponse.json()) as DagsterRunDetailResponse;
         if (targetBody.data.status === "ok" && targetBody.data.run) {
           expect(targetBody.data.run.run_id).toBe(target.run_id);
-          await expect(runDetailCard.getByText(target.run_id)).toBeVisible(T);
+          await expect(runDetailCard.getByText(target.run_id).first()).toBeVisible(T);
         }
       }
     });

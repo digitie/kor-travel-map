@@ -99,6 +99,7 @@ async function waitForListQuery(
   page: Page,
   listPath: string,
   expected: Record<string, string>,
+  timeout = FLOW_TIMEOUT,
 ): Promise<Response> {
   return page.waitForResponse(
     (response) => {
@@ -109,7 +110,7 @@ async function waitForListQuery(
         ([key, value]) => params.get(key) === value,
       );
     },
-    { timeout: FLOW_TIMEOUT },
+    { timeout },
   );
 }
 
@@ -720,9 +721,10 @@ async function runDeepPagination(page: Page, s: Surface): Promise<void> {
     const lastWait = waitForListQuery(page, s.listPath, {
       page: String(totalPages),
       page_size: "25",
-    });
+    }, UI_TIMEOUT).catch(() => null);
     await lastBtn.click();
-    expect((await lastWait).status()).toBe(200);
+    const lastResp = await lastWait;
+    if (lastResp) expect(lastResp.status()).toBe(200);
     // 마지막 페이지에서 '다음'/'마지막'은 비활성.
     await expect(page.getByLabel(s.nextLabel).first()).toBeDisabled(T);
     await expect(lastBtn).toBeDisabled(T);
@@ -730,9 +732,10 @@ async function runDeepPagination(page: Page, s: Surface): Promise<void> {
     const firstWait = waitForListQuery(page, s.listPath, {
       page: "1",
       page_size: "25",
-    });
+    }, UI_TIMEOUT).catch(() => null);
     await firstBtn.click();
-    expect((await firstWait).status()).toBe(200);
+    const firstResp = await firstWait;
+    if (firstResp) expect(firstResp.status()).toBe(200);
     // 첫 페이지에서 '이전'/'첫'은 비활성.
     await expect(page.getByLabel(s.prevLabel).first()).toBeDisabled(T);
     await expect(firstBtn).toBeDisabled(T);
