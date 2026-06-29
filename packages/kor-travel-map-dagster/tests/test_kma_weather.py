@@ -48,26 +48,20 @@ def _int_grid(lat: float, lon: float) -> tuple[int, int]:
 # -- map_grid_targets -----------------------------------------------------
 
 
-def test_map_grid_targets_dedupes_caps_and_maps_places() -> None:
+def test_map_grid_targets_dedupes_and_caps() -> None:
     targets = map_grid_targets(
         # 두 target이 같은 격자 (126, 37)로 dedupe.
         target_coords=[(126.9, 37.5), (126.95, 37.55)],
         # extra 2격자 — 상한(2)에 걸려 마지막 (130, 36)이 떨어진다.
         extra_points=[(129.0, 35.1), (130.2, 36.0)],
-        place_coords=[
-            ("f-in-first", 126.97, 37.56),
-            ("f-in-second", 129.07, 35.17),
-            ("f-outside", 127.5, 36.5),
-            ("f-dropped-grid", 130.5, 36.2),
-        ],
         to_grid=_int_grid,
         max_grids=2,
     )
 
+    # 격자는 target → extra 순서로 dedupe·상한 적용된다(place feature 매핑 없음 —
+    # 각 격자가 자체 weather feature로 적재되므로).
     assert targets.grids == ((126, 37), (129, 35))
     assert targets.grids_dropped == 1
-    assert targets.feature_ids_by_grid[(126, 37)] == ("f-in-first",)
-    assert targets.feature_ids_by_grid[(129, 35)] == ("f-in-second",)
 
 
 def test_map_grid_targets_rejects_nonpositive_cap() -> None:
@@ -75,7 +69,6 @@ def test_map_grid_targets_rejects_nonpositive_cap() -> None:
         map_grid_targets(
             target_coords=[],
             extra_points=[],
-            place_coords=[],
             to_grid=_int_grid,
             max_grids=0,
         )
@@ -163,6 +156,7 @@ class _FakeKrtourClient:
         self.place_coords = place_coords or []
         self.load_error = load_error
         self.loaded_values: list[Any] = []
+        self.loaded_bundles: list[Any] = []
         self.success_calls: list[dict[str, Any]] = []
         self.failure_calls: list[dict[str, Any]] = []
 
@@ -176,6 +170,13 @@ class _FakeKrtourClient:
 
     async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
         return list(self.place_coords)
+
+    async def load_feature_bundles(self, bundles: Any) -> Any:
+        # 격자 weather feature(앵커)를 적재한다. load_error는 weather-value 적재
+        # 실패 경로 검증용이라 여기서는 던지지 않는다.
+        materialized = list(bundles)
+        self.loaded_bundles.extend(materialized)
+        return SimpleNamespace(inserted=len(materialized))
 
     async def load_weather_values(self, values: Any) -> int:
         materialized = list(values)
@@ -280,12 +281,19 @@ def _context(kor_travel_map_client: _FakeKrtourClient, forecast: _FakeForecastSe
             "kma_weather_client": SimpleNamespace(forecast=forecast),
             "kma_weather_extra_points": None,
             "kma_weather_max_grids_per_run": 50,
+            # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
+            "reverse_geocoder": None,
         }
     )
 
 
 def _patch_grid_and_bases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(kma_weather, "_kma_grid", _int_grid)
+    # 격자 중심 좌표(kma.grid.to_latlon)는 python-kma-api 미설치 환경에서 import
+    # 실패하므로 결정적 stub으로 대체한다(격자 → 고정 중심).
+    monkeypatch.setattr(
+        kma_weather, "_grid_center", lambda nx, ny: (float(ny), float(nx))
+    )
     monkeypatch.setattr(
         kma_weather, "_latest_nowcast_base", lambda: ("20260611", "0500")
     )
@@ -325,10 +333,18 @@ async def test_nowcast_asset_loads_values_per_feature_and_advances_cursor(
     assert result.grids_total == 1
     assert result.grids_fetched == 1
     assert result.features_total == 1
-    # 복제 제거: 2 카테고리 × 격자 anchor 1개(격자의 첫 place feature).
+    # 격자당 1 feature·1 값세트 (2 카테고리 T1H+REH) — place feature를 빌리지 않는다.
     assert result.values_loaded == 2
     assert forecast.calls == [("now", 126, 37)]
-    assert {value.feature_id for value in kor_travel_map_client.loaded_values} == {"f1"}
+    # 값은 격자 weather feature(126,37)에 붙는다 — place "f1"이 아니다(별개 마커).
+    assert len(kor_travel_map_client.loaded_bundles) == 1
+    grid_feature = kor_travel_map_client.loaded_bundles[0].feature
+    assert grid_feature.kind.value == "weather"
+    assert grid_feature.name == "기상청 초단기 격자 126,37"
+    assert {value.feature_id for value in kor_travel_map_client.loaded_values} == {
+        grid_feature.feature_id
+    }
+    assert grid_feature.feature_id != "f1"
     sample = kor_travel_map_client.loaded_values[0]
     assert sample.provider == "python-kma-api"
     assert sample.weather_domain == WeatherDomain.KMA_ULTRA_SHORT_NOWCAST
@@ -363,13 +379,18 @@ async def test_asset_skips_when_cursor_matches_base(
     assert kor_travel_map_client.success_calls == []
 
 
-async def test_asset_skips_kma_call_for_grid_without_features(
+async def test_asset_creates_grid_feature_without_place_features(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """대상 격자에 place feature가 없어도 격자 자체 weather feature로 적재한다.
+
+    예전엔 place feature가 없는 격자를 건너뛰었지만(borrow-anchor 시절), 이제 격자가
+    자체 feature라 place 유무와 무관하게 적재된다 — KMA가 airkorea와 별개 마커.
+    """
     _patch_grid_and_bases(monkeypatch)
     kor_travel_map_client = _FakeKrtourClient(
         target_coords=[(126.978, 37.5665)],
-        # 대상 격자 (126, 37)에 속하는 place가 없다.
+        # 대상 격자 (126, 37)에 속하는 place가 없다 — 그래도 격자 feature는 만든다.
         place_coords=[("f-far", 129.07, 35.17)],
     )
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
@@ -380,11 +401,18 @@ async def test_asset_skips_kma_call_for_grid_without_features(
 
     assert result.skipped is False
     assert result.grids_total == 1
-    assert result.grids_fetched == 0
-    assert result.values_loaded == 0
-    assert forecast.calls == []
-    # 호출이 없었으므로 cursor를 전진시키지 않는다.
-    assert kor_travel_map_client.success_calls == []
+    assert result.grids_fetched == 1
+    assert result.values_loaded == 2
+    assert forecast.calls == [("now", 126, 37)]
+    assert len(kor_travel_map_client.loaded_bundles) == 1
+    # 호출이 있었으므로 cursor 전진.
+    assert kor_travel_map_client.success_calls == [
+        {
+            "provider": "python-kma-api",
+            "dataset_key": "kma_ultra_short_nowcast",
+            "cursor": {"base_datetime": "202606110500"},
+        }
+    ]
     assert kor_travel_map_client.failure_calls == []
 
 

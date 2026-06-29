@@ -234,7 +234,7 @@ class KorTravelMapSettings(BaseSettings):
         ),
     )
     kma_weather_max_grids_per_run: int = Field(
-        default=50,
+        default=300,
         ge=1,
         le=500,
         description=(

@@ -22,19 +22,23 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 # NOTE: `from __future__ import annotations` 금지 — dagster가 asset 함수의
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
 import importlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from kortravelmap.dto import kst_now
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.providers.kma import (
     KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
+    KMA_SHORT_GRID_DATASET_KEY,
     KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_GRID_DATASET_KEY,
     KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
     KMA_WEATHER_ALERT_DATASET_KEY,
+    grid_to_weather_bundle,
     mid_land_forecast_to_weather_values,
     mid_temperature_to_weather_values,
     parse_mid_region_features,
@@ -55,6 +59,7 @@ from .assets import (
     _record_list,
     _resource_object,
     _resource_value,
+    _reverse_geocoder,
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 
@@ -97,6 +102,7 @@ _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
     "kma_weather_client",
     "kma_weather_extra_points",
     "kma_weather_max_grids_per_run",
+    "reverse_geocoder",
 }
 """KMA weather asset 공통 resource key."""
 
@@ -187,6 +193,16 @@ def _kma_grid(lat: float, lon: float) -> tuple[int, int]:
     return (int(nx), int(ny))
 
 
+def _grid_center(nx: int, ny: int) -> tuple[float, float]:
+    """KMA DFS 격자 ``(nx, ny)`` → 격자 중심 WGS84 ``(lat, lon)`` (``kma.grid.to_latlon``).
+
+    격자 weather Feature의 좌표 — KMA 예보는 격자 단위라 격자 중심이 정본 위치다.
+    """
+    grid = cast(Any, importlib.import_module("kma.grid"))
+    lat, lon = grid.to_latlon(nx, ny)
+    return (float(lat), float(lon))
+
+
 def _latest_nowcast_base() -> tuple[str, str]:
     """``getUltraSrtNcst`` 최신 조회 가능 ``(base_date, base_time)``."""
     time_utils = cast(Any, importlib.import_module("kma.time_utils"))
@@ -229,13 +245,10 @@ def _fetch_short_forecast_rows(
 
 @dataclass(frozen=True)
 class KmaGridTargets:
-    """대상 격자 + 격자별 place feature 매핑 (``map_grid_targets`` 결과)."""
+    """대상 격자 목록 (``map_grid_targets`` 결과)."""
 
     grids: tuple[tuple[int, int], ...]
     """run 상한 적용 후 대상 격자 — 입력 순서(poi target → extra point) 유지."""
-
-    feature_ids_by_grid: Mapping[tuple[int, int], tuple[str, ...]]
-    """격자 → 그 격자에 속하는 active place ``feature_id`` 목록."""
 
     grids_dropped: int
     """run 상한 초과로 제외된 격자 수 (운영 로그용 — silent cap 금지)."""
@@ -245,15 +258,14 @@ def map_grid_targets(
     *,
     target_coords: Sequence[tuple[float, float]],
     extra_points: Sequence[tuple[float, float]],
-    place_coords: Sequence[tuple[str, float, float]],
     to_grid: Callable[[float, float], tuple[int, int]],
     max_grids: int,
 ) -> KmaGridTargets:
-    """(lon, lat) 대상 좌표 → 격자 dedupe + 상한 + place feature 매핑.
+    """(lon, lat) 대상 좌표 → 격자 dedupe + 상한.
 
     ``target_coords``(poi_cache_targets)가 ``extra_points``(설정 명시 좌표)보다
-    먼저다 — 상한 절단 시 수요가 증명된 지점이 우선 생존한다. ``place_coords``는
-    ``(feature_id, lon, lat)``이며 상한 적용 후 격자에만 매핑한다.
+    먼저다 — 상한 절단 시 수요가 증명된 지점이 우선 생존한다. 각 대상 격자는
+    자체 weather-kind Feature(격자 중심)로 적재되므로 place feature 매핑은 없다.
     """
     if max_grids <= 0:
         raise ValueError("max_grids must be positive")
@@ -266,14 +278,8 @@ def map_grid_targets(
             ordered.append(cell)
     dropped = max(0, len(ordered) - max_grids)
     capped = ordered[:max_grids]
-    mapping: dict[tuple[int, int], list[str]] = {cell: [] for cell in capped}
-    for feature_id, lon, lat in place_coords:
-        bucket = mapping.get(to_grid(lat, lon))
-        if bucket is not None:
-            bucket.append(feature_id)
     return KmaGridTargets(
         grids=tuple(capped),
-        feature_ids_by_grid={cell: tuple(ids) for cell, ids in mapping.items()},
         grids_dropped=dropped,
     )
 
@@ -320,6 +326,8 @@ async def _run_kma_weather_asset(
     context: AssetExecutionContext,
     *,
     dataset_key: str,
+    grid_dataset_key: str,
+    grid_name_label: str,
     latest_base: Callable[[], tuple[str, str]],
     fetch_rows: Callable[[Any, int, int], Sequence[Any]],
     to_values: Callable[[Sequence[Any], str], list[WeatherValue]],
@@ -365,17 +373,15 @@ async def _run_kma_weather_asset(
         cast(
             "int",
             await _resource_value(
-                context, "kma_weather_max_grids_per_run", default=50
+                context, "kma_weather_max_grids_per_run", default=300
             ),
         )
     )
 
     target_coords = await kor_travel_map_client.list_poi_cache_target_coords()
-    place_coords = await kor_travel_map_client.list_active_place_coords()
     targets = map_grid_targets(
         target_coords=target_coords,
         extra_points=extra_points,
-        place_coords=place_coords,
         to_grid=_kma_grid,
         max_grids=max_grids,
     )
@@ -395,26 +401,36 @@ async def _run_kma_weather_asset(
         )
 
     kma_client = _resource_object(context, "kma_weather_client")
+    reverse_geocoder = _reverse_geocoder(context)
+    fetched_at = kst_now()
     grids_fetched = 0
     values_loaded = 0
     matched_features: set[str] = set()
     try:
         for nx, ny in targets.grids:
-            feature_ids = targets.feature_ids_by_grid[(nx, ny)]
-            if not feature_ids:
-                # 격자에 매핑된 place feature가 없으면 적재할 곳이 없다 —
-                # KMA 호출 자체를 생략(일일 호출 한도 보호).
-                continue
             rows = fetch_rows(kma_client, nx, ny)
             grids_fetched += 1
             if not rows:
                 continue
-            # 복제 제거: 격자 응답을 그 격자의 place feature 전체에 복제하지 않고
-            # 대표 feature 1개(anchor)에만 1회 적재한다. 나머지 feature의 weather는
-            # build_weather_card가 반경 내 가장 가까운 기온(KMA) anchor를 조회·병합해
-            # 서빙한다(weather_repo nearest-temp). 이로써 격자×feature 팬아웃(약 30M행)이
-            # 사라진다(격자당 1세트만 적재).
-            anchor = feature_ids[0]
+            # KMA 격자를 자체 weather-kind Feature(격자 중심 좌표)로 만들고 그
+            # feature_id에 격자 응답을 1회 적재한다(격자당 1 feature·1 값세트 —
+            # #496 anti-replication 유지: 격자×feature 팬아웃 없음). place feature를
+            # 빌리지 않으므로 KMA 날씨가 airkorea 측정소와 **별개** 마커로 뜬다. 다른
+            # feature의 weather는 build_weather_card가 반경 내 가장 가까운 KMA 격자
+            # anchor를 조회·병합해 서빙한다(weather_repo nearest-temp).
+            lat, lon = _grid_center(nx, ny)
+            bundle = await grid_to_weather_bundle(
+                nx,
+                ny,
+                lat,
+                lon,
+                dataset_key=grid_dataset_key,
+                name_label=grid_name_label,
+                fetched_at=fetched_at,
+                reverse_geocoder=reverse_geocoder,
+            )
+            await kor_travel_map_client.load_feature_bundles([bundle])
+            anchor = bundle.feature.feature_id
             grid_values: list[WeatherValue] = list(to_values(rows, anchor))
             values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
             matched_features.add(anchor)
@@ -452,10 +468,12 @@ async def _run_kma_weather_asset(
 async def run_feature_weather_kma_ultra_short_nowcast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    """KMA 초단기실황(``getUltraSrtNcst``)을 대상 격자 place feature에 적재한다."""
+    """KMA 초단기실황(``getUltraSrtNcst``)을 격자 **초단기** weather feature에 적재한다."""
     return await _run_kma_weather_asset(
         context,
         dataset_key=KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        grid_dataset_key=KMA_ULTRA_SHORT_GRID_DATASET_KEY,
+        grid_name_label="기상청 초단기",
         latest_base=_latest_nowcast_base,
         fetch_rows=_fetch_nowcast_rows,
         to_values=lambda rows, feature_id: ultra_short_nowcast_to_weather_values(
@@ -478,10 +496,15 @@ async def feature_weather_kma_ultra_short_nowcast(
 async def run_feature_weather_kma_ultra_short_forecast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    """KMA 초단기예보(``getUltraSrtFcst``)를 대상 격자 place feature에 적재한다."""
+    """KMA 초단기예보(``getUltraSrtFcst``)를 격자 **초단기** weather feature에 적재한다.
+
+    초단기실황과 같은 ``grid_dataset_key``(=같은 feature_id)에 적재 — 실황+예보가
+    한 초단기 feature에 공존한다."""
     return await _run_kma_weather_asset(
         context,
         dataset_key=KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
+        grid_dataset_key=KMA_ULTRA_SHORT_GRID_DATASET_KEY,
+        grid_name_label="기상청 초단기",
         latest_base=_latest_ultra_short_forecast_base,
         fetch_rows=_fetch_ultra_short_forecast_rows,
         to_values=lambda rows, feature_id: ultra_short_forecast_to_weather_values(
@@ -504,10 +527,14 @@ async def feature_weather_kma_ultra_short_forecast(
 async def run_feature_weather_kma_short_forecast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    """KMA 단기예보(``getVilageFcst``)를 대상 격자 place feature에 적재한다."""
+    """KMA 단기예보(``getVilageFcst``)를 격자 **단기** weather feature에 적재한다.
+
+    초단기와 같은 격자라도 ``grid_dataset_key``가 달라 **별개** feature가 된다."""
     return await _run_kma_weather_asset(
         context,
         dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
+        grid_dataset_key=KMA_SHORT_GRID_DATASET_KEY,
+        grid_name_label="기상청 단기",
         latest_base=_latest_short_forecast_base,
         fetch_rows=_fetch_short_forecast_rows,
         to_values=lambda rows, feature_id: short_forecast_to_weather_values(
