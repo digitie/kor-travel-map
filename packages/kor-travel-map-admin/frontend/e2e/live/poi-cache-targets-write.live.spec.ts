@@ -362,7 +362,8 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
         await expect(row).toBeVisible(T);
         await expect(row).toContainText("center_radius");
         await expect(row).toContainText("provider_default");
-        await expect(row).toContainText("active");
+        // enabled 컬럼은 StatusBadge(update_enabled→"active") → statusLabel로 "활성" 렌더.
+        await expect(row).toContainText("활성");
 
         // row 클릭 → selectedTarget → Nearby features 헤더에 external_system/target_key 노출.
         await expect(page.getByText("target을 선택하세요")).toBeVisible(T);
@@ -848,7 +849,8 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
         const row = rowContaining(page, name);
         await expect(row).toBeVisible(T);
         await expect(row).toContainText("allow_targeted");
-        await expect(row).toContainText("disabled");
+        // enabled 컬럼은 StatusBadge(update_enabled=false→"disabled") → statusLabel로 "비활성화" 렌더.
+        await expect(row).toContainText("비활성화");
       });
 
       await test.step("provider_overrides min_interval_seconds를 갱신하면 GET이 새 값으로 바뀐다", async () => {

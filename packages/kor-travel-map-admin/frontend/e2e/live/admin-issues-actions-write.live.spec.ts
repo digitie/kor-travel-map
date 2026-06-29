@@ -31,6 +31,27 @@ const EXECUTE_ISSUES_WRITE =
 // 매핑한다. 그래서 read probe는 절대 ?status=all을 보내지 않는다.
 const PROBE_STATUSES = ["open", "resolved", "ignored", "acknowledged"] as const;
 
+// status-badge.tsx의 statusLabel()이 status/severity enum을 한글 배지 텍스트로
+// 렌더한다(StatusBadge — admin-issues-client.tsx line 210/211/459/465). 그래서
+// UI-표시(렌더 텍스트) 단언은 한글 라벨로 비교해야 한다. API/DTO enum 값은 영어
+// 그대로이므로 query param·selectOption·PATCH 응답 단언은 영어를 유지한다.
+// 여기 등장하는 값(status open/acknowledged/resolved/ignored + severity
+// info/warning/error/critical)만 매핑하고, 미매핑 값은 statusLabel과 동일하게
+// 원문을 그대로 돌려준다.
+const STATUS_KO: Record<string, string> = {
+  open: "열림",
+  acknowledged: "확인됨",
+  resolved: "해결됨",
+  ignored: "무시됨",
+  info: "정보",
+  warning: "경고",
+  error: "오류",
+  critical: "심각",
+};
+function statusKo(value: string): string {
+  return STATUS_KO[value.toLowerCase()] ?? value;
+}
+
 test.describe.configure({ mode: "serial" });
 
 // ── gold-standard 헬퍼 그대로 복사 (admin-features-change-requests-write.live.spec.ts) ──
@@ -324,8 +345,9 @@ test.describe("/admin/issues live read + reversible status write", () => {
     await expect(detailCard).toBeVisible(T);
     await expect(detailCard).toContainText(issue.issue_id);
     await expect(detailCard).toContainText(issue.violation_type);
-    await expect(detailCard).toContainText(issue.status);
-    await expect(detailCard).toContainText(issue.severity);
+    // status/severity는 StatusBadge가 한글로 렌더 → 한글 라벨로 단언.
+    await expect(detailCard).toContainText(statusKo(issue.status));
+    await expect(detailCard).toContainText(statusKo(issue.severity));
     if (issue.message.trim().length > 0) {
       await expect(detailCard).toContainText(issue.message);
     }
@@ -392,9 +414,12 @@ test.describe("/admin/issues live read + reversible status write", () => {
         }, T)
         .toBe("resolved");
 
-      // UI 반영: 선택 유지된 상세 카드가 resolve 후 'resolved' badge로 갱신된다.
+      // UI 반영: 선택 유지된 상세 카드가 resolve 후 '해결됨'(resolved) 한글 badge로
+      // 갱신된다(StatusBadge → statusLabel). exact 매치는 status 배지에만 걸린다.
       const detailCard = issueDetailCard(page);
-      await expect(detailCard.getByText("resolved", { exact: true })).toBeVisible(T);
+      await expect(
+        detailCard.getByText(statusKo("resolved"), { exact: true }),
+      ).toBeVisible(T);
     } finally {
       // 원복: open이던 이슈를 reopen으로 되돌린다(status만 가역 전이).
       if (reopenIssueId && originalStatus === "open") {

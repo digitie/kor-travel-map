@@ -43,6 +43,38 @@ const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
 const ANCHOR = { lon: 126.531, lat: 33.499, zoom: 11 } as const;
 
+// 상세 패널의 status 배지는 영어 enum이 아니라 한글로 렌더된다(features-client.tsx
+// FeatureDetailPanel → `statusLabel(...)`). 렌더 텍스트를 단언하려면 같은 매핑이
+// 필요하다. 정본은 src/components/status-badge.tsx의 STATUS_LABELS — 동기화 유지.
+// (component를 직접 import하지 않는 이유: Playwright 런타임이 `@/` 별칭을 풀지 않아
+//  status-badge.tsx의 `@/lib/utils` import가 깨진다. 그래서 순수 매핑만 미러링한다.)
+const STATUS_LABELS: Record<string, string> = {
+  ok: "정상", normal: "정상", success: "성공", succeeded: "성공", done: "완료",
+  completed: "완료", active: "활성", accepted: "수락됨", merged: "병합됨",
+  resolved: "해결됨", started: "시작됨", applied: "반영됨", curated: "큐레이션됨",
+  validated: "검증됨", loaded: "적재됨", implemented: "구현됨", fresh: "최신",
+  queued: "대기", pending: "대기", loading: "로딩중", running: "실행중",
+  starting: "시작중", dry_run: "모의실행", validating: "검증중", in_progress: "진행중",
+  materializing: "구체화중", scheduled: "예정됨", planned: "예정됨", ongoing: "진행중",
+  managed: "관리됨", acknowledged: "확인됨", open: "열림", candidate: "후보",
+  uploaded: "업로드됨", canceling: "취소중", paused: "일시정지", connecting: "연결중",
+  reconnecting: "재연결중", error: "오류", failed: "실패", failure: "실패",
+  cancelled: "취소됨", canceled: "취소됨", unavailable: "사용불가", critical: "심각",
+  rejected: "거절됨", denied: "거부됨", inactive: "비활성", deleted: "삭제됨",
+  disabled: "비활성화", expired: "만료됨", archived: "보관됨", deprecated: "지원중단",
+  revoked: "폐기됨", skipped: "건너뜀", validation_failed: "검증실패",
+  load_failed: "적재실패", not_found: "없음", degraded: "저하됨",
+  manual_required: "수동 필요", provider_needed: "공급자 필요", manual_only: "수동 전용",
+  ended: "종료됨", stopped: "중지됨", ignored: "무시됨", hidden: "숨김",
+  not_started: "시작 전", stale: "오래됨", draft: "초안", unknown: "알수없음",
+  none: "없음", info: "정보", warning: "경고", debug: "디버그",
+};
+
+/** status-badge.tsx statusLabel 미러: 영어 enum → 한글(미지정은 원문 fallback). */
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status.toLowerCase().replace(/-/g, "_")] ?? status;
+}
+
 test.describe.configure({ mode: "serial" });
 
 // ── gold-standard에서 verbatim 복사한 헬퍼 ─────────────────────────────────
@@ -384,24 +416,29 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         placeOnly.body!.data.items.length,
       );
 
-      // (3) UI 반영: 초기화 버튼 노출 + 카운트 배지(>0) + 마커 존재.
-      await expect(filter.getByRole("button", { name: "초기화" })).toBeVisible(T);
+      // (3) UI 반영: 초기화 버튼 활성화(kind 선택 시) + 카운트 배지(>0) + 마커 존재.
+      // 초기화 버튼은 항상 렌더되고 `disabled={kind 0건}`이라, kind 선택 시 enabled가
+      // 의미 있는 단언이다(과거의 노출/숨김 토글은 #600에서 disabled 토글로 바뀜).
+      await expect(filter.getByRole("button", { name: "초기화" })).toBeEnabled(T);
       await expect.poll(async () => readFeatureCount(page), T).toBeGreaterThan(0);
       await expect(page.locator(".maplibregl-marker").first()).toBeVisible({
         timeout: 30_000,
       });
     } finally {
       // 읽기 전용 — 백엔드 변경 없음. UI 필터만 초기화해 깨끗한 상태로 둔다.
+      // 초기화 버튼은 항상 렌더되므로(disabled로 제어), enabled일 때만 클릭한다
+      // (disabled 버튼 click은 actionability 대기로 멈출 수 있다).
       const reset = filter.getByRole("button", { name: "초기화" });
-      if (await reset.isVisible().catch(() => false)) {
+      if (await reset.isEnabled().catch(() => false)) {
         await reset.click().catch(() => {});
       }
     }
 
-    // 초기화 후 chip 비활성 + 초기화 숨김(동일 byte 쿼리는 staleTime 캐시로 네트워크
-    // 호출이 없을 수 있어 refetch가 아니라 UI 상태로 단언 — interactions.spec과 동일 idiom).
+    // 초기화 후 chip 비활성 + 초기화 버튼 disabled(동일 byte 쿼리는 staleTime 캐시로
+    // 네트워크 호출이 없을 수 있어 refetch가 아니라 UI 상태로 단언 — interactions.spec과
+    // 동일 idiom). 버튼은 항상 렌더되고 kind 0건이면 `disabled`다(#600).
     await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
-    await expect(filter.getByRole("button", { name: "초기화" })).toBeHidden(T);
+    await expect(filter.getByRole("button", { name: "초기화" })).toBeDisabled(T);
   });
 
   test("점 마커 클릭 → 상세 패널이 실제 backend feature를 반영", async ({
@@ -461,11 +498,13 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await expect(
         panel.getByRole("heading", { level: 2, name: picked.name }),
       ).toBeVisible(T);
+      // kind 배지는 원문 그대로 렌더(`<Badge>{detail.kind}</Badge>`).
       await expect(
         panel.getByText(picked.kind, { exact: true }).first(),
       ).toBeVisible(T);
+      // status 배지는 한글로 렌더(`statusLabel(detail.status)`) — 같은 매핑으로 단언.
       await expect(
-        panel.getByText(picked.status, { exact: true }).first(),
+        panel.getByText(statusLabel(picked.status), { exact: true }).first(),
       ).toBeVisible(T);
 
       // (2) 백엔드 라운드트립: 패널이 가리키는 feature_id를 직접 조회 → 동일 feature.

@@ -308,9 +308,9 @@ test.describe("/admin/offline-uploads live write workflow", () => {
         await expect(row).toHaveCount(1, T);
         await expect(row).toContainText(PROVIDER);
         await expect(row).toContainText(DATASET_KEY);
-        // bare getByText('uploaded')는 status <select>의 숨은 <option>과도 매칭되므로
-        // row scope으로 좁혀 StatusBadge만 단언한다.
-        await expect(row.getByText("uploaded")).toBeVisible(T);
+        // status badge는 statusLabel로 한글 렌더된다('uploaded'→'업로드됨'). status
+        // <select>의 숨은 <option>은 영어 원문이므로 row scope으로 좁혀 한글 badge만 단언한다.
+        await expect(row.getByText("업로드됨")).toBeVisible(T);
         await expect(row.getByText("jsonl", { exact: true })).toBeVisible(T);
         await expect(page.getByText("1 rows")).toBeVisible(T);
       });
@@ -459,11 +459,11 @@ test.describe("/admin/offline-uploads live write workflow", () => {
 
       await test.step("UI status select를 바꾸면 목록이 backend 결과를 반영한다", async () => {
         await page.getByLabel("provider filter").fill(PROVIDER_STATUS);
-        // 기본 status=uploaded → 우리 업로드 1건이 status badge와 함께 보인다.
+        // 기본 status=uploaded → 우리 업로드 1건이 status badge(한글 '업로드됨')와 함께 보인다.
         await expect(page.getByTestId("offline-upload-row")).toHaveCount(1, T);
         await expect(page.getByText("1 rows")).toBeVisible(T);
         await expect(
-          page.getByTestId("offline-upload-row").getByText("uploaded"),
+          page.getByTestId("offline-upload-row").getByText("업로드됨"),
         ).toBeVisible(T);
 
         // loaded로 바꾸면 backend가 0건을 돌려줘 목록이 비고 empty 메시지가 뜬다.
