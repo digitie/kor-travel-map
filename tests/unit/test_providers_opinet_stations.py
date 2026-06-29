@@ -40,13 +40,13 @@ def stations_to_bundles(
 
 def station_details_to_price_features_and_values(
     items: Iterable[Any], **kwargs: Any
-) -> tuple[list[FeatureBundle], list[Any]]:
+) -> tuple[list[FeatureBundle], list[FeatureBundle], list[Any]]:
     return asyncio.run(_price_features_async(items, **kwargs))
 
 
 def stations_to_price_features_and_values(
     items: Iterable[Any], **kwargs: Any
-) -> tuple[list[FeatureBundle], list[Any]]:
+) -> tuple[list[FeatureBundle], list[FeatureBundle], list[Any]]:
     return asyncio.run(_station_prices_async(items, **kwargs))
 
 
@@ -298,7 +298,7 @@ def test_station_detail_price_feature_and_values() -> None:
         ),
     )
 
-    bundles, values = station_details_to_price_features_and_values(
+    station_bundles, bundles, values = station_details_to_price_features_and_values(
         [detail], fetched_at=_NOW
     )
 
@@ -312,6 +312,11 @@ def test_station_detail_price_feature_and_values() -> None:
     assert bundle.source_record.dataset_key == OPINET_PRICE_DATASET_KEY
     assert [value.product_key for value in values] == ["gasoline", "diesel"]
     assert {value.feature_id for value in values} == {bundle.feature.feature_id}
+    # 부모 주유소 place bundle이 함께 반환되고 가격의 parent_feature_id와 정확히 일치한다
+    # — 가격보다 먼저 적재돼 FK 위반을 막는다.
+    assert len(station_bundles) == 1
+    assert station_bundles[0].feature.kind == FeatureKind.PLACE
+    assert station_bundles[0].feature.feature_id == bundle.feature.parent_feature_id
 
 
 @pytest.mark.unit
@@ -329,10 +334,11 @@ def test_station_detail_price_skips_null_price() -> None:
         ),
     )
 
-    bundles, values = station_details_to_price_features_and_values(
+    station_bundles, bundles, values = station_details_to_price_features_and_values(
         [detail], fetched_at=_NOW
     )
 
+    assert station_bundles == []
     assert bundles == []
     assert values == []
 
@@ -349,7 +355,7 @@ def test_station_price_feature_and_value_from_low_top_station() -> None:
         }
     )
 
-    bundles, values = stations_to_price_features_and_values(
+    station_bundles, bundles, values = stations_to_price_features_and_values(
         [station], fetched_at=_NOW
     )
 
@@ -363,9 +369,46 @@ def test_station_price_feature_and_value_from_low_top_station() -> None:
     assert bundle.source_record.dataset_key == OPINET_PRICE_DATASET_KEY
     assert bundle.source_record.source_entity_id == "A0000002:B027"
     assert value.feature_id == bundle.feature.feature_id
+    # 부모 주유소 place bundle 동반 + parent_feature_id 일치 (FK 보장).
+    assert len(station_bundles) == 1
+    assert station_bundles[0].feature.kind == FeatureKind.PLACE
+    assert station_bundles[0].feature.feature_id == bundle.feature.parent_feature_id
     assert value.product_key == "gasoline"
     assert value.value_number == 1589
     assert value.observed_at == _NOW
+
+
+@pytest.mark.unit
+def test_station_price_dedupes_parent_place_across_products() -> None:
+    # 같은 주유소의 두 제품 가격 → 부모 place bundle은 feature_id로 1개만 dedupe,
+    # 두 price의 parent_feature_id가 모두 그 부모를 가리킨다(FK 보장).
+    gasoline = _StationItem(
+        **{
+            **_S2.__dict__,
+            "price": 1589,
+            "product_code": "B027",
+            "product_name": "휘발유",
+            "raw": {"PRODCD": "B027", "PRICE": "1589"},
+        }
+    )
+    diesel = _StationItem(
+        **{
+            **_S2.__dict__,
+            "price": 1650,
+            "product_code": "D047",
+            "product_name": "경유",
+            "raw": {"PRODCD": "D047", "PRICE": "1650"},
+        }
+    )
+
+    station_bundles, bundles, values = stations_to_price_features_and_values(
+        [gasoline, diesel], fetched_at=_NOW
+    )
+
+    assert len(station_bundles) == 1
+    assert station_bundles[0].feature.kind == FeatureKind.PLACE
+    parent_id = station_bundles[0].feature.feature_id
+    assert {bundle.feature.parent_feature_id for bundle in bundles} == {parent_id}
 
 
 @pytest.mark.unit
@@ -373,9 +416,10 @@ def test_station_price_skips_missing_product_or_price() -> None:
     missing_price = _StationItem(**{**_S1.__dict__, "product_code": "B027"})
     missing_product = _StationItem(**{**_S2.__dict__, "price": 1700})
 
-    bundles, values = stations_to_price_features_and_values(
+    station_bundles, bundles, values = stations_to_price_features_and_values(
         [missing_price, missing_product], fetched_at=_NOW
     )
 
+    assert station_bundles == []
     assert bundles == []
     assert values == []

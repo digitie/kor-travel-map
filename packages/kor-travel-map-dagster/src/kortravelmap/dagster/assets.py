@@ -216,18 +216,26 @@ async def run_feature_price_opinet_stations(
     fetched_at = await _fetched_at(context)
     reverse_geocoder = _reverse_geocoder(context)
     if any(hasattr(record, "prices") for record in records):
-        bundles, values = await station_details_to_price_features_and_values(
-            records,
-            fetched_at=fetched_at,
-            reverse_geocoder=reverse_geocoder,
+        station_bundles, bundles, values = (
+            await station_details_to_price_features_and_values(
+                records,
+                fetched_at=fetched_at,
+                reverse_geocoder=reverse_geocoder,
+            )
         )
     else:
-        bundles, values = await stations_to_price_features_and_values(
+        station_bundles, bundles, values = await stations_to_price_features_and_values(
             records,
             fetched_at=fetched_at,
             reverse_geocoder=reverse_geocoder,
         )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    # 가격 feature의 parent_feature_id가 가리키는 주유소 place feature를 가격보다
+    # 먼저 upsert한다. 가격 detail에만 있고 stations 목록 asset에는 없는 주유소
+    # (endpoint coverage 불일치)의 부모 place도 보장돼, price INSERT가 FK 제약
+    # ``fk_features_parent_feature_id_features``을 위반하지 않는다.
+    if station_bundles:
+        await client.load_feature_bundles(station_bundles)
     result = await client.load_price_features(bundles, values)
     _add_output_metadata(
         context,

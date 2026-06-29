@@ -469,7 +469,8 @@ async def _station_detail_to_price_bundle_and_values(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
-) -> tuple[FeatureBundle, list[PriceValue]] | None:
+) -> tuple[FeatureBundle, FeatureBundle, list[PriceValue]] | None:
+    # 반환: (주유소 place 부모 bundle, 가격 price bundle, PriceValue 목록).
     prices = list(detail.prices)
     station_bundle = await _station_item_to_bundle(
         detail,
@@ -563,6 +564,7 @@ async def _station_detail_to_price_bundle_and_values(
         is_primary_source=True,
     )
     return (
+        station_bundle,
         FeatureBundle(
             feature=feature,
             source_record=source_record,
@@ -578,8 +580,14 @@ async def station_details_to_price_features_and_values(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
-) -> tuple[list[FeatureBundle], list[PriceValue]]:
-    """OpiNet station detail → price-kind Feature + ``PriceValue`` 목록."""
+) -> tuple[list[FeatureBundle], list[FeatureBundle], list[PriceValue]]:
+    """OpiNet station detail → (주유소 place 부모 bundle, price Feature, PriceValue).
+
+    가격 feature는 ``parent_feature_id``로 주유소 place feature를 가리킨다. 그
+    부모 place bundle을 함께 반환해 호출자가 **가격보다 먼저** 적재하게 한다 —
+    가격 detail에만 있고 stations 목록 asset에는 없는 주유소(coverage 불일치)도
+    부모가 보장돼 FK 위반이 없다. place bundle은 ``feature_id``로 dedupe한다.
+    """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
         if reverse_geocoder is not None
@@ -590,6 +598,7 @@ async def station_details_to_price_features_and_values(
         if address_resolver is not None
         else None
     )
+    station_bundles: dict[str, FeatureBundle] = {}
     bundles: list[FeatureBundle] = []
     values: list[PriceValue] = []
     for item in items:
@@ -601,10 +610,11 @@ async def station_details_to_price_features_and_values(
         )
         if converted is None:
             continue
-        bundle, item_values = converted
+        station_bundle, bundle, item_values = converted
+        station_bundles.setdefault(station_bundle.feature.feature_id, station_bundle)
         bundles.append(bundle)
         values.extend(item_values)
-    return bundles, values
+    return list(station_bundles.values()), bundles, values
 
 
 # -- lowTop10/aroundAll Station → price Feature + PriceValue --------------
@@ -626,7 +636,8 @@ async def _station_price_to_bundle_and_value(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
-) -> tuple[FeatureBundle, PriceValue] | None:
+) -> tuple[FeatureBundle, FeatureBundle, PriceValue] | None:
+    # 반환: (주유소 place 부모 bundle, 가격 price bundle, PriceValue).
     raw_price = getattr(item, "price", None)
     prodcd = _station_product_code_text(item)
     if raw_price is None or prodcd is None:
@@ -732,6 +743,7 @@ async def _station_price_to_bundle_and_value(
         source_record_key=source_record_key,
     )
     return (
+        station_bundle,
         FeatureBundle(
             feature=feature,
             source_record=source_record,
@@ -747,7 +759,7 @@ async def stations_to_price_features_and_values(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
-) -> tuple[list[FeatureBundle], list[PriceValue]]:
+) -> tuple[list[FeatureBundle], list[FeatureBundle], list[PriceValue]]:
     """OpiNet Station 단일 제품 가격 → price-kind Feature + ``PriceValue``.
 
     ``lowTop10``은 주유소별 전체 가격 detail이 아니라 요청 제품 1개의 가격만
@@ -764,6 +776,7 @@ async def stations_to_price_features_and_values(
         if address_resolver is not None
         else None
     )
+    station_bundles: dict[str, FeatureBundle] = {}
     bundles: list[FeatureBundle] = []
     values: list[PriceValue] = []
     for item in items:
@@ -775,10 +788,11 @@ async def stations_to_price_features_and_values(
         )
         if converted is None:
             continue
-        bundle, value = converted
+        station_bundle, bundle, value = converted
+        station_bundles.setdefault(station_bundle.feature.feature_id, station_bundle)
         bundles.append(bundle)
         values.append(value)
-    return bundles, values
+    return list(station_bundles.values()), bundles, values
 
 
 # -- stations_to_bundles (PR#43) -----------------------------------------
