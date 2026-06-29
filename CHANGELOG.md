@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Enrichment review detail 진입 명시화 (2026-06-29)
+
+- **ADDED**: `/admin/enrichment-reviews` 목록 actions 컬럼에 `detail` 버튼을 추가해 상세 비교
+  다이얼로그와 VWorld 위치 비교 지도로 진입하는 동선을 명시했다.
+
 ### n150 live e2e 실패 보강 (2026-06-29)
 
 - **FIXED**: enrichment review 목록/상세 조회에서 아주 먼 후보 거리의 공간 점수 계산이 numeric

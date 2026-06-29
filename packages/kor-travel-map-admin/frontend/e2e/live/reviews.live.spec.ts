@@ -7,9 +7,10 @@ import * as F from "./_fixtures";
 // backend = prod 실데이터(1.09M features). PRESENCE for all four queues = 0
 // (issues/dedup/enrichment/update_requests). So every page is expected to be
 // EMPTY: we assert heading + (empty-state OR table container) + controls, never
-// exact row text/counts. NO action buttons are clicked — only nav links, status
+// exact row text/counts. Decision action buttons are not clicked; detail smoke
+// may open the read-only detail dialog. Other interactions are nav links, status
 // filter selects, page-size select, sortable column headers, pagination
-// prev/next, and typing into search inputs (all GET). All assertions use the
+// prev/next, and typing into search inputs. All assertions use the
 // 15s timeout and stable headings/landmarks reused from the *-actions specs.
 
 const T = 15000;
@@ -355,14 +356,14 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
 
     const rows = page.locator("tbody tr");
     if ((await rows.count()) > 0) {
+      const detailButton = page.getByRole("button", { name: "detail" }).first();
+      await expect(detailButton).toBeVisible({ timeout: T });
       const detailResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "GET" &&
           response.url().includes("/api/proxy/v1/admin/enrichment-reviews/"),
       );
-      await rows.first().locator("td").first().click({
-        position: { x: 12, y: 12 },
-      });
+      await detailButton.click();
       await expect((await detailResponse).ok()).toBe(true);
       const dialog = page.getByRole("dialog", {
         name: "enrichment review detail",

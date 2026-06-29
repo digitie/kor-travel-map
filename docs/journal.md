@@ -5,11 +5,13 @@
 ## 2026-06-29 (codex) — Enrichment review detail live smoke 클릭 안정화
 
 n150 targeted review live e2e에서 enrichment 목록/score=all 조회는 통과했지만, 상세 다이얼로그
-smoke가 행 전체 클릭 좌표 문제로 열리지 않는 현상을 확인했다.
+smoke가 테이블 overflow/hit-test 경로에서 row click으로 이어지지 않는 현상을 확인했다.
 
-- **e2e**: enrichment review 상세 smoke는 첫 번째 행의 보이는 첫 셀을 클릭하고, detail GET 응답이
-  성공했는지 확인한 뒤 다이얼로그/지도 surface를 검증하도록 보강했다.
-- **검증**: 직전 n150 targeted backup/restore live spec은 8 passed / 1 skipped로 통과했다.
+- **UI**: enrichment review actions 컬럼에 `detail` 버튼을 추가해 상세 비교 다이얼로그 진입을 명시화했다.
+- **e2e**: enrichment review 상세 smoke는 `detail` 버튼을 클릭하고, detail GET 응답이 성공했는지
+  확인한 뒤 다이얼로그/지도 surface를 검증하도록 보강했다.
+- **검증**: n150 targeted backup/restore live spec은 8 passed / 1 skipped, targeted enrichment review
+  live spec은 3 passed로 통과했다.
 
 ## 2026-06-29 (codex) — Backup destructive live e2e 실행 경로 분리
 

@@ -5,10 +5,9 @@
 - **완료**: PR #586으로 backup/restore destructive 실행 경로 분리 변경을 CI green 후 머지했다.
 - **완료**: n150 targeted backup/restore live spec은 실제 backup execute와 restore execute를 포함해
   8 passed / 1 skipped로 통과했다.
-- **진행 중**: targeted enrichment review live spec에서 score=all은 통과했고, 상세 다이얼로그 smoke는
-  행 전체 클릭 좌표가 UI의 가로 overflow와 맞물려 다이얼로그를 열지 못했다.
-- **다음 한 작업**: 첫 번째 행의 보이는 셀 클릭 + detail GET 성공 확인으로 spec을 보강해 PR/CI/머지 후
-  targeted review와 full n150 live e2e를 재실행한다.
+- **완료**: targeted enrichment review live spec은 actions 컬럼 `detail` 버튼을 통해 detail GET과
+  상세 다이얼로그/지도 smoke까지 3 passed로 통과했다.
+- **다음 한 작업**: UI/spec 변경을 PR/CI/머지한 뒤 full n150 live e2e를 재실행한다.
 
 ## 2026-06-29 (codex) — Backup destructive live e2e 실행 경로 분리
 
