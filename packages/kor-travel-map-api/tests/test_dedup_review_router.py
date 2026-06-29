@@ -184,6 +184,9 @@ def test_dedup_review_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/dedup-reviews/{review_id}" in spec["paths"]
     assert "DedupReviewRecord" in spec["components"]["schemas"]
     assert "DedupReviewDetailResponse" in spec["components"]["schemas"]
+    assert "next_cursor" not in spec["components"]["schemas"]["OffsetPageMeta"][
+        "properties"
+    ]
 
 
 @pytest.mark.unit
@@ -223,7 +226,6 @@ def test_list_dedup_reviews_passes_filters(
     assert body["data"]["items"][0]["review_id"] == "review-1"
     assert body["meta"]["page"] == {
         "page_size": 25,
-        "next_cursor": None,
         "total": 37,
     }
 

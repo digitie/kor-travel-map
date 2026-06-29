@@ -16,6 +16,7 @@ import * as F from "./_fixtures";
  */
 
 const TIMEOUT = { timeout: 15000 } as const;
+const ETL_TIMEOUT = { timeout: 45_000 } as const;
 
 // admin-shell nav 18행 — home-nav.spec NAV_ITEMS와 1:1.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
@@ -274,7 +275,7 @@ test.describe("misc live — /etl preview", () => {
 
   test("etl provider select 존재", async ({ page }) => {
     await page.goto("/etl");
-    await expect(page.locator("main select").nth(0)).toBeVisible(TIMEOUT);
+    await expect(page.locator("main select").nth(0)).toBeVisible(ETL_TIMEOUT);
   });
 
   // provider 드롭다운에 각 provider option이 attached.
@@ -284,7 +285,7 @@ test.describe("misc live — /etl preview", () => {
       const providerSelect = page.locator("main select").nth(0);
       await expect(
         providerSelect.locator("option", { hasText: name }),
-      ).toBeAttached(TIMEOUT);
+      ).toBeAttached(ETL_TIMEOUT);
     });
 
     // provider 선택(select GET 조회) — 비파괴. dataset select가 그대로 노출되는지.
@@ -293,9 +294,9 @@ test.describe("misc live — /etl preview", () => {
     }) => {
       await page.goto("/etl");
       const selects = page.locator("main select");
-      await expect(selects.nth(0)).toBeVisible(TIMEOUT);
+      await expect(selects.nth(0)).toBeVisible(ETL_TIMEOUT);
       await selects.nth(0).selectOption(name);
-      await expect(selects.nth(1)).toBeVisible(TIMEOUT);
+      await expect(selects.nth(1)).toBeVisible(ETL_TIMEOUT);
     });
   }
 

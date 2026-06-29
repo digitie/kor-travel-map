@@ -15,6 +15,7 @@ type OpsImportJobsListResponse =
 type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
 type DedupReviewListResponse =
   components["schemas"]["DedupReviewListResponse"];
+type DedupReviewListMeta = DedupReviewListResponse["meta"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
 type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
 type DagsterSummaryResponse = components["schemas"]["DagsterSummaryResponse"];
@@ -33,10 +34,18 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-function listMeta(pageSize: number, requestId: string): Meta {
+function cursorListMeta(pageSize: number, requestId: string): Meta {
   // docs/architecture/rest-api.md §1.4/§3.3 — cursor 목록의 next_cursor는 항상 존재, null=소진.
   const page: PageMeta = { next_cursor: null, page_size: pageSize, total: null };
   return { duration_ms: 1, page, request_id: requestId };
+}
+
+function offsetListMeta(pageSize: number, requestId: string): DedupReviewListMeta {
+  return {
+    duration_ms: 1,
+    page: { page_size: pageSize, total: null },
+    request_id: requestId,
+  };
 }
 
 function simpleMeta(requestId: string): Meta {
@@ -127,7 +136,7 @@ function makeImportJob(
 function makeImportJobsList(
   items: OpsImportJobRecord[],
 ): OpsImportJobsListResponse {
-  return { data: { items }, meta: listMeta(8, "e2e-home-import-jobs") };
+  return { data: { items }, meta: cursorListMeta(8, "e2e-home-import-jobs") };
 }
 
 function makeDedupFeature(
@@ -171,7 +180,7 @@ function makeDedupReview(
 }
 
 function makeDedupList(items: DedupReviewRecord[]): DedupReviewListResponse {
-  return { data: { items }, meta: listMeta(6, "e2e-home-dedup") };
+  return { data: { items }, meta: offsetListMeta(6, "e2e-home-dedup") };
 }
 
 function makeDagster(

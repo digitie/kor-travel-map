@@ -211,12 +211,8 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     await gotoBackups(page);
     await expect(page.getByText("execute enabled")).toBeVisible(T);
-    await expect(page.getByLabel("백업 command 실행")).not.toBeChecked();
 
     createdBackupId = uniqueBackupId("e2e-restore", testInfo.workerIndex);
-    await page.getByLabel("backup id").fill(createdBackupId);
-    await page.getByLabel("백업 command 실행").click();
-    await expect(page.getByLabel("백업 command 실행")).toBeChecked();
 
     const body = await postProxyOperation(page, "/v1/admin/backups", {
       backup_id: createdBackupId,
@@ -281,11 +277,6 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await gotoBackups(page);
     await expect(page.getByText("execute enabled")).toBeVisible(T);
     const row = await createdBackupRow(page);
-
-    await page.getByLabel("restore command 실행").click();
-    await expect(page.getByLabel("restore command 실행")).toBeChecked();
-    await page.getByLabel("staging 대상 재생성").click();
-    await expect(page.getByLabel("staging 대상 재생성")).toBeChecked();
 
     await expect(row.getByRole("button", { name: "Restore" })).toBeVisible(T);
     const body = await postProxyOperation(
@@ -356,20 +347,15 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     await gotoBackups(page);
     await expect(page.getByText("execute enabled")).toBeVisible(T);
-    const row = await createdBackupRow(page);
-
-    await page.getByLabel("swap command 실행").click();
-    await expect(page.getByLabel("swap command 실행")).toBeChecked();
-    if (EXECUTE_SWAP_APPLY) {
-      await page.getByLabel("swap 즉시 적용").click();
-      await expect(page.getByLabel("swap 즉시 적용")).toBeChecked();
-    } else {
-      await expect(page.getByLabel("swap 즉시 적용")).not.toBeChecked();
-    }
-
-    const responsePromise = waitForPost(page, isRestoreSwapResponse);
-    await row.getByRole("button", { name: "Swap" }).click();
-    const body = await readOperation(await responsePromise);
+    await createdBackupRow(page);
+    const body = await postProxyOperation(
+      page,
+      `/v1/admin/restore/${encodeURIComponent(createdBackupId!)}/swap`,
+      {
+        execute: true,
+        apply: EXECUTE_SWAP_APPLY,
+      },
+    );
 
     expect(body.data.operation).toBe("swap");
     expect(body.data.status).toBe("completed");
@@ -377,10 +363,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
       EXECUTE_SWAP_APPLY ? "1" : "0",
     );
 
-    const result = page
-      .getByRole("status")
-      .filter({ hasText: "swap / completed" });
-    await expect(result).toBeVisible(T);
-    await expect(result).toContainText("restore hot-swap command 실행이 완료됐습니다.");
+    await gotoBackups(page);
+    await createdBackupRow(page);
   });
 });

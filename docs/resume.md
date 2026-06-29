@@ -1,5 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — Claude 후속 이슈 #589~#594 정리
+
+- **완료**: feature-update enqueue 경로는 `catalog_refreshable_entries()` 기준으로
+  non-refreshable provider/dataset 조합을 422로 거절한다.
+- **완료**: dedup/enrichment review list 응답은 `OffsetMeta`로 분리해 `meta.page.next_cursor`
+  영구 null 직렬화를 제거했고, OpenAPI/admin generated type을 갱신했다.
+- **완료**: backup/restore/swap execute live spec에서 죽은 UI 토글을 제거하고 swap execute도
+  `/api/proxy` 직접 POST로 통일했다.
+- **완료**: #590/#591/#592의 테스트 스타일·관심사 분리·문서 stale 문구를 반영했다.
+- **검증**: 관련 pytest 56건, `ruff`, OpenAPI drift, admin/user generated type drift,
+  frontend `type-check`/`type-check:e2e`, 대상 mypy, import-linter 통과. 로컬 mocked Playwright는
+  현재 WSL 배포판 미지원으로 Chromium 설치 단계에서 중단.
+- **다음 한 작업**: 이 변경과 n150 long-tail e2e 안정화 변경을 PR/CI/머지한 뒤 n150에 반영하고
+  full live e2e를 재실행한다.
+
+## 2026-06-29 (codex) — n150 full live e2e long-tail 안정화
+
+- **완료**: PR #588을 CI green 후 머지했고, n150 UI는 새 image로 재빌드/재생성했다.
+- **완료**: n150 full live e2e 1차 재실행은 1,869 passed / 12 flaky / 17 skipped / 7 failed /
+  5 did not run으로 종료했다.
+- **완료**: 실패 7건은 strict duplicate locator, import-jobs navigation `ERR_NETWORK_CHANGED`, ETL
+  provider catalog loading wait, enrichment deep pagination response wait로 분해했고 spec 안정화를 적용했다.
+- **검증**: 실패 축 targeted 재실행은 12 passed로 통과했다.
+- **다음 한 작업**: 안정화 변경을 PR/CI/머지한 뒤 full n150 live e2e를 다시 실행한다.
+
 ## 2026-06-29 (codex) — Enrichment review detail live smoke 클릭 안정화
 
 - **완료**: PR #586으로 backup/restore destructive 실행 경로 분리 변경을 CI green 후 머지했다.

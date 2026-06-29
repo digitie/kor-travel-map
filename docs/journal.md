@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Claude 후속 이슈 #589~#594 정리
+
+full n150 live e2e 재실행 전에 Claude 사후 리뷰로 열린 #589~#594를 먼저 반영했다.
+
+- **API 계약**: feature-update request 생성/run-now 경로에서 refresh 가능한 provider/dataset 조합만
+  enqueue되도록 catalog 검증을 추가했다. MOIS history/closed/detail 같은 non-refreshable 조합은
+  직접 API 호출이어도 422로 거절한다.
+- **API 계약**: dedup/enrichment review list 응답은 cursor 없는 `OffsetMeta`를 사용하도록 분리해
+  `meta.page.next_cursor` 영구 null 직렬화를 제거했다. OpenAPI와 admin generated type을 재생성했다.
+- **e2e**: backup/restore/swap execute live spec의 죽은 UI 토글을 제거하고, swap execute도
+  `/api/proxy` 직접 POST 후 Admin UI 목록 반영을 확인하는 경로로 맞췄다.
+- **테스트/문서**: backup router 테스트 들여쓰기, dedup fast-count/decision 단언 분리, 잔존
+  Windows Playwright 문구를 n150 Linux 우선 기준으로 정리했다.
+- **검증**: 관련 pytest 56건, `ruff`, OpenAPI drift, admin/user generated type drift,
+  frontend `type-check`/`type-check:e2e`, 대상 mypy, import-linter를 통과했다. 로컬 mocked
+  Playwright는 현재 WSL 배포판을 Playwright가 지원하지 않아 Chromium 설치 단계에서 중단했다.
+
+## 2026-06-29 (codex) — n150 full live e2e long-tail 안정화
+
+n150 write/destructive full live e2e는 1차 재실행에서 1,869 passed / 12 flaky / 17 skipped /
+7 failed / 5 did not run으로 끝났다. 실패 원인은 제품 동작 회귀보다는 full 부하에서 드러난
+live spec 동기화 문제였다.
+
+- **e2e**: Dagster run detail과 features map detail의 중복 텍스트 strict locator를 `.first()`로 좁혔다.
+- **e2e**: import-jobs live navigation은 `ERR_NETWORK_CHANGED`/timeout을 짧게 retry하는 `gotoLive`
+  helper를 거치도록 정리했다.
+- **e2e**: ETL provider catalog 로딩은 n150 full 부하를 고려해 ETL 구간 timeout만 45초로 늘렸다.
+- **e2e**: enrichment review deep pagination은 5분 response wait로 hang하지 않도록 response 관측을
+  짧게 제한하고 UI disabled state 검증을 유지했다.
+- **검증**: 실패 축 targeted 재실행은 12 passed로 통과했다.
+
 ## 2026-06-29 (codex) — Enrichment review detail live smoke 클릭 안정화
 
 n150 targeted review live e2e에서 enrichment 목록/score=all 조회는 통과했지만, 상세 다이얼로그

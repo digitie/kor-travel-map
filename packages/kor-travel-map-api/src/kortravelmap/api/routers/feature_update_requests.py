@@ -41,6 +41,7 @@ from pydantic import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.provider_catalog import catalog_refreshable_entries
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -381,6 +382,59 @@ def _scope_explicitly_needs_sigungu(scope: Mapping[str, Any]) -> bool:
     )
 
 
+def _refreshable_pairs() -> frozenset[tuple[str, str]]:
+    return frozenset(
+        (entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries()
+    )
+
+
+def _validate_refreshable_request(
+    *,
+    scope: Mapping[str, Any],
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+) -> None:
+    refreshable_pairs = _refreshable_pairs()
+    refreshable_providers = {provider for provider, _dataset in refreshable_pairs}
+    refreshable_datasets = {dataset for _provider, dataset in refreshable_pairs}
+
+    def reject(provider: str | None, dataset_key: str | None) -> None:
+        subject = (
+            f"{provider}/{dataset_key}"
+            if provider is not None and dataset_key is not None
+            else provider
+            if provider is not None
+            else dataset_key
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "feature update request는 refresh 가능한 provider/dataset만 "
+                f"요청할 수 있습니다: {subject}"
+            ),
+        )
+
+    if scope.get("type") == "provider_dataset":
+        provider = str(scope.get("provider", ""))
+        dataset_key = str(scope.get("dataset_key", ""))
+        if (provider, dataset_key) not in refreshable_pairs:
+            reject(provider, dataset_key)
+
+    if providers and dataset_keys:
+        for provider in providers:
+            for dataset_key in dataset_keys:
+                if (provider, dataset_key) not in refreshable_pairs:
+                    reject(provider, dataset_key)
+        return
+
+    for provider in providers:
+        if provider not in refreshable_providers:
+            reject(provider, None)
+    for dataset_key in dataset_keys:
+        if dataset_key not in refreshable_datasets:
+            reject(None, dataset_key)
+
+
 @asynccontextmanager
 async def _sigungu_resolver_for_scope(
     scope: Mapping[str, Any],
@@ -460,6 +514,11 @@ async def _enqueue(
     operator: str | None,
     reason: str | None,
 ) -> FeatureUpdateRequest | FeatureUpdateRequestPreview:
+    _validate_refreshable_request(
+        scope=scope,
+        providers=providers,
+        dataset_keys=dataset_keys,
+    )
     try:
         async with _sigungu_resolver_for_scope(scope) as sigungu_resolver:
             return await enqueue_feature_update_request(
@@ -490,6 +549,11 @@ async def _create_feature_update_request_response(
     started_at = perf_counter()
     scope = _scope_payload(body.scope)
     update_policy = _update_policy_payload(body.update_policy)
+    _validate_refreshable_request(
+        scope=scope,
+        providers=body.providers,
+        dataset_keys=body.dataset_keys,
+    )
     if body.dry_run:
         result = await _enqueue(
             session,

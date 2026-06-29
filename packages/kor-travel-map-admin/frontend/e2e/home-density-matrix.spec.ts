@@ -13,6 +13,7 @@ type OpsImportJobsListResponse =
 type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
 type DedupReviewListResponse =
   components["schemas"]["DedupReviewListResponse"];
+type DedupReviewListMeta = DedupReviewListResponse["meta"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
 type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
 type DagsterSummaryResponse = components["schemas"]["DagsterSummaryResponse"];
@@ -70,9 +71,17 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-function listMeta(pageSize: number, requestId: string): Meta {
+function cursorListMeta(pageSize: number, requestId: string): Meta {
   const page: PageMeta = { next_cursor: null, page_size: pageSize, total: null };
   return { duration_ms: 1, page, request_id: requestId };
+}
+
+function offsetListMeta(pageSize: number, requestId: string): DedupReviewListMeta {
+  return {
+    duration_ms: 1,
+    page: { page_size: pageSize, total: null },
+    request_id: requestId,
+  };
 }
 
 function simpleMeta(requestId: string): Meta {
@@ -161,7 +170,7 @@ function makeImportJob(
 function makeImportJobsList(
   items: OpsImportJobRecord[],
 ): OpsImportJobsListResponse {
-  return { data: { items }, meta: listMeta(8, "e2e-density-import-jobs") };
+  return { data: { items }, meta: cursorListMeta(8, "e2e-density-import-jobs") };
 }
 
 function makeDedupFeature(
@@ -205,7 +214,7 @@ function makeDedupReview(
 }
 
 function makeDedupList(items: DedupReviewRecord[]): DedupReviewListResponse {
-  return { data: { items }, meta: listMeta(6, "e2e-density-dedup") };
+  return { data: { items }, meta: offsetListMeta(6, "e2e-density-dedup") };
 }
 
 function makeDagster(

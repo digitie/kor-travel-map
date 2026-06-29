@@ -12,12 +12,15 @@ from pydantic import BaseModel, ConfigDict, Field
 __all__ = [
     "ClusterMeta",
     "Meta",
+    "OffsetMeta",
+    "OffsetPageMeta",
     "PageMeta",
     "ProblemDetail",
     "ProblemDetailError",
     "bind_request_id",
     "duration_ms",
     "make_meta",
+    "make_offset_meta",
     "request_id",
     "reset_request_id",
 ]
@@ -42,6 +45,18 @@ class PageMeta(BaseModel):
     total: int | None = None
 
 
+class OffsetPageMeta(BaseModel):
+    """Page-number/offset pagination metadata.
+
+    Cursor를 쓰지 않는 목록은 cursor 필드를 노출하지 않는다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    page_size: int
+    total: int | None = None
+
+
 class ClusterMeta(BaseModel):
     """Map clustering metadata."""
 
@@ -59,6 +74,16 @@ class Meta(BaseModel):
     request_id: str = Field(default="", description="X-Request-ID와 같은 요청 ID.")
     page: PageMeta | None = None
     cluster: ClusterMeta | None = None
+
+
+class OffsetMeta(BaseModel):
+    """Cursor가 없는 page-number 목록용 성공 응답 metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+    request_id: str = Field(default="", description="X-Request-ID와 같은 요청 ID.")
+    page: OffsetPageMeta | None = None
 
 
 class ProblemDetailError(BaseModel):
@@ -159,4 +184,24 @@ def make_meta(
         cluster=ClusterMeta(cluster_unit=cluster_unit)
         if cluster_unit is not None
         else None,
+    )
+
+
+def make_offset_meta(
+    request: Request | None = None,
+    *,
+    started_at: float,
+    page_size: int,
+    total: int | None = None,
+) -> OffsetMeta:
+    """Build response ``meta`` for page-number lists without cursor fields."""
+
+    return OffsetMeta(
+        duration_ms=duration_ms(started_at),
+        request_id=(
+            request_id(request)
+            if request is not None
+            else (_CURRENT_REQUEST_ID.get() or "")
+        ),
+        page=OffsetPageMeta(page_size=page_size, total=total),
     )

@@ -457,13 +457,15 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       // (1) UI 반영: 상세 패널 노출 + 선택 feature_id/이름/badge가 응답과 일치.
       await expect(panel).toBeVisible(T);
       await expect(panel.getByText("선택 Feature")).toBeVisible(T);
-      await expect(panel.getByText(picked.feature_id)).toBeVisible(T);
+      await expect(panel.getByText(picked.feature_id).first()).toBeVisible(T);
       await expect(
         panel.getByRole("heading", { level: 2, name: picked.name }),
       ).toBeVisible(T);
-      await expect(panel.getByText(picked.kind, { exact: true })).toBeVisible(T);
       await expect(
-        panel.getByText(picked.status, { exact: true }),
+        panel.getByText(picked.kind, { exact: true }).first(),
+      ).toBeVisible(T);
+      await expect(
+        panel.getByText(picked.status, { exact: true }).first(),
       ).toBeVisible(T);
 
       // (2) 백엔드 라운드트립: 패널이 가리키는 feature_id를 직접 조회 → 동일 feature.

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import * as F from "./_fixtures";
 
 /**
@@ -67,9 +67,30 @@ async function expectDetailReady(
   ).toBeVisible({ timeout: 15000 });
 }
 
+async function gotoLive(page: Page, url: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(url, { timeout: 30_000, waitUntil: "domcontentloaded" });
+      return;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        !message.includes("ERR_NETWORK_CHANGED") &&
+        !message.includes("Timeout")
+      ) {
+        throw error;
+      }
+      await page.waitForTimeout(1_000 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
 test.describe("import-jobs live · list base", () => {
   test("list page loads — heading + job columnheader", async ({ page }) => {
-    await page.goto(LIST_ROUTE);
+    await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
     await expect(page).toHaveURL(/\/ops\/import-jobs$/, { timeout: 15000 });
   });
@@ -77,7 +98,7 @@ test.describe("import-jobs live · list base", () => {
   test("list page — filter controls present (status/kind/batch/parent)", async ({
     page,
   }) => {
-    await page.goto(LIST_ROUTE);
+    await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
     await expect(page.getByLabel("status")).toBeVisible({ timeout: 15000 });
     await expect(page.getByPlaceholder("kind filter")).toBeVisible({
@@ -94,14 +115,14 @@ test.describe("import-jobs live · list base", () => {
   test("list page — table landmark visible (empty or rows, loose)", async ({
     page,
   }) => {
-    await page.goto(LIST_ROUTE);
+    await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
     // PRESENCE가 0이어도 DataTable role=table은 항상 존재한다(empty 포함).
     await expect(page.getByRole("table")).toBeVisible({ timeout: 15000 });
   });
 
   test("list page — status select defaults to 'all'", async ({ page }) => {
-    await page.goto(LIST_ROUTE);
+    await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
     await expect(page.getByLabel("status")).toHaveValue("all", {
       timeout: 15000,
@@ -114,7 +135,7 @@ test.describe("import-jobs live · status filter", () => {
     test(`status filter '${status}' — select stays loaded`, async ({
       page,
     }) => {
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       // status select 변경은 GET 조회(queryKey 변경)만 유발 — read-only.
       await page.getByLabel("status").selectOption(status);
@@ -129,7 +150,7 @@ test.describe("import-jobs live · status filter", () => {
 test.describe("import-jobs live · status via URL deeplink", () => {
   for (const status of STATUS_OPTIONS) {
     test(`URL ?status=${status} seeds control`, async ({ page }) => {
-      await page.goto(`${LIST_ROUTE}?status=${status}`);
+      await gotoLive(page, `${LIST_ROUTE}?status=${status}`);
       await expectListReady(page);
       // 'all' 및 union 멤버는 그대로 시드, union 밖이면 'all' 폴백(여긴 전부 union).
       await expect(page.getByLabel("status")).toHaveValue(status, {
@@ -139,7 +160,7 @@ test.describe("import-jobs live · status via URL deeplink", () => {
   }
 
   test("URL ?status=bogus falls back to 'all'", async ({ page }) => {
-    await page.goto(`${LIST_ROUTE}?status=bogus`);
+    await gotoLive(page, `${LIST_ROUTE}?status=bogus`);
     await expectListReady(page);
     await expect(page.getByLabel("status")).toHaveValue("all", {
       timeout: 15000,
@@ -151,7 +172,7 @@ test.describe("import-jobs live · kind filter typing (GET only)", () => {
   // IMPORT_JOB_KINDS를 kind filter input에 타이핑 — GET 조회만 유발(비파괴).
   for (const kind of JOB_KINDS.length > 0 ? JOB_KINDS : ["provider_sync"]) {
     test(`kind filter typing '${kind}' reflects in input`, async ({ page }) => {
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       const input = page.getByPlaceholder("kind filter");
       await input.fill(kind);
@@ -163,7 +184,7 @@ test.describe("import-jobs live · kind filter typing (GET only)", () => {
 
   for (const kind of JOB_KINDS.length > 0 ? JOB_KINDS : ["provider_sync"]) {
     test(`URL ?kind=${kind} seeds kind filter input`, async ({ page }) => {
-      await page.goto(`${LIST_ROUTE}?kind=${encodeURIComponent(kind)}`);
+      await gotoLive(page, `${LIST_ROUTE}?kind=${encodeURIComponent(kind)}`);
       await expectListReady(page);
       await expect(page.getByPlaceholder("kind filter")).toHaveValue(kind, {
         timeout: 15000,
@@ -178,7 +199,7 @@ test.describe("import-jobs live · search term typing (GET only)", () => {
     test(`search typing '${term}' reflects + list stays ready`, async ({
       page,
     }) => {
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       const input = page.getByPlaceholder("kind filter");
       await input.fill(term);
@@ -191,7 +212,8 @@ test.describe("import-jobs live · search term typing (GET only)", () => {
 test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () => {
   for (const jobId of JOB_IDS) {
     test(`URL ?load_batch_id=${jobId} seeds batch input`, async ({ page }) => {
-      await page.goto(
+      await gotoLive(
+        page,
         `${LIST_ROUTE}?load_batch_id=${encodeURIComponent(jobId)}`,
       );
       await expectListReady(page);
@@ -203,7 +225,8 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
 
   for (const jobId of JOB_IDS) {
     test(`URL ?parent_job_id=${jobId} seeds parent input`, async ({ page }) => {
-      await page.goto(
+      await gotoLive(
+        page,
         `${LIST_ROUTE}?parent_job_id=${encodeURIComponent(jobId)}`,
       );
       await expectListReady(page);
@@ -217,7 +240,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
     test(`load_batch_id input typing '${jobId.slice(0, 8)}' (GET)`, async ({
       page,
     }) => {
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       const input = page.getByPlaceholder("load_batch_id");
       await input.fill(jobId);
@@ -230,7 +253,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
     test(`parent_job_id input typing '${jobId.slice(0, 8)}' (GET)`, async ({
       page,
     }) => {
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       const input = page.getByPlaceholder("parent_job_id");
       await input.fill(jobId);
@@ -246,7 +269,8 @@ test.describe("import-jobs live · combined URL filters", () => {
       page,
     }) => {
       const kind = JOB_KINDS[0] ?? "provider_sync";
-      await page.goto(
+      await gotoLive(
+        page,
         `${LIST_ROUTE}?status=${status}&kind=${encodeURIComponent(kind)}`,
       );
       await expectListReady(page);
@@ -264,7 +288,8 @@ test.describe("import-jobs live · combined URL filters", () => {
       page,
     }) => {
       const kind = JOB_KINDS[0] ?? "provider_sync";
-      await page.goto(
+      await gotoLive(
+        page,
         `${LIST_ROUTE}?status=done&kind=${encodeURIComponent(kind)}` +
           `&load_batch_id=${encodeURIComponent(jobId)}` +
           `&parent_job_id=${encodeURIComponent(jobId)}`,
@@ -291,7 +316,7 @@ test.describe("import-jobs live · page_size dimension (URL passthrough)", () =>
     test(`list loads with ?page_size=${size} ignored gracefully`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}?page_size=${size}`);
+      await gotoLive(page, `${LIST_ROUTE}?page_size=${size}`);
       await expectListReady(page);
     });
   }
@@ -300,7 +325,7 @@ test.describe("import-jobs live · page_size dimension (URL passthrough)", () =>
     test(`list loads with status=running&page_size=${size}`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}?status=running&page_size=${size}`);
+      await gotoLive(page, `${LIST_ROUTE}?status=running&page_size=${size}`);
       await expectListReady(page);
       await expect(page.getByLabel("status")).toHaveValue("running", {
         timeout: 15000,
@@ -315,7 +340,7 @@ test.describe("import-jobs live · responsive viewports (list)", () => {
       page,
     }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
     });
   }
@@ -323,7 +348,7 @@ test.describe("import-jobs live · responsive viewports (list)", () => {
   for (const vp of VIEWPORTS) {
     test(`list status select usable at ${vp.name}`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto(LIST_ROUTE);
+      await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       await expect(page.getByLabel("status")).toBeVisible({ timeout: 15000 });
     });
@@ -335,7 +360,7 @@ test.describe("import-jobs live · detail by job id", () => {
     test(`detail loads for ${jobId.slice(0, 8)} — Import job heading`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       await expect(page).toHaveURL(
         new RegExp(`/ops/import-jobs/${jobId}$`),
@@ -348,7 +373,7 @@ test.describe("import-jobs live · detail by job id", () => {
     test(`detail '목록' back link href for ${jobId.slice(0, 8)}`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // import-job-detail-client.tsx: 목록 back link → /ops/import-jobs.
       await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
@@ -363,7 +388,7 @@ test.describe("import-jobs live · detail by job id", () => {
     test(`detail Events/Payload sections for ${jobId.slice(0, 8)}`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // 데이터가 있을 때만 Events/Payload 카드가 렌더되므로 둘 중 하나라도
       // 보이거나, 없으면(빈 DB → isError alert) 조회 실패 alert가 보인다 —
@@ -382,7 +407,7 @@ test.describe("import-jobs live · detail event level filter (read-only)", () =>
       0,
       8,
     )}`, async ({ page }) => {
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // event level select는 jobData가 있을 때만 렌더. 없으면 조회 실패 alert.
       const levelOrError = page
@@ -400,7 +425,7 @@ test.describe("import-jobs live · detail responsive viewports", () => {
       page,
     }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
     });
   }
@@ -412,7 +437,7 @@ test.describe("import-jobs live · detail responsive viewports", () => {
       8,
     )}`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
         "href",
@@ -428,7 +453,7 @@ test.describe("import-jobs live · list↔detail nav round-trip (read-only)", ()
     test(`detail → 목록 link navigates back for ${jobId.slice(0, 8)}`, async ({
       page,
     }) => {
-      await page.goto(`${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
+      await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // 내비 링크 클릭은 허용(GET navigation, 비파괴).
       await page.getByRole("link", { name: "목록" }).click();
@@ -443,7 +468,7 @@ test.describe("import-jobs live · status×viewport cross matrix", () => {
     for (const vp of VIEWPORTS) {
       test(`status=${status} at ${vp.name}`, async ({ page }) => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
-        await page.goto(`${LIST_ROUTE}?status=${status}`);
+        await gotoLive(page, `${LIST_ROUTE}?status=${status}`);
         await expectListReady(page);
         await expect(page.getByLabel("status")).toHaveValue(status, {
           timeout: 15000,

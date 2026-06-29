@@ -8,6 +8,7 @@ type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
 type DedupReviewListResponse =
   components["schemas"]["DedupReviewListResponse"];
+type DedupReviewListMeta = DedupReviewListResponse["meta"];
 type DedupReviewDetailResponse =
   components["schemas"]["DedupReviewDetailResponse"];
 type DedupReviewDecisionRequest =
@@ -89,19 +90,19 @@ function makeDedupReview(
 
 function listResponse(
   items: DedupReviewRecord[],
-  options: { nextCursor?: string | null; pageSize?: number; total?: number } = {},
+  options: { pageSize?: number; total?: number } = {},
 ): DedupReviewListResponse {
+  const meta: DedupReviewListMeta = {
+    duration_ms: 1,
+    page: {
+      page_size: options.pageSize ?? 100,
+      total: options.total ?? items.length,
+    },
+    request_id: "e2e-dedup-list",
+  };
   return {
     data: { items },
-    meta: {
-      duration_ms: 1,
-      page: {
-        page_size: options.pageSize ?? 100,
-        next_cursor: options.nextCursor ?? null,
-        total: options.total ?? items.length,
-      },
-      request_id: "e2e-dedup-list",
-    },
+    meta,
   };
 }
 
@@ -330,12 +331,9 @@ async function mockDedupReviews(
       const rows = filteredRows(url);
       const pageIndex = Math.max(1, Number(url.searchParams.get("page") ?? 1));
       const start = (pageIndex - 1) * pageSize;
-      const nextCursor =
-        rows.length > start + pageSize ? `cursor-page-${pageIndex + 1}` : null;
       await fulfillJson(
         route,
         listResponse(rows.slice(start, start + pageSize), {
-          nextCursor,
           pageSize,
           total: rows.length,
         }),
