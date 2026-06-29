@@ -26,7 +26,7 @@ import {
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -752,7 +752,7 @@ export function OfflineUploadsClient() {
                   <AlertTitle>업로드 완료</AlertTitle>
                   <AlertDescription>
                     {shortId(createUpload.data.data.upload_id, 18)} ·{" "}
-                    {createUpload.data.data.status} ·{" "}
+                    {statusLabel(createUpload.data.data.status)} ·{" "}
                     {formatBytes(createUpload.data.data.byte_size)}
                   </AlertDescription>
                 </Alert>
@@ -798,7 +798,7 @@ export function OfflineUploadsClient() {
               <AlertTitle>Dagster load 실행됨</AlertTitle>
               <AlertDescription>
                 {shortId(launchLoad.data.meta.dagster_run_id, 18)} ·{" "}
-                {launchLoad.data.meta.dagster_status}
+                {statusLabel(launchLoad.data.meta.dagster_status)}
               </AlertDescription>
             </Alert>
           ) : null}

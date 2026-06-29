@@ -19,7 +19,7 @@ import {
   useDedupReviews,
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -137,7 +137,7 @@ function FeatureDetailPanel({
       <dl className="grid gap-3 sm:grid-cols-2">
         <DetailMetric label="kind" value={feature.kind} />
         <DetailMetric label="category" value={feature.category} />
-        <DetailMetric label="status" value={feature.status} />
+        <DetailMetric label="status" value={statusLabel(feature.status)} />
         <DetailMetric label="origin" value={feature.data_origin} />
         <DetailMetric label="lon" value={feature.lon?.toFixed(6)} />
         <DetailMetric label="lat" value={feature.lat?.toFixed(6)} />

@@ -428,6 +428,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "max_lat": 37.525,
             "kinds": ["place", "event"],
             "categories": None,
+            "providers": None,
             "cursor_feature_id": None,
             "limit": 200,
         },
@@ -469,6 +470,7 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
         "max_lat": 37.525,
         "kinds": ["place", "event"],
         "categories": None,
+        "providers": None,
         "limit": 200,
     }
     for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
@@ -483,6 +485,43 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
         migrated_session,
         _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
         params,
+        force_index=False,
+    )
+    _assert_uses_index(representative, "idx_features_coord_gist")
+    _assert_no_seq_scan_on(representative, "features")
+
+
+async def test_t212d_cluster_provider_filter_uses_spatial_index(
+    migrated_session: AsyncSession,
+) -> None:
+    """클러스터 rollup에 provider(소스) 필터를 켜도 bbox GIST 인덱스로 풀리고
+    feature.features seqscan이 없어야 한다 — in-bounds provider 필터 '2번 완화책'
+    (``:providers`` 단락 + EXISTS, 클러스터 집계에 join 미도입)의 perf 검증.
+    """
+    await _seed_live_like_perf_data(migrated_session)
+
+    filtered_params = {
+        "min_lon": 126.9,
+        "min_lat": 37.4,
+        "max_lon": 127.1,
+        "max_lat": 37.7,
+        "kinds": None,
+        "categories": None,
+        "providers": ["python-visitkorea-api"],
+        "limit": 200,
+    }
+    for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
+        plan = await _explain_json(
+            migrated_session,
+            _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
+            filtered_params,
+        )
+        _assert_uses_index(plan, "idx_features_coord_gist")
+
+    representative = await _explain_json(
+        migrated_session,
+        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        filtered_params,
         force_index=False,
     )
     _assert_uses_index(representative, "idx_features_coord_gist")
@@ -504,6 +543,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "max_lat": 37.525,
             "kinds": ["place", "event"],
             "categories": None,
+            "providers": None,
             "cursor_feature_id": None,
             "limit": 200,
         },

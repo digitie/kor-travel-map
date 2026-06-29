@@ -21968,6 +21968,27 @@
             }
           },
           {
+            "description": "primary provider(소스) 반복 필터. 개별 feature 응답과 클러스터 rollup 응답 모두에 적용된다(미지정 시 술어 단락 — bbox 인덱스 조회 무영향).",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider(소스) 반복 필터. 개별 feature 응답과 클러스터 rollup 응답 모두에 적용된다(미지정 시 술어 단락 — bbox 인덱스 조회 무영향).",
+              "title": "Provider"
+            }
+          },
+          {
             "in": "query",
             "name": "zoom",
             "required": false,

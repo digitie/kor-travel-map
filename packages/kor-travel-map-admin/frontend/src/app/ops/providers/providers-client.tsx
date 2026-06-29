@@ -24,7 +24,7 @@ import {
 } from "@/api/providerRefreshPolicies";
 import { useCreateFeatureUpdateRequestMutation } from "@/api/updateRequests";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -555,7 +555,7 @@ function DatasetDetailPanel({
                 {shortId(createdRequestId)}
               </Link>
               {" · "}
-              {createRequest.data.data.status}
+              {statusLabel(createRequest.data.data.status)}
             </AlertDescription>
           </Alert>
         ) : null}

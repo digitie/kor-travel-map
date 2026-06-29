@@ -21,7 +21,7 @@ import {
 import { DAGSTER_UI_URL } from "@/api/dagster";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -319,7 +319,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
           <Alert>
             <AlertTitle>cancel 요청됨</AlertTitle>
             <AlertDescription>
-              {cancelJob.data.data.status} · {shortId(cancelJob.data.data.job_id)}
+              {statusLabel(cancelJob.data.data.status)} · {shortId(cancelJob.data.data.job_id)}
             </AlertDescription>
           </Alert>
         ) : null}

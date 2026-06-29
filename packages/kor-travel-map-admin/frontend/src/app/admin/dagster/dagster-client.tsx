@@ -27,6 +27,7 @@ import {
   useDagsterSummary,
 } from "@/api/dagster";
 import { AdminShell } from "@/components/admin-shell";
+import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -188,7 +189,9 @@ function TickRows({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <Badge variant={statusVariant(tick.status)}>{tick.status}</Badge>
+              <Badge variant={statusVariant(tick.status)}>
+                {statusLabel(tick.status)}
+              </Badge>
               <span className="truncate font-mono text-muted-foreground">
                 {tick.tick_id}
               </span>
@@ -266,7 +269,7 @@ function InstigationList({
             <div className="flex items-center justify-between gap-3 text-xs">
               <span className="truncate font-mono">{item.name}</span>
               <Badge variant={statusVariant(item.status ?? "")}>
-                {item.status ?? "unknown"}
+                {statusLabel(item.status ?? "unknown")}
               </Badge>
             </div>
             {item.cron_schedule ? (
@@ -407,7 +410,7 @@ function RunsTable({
         header: "status",
         cell: ({ row }) => (
           <Badge variant={statusVariant(row.original.status)}>
-            {row.original.status}
+            {statusLabel(row.original.status)}
           </Badge>
         ),
       },
@@ -488,7 +491,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
               </Badge>
               {event.level ? (
                 <span className="text-xs text-muted-foreground">
-                  {event.level}
+                  {statusLabel(event.level)}
                 </span>
               ) : null}
             </div>
@@ -601,8 +604,14 @@ function RunDetailCard({ runId }: { runId: string | null }) {
 
         {data ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
-            {run ? <Badge variant={statusVariant(run.status)}>{run.status}</Badge> : null}
+            <Badge variant={statusVariant(data.status)}>
+              {statusLabel(data.status)}
+            </Badge>
+            {run ? (
+              <Badge variant={statusVariant(run.status)}>
+                {statusLabel(run.status)}
+              </Badge>
+            ) : null}
             {data.event_has_more ? (
               <Badge variant="outline">events more</Badge>
             ) : null}
@@ -783,7 +792,7 @@ export function DagsterAdminClient() {
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusVariant(data?.status ?? "loading")}>
-            {data?.status ?? (summary.isError ? "error" : "loading")}
+            {statusLabel(data?.status ?? (summary.isError ? "error" : "loading"))}
           </Badge>
           {data?.version ? <Badge variant="outline">v{data.version}</Badge> : null}
         </div>

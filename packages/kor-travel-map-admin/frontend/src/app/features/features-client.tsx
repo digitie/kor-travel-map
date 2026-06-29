@@ -18,8 +18,10 @@ import { useCallback, useMemo, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
+import { useProviders } from "@/api/etl";
 import {
   FEATURE_KINDS,
+  useAdminFeatureDetail,
   useFeatureDetail,
   useFeaturesInBbox,
   type FeatureKind,
@@ -28,6 +30,7 @@ import {
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
+import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +43,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
+import { NativeSelect } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -89,6 +94,12 @@ function FeatureDetailPanel({
   onClose: () => void;
 }) {
   const detailQuery = useFeatureDetail(featureId);
+  const adminDetailQuery = useAdminFeatureDetail(featureId);
+  const sourceProviders = useMemo(() => {
+    const sources = adminDetailQuery.data?.data.sources ?? [];
+    return Array.from(new Set(sources.map((source) => source.provider))).sort();
+  }, [adminDetailQuery.data]);
+  const dataOrigin = adminDetailQuery.data?.data.feature.data_origin ?? null;
 
   return (
     <Card
@@ -135,7 +146,9 @@ function FeatureDetailPanel({
               <h2 className="text-base font-semibold">{detailQuery.data.name}</h2>
               <div className="flex flex-wrap gap-2">
                 <Badge>{detailQuery.data.kind}</Badge>
-                <Badge variant="secondary">{detailQuery.data.status}</Badge>
+                <Badge variant="secondary">
+                  {statusLabel(detailQuery.data.status)}
+                </Badge>
                 <Badge variant="outline">{detailQuery.data.category}</Badge>
               </div>
             </div>
@@ -149,6 +162,22 @@ function FeatureDetailPanel({
               </dd>
               <dt className="text-muted-foreground">sigungu</dt>
               <dd>{detailQuery.data.sigungu_code ?? "없음"}</dd>
+              <dt className="text-muted-foreground">소스</dt>
+              <dd className="flex flex-wrap gap-1">
+                {adminDetailQuery.isLoading ? (
+                  <span className="text-muted-foreground">로딩 중</span>
+                ) : sourceProviders.length > 0 ? (
+                  sourceProviders.map((provider) => (
+                    <Badge key={provider} variant="outline">
+                      {provider}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground">없음</span>
+                )}
+              </dd>
+              <dt className="text-muted-foreground">data_origin</dt>
+              <dd>{dataOrigin ?? "없음"}</dd>
             </dl>
             <details>
               <summary className="cursor-pointer text-sm font-medium">address</summary>
@@ -188,10 +217,33 @@ export function FeaturesClient() {
   const clearFeatureKinds = useMapStore((state) => state.clearFeatureKinds);
 
   const [bbox, setBbox] = useState<Bbox | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string>("");
   const kindFilter = useMemo(
     () => Array.from(activeFeatureKinds) as FeatureKind[],
     [activeFeatureKinds],
   );
+
+  // 소스(provider) 필터 옵션: feature 선택 시 그 feature가 묶인 provider만, 아니면
+  // 전체 provider 목록. 선택이 바뀌어 현재 값이 옵션에 없으면 "모두 보기"로 되돌린다.
+  const providersQuery = useProviders();
+  const selectedFeatureAdminDetail = useAdminFeatureDetail(selectedFeatureId);
+  const providerOptions = useMemo<string[]>(() => {
+    if (selectedFeatureId) {
+      const sources = selectedFeatureAdminDetail.data?.data.sources ?? [];
+      return Array.from(
+        new Set(sources.map((source) => source.provider)),
+      ).sort();
+    }
+    const providers = providersQuery.data?.data.providers ?? [];
+    return Array.from(new Set(providers.map((entry) => entry.provider))).sort();
+  }, [selectedFeatureId, selectedFeatureAdminDetail.data, providersQuery.data]);
+
+  // 선택이 바뀌어 저장된 값이 현재 옵션에 없으면, effect로 setState하지 않고
+  // 렌더 시점에 "모두 보기"(빈 값)로 환원한다 (react-hooks/set-state-in-effect 회피).
+  const effectiveProvider =
+    providerFilter && providerOptions.includes(providerFilter)
+      ? providerFilter
+      : "";
   const includeFeatureGeometry =
     kindFilter.includes("route") || viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
   const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
@@ -200,6 +252,7 @@ export function FeaturesClient() {
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
+      provider: effectiveProvider ? [effectiveProvider] : undefined,
       // 서버 in-bounds 파라미터는 `page_size`(최대 500). 과거엔 `limit`을 보내
       // 서버가 무시 → 항상 기본 100건만 표시됐다(110만 중 100개, 필터 체감 약함).
       includeGeometry: includeFeatureGeometry,
@@ -248,7 +301,11 @@ export function FeaturesClient() {
         header: "kind",
         cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
       },
-      { accessorKey: "status", header: "status" },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => statusLabel(row.original.status),
+      },
       {
         id: "coord",
         header: "coord",
@@ -372,17 +429,29 @@ export function FeaturesClient() {
                 </Button>
               );
             })}
-            {activeFeatureKinds.size > 0 ? (
-              <Button
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={clearFeatureKinds}
-              >
-                초기화
-              </Button>
-            ) : null}
+            <Button
+              disabled={activeFeatureKinds.size === 0}
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={clearFeatureKinds}
+            >
+              초기화
+            </Button>
           </div>
+          <NativeSelect
+            aria-label="소스 필터"
+            className="w-44"
+            value={effectiveProvider}
+            onChange={(event) => setProviderFilter(event.target.value)}
+          >
+            <NativeSelectOption value="">모두 보기</NativeSelectOption>
+            {providerOptions.map((provider) => (
+              <NativeSelectOption key={provider} value={provider}>
+                {provider}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
         </div>
         </div>
 

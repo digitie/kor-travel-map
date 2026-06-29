@@ -428,6 +428,18 @@ WHERE f.deleted_at IS NULL
     OR f.category = ANY(CAST(:categories AS text[]))
   )
   AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_records AS pr
+        ON pr.source_record_key = pl.source_record_key
+      WHERE pl.feature_id = f.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+  AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
@@ -547,6 +559,18 @@ WHERE f.deleted_at IS NULL
     OR f.category = ANY(CAST(:categories AS text[]))
   )
   AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_records AS pr
+        ON pr.source_record_key = pl.source_record_key
+      WHERE pl.feature_id = f.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+  AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
@@ -578,6 +602,18 @@ WHERE deleted_at IS NULL
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
   )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_records AS pr
+        ON pr.source_record_key = pl.source_record_key
+      WHERE pl.feature_id = features.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
 GROUP BY {code_col}
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
@@ -605,6 +641,7 @@ async def cluster_features_in_bbox(
     cluster_unit: str,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
     limit: int = 2000,
 ) -> list[dict[str, Any]]:
     """bbox 내 feature를 행정구역(``cluster_unit``) 단위로 rollup한다 (T-213c).
@@ -628,6 +665,7 @@ async def cluster_features_in_bbox(
                 "max_lat": max_lat,
                 "kinds": _normalized_filter(kinds),
                 "categories": _normalized_filter(categories),
+                "providers": _normalized_filter(providers),
                 "limit": limit,
             },
         )
@@ -1784,6 +1822,7 @@ async def features_in_bbox(
     max_lat: float,
     kinds: list[str] | None = None,
     categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
     limit: int = 1000,
     cursor: str | None = None,
     include_geometry: bool = False,
@@ -1794,7 +1833,9 @@ async def features_in_bbox(
     사용하는 ``&&`` 연산. ``deleted_at IS NULL`` + ``coord IS NOT NULL``만. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
     ``include_geometry``가 true이면 route/area용 ``geom``도 bbox 후보에 포함해
-    지도 표시용 GeoJSON/면적을 반환한다.
+    지도 표시용 GeoJSON/면적을 반환한다. ``providers``가 주어지면 primary source
+    provider 기준(``provider_sync.source_links.is_primary_source``)으로 추가 필터한다
+    — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     """
     rows = (
         await session.execute(
@@ -1810,6 +1851,7 @@ async def features_in_bbox(
                 "max_lat": max_lat,
                 "kinds": kinds,
                 "categories": _normalized_filter(categories),
+                "providers": _normalized_filter(providers),
                 "limit": limit,
                 "cursor_feature_id": _bbox_cursor_feature_id(cursor),
             },
