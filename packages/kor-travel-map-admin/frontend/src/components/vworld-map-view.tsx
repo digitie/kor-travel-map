@@ -7,6 +7,7 @@ import {
 import maplibregl, {
   type Map as MapLibreMap,
   type Marker as MapLibreMarker,
+  type Popup as MapLibrePopup,
 } from "maplibre-gl";
 import {
   createContext,
@@ -496,12 +497,61 @@ function weatherMarkerLabel(
   return summary.value_text ?? null;
 }
 
+type CoincidentEntry = {
+  feature_id: string;
+  name: string;
+  kind: string;
+  lon: number;
+  lat: number;
+};
+
+const FEATURE_KIND_LABELS: Record<string, string> = {
+  place: "장소",
+  event: "행사",
+  notice: "공지",
+  price: "가격",
+  weather: "날씨",
+  route: "경로",
+  area: "구역",
+};
+
+function featureKindLabel(kind: string): string {
+  return FEATURE_KIND_LABELS[kind] ?? kind;
+}
+
+/** 마커 우상단에 겹침 개수 배지를 단다(클릭하면 선택 팝업이 뜬다는 신호). */
+function appendCountBadge(el: HTMLElement, count: number, color: string): void {
+  if (!el.style.position) el.style.position = "relative";
+  const badge = document.createElement("div");
+  badge.textContent = String(count);
+  badge.setAttribute("aria-hidden", "true");
+  badge.style.position = "absolute";
+  badge.style.top = "-6px";
+  badge.style.right = "-6px";
+  badge.style.minWidth = "16px";
+  badge.style.height = "16px";
+  badge.style.padding = "0 3px";
+  badge.style.borderRadius = "8px";
+  badge.style.background = color;
+  badge.style.color = "#ffffff";
+  badge.style.fontSize = "10px";
+  badge.style.fontWeight = "700";
+  badge.style.lineHeight = "16px";
+  badge.style.textAlign = "center";
+  badge.style.border = "1.5px solid #ffffff";
+  badge.style.boxShadow = "0 1px 3px rgba(0,0,0,0.3)";
+  badge.style.pointerEvents = "none";
+  badge.style.boxSizing = "border-box";
+  el.appendChild(badge);
+}
+
 function createFeatureMarkerElement({
   markerIcon,
   markerColor,
   priceLabel,
   weatherLabel,
   title,
+  badgeCount,
   onClick,
 }: {
   markerIcon?: string | null;
@@ -509,6 +559,7 @@ function createFeatureMarkerElement({
   priceLabel?: string | null;
   weatherLabel?: string | null;
   title: string;
+  badgeCount?: number;
   onClick?: (event: MouseEvent) => void;
 }): HTMLDivElement {
   const icon = createMarkerElement({
@@ -522,6 +573,9 @@ function createFeatureMarkerElement({
     if (onClick) {
       icon.style.cursor = "pointer";
       icon.addEventListener("click", onClick);
+    }
+    if (badgeCount && badgeCount > 1) {
+      appendCountBadge(icon, badgeCount, resolveMarkerColor(markerColor ?? null));
     }
     return icon;
   }
@@ -553,6 +607,9 @@ function createFeatureMarkerElement({
 
   wrapper.append(icon, label);
   if (onClick) wrapper.addEventListener("click", onClick);
+  if (badgeCount && badgeCount > 1) {
+    appendCountBadge(wrapper, badgeCount, color);
+  }
   return wrapper;
 }
 
@@ -682,6 +739,10 @@ export function VWorldFeatureClusters({
   // 시 마커 풀을 건드리지 않고 outline만 토글한다(#500 (c)).
   const pointElementsRef = useRef(new Map<string, HTMLElement>());
   const labelElementsRef = useRef(new Map<string, HTMLElement>());
+  // 겹친 마커 선택: 같은 화면 픽셀 셀에 묶인 point feature 그룹(feature_id → 그룹)과
+  // 현재 떠 있는 선택 팝업을 추적한다(동일 좌표 KMA 초단기/단기 등 겹침 분기).
+  const coincidentGroupsRef = useRef(new Map<string, CoincidentEntry[]>());
+  const popupRef = useRef<MapLibrePopup | null>(null);
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
@@ -974,6 +1035,80 @@ export function VWorldFeatureClusters({
       });
     };
 
+    // 겹친 좌표의 feature들을 나열해 선택하게 하는 팝업. 동일 좌표(KMA 초단기/단기
+    // 격자처럼)나 근접해 마커가 겹치는 경우, 마커 클릭이 이 팝업으로 분기한다.
+    const showCoincidentPopup = (group: CoincidentEntry[]) => {
+      popupRef.current?.remove();
+      const container = document.createElement("div");
+      container.style.font = "13px/1.4 system-ui, -apple-system, sans-serif";
+      container.style.color = "#111827";
+      const header = document.createElement("div");
+      header.textContent = `겹친 지점 ${group.length}개`;
+      header.style.fontSize = "11px";
+      header.style.fontWeight = "700";
+      header.style.color = "#6b7280";
+      header.style.padding = "2px 4px 6px";
+      container.appendChild(header);
+      const list = document.createElement("div");
+      list.style.display = "flex";
+      list.style.flexDirection = "column";
+      list.style.gap = "2px";
+      list.style.maxHeight = "220px";
+      list.style.overflowY = "auto";
+      for (const f of group) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.gap = "6px";
+        row.style.width = "100%";
+        row.style.padding = "5px 6px";
+        row.style.border = "none";
+        row.style.borderRadius = "5px";
+        row.style.background = "transparent";
+        row.style.cursor = "pointer";
+        row.style.textAlign = "left";
+        row.style.font = "inherit";
+        row.style.color = "inherit";
+        row.addEventListener("mouseenter", () => {
+          row.style.background = "#f3f4f6";
+        });
+        row.addEventListener("mouseleave", () => {
+          row.style.background = "transparent";
+        });
+        const kindBadge = document.createElement("span");
+        kindBadge.textContent = featureKindLabel(f.kind);
+        kindBadge.style.flex = "0 0 auto";
+        kindBadge.style.fontSize = "10px";
+        kindBadge.style.fontWeight = "700";
+        kindBadge.style.padding = "1px 5px";
+        kindBadge.style.borderRadius = "4px";
+        kindBadge.style.background = "#e5e7eb";
+        kindBadge.style.color = "#374151";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = f.name;
+        nameSpan.style.flex = "1 1 auto";
+        nameSpan.style.whiteSpace = "nowrap";
+        nameSpan.style.overflow = "hidden";
+        nameSpan.style.textOverflow = "ellipsis";
+        row.append(kindBadge, nameSpan);
+        row.addEventListener("click", () => {
+          onSelectRef.current?.(f.feature_id);
+          popupRef.current?.remove();
+        });
+        list.appendChild(row);
+      }
+      container.appendChild(list);
+      popupRef.current = new maplibregl.Popup({
+        closeButton: true,
+        closeOnClick: true,
+        maxWidth: "260px",
+      })
+        .setLngLat([group[0].lon, group[0].lat])
+        .setDOMContent(container)
+        .addTo(map);
+    };
+
     const updateMarkers = () => {
       if (!map.getSource(SRC) || !map.isStyleLoaded()) return;
       const next = new Set<string>();
@@ -981,6 +1116,40 @@ export function VWorldFeatureClusters({
       const selectedId = selectedFeatureIdRef.current;
       pointElements.clear();
       const rendered = map.querySourceFeatures(SRC);
+      // 겹침 그룹 선계산: 화면 픽셀 셀(≈마커 크기)로 point feature를 묶는다. zoom마다
+      // 픽셀 위치가 바뀌므로 update마다 다시 계산하고, 클릭 핸들러는 ref로 최신값을 읽는다.
+      const OVERLAP_PX = 24;
+      const cellGroups = new Map<string, CoincidentEntry[]>();
+      for (const feat of rendered) {
+        if (feat.geometry.type !== "Point") continue;
+        const props = feat.properties ?? {};
+        if (props.cluster) continue;
+        const c = feat.geometry.coordinates as [number, number];
+        const p = map.project(c);
+        const cellKey = `${Math.round(p.x / OVERLAP_PX)}:${Math.round(p.y / OVERLAP_PX)}`;
+        const entry: CoincidentEntry = {
+          feature_id: String(props.feature_id),
+          name: String(props.name),
+          kind: String(props.kind),
+          lon: c[0],
+          lat: c[1],
+        };
+        const arr = cellGroups.get(cellKey);
+        if (arr) arr.push(entry);
+        else cellGroups.set(cellKey, [entry]);
+      }
+      const coincident = new Map<string, CoincidentEntry[]>();
+      for (const arr of cellGroups.values()) {
+        if (arr.length > 1) {
+          arr.sort((a, b) =>
+            a.kind === b.kind
+              ? a.name.localeCompare(b.name, "ko")
+              : a.kind.localeCompare(b.kind),
+          );
+        }
+        for (const e of arr) coincident.set(e.feature_id, arr);
+      }
+      coincidentGroupsRef.current = coincident;
       for (const feat of rendered) {
         if (feat.geometry.type !== "Point") continue;
         const coords = feat.geometry.coordinates as [number, number];
@@ -1048,11 +1217,14 @@ export function VWorldFeatureClusters({
           const weatherLabel = weatherMarkerLabel(
             weatherSummariesRef.current.get(featureId),
           );
+          const coincidentGroup = coincidentGroupsRef.current.get(featureId);
+          const coincidentCount = coincidentGroup ? coincidentGroup.length : 1;
           const renderKey = JSON.stringify({
             markerIcon,
             markerColor,
             priceLabel,
             weatherLabel,
+            coincidentCount,
           });
           let marker = markers.get(id);
           const wasOnScreen = onScreen.has(id);
@@ -1067,7 +1239,13 @@ export function VWorldFeatureClusters({
               priceLabel,
               weatherLabel,
               title,
-              onClick: () => onSelectRef.current?.(featureId),
+              badgeCount: coincidentCount,
+              onClick: () => {
+                // 겹친 그룹이 2개 이상이면 선택 팝업, 단일이면 바로 선택(ref로 최신값).
+                const grp = coincidentGroupsRef.current.get(featureId);
+                if (grp && grp.length > 1) showCoincidentPopup(grp);
+                else onSelectRef.current?.(featureId);
+              },
             });
             element.dataset.renderKey = renderKey;
             element.setAttribute("role", "button");
@@ -1138,6 +1316,8 @@ export function VWorldFeatureClusters({
       map.off("sourcedata", scheduleUpdate);
       map.off("idle", scheduleUpdate);
       map.off("styledata", handleStyleData);
+      popupRef.current?.remove();
+      popupRef.current = null;
       for (const marker of markers.values()) marker.remove();
       markers.clear();
       pointElements.clear();
