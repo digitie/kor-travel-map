@@ -257,6 +257,11 @@ async def run_feature_price_opinet_stations(
 
 @asset(
     group_name="features_price",
+    # price feature의 parent_feature_id는 주유소 place feature를 가리킨다 →
+    # place asset을 dagster 상류 의존(deps)으로 선언해 계보·backfill 순서를 보장한다.
+    # 단, place는 월 1회/price는 일 1회 스케줄이라(OpiNet 일일 한도) 스케줄 자체는
+    # 분리하고, 런타임 정합성은 price asset의 parent place co-load(#605)가 보장한다.
+    deps=[feature_place_opinet_stations],
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_station_price_details"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
@@ -343,6 +348,11 @@ async def run_feature_price_krex_rest_areas(
 
 @asset(
     group_name="features_price",
+    # 유가 price feature는 휴게소 place feature를 parent로 삼고 place 좌표를 locator로
+    # 상속한다 → place asset을 상류 의존(deps)으로 선언(place 먼저 적재 시 좌표 회복).
+    # place 월 1회/price 일 2회라 스케줄은 분리하고, place 미적재 시 price는
+    # coordless·parentless로 degrade한다(FK 위반 없음).
+    deps=[feature_place_krex_rest_areas],
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_area_fuel_prices"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
