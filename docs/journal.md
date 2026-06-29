@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Backup live e2e 상태 배지 assertion 안정화
+
+n150 targeted backup live e2e에서 command 실행 전 기본 옵션 테스트가 `plan only`/`execute enabled`
+상태 배지 전환을 분기형 `isVisible`로 확인하다 stale 분기를 타는 문제를 정리했다.
+
+- **e2e**: backup page 실행 상태는 `plan only` 또는 `execute enabled` 중 현재 렌더링된 배지 하나가
+  보이면 통과하도록 단일 locator assertion으로 바꿨다.
+- **검증 예정**: frontend e2e type-check 후 PR/CI/merge, n150 backup targeted live e2e 재실행.
+
 ## 2026-06-29 (codex) — n150 live e2e 실패 보강
 
 n150 full live e2e write 실행에서 드러난 백업 command 시작 실패와 enrichment review 조회 500을

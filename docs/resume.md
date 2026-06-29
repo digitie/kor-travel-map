@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — Backup live e2e 상태 배지 assertion 안정화
+
+- **진행 중**: n150 targeted backup live e2e에서 `/admin/backups` 기본 옵션 테스트가
+  `plan only`/`execute enabled` 상태 배지의 순간 상태를 분기형으로 읽다가 실패했다.
+- **진행 중**: 해당 assertion을 현재 렌더링된 두 상태 배지 중 하나를 단일 locator로 확인하도록
+  단순화했다.
+- **다음 한 작업**: frontend e2e type-check와 CI를 통과시켜 PR 머지 후 n150에 반영하고 backup/review
+  targeted live e2e를 재실행한다.
+
 ## 2026-06-29 (codex) — n150 live e2e 실패 보강
 
 - **완료**: n150 full live e2e write 실행에서 백업 command 시작 실패와 enrichment review 조회 500을
