@@ -703,30 +703,35 @@ export function OfflineUploadsClient() {
             <div className="flex flex-col gap-3">
               <FormField
                 data-testid="offline-upload-file-input"
+                hint="업로드할 오프라인 데이터 파일(JSON/JSONL/CSV/TSV)입니다."
                 label="파일"
                 type="file"
                 accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
               <FormField
+                hint="이 업로드 데이터의 provider 식별자입니다."
                 label="provider"
                 placeholder="provider"
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
               />
               <FormField
+                hint="업로드 데이터의 dataset_key입니다."
                 label="dataset key"
                 placeholder="dataset_key"
                 value={datasetKey}
                 onChange={(event) => setDatasetKey(event.target.value)}
               />
               <FormField
+                hint="이 업로드가 적용될 동기화 스코프입니다."
                 label="sync scope"
                 placeholder="sync_scope"
                 value={syncScope}
                 onChange={(event) => setSyncScope(event.target.value)}
               />
               <FormField
+                hint="업로드를 생성한 사용자 식별자입니다(선택)."
                 label="created by"
                 placeholder="created_by"
                 value={createdBy}

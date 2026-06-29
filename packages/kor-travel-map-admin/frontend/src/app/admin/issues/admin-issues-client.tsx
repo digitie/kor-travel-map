@@ -335,6 +335,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <FormTextArea
             className="font-mono"
             error={manualErrorField === "address" ? manualError : undefined}
+            hint="수동 보정 시 도로명/지번 주소를 JSON으로 입력합니다."
             label="address JSON"
             placeholder='{"road": "...", "jibun": "..."}'
             ref={manualAddressRef}
@@ -344,6 +345,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <FormField
               error={manualErrorField === "lon" ? manualError : undefined}
+              hint="수동으로 지정할 경도입니다."
               label="manual lon"
               placeholder="lon"
               ref={manualLonRef}
@@ -351,12 +353,14 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
               onChange={(event) => setManualLon(event.target.value)}
             />
             <FormField
+              hint="수동으로 지정할 위도입니다."
               label="manual lat"
               placeholder="lat"
               value={manualLat}
               onChange={(event) => setManualLat(event.target.value)}
             />
             <FormField
+              hint="수동 보정 사유를 기록합니다."
               label="manual reason"
               placeholder="reason"
               value={manualReason}
@@ -592,7 +596,7 @@ export function AdminIssuesClient() {
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
-                aria-label="issue search"
+                aria-label="이슈 검색"
                 className="pl-8"
                 placeholder="message, feature_id, source_record_key"
                 value={q}
@@ -603,7 +607,7 @@ export function AdminIssuesClient() {
               />
             </div>
             <NativeSelect
-              aria-label="issue status"
+              aria-label="이슈 상태 필터"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as AdminIssueStatus | "all");
@@ -617,7 +621,7 @@ export function AdminIssuesClient() {
               ))}
             </NativeSelect>
             <NativeSelect
-              aria-label="issue severity"
+              aria-label="이슈 심각도 필터"
               value={severity}
               onChange={(event) => {
                 setSeverity(event.target.value as AdminIssueSeverity | "all");

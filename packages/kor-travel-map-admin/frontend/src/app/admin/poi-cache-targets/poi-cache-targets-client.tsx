@@ -289,6 +289,7 @@ export function PoiCacheTargetsClient() {
           <div className="flex flex-col gap-3">
             <FormField
               error={errors.externalSystem}
+              hint="POI 캐시 타깃을 제공하는 외부 시스템 식별자입니다."
               label="external system"
               ref={externalSystemRef}
               required
@@ -297,6 +298,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.targetKey}
+              hint="외부 시스템에서의 타깃 고유 키입니다."
               label="target key"
               placeholder="target_key"
               ref={targetKeyRef}
@@ -305,6 +307,7 @@ export function PoiCacheTargetsClient() {
               onChange={(event) => setTargetKey(event.target.value)}
             />
             <FormField
+              hint="타깃을 식별하는 표시 이름입니다(선택)."
               label="target name"
               placeholder="name"
               value={name}
@@ -312,6 +315,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.lon}
+              hint="타깃 중심점의 경도입니다."
               label="경도"
               ref={lonRef}
               required
@@ -320,6 +324,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.lat}
+              hint="타깃 중심점의 위도입니다."
               label="위도"
               ref={latRef}
               required
@@ -328,6 +333,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.radiusKm}
+              hint="중심점에서 이 반경(km) 안의 지점을 캐시 대상으로 합니다."
               label="radius km"
               ref={radiusKmRef}
               required
