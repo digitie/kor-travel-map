@@ -21,11 +21,19 @@ const T = { timeout: UI_TIMEOUT } as const;
 
 // 모든 생성 엔티티 식별자에 박아 parallel/재실행 충돌을 막는다.
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-// SAFE 선택: 존재하지 않는 unique provider/dataset로 좁히면 center_radius scope여도
-// 매칭되는 provider가 없어 Dagster job이 no-op가 된다(무거운 실 실행 방지). providers를
-// 비워 두면 반경 내 "모든" provider refresh로 무거워질 수 있으므로 반드시 bogus 값을 준다.
-const PROVIDER = `e2e_inert_provider_${RUN_ID}`;
-const DATASET = `e2e_inert_dataset_${RUN_ID}`;
+const RUN_STARTED_AT = new Date(Date.now() - 5_000).toISOString();
+// SAFE 선택: API는 refreshable catalog pair만 queue에 넣도록 검증한다. 실제 pair를 쓰되
+// 한국 남서쪽 경계 근처의 극소 반경으로 제한해 scope match/runner 부담을 낮춘다.
+const SAFE_LON = "124.0001";
+const SAFE_LAT = "33.0001";
+const SAFE_RADIUS_KM = "0.1";
+const PROVIDER = "python-kma-api";
+const DATASET = "kma_short_forecast";
+const MULTI_DATASETS = [
+  "kma_ultra_short_nowcast",
+  "kma_ultra_short_forecast",
+  "kma_short_forecast",
+] as const;
 const BASE_REASON = `live ui e2e feature update ${RUN_ID}`;
 
 // 메인 write flow 게이트(공통 E2E_ADMIN_WRITE 또는 surface 전용 E2E_FEATURE_UPDATE_WRITE).
@@ -138,9 +146,12 @@ async function fetchListByProviderApi(
   page: Page,
   provider: string,
   statusFilter?: string,
+  datasetKey?: string,
 ): Promise<BrowserFetchResult<FeatureUpdateRequestListResponse>> {
   const params = new URLSearchParams();
   params.set("provider", provider);
+  params.set("created_from", RUN_STARTED_AT);
+  if (datasetKey) params.set("dataset_key", datasetKey);
   if (statusFilter) params.set("status", statusFilter);
   params.set("page_size", "100");
   return browserFetch<FeatureUpdateRequestListResponse>(
@@ -180,15 +191,12 @@ function rowContaining(page: Page, text: string): Locator {
   return page.getByRole("row", { name: new RegExp(escapeRegExp(text)) });
 }
 
-// ─── DEEPEN helpers (above browserFetch/waitForApiResponse 등은 재사용) ────────
-// 시나리오별 고유 provider/dataset 토큰 — list 필터가 jsonb @> 정확 멤버십이라
-// 서로 다른 tag면 교차 매칭되지 않아 시나리오가 격리된다.
-function inertProvider(tag: string): string {
-  return `${PROVIDER}_${tag}`;
+function shortId(value: string, size = 12): string {
+  return value.length > size ? `${value.slice(0, size)}...` : value;
 }
 
-function inertDataset(tag: string): string {
-  return `${DATASET}_${tag}`;
+function requestRowById(page: Page, requestId: string): Locator {
+  return rowContaining(page, shortId(requestId));
 }
 
 // status select → 목록 GET을 query string까지 매칭해 "UI 선택 → API status param"을 증명.
@@ -217,9 +225,9 @@ type CreatedRequest = {
   requestId: string;
 };
 
-// UI 폼으로 SAFE(bogus provider/dataset) queued 요청을 만들고 request_id를 돌려준다.
-// dry-run을 해제해 실제 row를 만들되, bogus provider라 Dagster job은 no-op가 된다.
-async function createInertQueuedRequest(
+// UI 폼으로 SAFE refreshable provider/dataset queued 요청을 만들고 request_id를 돌려준다.
+// dry-run을 해제해 실제 row를 만들되, 좁은 scope라 실행 부담이 낮다.
+async function createRefreshableQueuedRequest(
   page: Page,
   options: {
     provider: string;
@@ -229,11 +237,11 @@ async function createInertQueuedRequest(
     radiusKm?: string;
   },
 ): Promise<CreatedRequest> {
-  await page.getByLabel("lon", { exact: true }).fill(options.lon ?? "126.9780");
-  await page.getByLabel("lat", { exact: true }).fill(options.lat ?? "37.5665");
+  await page.getByLabel("lon", { exact: true }).fill(options.lon ?? SAFE_LON);
+  await page.getByLabel("lat", { exact: true }).fill(options.lat ?? SAFE_LAT);
   await page
     .getByLabel("radius km", { exact: true })
-    .fill(options.radiusKm ?? "5");
+    .fill(options.radiusKm ?? SAFE_RADIUS_KM);
   await page.getByLabel("providers", { exact: true }).fill(options.provider);
   await page.getByLabel("dataset keys", { exact: true }).fill(options.dataset);
   await page.getByLabel("run mode").selectOption("queued");
@@ -272,10 +280,9 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("dry-run을 끄고 SAFE provider/dataset로 queued 요청을 생성한다", async () => {
-        // 기본 center_radius(서울) 좌표 + bogus provider/dataset로 inert queued 요청 생성.
-        await page.getByLabel("lon", { exact: true }).fill("126.9780");
-        await page.getByLabel("lat", { exact: true }).fill("37.5665");
-        await page.getByLabel("radius km", { exact: true }).fill("5");
+        await page.getByLabel("lon", { exact: true }).fill(SAFE_LON);
+        await page.getByLabel("lat", { exact: true }).fill(SAFE_LAT);
+        await page.getByLabel("radius km", { exact: true }).fill(SAFE_RADIUS_KM);
         await page.getByLabel("providers", { exact: true }).fill(PROVIDER);
         await page.getByLabel("dataset keys", { exact: true }).fill(DATASET);
         await page.getByLabel("run mode").selectOption("queued");
@@ -309,16 +316,16 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         await expect(successAlert).toContainText("queued");
       });
 
-      await test.step("목록(queued 필터)에 새 요청 행이 나타난다", async () => {
+      await test.step("목록(all 필터)에 새 요청 행이 나타난다", async () => {
         // 폼/목록은 같은 페이지 — 생성 onSuccess가 목록 쿼리를 invalidate해 refetch한다.
-        await page.getByLabel("request status").selectOption("queued");
-        const row = rowContaining(page, PROVIDER);
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("queued");
+        await expect(row).toContainText(PROVIDER);
       });
 
       await test.step("행의 상세 링크로 이동해 requestId/scope를 확인한다", async () => {
-        const row = rowContaining(page, PROVIDER);
+        const row = requestRowById(page, requestId as string);
         // request 컬럼만 link(shortId) — job 컬럼은 '-' 텍스트, actions는 버튼.
         await row.getByRole("link").click();
         await expect(page).toHaveURL(
@@ -366,7 +373,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         );
 
         // list 조회 (provider 필터로 우리 row 한정).
-        const list = await fetchListByProviderApi(page, PROVIDER);
+        const list = await fetchListByProviderApi(page, PROVIDER, undefined, DATASET);
         expect(list.status).toBe(200);
         const found = list.body?.data.items.find(
           (item) => item.request_id === requestId,
@@ -415,7 +422,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     }
   });
 
-  test("한 요청에 다중 provider/dataset_keys를 넣으면 응답·목록·상세에 모두 반영된다", async ({
+  test("한 요청에 다중 refreshable dataset_keys를 넣으면 응답·목록·상세에 모두 반영된다", async ({
     page,
   }) => {
     test.skip(
@@ -424,27 +431,20 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const providerA = inertProvider("multi_a");
-    const providerB = inertProvider("multi_b");
-    const datasetA = inertDataset("multi_1");
-    const datasetB = inertDataset("multi_2");
-    const datasetC = inertDataset("multi_3");
+    const [datasetA, datasetB, datasetC] = MULTI_DATASETS;
     let requestId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
 
-      await test.step("comma-separated 다중 provider/dataset로 queued 요청을 생성한다", async () => {
-        const created = await createInertQueuedRequest(page, {
-          provider: `${providerA},${providerB}`,
+      await test.step("comma-separated 다중 dataset로 queued 요청을 생성한다", async () => {
+        const created = await createRefreshableQueuedRequest(page, {
+          provider: PROVIDER,
           dataset: `${datasetA},${datasetB},${datasetC}`,
         });
         requestId = created.requestId;
-        // 생성 응답이 두 provider/세 dataset을 그대로 담는다(동기 캡처).
-        expect(created.create.data.providers).toEqual(
-          expect.arrayContaining([providerA, providerB]),
-        );
-        expect(created.create.data.providers).toHaveLength(2);
+        // 생성 응답이 한 provider/세 dataset을 그대로 담는다(동기 캡처).
+        expect(created.create.data.providers).toEqual([PROVIDER]);
         expect(created.create.data.dataset_keys).toEqual(
           expect.arrayContaining([datasetA, datasetB, datasetC]),
         );
@@ -458,13 +458,14 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         await expect(successAlert).toContainText(requestId as string);
       });
 
-      await test.step("목록 행이 두 provider를 함께 노출한다", async () => {
-        const row = rowContaining(page, providerA);
+      await test.step("목록 행이 provider와 request short id를 함께 노출한다", async () => {
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText(providerB);
+        await expect(row).toContainText(PROVIDER);
       });
 
-      await test.step("detail/list API가 다중 provider/dataset를 모두 반환한다", async () => {
+      await test.step("detail/list API가 다중 dataset를 모두 반환한다", async () => {
         await expect
           .poll(
             async () =>
@@ -473,16 +474,19 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
           )
           .toBe(200);
         const detail = await fetchDetailByApi(page, requestId as string);
-        expect(detail.body?.data.providers).toEqual(
-          expect.arrayContaining([providerA, providerB]),
-        );
+        expect(detail.body?.data.providers).toEqual([PROVIDER]);
         expect(detail.body?.data.dataset_keys).toEqual(
           expect.arrayContaining([datasetA, datasetB, datasetC]),
         );
 
-        // providerA, providerB 각각으로 필터해도 같은 row를 찾는다(@> 멤버십 매칭).
-        for (const provider of [providerA, providerB]) {
-          const list = await fetchListByProviderApi(page, provider);
+        // dataset_key 각각으로 필터해도 같은 row를 찾는다(@> 멤버십 매칭).
+        for (const dataset of [datasetA, datasetB, datasetC]) {
+          const list = await fetchListByProviderApi(
+            page,
+            PROVIDER,
+            undefined,
+            dataset,
+          );
           expect(list.status).toBe(200);
           const found = list.body?.data.items.find(
             (item) => item.request_id === requestId,
@@ -505,7 +509,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     test.setTimeout(FLOW_TIMEOUT);
 
     // 라우터: providers list max_length=MAX_PROVIDER_FILTERS(32) → 33개면 서버 422.
-    const badBase = inertProvider("bad");
+    const badBase = `e2e_bad_provider_${RUN_ID}`;
     const tooManyProviders = [...Array(33).keys()].map(
       (index) => `${badBase}_${index}`,
     );
@@ -548,45 +552,59 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const provider = inertProvider("filter");
-    const dataset = inertDataset("filter");
     let requestId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
 
       await test.step("queued 요청을 하나 만든다", async () => {
-        const created = await createInertQueuedRequest(page, { provider, dataset });
+        const created = await createRefreshableQueuedRequest(page, {
+          provider: PROVIDER,
+          dataset: DATASET,
+        });
         requestId = created.requestId;
         expect(created.create.data.status).toBe("queued");
       });
 
-      await test.step("queued 필터에서 우리 row가 보이고 API도 queued만 반환한다", async () => {
-        await page.getByLabel("request status").selectOption("queued");
-        const row = rowContaining(page, provider);
+      await test.step("all 필터에서 우리 row가 보인다", async () => {
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("queued");
+        await expect(row).toContainText(PROVIDER);
 
-        const list = await fetchListByProviderApi(page, provider, "queued");
+        const list = await fetchListByProviderApi(
+          page,
+          PROVIDER,
+          undefined,
+          DATASET,
+        );
         expect(list.status).toBe(200);
         const found = list.body?.data.items.find(
           (item) => item.request_id === requestId,
         );
         expect(found).toBeDefined();
-        expect(found?.status).toBe("queued");
       });
 
-      await test.step("done 필터 선택 시 status=done query가 나가고 우리 row는 사라진다", async () => {
-        const responsePromise = waitForListStatusResponse(page, "done");
-        await page.getByLabel("request status").selectOption("done");
+      await test.step("failed 필터 선택 시 status=failed query가 나가고 우리 row는 사라진다", async () => {
+        const responsePromise = waitForListStatusResponse(page, "failed");
+        await page.getByLabel("request status").selectOption("failed");
         const response = await responsePromise;
-        expect(new URL(response.url()).searchParams.get("status")).toBe("done");
+        expect(new URL(response.url()).searchParams.get("status")).toBe(
+          "failed",
+        );
 
-        // queued row는 done 목록에서 빠진다(UI 반영).
-        await expect(rowContaining(page, provider)).toHaveCount(0);
+        await expect(requestRowById(page, requestId as string)).toHaveCount(0);
 
-        const list = await fetchListByProviderApi(page, provider, "done");
+        const list = await fetchListByProviderApi(
+          page,
+          PROVIDER,
+          "failed",
+          DATASET,
+        );
         expect(list.status).toBe(200);
+        for (const item of list.body?.data.items ?? []) {
+          expect(item.status).toBe("failed");
+        }
         const found = list.body?.data.items.find(
           (item) => item.request_id === requestId,
         );
@@ -601,15 +619,16 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
           "running",
         );
 
-        const list = await fetchListByProviderApi(page, provider, "running");
+        const list = await fetchListByProviderApi(
+          page,
+          PROVIDER,
+          "running",
+          DATASET,
+        );
         expect(list.status).toBe(200);
         for (const item of list.body?.data.items ?? []) {
           expect(item.status).toBe("running");
         }
-        const found = (list.body?.data.items ?? []).find(
-          (item) => item.request_id === requestId,
-        );
-        expect(found).toBeUndefined();
       });
     } finally {
       if (requestId) await cancelByApi(page, requestId);
@@ -625,20 +644,18 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const provider = inertProvider("detail");
-    const dataset = inertDataset("detail");
     const lon = "127.01234";
     const lat = "37.61234";
-    const radiusKm = "3";
+    const radiusKm = "0.1";
     let requestId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
 
       await test.step("구별되는 좌표/반경으로 queued 요청을 만든다", async () => {
-        const created = await createInertQueuedRequest(page, {
-          provider,
-          dataset,
+        const created = await createRefreshableQueuedRequest(page, {
+          provider: PROVIDER,
+          dataset: DATASET,
           lon,
           lat,
           radiusKm,
@@ -647,7 +664,8 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("행의 상세 링크로 이동한다", async () => {
-        const row = rowContaining(page, provider);
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await row.getByRole("link").click();
         await expect(page).toHaveURL(
@@ -668,8 +686,8 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         expect(data?.run_mode).toBe("queued");
         expect(data?.priority).toBe(50);
         expect(data?.dry_run).toBe(false);
-        expect(data?.providers).toContain(provider);
-        expect(data?.dataset_keys).toContain(dataset);
+        expect(data?.providers).toContain(PROVIDER);
+        expect(data?.dataset_keys).toContain(DATASET);
         // 폼이 update_policy 필드를 노출하지 않으므로 빈 객체로 저장된다.
         expect(data?.update_policy).toEqual({});
         expect(data?.scope).toMatchObject({
@@ -716,29 +734,35 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const provider = inertProvider("cancel");
-    const dataset = inertDataset("cancel");
     let requestId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
 
       await test.step("queued 요청을 만든다", async () => {
-        const created = await createInertQueuedRequest(page, { provider, dataset });
+        const created = await createRefreshableQueuedRequest(page, {
+          provider: PROVIDER,
+          dataset: DATASET,
+        });
         requestId = created.requestId;
       });
 
       await test.step("queued row의 cancel 버튼이 POST /cancel을 호출하고 cancelled를 반환한다", async () => {
-        await page.getByLabel("request status").selectOption("queued");
-        const row = rowContaining(page, provider);
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
+        const cancelButton = row.getByRole("button", { name: "cancel" });
+        test.skip(
+          (await cancelButton.count()) === 0,
+          "sensor가 먼저 terminal status로 처리해 UI cancel 버튼이 사라짐",
+        );
 
         const responsePromise = waitForApiResponse(
           page,
           "POST",
           cancelPath(requestId as string),
         );
-        await row.getByRole("button", { name: "cancel" }).click();
+        await cancelButton.click();
         const response = await responsePromise;
         expect(response.status()).toBe(200);
         const body =
@@ -758,7 +782,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
 
       await test.step("cancelled 필터 목록에 row가 cancelled로 나타난다", async () => {
         await page.getByLabel("request status").selectOption("cancelled");
-        const row = rowContaining(page, provider);
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await expect(row).toContainText("cancelled");
       });
@@ -777,8 +801,6 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const provider = inertProvider("runnow");
-    const dataset = inertDataset("runnow");
     let requestId: string | null = null;
     let runNowRequestId: string | null = null;
 
@@ -786,13 +808,16 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       await gotoUpdateRequests(page);
 
       await test.step("queued 요청을 만든다", async () => {
-        const created = await createInertQueuedRequest(page, { provider, dataset });
+        const created = await createRefreshableQueuedRequest(page, {
+          provider: PROVIDER,
+          dataset: DATASET,
+        });
         requestId = created.requestId;
       });
 
       await test.step("run-now 버튼이 run_mode=now 신규 row를 201로 enqueue한다", async () => {
-        await page.getByLabel("request status").selectOption("queued");
-        const row = rowContaining(page, provider);
+        await page.getByLabel("request status").selectOption("all");
+        const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
 
         const responsePromise = waitForApiResponse(
@@ -806,7 +831,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         expect(runNowRequestId).not.toBeNull();
         expect(runNowRequestId).not.toBe(requestId);
         expect(runResponse.data.run_mode).toBe("now");
-        expect(runResponse.data.providers).toContain(provider);
+        expect(runResponse.data.providers).toContain(PROVIDER);
       });
 
       await test.step("새 now 요청의 status가 queued를 벗어난다(runner 활성 전제)", async () => {

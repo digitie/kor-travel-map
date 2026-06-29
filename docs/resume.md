@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — feature-update live spec refreshable 계약 정합화
+
+- **완료**: PR #595는 CI green 후 squash merge됐고 n150 운영 디렉터리/컨테이너는 `main@9af83b1`로
+  재배포됐다. Alembic head, UI auth hash, 로그인 POST 200 + Set-Cookie를 확인했다.
+- **진행 중**: full live e2e 전 점검에서 feature-update live write spec이 PR #595의
+  refreshable provider/dataset 검증과 충돌하는 bogus provider 전략을 쓰고 있음을 확인했다.
+- **진행 중**: spec을 실제 refreshable pair + 극소 반경 + `request_id` short link row 식별로
+  정합화했다. 다중 provider×dataset 가정은 단일 provider의 다중 refreshable dataset 검증으로
+  바꿨다.
+- **검증**: frontend `type-check:e2e`, `git diff --check` 통과.
+- **다음 한 작업**: 이 e2e spec 보정을 PR/CI/머지하고 n150에 반영한 뒤 targeted live smoke와 full
+  live e2e를 실행한다.
+
 ## 2026-06-29 (codex) — Claude 후속 이슈 #589~#594 정리
 
 - **완료**: feature-update enqueue 경로는 `catalog_refreshable_entries()` 기준으로
