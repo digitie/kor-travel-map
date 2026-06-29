@@ -10829,6 +10829,8 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 필터 (반복 가능). 미지정 시 전체. */
                 category?: string[] | null;
+                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준. */
+                provider?: string[] | null;
                 /** @description 페이지 크기. */
                 page_size?: number;
                 cursor?: string | null;
