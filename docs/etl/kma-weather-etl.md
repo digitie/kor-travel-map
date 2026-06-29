@@ -13,7 +13,7 @@
 | Feature.kind | (weather → `WeatherValue` 적재) / (alert → `notice` 적재) |
 | 코드 entrypoint | `kortravelmap.providers.kma` |
 | 갱신 주기 | endpoint별 (10분~12시간) |
-| category | weather-only anchor (`kind=weather`)는 `features.category` 일반적으로 비움. 기존 place feature에 `WeatherValue`를 붙이는 경우 그 feature의 category 유지 (`docs/architecture/category.md` §4). 산악 관측소 anchor는 `WEATHER_MOUNTAIN_STATION` 신설 후보 (forest-feature-etl.md §11.6) |
+| category | 격자 weather feature(`kind=weather`)는 `category="99000000"` sentinel (weather kind는 detail 없음). 초단기/단기 격자 feature는 §3 참조 (`docs/architecture/category.md` §4). 산악 관측소 anchor는 `WEATHER_MOUNTAIN_STATION` 신설 후보 (forest-feature-etl.md §11.6) |
 
 ## 2. 4종 weather endpoint
 
@@ -39,17 +39,34 @@ nx, ny = to_grid(37.5, 127.0)  # (lat, lon) 순서
 # (60, 127) — 서울 종로구 일대
 ```
 
-격자 → 인근 feature 매핑 전략:
-- **옵션 A**: 격자마다 weather-only `Feature(kind=weather)` 생성, 인근 place
-  feature와 `sibling_group_id`로 묶음.
-- **옵션 B**: 각 place의 `coord`로 격자 계산 → 같은 격자의 weather를 직접 매핑.
+격자 → weather feature 전략 (**KMA-own-grid-features**, 2026-06-29 개정 —
+초기 옵션 B "place 빌리기"에서 옵션 A "격자 자체 feature"로 전환):
 
-v2 1차: 옵션 B (place 별로 격자 계산하면 매핑 N:1로 깔끔). **대상 한정**
-(T-219a/b): 전 place가 아니라 ① 활성 `poi_cache_targets` 좌표 + ② 설정
-`KOR_TRAVEL_MAP_KMA_WEATHER_EXTRA_POINTS`(`lon,lat;lon,lat`)의 distinct 격자만,
-run당 `KOR_TRAVEL_MAP_KMA_WEATHER_MAX_GRIDS_PER_RUN`(기본 50) 상한. 매핑된 place
-feature가 없는 격자는 KMA 호출 자체를 생략한다(일일 한도 보호). place는
-`deleted_at IS NULL` 기준(`status='inactive'`여도 날씨 부착 — D-12 read 정합).
+각 대상 격자를 **자체** `Feature(kind=weather)`(격자 중심 좌표 =
+`kma.grid.to_latlon(nx, ny)`)로 만든다 — `providers.kma.grid_to_weather_bundle`.
+KMA 예보값은 이 격자 feature에 붙는다. place feature를 빌리지 않으므로 KMA 날씨가
+**airkorea 측정소와 완전 별개** 마커로 뜬다. 격자당 1 feature·1 값세트라
+격자×feature 팬아웃(약 30M행)은 없다(#496 anti-replication 유지). 다른 place의
+날씨는 `build_weather_card`가 반경 내 가장 가까운 KMA 격자 기온 anchor를 조회·병합해
+서빙한다(`weather_repo` nearest-temp, 반경 50km).
+
+**초단기·단기는 격자 간격·갱신 주기가 달라 별개 feature로 분리**한다(같은 격자
+`(nx,ny)`라도 `source_type`이 달라 `feature_id`가 다름):
+
+| weather feature | `grid_dataset_key` | name_label | 적재 endpoint | 갱신 |
+|-----------------|--------------------|-----------|--------------|------|
+| 초단기 | `kma_ultra_short_grid` | `기상청 초단기` | 실황(`getUltraSrtNcst`) + 초단기예보(`getUltraSrtFcst`) **한 feature** | 매시간 |
+| 단기 | `kma_short_grid` | `기상청 단기` | 단기예보(`getVilageFcst`) 별도 feature | 하루 8회 |
+
+중기·특보는 격자가 아닌 region 단위라 좌표 매핑이 다르다 → **Phase 2**(별도
+region feature, 후속 — reg_id→중심좌표 소스 결정 후).
+
+**대상 격자 한정**(T-219a/b): 전 격자가 아니라 ① 활성 `poi_cache_targets` 좌표 + ②
+설정 `KOR_TRAVEL_MAP_KMA_WEATHER_EXTRA_POINTS`(`lon,lat;lon,lat`)의 distinct 격자만,
+run당 `KOR_TRAVEL_MAP_KMA_WEATHER_MAX_GRIDS_PER_RUN`(기본 300, ≤500) 상한 — "주요
+도시·시군 단위" 커버리지. 격자에 매핑된 place feature가 없어도 격자 feature는
+만든다(borrow 시절의 "place 없는 격자 skip"은 제거 — 격자가 자체 feature라 적재처가
+항상 존재).
 
 ## 4. 단기예보 변환 (TMP, REH, WSD, PTY, SKY 등)
 
@@ -148,6 +165,11 @@ base 중복 호출 회피(T-219b 구현). 최신 base 계산도 python-kma-api
 `record_sync_failure`(신선도 대시보드 T-217g 신호).
 
 ## 7. 적재 흐름 (단기예보 — 30분 cron)
+
+> **NOTE (2026-06-29):** 아래 pseudocode는 격자→feature 빌리기 시절의 설계
+> 스케치다. **현재 정본은 §3 + §8** — 각 격자가 자체 weather feature이고, 적재는
+> `providers.kma.grid_to_weather_bundle` + asset(`dagster.kma_weather`)이 담당한다
+> (per-feature 루프 아님).
 
 ```python
 async def kma_short_forecast_etl(client, async_session):

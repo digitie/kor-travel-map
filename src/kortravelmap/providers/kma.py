@@ -36,11 +36,17 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
-from kortravelmap.core.address import normalize_korean_text
+from kortravelmap.category import mapbox_maki_icon_or_none
+from kortravelmap.core.address import (
+    extract_sido_code,
+    extract_sigungu_code,
+    normalize_korean_text,
+)
 from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    Coordinate,
     Feature,
     FeatureBundle,
     FeatureKind,
@@ -53,6 +59,7 @@ from kortravelmap.dto import (
     WeatherDomain,
     WeatherValue,
 )
+from kortravelmap.geocoding import ReverseGeocoder
 
 __all__ = [
     "KmaShortForecastItem",
@@ -68,8 +75,13 @@ __all__ = [
     "weather_alerts_to_notice_bundles",
     "mid_land_forecast_to_weather_values",
     "mid_temperature_to_weather_values",
+    "grid_to_weather_bundle",
     # 메타
     "KMA_PROVIDER_NAME",
+    "KMA_ULTRA_SHORT_GRID_DATASET_KEY",
+    "KMA_SHORT_GRID_DATASET_KEY",
+    "KMA_GRID_CATEGORY",
+    "KMA_GRID_MARKER_COLOR",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
     "KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY",
@@ -104,6 +116,144 @@ KMA_ULTRA_SHORT_FORECAST_DATASET_KEY: Final[str] = "kma_ultra_short_forecast"
 
 KMA_SHORT_FORECAST_DATASET_KEY: Final[str] = "kma_short_forecast"
 """provider_sync dataset_key — 단기예보 (``getVilageFcst``)."""
+
+
+# -- KMA 격자 weather feature (anchor) 상수 -------------------------------
+# KMA 예보(실황/초단기/단기)는 격자(DFS nx,ny) 단위라 '관측소'가 없다. 격자 자체를
+# weather-kind Feature(격자 중심 좌표 = ``kma.grid.to_latlon``)로 만들어 KMA 날씨가
+# airkorea 측정소와 **별개의** 독립 마커로 뜨게 한다(#496 anchor 방식을 'place 빌리기'
+# 에서 'KMA 소유 격자 feature'로 개정 — 격자당 1 feature·1 값세트라 fan-out은 없음).
+
+KMA_ULTRA_SHORT_GRID_DATASET_KEY: Final[str] = "kma_ultra_short_grid"
+"""초단기(실황+초단기예보) 격자 weather-kind Feature dataset key."""
+KMA_SHORT_GRID_DATASET_KEY: Final[str] = "kma_short_grid"
+"""단기예보 격자 weather-kind Feature dataset key.
+
+같은 격자(nx,ny)라도 초단기와 ``source_type``이 달라 **별개** feature가 된다 —
+갱신 주기가 달라(초단기 매시간 vs 단기 하루 8회) 별도 feature로 분리한다."""
+
+_GRID_ENTITY_TYPE: Final[str] = "kma_grid"
+KMA_GRID_CATEGORY: Final[str] = "99000000"
+"""weather kind는 detail이 없어 category가 부차적 — airkorea/특보와 동일 sentinel."""
+KMA_GRID_MARKER_COLOR: Final[str] = "P-01"
+"""airkorea 측정소(P-16 violet)와 구분되는 KMA 격자 마커색(P-01 blue)."""
+_DEFAULT_GRID_ICON: Final[str] = "marker"
+
+
+async def grid_to_weather_bundle(
+    nx: int,
+    ny: int,
+    lat: float,
+    lon: float,
+    *,
+    dataset_key: str,
+    name_label: str,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> FeatureBundle:
+    """KMA DFS 격자 ``(nx, ny)`` → ``weather`` kind ``FeatureBundle``.
+
+    격자 중심 좌표(``lat``/``lon`` = ``kma.grid.to_latlon(nx, ny)``)를 weather-kind
+    Feature로 만든다. KMA 예보값(``WeatherValue``)은 이 feature_id에 붙는다(격자당
+    1세트 — fan-out 없음). 안정키는 격자 ``"{nx}_{ny}"``라 같은 격자는 항상 같은
+    ``feature_id``(결정적, ADR-009). airkorea 측정소와 provider/source_type/natural_key가
+    모두 달라 별개 feature로 공존한다(병합 없음).
+    """
+    coord = Coordinate(lon=lon, lat=lat)
+    geo: Address | None = None
+    if reverse_geocoder is not None:
+        geo = await reverse_geocoder(coord)
+    bjd_code = geo.bjd_code if geo is not None else None
+    sigungu_code = (
+        geo.sigungu_code if geo is not None else None
+    ) or extract_sigungu_code(bjd_code)
+    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(
+        bjd_code
+    )
+    region_name = (
+        (
+            normalize_korean_text(geo.sigungu_name)
+            or normalize_korean_text(geo.sido_name)
+            or normalize_korean_text(geo.admin)
+        )
+        if geo is not None
+        else None
+    )
+    name = (
+        f"{name_label} {region_name}"
+        if region_name
+        else f"{name_label} 격자 {nx},{ny}"
+    )
+    address = Address(
+        admin=geo.admin if geo is not None else None,
+        bjd_code=bjd_code,
+        admin_dong_code=geo.admin_dong_code if geo is not None else None,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        zipcode=geo.zipcode if geo is not None else None,
+        sido_name=geo.sido_name if geo is not None else None,
+        sigungu_name=geo.sigungu_name if geo is not None else None,
+    )
+    natural_key = f"{nx}_{ny}"
+    raw_data: dict[str, Any] = {
+        "nx": nx,
+        "ny": ny,
+        "latitude": str(lat),
+        "longitude": str(lon),
+        "dataset_key": dataset_key,
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=_GRID_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=bjd_code,
+        kind=FeatureKind.WEATHER.value,
+        category=KMA_GRID_CATEGORY,
+        source_type=f"{KMA_PROVIDER_NAME}:{dataset_key}",
+        source_natural_key=natural_key,
+    )
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.WEATHER,
+        name=name,
+        coord=coord,
+        address=address,
+        category=KMA_GRID_CATEGORY,
+        marker_icon=mapbox_maki_icon_or_none(KMA_GRID_CATEGORY) or _DEFAULT_GRID_ICON,
+        marker_color=KMA_GRID_MARKER_COLOR,
+        detail=None,  # weather kind는 detail 불가(ADR-018) — 값은 WeatherValue.
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(KMA_PROVIDER_NAME),
+        dataset_key=dataset_key,
+        source_entity_type=_GRID_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+        source_version=None,
+        raw_name=name,
+        raw_address=None,
+        raw_longitude=lon,
+        raw_latitude=lat,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return FeatureBundle(
+        feature=feature, source_record=source_record, source_link=source_link
+    )
 
 
 # -- 특보 (weather_alerts) 상수 (PR#46) ---------------------------------
