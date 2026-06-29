@@ -602,6 +602,18 @@ WHERE deleted_at IS NULL
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
   )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_records AS pr
+        ON pr.source_record_key = pl.source_record_key
+      WHERE pl.feature_id = features.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
 GROUP BY {code_col}
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
@@ -629,6 +641,7 @@ async def cluster_features_in_bbox(
     cluster_unit: str,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
     limit: int = 2000,
 ) -> list[dict[str, Any]]:
     """bbox 내 feature를 행정구역(``cluster_unit``) 단위로 rollup한다 (T-213c).
@@ -652,6 +665,7 @@ async def cluster_features_in_bbox(
                 "max_lat": max_lat,
                 "kinds": _normalized_filter(kinds),
                 "categories": _normalized_filter(categories),
+                "providers": _normalized_filter(providers),
                 "limit": limit,
             },
         )
