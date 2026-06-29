@@ -1,7 +1,7 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { CheckIcon, MapIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import { CheckIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import {
@@ -342,7 +342,6 @@ export function EnrichmentReviewClient() {
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [pageIndex, setPageIndex] = useState(1);
-  const [mapReviewId, setMapReviewId] = useState<string | null>(null);
   const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
   const [selectedDetailSource, setSelectedDetailSource] =
     useState<EnrichmentDetailSource | null>(null);
@@ -384,7 +383,6 @@ export function EnrichmentReviewClient() {
 
   const resetPage = () => {
     setPageIndex(1); // 필터 바뀌면 1페이지로.
-    setMapReviewId(null);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
@@ -398,7 +396,6 @@ export function EnrichmentReviewClient() {
   const goLast = () => {
     if (totalPages !== null) {
       setPageIndex(totalPages);
-      setMapReviewId(null);
       setDetailReviewId(null);
       setSelectedDetailSource(null);
     }
@@ -408,13 +405,11 @@ export function EnrichmentReviewClient() {
     setPageIndex((current) =>
       totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
     );
-    setMapReviewId(null);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
   const goPrev = () => {
     setPageIndex((current) => Math.max(1, current - 1));
-    setMapReviewId(null);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
@@ -440,7 +435,6 @@ export function EnrichmentReviewClient() {
     setSelectedDetailSource(null);
   };
 
-  const mapReview = items.find((item) => item.review_id === mapReviewId) ?? null;
   const renderPagination = (placement: "top" | "bottom") => (
     <nav
       aria-label={`enrichment pagination ${placement}`}
@@ -590,26 +584,11 @@ export function EnrichmentReviewClient() {
         enableSorting: false,
         cell: ({ row }) => {
           const item = row.original;
-          const hasMapCoords =
-            typeof item.target_lon === "number" &&
-            typeof item.target_lat === "number" &&
-            typeof item.source_lon === "number" &&
-            typeof item.source_lat === "number";
           return item.status === "pending" ? (
             <div
               className="flex flex-wrap gap-1"
               onClick={(event) => event.stopPropagation()}
             >
-              <Button
-                disabled={!hasMapCoords}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => setMapReviewId(item.review_id)}
-              >
-                <MapIcon data-icon="inline-start" />
-                지도
-              </Button>
               <Button
                 disabled={decision.isPending}
                 size="sm"
@@ -645,16 +624,6 @@ export function EnrichmentReviewClient() {
               className="flex flex-wrap items-center gap-1"
               onClick={(event) => event.stopPropagation()}
             >
-              <Button
-                disabled={!hasMapCoords}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => setMapReviewId(item.review_id)}
-              >
-                <MapIcon data-icon="inline-start" />
-                지도
-              </Button>
               <span className="text-sm text-muted-foreground">완료</span>
             </div>
           );
@@ -783,81 +752,6 @@ export function EnrichmentReviewClient() {
             </NativeSelect>
           </div>
         </section>
-
-        {mapReview &&
-        typeof mapReview.target_lon === "number" &&
-        typeof mapReview.target_lat === "number" &&
-        typeof mapReview.source_lon === "number" &&
-        typeof mapReview.source_lat === "number" ? (
-          <section
-            aria-label="enrichment coordinate map"
-            className="rounded-lg border bg-background"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">좌표 비교</div>
-                <div className="text-sm text-muted-foreground">
-                  {formatDistance(mapReview.distance_m)} · datagokr / visitkorea
-                </div>
-              </div>
-              <Button
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => setMapReviewId(null)}
-              >
-                닫기
-              </Button>
-            </div>
-            <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <div className="relative h-80 min-h-72 overflow-hidden">
-                <VWorldMapView
-                  apiKey={VWORLD_KEY}
-                  center={[
-                    (mapReview.target_lon + mapReview.source_lon) / 2,
-                    (mapReview.target_lat + mapReview.source_lat) / 2,
-                  ]}
-                  className="absolute inset-0 h-full w-full"
-                  key={mapReview.review_id}
-                  navigation
-                  scale
-                  testId="enrichment-review-map"
-                  zoom={14}
-                >
-                  <VWorldMarker
-                    lngLat={[mapReview.target_lon, mapReview.target_lat]}
-                    markerColor="#2563eb"
-                    selected
-                    title={`datagokr: ${mapReview.target_name}`}
-                  />
-                  <VWorldMarker
-                    lngLat={[mapReview.source_lon, mapReview.source_lat]}
-                    markerColor="#dc2626"
-                    title={`visitkorea: ${mapReview.source_name}`}
-                  />
-                </VWorldMapView>
-              </div>
-              <div className="space-y-3 border-t p-4 text-sm lg:border-l lg:border-t-0">
-                <div>
-                  <div className="font-medium text-blue-700">datagokr</div>
-                  <div>{mapReview.target_name}</div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {mapReview.target_lon.toFixed(6)},{" "}
-                    {mapReview.target_lat.toFixed(6)}
-                  </div>
-                </div>
-                <div>
-                  <div className="font-medium text-red-700">visitkorea</div>
-                  <div>{mapReview.source_name}</div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {mapReview.source_lon.toFixed(6)},{" "}
-                    {mapReview.source_lat.toFixed(6)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        ) : null}
 
         {renderPagination("top")}
 

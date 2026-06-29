@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Enrichment review 지도 비교 surface 일원화
+
+#572 지적에 따라 enrichment review 목록의 인라인 지도 비교 surface를 제거했다.
+
+- **UI**: `mapReviewId` state, 행별 `지도` 버튼, `enrichment coordinate map` section을 삭제하고
+  #559 상세 다이얼로그의 VWorld 지도만 좌표 비교 surface로 남겼다.
+- **e2e**: mocked enrichment action spec과 live review smoke를 행 클릭 상세 다이얼로그 지도 기준으로
+  바꾸고, 목록 행에 `지도` 버튼이 더 이상 보이지 않음을 단언한다.
+- **검증**: frontend `type-check`, `lint`(기존 6 warnings), production `build`, `git diff --check`,
+  Docker Playwright 수동 시나리오(로그인 → 목록 mock → 행 클릭 → 상세 다이얼로그 지도)를 통과했다.
+
 ## 2026-06-29 (codex) — Dedup/Enrichment review page-only 계약 정리
 
 #571 지적에 따라 review 목록의 이중 pagination 계약을 제거했다.

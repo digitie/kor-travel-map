@@ -348,19 +348,22 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
     await expectEmptyOrTable(page, ENRICH);
   });
 
-  test("/admin/enrichment-reviews map button conditional smoke", async ({ page }) => {
+  test("/admin/enrichment-reviews detail dialog map surface smoke", async ({ page }) => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
-    const mapButtons = page.getByRole("button", { name: "지도" });
-    const firstMapButton = mapButtons.first();
-    if ((await mapButtons.count()) > 0 && (await firstMapButton.isEnabled())) {
-      await firstMapButton.click();
-      await expect(page.getByLabel("enrichment coordinate map")).toBeVisible({
-        timeout: T,
+    await expect(page.getByRole("button", { name: "지도" })).toHaveCount(0);
+
+    const rows = page.locator("tbody tr");
+    if ((await rows.count()) > 0) {
+      await rows.first().click();
+      const dialog = page.getByRole("dialog", {
+        name: "enrichment review detail",
       });
-      await expect(page.getByTestId("enrichment-review-map")).toBeVisible({
-        timeout: T,
-      });
+      await expect(dialog).toBeVisible({ timeout: T });
+      const detailMap = page.getByTestId("enrichment-detail-map");
+      if ((await detailMap.count()) > 0) {
+        await expect(detailMap).toBeVisible({ timeout: T });
+      }
     } else {
       await expectEmptyOrTable(page, ENRICH);
     }

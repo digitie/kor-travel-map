@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Enrichment review 지도 비교 surface 일원화 (2026-06-29)
+
+- **CHANGED**: enrichment review 목록의 행별 인라인 `지도` 버튼과 별도 지도 panel을 제거하고,
+  행 클릭 상세 다이얼로그의 VWorld 위치 비교 지도로 surface를 일원화했다.
+
 ### Review 목록 page-only 계약 정리 (2026-06-29)
 
 - **CHANGED**: `GET /v1/admin/dedup-reviews`와
