@@ -98,9 +98,9 @@
   0→**86,341** 후보(테마 7종, MCST source 카운트 정합), admin API 실제 서빙, 사용자
   표면은 미선택 후보 숨김(선택 게이트), curated-themes/sources 200, tripmate-copy는
   선택 시 생성(0). `/metrics` 200, smoke breadth 전 표면 응답(200/정상404). AS-01/
-  API-11/12 실데이터 해소. **잔여**: arm64 multi-arch buildx는 `GITHUB_TOKEN` 부재로
-  배포 시점 후속(`T-229-buildx`, `docs/tasks.md`). codex 스택은 사용자 지시로 강제종료
-  후 external-infra 재기동. 정본 `docs/reports/t-229-curated-live-verify-2026-06-14.md`.
+  API-11/12 실데이터 해소. arm64 multi-arch buildx는 당시 환경 제약으로 검증하지 못했으나,
+  2026-06-29 사용자 결정으로 추가 추적하지 않는다. codex 스택은 사용자 지시로
+  강제종료 후 external-infra 재기동. 정본 `docs/reports/t-229-curated-live-verify-2026-06-14.md`.
 
 ## T-212e closure 재검증 (2026-06-13, `T-225`)
 

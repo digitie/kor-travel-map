@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — tasks 백로그 정리
+
+사용자 결정에 따라 열린 백로그를 다시 정리했다.
+
+- **tasks**: `T-229-buildx`는 추가 추적하지 않기로 결정해 열린 백로그에서 제거했다.
+- **tasks**: `T-AUDIT-0616` F-01 옵션 A는 ADR-058의 옵션 B(re-key 없음, geocoder 필수화)
+  채택으로 필수 진행 백로그에서 제외했다.
+- **tasks-done**: T-229 아카이브의 `docs/tasks.md` 후속 추적 문구를 현재 결정에 맞게 정정했다.
+
 ## 2026-06-29 (codex) — n150 live e2e backup runner tracked 전환
 
 n150 full live e2e에서 복구한 `live-e2e-backup-runner`가 untracked 상태라 배포 rsync/정리 시 다시
