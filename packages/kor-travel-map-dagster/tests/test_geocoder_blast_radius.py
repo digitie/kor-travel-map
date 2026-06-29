@@ -73,5 +73,5 @@ def test_feature_load_assets_require_reverse_geocoder(asset_def: AssetsDefinitio
 def test_kma_forecast_assets_do_not_require_reverse_geocoder(
     asset_def: AssetsDefinition,
 ) -> None:
-    """중기예보 asset은 값-only(feature 생성 X)라 reverse_geocoder를 요구하지 않는다(blast radius 제외)."""
+    """중기예보(값-only)는 reverse_geocoder를 요구하지 않는다(blast radius 제외)."""
     assert "reverse_geocoder" not in asset_def.required_resource_keys
