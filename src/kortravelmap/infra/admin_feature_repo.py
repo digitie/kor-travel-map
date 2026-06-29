@@ -2706,7 +2706,11 @@ SELECT
     dist.distance_m,
     CASE
         WHEN dist.distance_m IS NULL THEN NULL
-        ELSE (exp(-(dist.distance_m / 50.0)) * 100.0)::double precision
+        WHEN dist.distance_m >= 35000.0 THEN 0.0::double precision
+        ELSE (
+            exp(-(dist.distance_m / 50.0::double precision))
+            * 100.0::double precision
+        )::double precision
     END AS spatial_score
 FROM reviews AS q
 LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
@@ -2870,7 +2874,11 @@ SELECT
     dist.distance_m,
     CASE
         WHEN dist.distance_m IS NULL THEN NULL
-        ELSE (exp(-(dist.distance_m / 50.0)) * 100.0)::double precision
+        WHEN dist.distance_m >= 35000.0 THEN 0.0::double precision
+        ELSE (
+            exp(-(dist.distance_m / 50.0::double precision))
+            * 100.0::double precision
+        )::double precision
     END AS spatial_score
 FROM ops.enrichment_review_queue AS q
 LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id

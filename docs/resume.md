@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — n150 live e2e 실패 보강
+
+- **완료**: n150 full live e2e write 실행에서 백업 command 시작 실패와 enrichment review 조회 500을
+  재현했고, 두 실패를 각각 API 503 계약화와 거리 점수 clamp로 보강했다.
+- **완료**: backup/restore/swap command의 `asyncio.create_subprocess_exec` 시작 실패를
+  `BACKUP_COMMAND_UNAVAILABLE` 문제 응답으로 반환한다.
+- **완료**: enrichment review 목록/상세 SQL은 35km 이상 후보의 `spatial_score`를 0으로 고정해
+  numeric underflow 없이 조회된다.
+- **검증**: admin backup router 단위 테스트 12건, enrichment review integration 대상 2건, 변경 파일
+  ruff 통과.
+- **다음 한 작업**: PR을 올리고 CI green 후 머지한 뒤 n150에 재배포하고 backup/review targeted e2e와
+  full live e2e를 다시 실행한다.
+
 ## 2026-06-29 (codex) — #572 Enrichment review 지도 비교 surface 일원화
 
 - **완료**: enrichment review 목록의 `mapReviewId` state, 행별 `지도` 버튼, 별도

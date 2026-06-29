@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — n150 live e2e 실패 보강
+
+n150 full live e2e write 실행에서 드러난 백업 command 시작 실패와 enrichment review 조회 500을
+작은 API/SQL 보강으로 정리했다.
+
+- **백업 API**: backup/restore/swap command 실행 전에 `cwd` 또는 command 시작이 실패하면
+  `BACKUP_COMMAND_UNAVAILABLE` 503 문제 응답으로 반환해 운영 설정 문제를 UI/API에서 식별할 수 있게 했다.
+- **리뷰 조회**: enrichment review 거리 기반 점수 SQL에서 35km 이상 후보는 `spatial_score=0`으로
+  clamp해 아주 먼 좌표 조합이 numeric underflow로 목록/상세 조회를 깨뜨리지 않게 했다.
+- **검증**: admin backup router 단위 테스트 12건, enrichment review integration 대상 2건, 변경 파일
+  ruff를 통과했다. n150 재배포 후 targeted/full live e2e 재실행이 다음 단계다.
+
 ## 2026-06-29 (codex) — Enrichment review 지도 비교 surface 일원화
 
 #572 지적에 따라 enrichment review 목록의 인라인 지도 비교 surface를 제거했다.
