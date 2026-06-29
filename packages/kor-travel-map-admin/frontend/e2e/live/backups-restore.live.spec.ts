@@ -132,13 +132,9 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await expect(page.getByLabel("swap command 실행")).not.toBeChecked();
     await expect(page.getByLabel("swap 즉시 적용")).not.toBeChecked();
 
-    const planOnly = page.getByText("plan only");
-    const planOnlyVisible = await planOnly.isVisible(T).catch(() => false);
-    if (planOnlyVisible) {
-      await expect(planOnly).toBeVisible(T);
-    } else {
-      await expect(page.getByText("execute enabled")).toBeVisible(T);
-    }
+    await expect(
+      page.getByText(/plan only|execute enabled/).first(),
+    ).toBeVisible(T);
   });
 
   test("잘못된 backup id — API 422과 UI 오류 alert를 표시한다", async ({ page }) => {
