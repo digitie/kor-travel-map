@@ -51,6 +51,19 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_features_in_bbox_exposes_provider_filter(client: TestClient) -> None:
+    """``/v1/features``(지도 뷰포트 endpoint)가 provider(소스) 필터 파라미터를 노출해야
+    한다 — admin 지도의 소스 필터가 실제로 동작하려면 이 endpoint가 provider를 받아
+    ``features_in_bbox(providers=...)``로 넘겨야 한다(엔드포인트 오인 회귀 방지)."""
+    spec = client.get("/openapi.json").json()
+    params = spec["paths"]["/v1/features"]["get"].get("parameters", [])
+    names = {p["name"] for p in params}
+    assert "provider" in names, (
+        f"/v1/features must expose the provider filter; has {sorted(names)}"
+    )
+
+
+@pytest.mark.unit
 def test_features_nearby_validation(client: TestClient) -> None:
     # radius_m 필수 — 누락 시 DB 도달 전 422.
     assert client.get(

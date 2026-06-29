@@ -462,6 +462,15 @@ async def list_features_in_bbox(
         list[str] | None,
         Query(description="category code 필터 (반복 가능). 미지정 시 전체."),
     ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "primary provider(소스) 필터 (반복 가능). 미지정 시 전체. "
+                "primary source(provider_sync.is_primary_source) 기준."
+            ),
+        ),
+    ] = None,
     page_size: Annotated[int, Query(ge=1, le=500, description="페이지 크기.")] = 100,
     cursor: Annotated[str | None, Query()] = None,
     include_geometry: Annotated[
@@ -485,6 +494,7 @@ async def list_features_in_bbox(
             max_lat=max_lat,
             kinds=kind,
             categories=category,
+            providers=provider,
             limit=page_size + 1,
             cursor=cursor,
             include_geometry=include_geometry,
