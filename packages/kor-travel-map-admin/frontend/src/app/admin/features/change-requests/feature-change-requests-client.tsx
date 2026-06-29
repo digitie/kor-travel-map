@@ -374,7 +374,7 @@ export function FeatureChangeRequestsClient() {
     () => [
       {
         id: "request",
-        header: "request",
+        header: "요청",
         enableSorting: false,
         cell: ({ row }) => {
           const request = row.original;
@@ -392,7 +392,7 @@ export function FeatureChangeRequestsClient() {
       },
       {
         id: "action_status",
-        header: "action/status",
+        header: "작업/상태",
         accessorFn: (request) => request.status,
         cell: ({ row }) => {
           const request = row.original;
@@ -426,7 +426,7 @@ export function FeatureChangeRequestsClient() {
       },
       {
         id: "review",
-        header: "review",
+        header: "리뷰",
         enableSorting: false,
         cell: ({ row }) => {
           const request = row.original;
@@ -442,7 +442,7 @@ export function FeatureChangeRequestsClient() {
       },
       {
         id: "reason",
-        header: "reason",
+        header: "사유",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-56 truncate">
@@ -452,7 +452,7 @@ export function FeatureChangeRequestsClient() {
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -461,7 +461,7 @@ export function FeatureChangeRequestsClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const request = row.original;

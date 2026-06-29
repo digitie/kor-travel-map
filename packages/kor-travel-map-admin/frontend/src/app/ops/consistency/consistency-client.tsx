@@ -50,7 +50,7 @@ export function ConsistencyClient() {
     () => [
       {
         id: "report",
-        header: "report",
+        header: "리포트",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -60,7 +60,7 @@ export function ConsistencyClient() {
       },
       {
         id: "batch",
-        header: "batch",
+        header: "배치",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -70,12 +70,12 @@ export function ConsistencyClient() {
       },
       {
         accessorKey: "severity_max",
-        header: "severity",
+        header: "심각도",
         cell: ({ row }) => <StatusBadge status={row.original.severity_max} />,
       },
       {
         accessorKey: "finished_at",
-        header: "finished",
+        header: "완료",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.finished_at)}
@@ -92,7 +92,7 @@ export function ConsistencyClient() {
     () => [
       {
         id: "issue",
-        header: "issue",
+        header: "이슈",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -102,7 +102,7 @@ export function ConsistencyClient() {
       },
       {
         accessorKey: "severity",
-        header: "severity",
+        header: "심각도",
         cell: ({ row }) => <StatusBadge status={row.original.severity} />,
       },
       {
@@ -112,7 +112,7 @@ export function ConsistencyClient() {
       },
       {
         accessorKey: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-96 truncate">{row.original.message}</span>
@@ -120,7 +120,7 @@ export function ConsistencyClient() {
       },
       {
         accessorKey: "detected_at",
-        header: "detected",
+        header: "감지",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.detected_at)}

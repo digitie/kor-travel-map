@@ -376,7 +376,7 @@ function RunsTable({
     () => [
       {
         id: "run",
-        header: "run",
+        header: "실행",
         enableSorting: false,
         cell: ({ row }) => {
           const run = row.original;
@@ -407,7 +407,7 @@ function RunsTable({
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => (
           <Badge variant={statusVariant(row.original.status)}>
             {statusLabel(row.original.status)}
@@ -416,7 +416,7 @@ function RunsTable({
       },
       {
         id: "updated",
-        header: "updated",
+        header: "수정",
         accessorFn: (run) =>
           run.update_time ?? run.end_time ?? run.start_time ?? 0,
         cell: ({ row }) => {
@@ -468,7 +468,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
     () => [
       {
         id: "time",
-        header: "time",
+        header: "시각",
         // event log는 cursor 페이지네이션(event_has_more) — 서버 순서 유지, client 정렬 끔(#502).
         enableSorting: false,
         accessorFn: (event) => event.timestamp ?? "",
@@ -480,7 +480,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
       },
       {
         id: "event",
-        header: "event",
+        header: "이벤트",
         enableSorting: false,
         cell: ({ row }) => {
           const event = row.original;
@@ -500,7 +500,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
       },
       {
         id: "step",
-        header: "step",
+        header: "스텝",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">{row.original.step_id ?? "-"}</span>
@@ -508,7 +508,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
       },
       {
         id: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => {
           const errorText = graphqlErrorText(row.original.error);

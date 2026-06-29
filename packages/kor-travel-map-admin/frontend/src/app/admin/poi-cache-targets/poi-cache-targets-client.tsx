@@ -80,7 +80,7 @@ export function PoiCacheTargetsClient() {
     () => [
       {
         id: "target",
-        header: "target",
+        header: "대상",
         enableSorting: false,
         cell: ({ row }) => {
           const target = row.original;
@@ -98,7 +98,7 @@ export function PoiCacheTargetsClient() {
       },
       {
         id: "coord",
-        header: "coord",
+        header: "좌표",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -109,10 +109,10 @@ export function PoiCacheTargetsClient() {
       },
       // keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로 컬럼 정렬을
       // 끈다(#502: manual 기본에서 client 정렬은 현재 페이지만 재배열해 오해를 줌).
-      { accessorKey: "scope_mode", header: "scope", enableSorting: false },
+      { accessorKey: "scope_mode", header: "스코프", enableSorting: false },
       {
         accessorKey: "update_enabled",
-        header: "enabled",
+        header: "사용",
         enableSorting: false,
         cell: ({ row }) => (
           <StatusBadge
@@ -120,10 +120,10 @@ export function PoiCacheTargetsClient() {
           />
         ),
       },
-      { accessorKey: "refresh_policy", header: "refresh", enableSorting: false },
+      { accessorKey: "refresh_policy", header: "갱신", enableSorting: false },
       {
         accessorKey: "updated_at",
-        header: "updated",
+        header: "수정",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -133,7 +133,7 @@ export function PoiCacheTargetsClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const target = row.original;
@@ -176,10 +176,10 @@ export function PoiCacheTargetsClient() {
         ),
       },
       // nearby는 서버가 거리순(또는 지정 sort)으로 반환 — client 재정렬을 끈다(#502).
-      { accessorKey: "kind", header: "kind", enableSorting: false },
+      { accessorKey: "kind", header: "종류", enableSorting: false },
       {
         accessorKey: "distance_m",
-        header: "distance",
+        header: "거리",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">
@@ -312,7 +312,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.lon}
-              label="lon"
+              label="경도"
               ref={lonRef}
               required
               value={lon}
@@ -320,7 +320,7 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.lat}
-              label="lat"
+              label="위도"
               ref={latRef}
               required
               value={lat}

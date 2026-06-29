@@ -42,7 +42,7 @@ export function AdminSettingsClient() {
     () => [
       {
         id: "label",
-        header: "label",
+        header: "라벨",
         enableSorting: false,
         cell: ({ row }) => (
           <>
@@ -55,19 +55,19 @@ export function AdminSettingsClient() {
       },
       {
         accessorKey: "key_hint",
-        header: "hint",
+        header: "힌트",
         cell: ({ row }) => (
           <span className="font-mono text-xs">...{row.original.key_hint}</span>
         ),
       },
       {
         accessorKey: "state",
-        header: "state",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.state} />,
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -76,7 +76,7 @@ export function AdminSettingsClient() {
       },
       {
         id: "revoked",
-        header: "revoked",
+        header: "취소",
         enableSorting: false,
         cell: ({ row }) =>
           row.original.revoked_at ? (
@@ -89,7 +89,7 @@ export function AdminSettingsClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) =>
           row.original.state === "active" ? (
@@ -113,7 +113,7 @@ export function AdminSettingsClient() {
     () => [
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -122,19 +122,19 @@ export function AdminSettingsClient() {
       },
       {
         accessorKey: "event_type",
-        header: "event",
+        header: "이벤트",
         cell: ({ row }) => <Badge variant="outline">{row.original.event_type}</Badge>,
       },
       {
         accessorKey: "outcome",
-        header: "outcome",
+        header: "결과",
         cell: ({ row }) => <StatusBadge status={row.original.outcome} />,
       },
-      { accessorKey: "attempted_username", header: "username" },
-      { accessorKey: "reason", header: "reason" },
+      { accessorKey: "attempted_username", header: "사용자명" },
+      { accessorKey: "reason", header: "사유" },
       {
         id: "client",
-        header: "client",
+        header: "클라이언트",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-72 truncate text-xs text-muted-foreground">
@@ -144,7 +144,7 @@ export function AdminSettingsClient() {
       },
       {
         id: "request",
-        header: "request",
+        header: "요청",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">{shortId(row.original.request_id)}</span>

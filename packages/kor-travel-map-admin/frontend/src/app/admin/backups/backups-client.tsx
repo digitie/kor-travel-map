@@ -172,7 +172,7 @@ export function BackupsClient() {
     () => [
       {
         accessorKey: "backup_id",
-        header: "backup",
+        header: "백업",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
             {shortId(row.original.backup_id, 20)}
@@ -181,25 +181,25 @@ export function BackupsClient() {
       },
       {
         accessorKey: "created_at_utc",
-        header: "created",
+        header: "생성",
         enableSorting: true,
         cell: ({ row }) => formatDateTime(row.original.created_at_utc),
       },
       {
         accessorKey: "manifest_status",
-        header: "status",
+        header: "상태",
         enableSorting: true,
         cell: ({ row }) => <StatusBadge status={row.original.manifest_status} />,
       },
       {
         accessorKey: "byte_size",
-        header: "size",
+        header: "크기",
         enableSorting: true,
         cell: ({ row }) => formatBytes(row.original.byte_size),
       },
       {
         id: "action",
-        header: "action",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const backup = row.original;
