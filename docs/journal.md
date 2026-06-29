@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — n150 full admin live e2e 완료
+
+PR #596을 CI green 후 squash merge하고 n150 운영 디렉터리를 `main@860a987`로 맞춘 뒤, admin
+live e2e 전체 실행을 다시 완료했다.
+
+- **운영 runner**: PR #595 재배포 때 untracked `live-e2e-backup-runner`가 삭제되어
+  backup execute가 503으로 실패했다. n150 로컬 runner를 복구하고 docker-manager 배포 topology에
+  맞춰 API/Dagster DSN, host-network PostgreSQL client, RustFS volume archive 경로로
+  backup/restore를 수행하게 조정했다.
+- **검증**: runner 복구 후 targeted `backups-restore.live.spec.ts`는 실제 backup execute,
+  staging restore execute, swap plan까지 8 passed / 1 skipped로 통과했다.
+- **full live e2e**: 최종 `playwright-live-full-20260629T054002Z`는 status 0으로 종료했다.
+  결과는 1,886 passed / 2 flaky / 22 skipped이며 실패는 0건이다.
+- **flaky**: 2건은 full 부하 중 일시적인 `Failed to fetch`와 `ERR_NETWORK_CHANGED`였고, 둘 다
+  retry #1에서 통과했다. backup execute/restore execute/swap plan은 최종 full run에서 모두 통과했다.
+
 ## 2026-06-29 (codex) — feature-update live spec refreshable 계약 정합화
 
 PR #595 머지/배포 후 full n150 live e2e 전에 feature-update write live spec을 다시 점검했다.

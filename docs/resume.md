@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — n150 full admin live e2e 완료
+
+- **완료**: PR #596은 CI green 후 squash merge됐고, n150 운영 디렉터리는 `main@860a987`로
+  동기화됐다.
+- **완료**: n150 local `live-e2e-backup-runner`를 복구하고 docker-manager 배포 topology에 맞춰
+  backup/restore runner를 조정했다. targeted backup/restore live spec은 실제 backup execute와
+  staging restore execute 포함 8 passed / 1 skipped로 통과했다.
+- **완료**: 최종 full live e2e `playwright-live-full-20260629T054002Z`는 status 0으로 종료했다.
+  결과는 1,886 passed / 2 flaky / 22 skipped, 실패 0건이다.
+- **메모**: flaky 2건은 full 부하 중 일시적인 `Failed to fetch`/`ERR_NETWORK_CHANGED`였고 둘 다
+  retry #1에서 통과했다.
+- **다음 한 작업**: 별도 기능 작업 전에는 남은 flaky 2건을 낮은 우선순위 안정화 후보로만 추적한다.
+
 ## 2026-06-29 (codex) — feature-update live spec refreshable 계약 정합화
 
 - **완료**: PR #595는 CI green 후 squash merge됐고 n150 운영 디렉터리/컨테이너는 `main@9af83b1`로
