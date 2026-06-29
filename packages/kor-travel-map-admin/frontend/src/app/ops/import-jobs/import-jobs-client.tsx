@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,7 +74,7 @@ export function ImportJobsClient({
     () => [
       {
         id: "job",
-        header: "job",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -90,7 +90,7 @@ export function ImportJobsClient({
       },
       {
         id: "batch",
-        header: "batch",
+        header: "배치",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -102,7 +102,7 @@ export function ImportJobsClient({
       },
       {
         id: "parent",
-        header: "parent",
+        header: "상위",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -112,28 +112,28 @@ export function ImportJobsClient({
           </span>
         ),
       },
-      { accessorKey: "kind", header: "kind" },
+      { accessorKey: "kind", header: "종류" },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         accessorKey: "progress",
-        header: "progress",
+        header: "진행률",
         cell: ({ row }) => (
           <span className="font-mono">{row.original.progress}%</span>
         ),
       },
       {
         id: "stage",
-        header: "stage",
+        header: "단계",
         enableSorting: false,
         cell: ({ row }) => row.original.current_stage ?? "-",
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -142,7 +142,7 @@ export function ImportJobsClient({
       },
       {
         accessorKey: "finished_at",
-        header: "finished",
+        header: "완료",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.finished_at)}
@@ -151,7 +151,7 @@ export function ImportJobsClient({
       },
       {
         id: "error",
-        header: "error",
+        header: "오류",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-80 truncate text-destructive">
@@ -181,21 +181,21 @@ export function ImportJobsClient({
           </Button>
         </>
       }
-      description="ops.import_jobs 진행 상태와 batch/parent 연결을 확인합니다."
-      section="Ops"
-      title="Import jobs"
+      description="임포트 작업(ops.import_jobs)의 진행 상태와 배치/상위 연결을 확인합니다."
+      section="운영"
+      title="임포트 작업"
     >
       <div className="flex flex-col gap-4">
         {jobs.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>import job 조회 실패</AlertTitle>
+            <AlertTitle>임포트 작업 조회 실패</AlertTitle>
             <AlertDescription>{jobs.error.message}</AlertDescription>
           </Alert>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect
-            aria-label="status"
+            aria-label="상태 필터"
             value={status}
             onChange={(event) =>
               setStatus(event.target.value as ImportJobStatus | "all")
@@ -203,25 +203,25 @@ export function ImportJobsClient({
           >
             {statuses.map((item) => (
               <NativeSelectOption key={item} value={item}>
-                {item}
+                {item === "all" ? "전체" : statusLabel(item)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
           <Input
             className="max-w-72"
-            placeholder="kind filter"
+            placeholder="종류(kind) 필터"
             value={kind}
             onChange={(event) => setKind(event.target.value)}
           />
           <Input
             className="max-w-80"
-            placeholder="load_batch_id"
+            placeholder="배치 ID(load_batch_id) 필터"
             value={loadBatchId}
             onChange={(event) => setLoadBatchId(event.target.value)}
           />
           <Input
             className="max-w-80"
-            placeholder="parent_job_id"
+            placeholder="상위 작업 ID(parent_job_id) 필터"
             value={parentJobId}
             onChange={(event) => setParentJobId(event.target.value)}
           />
@@ -232,7 +232,7 @@ export function ImportJobsClient({
           data={items}
           getRowId={(row) => row.job_id}
           isLoading={jobs.isLoading}
-          emptyMessage="import job이 없습니다."
+          emptyMessage="임포트 작업이 없습니다."
           manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
         />

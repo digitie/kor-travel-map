@@ -573,8 +573,8 @@ export function AdminIssuesClient() {
         </Button>
       }
       description="주소/정합성 이슈 목록, 상세 payload, resolve/ignore/reopen/manual override를 처리합니다."
-      section="Admin"
-      title="Admin issues"
+      section="관리"
+      title="이슈"
     >
       <div className="flex flex-col gap-4">
         {(issues.isError || action.isError) && (

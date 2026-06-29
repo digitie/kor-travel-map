@@ -316,8 +316,8 @@ export function BackupsClient() {
         </>
       }
       description="cold backup artifact와 staging restore command를 확인합니다."
-      section="Admin"
-      title="Backups"
+      section="관리"
+      title="백업"
     >
       <div className="flex flex-col gap-5">
         {activeError ? (

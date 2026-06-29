@@ -185,9 +185,9 @@ export function AdminSettingsClient() {
 
   return (
     <AdminShell
-      title="Settings"
+      title="설정"
       description="관리자 로그인 감사 기록과 VWorld 호환 public API key를 관리합니다."
-      section="Admin"
+      section="관리"
       actions={
         <Button type="button" variant="outline" onClick={refresh}>
           <RefreshCwIcon data-icon="inline-start" />

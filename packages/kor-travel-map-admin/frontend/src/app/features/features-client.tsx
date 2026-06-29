@@ -381,8 +381,8 @@ export function FeaturesClient() {
         </>
       }
       description={status}
-      section="Features"
-      title="Feature 지도"
+      section="지도"
+      title="피처 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
         <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
