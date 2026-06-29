@@ -135,12 +135,12 @@ function FeatureDetailPanel({
         </div>
       </div>
       <dl className="grid gap-3 sm:grid-cols-2">
-        <DetailMetric label="kind" value={feature.kind} />
-        <DetailMetric label="category" value={feature.category} />
-        <DetailMetric label="status" value={statusLabel(feature.status)} />
-        <DetailMetric label="origin" value={feature.data_origin} />
-        <DetailMetric label="lon" value={feature.lon?.toFixed(6)} />
-        <DetailMetric label="lat" value={feature.lat?.toFixed(6)} />
+        <DetailMetric label="종류" value={feature.kind} />
+        <DetailMetric label="카테고리" value={feature.category} />
+        <DetailMetric label="상태" value={statusLabel(feature.status)} />
+        <DetailMetric label="출처" value={feature.data_origin} />
+        <DetailMetric label="경도" value={feature.lon?.toFixed(6)} />
+        <DetailMetric label="위도" value={feature.lat?.toFixed(6)} />
         <DetailMetric label="primary provider" value={primarySource?.provider} />
         <DetailMetric label="primary entity" value={primarySource?.source_entity_id} />
       </dl>
@@ -211,10 +211,10 @@ function DedupDetailDialog({
             <>
               <dl className="grid gap-3 rounded-lg border bg-muted/40 p-3 sm:grid-cols-5">
                 <DetailMetric label="total" value={formatScore(detail.total_score)} />
-                <DetailMetric label="name" value={formatScore(detail.name_score)} />
+                <DetailMetric label="이름" value={formatScore(detail.name_score)} />
                 <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
-                <DetailMetric label="category" value={formatScore(detail.category_score)} />
-                <DetailMetric label="distance" value={formatDistance(detail.distance_m)} />
+                <DetailMetric label="카테고리" value={formatScore(detail.category_score)} />
+                <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
               </dl>
               {hasMap ? (
                 <section className="overflow-hidden rounded-lg border">
@@ -448,7 +448,7 @@ export function DedupReviewClient() {
     () => [
       {
         id: "review",
-        header: "review",
+        header: "리뷰",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -458,7 +458,7 @@ export function DedupReviewClient() {
       },
       {
         accessorKey: "total_score",
-        header: "score",
+        header: "점수",
         cell: ({ row }) => (
           <div className="space-y-1 font-mono text-xs">
             <div>total {formatScore(row.original.total_score)}</div>
@@ -497,14 +497,14 @@ export function DedupReviewClient() {
       },
       {
         accessorKey: "distance_m",
-        header: "distance",
+        header: "거리",
         cell: ({ row }) => (
           <span className="font-mono">{formatDistance(row.original.distance_m)}</span>
         ),
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const item = row.original;
@@ -615,12 +615,12 @@ export function DedupReviewClient() {
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}

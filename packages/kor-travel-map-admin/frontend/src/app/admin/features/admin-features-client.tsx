@@ -287,7 +287,7 @@ export function AdminFeaturesClient() {
       },
       {
         id: "kind_status",
-        header: "kind/status",
+        header: "종류/상태",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -321,7 +321,7 @@ export function AdminFeaturesClient() {
       },
       {
         id: "issue_count",
-        header: "issues",
+        header: "이슈",
         cell: ({ row }) => {
           const feature = row.original;
           return (
@@ -345,7 +345,7 @@ export function AdminFeaturesClient() {
       },
       {
         id: "coord_address",
-        header: "coord/address",
+        header: "좌표/주소",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -361,7 +361,7 @@ export function AdminFeaturesClient() {
       },
       {
         id: "updated_at",
-        header: "updated",
+        header: "수정",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.updated_at)}
@@ -370,7 +370,7 @@ export function AdminFeaturesClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;

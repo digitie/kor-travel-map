@@ -182,12 +182,12 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
       </div>
       <dl className="flex flex-col gap-3">
         <DetailRow label="provider" value={upload.provider} />
-        <DetailRow label="dataset" value={upload.dataset_key} />
-        <DetailRow label="scope" value={upload.sync_scope} />
+        <DetailRow label="데이터셋" value={upload.dataset_key} />
+        <DetailRow label="스코프" value={upload.sync_scope} />
         <DetailRow label="storage" value={`${upload.storage_backend}:${upload.storage_key}`} />
         <DetailRow label="size" value={formatBytes(upload.byte_size)} />
         <DetailRow label="sha256" value={upload.checksum_sha256} />
-        <DetailRow label="format" value={upload.detected_format ?? "-"} />
+        <DetailRow label="형식" value={upload.detected_format ?? "-"} />
         <DetailRow label="validation job" value={upload.validation_job_id ?? "-"} />
         <DetailRow label="load job" value={upload.load_job_id ?? "-"} />
         <DetailRow label="updated" value={formatDateTime(upload.updated_at)} />
@@ -290,33 +290,33 @@ type ValidationIssueRow = {
 const validationIssueColumns: ColumnDef<ValidationIssueRow, unknown>[] = [
   {
     accessorKey: "severity",
-    header: "severity",
+    header: "심각도",
     cell: ({ row }) => <StatusBadge status={row.original.severity} />,
   },
   {
     accessorKey: "row_number",
-    header: "row",
+    header: "행",
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.row_number ?? "-"}</span>
     ),
   },
   {
     accessorKey: "column",
-    header: "column",
+    header: "컬럼",
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.column ?? "-"}</span>
     ),
   },
   {
     accessorKey: "code",
-    header: "code",
+    header: "코드",
     cell: ({ row }) => (
       <span className="font-mono text-xs">{row.original.code}</span>
     ),
   },
   {
     accessorKey: "message",
-    header: "message",
+    header: "메시지",
     enableSorting: false,
     cell: ({ row }) => (
       <span className="block max-w-xl">{row.original.message}</span>
@@ -530,7 +530,7 @@ export function OfflineUploadsClient() {
     () => [
       {
         id: "upload",
-        header: "upload",
+        header: "업로드",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -540,12 +540,12 @@ export function OfflineUploadsClient() {
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "format",
-        header: "format",
+        header: "형식",
         accessorFn: (row) => uploadFormat(row),
         cell: ({ row }) => (
           <Badge variant="outline">{uploadFormat(row.original) || "-"}</Badge>
@@ -566,7 +566,7 @@ export function OfflineUploadsClient() {
       },
       {
         id: "file",
-        header: "file",
+        header: "파일",
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex max-w-72 items-center gap-2 truncate">
@@ -577,12 +577,12 @@ export function OfflineUploadsClient() {
       },
       {
         accessorKey: "byte_size",
-        header: "size",
+        header: "크기",
         cell: ({ row }) => formatBytes(row.original.byte_size),
       },
       {
         accessorKey: "updated_at",
-        header: "updated",
+        header: "수정",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.updated_at)}
@@ -591,7 +591,7 @@ export function OfflineUploadsClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const upload = row.original;
@@ -703,7 +703,7 @@ export function OfflineUploadsClient() {
             <div className="flex flex-col gap-3">
               <FormField
                 data-testid="offline-upload-file-input"
-                label="file"
+                label="파일"
                 type="file"
                 accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
@@ -826,14 +826,14 @@ export function OfflineUploadsClient() {
             <Input
               className="w-56"
               aria-label="provider filter"
-              placeholder="provider filter"
+              placeholder="provider 필터"
               value={providerFilter}
               onChange={(event) => setProviderFilter(event.target.value)}
             />
             <Input
               className="w-56"
               aria-label="dataset filter"
-              placeholder="dataset_key filter"
+              placeholder="dataset_key 필터"
               value={datasetFilter}
               onChange={(event) => setDatasetFilter(event.target.value)}
             />

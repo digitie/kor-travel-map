@@ -434,7 +434,7 @@ export function AdminIssuesClient() {
     () => [
       {
         id: "issue",
-        header: "issue",
+        header: "이슈",
         enableSorting: false,
         cell: ({ row }) => {
           const issue = row.original;
@@ -452,7 +452,7 @@ export function AdminIssuesClient() {
       },
       {
         accessorKey: "severity",
-        header: "severity",
+        header: "심각도",
         // keyset cursor 목록 — 서버가 정렬을 소유하고 severity accessor로 정렬하지 않으므로
         // client 정렬은 현재 페이지만 재배열해 오해를 준다(#502). 정렬 비활성화.
         enableSorting: false,
@@ -460,7 +460,7 @@ export function AdminIssuesClient() {
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
@@ -482,7 +482,7 @@ export function AdminIssuesClient() {
       },
       {
         id: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => {
           const issue = row.original;
@@ -508,7 +508,7 @@ export function AdminIssuesClient() {
       },
       {
         accessorKey: "detected_at",
-        header: "detected",
+        header: "감지",
         // keyset cursor 목록 — 서버 정렬을 신뢰(현재 페이지만 client 정렬하지 않음, #502).
         enableSorting: false,
         cell: ({ row }) => (
@@ -519,7 +519,7 @@ export function AdminIssuesClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const issue = row.original;

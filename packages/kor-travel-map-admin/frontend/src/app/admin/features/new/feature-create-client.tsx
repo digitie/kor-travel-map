@@ -369,7 +369,7 @@ export function FeatureCreateClient() {
       },
       {
         accessorKey: "distance_m",
-        header: "distance",
+        header: "거리",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
             {row.original.distance_m.toFixed(1)}m
@@ -378,7 +378,7 @@ export function FeatureCreateClient() {
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
     ],
@@ -805,7 +805,7 @@ export function FeatureCreateClient() {
           </div>
           <div className="grid gap-3 lg:grid-cols-4">
             <FormSelect
-              label="kind"
+              label="종류"
               value={form.kind}
               onChange={(event) =>
                 updateForm(
@@ -821,7 +821,7 @@ export function FeatureCreateClient() {
               ))}
             </FormSelect>
             <FormSelect
-              label="status"
+              label="상태"
               value={form.status}
               onChange={(event) =>
                 updateForm(
@@ -838,14 +838,14 @@ export function FeatureCreateClient() {
             </FormSelect>
             <FormField
               error={fieldErrors.name}
-              label="name"
+              label="이름"
               required
               value={form.name}
               onChange={(event) => updateForm("name", event.target.value)}
             />
             <FormField
               error={fieldErrors.category}
-              label="category"
+              label="카테고리"
               required
               value={form.category}
               onChange={(event) => updateForm("category", event.target.value)}
@@ -855,7 +855,7 @@ export function FeatureCreateClient() {
             <FormField
               error={fieldErrors.lon}
               inputMode="decimal"
-              label="lon"
+              label="경도"
               required
               value={form.lon}
               onChange={(event) => updateForm("lon", event.target.value)}
@@ -863,7 +863,7 @@ export function FeatureCreateClient() {
             <FormField
               error={fieldErrors.lat}
               inputMode="decimal"
-              label="lat"
+              label="위도"
               required
               value={form.lat}
               onChange={(event) => updateForm("lat", event.target.value)}
@@ -882,13 +882,13 @@ export function FeatureCreateClient() {
           <div className="mt-3 grid gap-3 lg:grid-cols-4">
             <FormField
               error={fieldErrors.reason}
-              label="reason"
+              label="사유"
               required
               value={form.reason}
               onChange={(event) => updateForm("reason", event.target.value)}
             />
             <FormField
-              label="operator"
+              label="운영자"
               value={form.operator}
               onChange={(event) => updateForm("operator", event.target.value)}
             />
@@ -912,7 +912,7 @@ export function FeatureCreateClient() {
             <h2 className="mb-4 font-medium">주소</h2>
             <div className="grid gap-3 md:grid-cols-2">
               <FormField
-                label="road"
+                label="도로"
                 value={form.addressRoad}
                 onChange={(event) => updateForm("addressRoad", event.target.value)}
               />
@@ -924,7 +924,7 @@ export function FeatureCreateClient() {
                 }
               />
               <FormField
-                label="admin"
+                label="관리자"
                 value={form.addressAdmin}
                 onChange={(event) =>
                   updateForm("addressAdmin", event.target.value)
@@ -1006,7 +1006,7 @@ export function FeatureCreateClient() {
                   }
                 />
                 <FormField
-                  label="organizer"
+                  label="주최"
                   value={form.organizer}
                   onChange={(event) => updateForm("organizer", event.target.value)}
                 />
@@ -1025,7 +1025,7 @@ export function FeatureCreateClient() {
                   onChange={(event) => updateForm("placeKind", event.target.value)}
                 />
                 <FormField
-                  label="phone"
+                  label="전화"
                   value={form.phone}
                   onChange={(event) => updateForm("phone", event.target.value)}
                 />
@@ -1033,12 +1033,12 @@ export function FeatureCreateClient() {
             )}
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <FormField
-                label="homepage"
+                label="홈페이지"
                 value={form.homepageUrl}
                 onChange={(event) => updateForm("homepageUrl", event.target.value)}
               />
               <FormField
-                label="source"
+                label="소스"
                 value={form.sourceUrl}
                 onChange={(event) => updateForm("sourceUrl", event.target.value)}
               />

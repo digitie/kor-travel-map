@@ -283,7 +283,7 @@ export function FeaturesClient() {
     () => [
       {
         accessorKey: "name",
-        header: "name",
+        header: "이름",
         sortingFn: (rowA, rowB) =>
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (
@@ -298,17 +298,17 @@ export function FeaturesClient() {
       },
       {
         accessorKey: "kind",
-        header: "kind",
+        header: "종류",
         cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => statusLabel(row.original.status),
       },
       {
         id: "coord",
-        header: "coord",
+        header: "좌표",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;

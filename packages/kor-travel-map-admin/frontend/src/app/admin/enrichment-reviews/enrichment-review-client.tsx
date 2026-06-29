@@ -171,9 +171,9 @@ function EnrichmentDetailDialog({
             <>
               <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
                 <dl className="grid flex-1 gap-3 sm:grid-cols-4">
-                  <DetailMetric label="name" value={formatScore(detail.name_score)} />
+                  <DetailMetric label="이름" value={formatScore(detail.name_score)} />
                   <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
-                  <DetailMetric label="distance" value={formatDistance(detail.distance_m)} />
+                  <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
                   <DetailMetric
                     label="audit default"
                     value={detail.default_detail_source}
@@ -264,18 +264,18 @@ function EnrichmentDetailDialog({
                     </div>
                   </div>
                   <dl className="grid gap-3 sm:grid-cols-2">
-                    <DetailMetric label="kind" value={target.kind} />
-                    <DetailMetric label="category" value={target.category} />
+                    <DetailMetric label="종류" value={target.kind} />
+                    <DetailMetric label="카테고리" value={target.category} />
                     <DetailMetric
-                      label="period"
+                      label="기간"
                       value={formatPeriod(
                         detail.target_start_date,
                         detail.target_end_date,
                       )}
                     />
-                    <DetailMetric label="status" value={statusLabel(target.status)} />
-                    <DetailMetric label="lon" value={target.lon?.toFixed(6)} />
-                    <DetailMetric label="lat" value={target.lat?.toFixed(6)} />
+                    <DetailMetric label="상태" value={statusLabel(target.status)} />
+                    <DetailMetric label="경도" value={target.lon?.toFixed(6)} />
+                    <DetailMetric label="위도" value={target.lat?.toFixed(6)} />
                   </dl>
                   <div className="mt-4 space-y-3">
                     <div>
@@ -305,24 +305,24 @@ function EnrichmentDetailDialog({
                     </div>
                   </div>
                   <dl className="grid gap-3 sm:grid-cols-2">
-                    <DetailMetric label="dataset" value={source.dataset_key} />
+                    <DetailMetric label="데이터셋" value={source.dataset_key} />
                     <DetailMetric
-                      label="period"
+                      label="기간"
                       value={formatPeriod(
                         detail.source_start_date,
                         detail.source_end_date,
                       )}
                     />
                     <DetailMetric
-                      label="lon"
+                      label="경도"
                       value={source.raw_longitude?.toFixed(6)}
                     />
                     <DetailMetric
-                      label="lat"
+                      label="위도"
                       value={source.raw_latitude?.toFixed(6)}
                     />
-                    <DetailMetric label="address" value={source.raw_address} />
-                    <DetailMetric label="record" value={source.source_record_key} />
+                    <DetailMetric label="주소" value={source.raw_address} />
+                    <DetailMetric label="레코드" value={source.source_record_key} />
                   </dl>
                   <div className="mt-4">
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
@@ -499,7 +499,7 @@ export function EnrichmentReviewClient() {
     () => [
       {
         id: "review",
-        header: "review",
+        header: "리뷰",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -509,7 +509,7 @@ export function EnrichmentReviewClient() {
       },
       {
         accessorKey: "name_score",
-        header: "score",
+        header: "점수",
         // 서버 page 목록 — 서버 정렬 유지, client 정렬 끔(#502).
         enableSorting: false,
         cell: ({ row }) => (
@@ -521,7 +521,7 @@ export function EnrichmentReviewClient() {
       },
       {
         accessorKey: "distance_m",
-        header: "distance",
+        header: "거리",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">
@@ -570,13 +570,13 @@ export function EnrichmentReviewClient() {
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -586,7 +586,7 @@ export function EnrichmentReviewClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const item = row.original;
@@ -739,7 +739,7 @@ export function EnrichmentReviewClient() {
             </NativeSelect>
             <Input
               aria-label="enrichment provider"
-              placeholder="source provider"
+              placeholder="소스 provider"
               value={provider}
               onChange={(event) => {
                 setProvider(event.target.value);

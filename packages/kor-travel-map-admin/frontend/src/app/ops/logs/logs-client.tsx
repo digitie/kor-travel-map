@@ -171,7 +171,7 @@ export function LogsClient() {
     () => [
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -181,15 +181,15 @@ export function LogsClient() {
       },
       {
         accessorKey: "level",
-        header: "level",
+        header: "레벨",
         enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
-      { accessorKey: "source", header: "source", enableSorting: false },
-      { accessorKey: "event", header: "event", enableSorting: false },
+      { accessorKey: "source", header: "소스", enableSorting: false },
+      { accessorKey: "event", header: "이벤트", enableSorting: false },
       {
         id: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => (
           <div className="max-w-96">
@@ -199,7 +199,7 @@ export function LogsClient() {
       },
       {
         id: "request",
-        header: "request",
+        header: "요청",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -215,7 +215,7 @@ export function LogsClient() {
     () => [
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -225,13 +225,13 @@ export function LogsClient() {
       },
       {
         accessorKey: "method",
-        header: "method",
+        header: "방식",
         enableSorting: false,
         cell: ({ row }) => <Badge variant="outline">{row.original.method}</Badge>,
       },
       {
         accessorKey: "status_code",
-        header: "status",
+        header: "상태",
         enableSorting: false,
         cell: ({ row }) => (
           <StatusBadge status={String(row.original.status_code)} />
@@ -239,7 +239,7 @@ export function LogsClient() {
       },
       {
         accessorKey: "duration_ms",
-        header: "duration",
+        header: "소요시간",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">{row.original.duration_ms}ms</span>
@@ -247,7 +247,7 @@ export function LogsClient() {
       },
       {
         id: "path",
-        header: "path",
+        header: "경로",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-96 break-all font-mono text-xs">
@@ -257,7 +257,7 @@ export function LogsClient() {
       },
       {
         id: "request",
-        header: "request",
+        header: "요청",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -267,7 +267,7 @@ export function LogsClient() {
       },
       {
         accessorKey: "error_code",
-        header: "error",
+        header: "오류",
         enableSorting: false,
         cell: ({ row }) => row.original.error_code ?? "-",
       },
@@ -279,7 +279,7 @@ export function LogsClient() {
     () => [
       {
         accessorKey: "occurred_at",
-        header: "occurred",
+        header: "발생",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -289,7 +289,7 @@ export function LogsClient() {
       },
       {
         accessorKey: "level",
-        header: "level",
+        header: "레벨",
         enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
@@ -301,19 +301,19 @@ export function LogsClient() {
       },
       {
         accessorKey: "dataset_key",
-        header: "dataset",
+        header: "데이터셋",
         enableSorting: false,
         cell: ({ row }) => row.original.dataset_key ?? "-",
       },
       {
         accessorKey: "stage",
-        header: "stage",
+        header: "단계",
         enableSorting: false,
         cell: ({ row }) => row.original.stage ?? "-",
       },
       {
         id: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => (
           <div className="max-w-96">
@@ -341,7 +341,7 @@ export function LogsClient() {
       },
       {
         accessorKey: "code",
-        header: "code",
+        header: "코드",
         enableSorting: false,
         cell: ({ row }) => row.original.code ?? "-",
       },
@@ -506,7 +506,7 @@ export function LogsClient() {
                 />
                 <Input
                   aria-label="api log path"
-                  placeholder="path contains"
+                  placeholder="경로 포함"
                   value={apiPath}
                   onChange={(event) => {
                     setApiPath(event.target.value);
@@ -515,7 +515,7 @@ export function LogsClient() {
                 />
                 <Input
                   aria-label="api log min status"
-                  placeholder="min status"
+                  placeholder="최소 상태"
                   value={apiMinStatus}
                   onChange={(event) => {
                     setApiMinStatus(event.target.value);

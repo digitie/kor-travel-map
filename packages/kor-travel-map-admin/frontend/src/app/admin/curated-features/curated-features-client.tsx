@@ -604,12 +604,12 @@ export function CuratedFeatureDetailPreview({
     () => [
       {
         accessorKey: "sort_order",
-        header: "order",
+        header: "순서",
         cell: ({ row }) => row.original.sort_order,
       },
       {
         accessorKey: "relation",
-        header: "relation",
+        header: "관계",
         cell: ({ row }) => (
           <Badge variant="outline">{row.original.relation}</Badge>
         ),
@@ -626,7 +626,7 @@ export function CuratedFeatureDetailPreview({
       },
       {
         id: "memo",
-        header: "memo",
+        header: "메모",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-[12rem] whitespace-normal">
@@ -1072,7 +1072,7 @@ export function CuratedFeaturesClient() {
     () => [
       {
         accessorKey: "curation_status",
-        header: "status",
+        header: "상태",
         enableSorting: false,
         cell: ({ row }) => (
           <Badge variant={featureStatusVariant(row.original.curation_status)}>
@@ -1105,7 +1105,7 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "source_name",
-        header: "source",
+        header: "소스",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -1121,7 +1121,7 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "theme_name",
-        header: "theme",
+        header: "테마",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -1137,7 +1137,7 @@ export function CuratedFeaturesClient() {
       },
       {
         id: "reuse",
-        header: "reuse",
+        header: "재사용",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -1153,13 +1153,13 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "updated_at",
-        header: "updated",
+        header: "수정",
         enableSorting: false,
         cell: ({ row }) => formatDateTime(row.original.updated_at),
       },
       {
         id: "actions",
-        header: "actions",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
@@ -1192,7 +1192,7 @@ export function CuratedFeaturesClient() {
                 <ExternalLinkIcon />
               </Link>
               <Button
-                aria-label="preview"
+                aria-label="미리보기"
                 size="icon-sm"
                 type="button"
                 variant="ghost"
@@ -1219,7 +1219,7 @@ export function CuratedFeaturesClient() {
                 </Button>
               ) : (
                 <Button
-                  aria-label="select"
+                  aria-label="선택"
                   disabled={anyFeatureMutationPending}
                   size="icon-sm"
                   type="button"
@@ -1232,7 +1232,7 @@ export function CuratedFeaturesClient() {
                 </Button>
               )}
               <Button
-                aria-label="archive"
+                aria-label="보관"
                 disabled={anyFeatureMutationPending}
                 size="icon-sm"
                 type="button"
@@ -1259,7 +1259,7 @@ export function CuratedFeaturesClient() {
     () => [
       {
         accessorKey: "enabled",
-        header: "enabled",
+        header: "사용",
         cell: ({ row }) => (
           <Badge variant={row.original.enabled ? "default" : "outline"}>
             {row.original.enabled ? "enabled" : "disabled"}
@@ -1268,7 +1268,7 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "theme_slug",
-        header: "theme",
+        header: "테마",
         cell: ({ row }) => (
           <>
             <div>{row.original.theme_slug}</div>
@@ -1280,7 +1280,7 @@ export function CuratedFeaturesClient() {
       },
       {
         id: "source",
-        header: "source",
+        header: "소스",
         enableSorting: false,
         cell: ({ row }) => {
           const rule = row.original;
@@ -1297,19 +1297,19 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "default_action",
-        header: "action",
+        header: "작업",
         cell: ({ row }) => (
           <Badge variant="outline">{row.original.default_action}</Badge>
         ),
       },
       {
         accessorKey: "priority",
-        header: "priority",
+        header: "우선순위",
         cell: ({ row }) => row.original.priority,
       },
       {
         accessorKey: "updated_at",
-        header: "updated",
+        header: "수정",
         cell: ({ row }) => formatDateTime(row.original.updated_at),
       },
     ],
