@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — feature-update live spec refreshable 계약 정합화
+
+PR #595 머지/배포 후 full n150 live e2e 전에 feature-update write live spec을 다시 점검했다.
+PR #595에서 API가 refresh 가능한 provider/dataset 조합만 enqueue하도록 바뀌었기 때문에, 기존
+spec의 bogus provider/dataset no-op 전략이 422 계약과 충돌하는 것을 확인했다.
+
+- **e2e**: feature-update live write spec은 실제 refreshable catalog pair
+  (`python-kma-api`/`kma_short_forecast`)를 사용하되 한국 남서쪽 경계 근처의 극소 반경으로
+  scope를 제한하도록 바꿨다.
+- **e2e**: 목록 row 식별은 provider 문자열 대신 생성 응답의 `request_id` short link로 바꿔
+  운영 데이터와 섞여도 자기 row를 안정적으로 찾게 했다.
+- **e2e**: 다중 provider×dataset 가정은 새 API 계약에 맞춰 단일 provider의 다중 refreshable
+  dataset 검증으로 바꿨고, API 목록 확인에는 `created_from`/`dataset_key` 필터를 보조로 쓴다.
+- **검증**: frontend e2e type-check와 `git diff --check`를 통과했다. n150 targeted live 검증 후
+  PR/CI/머지를 진행하고 full live e2e를 이어간다.
+
 ## 2026-06-29 (codex) — Claude 후속 이슈 #589~#594 정리
 
 full n150 live e2e 재실행 전에 Claude 사후 리뷰로 열린 #589~#594를 먼저 반영했다.
