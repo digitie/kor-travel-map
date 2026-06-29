@@ -78,8 +78,8 @@ export function CuratedFeatureDetailClient({
         </>
       }
       description="curated 후보의 위치, 장소 검색 결과, display 속성, detail snapshot을 한 화면에서 검토합니다."
-      section="Admin"
-      title="Curated feature detail"
+      section="관리"
+      title="큐레이션 피처 상세"
     >
       <div className="flex flex-col gap-4">
         {feature.isLoading ? <Skeleton className="h-[34rem] w-full" /> : null}

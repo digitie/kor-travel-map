@@ -542,8 +542,8 @@ export function FeatureChangeRequestsClient() {
         </>
       }
       description="Feature 추가·수정·삭제 요청을 한 큐에서 만들고 검토합니다."
-      section="Admin"
-      title="Feature change requests"
+      section="관리"
+      title="피처 변경 요청"
     >
       <div className="flex flex-col gap-4">
         {(changes.isError || mutationError || formError) && (

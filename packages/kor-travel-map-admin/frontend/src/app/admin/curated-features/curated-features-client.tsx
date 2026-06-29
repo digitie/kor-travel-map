@@ -1336,8 +1336,8 @@ export function CuratedFeaturesClient() {
         </Button>
       }
       description="curated overlay 후보를 검토하고 source rule을 적용하며 detail snapshot을 확인합니다."
-      section="Admin"
-      title="Curated features"
+      section="관리"
+      title="큐레이션 피처"
     >
       <div className="flex flex-col gap-4">
         {features.isError ||

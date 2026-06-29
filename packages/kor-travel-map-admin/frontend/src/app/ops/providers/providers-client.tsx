@@ -126,20 +126,45 @@ function targetedPolicyValue(
     : "follow_system";
 }
 
+// rate-limit·주기 기본값 — 신규 정책에서 운영자가 일일이 채우지 않도록 보수적 값을
+// 미리 채운다. 기존 정책에 값이 있으면 그대로 유지하고, 비어 있을 때만 기본값을 쓴다.
+const POLICY_DEFAULTS = {
+  system_interval_seconds: 86400,
+  optimal_interval_seconds: 86400,
+  min_interval_seconds: 3600,
+  max_requests_per_minute: 60,
+  max_requests_per_hour: 1000,
+  max_requests_per_day: 10000,
+  max_concurrent: 1,
+  burst_size: 10,
+} as const;
+
 function policyToDraft(
   policy: ProviderRefreshPolicyRecord | null | undefined,
 ): PolicyDraft {
   return {
     source_kind: sourceKindValue(policy?.source_kind),
     targeted_policy: targetedPolicyValue(policy?.targeted_policy),
-    system_interval_seconds: numberText(policy?.system_interval_seconds),
-    optimal_interval_seconds: numberText(policy?.optimal_interval_seconds),
-    min_interval_seconds: numberText(policy?.min_interval_seconds),
-    max_requests_per_minute: numberText(policy?.max_requests_per_minute),
-    max_requests_per_hour: numberText(policy?.max_requests_per_hour),
-    max_requests_per_day: numberText(policy?.max_requests_per_day),
-    max_concurrent: numberText(policy?.max_concurrent ?? 1),
-    burst_size: numberText(policy?.burst_size),
+    system_interval_seconds: numberText(
+      policy?.system_interval_seconds ?? POLICY_DEFAULTS.system_interval_seconds,
+    ),
+    optimal_interval_seconds: numberText(
+      policy?.optimal_interval_seconds ?? POLICY_DEFAULTS.optimal_interval_seconds,
+    ),
+    min_interval_seconds: numberText(
+      policy?.min_interval_seconds ?? POLICY_DEFAULTS.min_interval_seconds,
+    ),
+    max_requests_per_minute: numberText(
+      policy?.max_requests_per_minute ?? POLICY_DEFAULTS.max_requests_per_minute,
+    ),
+    max_requests_per_hour: numberText(
+      policy?.max_requests_per_hour ?? POLICY_DEFAULTS.max_requests_per_hour,
+    ),
+    max_requests_per_day: numberText(
+      policy?.max_requests_per_day ?? POLICY_DEFAULTS.max_requests_per_day,
+    ),
+    max_concurrent: numberText(policy?.max_concurrent ?? POLICY_DEFAULTS.max_concurrent),
+    burst_size: numberText(policy?.burst_size ?? POLICY_DEFAULTS.burst_size),
     rate_limit_source: JSON.stringify(policy?.rate_limit_source ?? {}, null, 2),
     config_source: policy?.config_source ?? "db",
     enabled: policy?.enabled ?? true,
@@ -244,34 +269,25 @@ function PolicyEditor({
     <div className="rounded-lg border bg-background p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="font-medium">Refresh policy</div>
+          <div className="font-medium">갱신 정책</div>
           <div className="font-mono text-xs text-muted-foreground">
             {provider}/{datasetKey}
           </div>
         </div>
         <Badge variant={draft.enabled ? "outline" : "destructive"}>
-          {draft.enabled ? "enabled" : "disabled"}
+          {draft.enabled ? "활성" : "비활성"}
         </Badge>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
-        <FormSelect
-          label="source kind"
+        <FormField
+          readOnly
+          label="소스 종류"
+          hint="제공자·데이터셋에 따라 고정되는 값이라 자동 설정됩니다(수정 불가)."
           value={draft.source_kind}
-          onChange={(event) =>
-            setField(
-              "source_kind",
-              event.target.value as PolicyDraft["source_kind"],
-            )
-          }
-        >
-          {sourceKinds.map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {value}
-            </NativeSelectOption>
-          ))}
-        </FormSelect>
+        />
         <FormSelect
-          label="targeted policy"
+          label="타깃 갱신 정책"
+          hint="개별 지점 타깃 갱신을 허용/차단하거나 시스템 정책을 따를지 정합니다."
           value={draft.targeted_policy}
           onChange={(event) =>
             setField(
@@ -288,7 +304,8 @@ function PolicyEditor({
         </FormSelect>
         <FormField
           inputMode="numeric"
-          label="system interval sec"
+          label="시스템 주기(초)"
+          hint="시스템 자동 갱신이 도는 기본 간격(초)입니다."
           value={draft.system_interval_seconds}
           onChange={(event) =>
             setField("system_interval_seconds", event.target.value)
@@ -296,7 +313,8 @@ function PolicyEditor({
         />
         <FormField
           inputMode="numeric"
-          label="optimal interval sec"
+          label="최적 주기(초)"
+          hint="데이터 신선도상 권장되는 갱신 간격(초)입니다."
           value={draft.optimal_interval_seconds}
           onChange={(event) =>
             setField("optimal_interval_seconds", event.target.value)
@@ -304,13 +322,15 @@ function PolicyEditor({
         />
         <FormField
           inputMode="numeric"
-          label="min interval sec"
+          label="최소 주기(초)"
+          hint="이 간격보다 더 자주는 갱신하지 않습니다(과도 호출 방지)."
           value={draft.min_interval_seconds}
           onChange={(event) => setField("min_interval_seconds", event.target.value)}
         />
         <FormField
           inputMode="numeric"
-          label="requests / min"
+          label="분당 요청 수"
+          hint="provider API에 1분 동안 보낼 수 있는 최대 요청 수입니다."
           value={draft.max_requests_per_minute}
           onChange={(event) =>
             setField("max_requests_per_minute", event.target.value)
@@ -318,7 +338,8 @@ function PolicyEditor({
         />
         <FormField
           inputMode="numeric"
-          label="requests / hour"
+          label="시간당 요청 수"
+          hint="1시간 동안 보낼 수 있는 최대 요청 수입니다."
           value={draft.max_requests_per_hour}
           onChange={(event) =>
             setField("max_requests_per_hour", event.target.value)
@@ -326,7 +347,8 @@ function PolicyEditor({
         />
         <FormField
           inputMode="numeric"
-          label="requests / day"
+          label="일일 요청 수"
+          hint="하루 동안 보낼 수 있는 최대 요청 수(무료키 일일 쿼터 보호)입니다."
           value={draft.max_requests_per_day}
           onChange={(event) =>
             setField("max_requests_per_day", event.target.value)
@@ -334,18 +356,21 @@ function PolicyEditor({
         />
         <FormField
           inputMode="numeric"
-          label="max concurrent"
+          label="최대 동시 실행"
+          hint="동시에 실행할 수 있는 최대 요청 수입니다."
           value={draft.max_concurrent}
           onChange={(event) => setField("max_concurrent", event.target.value)}
         />
         <FormField
           inputMode="numeric"
-          label="burst size"
+          label="버스트 크기"
+          hint="순간적으로 허용되는 추가 요청 수(토큰 버킷 버스트)입니다."
           value={draft.burst_size}
           onChange={(event) => setField("burst_size", event.target.value)}
         />
         <FormField
-          label="config source"
+          label="설정 출처"
+          hint="이 정책 값의 출처 식별자입니다(기본 db)."
           value={draft.config_source}
           onChange={(event) => setField("config_source", event.target.value)}
         />
@@ -355,11 +380,12 @@ function PolicyEditor({
             type="checkbox"
             onChange={(event) => setField("enabled", event.target.checked)}
           />
-          enabled
+          활성화
         </label>
         <FormTextArea
           className="lg:col-span-2"
-          label="rate limit source"
+          label="rate limit 출처(JSON)"
+          hint="provider가 내려준 원본 rate-limit 정보를 JSON으로 보관합니다."
           value={draft.rate_limit_source}
           onChange={(event) => setField("rate_limit_source", event.target.value)}
         />
@@ -375,13 +401,13 @@ function PolicyEditor({
         </Button>
         {upsertPolicy.data ? (
           <Badge variant="outline">
-            saved {formatDateTime(upsertPolicy.data.data.updated_at)}
+            저장됨 {formatDateTime(upsertPolicy.data.data.updated_at)}
           </Badge>
         ) : null}
       </div>
       {error || upsertPolicy.isError ? (
         <Alert className="mt-3" variant="destructive">
-          <AlertTitle>policy 저장 실패</AlertTitle>
+          <AlertTitle>정책 저장 실패</AlertTitle>
           <AlertDescription>
             {error ?? upsertPolicy.error?.message}
           </AlertDescription>
@@ -398,19 +424,19 @@ type RecentRequestRow =
 const syncStateColumns: ColumnDef<SyncStateRow, unknown>[] = [
   {
     accessorKey: "sync_scope",
-    header: "scope",
+    header: "범위",
     enableSorting: false,
     cell: ({ row }) => row.original.sync_scope,
   },
   {
     accessorKey: "status",
-    header: "status",
+    header: "상태",
     enableSorting: true,
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
     accessorKey: "last_success_at",
-    header: "last success",
+    header: "마지막 성공",
     enableSorting: true,
     cell: ({ row }) => (
       <span className="text-muted-foreground">
@@ -420,7 +446,7 @@ const syncStateColumns: ColumnDef<SyncStateRow, unknown>[] = [
   },
   {
     accessorKey: "next_run_after",
-    header: "next run",
+    header: "다음 실행",
     enableSorting: true,
     cell: ({ row }) => (
       <span className="text-muted-foreground">
@@ -430,7 +456,7 @@ const syncStateColumns: ColumnDef<SyncStateRow, unknown>[] = [
   },
   {
     accessorKey: "consecutive_failures",
-    header: "failures",
+    header: "실패 횟수",
     enableSorting: false,
     cell: ({ row }) => formatCount(row.original.consecutive_failures),
   },
@@ -439,7 +465,7 @@ const syncStateColumns: ColumnDef<SyncStateRow, unknown>[] = [
 const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
   {
     id: "request",
-    header: "request",
+    header: "요청",
     enableSorting: false,
     cell: ({ row }) => (
       <span className="font-mono text-xs">{shortId(row.original.request_id)}</span>
@@ -447,13 +473,13 @@ const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
   },
   {
     accessorKey: "status",
-    header: "status",
+    header: "상태",
     enableSorting: true,
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
   {
     id: "job",
-    header: "job",
+    header: "잡",
     enableSorting: false,
     cell: ({ row }) => (
       <span className="font-mono text-xs">
@@ -472,7 +498,7 @@ const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
   },
   {
     accessorKey: "created_at",
-    header: "created",
+    header: "생성",
     enableSorting: true,
     cell: ({ row }) => (
       <span className="text-muted-foreground">
@@ -482,7 +508,7 @@ const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
   },
   {
     id: "link",
-    header: "link",
+    header: "링크",
     enableSorting: false,
     cell: ({ row }) => (
       <Link
@@ -530,7 +556,7 @@ function DatasetDetailPanel({
       <div className="rounded-lg border bg-background p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
-            <div className="font-medium">Dataset detail</div>
+            <div className="font-medium">데이터셋 상세</div>
             <div className="break-all font-mono text-xs text-muted-foreground">
               {selection.provider}/{selection.datasetKey}
             </div>
@@ -546,7 +572,7 @@ function DatasetDetailPanel({
         </div>
         {createRequest.data && createdRequestId ? (
           <Alert>
-            <AlertTitle>request 생성 완료</AlertTitle>
+            <AlertTitle>요청 생성 완료</AlertTitle>
             <AlertDescription>
               <Link
                 className="underline underline-offset-2"
@@ -561,7 +587,7 @@ function DatasetDetailPanel({
         ) : null}
         {createRequest.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>request 생성 실패</AlertTitle>
+            <AlertTitle>요청 생성 실패</AlertTitle>
             <AlertDescription>{createRequest.error.message}</AlertDescription>
           </Alert>
         ) : null}
@@ -577,7 +603,7 @@ function DatasetDetailPanel({
       />
 
       <div className="rounded-lg border bg-background p-4">
-        <div className="mb-2 font-medium">Cursor</div>
+        <div className="mb-2 font-medium">커서</div>
         <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
           {JSON.stringify(detail?.sync_states[0]?.cursor ?? {}, null, 2)}
         </pre>
@@ -647,7 +673,7 @@ export function ProvidersFreshnessClient() {
     () => [
       {
         id: "detail",
-        header: "detail",
+        header: "상세",
         enableSorting: false,
         cell: ({ row }) => {
           const item = row.original;
@@ -672,7 +698,7 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "provider",
-        header: "provider",
+        header: "제공자",
         enableSorting: true,
         cell: ({ row }) => (
           <span className="font-medium">{row.original.provider}</span>
@@ -680,7 +706,7 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "dataset_key",
-        header: "dataset",
+        header: "데이터셋",
         enableSorting: true,
         cell: ({ row }) => (
           <span className="font-mono text-xs">{row.original.dataset_key}</span>
@@ -688,19 +714,19 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "sync_scope",
-        header: "scope",
+        header: "범위",
         enableSorting: true,
         cell: ({ row }) => row.original.sync_scope,
       },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         enableSorting: true,
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "policy",
-        header: "policy",
+        header: "정책",
         accessorFn: (item) => item.refresh_policy?.targeted_policy ?? "",
         enableSorting: true,
         cell: ({ row }) =>
@@ -714,7 +740,7 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "last_success_at",
-        header: "last success",
+        header: "마지막 성공",
         enableSorting: true,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -724,7 +750,7 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "next_run_after",
-        header: "next run",
+        header: "다음 실행",
         enableSorting: true,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
@@ -734,7 +760,7 @@ export function ProvidersFreshnessClient() {
       },
       {
         accessorKey: "consecutive_failures",
-        header: "failures",
+        header: "실패 횟수",
         enableSorting: true,
         cell: ({ row }) =>
           row.original.consecutive_failures > 0 ? (
@@ -763,9 +789,9 @@ export function ProvidersFreshnessClient() {
           새로고침
         </Button>
       }
-      description="전 provider×dataset의 sync state, update request, refresh policy를 추적합니다."
-      section="Ops"
-      title="Providers"
+      description="전 provider×dataset의 동기화 상태, 갱신 요청, 갱신 정책을 추적합니다."
+      section="운영"
+      title="제공자"
     >
       <div className="flex flex-col gap-4">
         {providers.isError || showDetailError ? (
@@ -779,18 +805,18 @@ export function ProvidersFreshnessClient() {
 
         <section className="flex flex-wrap gap-2">
           <Badge variant="outline">
-            {formatCount(summary.providers)} providers
+            제공자 {formatCount(summary.providers)}
           </Badge>
-          <Badge variant="outline">{formatCount(items.length)} datasets</Badge>
-          <Badge variant="outline">{formatCount(summary.policies)} policies</Badge>
+          <Badge variant="outline">데이터셋 {formatCount(items.length)}</Badge>
+          <Badge variant="outline">정책 {formatCount(summary.policies)}</Badge>
           <Badge variant={summary.failing.length > 0 ? "destructive" : "outline"}>
-            failing {formatCount(summary.failing.length)}
+            실패 {formatCount(summary.failing.length)}
           </Badge>
           <Badge variant="outline">
-            stale(&gt;{STALE_AFTER_HOURS}h) {formatCount(summary.stale.length)}
+            오래됨(&gt;{STALE_AFTER_HOURS}h) {formatCount(summary.stale.length)}
           </Badge>
           <Badge variant="outline">
-            never-run {formatCount(summary.neverRun.length)}
+            미실행 {formatCount(summary.neverRun.length)}
           </Badge>
         </section>
 

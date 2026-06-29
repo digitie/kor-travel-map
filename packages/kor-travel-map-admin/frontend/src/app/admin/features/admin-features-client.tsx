@@ -447,8 +447,8 @@ export function AdminFeaturesClient() {
         </>
       }
       description="운영자용 feature 목록, 상세, weather, 단건 비활성화 표면입니다."
-      section="Admin"
-      title="Admin features"
+      section="관리"
+      title="피처 관리"
     >
       <div className="flex flex-col gap-4">
         {(features.isError || deactivate.isError) && (

@@ -786,7 +786,7 @@ export function DagsterAdminClient() {
         </>
       }
       description={`checked ${formatCheckedAt(data?.checked_at)} · ${DAGSTER_UI_URL}`}
-      section="Ops"
+      section="운영"
       title="Dagster 운영"
     >
       <div className="flex flex-col gap-5">

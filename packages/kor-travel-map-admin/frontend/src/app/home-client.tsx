@@ -218,7 +218,7 @@ export function HomePageClient() {
         </>
       }
       description="feature, import job, consistency, Dagster 상태를 한 화면에서 확인합니다."
-      section="Overview"
+      section="개요"
       title="운영 홈"
     >
       <div className="space-y-6">

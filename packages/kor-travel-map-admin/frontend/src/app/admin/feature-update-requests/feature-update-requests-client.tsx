@@ -75,7 +75,7 @@ export function FeatureUpdateRequestsClient() {
     () => [
       {
         id: "request",
-        header: "request",
+        header: "요청",
         enableSorting: false,
         cell: ({ row }) => {
           const id = row.original.request_id;
@@ -95,16 +95,16 @@ export function FeatureUpdateRequestsClient() {
           );
         },
       },
-      { accessorKey: "scope_type", header: "scope" },
+      { accessorKey: "scope_type", header: "범위" },
       {
         accessorKey: "status",
-        header: "status",
+        header: "상태",
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
-      { accessorKey: "run_mode", header: "mode" },
+      { accessorKey: "run_mode", header: "모드" },
       {
         id: "providers",
-        header: "providers",
+        header: "제공자",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="block max-w-56 truncate">
@@ -114,7 +114,7 @@ export function FeatureUpdateRequestsClient() {
       },
       {
         id: "job",
-        header: "job",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">{shortId(row.original.job_id)}</span>
@@ -122,7 +122,7 @@ export function FeatureUpdateRequestsClient() {
       },
       {
         accessorKey: "created_at",
-        header: "created",
+        header: "생성",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -131,7 +131,7 @@ export function FeatureUpdateRequestsClient() {
       },
       {
         id: "actions",
-        header: "actions",
+        header: "동작",
         enableSorting: false,
         cell: ({ row }) => {
           const request = row.original;
@@ -253,22 +253,23 @@ export function FeatureUpdateRequestsClient() {
           새로고침
         </Button>
       }
-      description="좌표/반경/provider 기준 targeted feature update request를 생성하고 상태를 추적합니다."
-      section="Admin"
-      title="Feature update requests"
+      description="좌표·반경·provider 기준 타깃 갱신 요청을 생성하고 상태를 추적합니다."
+      section="관리"
+      title="갱신 요청"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
         <div className="rounded-lg border bg-background p-4">
           <div className="mb-4">
             <div className="font-medium">새 요청</div>
             <div className="text-sm text-muted-foreground">
-              center_radius scope payload
+              중심점·반경 기준 스코프
             </div>
           </div>
           <div className="flex flex-col gap-3">
             <FormField
               error={errors.lon}
-              label="lon"
+              label="경도(lon)"
+              hint="요청 중심점의 경도입니다."
               ref={lonRef}
               required
               value={lon}
@@ -276,7 +277,8 @@ export function FeatureUpdateRequestsClient() {
             />
             <FormField
               error={errors.lat}
-              label="lat"
+              label="위도(lat)"
+              hint="요청 중심점의 위도입니다."
               ref={latRef}
               required
               value={lat}
@@ -284,31 +286,35 @@ export function FeatureUpdateRequestsClient() {
             />
             <FormField
               error={errors.radiusKm}
-              label="radius km"
+              label="반경(km)"
+              hint="중심점에서 이 반경(km) 안의 feature를 대상으로 합니다."
               ref={radiusKmRef}
               required
               value={radiusKm}
               onChange={(e) => setRadiusKm(e.target.value)}
             />
             <FormField
-              label="providers"
-              placeholder="providers comma separated"
+              label="제공자"
+              hint="갱신할 provider를 쉼표로 구분해 입력합니다(비우면 전체)."
+              placeholder="예: python-kma-api, python-opinet-api"
               value={providers}
               onChange={(e) => setProviders(e.target.value)}
             />
             <FormField
-              label="dataset keys"
-              placeholder="dataset_keys comma separated"
+              label="데이터셋 키"
+              hint="특정 dataset_key만 갱신할 때 쉼표로 구분해 입력합니다."
+              placeholder="예: kma_short_grid"
               value={datasets}
               onChange={(e) => setDatasets(e.target.value)}
             />
             <FormSelect
-              label="run mode"
+              label="실행 모드"
+              hint="예약(queued) 또는 즉시(now) 실행을 선택합니다."
               value={runMode}
               onChange={(event) => setRunMode(event.target.value as "queued" | "now")}
             >
-              <NativeSelectOption value="queued">queued</NativeSelectOption>
-              <NativeSelectOption value="now">now</NativeSelectOption>
+              <NativeSelectOption value="queued">예약(queued)</NativeSelectOption>
+              <NativeSelectOption value="now">즉시(now)</NativeSelectOption>
             </FormSelect>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -316,7 +322,7 @@ export function FeatureUpdateRequestsClient() {
                 type="checkbox"
                 onChange={(event) => setDryRun(event.target.checked)}
               />
-              dry-run
+              dry-run(실제 적용 없이 시험 실행)
             </label>
             <Button
               disabled={createRequest.isPending}
@@ -347,7 +353,7 @@ export function FeatureUpdateRequestsClient() {
         <div className="flex flex-col gap-4">
           {(requests.isError || cancelRequest.isError || runNow.isError) && (
             <Alert variant="destructive">
-              <AlertTitle>request 처리 실패</AlertTitle>
+              <AlertTitle>요청 처리 실패</AlertTitle>
               <AlertDescription>
                 {requests.error?.message ??
                   cancelRequest.error?.message ??
@@ -357,7 +363,7 @@ export function FeatureUpdateRequestsClient() {
           )}
           <div className="flex flex-wrap items-center gap-2">
             <NativeSelect
-              aria-label="request status"
+              aria-label="요청 상태 필터"
               value={status}
               onChange={(event) =>
                 setStatus(event.target.value as FeatureUpdateStatus | "all")
@@ -365,12 +371,12 @@ export function FeatureUpdateRequestsClient() {
             >
               {statuses.map((item) => (
                 <NativeSelectOption key={item} value={item}>
-                  {item}
+                  {item === "all" ? "전체" : statusLabel(item)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
             <Badge variant="outline">
-              {requests.data?.data.items.length ?? 0} rows
+              {requests.data?.data.items.length ?? 0}건
             </Badge>
           </div>
           <DataTable

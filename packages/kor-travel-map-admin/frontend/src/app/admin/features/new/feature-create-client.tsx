@@ -587,8 +587,8 @@ export function FeatureCreateClient() {
         </>
       }
       description="좌표·주소·중복 후보를 함께 검토하는 수동 feature 작성 표면입니다."
-      section="Admin"
-      title="New feature"
+      section="관리"
+      title="새 피처"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>
         {(formError || korTravelGeoError || createFeature.isError) && (

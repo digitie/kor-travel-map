@@ -37,8 +37,8 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
           </Link>
         </>
       }
-      section="Features"
-      title="Feature detail"
+      section="지도"
+      title="피처 상세"
     >
       <FeatureDetailView featureId={featureId} />
     </AdminShell>

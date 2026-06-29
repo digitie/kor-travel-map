@@ -645,8 +645,8 @@ export function DedupReviewClient() {
         </Button>
       }
       description="중복 후보를 운영자가 검토합니다. accept/reject/ignore 또는 merge(master 수동 선택 또는 자동 선정)로 처리합니다."
-      section="Admin"
-      title="Dedup review"
+      section="관리"
+      title="중복 검토"
     >
       <div className="flex flex-col gap-4">
         {(reviews.isError || decision.isError) && (

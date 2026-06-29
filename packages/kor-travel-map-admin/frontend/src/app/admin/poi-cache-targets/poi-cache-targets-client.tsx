@@ -275,8 +275,8 @@ export function PoiCacheTargetsClient() {
         </Button>
       }
       description="외부 시스템 POI/cache target을 등록하고 target key 기준 주변 feature를 확인합니다."
-      section="Admin"
-      title="POI cache targets"
+      section="관리"
+      title="POI 캐시 대상"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
         <div className="rounded-lg border bg-background p-4">
