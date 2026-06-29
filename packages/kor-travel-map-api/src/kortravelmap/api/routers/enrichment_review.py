@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import Meta, OffsetMeta, make_meta, make_offset_meta
 from kortravelmap.api.routers.dedup_review import (
     ReviewFeatureDetailRecord,
     ReviewSourceDetailRecord,
@@ -97,7 +97,7 @@ class EnrichmentReviewListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: EnrichmentReviewListData
-    meta: Meta
+    meta: OffsetMeta
 
 
 class EnrichmentReviewDetailData(BaseModel):
@@ -309,7 +309,7 @@ async def list_reviews(
         data=EnrichmentReviewListData(
             items=[_record(item) for item in review_page.items],
         ),
-        meta=make_meta(
+        meta=make_offset_meta(
             request,
             started_at=started_at,
             page_size=page_size,

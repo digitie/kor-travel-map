@@ -14,6 +14,8 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
 )
+from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
+from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -44,7 +46,7 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(ApiSettings(admin_proxy_secret=None))
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
@@ -64,8 +66,8 @@ def _request(
         request_id=request_id,
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-1"]},
-        providers=("python-a-api",),
-        dataset_keys=("dataset-a",),
+        providers=(MOIS_PROVIDER_NAME,),
+        dataset_keys=(DATASET_KEY_BULK,),
         update_policy={"mode": "refresh_existing"},
         run_mode=run_mode,
         priority=50,
@@ -88,8 +90,8 @@ def _preview() -> FeatureUpdateRequestPreview:
     return FeatureUpdateRequestPreview(
         scope_type="feature_ids",
         scope={"type": "feature_ids", "feature_ids": ["feature-1"]},
-        providers=("python-a-api",),
-        dataset_keys=("dataset-a",),
+        providers=(MOIS_PROVIDER_NAME,),
+        dataset_keys=(DATASET_KEY_BULK,),
         update_policy={},
         run_mode="queued",
         priority=50,
@@ -136,8 +138,8 @@ def test_create_dry_run_returns_preview_without_transaction(
         "/v1/admin/feature-update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
-            "providers": ["python-a-api"],
-            "dataset_keys": ["dataset-a"],
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
             "dry_run": True,
         },
     )
@@ -269,6 +271,41 @@ def test_create_rejects_unbounded_provider_filter_list(
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_create_rejects_non_refreshable_provider_dataset_before_enqueue(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import feature_update_requests as router_mod
+
+    async def _unexpected_enqueue(
+        _session: Any, **_kwargs: Any
+    ) -> FeatureUpdateRequest:
+        raise AssertionError("non-refreshable request should be rejected")
+
+    monkeypatch.setattr(
+        router_mod, "enqueue_feature_update_request", _unexpected_enqueue
+    )
+
+    response = client.post(
+        "/v1/admin/feature-update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_DETAIL],
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "VALIDATION_ERROR"
+    assert MOIS_PROVIDER_NAME in body["detail"]
+    assert DATASET_KEY_DETAIL in body["detail"]
     assert session.begin_count == 0
 
 

@@ -8,11 +8,12 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 > 정본 계획: `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 > 2026-06-11 시나리오/연계/realtime 재점검:
 > `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
-> e2e 실행: **서버=WSL(`npm run dev` :12705), Playwright=Windows**(`docs/dev-environment.md`,
+> e2e 실행: **서버=WSL(`npm run dev` :12705), Playwright=n150 Linux 우선**(`docs/dev-environment.md`,
 > `playwright.config.ts` 머리말). admin/ops 스펙은 route-mock 기반이라 backend 없이도
-> 돈다. `/etl`만 실 backend(:12701, `/debug/etl`) 필요.
+> 돌고, n150에서 실행할 수 없을 때만 Windows 호스트 브라우저를 fallback으로 쓴다.
+> `/etl`만 실 backend(:12701, `/debug/etl`) 필요.
 > 검증 게이트(프론트 PR): `gen:types:check`(drift 0) · `type-check` · `lint` ·
-> env 명시 `build` · Windows Playwright e2e.
+> env 명시 `build` · n150 Linux 우선 Playwright e2e.
 
 ## 1. 점검 항목 정의
 

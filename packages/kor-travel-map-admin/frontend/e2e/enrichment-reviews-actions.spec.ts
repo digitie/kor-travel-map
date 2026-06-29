@@ -7,6 +7,8 @@ import type { components } from "../src/api/types";
 type EnrichmentReviewRecord = components["schemas"]["EnrichmentReviewRecord"];
 type EnrichmentReviewListResponse =
   components["schemas"]["EnrichmentReviewListResponse"];
+type EnrichmentReviewListMeta = EnrichmentReviewListResponse["meta"];
+type EnrichmentReviewPageMeta = NonNullable<EnrichmentReviewListMeta["page"]>;
 type EnrichmentReviewDetailResponse =
   components["schemas"]["EnrichmentReviewDetailResponse"];
 type EnrichmentReviewDecisionRequest =
@@ -20,7 +22,6 @@ type ReviewFeatureDetailRecord =
 type ReviewSourceDetailRecord =
   components["schemas"]["ReviewSourceDetailRecord"];
 type Meta = components["schemas"]["Meta"];
-type PageMeta = components["schemas"]["PageMeta"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const ENRICHMENT_GLOB = "**/v1/admin/enrichment-reviews**";
@@ -65,18 +66,26 @@ function makeReview(
   };
 }
 
-function makeMeta(page?: PageMeta | null): Meta {
+function makeMeta(): Meta {
   return {
     duration_ms: 1,
-    page: page ?? null,
     request_id: "e2e-enrichment-review",
   };
 }
 
-function makePageMeta(overrides: Partial<PageMeta> = {}): PageMeta {
+function makeListMeta(page: EnrichmentReviewPageMeta): EnrichmentReviewListMeta {
+  return {
+    duration_ms: 1,
+    page,
+    request_id: "e2e-enrichment-review",
+  };
+}
+
+function makePageMeta(
+  overrides: Partial<EnrichmentReviewPageMeta> = {},
+): EnrichmentReviewPageMeta {
   return {
     page_size: 50,
-    next_cursor: null,
     total: null,
     ...overrides,
   };
@@ -84,11 +93,11 @@ function makePageMeta(overrides: Partial<PageMeta> = {}): PageMeta {
 
 function listResponse(
   items: EnrichmentReviewRecord[],
-  page?: PageMeta | null,
+  page?: EnrichmentReviewPageMeta | null,
 ): EnrichmentReviewListResponse {
   return {
     data: { items },
-    meta: makeMeta(page ?? makePageMeta({ total: items.length })),
+    meta: makeListMeta(page ?? makePageMeta({ total: items.length })),
   };
 }
 
@@ -345,16 +354,13 @@ async function mockPageNumberPages(
     if (pageIndex >= 2) {
       await fulfillJson(
         route,
-        listResponse(pages.two, makePageMeta({ next_cursor: null, total: 51 })),
+        listResponse(pages.two, makePageMeta({ total: 51 })),
       );
       return;
     }
     await fulfillJson(
       route,
-      listResponse(
-        pages.one,
-        makePageMeta({ next_cursor: "cursor-page-2", total: 51 }),
-      ),
+      listResponse(pages.one, makePageMeta({ total: 51 })),
     );
   });
 
@@ -674,7 +680,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       }
       await fulfillJson(
         route,
-        listResponse([], makePageMeta({ next_cursor: null, total: 0 })),
+        listResponse([], makePageMeta({ total: 0 })),
       );
     });
 

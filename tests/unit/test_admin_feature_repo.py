@@ -445,6 +445,13 @@ async def test_list_dedup_reviews_and_decision() -> None:
     )
     assert changed is True
 
+    unchanged = await repo.set_dedup_review_decision(
+        _Session([_Result([])]),  # type: ignore[arg-type]
+        _REVIEW_KEY_1,
+        decision="ignored",
+    )
+    assert unchanged is False
+
 
 @pytest.mark.asyncio
 async def test_list_dedup_reviews_uses_fast_count_without_expansion_filters() -> None:
@@ -464,13 +471,6 @@ async def test_list_dedup_reviews_uses_fast_count_without_expansion_filters() ->
     assert page.total_count == 1
     assert session.calls[0]["statement"] == repo._DEDUP_REVIEW_FAST_COUNT_SQL
     assert "JOIN feature.features" not in session.calls[0]["statement"]
-
-    unchanged = await repo.set_dedup_review_decision(
-        _Session([_Result([])]),  # type: ignore[arg-type]
-        _REVIEW_KEY_1,
-        decision="ignored",
-    )
-    assert unchanged is False
 
 
 @pytest.mark.asyncio

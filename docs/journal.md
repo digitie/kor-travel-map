@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Claude 후속 이슈 #589~#594 정리
+
+full n150 live e2e 재실행 전에 Claude 사후 리뷰로 열린 #589~#594를 먼저 반영했다.
+
+- **API 계약**: feature-update request 생성/run-now 경로에서 refresh 가능한 provider/dataset 조합만
+  enqueue되도록 catalog 검증을 추가했다. MOIS history/closed/detail 같은 non-refreshable 조합은
+  직접 API 호출이어도 422로 거절한다.
+- **API 계약**: dedup/enrichment review list 응답은 cursor 없는 `OffsetMeta`를 사용하도록 분리해
+  `meta.page.next_cursor` 영구 null 직렬화를 제거했다. OpenAPI와 admin generated type을 재생성했다.
+- **e2e**: backup/restore/swap execute live spec의 죽은 UI 토글을 제거하고, swap execute도
+  `/api/proxy` 직접 POST 후 Admin UI 목록 반영을 확인하는 경로로 맞췄다.
+- **테스트/문서**: backup router 테스트 들여쓰기, dedup fast-count/decision 단언 분리, 잔존
+  Windows Playwright 문구를 n150 Linux 우선 기준으로 정리했다.
+- **검증**: 관련 pytest 56건, `ruff`, OpenAPI drift, admin/user generated type drift,
+  frontend `type-check`/`type-check:e2e`, 대상 mypy, import-linter를 통과했다. 로컬 mocked
+  Playwright는 현재 WSL 배포판을 Playwright가 지원하지 않아 Chromium 설치 단계에서 중단했다.
+
 ## 2026-06-29 (codex) — n150 full live e2e long-tail 안정화
 
 n150 write/destructive full live e2e는 1차 재실행에서 1,869 passed / 12 flaky / 17 skipped /

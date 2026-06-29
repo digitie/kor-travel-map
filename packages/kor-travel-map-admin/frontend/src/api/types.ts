@@ -4148,7 +4148,7 @@ export interface components {
          */
         DedupReviewListResponse: {
             data: components["schemas"]["DedupReviewListData"];
-            meta: components["schemas"]["Meta"];
+            meta: components["schemas"]["OffsetMeta"];
         };
         /**
          * DedupReviewRecord
@@ -4324,7 +4324,7 @@ export interface components {
          */
         EnrichmentReviewListResponse: {
             data: components["schemas"]["EnrichmentReviewListData"];
-            meta: components["schemas"]["Meta"];
+            meta: components["schemas"]["OffsetMeta"];
         };
         /**
          * EnrichmentReviewRecord
@@ -5325,6 +5325,33 @@ export interface components {
         OfflineUploadWriteResponse: {
             data: components["schemas"]["OfflineUploadRecord"];
             meta: components["schemas"]["OfflineUploadWriteMeta"];
+        };
+        /**
+         * OffsetMeta
+         * @description Cursor가 없는 page-number 목록용 성공 응답 metadata.
+         */
+        OffsetMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+            page?: components["schemas"]["OffsetPageMeta"] | null;
+            /**
+             * Request Id
+             * @description X-Request-ID와 같은 요청 ID.
+             * @default
+             */
+            request_id: string;
+        };
+        /**
+         * OffsetPageMeta
+         * @description Page-number/offset pagination metadata.
+         *
+         *     Cursor를 쓰지 않는 목록은 cursor 필드를 노출하지 않는다.
+         */
+        OffsetPageMeta: {
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total?: number | null;
         };
         /**
          * OpsConsistencyReportRecord

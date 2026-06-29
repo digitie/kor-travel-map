@@ -188,6 +188,9 @@ def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None
         ]["const"]
         == "audit_only"
     )
+    assert "next_cursor" not in spec["components"]["schemas"]["OffsetPageMeta"][
+        "properties"
+    ]
 
 
 @pytest.mark.unit
@@ -232,7 +235,6 @@ def test_list_enrichment_reviews_passes_filters(
     assert body["data"]["items"][0]["source_start_date"] == "20260405"
     assert body["meta"]["page"] == {
         "page_size": 25,
-        "next_cursor": None,
         "total": 42,
     }
 
