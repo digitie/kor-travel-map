@@ -271,6 +271,21 @@ def _command_disabled() -> HTTPException:
     )
 
 
+def _command_unavailable(exc: OSError, plan: BackupCommandPlan) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "BACKUP_COMMAND_UNAVAILABLE",
+            "message": "백업/복구 command 시작에 실패했습니다.",
+            "details": {
+                "command": plan.command,
+                "cwd": plan.cwd,
+                "error": str(exc),
+            },
+        },
+    )
+
+
 def _delete_failed(exc: OSError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -309,13 +324,16 @@ async def _run_command(
     timeout_seconds: float,
 ) -> _CommandResult:
     env = {**os.environ, **plan.env}
-    process = await asyncio.create_subprocess_exec(
-        *plan.command,
-        cwd=plan.cwd,
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *plan.command,
+            cwd=plan.cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise _command_unavailable(exc, plan) from exc
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(),

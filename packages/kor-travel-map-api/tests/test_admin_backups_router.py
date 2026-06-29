@@ -157,6 +157,27 @@ def test_execute_backup_requires_opt_in(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_execute_backup_reports_missing_command_cwd(tmp_path: Path) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path / "missing-runner",
+            backup_command_enabled=True,
+        )
+    )
+    response = TestClient(app).post(
+        "/v1/admin/backups",
+        json={"backup_id": "manual", "execute": True},
+    )
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "BACKUP_COMMAND_UNAVAILABLE"
+    assert body["details"]["cwd"].endswith("missing-runner")
+
+
+@pytest.mark.unit
 def test_execute_backup_uses_command_runner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -23,7 +23,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
-from kortravelmap.infra.admin_feature_repo import list_enrichment_reviews
+from kortravelmap.infra.admin_feature_repo import (
+    get_enrichment_review_detail,
+    list_enrichment_reviews,
+)
 from kortravelmap.infra.enrichment_review_repo import (
     EnrichmentQueueResult,
     EnrichmentReviewInput,
@@ -69,7 +72,14 @@ def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 �
 class _Item:
     """``VisitKoreaFestivalItem`` Protocol 만족 최소 객체."""
 
-    def __init__(self, content_id: str, title: str) -> None:
+    def __init__(
+        self,
+        content_id: str,
+        title: str,
+        *,
+        map_x: float = 126.9245,
+        map_y: float = 37.526,
+    ) -> None:
         self.content_id = content_id
         self.title = title
         self.overview = None
@@ -78,8 +88,8 @@ class _Item:
         self.addr1 = "서울특별시 영등포구"
         self.area_code = "1"
         self.sigungu_code = "19"
-        self.map_x = 126.9245
-        self.map_y = 37.526
+        self.map_x = map_x
+        self.map_y = map_y
         self.event_start_date = "20260405"
         self.event_end_date = "20260412"
         self.tel = None
@@ -92,14 +102,19 @@ def _now() -> datetime:
 
 
 def _review_candidate(
-    title: str, *, target: str = _TARGET_ID, target_name: str = "서울 봄꽃 축제"
+    title: str,
+    *,
+    map_x: float = 126.9245,
+    map_y: float = 37.526,
+    target: str = _TARGET_ID,
+    target_name: str = "서울 봄꽃 축제",
 ) -> FestivalReviewCandidate:
     """review-band 후보 1건 생성(점수 밴드를 넓혀 강제로 review로 보냄)."""
     matcher = ScoringFestivalMatcher(
         [FestivalCandidate(feature_id=target, name=target_name)]
     )
     plan = festival_to_review_candidates(
-        [_Item("c-" + title, title)],
+        [_Item("c-" + title, title, map_x=map_x, map_y=map_y)],
         matcher=matcher,
         fetched_at=_now(),
         accept_threshold=0.999,
@@ -331,6 +346,41 @@ async def test_list_enrichment_reviews_admin_query(
     )
     assert none_match.items == ()
     assert none_match.total_count == 0
+
+
+async def test_list_enrichment_reviews_far_distance_does_not_underflow(
+    migrated_session: AsyncSession,
+) -> None:
+    migrated_session.add(_festival_feature("f_far_evt", "서울 봄꽃 축제"))
+    await migrated_session.flush()
+    await enqueue_review_candidates(
+        migrated_session,
+        [
+            _as_input(
+                _review_candidate(
+                    "서울 봄꽃 축",
+                    map_x=0.0,
+                    map_y=0.0,
+                    target="f_far_evt",
+                    target_name="서울 봄꽃 축제",
+                )
+            ),
+        ],
+    )
+
+    page = await list_enrichment_reviews(migrated_session, statuses=("pending",))
+
+    assert len(page.items) == 1
+    item = page.items[0]
+    assert item.distance_m is not None
+    assert item.distance_m > 1_000_000
+    assert item.spatial_score == 0.0
+
+    detail = await get_enrichment_review_detail(migrated_session, item.review_id)
+    assert detail is not None
+    assert detail.distance_m is not None
+    assert detail.distance_m > 1_000_000
+    assert detail.spatial_score == 0.0
 
 
 async def test_fk_requires_existing_target_feature(

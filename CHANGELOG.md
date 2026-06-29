@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### n150 live e2e 실패 보강 (2026-06-29)
+
+- **FIXED**: enrichment review 목록/상세 조회에서 아주 먼 후보 거리의 공간 점수 계산이 numeric
+  underflow로 500을 내지 않도록 35km 이상 거리는 `spatial_score=0`으로 clamp한다.
+- **FIXED**: admin backup/restore/swap command 시작 시 실행 경로나 command가 없으면 내부 500 대신
+  `503 BACKUP_COMMAND_UNAVAILABLE` 문제 응답으로 실패 원인을 노출한다.
+
 ### Enrichment review 지도 비교 surface 일원화 (2026-06-29)
 
 - **CHANGED**: enrichment review 목록의 행별 인라인 `지도` 버튼과 별도 지도 panel을 제거하고,
