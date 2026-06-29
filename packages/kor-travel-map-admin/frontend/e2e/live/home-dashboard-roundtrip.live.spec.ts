@@ -122,6 +122,91 @@ function sumValues(map: Record<string, number>): number {
   return Object.values(map).reduce((sum, count) => sum + count, 0);
 }
 
+// statusLabel mirrors src/components/status-badge.tsx STATUS_LABELS: StatusBadge가
+// status enum을 한글로 렌더한다(영어→한글, 미매핑 값은 원문 유지, null→""). #585
+// 이후 상태 배지가 한글화되어, 배지 텍스트를 단언할 땐 이 변환을 거쳐 비교한다.
+const STATUS_LABELS: Record<string, string> = {
+  ok: "정상",
+  normal: "정상",
+  success: "성공",
+  succeeded: "성공",
+  done: "완료",
+  completed: "완료",
+  active: "활성",
+  accepted: "수락됨",
+  merged: "병합됨",
+  resolved: "해결됨",
+  started: "시작됨",
+  applied: "반영됨",
+  curated: "큐레이션됨",
+  validated: "검증됨",
+  loaded: "적재됨",
+  implemented: "구현됨",
+  fresh: "최신",
+  queued: "대기",
+  pending: "대기",
+  loading: "로딩중",
+  running: "실행중",
+  starting: "시작중",
+  dry_run: "모의실행",
+  validating: "검증중",
+  in_progress: "진행중",
+  materializing: "구체화중",
+  scheduled: "예정됨",
+  planned: "예정됨",
+  ongoing: "진행중",
+  managed: "관리됨",
+  acknowledged: "확인됨",
+  open: "열림",
+  candidate: "후보",
+  uploaded: "업로드됨",
+  canceling: "취소중",
+  paused: "일시정지",
+  connecting: "연결중",
+  reconnecting: "재연결중",
+  error: "오류",
+  failed: "실패",
+  failure: "실패",
+  cancelled: "취소됨",
+  canceled: "취소됨",
+  unavailable: "사용불가",
+  critical: "심각",
+  rejected: "거절됨",
+  denied: "거부됨",
+  inactive: "비활성",
+  deleted: "삭제됨",
+  disabled: "비활성화",
+  expired: "만료됨",
+  archived: "보관됨",
+  deprecated: "지원중단",
+  revoked: "폐기됨",
+  skipped: "건너뜀",
+  validation_failed: "검증실패",
+  load_failed: "적재실패",
+  not_found: "없음",
+  degraded: "저하됨",
+  manual_required: "수동 필요",
+  provider_needed: "공급자 필요",
+  manual_only: "수동 전용",
+  ended: "종료됨",
+  stopped: "중지됨",
+  ignored: "무시됨",
+  hidden: "숨김",
+  not_started: "시작 전",
+  stale: "오래됨",
+  draft: "초안",
+  unknown: "알수없음",
+  none: "없음",
+  info: "정보",
+  warning: "경고",
+  debug: "디버그",
+};
+function statusLabel(status: string | null | undefined): string {
+  if (status == null) return "";
+  const normalized = status.toLowerCase().replace(/-/g, "_");
+  return STATUS_LABELS[normalized] ?? status;
+}
+
 // card.tsx: Card는 data-slot="card", CardTitle은 role="heading"(aria-level 2).
 function cardByTitle(page: Page, title: string): Locator {
   return page.locator('[data-slot="card"]').filter({
@@ -233,9 +318,10 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
       expect(health.status).toBe(200);
       expect(health.body).not.toBeNull();
       const healthStatus = (health.body as PublicHealthResponse).data.status;
-      // status-badge.tsx: 배지 텍스트 = `{status ?? "-"}` (예: "ok").
+      // status-badge.tsx: StatusBadge가 statusLabel(status)를 렌더 → 한글
+      // (예: "ok"→"정상"). 미매핑 값은 원문 유지하므로 statusLabel로 변환해 비교한다.
       await expect(
-        backendCard.getByText(healthStatus, { exact: true }),
+        backendCard.getByText(statusLabel(healthStatus), { exact: true }),
       ).toBeVisible(T);
 
       const version = await browserFetch<PublicVersionResponse>(
@@ -257,15 +343,17 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
     await test.step("Dagster 배지가 dagster summary status와 일치한다(불가용 시 error로 폴백)", async () => {
       // home-client.tsx: status={dagsterData?.status ?? (dagster.isError ? "error" : "loading")}.
       // dagster가 degrade되면 summary가 200이라도 data.status="error/unavailable",
-      // 하드 실패면 query.isError → 배지 "error". 응답을 재조회하며 수렴을 단언한다.
+      // 하드 실패면 query.isError → "error". StatusBadge가 statusLabel(...)로 한글
+      // 렌더하므로(ok→정상·unavailable→사용불가·error→오류) statusLabel로 변환해 단언한다.
       await expect
         .poll(async () => {
           const res = await browserFetch<DagsterSummaryResponse>(
             page,
             DAGSTER_SUMMARY_QUERY,
           );
-          const expected =
-            res.status === 200 && res.body ? res.body.data.status : "error";
+          const expected = statusLabel(
+            res.status === 200 && res.body ? res.body.data.status : "error",
+          );
           const visible = await dagsterCard
             .getByText(expected, { exact: true })
             .first()

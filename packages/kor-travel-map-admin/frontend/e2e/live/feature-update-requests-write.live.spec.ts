@@ -313,7 +313,8 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
           .filter({ hasText: "요청 처리 완료" });
         await expect(successAlert).toBeVisible(T);
         await expect(successAlert).toContainText(requestId as string);
-        await expect(successAlert).toContainText("queued");
+        // 성공 alert은 statusLabel(status)로 렌더 → "queued"가 한글 "대기"로 표시된다.
+        await expect(successAlert).toContainText("대기");
       });
 
       await test.step("목록(all 필터)에 새 요청 행이 나타난다", async () => {
@@ -784,7 +785,8 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         await page.getByLabel("request status").selectOption("cancelled");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("cancelled");
+        // status 컬럼은 <StatusBadge>로 렌더 → "cancelled"가 한글 "취소됨"으로 표시된다.
+        await expect(row).toContainText("취소됨");
       });
     } finally {
       // 이미 terminal(cancelled)이면 cleanup cancel은 409 → cancelByApi가 삼킨다.

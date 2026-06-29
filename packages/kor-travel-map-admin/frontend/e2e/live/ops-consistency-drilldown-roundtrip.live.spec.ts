@@ -62,6 +62,21 @@ function shortId(value: string): string {
   return value.length > 12 ? `${value.slice(0, 12)}...` : value;
 }
 
+// status-badge.tsx: <StatusBadge>가 표시 텍스트를 statusLabel(status)로 한글화한다.
+// "Latest severity" 카드는 <StatusBadge status={severity_max ?? "none"}>를 렌더하므로
+// 화면 텍스트는 한글이다. severity_max ∈ ConsistencySeverity("OK"|"WARN"|"ERROR"),
+// 카드 fallback "none". statusLabel: OK→정상 · ERROR→오류 · none→없음;
+// STATUS_LABELS에 없는 값(WARN 등)은 원문 유지. (data/API status·severity 단언은
+// 화면이 아니라 응답 계약이므로 영문 그대로 둔다.)
+const SEVERITY_LABELS: Record<string, string> = {
+  ok: "정상",
+  error: "오류",
+  none: "없음",
+};
+function severityLabel(value: string): string {
+  return SEVERITY_LABELS[value.toLowerCase().replace(/-/g, "_")] ?? value;
+}
+
 function apiPath(response: Response): string {
   const pathname = new URL(response.url()).pathname;
   const path = pathname.startsWith("/api/proxy/")
@@ -332,10 +347,11 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
         await expect(reportsCard.getByText(EMPTY_MESSAGE)).toBeVisible(T);
       }
 
-      // Latest severity 카드 = latest_consistency_report.severity_max ?? 'none'.
+      // Latest severity 카드 = <StatusBadge status={severity_max ?? 'none'}> →
+      // 화면엔 statusLabel 한글 텍스트가 렌더되므로 기대값도 동일 매핑을 통과시킨다.
       const latest = metricsBody.data.latest_consistency_report ?? null;
       const latestSeverityCard = metricsCard(page, "Latest severity");
-      const expectedSeverity = latest ? latest.severity_max : "none";
+      const expectedSeverity = severityLabel(latest ? latest.severity_max : "none");
       await expect(
         latestSeverityCard.getByText(expectedSeverity).first(),
       ).toBeVisible(T);

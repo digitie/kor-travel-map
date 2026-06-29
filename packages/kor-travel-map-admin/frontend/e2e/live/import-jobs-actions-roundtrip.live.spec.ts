@@ -407,11 +407,13 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     expect(after.data.status).toBe("cancelled");
 
     // (3) 성공 Alert(default variant → role=status, line 318-325).
+    // AlertDescription은 status를 statusLabel()로 렌더하므로(line 322) cancelled →
+    // "취소됨". (API body는 영어 "cancelled" 그대로 — 위 (2)에서 단언.)
     const successAlert = page
       .getByRole("status")
       .filter({ hasText: "cancel 요청됨" });
     await expect(successAlert).toBeVisible(T);
-    await expect(successAlert).toContainText("cancelled");
+    await expect(successAlert).toContainText("취소됨");
 
     // (4) backend 재확인 — 상세 GET이 cancelled를 반환.
     await expect

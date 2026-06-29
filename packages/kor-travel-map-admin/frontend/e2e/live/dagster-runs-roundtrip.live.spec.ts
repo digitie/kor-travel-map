@@ -58,6 +58,15 @@ const T = { timeout: UI_TIMEOUT } as const;
 const SUMMARY_PATH = "/v1/ops/dagster/summary";
 const NUX_SEEN_PATH = "/v1/ops/dagster/nux-seen";
 
+// 상단 상태 배지는 dagster-client.tsx에서 statusLabel(data.status)로 한글화된다
+// (status-badge.tsx). summary data.status enum("ok"|"unavailable"|"error")의 한글 매핑.
+// 주의: 이는 UI 렌더 텍스트 단언에만 쓴다 — API/DTO enum은 여전히 영어다.
+const SUMMARY_STATUS_LABEL: Record<string, string> = {
+  ok: "정상",
+  unavailable: "사용불가",
+  error: "오류",
+};
+
 // PART B gating: heavy + hard-to-undo, default-skip. Requires the EXTRA flag
 // E2E_DAGSTER_RUN=1 AND a write gate (E2E_ADMIN_WRITE=1 or E2E_DAGSTER_WRITE=1).
 const EXECUTE_DAGSTER_WRITE =
@@ -331,8 +340,14 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       expect(fetched.body).not.toBeNull();
       const data = (fetched.body as DagsterSummaryResponse).data;
 
-      // 상단 상태 배지 = data.status (Badge 텍스트, exact).
-      await expect(page.getByText(data.status, { exact: true }).first()).toBeVisible(T);
+      // 상단 상태 배지 = statusLabel(data.status) 한글 텍스트 (Badge 텍스트, exact).
+      await expect(
+        page
+          .getByText(SUMMARY_STATUS_LABEL[data.status] ?? data.status, {
+            exact: true,
+          })
+          .first(),
+      ).toBeVisible(T);
 
       // SummaryCard value(text-2xl div) = repository_count / asset_count. 카드로 scope해
       // 설명 문구의 동일 숫자와의 strict-mode 충돌을 피한다.
