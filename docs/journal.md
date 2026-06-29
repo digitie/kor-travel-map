@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — Backup destructive live e2e 실행 경로 분리
+
+n150에서 backup/restore 실제 command는 API 직접 호출로 정상 완료되지만, UI destructive button 응답 대기에서
+Playwright가 멈추는 현상이 있어 live e2e 책임을 분리했다.
+
+- **e2e**: backup/restore plan은 계속 Admin UI 버튼 경로로 확인하고, 실제 destructive execute는 인증된
+  browser context의 `/api/proxy` 요청으로 수행한 뒤 Admin UI 백업 목록에 artifact가 반영되는지 확인한다.
+- **운영 runner**: n150 live runner는 compose 파싱 대신 API/Dagster DSN과 PostgreSQL client image를 사용해
+  backup/restore를 수행하도록 조정했다.
+- **검증**: 직접 `/api/proxy` backup execute와 restore execute가 200 completed를 반환함을 확인했다.
+
 ## 2026-06-29 (codex) — Backup live e2e 상태 배지 assertion 안정화
 
 n150 targeted backup live e2e에서 command 실행 전 기본 옵션 테스트가 `plan only`/`execute enabled`

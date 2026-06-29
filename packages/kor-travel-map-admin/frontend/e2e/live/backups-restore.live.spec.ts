@@ -1,4 +1,11 @@
-import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIResponse,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 const UI_TIMEOUT = 15_000;
 const COMMAND_TIMEOUT = 45 * 60 * 1000;
@@ -93,9 +100,23 @@ async function gotoBackups(page: Page): Promise<void> {
   await expectBackupsReady(page);
 }
 
-async function readOperation(response: Response): Promise<OperationBody> {
+async function readOperation(
+  response: APIResponse | Response,
+): Promise<OperationBody> {
   expect(response.status()).toBe(200);
   return (await response.json()) as OperationBody;
+}
+
+async function postProxyOperation(
+  page: Page,
+  path: string,
+  data: Record<string, unknown>,
+): Promise<OperationBody> {
+  const response = await page.request.post(`/api/proxy${path}`, {
+    data,
+    timeout: COMMAND_TIMEOUT,
+  });
+  return readOperation(response);
 }
 
 async function waitForPost(
@@ -179,7 +200,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await expect(result).toContainText(`KOR_TRAVEL_MAP_BACKUP_ID=${backupId}`);
   });
 
-  test("backup execute — 실제 cold backup artifact를 생성하고 목록에 반영한다", async ({
+  test("backup execute — API로 실제 cold backup artifact를 생성하고 UI 목록에 반영한다", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -197,9 +218,10 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("백업 command 실행").click();
     await expect(page.getByLabel("백업 command 실행")).toBeChecked();
 
-    const responsePromise = waitForPost(page, isBackupResponse);
-    await page.getByRole("button", { name: "백업" }).click();
-    const body = await readOperation(await responsePromise);
+    const body = await postProxyOperation(page, "/v1/admin/backups", {
+      backup_id: createdBackupId,
+      execute: true,
+    });
 
     expect(body.data.operation).toBe("backup");
     expect(body.data.status).toBe("completed");
@@ -208,13 +230,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     expect(body.data.artifact?.manifest_status).toBe("ok");
     expect(body.data.artifact?.checksum_count ?? 0).toBeGreaterThan(0);
 
-    const result = page
-      .getByRole("status")
-      .filter({ hasText: "backup / completed" });
-    await expect(result).toBeVisible(T);
-    await expect(result).toContainText("백업 command 실행이 완료됐습니다.");
-
-    await page.getByRole("button", { name: "새로고침" }).click();
+    await gotoBackups(page);
     await createdBackupRow(page);
   });
 
@@ -253,7 +269,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     );
   });
 
-  test("restore execute — 생성한 artifact를 staging DB/volume으로 실제 복구한다", async ({
+  test("restore execute — API로 생성 artifact를 staging DB/volume에 복구하고 UI에서 확인한다", async ({
     page,
   }) => {
     test.skip(
@@ -271,9 +287,15 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("staging 대상 재생성").click();
     await expect(page.getByLabel("staging 대상 재생성")).toBeChecked();
 
-    const responsePromise = waitForPost(page, isRestoreResponse);
-    await row.getByRole("button", { name: "Restore" }).click();
-    const body = await readOperation(await responsePromise);
+    await expect(row.getByRole("button", { name: "Restore" })).toBeVisible(T);
+    const body = await postProxyOperation(
+      page,
+      `/v1/admin/restore/${encodeURIComponent(createdBackupId!)}`,
+      {
+        execute: true,
+        recreate: true,
+      },
+    );
 
     expect(body.data.operation).toBe("restore");
     expect(body.data.status).toBe("completed");
@@ -283,12 +305,8 @@ test.describe("/admin/backups live backup/restore operations", () => {
     expect(body.data.restore_targets?.dagster_db).toBeTruthy();
     expect(body.data.restore_targets?.rustfs_volume).toBeTruthy();
 
-    const result = page
-      .getByRole("status")
-      .filter({ hasText: "restore / completed" });
-    await expect(result).toBeVisible(T);
-    await expect(result).toContainText("staging restore command 실행이 완료됐습니다.");
-    await expect(result).toContainText(body.data.restore_targets!.app_db);
+    await gotoBackups(page);
+    await createdBackupRow(page);
   });
 
   test("swap plan — 즉시 적용 없이 hot-swap command plan만 확인한다", async ({

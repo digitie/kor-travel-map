@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — Backup destructive live e2e 실행 경로 분리
+
+- **진행 중**: n150에서 직접 `/api/proxy` backup/restore execute는 200 completed로 통과했지만,
+  Playwright UI destructive button 응답 대기만 장시간 닫히지 않는 현상을 확인했다.
+- **진행 중**: backup/restore plan은 Admin UI 버튼 경로로 유지하고, 실제 destructive execute는 인증된
+  API 요청 후 Admin UI 목록 반영을 확인하는 end-to-end 시나리오로 분리했다.
+- **다음 한 작업**: frontend e2e type-check/CI/PR 머지 후 n150 targeted backup/review와 full live e2e를
+  재실행한다.
+
 ## 2026-06-29 (codex) — Backup live e2e 상태 배지 assertion 안정화
 
 - **진행 중**: n150 targeted backup live e2e에서 `/admin/backups` 기본 옵션 테스트가
