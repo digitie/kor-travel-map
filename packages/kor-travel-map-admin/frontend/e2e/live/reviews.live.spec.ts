@@ -355,7 +355,15 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
 
     const rows = page.locator("tbody tr");
     if ((await rows.count()) > 0) {
-      await rows.first().click();
+      const detailResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          response.url().includes("/api/proxy/v1/admin/enrichment-reviews/"),
+      );
+      await rows.first().locator("td").first().click({
+        position: { x: 12, y: 12 },
+      });
+      await expect((await detailResponse).ok()).toBe(true);
       const dialog = page.getByRole("dialog", {
         name: "enrichment review detail",
       });
