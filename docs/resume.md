@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — tasks 백로그 정리
+
+- **완료**: `T-229-buildx`는 사용자 결정에 따라 추가 추적하지 않기로 하고 열린 백로그에서 제거했다.
+- **완료**: `T-AUDIT-0616` F-01 옵션 A는 ADR-058의 옵션 B(re-key 없음, geocoder 필수화) 채택으로
+  필수 진행 백로그에서 제외했다.
+- **완료**: `docs/tasks.md`의 열린 항목은 보류/결정 대기인 `T-101`만 남겼다.
+- **다음 한 작업**: 즉시 실행 백로그 없음. `T-101`은 Materialized View 도입 조건이 생길 때 재검토한다.
+
 ## 2026-06-29 (codex) — n150 live e2e backup runner tracked 전환
 
 - **진행 중**: n150 local `live-e2e-backup-runner`를 repo tracked 파일로 전환해 다음 배포/rsync에서
