@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — n150 live e2e backup runner tracked 전환
+
+- **진행 중**: n150 local `live-e2e-backup-runner`를 repo tracked 파일로 전환해 다음 배포/rsync에서
+  runner가 다시 삭제되지 않게 한다.
+- **완료**: runner는 민감정보 없이 API/Dagster 컨테이너 DSN과 host-network PostgreSQL client,
+  RustFS volume archive 경로를 사용하도록 작성했다.
+- **완료**: `swap.sh`는 자동 hot-swap apply를 거부한다.
+- **검증**: `bash -n live-e2e-backup-runner/{backup,restore,swap}.sh` 통과. tracked runner 내용을
+  n150에 반영한 뒤 targeted `backups-restore.live.spec.ts`는 8 passed / 1 skipped로 통과.
+- **다음 한 작업**: 보안 스캔/CI green 후 PR을 머지하고 n150 untracked runner를 tracked 파일로 치환한다.
+
 ## 2026-06-29 (codex) — n150 full admin live e2e 완료
 
 - **완료**: PR #596은 CI green 후 squash merge됐고, n150 운영 디렉터리는 `main@860a987`로
