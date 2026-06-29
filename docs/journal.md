@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-29 (codex) — n150 live e2e backup runner tracked 전환
+
+n150 full live e2e에서 복구한 `live-e2e-backup-runner`가 untracked 상태라 배포 rsync/정리 시 다시
+사라질 수 있는 문제가 있어, 민감정보 없는 runner 스크립트를 repo에 포함했다.
+
+- **runner**: `backup.sh`는 API/Dagster 컨테이너의 기존 DSN을 읽고 host-network PostgreSQL client
+  컨테이너와 RustFS volume archive를 사용해 backup artifact를 만든다.
+- **runner**: `restore.sh`는 staging DB/volume만 대상으로 복구하며, superuser role은 기존 DB 안에서
+  조회해 extension/schema 선행 생성과 dump restore에 사용한다.
+- **safety**: `swap.sh`는 `apply=1` 자동 hot-swap을 거부하고 plan/검증용 출력만 제공한다.
+- **검증**: runner 3개 shell script는 `bash -n`을 통과했다. tracked runner 내용을 n150에 반영한 뒤
+  targeted `backups-restore.live.spec.ts`는 8 passed / 1 skipped로 통과했다.
+
 ## 2026-06-29 (codex) — n150 full admin live e2e 완료
 
 PR #596을 CI green 후 squash merge하고 n150 운영 디렉터리를 `main@860a987`로 맞춘 뒤, admin
