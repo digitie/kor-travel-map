@@ -13,7 +13,7 @@ import {
   useRunFeatureUpdateRequestNowMutation,
 } from "@/api/updateRequests";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -331,7 +331,7 @@ export function FeatureUpdateRequestsClient() {
                 <AlertTitle>요청 처리 완료</AlertTitle>
                 <AlertDescription>
                   {createRequest.data.data.request_id ?? "dry-run"} ·{" "}
-                  {createRequest.data.data.status}
+                  {statusLabel(createRequest.data.data.status)}
                 </AlertDescription>
               </Alert>
             ) : null}

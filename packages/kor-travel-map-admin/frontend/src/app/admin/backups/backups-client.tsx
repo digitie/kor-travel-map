@@ -19,7 +19,7 @@ import {
   useRestoreSwapMutation,
 } from "@/api/backups";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,7 +122,7 @@ function OperationResult({ result }: { result: BackupOperationResponse | null })
     <Alert>
       <DatabaseIcon data-icon="inline-start" />
       <AlertTitle>
-        {result.data.operation} / {result.data.status}
+        {result.data.operation} / {statusLabel(result.data.status)}
       </AlertTitle>
       <AlertDescription className="flex flex-col gap-2">
         <span>{result.data.message}</span>

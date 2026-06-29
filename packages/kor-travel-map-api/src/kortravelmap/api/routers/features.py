@@ -526,6 +526,16 @@ async def list_public_features_in_bounds(
         list[str] | None,
         Query(description="category code 반복 필터."),
     ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "primary provider(소스) 반복 필터. 개별 feature 응답(non-clustered)"
+                "에만 적용되며, cluster_unit이 해석되면(zoom 유도 포함) 클러스터 "
+                "응답에는 무시된다."
+            ),
+        ),
+    ] = None,
     zoom: Annotated[int | None, Query(ge=0, le=24)] = None,
     cluster_unit: Annotated[
         ClusterUnit | None,
@@ -582,6 +592,7 @@ async def list_public_features_in_bounds(
         max_lat=max_lat,
         kinds=kind,
         categories=category,
+        providers=provider,
         limit=max_items,
         include_geometry=include_geometry,
     )

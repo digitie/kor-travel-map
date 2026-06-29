@@ -43,6 +43,7 @@ export interface FeaturesInBboxParams {
   max_lon: number;
   max_lat: number;
   kinds?: string[];
+  provider?: string[];
   includeGeometry?: boolean;
   page_size?: number;
   zoom?: number;
@@ -169,6 +170,7 @@ async function fetchFeaturesInBbox(
       max_lat: params.max_lat,
       page_size: params.page_size,
       kind: params.kinds,
+      provider: params.provider,
       include_geometry: params.includeGeometry,
       cursor: params.cursor,
     }),
@@ -262,6 +264,7 @@ async function fetchFeaturesInTiles(
         tile.x,
         tile.y,
         params.kinds?.join(",") ?? "",
+        params.provider?.join(",") ?? "",
         params.includeGeometry ? "geometry" : "summary",
         perTilePageSize,
       ],
@@ -355,6 +358,7 @@ export function useFeaturesInBbox(
     "viewport",
     tiles.map((tile) => tile.key).join("|"),
     params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
     params.includeGeometry ? "geometry" : "summary",
     params.page_size ?? 500,
   ] as const;

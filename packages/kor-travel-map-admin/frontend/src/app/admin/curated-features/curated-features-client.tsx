@@ -49,6 +49,7 @@ import {
 } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { statusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -1075,7 +1076,7 @@ export function CuratedFeaturesClient() {
         enableSorting: false,
         cell: ({ row }) => (
           <Badge variant={featureStatusVariant(row.original.curation_status)}>
-            {row.original.curation_status}
+            {statusLabel(row.original.curation_status)}
           </Badge>
         ),
       },
@@ -1613,7 +1614,7 @@ export function CuratedFeaturesClient() {
                         selectedFeature.curation_status,
                       )}
                     >
-                      {selectedFeature.curation_status}
+                      {statusLabel(selectedFeature.curation_status)}
                     </Badge>
                   </div>
                   <div className="flex flex-wrap gap-2">

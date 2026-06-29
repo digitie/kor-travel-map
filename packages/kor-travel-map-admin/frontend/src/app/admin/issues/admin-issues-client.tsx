@@ -25,7 +25,7 @@ import {
   type AdminIssueStatus,
 } from "@/api/issues";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -295,7 +295,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 </summary>
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
                   <dt className="text-muted-foreground">status</dt>
-                  <dd>{feature.status}</dd>
+                  <dd>{statusLabel(feature.status)}</dd>
                   <dt className="text-muted-foreground">coord</dt>
                   <dd className="font-mono">
                     {typeof feature.lon === "number" &&

@@ -1654,6 +1654,8 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
+                /** @description primary provider(소스) 반복 필터. 개별 feature 응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom 유도 포함) 클러스터 응답에는 무시된다. */
+                provider?: string[] | null;
                 zoom?: number | null;
                 /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
                 cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;

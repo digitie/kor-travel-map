@@ -221,6 +221,26 @@ async def test_features_in_bbox_finds_loaded_feature(
     )
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_category}
 
+    # provider(소스) 필터: primary source provider와 일치하면 포함
+    rows_provider = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon - 0.1, min_lat=lat - 0.1,
+        max_lon=lon + 0.1, max_lat=lat + 0.1,
+        providers=[bundle.source_record.provider],
+    )
+    assert bundle.feature.feature_id in {r["feature_id"] for r in rows_provider}
+
+    # provider 필터 mismatch면 제외
+    rows_provider_miss = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon - 0.1, min_lat=lat - 0.1,
+        max_lon=lon + 0.1, max_lat=lat + 0.1,
+        providers=["does-not-match-provider"],
+    )
+    assert bundle.feature.feature_id not in {
+        r["feature_id"] for r in rows_provider_miss
+    }
+
     # feature 밖 bbox면 빈 결과
     rows_far = await feature_repo.features_in_bbox(
         migrated_session,

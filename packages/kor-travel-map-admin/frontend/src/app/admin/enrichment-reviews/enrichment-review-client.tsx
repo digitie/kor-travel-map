@@ -19,7 +19,7 @@ import {
   useEnrichmentReviews,
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -273,7 +273,7 @@ function EnrichmentDetailDialog({
                         detail.target_end_date,
                       )}
                     />
-                    <DetailMetric label="status" value={target.status} />
+                    <DetailMetric label="status" value={statusLabel(target.status)} />
                     <DetailMetric label="lon" value={target.lon?.toFixed(6)} />
                     <DetailMetric label="lat" value={target.lat?.toFixed(6)} />
                   </dl>

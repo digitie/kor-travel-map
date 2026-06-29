@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useAdminCuratedFeature } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { statusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -97,7 +98,9 @@ export function CuratedFeatureDetailClient({
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{item.theme_name}</Badge>
                     <Badge variant="outline">{item.feature_kind}</Badge>
-                    <Badge variant="secondary">{item.curation_status}</Badge>
+                    <Badge variant="secondary">
+                      {statusLabel(item.curation_status)}
+                    </Badge>
                   </div>
                   <h2 className="mt-3 break-keep text-xl font-semibold">
                     {item.display_title ?? item.feature_name}
