@@ -1,7 +1,13 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { CheckIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  EyeIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import {
@@ -590,6 +596,15 @@ export function EnrichmentReviewClient() {
               onClick={(event) => event.stopPropagation()}
             >
               <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => openDetail(item.review_id)}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
+              <Button
                 disabled={decision.isPending}
                 size="sm"
                 type="button"
@@ -624,6 +639,15 @@ export function EnrichmentReviewClient() {
               className="flex flex-wrap items-center gap-1"
               onClick={(event) => event.stopPropagation()}
             >
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => openDetail(item.review_id)}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
               <span className="text-sm text-muted-foreground">완료</span>
             </div>
           );
