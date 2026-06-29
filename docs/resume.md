@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-29 (codex) — #572 Enrichment review 지도 비교 surface 일원화
+
+- **완료**: enrichment review 목록의 `mapReviewId` state, 행별 `지도` 버튼, 별도
+  `enrichment coordinate map` section을 제거하고 상세 다이얼로그 지도만 남겼다.
+- **완료**: mocked/live e2e는 목록 인라인 지도 대신 행 클릭 상세 다이얼로그 지도와 `지도` 버튼 부재를
+  검증하도록 갱신했다.
+- **검증**: `type-check`, `lint`(기존 6 warnings), production `build`, `git diff --check`,
+  Docker Playwright 수동 시나리오(로그인 → enrichment review 목록 mock → 행 클릭 → 상세 다이얼로그 지도)
+  통과.
+- **다음 한 작업**: PR을 올리고 CI green 후 머지해 #572를 닫는다.
+
 ## 2026-06-29 (codex) — #571 Dedup/Enrichment review page-only 계약 정리
 
 - **완료**: `GET /v1/admin/dedup-reviews`와 `GET /v1/admin/enrichment-reviews`의 이중

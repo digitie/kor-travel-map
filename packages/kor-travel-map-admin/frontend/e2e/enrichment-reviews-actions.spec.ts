@@ -599,9 +599,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     expect(last?.searchParams.get("page")).toBe("1");
   });
 
-  test("map button opens one VWorld map with datagokr and visitkorea labels", async ({
-    page,
-  }) => {
+  test("row click opens the single detail-dialog map surface", async ({ page }) => {
     const review = makeReview({
       review_id: "enrich-map-1",
       target_name: "Datagokr Map Festival",
@@ -617,15 +615,21 @@ test.describe("admin/enrichment-reviews actions", () => {
     await page.goto("/admin/enrichment-reviews");
     const row = page.getByRole("row", { name: /Datagokr Map Festival/ });
     await expect(row).toBeVisible();
+    await expect(row.getByRole("button", { name: "지도" })).toHaveCount(0);
 
-    await row.getByRole("button", { name: "지도" }).click();
+    await row.click();
 
-    const map = page.getByLabel("enrichment coordinate map");
-    await expect(map).toBeVisible();
-    await expect(map.getByText("Datagokr Map Festival")).toBeVisible();
-    await expect(map.getByText("Visitkorea Map Festival")).toBeVisible();
-    await expect(map.getByText(/14\.2m/)).toBeVisible();
-    await expect(page.getByTestId("enrichment-review-map")).toBeVisible();
+    const dialog = page.getByRole("dialog", {
+      name: "enrichment review detail",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "Datagokr Map Festival" }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "Visitkorea Map Festival" }),
+    ).toBeVisible();
+    await expect(page.getByTestId("enrichment-detail-map")).toBeVisible();
   });
 
   test("compare cells render 1차 datagokr target vs 2차 visitkorea source", async ({
