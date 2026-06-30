@@ -323,6 +323,15 @@ class KorTravelMapSettings(BaseSettings):
             "부재 시 fetcher가 명확히 실패. env ``KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH``."
         ),
     )
+    mois_source_sync_ttl_hours: int = Field(
+        default=24,
+        description=(
+            "Phase B read 전 MOIS 소스 DB freshness 게이트 TTL(시간). 소스 DB가 이 "
+            "시간 내 sync됐으면 read 경로에서 전국 Phase A sync를 생략한다(#617 리뷰 — "
+            "RUNNING 센서를 통한 무조건 전국 재sync 방지). env "
+            "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
+        ),
+    )
     knps_point_dataset_key: str = Field(
         default="knps_visitor_centers",
         description=(

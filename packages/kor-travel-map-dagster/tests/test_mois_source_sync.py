@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
 from types import ModuleType
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster.mois_source_sync import (
     MoisSourceSyncSummary,
+    ensure_mois_source_db_fresh,
     mois_localdata_source_sync_op,
     sync_mois_source_db,
 )
@@ -230,3 +232,85 @@ def test_op_runs_sync_and_emits_metadata(
     assert metadata["service_slug_count"] == len(PROMOTED_SERVICE_SLUGS)
     assert metadata["db_path"] == str(db_file)
     assert all(call["commit"] is True for call in calls["sync_calls"])
+
+
+# -- ensure_mois_source_db_fresh: freshness 게이트(#617 리뷰) --------------------
+
+_SQLITE_HEADER = b"SQLite format 3\x00"
+
+
+def _stub_sync(monkeypatch: pytest.MonkeyPatch, *, creates: Any = None) -> dict[str, int]:
+    """``sync_mois_source_db``를 호출 카운터 stub으로 치환한다(게이트만 검증)."""
+    calls = {"n": 0}
+
+    def _spy(_settings: Any, **_kwargs: Any) -> MoisSourceSyncSummary:
+        calls["n"] += 1
+        if creates is not None:
+            creates.write_bytes(_SQLITE_HEADER)
+        return MoisSourceSyncSummary(
+            db_path="x",
+            service_slugs=("a",),
+            sync_kind="localdata_full",
+            scanned_count=0,
+            upserted_count=0,
+            open_count=0,
+            closed_count=0,
+            unknown_status_count=0,
+        )
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.mois_source_sync.sync_mois_source_db", _spy
+    )
+    return calls
+
+
+def _write_marker(db_file: Any, *, hours_ago: float = 0.0) -> None:
+    stamp = datetime.now(UTC) - timedelta(hours=hours_ago)
+    (db_file.parent / (db_file.name + ".synced")).write_text(
+        stamp.isoformat(), encoding="utf-8"
+    )
+
+
+def test_ensure_skips_sync_when_db_fresh(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    _write_marker(db_file, hours_ago=1.0)
+    settings = KorTravelMapSettings(
+        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
+    )
+    calls = _stub_sync(monkeypatch)
+    assert ensure_mois_source_db_fresh(settings) is None
+    assert calls["n"] == 0  # fresh → Phase A sync 생략
+
+
+def test_ensure_syncs_when_missing_then_skips_within_ttl(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    settings = KorTravelMapSettings(
+        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
+    )
+    calls = _stub_sync(monkeypatch, creates=db_file)
+    # 1) DB 없음 → sync 1회 + 마커 기록
+    assert ensure_mois_source_db_fresh(settings) is not None
+    assert calls["n"] == 1
+    assert (db_file.parent / (db_file.name + ".synced")).exists()
+    # 2) TTL 이내 재호출 → fresh → 재sync 없음(센서가 매번 큐잉해도 전국 sync 안 함)
+    assert ensure_mois_source_db_fresh(settings) is None
+    assert calls["n"] == 1
+
+
+def test_ensure_syncs_when_marker_stale(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    _write_marker(db_file, hours_ago=48.0)
+    settings = KorTravelMapSettings(
+        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
+    )
+    calls = _stub_sync(monkeypatch)
+    assert ensure_mois_source_db_fresh(settings) is not None
+    assert calls["n"] == 1  # 마커 stale → 재sync

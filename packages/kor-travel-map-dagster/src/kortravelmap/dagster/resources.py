@@ -28,7 +28,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
-from .mois_source_sync import sync_mois_source_db
+from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     fetch_airkorea_air_quality,
     fetch_airkorea_stations,
@@ -587,8 +587,12 @@ _MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
 def _sync_then_fetch_mois_license_records(
     settings: KorTravelMapSettings,
 ) -> Iterable[Any]:
-    """MOIS Phase A source DB sync를 먼저 실행한 뒤 Phase B record를 읽는다."""
-    sync_mois_source_db(settings)
+    """MOIS Phase A source DB가 stale/missing일 때만 sync한 뒤 Phase B record를 읽는다.
+
+    #617 리뷰: 매 read마다 전국 Phase A sync를 돌리지 않고 freshness 게이트를 통과한
+    경우에만 sync한다(``ensure_mois_source_db_fresh``).
+    """
+    ensure_mois_source_db_fresh(settings)
     return fetch_mois_license_records(settings)
 
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = (

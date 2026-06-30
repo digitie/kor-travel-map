@@ -246,14 +246,15 @@ def test_mois_license_records_resource_syncs_source_db_before_fetch(
     calls: list[tuple[str, str | None]] = []
     sentinel = [object()]
 
-    def _fake_sync(settings: KorTravelMapSettings) -> None:
+    def _fake_sync(settings: KorTravelMapSettings, **_kwargs: object) -> None:
+        # freshness 게이트(ensure_mois_source_db_fresh)가 read 전에 호출됨을 검증.
         calls.append(("sync", settings.mois_source_db_path))
 
     def _fake_fetch(settings: KorTravelMapSettings) -> list[object]:
         calls.append(("fetch", settings.mois_source_db_path))
         return sentinel
 
-    monkeypatch.setattr(resources, "sync_mois_source_db", _fake_sync)
+    monkeypatch.setattr(resources, "ensure_mois_source_db_fresh", _fake_sync)
     monkeypatch.setattr(resources, "fetch_mois_license_records", _fake_fetch)
     resource_def = resources.PROVIDER_RECORD_RESOURCE_DEFINITIONS[
         "mois_license_records"

@@ -660,8 +660,24 @@ function buildCreatePayload(
   };
 }
 
+// category/marker_icon/marker_color는 initialForm 기본값이 비어있지 않아 optionalString이
+// 항상 통과 → prefill 안 된 update에서 기존 feature 값을 기본값으로 덮어쓰는 사고가 났다(#613).
+// 로드된 feature(baseline)와 다를 때만 PATCH에 포함하고, baseline이 없으면 생략한다.
+function patchDefaultedField(
+  formValue: string,
+  baselineValue: string | null | undefined,
+  baseline: AdminFeatureDetailData["feature"] | null,
+): string | undefined {
+  const trimmed = formValue.trim();
+  if (trimmed.length === 0) return undefined;
+  if (!baseline) return undefined;
+  if (baselineValue != null && trimmed === baselineValue) return undefined;
+  return trimmed;
+}
+
 function buildPatchPayload(
   form: FeatureChangeFormState,
+  baseline: AdminFeatureDetailData["feature"] | null,
 ): AdminFeaturePatchRequest {
   if (form.featureId.trim().length === 0) {
     throw new Error("update에는 feature_id가 필요합니다.");
@@ -674,14 +690,14 @@ function buildPatchPayload(
     reason: form.reason.trim(),
     operator: optionalString(form.operator),
     name: optionalString(form.name),
-    category: optionalString(form.category),
+    category: patchDefaultedField(form.category, baseline?.category, baseline),
     coord,
     coord_precision_digits: parseOptionalInteger(
       "coord_precision_digits",
       form.coordPrecisionDigits,
     ),
-    marker_icon: optionalString(form.markerIcon),
-    marker_color: optionalString(form.markerColor),
+    marker_icon: patchDefaultedField(form.markerIcon, baseline?.marker_icon, baseline),
+    marker_color: patchDefaultedField(form.markerColor, baseline?.marker_color, baseline),
     sido_code: optionalString(form.sidoCode),
     sigungu_code: optionalString(form.sigunguCode),
     legal_dong_code: optionalString(form.legalDongCode),
@@ -1076,7 +1092,18 @@ export function FeatureChangeRequestsClient({
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
   const categories = useCategories({ active_only: false, include_counts: false });
-  const prefillFeature = useAdminFeatureDetail(prefillFeatureId);
+  // update 대상 feature는 URL prefill뿐 아니라 폼의 Feature ID 입력에서도 조회한다 —
+  // 폼이 실제 feature 값으로 채워져야 기본값 덮어쓰기(#613)를 막을 수 있다.
+  const detailLookupId =
+    form.action === "update"
+      ? form.featureId.trim() || prefillFeatureId
+      : prefillFeatureId;
+  const prefillFeature = useAdminFeatureDetail(detailLookupId);
+  const loadedUpdateFeature =
+    form.action === "update" &&
+    prefillFeature.data?.data.feature?.feature_id === form.featureId.trim()
+      ? prefillFeature.data.data.feature
+      : null;
 
   const params = useMemo(
     () => ({
@@ -1158,8 +1185,14 @@ export function FeatureChangeRequestsClient({
 
   useEffect(() => {
     const feature = prefillFeature.data?.data.feature;
-    if (!prefillFeatureId || !feature) return;
-    const key = `${prefillFeatureId}:${feature.updated_at}`;
+    if (!feature) return;
+    // URL prefill 또는 update에서 직접 입력한 Feature ID의 feature가 로드되면 폼을 그 값으로 채운다.
+    const targetId =
+      form.action === "update"
+        ? form.featureId.trim() || prefillFeatureId
+        : prefillFeatureId;
+    if (!targetId || feature.feature_id !== targetId) return;
+    const key = `${feature.feature_id}:${feature.updated_at}`;
     if (appliedFeaturePrefillRef.current === key) return;
     setForm((current) => ({
       ...current,
@@ -1167,7 +1200,7 @@ export function FeatureChangeRequestsClient({
       reason: current.reason || "admin feature detail edit",
     }));
     appliedFeaturePrefillRef.current = key;
-  }, [prefillFeature.data?.data.feature, prefillFeatureId]);
+  }, [prefillFeature.data?.data.feature, prefillFeatureId, form.action, form.featureId]);
 
   useEffect(() => {
     const raw = form.sigunguCode.trim();
@@ -1210,7 +1243,10 @@ export function FeatureChangeRequestsClient({
     event.preventDefault();
     setFormError(null);
     try {
-      validateTextFields(form, categoryItems);
+      // delete는 feature_id + reason만 필요 — marker/category/coord 카탈로그 검증은 건너뛴다(#613).
+      if (form.action !== "delete") {
+        validateTextFields(form, categoryItems);
+      }
       if (form.action === "add") {
         const response = await createFeature.mutateAsync(buildCreatePayload(form));
         setSelectedRequest(response.data.request);
@@ -1218,7 +1254,7 @@ export function FeatureChangeRequestsClient({
         const featureId = form.featureId.trim();
         const response = await patchFeature.mutateAsync({
           featureId,
-          body: buildPatchPayload(form),
+          body: buildPatchPayload(form, loadedUpdateFeature),
         });
         setSelectedRequest(response.data.request);
       } else {
@@ -1485,7 +1521,14 @@ export function FeatureChangeRequestsClient({
                   <RotateCcwIcon data-icon="inline-start" />
                   초기화
                 </Button>
-                <Button disabled={anyMutationPending} size="sm" type="submit">
+                <Button
+                  disabled={
+                    anyMutationPending ||
+                    (form.action === "update" && prefillFeature.isFetching)
+                  }
+                  size="sm"
+                  type="submit"
+                >
                   <PlusIcon data-icon="inline-start" />
                   요청 생성
                 </Button>

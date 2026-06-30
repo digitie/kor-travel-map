@@ -7,6 +7,7 @@ API의 update request는 queue row만 만들고, 실제 provider refresh는 Dags
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
@@ -117,7 +118,7 @@ from .kma_weather import (
     run_feature_weather_kma_ultra_short_nowcast,
 )
 from .mcst_features import run_feature_place_mcst_culture
-from .mois_source_sync import sync_mois_source_db
+from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     ProviderCredentialMissing,
     fetch_airkorea_air_quality,
@@ -245,7 +246,9 @@ class FeatureUpdateAssetRunner:
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
         settings = self._settings_factory()
-        extra = spec.resources(settings, scope)
+        # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를 포함할 수
+        # 있으므로 이벤트 루프를 막지 않게 스레드로 보낸다(#617 리뷰).
+        extra = await asyncio.to_thread(spec.resources, settings, scope)
         context = _DirectAssetContext(
             resources={**self._common_resources, **dict(extra.values)},
             log=self._log,
@@ -396,7 +399,7 @@ def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    sync_mois_source_db(settings)
+    ensure_mois_source_db_fresh(settings)
     return RunnerResources(
         {
             "mois_license_records": fetch_mois_license_records(settings),

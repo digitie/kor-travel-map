@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -315,7 +315,7 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_price_opinet_stations_daily_schedule": "18 18 * * *",
     "feature_place_krex_rest_areas_monthly_schedule": "20 2 1 * *",
     "feature_price_krex_rest_areas_twice_daily_schedule": "28 6,18 * * *",
-    "feature_notice_krex_traffic_notices_monthly_schedule": "7 3 1 * *",
+    "feature_notice_krex_traffic_notices_ten_minute_schedule": "*/10 * * * *",
     "feature_weather_krex_rest_areas_hourly_schedule": "35 * * * *",
     "feature_place_krheritage_items_monthly_schedule": "15 2 2 * *",
     "feature_event_krheritage_events_monthly_schedule": "25 3 2 * *",
@@ -344,6 +344,19 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_notice_kma_weather_alerts_hourly_schedule": "15 * * * *",
     "feature_place_mcst_culture_monthly_schedule": "30 4 3 * *",
 }
+
+# 즉시 실행(run-now)이 schedule의 run_config를 복제하지 못하는 스케줄(#613). 이들은 동일
+# job을 run_config(dataset_key)로만 구분하므로, 빈 runConfigData로 즉시 실행하면 기본
+# dataset만 적재된다 → 잘못된 dataset을 조용히 적재하지 않도록 run-now를 거부한다.
+# (스케줄 tick으로는 정상 실행. 추후 GraphQL futureTicks runConfig 복제로 대체 가능.)
+_RUN_CONFIG_REQUIRED_SCHEDULES: frozenset[str] = frozenset(
+    {
+        "feature_place_datagokr_seoul_bookstores_monthly_schedule",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
+        "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
+        "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
+    }
+)
 
 _FILE_DOWNLOAD_SCHEDULE_HINTS = {
     "datagokr_filedata",
@@ -800,6 +813,11 @@ def _parse_ticks(raw_ticks: object) -> list[DagsterInstigationTick]:
     return ticks
 
 
+# 운영자 cron override 분 필드 ``*/N`` 최소 step(분). 정당한 10분 주기(KREX 교통공지)는
+# 허용하되 그보다 잦은 고빈도는 막는다(#613 가드 + #617 KREX 10분 스케줄 reconcile).
+_MIN_CRON_MINUTE_STEP: Final[int] = 10
+
+
 def _cron_part_is_valid(part: str, *, min_value: int, max_value: int) -> bool:
     if part == "*":
         return True
@@ -845,6 +863,21 @@ def _validate_cron_schedule(cron_schedule: str) -> str:
     for part, (min_value, max_value) in zip(parts, ranges, strict=True):
         if not _cron_part_is_valid(part, min_value=min_value, max_value=max_value):
             raise ValueError(f"cron 필드 범위가 올바르지 않습니다: {part}")
+    # 운영자 override 최소 주기 가드(#613): 분 필드는 0~59 단일 고정값(시간당 1회 이하)
+    # 또는 ``*/N``(N>=10, 즉 10분 이상 주기)만 허용한다 → 월간·대용량 작업을 매분/매5분으로
+    # escalate하는 runaway는 막되, 정당한 10분 주기(예: 고속도로 교통공지 notice, #617)는
+    # 허용한다. ``*``·범위·목록·``*/N``(N<10)은 거부.
+    minute_field = parts[0]
+    minute_ok = (minute_field.isdigit() and 0 <= int(minute_field) <= 59) or (
+        minute_field.startswith("*/")
+        and minute_field[2:].isdigit()
+        and int(minute_field[2:]) >= _MIN_CRON_MINUTE_STEP
+    )
+    if not minute_ok:
+        raise ValueError(
+            f"분 필드는 0~59 단일 값 또는 '*/N'(N>={_MIN_CRON_MINUTE_STEP})이어야 합니다 "
+            "(과도한 고빈도 방지). '*', 범위·목록, '*/N'(N<10)은 허용하지 않습니다."
+        )
     return cron
 
 
@@ -2119,6 +2152,20 @@ async def run_dagster_schedule_now(
                 schedule_name=schedule_name,
                 command="run",
                 error=" / ".join(errors) if errors else "schedule job 이름이 없습니다.",
+            ),
+            started_at=started_at,
+        )
+    if schedule_name in _RUN_CONFIG_REQUIRED_SCHEDULES:
+        return _schedule_command_response(
+            _command_error_data(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                schedule_name=schedule_name,
+                command="run",
+                error=(
+                    "이 스케줄은 run_config(dataset_key)로 동작해 즉시 실행이 잘못된 "
+                    "dataset을 적재할 수 있어 지원하지 않습니다 — 스케줄 tick으로 실행됩니다."
+                ),
             ),
             started_at=started_at,
         )
