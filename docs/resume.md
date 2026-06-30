@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-30 (codex) — PR #615 보존 브랜치 정리와 복기 문서화
+
+- **완료**: n150 UI image inspect 시각은 UTC임을 runbook에 명시했다. 예:
+  `2026-06-30T10:49:30Z`는 `2026-06-30 19:49:30 KST`이며, 이 시각 이후 UI 변경은 별도 rebuild/recreate
+  전까지 반영되지 않는다.
+- **완료**: UI 최신 여부 확인 절차를 image created/started 시각, 실제 `.next` bundle marker,
+  로그인된 public DOM marker, route/cache-buster 확인으로 분리했다.
+- **완료**: git worktree metadata가 깨졌을 때 바로 `git add -A`하지 말고 repair → status/stat/name-only
+  확인 → 관련 파일 stage 또는 draft 보존 PR로 전환하는 절차를 문서화했다.
+- **완료**: PR #615의 기존 보존 스냅샷은 현재 `main` 대비 회귀가 있어 로컬
+  `backup/pr615-before-cleanup-20260630`에 남기고, PR head는 현재 `main` 위에 문서 보강만 남기도록
+  재구성했다.
+- **다음 한 작업**: PR #615의 CI와 리뷰를 확인한다. 머지는 별도 지시 전까지 진행하지 않는다.
+
 ## 2026-06-30 (codex) — Feature 변경/작업 자동화 운영 UI n150 배포
 
 - **완료**: `/admin/dagster` 작업 자동화 화면에서 스케줄 cron 수정, 기본값 복귀, 시작/중지, 즉시 실행

@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-30 (codex) — PR #615 보존 브랜치 정리와 n150 UI 복기
+
+n150 UI가 이전 화면처럼 보인다는 보고를 받은 뒤, 배포 image 시각 해석과 git worktree metadata
+깨짐을 함께 복기하고 PR #615를 현재 `main` 기준 문서 보강 PR로 다시 정리했다.
+
+- **시각 해석**: Docker inspect의 `image_created=2026-06-30T10:49:30Z`는 UTC 기준이므로
+  한국시간으로는 `2026-06-30 19:49:30 KST`다. 따라서 “오전 버전”이라는 표현은 시각대 해석만으로는
+  맞지 않지만, 그 이후 UI 변경은 rebuild/recreate 전까지 반영되지 않는다는 점을 명시했다.
+- **배포 검증 기준**: n150 UI 최신 여부는 image 생성 시각만으로 판단하지 않고, 컨테이너 내부
+  `/app/packages/kor-travel-map-admin/frontend/.next` marker와 로그인된 public DOM marker를 함께
+  확인하도록 정리했다. 비로그인 `/login` HTML이나 잘못된 `/app/.next` 경로 grep은 근거로 쓰지 않는다.
+- **git 복구 사고**: `.git`이 사라진 worktree metadata를 가리켜 `git status`가 실패했고, 긴급 보존을
+  위해 `codex/admin-ui-ops-review-polish-save` branch와 draft PR #615를 먼저 만들었다. 리뷰 결과
+  기존 보존 스냅샷은 현재 `main` 대비 회귀가 있어 로컬 `backup/pr615-before-cleanup-20260630`에
+  남기고, PR head는 현재 `main` 위에 문서 보강만 다시 얹도록 정리했다.
+- **재발방지 문서**: `docs/runbooks/agent-failure-patterns.md`에 B5(worktree metadata 복구 중 diff 폭증)
+  와 F11(n150 UI image 시각/번들 검증 오판)을 추가했다. emergency 보존 PR도 push 전 redaction guard,
+  민감값 패턴 검사, prod-specific literal scan을 통과해야 한다.
+
 ## 2026-06-30 (codex) — Feature 변경/작업 자동화 운영 UI n150 배포
 
 Feature 변경 작성·검수 분리와 작업 자동화 스케줄 제어 UI를 n150에 배포하고 실제 live UI e2e로
