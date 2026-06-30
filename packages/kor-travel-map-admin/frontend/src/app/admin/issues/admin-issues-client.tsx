@@ -37,6 +37,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { KOREA_COORD_MESSAGE, isKoreaCoordinate } from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 
 const ISSUE_STATUSES: Array<AdminIssueStatus | "all"> = [
@@ -146,7 +147,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       try {
         address = JSON.parse(manualAddress) as Record<string, unknown>;
       } catch {
-        failManualOverride("address", "address JSON을 파싱할 수 없습니다.");
+        failManualOverride("address", "주소 보정값을 JSON 형식으로 입력하세요.");
         return;
       }
     }
@@ -156,15 +157,19 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       (lon !== undefined && !Number.isFinite(lon)) ||
       (lat !== undefined && !Number.isFinite(lat))
     ) {
-      failManualOverride("lon", "lon/lat은 숫자여야 합니다.");
+      failManualOverride("lon", "좌표는 숫자로 입력하세요.");
       return;
     }
     if ((lon === undefined) !== (lat === undefined)) {
-      failManualOverride("lon", "coord override는 lon/lat을 함께 입력해야 합니다.");
+      failManualOverride("lon", "경도와 위도는 함께 입력하세요.");
+      return;
+    }
+    if (lon !== undefined && lat !== undefined && !isKoreaCoordinate(lon, lat)) {
+      failManualOverride("lon", KOREA_COORD_MESSAGE);
       return;
     }
     if (address === undefined && lon === undefined) {
-      failManualOverride("address", "address JSON 또는 lon/lat 중 하나는 필요합니다.");
+      failManualOverride("address", "주소 또는 좌표 중 하나를 입력하세요.");
       return;
     }
     runAction("manual_override", {
@@ -182,7 +187,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       <div className="rounded-lg border bg-background">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">Issue detail</div>
+            <div className="font-medium">이슈 상세</div>
             <div className="break-all font-mono text-xs text-muted-foreground">
               {issueId}
             </div>
@@ -237,7 +242,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 onClick={() => runAction("resolve")}
               >
                 <CheckIcon data-icon="inline-start" />
-                resolve
+                  해결
               </Button>
               <Button
                 disabled={action.isPending}
@@ -247,7 +252,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 onClick={() => runAction("ignore")}
               >
                 <XIcon data-icon="inline-start" />
-                ignore
+                무시
               </Button>
               <Button
                 disabled={action.isPending}
@@ -257,7 +262,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 onClick={() => runAction("reopen")}
               >
                 <RotateCcwIcon data-icon="inline-start" />
-                reopen
+                다시 열기
               </Button>
               <Button
                 disabled={action.isPending}
@@ -266,7 +271,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 variant="ghost"
                 onClick={() => runAction("retry_geocode")}
               >
-                retry geocode
+                주소로 좌표 재검색
               </Button>
               <Button
                 disabled={action.isPending}
@@ -275,7 +280,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 variant="ghost"
                 onClick={() => runAction("retry_reverse_geocode")}
               >
-                retry reverse
+                좌표로 주소 재검색
               </Button>
               <Button
                 disabled={action.isPending}
@@ -284,14 +289,14 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 variant="ghost"
                 onClick={() => runAction("apply_kor_travel_geo_address")}
               >
-                apply kraddr
+                추천 주소 적용
               </Button>
             </div>
 
             {feature ? (
               <details open>
                 <summary className="cursor-pointer text-sm font-medium">
-                  feature snapshot
+                  Feature 스냅샷
                 </summary>
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
                   <dt className="text-muted-foreground">status</dt>
@@ -323,7 +328,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       <div className="rounded-lg border bg-background p-4">
         <div className="mb-3 flex items-center gap-2 font-medium">
           <WrenchIcon className="size-4 text-muted-foreground" />
-          Manual override
+          수동 보정
         </div>
         {action.isError ? (
           <Alert className="mb-3" variant="destructive">
@@ -335,8 +340,8 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <FormTextArea
             className="font-mono"
             error={manualErrorField === "address" ? manualError : undefined}
-            hint="수동 보정 시 도로명/지번 주소를 JSON으로 입력합니다."
-            label="address JSON"
+            hint="도로명/지번 주소를 JSON으로 입력합니다."
+            label="주소 보정값"
             placeholder='{"road": "...", "jibun": "..."}'
             ref={manualAddressRef}
             value={manualAddress}
@@ -345,24 +350,18 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <FormField
               error={manualErrorField === "lon" ? manualError : undefined}
-              hint="수동으로 지정할 경도입니다."
-              label="manual lon"
-              placeholder="lon"
+              label="경도"
               ref={manualLonRef}
               value={manualLon}
               onChange={(event) => setManualLon(event.target.value)}
             />
             <FormField
-              hint="수동으로 지정할 위도입니다."
-              label="manual lat"
-              placeholder="lat"
+              label="위도"
               value={manualLat}
               onChange={(event) => setManualLat(event.target.value)}
             />
             <FormField
-              hint="수동 보정 사유를 기록합니다."
-              label="manual reason"
-              placeholder="reason"
+              label="보정 사유"
               value={manualReason}
               onChange={(event) => setManualReason(event.target.value)}
             />
@@ -372,7 +371,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
             type="button"
             onClick={submitManualOverride}
           >
-            manual override
+            수동 보정 적용
           </Button>
         </div>
       </div>

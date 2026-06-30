@@ -182,11 +182,23 @@ def test_dagster_summary_parses_graphql_response(
             "group_name": "features_event",
             "asset_count": 1,
             "assets": ["feature_event_datagokr_cultural_festivals"],
+            "asset_items": [
+                {
+                    "name": "feature_event_datagokr_cultural_festivals",
+                    "display_name": "전국 문화축제",
+                }
+            ],
         },
         {
             "group_name": "features_place",
             "asset_count": 1,
             "assets": ["feature_place_mois_licenses"],
+            "asset_items": [
+                    {
+                        "name": "feature_place_mois_licenses",
+                        "display_name": "인허가 장소",
+                    }
+            ],
         },
     ]
     assert data["recent_runs"][0]["run_id"] == "run-1"

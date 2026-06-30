@@ -25,6 +25,7 @@ from dagster import (
     op,
 )
 
+from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
 if TYPE_CHECKING:
@@ -259,7 +260,10 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
     ScheduleDefinition(
         name="consistency_dedup_refresh_daily_schedule",
         job=consistency_dedup_refresh_job,
-        cron_schedule="45 5 * * *",
+        cron_schedule=cron_for_schedule(
+            "consistency_dedup_refresh_daily_schedule",
+            "45 5 * * *",
+        ),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,

@@ -1,13 +1,13 @@
 /**
- * Dagster 운영 요약 API hooks.
+ * 작업 자동화 요약 API hooks.
  *
  * `/v1/ops/dagster/summary`는 backend가 Dagster GraphQL을 읽어 admin UI용 DTO로
  * 정규화한 응답이다. iframe embed에는 public Dagster URL을 직접 사용한다.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postJson } from "./client";
+import { getJson, patchJson, pathWithQuery, postJson } from "./client";
 import { publicUrlEnv } from "./env";
 import type { components } from "./types";
 
@@ -30,6 +30,8 @@ export type DagsterRunSummary = DagsterSchemas["DagsterRunSummary"];
 export type DagsterRunEvent = DagsterSchemas["DagsterRunEvent"];
 export type DagsterRunDetailResponse =
   DagsterSchemas["DagsterRunDetailResponse"];
+export type DagsterScheduleCommandResponse =
+  DagsterSchemas["DagsterScheduleCommandResponse"];
 export type DagsterSummaryResponse = DagsterSchemas["DagsterSummaryResponse"];
 export type DagsterNuxSeenResponse = DagsterSchemas["DagsterNuxSeenResponse"];
 
@@ -45,6 +47,27 @@ function fetchDagsterSummary(
 
 function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
   return postJson<DagsterNuxSeenResponse>("/v1/ops/dagster/nux-seen");
+}
+
+function patchDagsterSchedule(
+  scheduleName: string,
+  body: { cron_schedule: string; operator?: string; reason?: string },
+): Promise<DagsterScheduleCommandResponse> {
+  return patchJson<DagsterScheduleCommandResponse>(
+    `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}`,
+    body,
+  );
+}
+
+function postDagsterScheduleCommand(
+  scheduleName: string,
+  command: "default" | "reset" | "run" | "start" | "stop",
+  body: { operator?: string; reason?: string } = {},
+): Promise<DagsterScheduleCommandResponse> {
+  return postJson<DagsterScheduleCommandResponse>(
+    `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}/${command}`,
+    body,
+  );
 }
 
 function fetchDagsterRunDetail(
@@ -77,6 +100,47 @@ export function useDagsterSummary(runLimit = 10) {
 export function useMarkDagsterNuxSeen() {
   return useMutation<DagsterNuxSeenResponse, Error>({
     mutationFn: markDagsterNuxSeen,
+  });
+}
+
+export function usePatchDagsterSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    DagsterScheduleCommandResponse,
+    Error,
+    { cronSchedule: string; reason?: string; scheduleName: string }
+  >({
+    mutationFn: ({ cronSchedule, reason, scheduleName }) =>
+      patchDagsterSchedule(scheduleName, {
+        cron_schedule: cronSchedule,
+        operator: "admin-ui",
+        reason,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
+    },
+  });
+}
+
+export function useDagsterScheduleCommand() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    DagsterScheduleCommandResponse,
+    Error,
+    {
+      command: "default" | "reset" | "run" | "start" | "stop";
+      reason?: string;
+      scheduleName: string;
+    }
+  >({
+    mutationFn: ({ command, reason, scheduleName }) =>
+      postDagsterScheduleCommand(scheduleName, command, {
+        operator: "admin-ui",
+        reason,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
+    },
   });
 }
 

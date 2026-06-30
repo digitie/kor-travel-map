@@ -45,6 +45,8 @@ class _Client:
     executed: list[dict[str, Any]] = field(default_factory=list)
     failed: list[dict[str, Any]] = field(default_factory=list)
     peek_limits: list[int] = field(default_factory=list)
+    claim_limits: list[int] = field(default_factory=list)
+    started: list[dict[str, Any]] = field(default_factory=list)
     fail_raises: Exception | None = None
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
@@ -54,6 +56,16 @@ class _Client:
         self, *, limit: int = 10
     ) -> tuple[FeatureUpdateRequest, ...]:
         self.peek_limits.append(limit)
+        if self.requests is not None:
+            return self.requests[:limit]
+        if self.request is None:
+            return ()
+        return (self.request,)
+
+    async def claim_update_requests(
+        self, *, limit: int = 10
+    ) -> tuple[FeatureUpdateRequest, ...]:
+        self.claim_limits.append(limit)
         if self.requests is not None:
             return self.requests[:limit]
         if self.request is None:
@@ -77,6 +89,17 @@ class _Client:
             }
         )
         return self.result
+
+    async def mark_update_request_started(
+        self,
+        request_id: str,
+        *,
+        dagster_run_id: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        self.started.append(
+            {"request_id": request_id, "dagster_run_id": dagster_run_id}
+        )
+        return self.request
 
     async def fail_update_request(
         self,
@@ -187,7 +210,7 @@ def test_queue_sensor_skips_empty_queue() -> None:
 
     assert isinstance(result, SkipReason)
     assert result.skip_message == "queued feature update request 없음"
-    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
+    assert client.claim_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
 
 
 def test_queue_sensor_emits_request_run_config_and_tags() -> None:
@@ -198,7 +221,7 @@ def test_queue_sensor_emits_request_run_config_and_tags() -> None:
     result = feature_update_request_queue_sensor(context)
 
     assert isinstance(result, RunRequest)
-    assert result.run_key == f"feature-update:{request.request_id}"
+    assert result.run_key == f"feature-update:{request.request_id}:{_NOW.isoformat()}"
     assert result.run_config == {
         "ops": {
             "execute_feature_update_request": {
@@ -208,7 +231,7 @@ def test_queue_sensor_emits_request_run_config_and_tags() -> None:
     }
     assert result.tags[FEATURE_UPDATE_REQUEST_ID_TAG] == request.request_id
     assert result.tags["kor_travel_map.feature_update_run_mode"] == "now"
-    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
+    assert client.claim_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
 
 
 def test_queue_sensor_emits_batch_run_requests() -> None:
@@ -221,8 +244,8 @@ def test_queue_sensor_emits_batch_run_requests() -> None:
 
     assert isinstance(result, list)
     assert [item.run_key for item in result] == [
-        f"feature-update:{first.request_id}",
-        f"feature-update:{second.request_id}",
+        f"feature-update:{first.request_id}:{_NOW.isoformat()}",
+        f"feature-update:{second.request_id}:{_NOW.isoformat()}",
     ]
     assert [
         item.run_config["ops"]["execute_feature_update_request"]["config"][
@@ -230,7 +253,7 @@ def test_queue_sensor_emits_batch_run_requests() -> None:
         ]
         for item in result
     ] == [first.request_id, second.request_id]
-    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
+    assert client.claim_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
 
 
 def test_worker_job_executes_configured_request() -> None:
@@ -250,6 +273,9 @@ def test_worker_job_executes_configured_request() -> None:
     )
 
     assert result.success
+    assert client.started == [
+        {"request_id": request.request_id, "dagster_run_id": result.run_id}
+    ]
     assert client.executed == [
         {
             "request_id": request.request_id,

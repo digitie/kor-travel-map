@@ -217,7 +217,7 @@ export function HomePageClient() {
           </a>
         </>
       }
-      description="feature, import job, consistency, Dagster 상태를 한 화면에서 확인합니다."
+      description="운영 상태를 한 화면에서 확인합니다."
       section="개요"
       title="운영 홈"
     >
@@ -244,7 +244,7 @@ export function HomePageClient() {
             <>
               <MetricCard
                 icon={MapIcon}
-                title="Features"
+                title="Feature"
                 unit="개"
                 value={formatCount(totalFeatures)}
               >
@@ -256,36 +256,36 @@ export function HomePageClient() {
                     />
                   </div>
                   <p className="text-[13px] leading-normal text-text-secondary">
-                    {formatCount(activeFeatures)} active /{" "}
-                    {formatCount(metricsData?.features_inactive)} inactive
+                    활성 {formatCount(activeFeatures)} / 비활성{" "}
+                    {formatCount(metricsData?.features_inactive)}
                   </p>
                 </div>
               </MetricCard>
               <MetricCard
                 icon={ListChecksIcon}
-                title="Import jobs"
+                title="적재 작업"
                 unit="건"
                 value={formatCount(importJobTotal)}
               >
                 <StatusLine tone={runningImportJobs > 0 ? "warning" : "success"}>
                   {runningImportJobs > 0
-                    ? `${formatCount(runningImportJobs)} queued/running`
+                    ? `${formatCount(runningImportJobs)}건 진행 중`
                     : "대기 중인 작업 없음"}
                 </StatusLine>
               </MetricCard>
               <MetricCard
                 icon={GitCompareArrowsIcon}
-                title="Dedup queue"
+                title="중복 검수"
                 unit="건"
                 value={formatCount(dedupQueueTotal)}
               >
                 <p className="text-[13px] leading-normal text-text-secondary">
-                  pending review {formatCount(pendingDedupCount)}건
+                  대기 {formatCount(pendingDedupCount)}건
                 </p>
               </MetricCard>
               <MetricCard
                 icon={AlertTriangleIcon}
-                title="Issues"
+                title="이슈"
                 unit="건"
                 value={formatCount(openIssueCount)}
               >
@@ -300,8 +300,7 @@ export function HomePageClient() {
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <Card>
             <CardHeader>
-              <CardTitle>최근 import jobs</CardTitle>
-              <CardDescription>ops.import_jobs 상태</CardDescription>
+              <CardTitle>최근 적재 작업</CardTitle>
               <CardAction>
                 <Link
                   className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
@@ -332,7 +331,6 @@ export function HomePageClient() {
             <Card>
               <CardHeader>
                 <CardTitle>서비스 상태</CardTitle>
-                <CardDescription>Backend / Dagster readiness</CardDescription>
                 <CardAction>
                   <DatabaseIcon className="text-icon-default" />
                 </CardAction>
@@ -388,7 +386,7 @@ export function HomePageClient() {
                     href="/admin/dagster"
                   >
                     <WorkflowIcon data-icon="inline-start" />
-                    Dagster 관리
+                    작업 자동화
                   </Link>
                 </div>
               </CardContent>

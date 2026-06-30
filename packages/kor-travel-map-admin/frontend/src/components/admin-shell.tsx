@@ -5,7 +5,6 @@ import {
   AlertTriangleIcon,
   DatabaseIcon,
   ArchiveIcon,
-  ClipboardListIcon,
   GaugeIcon,
   GitCompareArrowsIcon,
   HomeIcon,
@@ -25,7 +24,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -33,42 +32,42 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "홈", icon: HomeIcon },
-  { href: "/features", label: "지도", icon: MapIcon },
-  { href: "/admin/features", label: "피처 관리", icon: DatabaseIcon },
+  { href: "/features", label: "Feature 지도", icon: MapIcon },
+  { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
   {
-    href: "/admin/features/change-requests",
-    label: "피처 변경 요청",
-    icon: ClipboardListIcon,
+    href: "/admin/features/change-reviews",
+    label: "Feature 검수",
+    icon: ListChecksIcon,
   },
   {
     href: "/admin/curated-features",
-    label: "큐레이션 피처",
+    label: "Feature 큐레이션",
     icon: SparklesIcon,
   },
   { href: "/admin/issues", label: "이슈", icon: AlertTriangleIcon },
-  { href: "/ops/import-jobs", label: "임포트 작업", icon: ListChecksIcon },
-  { href: "/ops/providers", label: "제공자", icon: GaugeIcon },
-  { href: "/ops/consistency", label: "정합성", icon: RadarIcon },
-  { href: "/ops/logs", label: "로그", icon: ActivityIcon },
-  { href: "/admin/dedup-reviews", label: "중복 검토", icon: GitCompareArrowsIcon },
+  { href: "/ops/import-jobs", label: "적재 작업", icon: ListChecksIcon },
+  { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
+  { href: "/ops/consistency", label: "정합성 점검", icon: RadarIcon },
+  { href: "/ops/logs", label: "운영 로그", icon: ActivityIcon },
+  { href: "/admin/dedup-reviews", label: "Feature 중복 검토", icon: GitCompareArrowsIcon },
   {
     href: "/admin/enrichment-reviews",
-    label: "보강 검토",
+    label: "Feature 보강 검토",
     icon: LinkIcon,
   },
   {
     href: "/admin/feature-update-requests",
-    label: "갱신 요청",
+    label: "Feature 갱신",
     icon: RefreshCwIcon,
   },
-  { href: "/admin/poi-cache-targets", label: "POI 대상", icon: RouteIcon },
+  { href: "/admin/poi-cache-targets", label: "POI 캐시 대상", icon: RouteIcon },
   {
     href: "/admin/offline-uploads",
     label: "오프라인 업로드",
     icon: UploadCloudIcon,
   },
   { href: "/admin/backups", label: "백업", icon: ArchiveIcon },
-  { href: "/admin/dagster", label: "Dagster", icon: WorkflowIcon },
+  { href: "/admin/dagster", label: "작업 자동화", icon: WorkflowIcon },
   { href: "/admin/settings", label: "설정", icon: SettingsIcon },
   { href: "/etl", label: "ETL 미리보기", icon: DatabaseIcon },
 ] as const;
@@ -96,6 +95,7 @@ export function AdminShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const activeNavItemRef = useRef<HTMLAnchorElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
@@ -103,6 +103,15 @@ export function AdminShell({
   const activeHref = navItems
     .filter((item) => isActive(pathname, item.href))
     .toSorted((a, b) => b.href.length - a.href.length)[0]?.href;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || window.innerWidth >= 1024) return;
+    activeNavItemRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [activeHref]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed((current) => {
@@ -190,6 +199,7 @@ export function AdminShell({
                     )}
                     href={item.href}
                     key={item.href}
+                    ref={active ? activeNavItemRef : undefined}
                     title={item.label}
                   >
                     <Icon data-icon="inline-start" />

@@ -150,6 +150,9 @@ from kortravelmap.infra.feature_update_repo import (
     cancel_update_request as repo_cancel_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
+    claim_update_requests as repo_claim_update_requests,
+)
+from kortravelmap.infra.feature_update_repo import (
     enqueue_feature_update_request as repo_enqueue_feature_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
@@ -166,6 +169,9 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.feature_update_repo import (
     peek_update_requests as repo_peek_update_requests,
+)
+from kortravelmap.infra.feature_update_repo import (
+    start_update_request as repo_start_update_request,
 )
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -918,6 +924,27 @@ class AsyncKorTravelMapClient:
         """Dagster sensor가 queued request batch를 상태 변경 없이 확인한다."""
         async with self._session_factory() as session:
             return await repo_peek_update_requests(session, limit=limit)
+
+    async def claim_update_requests(
+        self, *, limit: int = 10
+    ) -> tuple[FeatureUpdateRequest, ...]:
+        """Dagster sensor가 실행할 queued request batch를 짧은 transaction으로 claim한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_claim_update_requests(session, limit=limit)
+
+    async def mark_update_request_started(
+        self,
+        request_id: str,
+        *,
+        dagster_run_id: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        """Dagster worker run id를 긴 provider 실행 전에 짧게 기록한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_start_update_request(
+                session,
+                request_id,
+                dagster_run_id=dagster_run_id,
+            )
 
     async def execute_next_feature_update_request(
         self,

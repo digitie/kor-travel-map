@@ -9,8 +9,8 @@ import * as F from "./_fixtures";
 // Selectors/headings/route are reused verbatim from the mocked depth spec
 // (e2e/features-list.spec.ts) and admin-features-client.tsx:
 //   route                 /admin/features
-//   h1 heading            "Admin features"
-//   nav link              getByRole("link", { name: "Admin features" })
+//   h1 heading            "Feature 목록"
+//   nav link              getByRole("link", { name: "Feature 목록" })
 //   search input          getByLabel("feature search")
 //   kind select           getByLabel("feature kind")     all + FEATURE_KINDS
 //   status select         getByLabel("feature status")   all + FEATURE_STATUSES
@@ -26,7 +26,7 @@ import * as F from "./_fixtures";
 // row text or counts.
 
 const ROUTE = "/admin/features";
-const HEADING = "Admin features";
+const HEADING = "Feature 목록";
 const READY = { timeout: 15000 } as const;
 
 // Page-level statuses available in the "feature status" select (admin-features-client).
@@ -105,10 +105,10 @@ test.describe("admin/features live — page load + landmarks", () => {
     ).toBeDisabled();
   });
 
-  test("nav link to Admin features keeps us on route", async ({ page }) => {
+  test("nav link to Feature 목록 keeps us on route", async ({ page }) => {
     await page.goto(ROUTE);
     await expectListReady(page);
-    await page.getByRole("link", { name: "Admin features" }).first().click();
+    await page.getByRole("link", { name: "Feature 목록" }).first().click();
     await expect(page).toHaveURL(/\/admin\/features$/, READY);
     await expectListReady(page);
   });

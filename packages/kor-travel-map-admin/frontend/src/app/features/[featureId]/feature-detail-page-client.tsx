@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ClipboardListIcon,
   DatabaseIcon,
+  PencilIcon,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -26,19 +27,26 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
             href="/admin/features"
           >
             <DatabaseIcon data-icon="inline-start" />
-            Admin
+            Feature 목록
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/features/change-requests"
           >
             <ClipboardListIcon data-icon="inline-start" />
-            Changes
+            Feature 변경
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
+          >
+            <PencilIcon data-icon="inline-start" />
+            수정
           </Link>
         </>
       }
-      section="지도"
-      title="피처 상세"
+      section="Feature"
+      title="Feature 상세"
     >
       <FeatureDetailView featureId={featureId} />
     </AdminShell>

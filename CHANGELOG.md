@@ -5,6 +5,47 @@
 
 ## [Unreleased]
 
+### 작업 자동화와 Feature 변경 검수 분리 (2026-06-30)
+
+- **ADDED**: `/admin/dagster` 작업 자동화 화면에서 운영 스케줄 cron 수정, 기본값 복귀, 시작/중지,
+  즉시 실행 명령을 수행할 수 있게 했다.
+- **ADDED**: Dagster asset 한국어 표시명을 상수로 추가하고, UI에서는 한국어명을 우선 표시하며
+  코드 레벨 이름은 보조 텍스트/말줄임/툴팁으로 노출한다.
+- **CHANGED**: `Feature 변경` 작성 페이지와 `Feature 검수` 페이지를 분리했다. 검수 페이지는
+  목록·필터·상세·승인/반려 흐름에 집중한다.
+- **CHANGED**: Admin UI 모바일 메뉴는 선택된 메뉴가 중앙에 오도록 자동 스크롤한다.
+- **FIXED**: Dagster code location reload가 지연돼도 스케줄 override 저장이 500으로 실패하지 않고,
+  저장 결과와 reload 상태를 분리해 보여준다.
+
+### Feature change requests 편집 UX 보강 (2026-06-29)
+
+- **ADDED**: `/admin/features` 상세 패널에 `편집` 링크를 추가해 선택한 feature를
+  `/admin/features/change-requests?action=update&feature_id=...`로 넘기고, change request
+  form이 기존 feature 값을 prefill하도록 했다.
+- **CHANGED**: Feature change request form의 `category`, `marker_icon`, `marker_color`를
+  정의된 카탈로그 기반 dropdown으로 바꿨다. marker color dropdown은 색상 이름·코드·실제 색상을
+  함께 보여준다.
+- **ADDED**: `lon`/`lat`/`marker_icon`/`marker_color`/`sigungu_code`를 함께 편집하는
+  위치/마커 다이얼로그를 추가했다. 지도 우클릭으로 좌표를 선택하면 reverse geocoder 결과의
+  시군구 코드와 이름을 함께 표시한다.
+- **ADDED**: `sigungu_code` 입력 시 숫자 코드 또는 한글 시군구명 기준으로 geocoder 후보를 즉시
+  검색해 최대 10개까지 보여주고, 실제 코드와 일치하면 해당 시군구명을 표시한다.
+- **ADDED**: Feature 상세 페이지의 `수정` 링크도 change request update form으로 연결하고,
+  prefill 시 주소/행정코드/관계 id/좌표 정밀도/전화·행사·URL 필드를 JSON textarea 밖의
+  개별 입력 필드로 채운다.
+- **ADDED**: 위치/마커 다이얼로그에 모바일 오래누르기 좌표 선택과 `적용`/`취소` 버튼을 추가해
+  데스크톱 우클릭과 모바일 조작을 같은 흐름으로 처리한다.
+- **FIXED**: `kor-travel-geo` 조회를 Next.js same-origin `/api/geo/...` 프록시로 보내도록 바꿔
+  admin UI의 시군구 검색/역지오코딩이 브라우저 CORS 설정에 흔들리지 않게 했다.
+- **FIXED**: enrichment review와 dedup review 상세 다이얼로그의 지도 비교가 두 좌표를 모두
+  볼 수 있도록 bounds 기준으로 중심과 축척을 맞춘다.
+- **CHANGED**: Admin UI 사이드 메뉴명을 한글 중심으로 정리했다. Feature 계열은
+  `Feature 지도`/`Feature 목록`/`Feature 변경`/`Feature 큐레이션`/`Feature 갱신`처럼
+  연계되는 기능끼리 같은 접두어를 쓰고, 운영 메뉴는 `적재 작업`, `정합성 점검`, `운영 로그`,
+  `백업`, `설정`처럼 직관적인 이름으로 표시한다.
+- **DOCS**: Playwright UI/e2e 실행 위치를 WSL 금지, n150 우선, Windows 호스트 브라우저 fallback으로
+  명시했다.
+
 ### Enrichment review detail 진입 명시화 (2026-06-29)
 
 - **ADDED**: `/admin/enrichment-reviews` 목록 actions 컬럼에 `detail` 버튼을 추가해 상세 비교

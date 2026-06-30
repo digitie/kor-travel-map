@@ -92,6 +92,86 @@ export function numberInRange<T>(
   };
 }
 
+export const KOREA_COORD_BOUNDS = {
+  lon: { min: 124, max: 132 },
+  lat: { min: 33, max: 39.5 },
+} as const;
+
+export const KOREA_COORD_MESSAGE =
+  "좌표는 대한민국 범위 안의 숫자로 입력하세요. 경도는 124~132, 위도는 33~39.5 사이입니다.";
+
+/** WGS84 경도(lon): 대한민국 권역 [124, 132]. */
+export function koreaLongitude<T>(
+  message = KOREA_COORD_MESSAGE,
+): FieldValidator<T> {
+  return numberInRange({
+    min: KOREA_COORD_BOUNDS.lon.min,
+    max: KOREA_COORD_BOUNDS.lon.max,
+    message,
+  });
+}
+
+/** WGS84 위도(lat): 대한민국 권역 [33, 39.5]. */
+export function koreaLatitude<T>(
+  message = KOREA_COORD_MESSAGE,
+): FieldValidator<T> {
+  return numberInRange({
+    min: KOREA_COORD_BOUNDS.lat.min,
+    max: KOREA_COORD_BOUNDS.lat.max,
+    message,
+  });
+}
+
+export function isKoreaCoordinate(lon: number, lat: number): boolean {
+  return (
+    Number.isFinite(lon) &&
+    Number.isFinite(lat) &&
+    lon >= KOREA_COORD_BOUNDS.lon.min &&
+    lon <= KOREA_COORD_BOUNDS.lon.max &&
+    lat >= KOREA_COORD_BOUNDS.lat.min &&
+    lat <= KOREA_COORD_BOUNDS.lat.max
+  );
+}
+
+/** 빈 값은 허용하고, 입력된 경우에는 한국 전화번호/국제번호에서 흔한 문자를 허용한다. */
+export function phoneNumber<T>(
+  message = "전화번호는 숫자, 하이픈, 괄호, 공백, +만 사용할 수 있습니다.",
+): FieldValidator<T> {
+  return (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value !== "string") return message;
+    const raw = value.trim();
+    if (raw.length === 0) return null;
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) return message;
+    return /^\+?[0-9][0-9()\-\s]{6,24}$/.test(raw) ? null : message;
+  };
+}
+
+/** 빈 값은 허용하고, 입력된 경우에는 http(s) URL만 허용한다. */
+export function httpUrl<T>(
+  label = "웹사이트 주소",
+): FieldValidator<T> {
+  return (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value !== "string") {
+      return `${label}는 http:// 또는 https://로 시작해야 합니다.`;
+    }
+    const raw = value.trim();
+    if (raw.length === 0) return null;
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      return `${label}는 http:// 또는 https://로 시작해야 합니다.`;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return `${label}는 http:// 또는 https://로 시작해야 합니다.`;
+    }
+    return null;
+  };
+}
+
 /** JSON으로 파싱되는지. 빈 문자열은 통과시키므로 선택 payload에 적합하다. */
 export function jsonObject<T>(
   message = "올바른 JSON 형식이 아닙니다.",

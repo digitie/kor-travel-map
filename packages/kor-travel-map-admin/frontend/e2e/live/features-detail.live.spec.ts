@@ -16,7 +16,7 @@ import * as F from "./_fixtures";
  *   - 헤더 dl 라벨: coord / sigungu / updated / provider
  *   - 섹션 타이틀: Sources / Issues / Overrides / History / Files / Raw / Nearby / Weather
  *   - Raw <details> summary: detail / raw_refs / urls / address
- *   - AdminShell 상수 헤딩(h1): "Feature detail"
+ *   - AdminShell 상수 헤딩(h1): "Feature 상세"
  *
  * 실데이터라 feature 이름·행 텍스트·카운트는 변동이 크므로 단언하지 않는다.
  * 안정 landmark(testid/상수 헤딩/섹션 타이틀/URL)만 robust하게 본다.
@@ -32,13 +32,13 @@ const DEEPLINK_IDS = F.FEATURE_IDS.slice(0, 24);
 const VIEWPORT_IDS = F.FEATURE_IDS.slice(0, 6);
 
 // fixture가 비어도 최소 시나리오가 돌도록 하는 폴백 id(존재하지 않아도
-// 상수 헤딩 "Feature detail"은 항상 렌더된다).
+// 상수 헤딩 "Feature 상세"은 항상 렌더된다).
 const FALLBACK_ID = "f_1156010100_p_e2eabc1234567890";
 
 const SAMPLE_ID = FEATURE_IDS[0] ?? FALLBACK_ID;
 
 // AdminShell이 항상 렌더하는 상수 헤딩(detail GET 성공/실패와 무관).
-const SHELL_HEADING = "Feature detail";
+const SHELL_HEADING = "Feature 상세";
 
 // detail GET 성공 시 detail-view가 무조건 렌더하는 섹션 타이틀들.
 const DETAIL_SECTIONS = [

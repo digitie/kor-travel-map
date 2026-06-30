@@ -35,7 +35,11 @@ function FormSelect({
 }: FormSelectProps) {
   const { fieldId, hintId, errorId } = useFieldIds(id);
   return (
-    <Field className={className} data-invalid={error ? true : undefined}>
+    <Field
+      className={className}
+      data-disabled={selectProps.disabled ? true : undefined}
+      data-invalid={error ? true : undefined}
+    >
       <FieldLabel className={labelClassName} htmlFor={fieldId}>
         {label}
         {required ? <span aria-hidden="true"> *</span> : null}

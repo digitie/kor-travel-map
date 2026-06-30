@@ -4,6 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import {
   CheckIcon,
   ClipboardListIcon,
+  MapPinIcon,
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -12,14 +13,25 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
+import {
+  useDeferredValue,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
+import { useCategories, type CategorySummary } from "@/api/categories";
 import {
   type AdminFeatureChangeAction,
   type AdminFeatureChangeRecord,
   type AdminFeatureChangeStatus,
+  type AdminFeatureDetailData,
   type AdminFeatureCreateRequest,
   type AdminFeaturePatchRequest,
+  useAdminFeatureDetail,
   useAdminFeatureChangeRequests,
   useApproveAdminFeatureChangeMutation,
   useCreateAdminFeatureMutation,
@@ -27,18 +39,49 @@ import {
   usePatchAdminFeatureMutation,
   useRejectAdminFeatureChangeMutation,
 } from "@/api/features";
+import {
+  korTravelGeoCandidateToCoord,
+  korTravelGeoCodesFromCandidate,
+  reverseGeocode,
+  searchDistricts,
+  type KorTravelGeoCandidate,
+} from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DataTable } from "@/components/ui/data-table";
+import { FormField } from "@/components/ui/form-field-input";
+import { FormSelect } from "@/components/ui/form-select";
+import { FormTextArea } from "@/components/ui/form-textarea";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
+import {
+  EVENT_STATUS_OPTIONS,
+  FEATURE_CHANGE_ACTION_OPTIONS,
+  FEATURE_KIND_OPTIONS,
+  FEATURE_STATUS_OPTIONS,
+  MARKER_COLOR_OPTIONS,
+  MARKER_ICON_OPTIONS,
+  PLACE_KIND_OPTIONS,
+  markerColorSelectStyle,
+  markerIconLabel,
+  readableTextColor,
+  withCurrentOption,
+} from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import {
+  KOREA_COORD_MESSAGE,
+  httpUrl,
+  isKoreaCoordinate,
+  phoneNumber,
+} from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
+import { DEFAULT_VIEWPORT } from "@/state/map";
 
 const CHANGE_STATUSES: Array<AdminFeatureChangeStatus | "all"> = [
   "pending",
@@ -53,53 +96,135 @@ const CHANGE_ACTIONS: Array<AdminFeatureChangeAction | "all"> = [
   "delete",
 ];
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
-const MUTATION_STATUSES = ["draft", "active", "inactive", "hidden"] as const;
-const MUTATION_KINDS = ["place", "event"] as const;
+const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
+const SIDO_SEARCH_LABEL_BY_CODE: Record<string, string> = {
+  "11": "서울특별시",
+  "26": "부산광역시",
+  "27": "대구광역시",
+  "28": "인천광역시",
+  "29": "광주광역시",
+  "30": "대전광역시",
+  "31": "울산광역시",
+  "36": "세종특별자치시",
+  "41": "경기도",
+  "42": "강원특별자치도",
+  "43": "충청북도",
+  "44": "충청남도",
+  "45": "전북특별자치도",
+  "46": "전라남도",
+  "47": "경상북도",
+  "48": "경상남도",
+  "50": "제주특별자치도",
+  "51": "강원특별자치도",
+  "52": "전북특별자치도",
+};
 
-type FeatureMutationStatus = (typeof MUTATION_STATUSES)[number];
-type FeatureMutationKind = (typeof MUTATION_KINDS)[number];
+type FeatureMutationStatus = (typeof FEATURE_STATUS_OPTIONS)[number]["value"];
+type FeatureMutationKind = (typeof FEATURE_KIND_OPTIONS)[number]["value"];
+
+interface SigunguCandidate {
+  code: string;
+  label: string;
+  lon?: number;
+  lat?: number;
+}
+
+export interface FeatureChangeRequestPrefill {
+  action?: string;
+  featureId?: string;
+  key: string;
+  reason?: string;
+}
 
 interface FeatureChangeFormState {
   action: AdminFeatureChangeAction;
+  addressAdmin: string;
   addressJson: string;
+  addressLegal: string;
+  addressRoad: string;
+  adminDongCode: string;
   category: string;
+  coordPrecisionDigits: string;
   detailJson: string;
+  endDate: string;
+  eventStatus: string;
   featureId: string;
+  homepageUrl: string;
   idempotencyKey: string;
   kind: FeatureMutationKind;
   lat: string;
+  legalDongCode: string;
   lon: string;
   markerColor: string;
   markerIcon: string;
   name: string;
   operator: string;
+  organizer: string;
+  parentFeatureId: string;
+  phone: string;
+  placeKind: string;
   reason: string;
+  roadAddressManagementNo: string;
+  roadNameCode: string;
+  siblingGroupId: string;
+  sidoCode: string;
   sigunguCode: string;
+  sourceUrl: string;
+  startDate: string;
   status: FeatureMutationStatus;
   urlsJson: string;
+  venue: string;
 }
 
 const EMPTY_JSON = "";
+type LocationDraft = Pick<
+  FeatureChangeFormState,
+  "lat" | "lon" | "markerColor" | "markerIcon" | "sigunguCode"
+>;
+type UpdateFeatureChangeForm = <K extends keyof FeatureChangeFormState>(
+  key: K,
+  value: FeatureChangeFormState[K],
+) => void;
 
 function initialForm(): FeatureChangeFormState {
   return {
     action: "add",
+    addressAdmin: "",
     addressJson: EMPTY_JSON,
+    addressLegal: "",
+    addressRoad: "",
+    adminDongCode: "",
     category: "01070300",
+    coordPrecisionDigits: "",
     detailJson: EMPTY_JSON,
+    endDate: "",
+    eventStatus: "",
     featureId: "",
+    homepageUrl: "",
     idempotencyKey: "",
     kind: "place",
     lat: "",
+    legalDongCode: "",
     lon: "",
     markerColor: "P-01",
     markerIcon: "marker",
     name: "",
     operator: "local-admin",
+    organizer: "",
+    parentFeatureId: "",
+    phone: "",
+    placeKind: "",
     reason: "",
+    roadAddressManagementNo: "",
+    roadNameCode: "",
+    siblingGroupId: "",
+    sidoCode: "",
     sigunguCode: "",
+    sourceUrl: "",
+    startDate: "",
     status: "active",
     urlsJson: EMPTY_JSON,
+    venue: "",
   };
 }
 
@@ -109,6 +234,241 @@ function JsonBlock({ value }: { value: unknown }) {
       {JSON.stringify(value, null, 2)}
     </pre>
   );
+}
+
+function isFeatureMutationKind(value: string): value is FeatureMutationKind {
+  return FEATURE_KIND_OPTIONS.some((option) => option.value === value);
+}
+
+function isFeatureMutationStatus(value: string): value is FeatureMutationStatus {
+  return FEATURE_STATUS_OPTIONS.some((option) => option.value === value);
+}
+
+function formatCoordInput(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(6)
+    : "";
+}
+
+function parseCoordInput(
+  lonValue: string,
+  latValue: string,
+): { lon: number; lat: number } | null {
+  const lon = Number(lonValue);
+  const lat = Number(latValue);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  if (!isKoreaCoordinate(lon, lat)) return null;
+  return { lon, lat };
+}
+
+function coordValidationMessage(lonValue: string, latValue: string): string | null {
+  const hasLon = lonValue.trim().length > 0;
+  const hasLat = latValue.trim().length > 0;
+  if (!hasLon && !hasLat) return null;
+  if (!hasLon || !hasLat) return "경도와 위도는 함께 입력하세요.";
+  const lon = Number(lonValue);
+  const lat = Number(latValue);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return "좌표는 숫자로 입력하세요.";
+  }
+  return isKoreaCoordinate(lon, lat) ? null : KOREA_COORD_MESSAGE;
+}
+
+function jsonObjectText(value: Record<string, unknown>): string {
+  return Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
+}
+
+function fieldText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function omitKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const next = { ...value };
+  for (const key of keys) {
+    delete next[key];
+  }
+  return next;
+}
+
+function compactObject(
+  value: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const entries = Object.entries(value).filter(([, item]) => {
+    if (item === null || item === undefined) return false;
+    if (typeof item === "string" && item.trim().length === 0) return false;
+    return true;
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function dateTimeLocalText(value: unknown): string {
+  const text = fieldText(value);
+  if (text.length === 0) return "";
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(text);
+  return match ? `${match[1]}T${match[2]}` : text;
+}
+
+function categoryOptionLabel(category: CategorySummary): string {
+  const path = category.path.length > 0 ? category.path.join(" > ") : category.label;
+  return `${category.code} · ${path}`;
+}
+
+function optionLabel(
+  options: readonly { value: string; label: string }[],
+  value: string,
+): string {
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function actionLabel(value: string): string {
+  return optionLabel(FEATURE_CHANGE_ACTION_OPTIONS, value);
+}
+
+function sigunguCandidateFromGeoCandidate(
+  candidate: KorTravelGeoCandidate,
+): SigunguCandidate | null {
+  const codes = korTravelGeoCodesFromCandidate(candidate);
+  const code = codes.sigungu_code;
+  if (!code || code.length !== 5) return null;
+  const region = candidate.region;
+  const label = [region?.sido, region?.sigungu]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  if (label.length === 0) return null;
+  const coord = korTravelGeoCandidateToCoord(candidate);
+  return {
+    code,
+    label,
+    ...(coord ? { lon: coord.lon, lat: coord.lat } : {}),
+  };
+}
+
+function uniqueSigunguCandidates(
+  candidates: readonly KorTravelGeoCandidate[],
+  filter?: (candidate: SigunguCandidate) => boolean,
+): SigunguCandidate[] {
+  const seen = new Set<string>();
+  const results: SigunguCandidate[] = [];
+  for (const rawCandidate of candidates) {
+    const candidate = sigunguCandidateFromGeoCandidate(rawCandidate);
+    if (!candidate || seen.has(candidate.code)) continue;
+    if (filter && !filter(candidate)) continue;
+    seen.add(candidate.code);
+    results.push(candidate);
+    if (results.length >= 10) break;
+  }
+  return results;
+}
+
+async function searchSigunguCandidates(rawValue: string): Promise<SigunguCandidate[]> {
+  const raw = rawValue.trim();
+  if (raw.length === 0) return [];
+  if (/^\d+$/.test(raw)) {
+    if (raw.length < 2) return [];
+    const sidoCode = raw.slice(0, 2);
+    const sidoQuery = SIDO_SEARCH_LABEL_BY_CODE[sidoCode];
+    if (!sidoQuery) return [];
+    const response = await searchDistricts(sidoQuery, {
+      sigCd: raw.length >= 5 ? raw.slice(0, 5) : sidoCode,
+      size: 100,
+    });
+    return uniqueSigunguCandidates(
+      response.candidates,
+      (candidate) => candidate.code.startsWith(raw),
+    );
+  }
+  const response = await searchDistricts(raw, { size: 10 });
+  return uniqueSigunguCandidates(response.candidates);
+}
+
+function detailToFormPatch(
+  feature: AdminFeatureDetailData["feature"],
+): Partial<FeatureChangeFormState> {
+  const address = feature.address;
+  const detail = feature.detail;
+  const urls = feature.urls;
+  return {
+    action: "update",
+    addressAdmin: fieldText(address.admin),
+    addressJson: jsonObjectText(
+      omitKeys(address, [
+        "admin",
+        "legal",
+        "road",
+        "bjd_code",
+        "legal_dong_code",
+        "sigungu_code",
+        "sido_code",
+        "admin_dong_code",
+        "road_name_code",
+        "road_address_management_no",
+      ]),
+    ),
+    addressLegal: fieldText(address.legal),
+    addressRoad: fieldText(address.road),
+    adminDongCode: fieldText(
+      feature.admin_dong_code ?? address.admin_dong_code,
+    ),
+    category: feature.category,
+    coordPrecisionDigits: fieldText(feature.coord_precision_digits),
+    detailJson: jsonObjectText(
+      omitKeys(detail, [
+        "phone",
+        "place_kind",
+        "event_status",
+        "starts_at",
+        "ends_at",
+        "organizer",
+        "venue",
+      ]),
+    ),
+    endDate: dateTimeLocalText(detail.ends_at),
+    eventStatus: fieldText(detail.event_status),
+    featureId: feature.feature_id,
+    homepageUrl: fieldText(urls.homepage),
+    kind: isFeatureMutationKind(feature.kind) ? feature.kind : "place",
+    lat: formatCoordInput(feature.lat),
+    legalDongCode: fieldText(
+      feature.legal_dong_code ?? address.bjd_code ?? address.legal_dong_code,
+    ),
+    lon: formatCoordInput(feature.lon),
+    markerColor: feature.marker_color ?? "P-01",
+    markerIcon: feature.marker_icon ?? "marker",
+    name: feature.name,
+    organizer: fieldText(detail.organizer),
+    parentFeatureId: fieldText(feature.parent_feature_id),
+    phone: fieldText(detail.phone),
+    placeKind: fieldText(detail.place_kind),
+    roadAddressManagementNo: fieldText(
+      feature.road_address_management_no ??
+        address.road_address_management_no,
+    ),
+    roadNameCode: fieldText(feature.road_name_code ?? address.road_name_code),
+    siblingGroupId: fieldText(feature.sibling_group_id),
+    sidoCode: fieldText(feature.sido_code ?? address.sido_code),
+    sigunguCode: fieldText(feature.sigungu_code ?? address.sigungu_code),
+    sourceUrl: fieldText(urls.source),
+    startDate: dateTimeLocalText(detail.starts_at),
+    status: isFeatureMutationStatus(feature.status) ? feature.status : "active",
+    urlsJson: jsonObjectText(omitKeys(urls, ["homepage", "source"])),
+    venue: fieldText(detail.venue),
+  };
+}
+
+function locationDraftFromForm(form: FeatureChangeFormState): LocationDraft {
+  return {
+    lat: form.lat,
+    lon: form.lon,
+    markerColor: form.markerColor,
+    markerIcon: form.markerIcon,
+    sigunguCode: form.sigunguCode,
+  };
 }
 
 function parseOptionalJsonObject(
@@ -146,12 +506,116 @@ function parseOptionalCoord(
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
     throw new Error("lon과 lat은 숫자여야 합니다.");
   }
+  if (!isKoreaCoordinate(lon, lat)) {
+    throw new Error(KOREA_COORD_MESSAGE);
+  }
   return { lon, lat };
+}
+
+function parseOptionalInteger(label: string, value: string): number | undefined {
+  const raw = value.trim();
+  if (raw.length === 0) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label}는 정수여야 합니다.`);
+  }
+  return parsed;
 }
 
 function optionalString(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function buildAddressPayload(
+  form: FeatureChangeFormState,
+): Record<string, unknown> | undefined {
+  const extra = parseOptionalJsonObject("address extra JSON", form.addressJson);
+  return compactObject({
+    ...(extra ?? {}),
+    admin: optionalString(form.addressAdmin),
+    legal: optionalString(form.addressLegal),
+    road: optionalString(form.addressRoad),
+    bjd_code: optionalString(form.legalDongCode),
+    sigungu_code: optionalString(form.sigunguCode),
+    sido_code: optionalString(form.sidoCode),
+    admin_dong_code: optionalString(form.adminDongCode),
+    road_name_code: optionalString(form.roadNameCode),
+    road_address_management_no: optionalString(form.roadAddressManagementNo),
+  });
+}
+
+function buildDetailPayload(
+  form: FeatureChangeFormState,
+): Record<string, unknown> | undefined {
+  const extra = parseOptionalJsonObject("detail extra JSON", form.detailJson);
+  return compactObject({
+    ...(extra ?? {}),
+    phone: optionalString(form.phone),
+    place_kind: optionalString(form.placeKind),
+    event_status: optionalString(form.eventStatus),
+    starts_at: optionalString(form.startDate),
+    ends_at: optionalString(form.endDate),
+    organizer: optionalString(form.organizer),
+    venue: optionalString(form.venue),
+  });
+}
+
+function buildUrlsPayload(
+  form: FeatureChangeFormState,
+): Record<string, unknown> | undefined {
+  const extra = parseOptionalJsonObject("urls extra JSON", form.urlsJson);
+  return compactObject({
+    ...(extra ?? {}),
+    homepage: optionalString(form.homepageUrl),
+    source: optionalString(form.sourceUrl),
+  });
+}
+
+function validateTextFields(
+  form: FeatureChangeFormState,
+  categoryItems: readonly CategorySummary[],
+): void {
+  const checks: Array<[string, string, RegExp]> = [
+    ["sido_code", form.sidoCode, /^\d{2}$/],
+    ["sigungu_code", form.sigunguCode, /^\d{5}$/],
+    ["legal_dong_code", form.legalDongCode, /^\d{10}$/],
+    ["admin_dong_code", form.adminDongCode, /^\d{7,10}$/],
+    ["road_name_code", form.roadNameCode, /^\d{7,12}$/],
+    ["road_address_management_no", form.roadAddressManagementNo, /^\d{20,26}$/],
+  ];
+  for (const [label, value, pattern] of checks) {
+    const raw = value.trim();
+    if (raw.length > 0 && !pattern.test(raw)) {
+      throw new Error(`${label} 형식이 올바르지 않습니다.`);
+    }
+  }
+  parseOptionalCoord(form.lon, form.lat);
+  const phoneError = phoneNumber<FeatureChangeFormState>()(form.phone, form);
+  if (phoneError) {
+    throw new Error(phoneError);
+  }
+  for (const [label, value] of [
+    ["홈페이지", form.homepageUrl],
+    ["출처", form.sourceUrl],
+  ] as const) {
+    const urlError = httpUrl<FeatureChangeFormState>(label)(value, form);
+    if (urlError) {
+      throw new Error(urlError);
+    }
+  }
+  if (!MARKER_ICON_OPTIONS.includes(form.markerIcon)) {
+    throw new Error("목록에 있는 마커 아이콘을 선택하세요.");
+  }
+  if (!MARKER_COLOR_OPTIONS.some((item) => item.code === form.markerColor)) {
+    throw new Error("목록에 있는 마커 색상을 선택하세요.");
+  }
+  if (
+    categoryItems.length > 0 &&
+    !categoryItems.some((item) => item.code === form.category)
+  ) {
+    throw new Error("목록에 있는 카테고리를 선택하세요.");
+  }
 }
 
 function buildCreatePayload(
@@ -171,6 +635,10 @@ function buildCreatePayload(
     name: form.name.trim(),
     category: form.category.trim(),
     coord: parseOptionalCoord(form.lon, form.lat),
+    coord_precision_digits: parseOptionalInteger(
+      "coord_precision_digits",
+      form.coordPrecisionDigits,
+    ),
     marker_icon: form.markerIcon.trim(),
     marker_color: form.markerColor.trim(),
     status: form.status,
@@ -178,10 +646,17 @@ function buildCreatePayload(
     operator: optionalString(form.operator),
     feature_id: optionalString(form.featureId),
     idempotency_key: optionalString(form.idempotencyKey),
+    sido_code: optionalString(form.sidoCode),
     sigungu_code: optionalString(form.sigunguCode),
-    address: parseOptionalJsonObject("address", form.addressJson),
-    detail: parseOptionalJsonObject("detail", form.detailJson),
-    urls: parseOptionalJsonObject("urls", form.urlsJson),
+    legal_dong_code: optionalString(form.legalDongCode),
+    admin_dong_code: optionalString(form.adminDongCode),
+    road_name_code: optionalString(form.roadNameCode),
+    road_address_management_no: optionalString(form.roadAddressManagementNo),
+    parent_feature_id: optionalString(form.parentFeatureId),
+    sibling_group_id: optionalString(form.siblingGroupId),
+    address: buildAddressPayload(form),
+    detail: buildDetailPayload(form),
+    urls: buildUrlsPayload(form),
   };
 }
 
@@ -201,12 +676,23 @@ function buildPatchPayload(
     name: optionalString(form.name),
     category: optionalString(form.category),
     coord,
+    coord_precision_digits: parseOptionalInteger(
+      "coord_precision_digits",
+      form.coordPrecisionDigits,
+    ),
     marker_icon: optionalString(form.markerIcon),
     marker_color: optionalString(form.markerColor),
+    sido_code: optionalString(form.sidoCode),
     sigungu_code: optionalString(form.sigunguCode),
-    address: parseOptionalJsonObject("address", form.addressJson),
-    detail: parseOptionalJsonObject("detail", form.detailJson),
-    urls: parseOptionalJsonObject("urls", form.urlsJson),
+    legal_dong_code: optionalString(form.legalDongCode),
+    admin_dong_code: optionalString(form.adminDongCode),
+    road_name_code: optionalString(form.roadNameCode),
+    road_address_management_no: optionalString(form.roadAddressManagementNo),
+    parent_feature_id: optionalString(form.parentFeatureId),
+    sibling_group_id: optionalString(form.siblingGroupId),
+    address: buildAddressPayload(form),
+    detail: buildDetailPayload(form),
+    urls: buildUrlsPayload(form),
   };
 }
 
@@ -227,43 +713,353 @@ function ChangeRequestDetail({
     <aside className="flex min-w-0 flex-col gap-4 rounded-lg border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-medium">Request detail</div>
+        <div className="font-medium">요청 상세</div>
           <div className="break-all font-mono text-xs text-muted-foreground">
             {request.request_id}
           </div>
         </div>
         <div className="flex flex-wrap gap-1">
-          <Badge variant="outline">{request.action}</Badge>
+          <Badge variant="outline">{actionLabel(request.action)}</Badge>
           <StatusBadge status={request.status} />
         </div>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-        <dt className="text-muted-foreground">feature</dt>
+        <dt className="text-muted-foreground">Feature</dt>
         <dd className="break-all font-mono">{request.feature_id}</dd>
-        <dt className="text-muted-foreground">mode</dt>
+        <dt className="text-muted-foreground">검수 방식</dt>
         <dd>{request.review_mode}</dd>
-        <dt className="text-muted-foreground">requested</dt>
+        <dt className="text-muted-foreground">요청자</dt>
         <dd>{request.requested_by ?? "-"}</dd>
-        <dt className="text-muted-foreground">reviewed</dt>
+        <dt className="text-muted-foreground">검수자</dt>
         <dd>{request.reviewed_by ?? "-"}</dd>
-        <dt className="text-muted-foreground">created</dt>
+        <dt className="text-muted-foreground">생성</dt>
         <dd>{formatDateTime(request.created_at)}</dd>
-        <dt className="text-muted-foreground">applied</dt>
+        <dt className="text-muted-foreground">반영</dt>
         <dd>{formatDateTime(request.applied_at)}</dd>
       </dl>
       <div>
-        <div className="mb-2 text-sm font-medium">reason</div>
+        <div className="mb-2 text-sm font-medium">사유</div>
         <p className="text-sm text-muted-foreground">{request.reason ?? "-"}</p>
       </div>
       <div>
-        <div className="mb-2 text-sm font-medium">payload</div>
+        <div className="mb-2 text-sm font-medium">변경 내용</div>
         <JsonBlock value={request.payload} />
       </div>
     </aside>
   );
 }
 
-export function FeatureChangeRequestsClient() {
+function LocationEditDialog({
+  form,
+  updateForm,
+  onClose,
+}: {
+  form: FeatureChangeFormState;
+  updateForm: UpdateFeatureChangeForm;
+  onClose: () => void;
+}) {
+  const [reverseMessage, setReverseMessage] = useState<string | null>(null);
+  const [draft, setDraft] = useState<LocationDraft>(() =>
+    locationDraftFromForm(form),
+  );
+  const [dialogSigunguCandidates, setDialogSigunguCandidates] = useState<
+    SigunguCandidate[]
+  >([]);
+  const [dialogSigunguSearchError, setDialogSigunguSearchError] = useState<
+    string | null
+  >(null);
+  const [dialogSigunguSearching, setDialogSigunguSearching] = useState(false);
+  const mountedRef = useRef(true);
+  const coord = parseCoordInput(draft.lon, draft.lat);
+  const coordError = coordValidationMessage(draft.lon, draft.lat);
+  const markerColorStyle = markerColorSelectStyle(draft.markerColor);
+  const markerIconOptions = MARKER_ICON_OPTIONS.includes(draft.markerIcon)
+    ? MARKER_ICON_OPTIONS
+    : [draft.markerIcon, ...MARKER_ICON_OPTIONS].filter(Boolean);
+  const dialogSigunguLabel = dialogSigunguCandidates.find(
+    (candidate) => candidate.code === draft.sigunguCode.trim(),
+  );
+  const dialogCenter: [number, number] = coord
+    ? [coord.lon, coord.lat]
+    : [DEFAULT_VIEWPORT.lon, DEFAULT_VIEWPORT.lat];
+  const dialogZoom = coord ? 13 : DEFAULT_VIEWPORT.zoom;
+
+  const updateDraft = <K extends keyof LocationDraft>(
+    key: K,
+    value: LocationDraft[K],
+  ) => setDraft((current) => ({ ...current, [key]: value }));
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const raw = draft.sigunguCode.trim();
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      setDialogSigunguSearchError(null);
+      if (form.action === "delete" || raw.length === 0) {
+        setDialogSigunguCandidates([]);
+        setDialogSigunguSearching(false);
+        return;
+      }
+      const run = async () => {
+        setDialogSigunguSearching(true);
+        try {
+          const candidates = await searchSigunguCandidates(raw);
+          if (!cancelled) setDialogSigunguCandidates(candidates);
+        } catch (error) {
+          if (!cancelled) {
+            setDialogSigunguCandidates([]);
+            setDialogSigunguSearchError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        } finally {
+          if (!cancelled) setDialogSigunguSearching(false);
+        }
+      };
+      void run();
+    }, form.action === "delete" || raw.length === 0 ? 0 : 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [draft.sigunguCode, form.action]);
+
+  const selectPoint = async (lon: number, lat: number) => {
+    setDraft((current) => ({
+      ...current,
+      lat: lat.toFixed(6),
+      lon: lon.toFixed(6),
+    }));
+      setReverseMessage("위치의 시군구를 확인하는 중...");
+    try {
+      const response = await reverseGeocode({ lon, lat });
+      const candidate = response.candidates[0];
+      const sigungu = candidate
+        ? sigunguCandidateFromGeoCandidate(candidate)
+        : null;
+      if (!mountedRef.current) return;
+      if (sigungu) {
+        setDraft((current) => ({ ...current, sigunguCode: sigungu.code }));
+        setDialogSigunguCandidates((current) => [
+          sigungu,
+          ...current.filter((candidate) => candidate.code !== sigungu.code),
+        ]);
+        setReverseMessage(`${sigungu.label} · ${sigungu.code}`);
+      } else {
+        setReverseMessage("시군구 후보 없음");
+      }
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setReverseMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const applyDraft = () => {
+    updateForm("lon", draft.lon);
+    updateForm("lat", draft.lat);
+    updateForm("markerIcon", draft.markerIcon);
+    updateForm("markerColor", draft.markerColor);
+    updateForm("sigunguCode", draft.sigunguCode);
+    onClose();
+  };
+
+  return (
+    <div
+      aria-labelledby="change-location-dialog-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 overflow-hidden bg-black/45 p-2 sm:p-4"
+      role="dialog"
+    >
+      <div className="mx-auto flex h-[calc(100dvh-1rem)] max-w-6xl flex-col overflow-hidden rounded-lg border bg-background shadow-xl sm:h-[min(48rem,calc(100dvh-2rem))]">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="font-medium" id="change-location-dialog-title">
+              위치/마커 편집
+            </div>
+            <div className="break-all font-mono text-xs text-muted-foreground">
+              {coord
+                ? `${coord.lon.toFixed(6)}, ${coord.lat.toFixed(6)}`
+                : "좌표 없음"}
+            </div>
+          </div>
+          <Button
+            aria-label="위치 편집 닫기"
+            size="icon"
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon data-icon="inline-start" />
+          </Button>
+        </div>
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(16rem,42dvh)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-1">
+          <div className="relative min-h-0">
+            <VWorldMapView
+              apiKey={VWORLD_KEY}
+              center={dialogCenter}
+              className="absolute inset-0 h-full w-full"
+              navigation
+              onContextMenu={(event) => {
+                event.originalEvent.preventDefault();
+                void selectPoint(event.lngLat.lng, event.lngLat.lat);
+              }}
+              onLongPress={(event) => {
+                event.originalEvent.preventDefault();
+                void selectPoint(event.lngLat.lng, event.lngLat.lat);
+              }}
+              scale
+              testId="feature-change-location-map"
+              zoom={dialogZoom}
+            >
+              {coord ? (
+                <VWorldMarker
+                  lngLat={[coord.lon, coord.lat]}
+                  markerColor={draft.markerColor}
+                  markerIcon={draft.markerIcon}
+                  selected
+                  size={34}
+                  title={form.name || "feature change point"}
+                />
+              ) : null}
+            </VWorldMapView>
+          </div>
+          <div className="min-h-0 overflow-auto border-t p-3 sm:p-4 lg:border-l lg:border-t-0">
+            <div className="grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                <FormField
+                  error={coordError}
+                  inputMode="decimal"
+                  label="경도"
+                  value={draft.lon}
+                  onChange={(event) => updateDraft("lon", event.target.value)}
+                />
+                <FormField
+                  error={coordError}
+                  inputMode="decimal"
+                  label="위도"
+                  value={draft.lat}
+                  onChange={(event) => updateDraft("lat", event.target.value)}
+                />
+              </div>
+              <FormSelect
+                label="마커 아이콘"
+                value={draft.markerIcon}
+                onChange={(event) => updateDraft("markerIcon", event.target.value)}
+              >
+                {markerIconOptions.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {markerIconLabel(item)}
+                  </NativeSelectOption>
+                ))}
+              </FormSelect>
+              <FormSelect
+                label="마커 색상"
+                style={markerColorStyle}
+                value={draft.markerColor}
+                onChange={(event) => updateDraft("markerColor", event.target.value)}
+              >
+                {MARKER_COLOR_OPTIONS.map((item) => (
+                  <NativeSelectOption
+                    key={item.code}
+                    style={{
+                      backgroundColor: item.hex,
+                      color: readableTextColor(item.hex),
+                    }}
+                    value={item.code}
+                  >
+                    {item.label}
+                  </NativeSelectOption>
+                ))}
+              </FormSelect>
+              <FormField
+                inputMode="text"
+                label="시군구 코드"
+                value={draft.sigunguCode}
+                onChange={(event) =>
+                  updateDraft("sigunguCode", event.target.value)
+                }
+              />
+              <div className="flex flex-wrap gap-2">
+                {dialogSigunguLabel ? (
+                  <Badge variant="secondary">
+                    {dialogSigunguLabel.label} · {dialogSigunguLabel.code}
+                  </Badge>
+                ) : null}
+                {reverseMessage ? (
+                  <Badge variant="outline">{reverseMessage}</Badge>
+                ) : null}
+                {dialogSigunguSearching ? (
+                  <Badge variant="outline">검색 중</Badge>
+                ) : null}
+              </div>
+              {dialogSigunguSearchError ? (
+                <div className="text-sm text-destructive">
+                  {dialogSigunguSearchError}
+                </div>
+              ) : null}
+              {dialogSigunguCandidates.length > 0 ? (
+                <div className="grid gap-1">
+                  {dialogSigunguCandidates.map((candidate) => (
+                    <button
+                      className="rounded-md border px-2.5 py-2 text-left text-sm hover:bg-muted"
+                      key={candidate.code}
+                      type="button"
+                      onClick={() => updateDraft("sigunguCode", candidate.code)}
+                    >
+                      <span className="font-mono">{candidate.code}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        {candidate.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t px-4 py-3">
+          <Button
+            className="flex-1 sm:flex-none"
+            type="button"
+            variant="outline"
+            onClick={onClose}
+          >
+            <XIcon data-icon="inline-start" />
+            취소
+          </Button>
+          <Button
+            className="flex-1 sm:flex-none"
+            disabled={Boolean(coordError)}
+            type="button"
+            onClick={applyDraft}
+          >
+            <CheckIcon data-icon="inline-start" />
+            적용
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function FeatureChangeRequestsClient({
+  prefill,
+  view = "request",
+}: {
+  prefill?: FeatureChangeRequestPrefill;
+  view?: "request" | "review";
+}) {
+  const queryPrefillKey = prefill?.key ?? "";
+  const prefillFeatureId = prefill?.featureId?.trim() || null;
   const [status, setStatus] = useState<AdminFeatureChangeStatus | "all">("pending");
   const [action, setAction] = useState<AdminFeatureChangeAction | "all">("all");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
@@ -273,6 +1069,14 @@ export function FeatureChangeRequestsClient() {
     useState<AdminFeatureChangeRecord | null>(null);
   const [form, setForm] = useState<FeatureChangeFormState>(() => initialForm());
   const [formError, setFormError] = useState<string | null>(null);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [sigunguCandidates, setSigunguCandidates] = useState<SigunguCandidate[]>([]);
+  const [sigunguSearchError, setSigunguSearchError] = useState<string | null>(null);
+  const [sigunguSearching, setSigunguSearching] = useState(false);
+  const appliedQueryPrefillRef = useRef<string | null>(null);
+  const appliedFeaturePrefillRef = useRef<string | null>(null);
+  const categories = useCategories({ active_only: false, include_counts: false });
+  const prefillFeature = useAdminFeatureDetail(prefillFeatureId);
 
   const params = useMemo(
     () => ({
@@ -289,6 +1093,8 @@ export function FeatureChangeRequestsClient() {
   const deleteFeature = useDeleteAdminFeatureMutation();
   const approveChange = useApproveAdminFeatureChangeMutation();
   const rejectChange = useRejectAdminFeatureChangeMutation();
+  const approveChangeRequest = approveChange.mutate;
+  const rejectChangeRequest = rejectChange.mutate;
   const items = changes.data?.data.items ?? [];
   const reviewMode = changes.data?.data.review_mode ?? "unknown";
   const anyMutationPending =
@@ -303,6 +1109,21 @@ export function FeatureChangeRequestsClient() {
     deleteFeature.error ??
     approveChange.error ??
     rejectChange.error;
+  const categoryItems = categories.data?.data.items ?? [];
+  const selectedSigungu = sigunguCandidates.find(
+    (candidate) => candidate.code === form.sigunguCode.trim(),
+  );
+  const selectedSigunguLabel = selectedSigungu
+    ? `${selectedSigungu.label} · ${selectedSigungu.code}`
+    : null;
+  const formCoord = parseCoordInput(form.lon, form.lat);
+  const formCoordError =
+    form.action === "delete" ? null : coordValidationMessage(form.lon, form.lat);
+  const formMarkerIconOptions = MARKER_ICON_OPTIONS.includes(form.markerIcon)
+    ? MARKER_ICON_OPTIONS
+    : [form.markerIcon, ...MARKER_ICON_OPTIONS].filter(Boolean);
+  const showRequestForm = view === "request";
+  const showReview = view === "review";
 
   const updateForm = <K extends keyof FeatureChangeFormState>(
     key: K,
@@ -312,12 +1133,84 @@ export function FeatureChangeRequestsClient() {
   const resetForm = () => {
     setForm(initialForm());
     setFormError(null);
+    appliedQueryPrefillRef.current = null;
+    appliedFeaturePrefillRef.current = null;
   };
+
+  useEffect(() => {
+    if (!queryPrefillKey || appliedQueryPrefillRef.current === queryPrefillKey) {
+      return;
+    }
+    const nextAction = prefill?.action;
+    const nextFeatureId = prefill?.featureId?.trim() ?? "";
+    const nextReason = prefill?.reason?.trim() ?? "";
+    setForm((current) => ({
+      ...current,
+      action:
+        nextAction === "add" || nextAction === "update" || nextAction === "delete"
+          ? nextAction
+          : current.action,
+      featureId: nextFeatureId || current.featureId,
+      reason: nextReason || current.reason,
+    }));
+    appliedQueryPrefillRef.current = queryPrefillKey;
+  }, [prefill, queryPrefillKey]);
+
+  useEffect(() => {
+    const feature = prefillFeature.data?.data.feature;
+    if (!prefillFeatureId || !feature) return;
+    const key = `${prefillFeatureId}:${feature.updated_at}`;
+    if (appliedFeaturePrefillRef.current === key) return;
+    setForm((current) => ({
+      ...current,
+      ...detailToFormPatch(feature),
+      reason: current.reason || "admin feature detail edit",
+    }));
+    appliedFeaturePrefillRef.current = key;
+  }, [prefillFeature.data?.data.feature, prefillFeatureId]);
+
+  useEffect(() => {
+    const raw = form.sigunguCode.trim();
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      setSigunguSearchError(null);
+      if (form.action === "delete" || raw.length === 0) {
+        setSigunguCandidates([]);
+        setSigunguSearching(false);
+        return;
+      }
+      const run = async () => {
+        setSigunguSearching(true);
+        try {
+          const candidates = await searchSigunguCandidates(raw);
+          if (!cancelled) setSigunguCandidates(candidates);
+        } catch (error) {
+          if (!cancelled) {
+            setSigunguCandidates([]);
+            setSigunguSearchError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        } finally {
+          if (!cancelled) setSigunguSearching(false);
+        }
+      };
+      void run();
+    }, form.action === "delete" || raw.length === 0 ? 0 : 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.action, form.sigunguCode]);
 
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     try {
+      validateTextFields(form, categoryItems);
       if (form.action === "add") {
         const response = await createFeature.mutateAsync(buildCreatePayload(form));
         setSelectedRequest(response.data.request);
@@ -350,25 +1243,25 @@ export function FeatureChangeRequestsClient() {
     }
   };
 
-  const approve = (request: AdminFeatureChangeRecord) => {
-    approveChange.mutate(
+  const approve = useCallback((request: AdminFeatureChangeRecord) => {
+    approveChangeRequest(
       {
         requestId: request.request_id,
         body: { operator: "local-admin", reason: "admin-ui approve" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
-  };
+  }, [approveChangeRequest]);
 
-  const reject = (request: AdminFeatureChangeRecord) => {
-    rejectChange.mutate(
+  const reject = useCallback((request: AdminFeatureChangeRecord) => {
+    rejectChangeRequest(
       {
         requestId: request.request_id,
         body: { operator: "local-admin", reason: "admin-ui reject" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
-  };
+  }, [rejectChangeRequest]);
 
   const columns = useMemo<ColumnDef<AdminFeatureChangeRecord, unknown>[]>(
     () => [
@@ -398,7 +1291,7 @@ export function FeatureChangeRequestsClient() {
           const request = row.original;
           return (
             <div className="flex flex-wrap gap-1">
-              <Badge variant="outline">{request.action}</Badge>
+              <Badge variant="outline">{actionLabel(request.action)}</Badge>
               <StatusBadge status={request.status} />
             </div>
           );
@@ -479,7 +1372,7 @@ export function FeatureChangeRequestsClient() {
                   }}
                 >
                   <CheckIcon data-icon="inline-start" />
-                  approve
+                  승인
                 </Button>
                 <Button
                   disabled={anyMutationPending}
@@ -492,7 +1385,7 @@ export function FeatureChangeRequestsClient() {
                   }}
                 >
                   <XIcon data-icon="inline-start" />
-                  reject
+                  반려
                 </Button>
               </div>
             );
@@ -525,10 +1418,18 @@ export function FeatureChangeRequestsClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/new"
+            href={
+              showReview
+                ? "/admin/features/change-requests"
+                : "/admin/features/change-reviews"
+            }
           >
-            <PlusIcon data-icon="inline-start" />
-            새 작성
+            {showReview ? (
+              <PlusIcon data-icon="inline-start" />
+            ) : (
+              <CheckIcon data-icon="inline-start" />
+            )}
+            {showReview ? "변경 요청 작성" : "검수 화면"}
           </Link>
           <Button
             disabled={changes.isFetching}
@@ -541,84 +1442,61 @@ export function FeatureChangeRequestsClient() {
           </Button>
         </>
       }
-      description="Feature 추가·수정·삭제 요청을 한 큐에서 만들고 검토합니다."
-      section="관리"
-      title="피처 변경 요청"
+      description={
+        showReview
+          ? "변경 요청을 검수합니다."
+          : "Feature를 추가·수정·삭제하는 요청을 작성합니다."
+      }
+      section="Feature"
+      title={showReview ? "Feature 검수" : "변경 요청 작성"}
     >
       <div className="flex flex-col gap-4">
         {(changes.isError || mutationError || formError) && (
           <Alert variant="destructive">
-            <AlertTitle>feature change 처리 실패</AlertTitle>
+            <AlertTitle>Feature 변경 처리 실패</AlertTitle>
             <AlertDescription>
               {formError ?? changes.error?.message ?? mutationError?.message}
             </AlertDescription>
           </Alert>
         )}
 
-        <section className="grid gap-3 md:grid-cols-4">
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">review mode</div>
-            <div className="mt-1 flex items-center gap-2">
-              <StatusBadge status={reviewMode} />
-            </div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">rows</div>
-            <div className="mt-1 text-xl font-semibold">
-              {formatCount(items.length)}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">limit</div>
-            <div className="mt-1 text-xl font-semibold">
-              {changes.data?.meta.page?.page_size ?? pageSize}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">duration</div>
-            <div className="mt-1 text-xl font-semibold">
-              {changes.data?.meta.duration_ms ?? 0}ms
-            </div>
-          </div>
-        </section>
-
-        <form
-          className="rounded-lg border bg-background p-4"
-          onSubmit={submitChange}
-        >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="font-medium">Change request form</div>
-              <div className="text-sm text-muted-foreground">
-                정본 admin feature mutation endpoint만 호출합니다.
+        {showRequestForm ? (
+          <form className="flex flex-col gap-4" onSubmit={submitChange}>
+          <section className="rounded-lg border bg-background p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-medium">변경 요청 작성</h2>
+                <div className="mt-1 flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  {prefillFeature.isFetching ? (
+                    <Badge variant="outline">불러오는 중</Badge>
+                  ) : null}
+                  {prefillFeatureId && prefillFeature.data?.data.feature ? (
+                    <Badge variant="secondary">데이터 로드됨</Badge>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={resetForm}
+                >
+                  <RotateCcwIcon data-icon="inline-start" />
+                  초기화
+                </Button>
+                <Button disabled={anyMutationPending} size="sm" type="submit">
+                  <PlusIcon data-icon="inline-start" />
+                  요청 생성
+                </Button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={resetForm}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                초기화
-              </Button>
-              <Button disabled={anyMutationPending} size="sm" type="submit">
-                <PlusIcon data-icon="inline-start" />
-                요청 생성
-              </Button>
-            </div>
-          </div>
 
-          <div className="grid gap-3 lg:grid-cols-4">
-            <label
-              className="flex flex-col gap-1 text-sm"
-              htmlFor="change-action"
-            >
-              action
-              <NativeSelect
+            <div className="grid gap-3 lg:grid-cols-4">
+              <FormSelect
                 aria-label="change action"
                 id="change-action"
+                label="요청 종류"
                 value={form.action}
                 onChange={(event) =>
                   updateForm(
@@ -627,84 +1505,266 @@ export function FeatureChangeRequestsClient() {
                   )
                 }
               >
-                <NativeSelectOption value="add">add</NativeSelectOption>
-                <NativeSelectOption value="update">update</NativeSelectOption>
-                <NativeSelectOption value="delete">delete</NativeSelectOption>
-              </NativeSelect>
-            </label>
-            <label
-              className="flex flex-col gap-1 text-sm"
-              htmlFor="change-feature-id"
-            >
-              feature_id
-              <Input
+                {FEATURE_CHANGE_ACTION_OPTIONS.map((option) => (
+                  <NativeSelectOption key={option.value} value={option.value}>
+                    {option.label}
+                  </NativeSelectOption>
+                ))}
+              </FormSelect>
+              <FormField
                 aria-label="change feature id"
                 id="change-feature-id"
+                label="Feature ID"
                 placeholder={
-                  form.action === "add" ? "optional existing/new id" : "required"
+                  form.action === "add" ? "비우면 자동 생성" : "수정할 Feature ID"
                 }
                 value={form.featureId}
                 onChange={(event) => updateForm("featureId", event.target.value)}
               />
-            </label>
-            <label
-              className="flex flex-col gap-1 text-sm"
-              htmlFor="change-reason"
-            >
-              reason
-              <Input
+              <FormField
                 aria-label="change reason"
                 id="change-reason"
-                placeholder="운영 변경 사유"
+                label="변경 사유"
+                placeholder="예: 전화번호 수정"
                 value={form.reason}
                 onChange={(event) => updateForm("reason", event.target.value)}
               />
-            </label>
-            <label
-              className="flex flex-col gap-1 text-sm"
-              htmlFor="change-operator"
-            >
-              operator
-              <Input
+              <FormField
                 aria-label="change operator"
                 id="change-operator"
+                label="담당자"
                 value={form.operator}
                 onChange={(event) => updateForm("operator", event.target.value)}
               />
-            </label>
-          </div>
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-4">
+              <FormField
+                aria-label="change idempotency key"
+                id="change-idempotency-key"
+                label="중복 방지 키"
+                hint="같은 요청을 한 번만 만들 때 사용합니다."
+                value={form.idempotencyKey}
+                onChange={(event) =>
+                  updateForm("idempotencyKey", event.target.value)
+                }
+              />
+              <FormField
+                aria-label="change parent feature id"
+                id="change-parent-feature-id"
+                label="상위 Feature ID"
+                value={form.parentFeatureId}
+                onChange={(event) =>
+                  updateForm("parentFeatureId", event.target.value)
+                }
+              />
+              <FormField
+                aria-label="change sibling group id"
+                id="change-sibling-group-id"
+                label="같은 그룹 ID"
+                value={form.siblingGroupId}
+                onChange={(event) =>
+                  updateForm("siblingGroupId", event.target.value)
+                }
+              />
+              <FormField
+                aria-label="change coord precision digits"
+                id="change-coord-precision-digits"
+                inputMode="numeric"
+                label="좌표 소수 자릿수"
+                value={form.coordPrecisionDigits}
+                onChange={(event) =>
+                  updateForm("coordPrecisionDigits", event.target.value)
+                }
+              />
+            </div>
+          </section>
+
+          {prefillFeature.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>feature 상세 prefill 실패</AlertTitle>
+              <AlertDescription>{prefillFeature.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
 
           {form.action !== "delete" ? (
             <>
-              <div className="mt-3 grid gap-3 lg:grid-cols-4">
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-kind"
-                >
-                  kind
-                  <NativeSelect
+              <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
+                <div className="min-w-0 rounded-lg border bg-background">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                    <div>
+                      <h2 className="font-medium">좌표</h2>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        {formCoord
+                          ? `${formCoord.lon.toFixed(6)}, ${formCoord.lat.toFixed(6)}`
+                          : "좌표 없음"}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setLocationDialogOpen(true)}
+                    >
+                      <MapPinIcon data-icon="inline-start" />
+                      위치 편집
+                    </Button>
+                  </div>
+                  <div className="relative h-[18rem] overflow-hidden sm:h-[24rem]">
+                    {formCoord ? (
+                      <VWorldMapView
+                        apiKey={VWORLD_KEY}
+                        center={[formCoord.lon, formCoord.lat]}
+                        className="absolute inset-0 h-full w-full"
+                        key={`${formCoord.lon}:${formCoord.lat}`}
+                        navigation
+                        scale
+                        testId="feature-change-location-preview-map"
+                        zoom={13}
+                      >
+                        <VWorldMarker
+                          lngLat={[formCoord.lon, formCoord.lat]}
+                          markerColor={form.markerColor}
+                          markerIcon={form.markerIcon}
+                          selected
+                          size={30}
+                          title={form.name || "feature change point"}
+                        />
+                      </VWorldMapView>
+                    ) : (
+                      <div className="flex h-full items-center justify-center border-t border-dashed text-sm text-muted-foreground">
+                        위치 편집에서 좌표를 선택하세요.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <section className="rounded-lg border bg-background p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="font-medium">위치/마커</h2>
+                    {selectedSigunguLabel ? (
+                      <Badge variant="secondary">{selectedSigunguLabel}</Badge>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <FormField
+                      aria-label="change lon"
+                      error={formCoordError}
+                      id="change-lon"
+                      inputMode="decimal"
+                      label="경도"
+                      value={form.lon}
+                      onChange={(event) => updateForm("lon", event.target.value)}
+                    />
+                    <FormField
+                      aria-label="change lat"
+                      error={formCoordError}
+                      id="change-lat"
+                      inputMode="decimal"
+                      label="위도"
+                      value={form.lat}
+                      onChange={(event) => updateForm("lat", event.target.value)}
+                    />
+                    <FormSelect
+                      aria-label="change marker icon"
+                      id="change-marker-icon"
+                      label="마커 아이콘"
+                      value={form.markerIcon}
+                      onChange={(event) =>
+                        updateForm("markerIcon", event.target.value)
+                      }
+                    >
+                      {formMarkerIconOptions.map((item) => (
+                        <NativeSelectOption key={item} value={item}>
+                          {markerIconLabel(item)}
+                        </NativeSelectOption>
+                      ))}
+                    </FormSelect>
+                    <FormSelect
+                      aria-label="change marker color"
+                      id="change-marker-color"
+                      label="마커 색상"
+                      style={markerColorSelectStyle(form.markerColor)}
+                      value={form.markerColor}
+                      onChange={(event) =>
+                        updateForm("markerColor", event.target.value)
+                      }
+                    >
+                      {MARKER_COLOR_OPTIONS.map((item) => (
+                        <NativeSelectOption
+                          key={item.code}
+                          style={{
+                            backgroundColor: item.hex,
+                            color: readableTextColor(item.hex),
+                          }}
+                          value={item.code}
+                        >
+                          {item.label}
+                        </NativeSelectOption>
+                      ))}
+                    </FormSelect>
+                    <FormField
+                      aria-label="change sigungu code"
+                      id="change-sigungu-code"
+                      inputMode="text"
+                      label="시군구 코드"
+                      value={form.sigunguCode}
+                      onChange={(event) =>
+                        updateForm("sigunguCode", event.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="mt-3 flex min-h-6 flex-wrap gap-2">
+                    {sigunguSearching ? <Badge variant="outline">검색 중</Badge> : null}
+                  </div>
+                  {sigunguSearchError ? (
+                    <div className="mt-2 text-sm text-destructive">
+                      {sigunguSearchError}
+                    </div>
+                  ) : null}
+                  {sigunguCandidates.length > 0 ? (
+                    <div className="mt-3 grid gap-1">
+                      {sigunguCandidates.map((candidate) => (
+                        <button
+                          className="rounded-md border px-2.5 py-2 text-left text-sm hover:bg-muted"
+                          key={candidate.code}
+                          type="button"
+                          onClick={() => updateForm("sigunguCode", candidate.code)}
+                        >
+                          <span className="font-mono">{candidate.code}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {candidate.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              </section>
+
+              <section className="rounded-lg border bg-background p-4">
+                <h2 className="mb-4 font-medium">기본 정보</h2>
+                <div className="grid gap-3 lg:grid-cols-4">
+                  <FormSelect
                     aria-label="change kind"
                     id="change-kind"
+                    label="종류"
                     value={form.kind}
                     onChange={(event) =>
-                      updateForm("kind", event.target.value as FeatureMutationKind)
+                      updateForm(
+                        "kind",
+                        event.target.value as FeatureMutationKind,
+                      )
                     }
                   >
-                    {MUTATION_KINDS.map((item) => (
-                      <NativeSelectOption key={item} value={item}>
-                        {item}
+                    {FEATURE_KIND_OPTIONS.map((item) => (
+                      <NativeSelectOption key={item.value} value={item.value}>
+                        {item.label}
                       </NativeSelectOption>
                     ))}
-                  </NativeSelect>
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-status"
-                >
-                  status
-                  <NativeSelect
+                  </FormSelect>
+                  <FormSelect
                     aria-label="change feature status"
                     id="change-status"
+                    label="상태"
                     value={form.status}
                     onChange={(event) =>
                       updateForm(
@@ -713,174 +1773,344 @@ export function FeatureChangeRequestsClient() {
                       )
                     }
                   >
-                    {MUTATION_STATUSES.map((item) => (
-                      <NativeSelectOption key={item} value={item}>
-                        {item}
+                    {FEATURE_STATUS_OPTIONS.map((item) => (
+                      <NativeSelectOption key={item.value} value={item.value}>
+                        {item.label}
                       </NativeSelectOption>
                     ))}
-                  </NativeSelect>
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-name"
-                >
-                  name
-                  <Input
+                  </FormSelect>
+                  <FormField
                     aria-label="change name"
                     id="change-name"
+                    label="이름"
                     value={form.name}
                     onChange={(event) => updateForm("name", event.target.value)}
                   />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-category"
-                >
-                  category
-                  <Input
+                  <FormSelect
                     aria-label="change category"
                     id="change-category"
+                    label="카테고리"
                     value={form.category}
                     onChange={(event) => updateForm("category", event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-5">
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-lon"
-                >
-                  lon
-                  <Input
-                    aria-label="change lon"
-                    id="change-lon"
-                    inputMode="decimal"
-                    value={form.lon}
-                    onChange={(event) => updateForm("lon", event.target.value)}
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-lat"
-                >
-                  lat
-                  <Input
-                    aria-label="change lat"
-                    id="change-lat"
-                    inputMode="decimal"
-                    value={form.lat}
-                    onChange={(event) => updateForm("lat", event.target.value)}
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-marker-icon"
-                >
-                  marker_icon
-                  <Input
-                    aria-label="change marker icon"
-                    id="change-marker-icon"
-                    value={form.markerIcon}
-                    onChange={(event) =>
-                      updateForm("markerIcon", event.target.value)
-                    }
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-marker-color"
-                >
-                  marker_color
-                  <Input
-                    aria-label="change marker color"
-                    id="change-marker-color"
-                    value={form.markerColor}
-                    onChange={(event) =>
-                      updateForm("markerColor", event.target.value)
-                    }
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-sigungu-code"
-                >
-                  sigungu_code
-                  <Input
-                    aria-label="change sigungu code"
-                    id="change-sigungu-code"
-                    value={form.sigunguCode}
-                    onChange={(event) =>
-                      updateForm("sigunguCode", event.target.value)
-                    }
-                  />
-                </label>
-              </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-4">
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-idempotency-key"
-                >
-                  idempotency_key
-                  <Input
-                    aria-label="change idempotency key"
-                    id="change-idempotency-key"
-                    value={form.idempotencyKey}
-                    onChange={(event) =>
-                      updateForm("idempotencyKey", event.target.value)
-                    }
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm lg:col-span-3"
-                  htmlFor="change-detail-json"
-                >
-                  detail JSON
-                  <textarea
-                    aria-label="change detail JSON"
-                    className="min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    id="change-detail-json"
-                    value={form.detailJson}
-                    onChange={(event) =>
-                      updateForm("detailJson", event.target.value)
-                    }
-                  />
-                </label>
-              </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-urls-json"
-                >
-                  urls JSON
-                  <textarea
-                    aria-label="change urls JSON"
-                    className="min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    id="change-urls-json"
-                    value={form.urlsJson}
-                    onChange={(event) => updateForm("urlsJson", event.target.value)}
-                  />
-                </label>
-                <label
-                  className="flex flex-col gap-1 text-sm"
-                  htmlFor="change-address-json"
-                >
-                  address JSON
-                  <textarea
-                    aria-label="change address JSON"
-                    className="min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    id="change-address-json"
-                    value={form.addressJson}
-                    onChange={(event) =>
-                      updateForm("addressJson", event.target.value)
-                    }
-                  />
-                </label>
-              </div>
+                  >
+                    {form.category &&
+                    !categoryItems.some((item) => item.code === form.category) ? (
+                      <NativeSelectOption value={form.category}>
+                        {form.category}
+                      </NativeSelectOption>
+                    ) : null}
+                    {categoryItems.map((item) => (
+                      <NativeSelectOption key={item.code} value={item.code}>
+                        {categoryOptionLabel(item)}
+                      </NativeSelectOption>
+                    ))}
+                  </FormSelect>
+                </div>
+                {categories.isError ? (
+                  <div className="mt-2 text-sm text-destructive">
+                    {categories.error.message}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-lg border bg-background p-4">
+                  <h2 className="mb-4 font-medium">주소</h2>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <FormField
+                      aria-label="change road address"
+                      id="change-address-road"
+                      label="도로명 주소"
+                      value={form.addressRoad}
+                      onChange={(event) =>
+                        updateForm("addressRoad", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change legal address"
+                      id="change-address-legal"
+                      label="법정동 주소"
+                      value={form.addressLegal}
+                      onChange={(event) =>
+                        updateForm("addressLegal", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change admin address"
+                      id="change-address-admin"
+                      label="행정동 주소"
+                      value={form.addressAdmin}
+                      onChange={(event) =>
+                        updateForm("addressAdmin", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change sido code"
+                      id="change-sido-code"
+                      inputMode="numeric"
+                    label="시도 코드"
+                      value={form.sidoCode}
+                      onChange={(event) =>
+                        updateForm("sidoCode", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change legal dong code"
+                      id="change-legal-dong-code"
+                      inputMode="numeric"
+                    label="법정동 코드"
+                      value={form.legalDongCode}
+                      onChange={(event) =>
+                        updateForm("legalDongCode", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change admin dong code"
+                      id="change-admin-dong-code"
+                      inputMode="numeric"
+                    label="행정동 코드"
+                      value={form.adminDongCode}
+                      onChange={(event) =>
+                        updateForm("adminDongCode", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change road name code"
+                      id="change-road-name-code"
+                      inputMode="numeric"
+                    label="도로명 코드"
+                      value={form.roadNameCode}
+                      onChange={(event) =>
+                        updateForm("roadNameCode", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change road address management no"
+                      id="change-road-address-management-no"
+                      inputMode="numeric"
+                      label="도로명주소 관리번호"
+                      value={form.roadAddressManagementNo}
+                      onChange={(event) =>
+                        updateForm(
+                          "roadAddressManagementNo",
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </div>
+                  <details className="mt-3 rounded-md border border-dashed p-3">
+                    <summary className="cursor-pointer text-sm font-medium">
+                      고급 추가 정보
+                    </summary>
+                    <FormTextArea
+                      className="mt-3"
+                      aria-label="change address JSON"
+                      id="change-address-json"
+                      label="주소 추가 정보"
+                      hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+                      value={form.addressJson}
+                      onChange={(event) =>
+                        updateForm("addressJson", event.target.value)
+                      }
+                    />
+                  </details>
+                </div>
+                <div className="rounded-lg border bg-background p-4">
+                  <h2 className="mb-4 font-medium">상세</h2>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <FormField
+                      aria-label="change phone"
+                      id="change-phone"
+                      label="전화"
+                      error={
+                        phoneNumber<FeatureChangeFormState>()(form.phone, form)
+                      }
+                      inputMode="tel"
+                      placeholder="예: 02-123-4567"
+                      value={form.phone}
+                      onChange={(event) =>
+                        updateForm("phone", event.target.value)
+                      }
+                    />
+                    <FormSelect
+                      aria-label="change place kind"
+                      id="change-place-kind"
+                      label="장소 종류"
+                      value={form.placeKind}
+                      onChange={(event) =>
+                        updateForm("placeKind", event.target.value)
+                      }
+                    >
+                      {withCurrentOption(
+                        PLACE_KIND_OPTIONS,
+                        form.placeKind,
+                        "현재 장소 종류",
+                      ).map((option) => (
+                        <NativeSelectOption key={option.value} value={option.value}>
+                          {option.label}
+                        </NativeSelectOption>
+                      ))}
+                    </FormSelect>
+                    {form.kind === "event" ? (
+                      <>
+                        <FormSelect
+                          aria-label="change event status"
+                          id="change-event-status"
+                          label="행사 상태"
+                          value={form.eventStatus}
+                          onChange={(event) =>
+                            updateForm("eventStatus", event.target.value)
+                          }
+                        >
+                          {withCurrentOption(
+                            EVENT_STATUS_OPTIONS,
+                            form.eventStatus,
+                            "현재 행사 상태",
+                          ).map((option) => (
+                            <NativeSelectOption
+                              key={option.value}
+                              value={option.value}
+                            >
+                              {option.label}
+                            </NativeSelectOption>
+                          ))}
+                        </FormSelect>
+                        <FormField
+                          aria-label="change event start"
+                          id="change-start-date"
+                          label="행사 시작"
+                          type="datetime-local"
+                          value={form.startDate}
+                          onChange={(event) =>
+                            updateForm("startDate", event.target.value)
+                          }
+                        />
+                        <FormField
+                          aria-label="change event end"
+                          id="change-end-date"
+                          label="행사 종료"
+                          type="datetime-local"
+                          value={form.endDate}
+                          onChange={(event) =>
+                            updateForm("endDate", event.target.value)
+                          }
+                        />
+                        <FormField
+                          aria-label="change organizer"
+                          id="change-organizer"
+                          label="주최"
+                          value={form.organizer}
+                          onChange={(event) =>
+                            updateForm("organizer", event.target.value)
+                          }
+                        />
+                        <FormField
+                          aria-label="change venue"
+                          id="change-venue"
+                          label="행사 장소"
+                          value={form.venue}
+                          onChange={(event) =>
+                            updateForm("venue", event.target.value)
+                          }
+                        />
+                      </>
+                    ) : null}
+                    <FormField
+                      aria-label="change homepage url"
+                      id="change-homepage-url"
+                      label="홈페이지"
+                      error={httpUrl<FeatureChangeFormState>("홈페이지")(form.homepageUrl, form)}
+                      placeholder="https://example.kr"
+                      type="url"
+                      value={form.homepageUrl}
+                      onChange={(event) =>
+                        updateForm("homepageUrl", event.target.value)
+                      }
+                    />
+                    <FormField
+                      aria-label="change source url"
+                      id="change-source-url"
+                      label="출처"
+                      error={httpUrl<FeatureChangeFormState>("출처")(form.sourceUrl, form)}
+                      placeholder="https://example.kr/source"
+                      type="url"
+                      value={form.sourceUrl}
+                      onChange={(event) =>
+                        updateForm("sourceUrl", event.target.value)
+                      }
+                    />
+                  </div>
+                  <details className="mt-3 rounded-md border border-dashed p-3">
+                    <summary className="cursor-pointer text-sm font-medium">
+                      고급 추가 정보
+                    </summary>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <FormTextArea
+                        aria-label="change detail JSON"
+                        id="change-detail-json"
+                        label="상세 추가 정보"
+                        hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+                        value={form.detailJson}
+                        onChange={(event) =>
+                          updateForm("detailJson", event.target.value)
+                        }
+                      />
+                      <FormTextArea
+                        aria-label="change urls JSON"
+                        id="change-urls-json"
+                        label="URL 추가 정보"
+                        hint="홈페이지/출처 외 추가 URL만 JSON으로 입력합니다."
+                        value={form.urlsJson}
+                        onChange={(event) =>
+                          updateForm("urlsJson", event.target.value)
+                        }
+                      />
+                    </div>
+                  </details>
+                </div>
+              </section>
             </>
           ) : null}
         </form>
+        ) : null}
 
+        {showRequestForm && locationDialogOpen ? (
+          <LocationEditDialog
+            form={form}
+            updateForm={updateForm}
+            onClose={() => setLocationDialogOpen(false)}
+          />
+        ) : null}
+
+        {showRequestForm && selectedRequest ? (
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
+            <Alert>
+              <AlertTitle>변경 요청 생성됨</AlertTitle>
+              <AlertDescription>
+                요청은 Feature 검수 화면에서 승인하거나 반려할 수 있습니다.
+              </AlertDescription>
+            </Alert>
+            <ChangeRequestDetail request={selectedRequest} />
+          </section>
+        ) : null}
+
+        {showReview ? (
+        <>
         <section className="rounded-lg border bg-background p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-medium">변경 요청 목록</h2>
+            <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+              <Badge variant="outline">review mode</Badge>
+              <StatusBadge status={reviewMode} />
+              <Badge variant="outline">rows {formatCount(items.length)}</Badge>
+              <Badge variant="outline">
+                limit {changes.data?.meta.page?.page_size ?? pageSize}
+              </Badge>
+              <Badge variant="outline">
+                duration {changes.data?.meta.duration_ms ?? 0}ms
+              </Badge>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]">
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -901,7 +2131,7 @@ export function FeatureChangeRequestsClient() {
             >
               {CHANGE_STATUSES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
-                  {item}
+                  {item === "all" ? "전체" : statusLabel(item)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -914,7 +2144,7 @@ export function FeatureChangeRequestsClient() {
             >
               {CHANGE_ACTIONS.map((item) => (
                 <NativeSelectOption key={item} value={item}>
-                  {item}
+                  {item === "all" ? "전체" : actionLabel(item)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -940,7 +2170,7 @@ export function FeatureChangeRequestsClient() {
             data={items}
             getRowId={(row) => row.request_id}
             isLoading={changes.isLoading}
-            emptyMessage="feature change request가 없습니다."
+            emptyMessage="변경 요청이 없습니다."
             manualSorting={false}
             containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
             onRowClick={(row) => setSelectedRequest(row)}
@@ -951,6 +2181,8 @@ export function FeatureChangeRequestsClient() {
 
           <ChangeRequestDetail request={selectedRequest} />
         </section>
+        </>
+        ) : null}
       </div>
     </AdminShell>
   );

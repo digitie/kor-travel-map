@@ -1,5 +1,46 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-30 (codex) — Feature 변경/작업 자동화 운영 UI n150 배포
+
+- **완료**: `/admin/dagster` 작업 자동화 화면에서 스케줄 cron 수정, 기본값 복귀, 시작/중지, 즉시 실행
+  명령을 수행할 수 있게 했다.
+- **완료**: Dagster asset 한국어 표기 상수를 추가하고, UI는 한국어명을 우선 표시하며 코드 레벨 이름은
+  하단/작은 글씨/말줄임/툴팁으로 표시한다.
+- **완료**: Feature 변경 요청 작성 화면과 검수 화면을 분리했다. 작성 화면은 form 중심, 검수 화면은
+  목록/필터/상세/승인·반려 중심으로 정리했다.
+- **완료**: Admin UI 메뉴명과 live e2e 기대값을 한글 UI에 맞췄고, 모바일 메뉴는 선택 항목이
+  중앙으로 오도록 스크롤된다.
+- **배포**: n150에서 API/UI/Dagster/Dagster daemon을 재빌드·재시작했고 Alembic head
+  `0037_dagster_schedule_overrides`와 UI 로그인 POST를 확인했다.
+- **검증**: n150 공식 Playwright Docker image로 Dagster 스케줄 write live spec 3 passed / 1 skipped,
+  Feature 변경 write live spec 3 passed, misc live smoke 182 passed를 확인했다.
+- **검증**: 로컬 frontend `type-check`, `lint`(기존 경고 4개), 관련 pytest 22건, ruff,
+  `git diff --check` 통과.
+- **다음 한 작업**: PR 전 보안 스캔과 CI green 확인 후 머지한다.
+
+## 2026-06-29 (codex) — Feature change requests 편집 UX 보강
+
+- **완료**: `/admin/features` detail에서 `편집` 링크로 change request update form을 열고, 대상
+  feature detail을 prefill하도록 연결했다.
+- **완료**: `/features/[featureId]` Feature 상세의 `수정` 링크도 같은 update prefill 경로로
+  연결하고, prefill 시 주소/행정코드/관계 id/좌표 정밀도/전화·행사·URL 값을 개별 필드로 채운다.
+- **완료**: change request form을 요청/기본 정보/위치·마커/payload 구조로 정리하고, category,
+  marker icon, marker color를 dropdown으로 바꿨다.
+- **완료**: 위치/마커 다이얼로그를 추가해 지도 우클릭 좌표 선택, marker icon/color 선택,
+  모바일 오래누르기 좌표 선택, `적용`/`취소`, reverse geocoder 기반 시군구 코드·이름 표시를 지원한다.
+- **완료**: `sigungu_code` 입력은 숫자 prefix와 한글 검색어 모두 geocoder 후보를 즉시 보여주며,
+  실제 코드가 있으면 시군구명을 표시한다.
+- **완료**: enrichment/dedup review 상세 다이얼로그 지도는 두 좌표가 모두 보이도록 bounds fit을
+  적용했다.
+- **완료**: Admin UI 사이드 메뉴를 한글 중심으로 정리했다. Feature 관련 메뉴는 `Feature 지도`,
+  `Feature 목록`, `Feature 변경`처럼 같은 접두어로 맞췄다.
+- **완료**: Playwright UI/e2e는 WSL에서 실행하지 않고 n150을 1순위, Windows 호스트 브라우저를
+  2순위 fallback으로 쓰도록 개발 환경 문서와 config 주석에 명시했다.
+- **검증**: frontend `type-check`, `type-check:e2e`, `lint`(기존 경고만), `test` 45건, `build`,
+  `git diff --check` 통과. n150 배포 후 targeted live UI e2e는 인증 setup과 read/edit UI 시나리오
+  2 passed, write opt-in spec 1 skipped로 통과했다.
+- **다음 한 작업**: PR 전 보안 스캔과 CI green 확인 후 머지한다.
+
 ## 2026-06-29 (codex) — tasks 백로그 정리
 
 - **완료**: `T-229-buildx`는 사용자 결정에 따라 추가 추적하지 않기로 하고 열린 백로그에서 제거했다.

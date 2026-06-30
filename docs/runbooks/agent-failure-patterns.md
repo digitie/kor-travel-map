@@ -307,10 +307,12 @@
 
 ### F9 — Playwright 실행 위치 혼동
 
-- **증상**: Windows에서 frontend 서버까지 띄우거나, n150 검증 가능 여부를 확인하지 않고
-  바로 Windows Playwright를 실행한다.
-- **정본**: Playwright Chromium은 n150 Linux에서 우선 실행한다. n150에서 실행할 수 없을 때만
-  Windows fallback을 쓴다.
+- **증상**: WSL에서 `npm run e2e`/`npx playwright test`/`npx playwright install`을 실행하거나,
+  n150 검증 가능 여부를 확인하지 않고 바로 Windows Playwright를 실행한다.
+- **원인**: WSL은 backend/frontend 서버와 정적 검증을 실행하는 경계이고, Playwright 브라우저
+  실행 경계가 아니다. 특히 지원되지 않는 WSL 배포판에서는 Chromium 설치 자체가 실패할 수 있다.
+- **정본**: Playwright Chromium은 **WSL에서 실행하지 않는다.** n150 Linux에서 우선 실행한다.
+  n150에서 실행할 수 없을 때만 Windows fallback을 쓴다.
   - WSL: backend `:12701`, frontend `:12705`.
   - n150 Linux: `cd packages/kor-travel-map-admin/frontend && npm run e2e`.
   - Windows fallback: `cd packages\kor-travel-map-admin\frontend; npm run e2e`.

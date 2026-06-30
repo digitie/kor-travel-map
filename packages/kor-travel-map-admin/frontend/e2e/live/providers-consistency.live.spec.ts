@@ -150,7 +150,7 @@ test.describe("live /ops/providers", () => {
 
   test("providers nav link is active and navigable", async ({ page }) => {
     await page.goto("/");
-    const navLink = page.getByRole("link", { name: "Providers" });
+    const navLink = page.getByRole("link", { name: "Provider 상태" });
     await expect(navLink.first()).toBeVisible({ timeout: T });
     await navLink.first().click();
     await expect(page).toHaveURL(/\/ops\/providers$/, { timeout: T });
@@ -226,7 +226,7 @@ test.describe("live /ops/consistency", () => {
 
   test("consistency nav link is active and navigable", async ({ page }) => {
     await page.goto("/");
-    const navLink = page.getByRole("link", { name: "Consistency" });
+    const navLink = page.getByRole("link", { name: "정합성 점검" });
     await expect(navLink.first()).toBeVisible({ timeout: T });
     await navLink.first().click();
     await expect(page).toHaveURL(/\/ops\/consistency$/, { timeout: T });
@@ -290,7 +290,7 @@ test.describe("live ops nav between providers and consistency", () => {
   test("providers → consistency via nav link", async ({ page }) => {
     await page.goto(PROVIDERS_ROUTE);
     await expectProvidersLoaded(page);
-    await page.getByRole("link", { name: "Consistency" }).first().click();
+    await page.getByRole("link", { name: "정합성 점검" }).first().click();
     await expect(page).toHaveURL(/\/ops\/consistency$/, { timeout: T });
     await expectConsistencyLoaded(page);
   });
@@ -298,7 +298,7 @@ test.describe("live ops nav between providers and consistency", () => {
   test("consistency → providers via nav link", async ({ page }) => {
     await page.goto(CONSISTENCY_ROUTE);
     await expectConsistencyLoaded(page);
-    await page.getByRole("link", { name: "Providers" }).first().click();
+    await page.getByRole("link", { name: "Provider 상태" }).first().click();
     await expect(page).toHaveURL(/\/ops\/providers$/, { timeout: T });
     await expectProvidersLoaded(page);
   });

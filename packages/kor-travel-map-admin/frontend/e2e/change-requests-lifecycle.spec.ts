@@ -15,6 +15,8 @@ type AdminFeatureChangeResponse =
 type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
+type CategorySummary = components["schemas"]["CategorySummary"];
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
@@ -42,6 +44,48 @@ function makeFeatureChange(
     status: "pending",
     ...overrides,
   };
+}
+
+function makeCategory(code: string, label: string): CategorySummary {
+  return {
+    code,
+    db_active: null,
+    db_feature_count: null,
+    depth: 4,
+    is_active: true,
+    label,
+    maki_icon: "marker",
+    parent_code: code.slice(0, 6).padEnd(8, "0"),
+    path: ["여행", "관광", label],
+    sort_order: 1,
+    tier1_code: "01",
+    tier1_name: "여행",
+    tier2_code: "0107",
+    tier2_name: "관광",
+    tier3_code: code.slice(0, 6),
+    tier3_name: label,
+    tier4_code: code,
+    tier4_name: label,
+  };
+}
+
+function categoriesResponse(): CategoriesResponse {
+  return {
+    data: {
+      include_counts: false,
+      items: [
+        makeCategory("01070300", "관광지"),
+        makeCategory("01070400", "문화시설"),
+      ],
+    },
+    meta: { duration_ms: 1, request_id: "e2e-categories" },
+  };
+}
+
+async function mockCategories(page: Page) {
+  await page.route("**/v1/categories**", async (route) => {
+    await fulfillJson(route, categoriesResponse());
+  });
 }
 
 function featureChangeListResponse(
@@ -209,6 +253,10 @@ async function mockChangeList(
 }
 
 test.describe("admin feature change-requests lifecycle", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockCategories(page);
+  });
+
   test("reject flips a pending row to rejected and clears its action buttons", async ({
     page,
   }) => {
@@ -227,7 +275,7 @@ test.describe("admin feature change-requests lifecycle", () => {
       ],
     });
 
-    await page.goto("/admin/features/change-requests");
+    await page.goto("/admin/features/change-reviews");
     // 기본 마운트 status 필터는 'pending'(useState 초기값). reject 후 행이 pending을
     // 벗어나도 보이도록 'all'로 바꾼다(approve-workflow idiom과 동일).
     await page.getByLabel("change status", { exact: true }).selectOption("all");
@@ -303,7 +351,7 @@ test.describe("admin feature change-requests lifecycle", () => {
       throw new Error(`Unhandled route: ${request.method()} ${url}`);
     });
 
-    await page.goto("/admin/features/change-requests");
+    await page.goto("/admin/features/change-reviews");
 
     // 기본 'pending' 필터가 이 행을 그대로 보여주므로 selectOption 불필요.
     const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
@@ -315,7 +363,7 @@ test.describe("admin feature change-requests lifecycle", () => {
     // destructive Alert는 role='alert'으로 해석된다.
     const alert = page
       .getByRole("alert")
-      .filter({ hasText: "feature change 처리 실패" });
+      .filter({ hasText: "Feature 변경 처리 실패" });
     await expect(alert).toBeVisible();
     // client.ts 에러 포맷 'POST <path> 실패 (HTTP 409) <detail>' → mutationError.message.
     await expect(alert).toContainText("HTTP 409");
@@ -383,7 +431,7 @@ test.describe("admin feature change-requests lifecycle", () => {
 
     const alert = page
       .getByRole("alert")
-      .filter({ hasText: "feature change 처리 실패" });
+      .filter({ hasText: "Feature 변경 처리 실패" });
     await expect(alert).toBeVisible();
     // formError는 null(buildCreatePayload 성공) → mutationError.message가 렌더된다.
     await expect(alert).toContainText("HTTP 422");
@@ -410,7 +458,7 @@ test.describe("admin feature change-requests lifecycle", () => {
       throw new Error(`Unhandled route: ${request.method()} ${url}`);
     });
 
-    await page.goto("/admin/features/change-requests");
+    await page.goto("/admin/features/change-reviews");
 
     // DataTable emptyMessage prop.
     await expect(
@@ -444,7 +492,7 @@ test.describe("admin feature change-requests lifecycle", () => {
       ],
     });
 
-    await page.goto("/admin/features/change-requests");
+    await page.goto("/admin/features/change-reviews");
     // 두 seed 행 모두 pending → 'all'로 바꿔 baseline 노출.
     await page.getByLabel("change status", { exact: true }).selectOption("all");
 
@@ -462,5 +510,30 @@ test.describe("admin feature change-requests lifecycle", () => {
     // 요청이 q를 실어 보냈는지 기록된 쿼리 파라미터로 검증(refetch count 아님 —
     // staleTime 15s 때문에 동일 파라미터는 캐시될 수 있음).
     await expect.poll(() => requests.lastListQ).toBe("alpha");
+  });
+
+  test("mobile location dialog keeps the map and actions inside the viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockChangeList(page, { initial: [] });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change name", { exact: true }).fill("Mobile map");
+    await page.getByLabel("change lon", { exact: true }).fill("126.978000");
+    await page.getByLabel("change lat", { exact: true }).fill("37.566500");
+    await page.getByRole("button", { name: "위치 편집" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "위치/마커 편집" });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("feature-change-location-map")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "취소" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "적용" })).toBeVisible();
+
+    const mapBox = await page
+      .getByTestId("feature-change-location-map")
+      .boundingBox();
+    expect(mapBox?.width).toBeGreaterThan(300);
+    expect(mapBox?.height).toBeGreaterThan(200);
   });
 });

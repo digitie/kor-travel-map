@@ -60,6 +60,10 @@ import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
+import {
+  PLACE_KIND_OPTIONS,
+  withCurrentOption,
+} from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -831,11 +835,21 @@ function RuleEditor({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">place_kind</span>
-            <Input
+            <span className="text-muted-foreground">장소 종류</span>
+            <NativeSelect
               value={placeKind}
               onChange={(event) => setPlaceKind(event.target.value)}
-            />
+            >
+              {withCurrentOption(
+                PLACE_KIND_OPTIONS,
+                placeKind,
+                "현재 장소 종류",
+              ).map((option) => (
+                <NativeSelectOption key={option.value} value={option.value}>
+                  {option.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
           </label>
           <label className="grid gap-1 text-sm">
             <span className="text-muted-foreground">category</span>

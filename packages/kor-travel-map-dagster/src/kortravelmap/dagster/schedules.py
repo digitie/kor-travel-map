@@ -49,6 +49,7 @@ from .kma_weather import (
 from .mcst_features import (
     feature_place_mcst_culture,
 )
+from .schedule_overrides import cron_for_schedule
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
 """Dagster provider schedule execution timezone."""
@@ -413,7 +414,7 @@ FEATURE_LOAD_SCHEDULES: Final = [
     ScheduleDefinition(
         name=spec.schedule_name,
         job=job,
-        cron_schedule=spec.cron_schedule,
+        cron_schedule=cron_for_schedule(spec.schedule_name, spec.cron_schedule),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         run_config=spec.run_config,

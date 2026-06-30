@@ -41,7 +41,7 @@ const PAGES: ReviewPage[] = [
   {
     route: "/admin/dedup-reviews",
     heading: "Dedup review",
-    navLabel: "Dedup reviews",
+    navLabel: "Feature 중복 검토",
     empty: "dedup review가 없습니다.",
     statusLabel: "dedup status",
     statuses: ["pending", "accepted", "rejected", "merged", "ignored", "all"],
@@ -50,7 +50,7 @@ const PAGES: ReviewPage[] = [
   {
     route: "/admin/enrichment-reviews",
     heading: "Enrichment review",
-    navLabel: "Enrichment reviews",
+    navLabel: "Feature 보강 검토",
     empty: "enrichment review가 없습니다.",
     statusLabel: "enrichment status",
     statuses: ["pending", "accepted", "rejected", "ignored", "all"],
@@ -59,7 +59,7 @@ const PAGES: ReviewPage[] = [
   {
     route: "/admin/feature-update-requests",
     heading: "Feature update requests",
-    navLabel: "Update requests",
+    navLabel: "Feature 갱신",
     empty: "요청이 없습니다.",
     statusLabel: "request status",
     statuses: ["queued", "running", "done", "failed", "cancelled", "all"],

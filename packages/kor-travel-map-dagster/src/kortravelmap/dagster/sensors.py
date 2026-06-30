@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from dagster import (
@@ -62,6 +63,10 @@ async def execute_feature_update_request_op(
         _resource_object(context, "sigungu_by_radius_resolver", default=None),
     )
 
+    await client.mark_update_request_started(
+        request_id,
+        dagster_run_id=context.run_id,
+    )
     result = await client.execute_feature_update_request(
         request_id,
         runner=runner,
@@ -105,7 +110,7 @@ def feature_update_request_queue_sensor(
         else _resource_object(context, "kor_travel_map_client"),
     )
     requests = _run_async(
-        client.peek_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
+        client.claim_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
     )
     if not requests:
         return SkipReason("queued feature update request 없음")
@@ -178,10 +183,17 @@ def _run_config_for_request(request: "FeatureUpdateRequest") -> dict[str, object
 
 def _run_request_for_request(request: "FeatureUpdateRequest") -> RunRequest:
     return RunRequest(
-        run_key=f"feature-update:{request.request_id}",
+        run_key=_run_key_for_request(request),
         run_config=_run_config_for_request(request),
         tags=_tags_for_request(request),
     )
+
+
+def _run_key_for_request(request: "FeatureUpdateRequest") -> str:
+    claimed_at = request.updated_at
+    if claimed_at.tzinfo is not None:
+        claimed_at = claimed_at.astimezone(UTC)
+    return f"feature-update:{request.request_id}:{claimed_at.isoformat()}"
 
 
 def _tags_for_request(request: "FeatureUpdateRequest") -> dict[str, str]:

@@ -8,6 +8,7 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
+import { type Map as MapLibreMap } from "maplibre-gl";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import {
@@ -47,6 +48,32 @@ const SCORE_FILTERS = [
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 
 type ScoreFilter = (typeof SCORE_FILTERS)[number]["value"];
+type MapPoint = [number, number];
+
+function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
+  if (points.length === 0) return;
+  if (points.length === 1) {
+    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    return;
+  }
+  const lons = points.map((point) => point[0]);
+  const lats = points.map((point) => point[1]);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  if (minLon === maxLon && minLat === maxLat) {
+    map.easeTo({ center: points[0], zoom: Math.max(map.getZoom(), 15), duration: 0 });
+    return;
+  }
+  map.fitBounds(
+    [
+      [minLon, minLat],
+      [maxLon, maxLat],
+    ],
+    { duration: 0, maxZoom: 16, padding: 64 },
+  );
+}
 
 function scoreBounds(value: ScoreFilter): { min?: number; max?: number } {
   const found = SCORE_FILTERS.find((item) => item.value === value);
@@ -231,6 +258,12 @@ function EnrichmentDetailDialog({
                       className="absolute inset-0 h-full w-full"
                       key={detail.review_id}
                       navigation
+                      onLoad={(map) =>
+                        fitMapToPoints(map, [
+                          [target.lon ?? 0, target.lat ?? 0],
+                          [source.raw_longitude ?? 0, source.raw_latitude ?? 0],
+                        ])
+                      }
                       scale
                       testId="enrichment-detail-map"
                       zoom={14}

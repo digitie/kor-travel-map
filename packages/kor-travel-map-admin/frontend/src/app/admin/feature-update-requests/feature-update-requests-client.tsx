@@ -12,6 +12,7 @@ import {
   useFeatureUpdateRequests,
   useRunFeatureUpdateRequestNowMutation,
 } from "@/api/updateRequests";
+import { useProviders } from "@/api/etl";
 import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -19,11 +20,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
+import { ComboboxMultiple } from "@/components/ui/combobox-multiple";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
 import {
   combine,
+  koreaLatitude,
+  koreaLongitude,
   numberInRange,
   required,
   validateForm,
@@ -50,7 +54,7 @@ export function FeatureUpdateRequestsClient() {
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
-  const [providers, setProviders] = useState("");
+  const [providers, setProviders] = useState<string[]>([]);
   const [datasets, setDatasets] = useState("");
   const [dryRun, setDryRun] = useState(true);
   const [runMode, setRunMode] = useState<"queued" | "now">("queued");
@@ -65,11 +69,27 @@ export function FeatureUpdateRequestsClient() {
     status: status === "all" ? undefined : status,
     page_size: 100,
   });
+  const providersQuery = useProviders();
   const createRequest = useCreateFeatureUpdateRequestMutation();
   const cancelRequest = useCancelFeatureUpdateRequestMutation();
   const runNow = useRunFeatureUpdateRequestNowMutation();
 
   const items = requests.data?.data.items ?? [];
+  const providerOptions = useMemo(() => {
+    const catalogOptions =
+      providersQuery.data?.data.providers.map((entry) => ({
+        value: entry.provider,
+        label: entry.provider,
+        description: `데이터셋 ${entry.datasets.length}개`,
+      })) ?? [];
+    const known = new Set(catalogOptions.map((option) => option.value));
+    return [
+      ...providers
+        .filter((provider) => !known.has(provider))
+        .map((provider) => ({ value: provider, label: provider })),
+      ...catalogOptions,
+    ];
+  }, [providers, providersQuery.data?.data.providers]);
   type RequestRow = NonNullable<typeof requests.data>["data"]["items"][number];
   const columns = useMemo<ColumnDef<RequestRow, unknown>[]>(
     () => [
@@ -192,21 +212,21 @@ export function FeatureUpdateRequestsClient() {
       {
         field: "lon",
         validate: combine(
-          required("경도(lon)는 필수입니다."),
-          numberInRange({ min: 124, max: 132, message: "경도는 124~132 범위여야 합니다." }),
+          required("경도를 입력하세요."),
+          koreaLongitude(),
         ),
       },
       {
         field: "lat",
         validate: combine(
-          required("위도(lat)는 필수입니다."),
-          numberInRange({ min: 33, max: 43, message: "위도는 33~43 범위여야 합니다." }),
+          required("위도를 입력하세요."),
+          koreaLatitude(),
         ),
       },
       {
         field: "radiusKm",
         validate: combine(
-          required("반경(radius_km)은 필수입니다."),
+          required("반경을 입력하세요."),
           numberInRange({ min: 0.1, message: "반경은 0.1 이상이어야 합니다." }),
         ),
       },
@@ -231,7 +251,7 @@ export function FeatureUpdateRequestsClient() {
         },
         radius_km: Number(values.radiusKm),
       },
-      providers: commaSeparatedValues(providers),
+      providers,
       dataset_keys: commaSeparatedValues(datasets),
       dry_run: dryRun,
       run_mode: runMode,
@@ -268,8 +288,7 @@ export function FeatureUpdateRequestsClient() {
           <div className="flex flex-col gap-3">
             <FormField
               error={errors.lon}
-              label="경도(lon)"
-              hint="요청 중심점의 경도입니다."
+              label="경도"
               ref={lonRef}
               required
               value={lon}
@@ -277,8 +296,7 @@ export function FeatureUpdateRequestsClient() {
             />
             <FormField
               error={errors.lat}
-              label="위도(lat)"
-              hint="요청 중심점의 위도입니다."
+              label="위도"
               ref={latRef}
               required
               value={lat}
@@ -287,18 +305,21 @@ export function FeatureUpdateRequestsClient() {
             <FormField
               error={errors.radiusKm}
               label="반경(km)"
-              hint="중심점에서 이 반경(km) 안의 feature를 대상으로 합니다."
               ref={radiusKmRef}
               required
               value={radiusKm}
               onChange={(e) => setRadiusKm(e.target.value)}
             />
-            <FormField
+            <ComboboxMultiple
+              disabled={providersQuery.isLoading}
+              emptyMessage="일치하는 제공자가 없습니다."
+              error={providersQuery.isError ? providersQuery.error.message : undefined}
               label="제공자"
-              hint="갱신할 provider를 쉼표로 구분해 입력합니다(비우면 전체)."
-              placeholder="예: python-kma-api, python-opinet-api"
+              options={providerOptions}
+              placeholder={providersQuery.isLoading ? "불러오는 중" : "전체 제공자"}
+              searchPlaceholder="제공자 검색"
               value={providers}
-              onChange={(e) => setProviders(e.target.value)}
+              onChange={setProviders}
             />
             <FormField
               label="데이터셋 키"
@@ -309,7 +330,6 @@ export function FeatureUpdateRequestsClient() {
             />
             <FormSelect
               label="실행 모드"
-              hint="예약(queued) 또는 즉시(now) 실행을 선택합니다."
               value={runMode}
               onChange={(event) => setRunMode(event.target.value as "queued" | "now")}
             >

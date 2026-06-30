@@ -25,6 +25,10 @@ import {
 } from "react";
 
 import {
+  useCategories,
+  type CategorySummary,
+} from "@/api/categories";
+import {
   useCreateAdminFeatureMutation,
   useNearbyFeatures,
   type AdminFeatureChangeRecord,
@@ -49,19 +53,30 @@ import { FormSelect } from "@/components/ui/form-select";
 import { FormTextArea } from "@/components/ui/form-textarea";
 import { DataTable } from "@/components/ui/data-table";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import {
+  EVENT_STATUS_OPTIONS,
+  FEATURE_KIND_OPTIONS,
+  FEATURE_STATUS_OPTIONS,
+  MARKER_COLOR_OPTIONS,
+  MARKER_ICON_OPTIONS,
+  PLACE_KIND_OPTIONS,
+  markerColorSelectStyle,
+  markerIconLabel,
+  readableTextColor,
+  withCurrentOption,
+} from "@/lib/feature-form-options";
 import { formatDateTime, shortId } from "@/lib/format";
+import {
+  KOREA_COORD_MESSAGE,
+  httpUrl,
+  isKoreaCoordinate,
+  phoneNumber,
+} from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT } from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
-const CREATE_STATUSES: AdminFeatureCreateRequest["status"][] = [
-  "draft",
-  "active",
-  "inactive",
-  "hidden",
-];
-const CREATE_KINDS: AdminFeatureCreateRequest["kind"][] = ["place", "event"];
 
 type FeatureCreateField = keyof FeatureCreateFormState;
 
@@ -187,12 +202,53 @@ function parseCoord(form: FeatureCreateFormState): { lon: number; lat: number } 
   const lon = Number(form.lon);
   const lat = Number(form.lat);
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-    throw new Error("lon과 lat은 숫자여야 합니다.");
+    throw new Error("좌표는 숫자로 입력하세요.");
   }
-  if (lon < 124 || lon > 132 || lat < 33 || lat > 39.5) {
-    throw new Error("좌표는 한국 본토 기준 범위 안이어야 합니다.");
+  if (!isKoreaCoordinate(lon, lat)) {
+    throw new Error(KOREA_COORD_MESSAGE);
   }
   return { lon, lat };
+}
+
+function coordValidationMessage(form: FeatureCreateFormState): string | null {
+  if (form.lon.trim().length === 0 || form.lat.trim().length === 0) {
+    return null;
+  }
+  try {
+    parseCoord(form);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function categoryOptionLabel(category: CategorySummary): string {
+  const path = category.path.length > 0 ? category.path.join(" > ") : category.label;
+  return `${category.code} · ${path}`;
+}
+
+function validateCreateTextFields(
+  form: FeatureCreateFormState,
+  categoryItems: readonly CategorySummary[],
+) {
+  const phoneError = phoneNumber<FeatureCreateFormState>()(form.phone, form);
+  if (phoneError) throw new Error(phoneError);
+  const homepageError = httpUrl<FeatureCreateFormState>("홈페이지")(form.homepageUrl, form);
+  if (homepageError) throw new Error(homepageError);
+  const sourceError = httpUrl<FeatureCreateFormState>("출처")(form.sourceUrl, form);
+  if (sourceError) throw new Error(sourceError);
+  if (!MARKER_ICON_OPTIONS.includes(form.markerIcon)) {
+    throw new Error("목록에 있는 마커 아이콘을 선택하세요.");
+  }
+  if (!MARKER_COLOR_OPTIONS.some((item) => item.code === form.markerColor)) {
+    throw new Error("목록에 있는 마커 색상을 선택하세요.");
+  }
+  if (
+    categoryItems.length > 0 &&
+    !categoryItems.some((item) => item.code === form.category)
+  ) {
+    throw new Error("목록에 있는 카테고리를 선택하세요.");
+  }
 }
 
 function coordOrNull(
@@ -325,8 +381,14 @@ export function FeatureCreateClient() {
   const [createdRequest, setCreatedRequest] =
     useState<AdminFeatureChangeRecord | null>(null);
 
+  const categories = useCategories();
   const createFeature = useCreateAdminFeatureMutation();
   const coord = useMemo(() => coordOrNull(form), [form]);
+  const coordError = coordValidationMessage(form);
+  const categoryItems = categories.data?.data.items ?? [];
+  const formMarkerIconOptions = MARKER_ICON_OPTIONS.includes(form.markerIcon)
+    ? MARKER_ICON_OPTIONS
+    : [form.markerIcon, ...MARKER_ICON_OPTIONS].filter(Boolean);
   const duplicateRadius = radiusOrNull(form.duplicateRadiusM);
   const nearby = useNearbyFeatures(
     coord && duplicateRadius
@@ -549,6 +611,7 @@ export function FeatureCreateClient() {
     setFormError(null);
     setFieldErrors({});
     try {
+      validateCreateTextFields(form, categoryItems);
       const payload = buildCreatePayload(form);
       const response = await createFeature.mutateAsync(payload);
       setCreatedRequest(response.data.request);
@@ -563,6 +626,12 @@ export function FeatureCreateClient() {
         setFieldErrors({ reason: message });
       } else if (message.includes("lon") || message.includes("좌표")) {
         setFieldErrors({ lon: message, lat: message });
+      } else if (message.includes("전화번호")) {
+        setFieldErrors({ phone: message });
+      } else if (message.includes("홈페이지")) {
+        setFieldErrors({ homepageUrl: message });
+      } else if (message.includes("출처")) {
+        setFieldErrors({ sourceUrl: message });
       }
     }
   };
@@ -582,18 +651,18 @@ export function FeatureCreateClient() {
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/features/change-requests"
           >
-            변경 요청
+            변경 요청 작성
           </Link>
         </>
       }
-      description="좌표·주소·중복 후보를 함께 검토하는 수동 feature 작성 표면입니다."
+      description="새 Feature를 등록합니다."
       section="관리"
-      title="새 피처"
+      title="새 Feature"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>
         {(formError || korTravelGeoError || createFeature.isError) && (
           <Alert variant="destructive">
-            <AlertTitle>feature 작성 실패</AlertTitle>
+            <AlertTitle>Feature 작성 실패</AlertTitle>
             <AlertDescription>
               {formError ?? korTravelGeoError ?? createFeature.error?.message}
             </AlertDescription>
@@ -603,7 +672,7 @@ export function FeatureCreateClient() {
         {createdRequest ? (
           <Alert>
             <CheckCircle2Icon data-icon="inline-start" />
-            <AlertTitle>change request 생성됨</AlertTitle>
+            <AlertTitle>변경 요청 생성됨</AlertTitle>
             <AlertDescription>
               {requestLabel(createdRequest)} ·{" "}
               <Link
@@ -809,7 +878,6 @@ export function FeatureCreateClient() {
           <div className="grid gap-3 lg:grid-cols-4">
             <FormSelect
               label="종류"
-              hint="생성할 feature 종류입니다."
               value={form.kind}
               onChange={(event) =>
                 updateForm(
@@ -818,15 +886,14 @@ export function FeatureCreateClient() {
                 )
               }
             >
-              {CREATE_KINDS.map((kind) => (
-                <NativeSelectOption key={kind} value={kind}>
-                  {kind}
+              {FEATURE_KIND_OPTIONS.map((kind) => (
+                <NativeSelectOption key={kind.value} value={kind.value}>
+                  {kind.label}
                 </NativeSelectOption>
               ))}
             </FormSelect>
             <FormSelect
               label="상태"
-              hint="생성될 feature의 초기 상태입니다."
               value={form.status}
               onChange={(event) =>
                 updateForm(
@@ -835,85 +902,113 @@ export function FeatureCreateClient() {
                 )
               }
             >
-              {CREATE_STATUSES.map((status) => (
-                <NativeSelectOption key={status} value={status}>
-                  {status}
+              {FEATURE_STATUS_OPTIONS.map((status) => (
+                <NativeSelectOption key={status.value} value={status.value}>
+                  {status.label}
                 </NativeSelectOption>
               ))}
             </FormSelect>
             <FormField
               error={fieldErrors.name}
               label="이름"
-              hint="지도·목록에 표시되는 이름입니다."
               required
               value={form.name}
               onChange={(event) => updateForm("name", event.target.value)}
             />
-            <FormField
+            <FormSelect
               error={fieldErrors.category}
               label="카테고리"
-              hint="8자리 숫자 카테고리 코드입니다."
               required
               value={form.category}
               onChange={(event) => updateForm("category", event.target.value)}
-            />
+            >
+              {form.category &&
+              !categoryItems.some((item) => item.code === form.category) ? (
+                <NativeSelectOption value={form.category}>
+                  현재 값: {form.category}
+                </NativeSelectOption>
+              ) : null}
+              {categoryItems.map((item) => (
+                <NativeSelectOption key={item.code} value={item.code}>
+                  {categoryOptionLabel(item)}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
           </div>
+          {categories.isError ? (
+            <div className="mt-2 text-sm text-destructive">
+              {categories.error.message}
+            </div>
+          ) : null}
           <div className="mt-3 grid gap-3 lg:grid-cols-4">
             <FormField
-              error={fieldErrors.lon}
+              error={fieldErrors.lon ?? coordError}
               inputMode="decimal"
               label="경도"
-              hint="위치 경도(WGS84)입니다."
               required
               value={form.lon}
               onChange={(event) => updateForm("lon", event.target.value)}
             />
             <FormField
-              error={fieldErrors.lat}
+              error={fieldErrors.lat ?? coordError}
               inputMode="decimal"
               label="위도"
-              hint="위치 위도(WGS84)입니다."
               required
               value={form.lat}
               onChange={(event) => updateForm("lat", event.target.value)}
             />
-            <FormField
-              label="marker_icon"
-              hint="지도 마커 아이콘 코드입니다(선택)."
+            <FormSelect
+              label="마커 아이콘"
               value={form.markerIcon}
               onChange={(event) => updateForm("markerIcon", event.target.value)}
-            />
-            <FormField
-              label="marker_color"
-              hint="지도 마커 색상 코드(P-01~P-16)입니다(선택)."
+            >
+              {formMarkerIconOptions.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {markerIconLabel(item)}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
+            <FormSelect
+              label="마커 색상"
+              style={markerColorSelectStyle(form.markerColor)}
               value={form.markerColor}
               onChange={(event) => updateForm("markerColor", event.target.value)}
-            />
+            >
+              {MARKER_COLOR_OPTIONS.map((item) => (
+                <NativeSelectOption
+                  key={item.code}
+                  style={{
+                    backgroundColor: item.hex,
+                    color: readableTextColor(item.hex),
+                  }}
+                  value={item.code}
+                >
+                  {item.label}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
           </div>
           <div className="mt-3 grid gap-3 lg:grid-cols-4">
             <FormField
               error={fieldErrors.reason}
               label="사유"
-              hint="이 생성 요청의 사유입니다."
               required
               value={form.reason}
               onChange={(event) => updateForm("reason", event.target.value)}
             />
             <FormField
               label="운영자"
-              hint="요청을 생성한 운영자입니다(선택)."
               value={form.operator}
               onChange={(event) => updateForm("operator", event.target.value)}
             />
             <FormField
-              label="feature_id"
-              hint="직접 지정할 ID입니다(비우면 자동 생성)."
+              label="Feature ID"
+              hint="비우면 자동 생성됩니다."
               value={form.featureId}
               onChange={(event) => updateForm("featureId", event.target.value)}
             />
             <FormField
-              label="idempotency_key"
-              hint="중복 생성을 막는 멱등 키입니다(선택)."
+              label="중복 방지 키"
               value={form.idempotencyKey}
               onChange={(event) =>
                 updateForm("idempotencyKey", event.target.value)
@@ -927,60 +1022,52 @@ export function FeatureCreateClient() {
             <h2 className="mb-4 font-medium">주소</h2>
             <div className="grid gap-3 md:grid-cols-2">
               <FormField
-                label="도로"
-                hint="도로명 주소입니다(선택)."
+                label="도로명 주소"
                 value={form.addressRoad}
                 onChange={(event) => updateForm("addressRoad", event.target.value)}
               />
               <FormField
-                label="legal"
-                hint="법정동 주소입니다(선택)."
+                label="법정동 주소"
                 value={form.addressLegal}
                 onChange={(event) =>
                   updateForm("addressLegal", event.target.value)
                 }
               />
               <FormField
-                label="관리자"
-                hint="행정동 주소입니다(선택)."
+                label="행정동 주소"
                 value={form.addressAdmin}
                 onChange={(event) =>
                   updateForm("addressAdmin", event.target.value)
                 }
               />
               <FormField
-                label="sigungu_code"
-                hint="시군구 코드입니다(선택)."
+                label="시군구 코드"
                 value={form.sigunguCode}
                 onChange={(event) =>
                   updateForm("sigunguCode", event.target.value)
                 }
               />
               <FormField
-                label="sido_code"
-                hint="시도 코드입니다(선택)."
+                label="시도 코드"
                 value={form.sidoCode}
                 onChange={(event) => updateForm("sidoCode", event.target.value)}
               />
               <FormField
-                label="legal_dong_code"
-                hint="법정동 코드입니다(선택)."
+                label="법정동 코드"
                 value={form.legalDongCode}
                 onChange={(event) =>
                   updateForm("legalDongCode", event.target.value)
                 }
               />
               <FormField
-                label="admin_dong_code"
-                hint="행정동 코드입니다(선택)."
+                label="행정동 코드"
                 value={form.adminDongCode}
                 onChange={(event) =>
                   updateForm("adminDongCode", event.target.value)
                 }
               />
               <FormField
-                label="road_name_code"
-                hint="도로명 코드입니다(선택)."
+                label="도로명 코드"
                 value={form.roadNameCode}
                 onChange={(event) =>
                   updateForm("roadNameCode", event.target.value)
@@ -988,23 +1075,27 @@ export function FeatureCreateClient() {
               />
               <FormField
                 className="md:col-span-2"
-                label="road_address_management_no"
-                hint="도로명주소 관리번호입니다(선택)."
+                label="도로명주소 관리번호"
                 value={form.roadAddressManagementNo}
                 onChange={(event) =>
                   updateForm("roadAddressManagementNo", event.target.value)
                 }
               />
             </div>
-            <FormTextArea
-              className="mt-3"
-              label="address extra JSON"
-              hint="주소 추가 필드를 JSON으로 입력합니다(선택)."
-              value={form.addressExtraJson}
-              onChange={(event) =>
-                updateForm("addressExtraJson", event.target.value)
-              }
-            />
+            <details className="mt-3 rounded-md border border-dashed p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                고급 추가 정보
+              </summary>
+              <FormTextArea
+                className="mt-3"
+                label="주소 추가 정보"
+                hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+                value={form.addressExtraJson}
+                onChange={(event) =>
+                  updateForm("addressExtraJson", event.target.value)
+                }
+              />
+            </details>
           </div>
 
           <div className="rounded-lg border bg-background p-4">
@@ -1012,52 +1103,71 @@ export function FeatureCreateClient() {
             {form.kind === "event" ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <FormField
-                  label="starts_at"
-                  hint="행사 시작 일시입니다."
+                  label="행사 시작"
                   type="datetime-local"
                   value={form.startDate}
                   onChange={(event) => updateForm("startDate", event.target.value)}
                 />
                 <FormField
-                  label="ends_at"
-                  hint="행사 종료 일시입니다."
+                  label="행사 종료"
                   type="datetime-local"
                   value={form.endDate}
                   onChange={(event) => updateForm("endDate", event.target.value)}
                 />
-                <FormField
-                  label="event_status"
-                  hint="행사 진행 상태입니다."
+                <FormSelect
+                  label="행사 상태"
                   value={form.eventStatus}
                   onChange={(event) =>
                     updateForm("eventStatus", event.target.value)
                   }
-                />
+                >
+                  {withCurrentOption(
+                    EVENT_STATUS_OPTIONS,
+                    form.eventStatus,
+                    "현재 행사 상태",
+                  ).map((option) => (
+                    <NativeSelectOption key={option.value} value={option.value}>
+                      {option.label}
+                    </NativeSelectOption>
+                  ))}
+                </FormSelect>
                 <FormField
                   label="주최"
-                  hint="행사 주최자입니다(선택)."
                   value={form.organizer}
                   onChange={(event) => updateForm("organizer", event.target.value)}
                 />
                 <FormField
                   className="md:col-span-2"
-                  label="venue"
-                  hint="행사 장소명입니다(선택)."
+                  label="행사 장소"
                   value={form.venue}
                   onChange={(event) => updateForm("venue", event.target.value)}
                 />
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
-                <FormField
-                  label="place_kind"
-                  hint="장소 세부 종류입니다(선택)."
+                <FormSelect
+                  label="장소 종류"
                   value={form.placeKind}
                   onChange={(event) => updateForm("placeKind", event.target.value)}
-                />
+                >
+                  {withCurrentOption(
+                    PLACE_KIND_OPTIONS,
+                    form.placeKind,
+                    "현재 장소 종류",
+                  ).map((option) => (
+                    <NativeSelectOption key={option.value} value={option.value}>
+                      {option.label}
+                    </NativeSelectOption>
+                  ))}
+                </FormSelect>
                 <FormField
+                  error={
+                    fieldErrors.phone ??
+                    phoneNumber<FeatureCreateFormState>()(form.phone, form)
+                  }
+                  inputMode="tel"
                   label="전화"
-                  hint="연락처 전화번호입니다(선택)."
+                  placeholder="예: 02-123-4567"
                   value={form.phone}
                   onChange={(event) => updateForm("phone", event.target.value)}
                 />
@@ -1065,36 +1175,54 @@ export function FeatureCreateClient() {
             )}
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <FormField
+                error={
+                  fieldErrors.homepageUrl ??
+                  httpUrl<FeatureCreateFormState>("홈페이지")(
+                    form.homepageUrl,
+                    form,
+                  )
+                }
                 label="홈페이지"
-                hint="홈페이지 URL입니다(선택)."
+                placeholder="https://example.kr"
+                type="url"
                 value={form.homepageUrl}
                 onChange={(event) => updateForm("homepageUrl", event.target.value)}
               />
               <FormField
-                label="소스"
-                hint="출처 URL입니다(선택)."
+                error={
+                  fieldErrors.sourceUrl ??
+                  httpUrl<FeatureCreateFormState>("출처")(form.sourceUrl, form)
+                }
+                label="출처"
+                placeholder="https://example.kr/source"
+                type="url"
                 value={form.sourceUrl}
                 onChange={(event) => updateForm("sourceUrl", event.target.value)}
               />
             </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <FormTextArea
-                label="detail extra JSON"
-                hint="상세 추가 필드를 JSON으로 입력합니다(선택)."
-                value={form.detailExtraJson}
-                onChange={(event) =>
-                  updateForm("detailExtraJson", event.target.value)
-                }
-              />
-              <FormTextArea
-                label="urls extra JSON"
-                hint="추가 URL을 JSON으로 입력합니다(선택)."
-                value={form.urlsExtraJson}
-                onChange={(event) =>
-                  updateForm("urlsExtraJson", event.target.value)
-                }
-              />
-            </div>
+            <details className="mt-3 rounded-md border border-dashed p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                고급 추가 정보
+              </summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <FormTextArea
+                  label="상세 추가 정보"
+                  hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+                  value={form.detailExtraJson}
+                  onChange={(event) =>
+                    updateForm("detailExtraJson", event.target.value)
+                  }
+                />
+                <FormTextArea
+                  label="URL 추가 정보"
+                  hint="홈페이지/출처 외 추가 URL만 JSON으로 입력합니다."
+                  value={form.urlsExtraJson}
+                  onChange={(event) =>
+                    updateForm("urlsExtraJson", event.target.value)
+                  }
+                />
+              </div>
+            </details>
           </div>
         </section>
 

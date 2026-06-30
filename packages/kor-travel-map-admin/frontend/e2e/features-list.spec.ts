@@ -476,7 +476,7 @@ test.describe("admin/features list depth", () => {
 
     // row 본문 클릭으로 선택 → 우측 preview가 렌더되되 전체 상세 링크는 노출하지 않는다.
     await row.click();
-    await expect(page.getByText("Feature detail", { exact: true })).toBeVisible();
+    await expect(page.getByText("Feature 상세", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "전체 상세" })).toHaveCount(0);
   });
 

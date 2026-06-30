@@ -46,6 +46,7 @@ from dagster import (
 
 from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
+from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
 __all__ = [
@@ -242,7 +243,10 @@ MOIS_SOURCE_SYNC_SCHEDULES: Final = [
     ScheduleDefinition(
         name="mois_localdata_source_sync_weekly_schedule",
         job=mois_localdata_source_sync_job,
-        cron_schedule="0 4 * * 1",
+        cron_schedule=cron_for_schedule(
+            "mois_localdata_source_sync_weekly_schedule",
+            "0 4 * * 1",
+        ),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         tags=MOIS_SOURCE_SYNC_JOB_TAGS,
