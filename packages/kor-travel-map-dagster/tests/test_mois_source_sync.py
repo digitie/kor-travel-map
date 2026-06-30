@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from dagster import build_op_context
@@ -156,6 +156,61 @@ def test_sync_creates_parent_directory(
     sync_mois_source_db(settings)
 
     assert nested.parent.is_dir()
+
+
+def test_checkpoint_runs_after_each_slug_and_once_at_end(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#614 회귀 가드: WAL checkpoint가 슬러그별 + 마지막에 호출되는지 구조적으로 단언.
+
+    슬러그당 checkpoint 줄을 지우거나 위치를 옮기면 이 테스트가 깨진다(기존 테스트는
+    전부 green으로 남아 회귀가 보이지 않았다)."""
+    import kortravelmap.dagster.mois_source_sync as mod
+
+    calls = _install_fake_mois(monkeypatch)
+    settings = KorTravelMapSettings(mois_source_db_path=str(tmp_path / "ck.sqlite"))
+
+    # checkpoint 호출 시점의 누적 sync 호출 수를 기록 → sync와 interleave 검증.
+    sync_counts_at_checkpoint: list[int] = []
+
+    def _spy(engine: Any) -> None:
+        sync_counts_at_checkpoint.append(len(calls["sync_calls"]))
+
+    monkeypatch.setattr(mod, "_checkpoint_sqlite_wal", _spy)
+
+    sync_mois_source_db(settings, service_slugs=["c", "a", "b"])
+
+    # 슬러그 3개 → 슬러그별 3회 + outer finally 1회 = 4회.
+    # sync 직후마다 호출되므로 누적 sync 수는 [1, 2, 3, 3](마지막은 전체 완료 후).
+    assert sync_counts_at_checkpoint == [1, 2, 3, 3]
+
+
+def test_sync_raises_on_empty_explicit_slugs(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """명시적 빈 slug 목록은 fail-fast(ValueError) — 조용한 no-op 회귀 방지."""
+    _install_fake_mois(monkeypatch)
+    settings = KorTravelMapSettings(mois_source_db_path=str(tmp_path / "empty.sqlite"))
+
+    with pytest.raises(ValueError, match="at least one slug"):
+        sync_mois_source_db(settings, service_slugs=[])
+
+
+def test_checkpoint_is_noop_for_non_sqlite_engine() -> None:
+    """비-sqlite dialect면 connect()도 건드리지 않고 즉시 반환한다(early-return)."""
+    from kortravelmap.dagster.mois_source_sync import _checkpoint_sqlite_wal
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _Engine:
+        dialect = _Dialect()
+
+        def connect(self) -> Any:  # pragma: no cover - 호출되면 실패
+            raise AssertionError("non-sqlite engine은 checkpoint에서 connect되면 안 된다")
+
+    # 예외 없이 조용히 반환해야 한다.
+    _checkpoint_sqlite_wal(cast("Any", _Engine()))
 
 
 def test_op_runs_sync_and_emits_metadata(

@@ -15,6 +15,14 @@
   lint(기존 경고 4건), frontend unit 45 passed, Dagster mypy 19 source, import-linter 4 contracts kept.
 - **다음 한 작업**: 보안 스캔 후 후속 PR을 올리고 CI green을 확인한다. 머지 뒤 n150 반영과 live UI e2e를
   진행한다.
+## 2026-06-30 (claude) — MOIS WAL 사고 후속 하드닝 (#614 리뷰 반영)
+
+- **완료**: `mois_source_sync.py` — checkpoint를 AUTOCOMMIT + busy 경고로 관측 가능화, 빈 slug
+  fail-fast, `sync_kind` distinct 합산, WAL checkpoint 호출 회귀 spy 테스트 추가.
+  (상세: journal 2026-06-30 (claude))
+- **다음 한 작업**: MOIS 재가동은 `docs/runbooks/docker-app.md` §MOIS 재가동 체크리스트대로 — fix 배포
+  후 source sync 1회 수동 materialize로 `*-wal`·디스크 헤드룸이 bound됨을 확인한 뒤 스케줄 재가동.
+  provider(python-mois-api) batch별 commit과 디스크 영구 가드는 별도 후속 이슈.
 
 ## 2026-06-30 (codex) — PR #615 보존 브랜치 정리와 복기 문서화
 
