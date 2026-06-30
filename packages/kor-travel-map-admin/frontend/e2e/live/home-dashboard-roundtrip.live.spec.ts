@@ -440,7 +440,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
       // admin-shell.tsx nav는 단일 <nav> 랜드마크. metric 카드 heading과 충돌 회피 위해 스코프.
       await page
         .getByRole("navigation")
-        .getByRole("link", { name: "Import jobs", exact: true })
+        .getByRole("link", { name: "적재 작업", exact: true })
         .click();
       await expect(page).toHaveURL(/\/ops\/import-jobs$/, T);
       await expect(
@@ -452,7 +452,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
       await gotoHome(page);
       await page
         .getByRole("navigation")
-        .getByRole("link", { name: "Consistency", exact: true })
+        .getByRole("link", { name: "정합성 점검", exact: true })
         .click();
       await expect(page).toHaveURL(/\/ops\/consistency$/, T);
       await expect(
@@ -460,11 +460,11 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
       ).toBeVisible(T);
     });
 
-    await test.step("서비스 상태 카드의 'Dagster 관리' 카드 링크 → /admin/dagster", async () => {
+    await test.step("서비스 상태 카드의 '작업 자동화' 카드 링크 → /admin/dagster", async () => {
       await gotoHome(page);
       const dagsterCard = page.getByTestId("service-dagster");
-      const manageLink = dagsterCard.getByRole("link", { name: "Dagster 관리" });
-      // home-client.tsx: <Link href="/admin/dagster">…Dagster 관리</Link>.
+      const manageLink = dagsterCard.getByRole("link", { name: "작업 자동화" });
+      // home-client.tsx: <Link href="/admin/dagster">…작업 자동화</Link>.
       await expect(manageLink).toHaveAttribute("href", "/admin/dagster");
       await manageLink.click();
       await expect(page).toHaveURL(/\/admin\/dagster$/, T);

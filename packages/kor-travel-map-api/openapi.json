@@ -533,6 +533,7 @@
           "admin_dong_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{7,10}$",
                 "type": "string"
               },
               {
@@ -627,6 +628,7 @@
           "legal_dong_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{10}$",
                 "type": "string"
               },
               {
@@ -680,6 +682,7 @@
           "road_address_management_no": {
             "anyOf": [
               {
+                "pattern": "^\\d{20,26}$",
                 "type": "string"
               },
               {
@@ -691,6 +694,7 @@
           "road_name_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{7,12}$",
                 "type": "string"
               },
               {
@@ -713,6 +717,7 @@
           "sido_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{2}$",
                 "type": "string"
               },
               {
@@ -724,6 +729,7 @@
           "sigungu_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{5}$",
                 "type": "string"
               },
               {
@@ -1994,6 +2000,7 @@
           "admin_dong_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{7,10}$",
                 "type": "string"
               },
               {
@@ -2063,6 +2070,7 @@
           "legal_dong_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{10}$",
                 "type": "string"
               },
               {
@@ -2137,6 +2145,7 @@
           "road_address_management_no": {
             "anyOf": [
               {
+                "pattern": "^\\d{20,26}$",
                 "type": "string"
               },
               {
@@ -2148,6 +2157,7 @@
           "road_name_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{7,12}$",
                 "type": "string"
               },
               {
@@ -2170,6 +2180,7 @@
           "sido_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{2}$",
                 "type": "string"
               },
               {
@@ -2181,6 +2192,7 @@
           "sigungu_code": {
             "anyOf": [
               {
+                "pattern": "^\\d{5}$",
                 "type": "string"
               },
               {
@@ -5997,6 +6009,13 @@
             "title": "Asset Count",
             "type": "integer"
           },
+          "asset_items": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterAssetSummary"
+            },
+            "title": "Asset Items",
+            "type": "array"
+          },
           "assets": {
             "items": {
               "type": "string"
@@ -6015,6 +6034,26 @@
           "assets"
         ],
         "title": "DagsterAssetGroup",
+        "type": "object"
+      },
+      "DagsterAssetSummary": {
+        "additionalProperties": false,
+        "description": "Dagster asset 표시 요약.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "DagsterAssetSummary",
         "type": "object"
       },
       "DagsterGraphqlError": {
@@ -6628,6 +6667,11 @@
         "additionalProperties": false,
         "description": "Dagster schedule 요약.",
         "properties": {
+          "can_reset": {
+            "default": false,
+            "title": "Can Reset",
+            "type": "boolean"
+          },
           "cron_schedule": {
             "anyOf": [
               {
@@ -6638,6 +6682,39 @@
               }
             ],
             "title": "Cron Schedule"
+          },
+          "default_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Cron Schedule"
+          },
+          "default_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Status"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "execution_timezone": {
             "anyOf": [
@@ -6650,9 +6727,42 @@
             ],
             "title": "Execution Timezone"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "override_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Cron Schedule"
+          },
+          "pipeline_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Name"
           },
           "recent_ticks": {
             "items": {
@@ -6660,6 +6770,61 @@
             },
             "title": "Recent Ticks",
             "type": "array"
+          },
+          "repository_location_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Location Name"
+          },
+          "repository_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Name"
+          },
+          "schedule_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Note"
+          },
+          "selector_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector Id"
+          },
+          "state_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Id"
           },
           "status": {
             "anyOf": [
@@ -6677,6 +6842,229 @@
           "name"
         ],
         "title": "DagsterSchedule",
+        "type": "object"
+      },
+      "DagsterScheduleCommandData": {
+        "additionalProperties": false,
+        "description": "Schedule write 명령 결과.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "command": {
+            "enum": [
+              "update",
+              "default",
+              "start",
+              "stop",
+              "reset",
+              "run"
+            ],
+            "title": "Command",
+            "type": "string"
+          },
+          "cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Schedule"
+          },
+          "dagster_url": {
+            "title": "Dagster Url",
+            "type": "string"
+          },
+          "default_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Cron Schedule"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "graphql_url": {
+            "title": "Graphql Url",
+            "type": "string"
+          },
+          "override_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Cron Schedule"
+          },
+          "reloaded": {
+            "default": false,
+            "title": "Reloaded",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "schedule_name": {
+            "title": "Schedule Name",
+            "type": "string"
+          },
+          "schedule_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Status"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "dagster_url",
+          "graphql_url",
+          "checked_at",
+          "schedule_name",
+          "command"
+        ],
+        "title": "DagsterScheduleCommandData",
+        "type": "object"
+      },
+      "DagsterScheduleCommandRequest": {
+        "additionalProperties": false,
+        "description": "Schedule start/stop/reset/run-now 명령 body.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "DagsterScheduleCommandRequest",
+        "type": "object"
+      },
+      "DagsterScheduleCommandResponse": {
+        "additionalProperties": false,
+        "description": "Schedule write 명령 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DagsterScheduleCommandData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DagsterScheduleCommandResponse",
+        "type": "object"
+      },
+      "DagsterScheduleOverrideRequest": {
+        "additionalProperties": false,
+        "description": "운영 화면 schedule cron override 요청.",
+        "properties": {
+          "cron_schedule": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Cron Schedule",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "cron_schedule"
+        ],
+        "title": "DagsterScheduleOverrideRequest",
         "type": "object"
       },
       "DagsterSensor": {
@@ -23745,6 +24133,422 @@
         ]
       }
     },
+    "/v1/ops/dagster/schedules/{schedule_name}": {
+      "patch": {
+        "description": "운영 스케줄의 cron override를 저장하고 code location reload를 요청한다. cron은 코드 정의를 직접 변경하지 않고 ops.dagster_schedule_overrides에 보관된다.",
+        "operationId": "update_dagster_schedule_v1_ops_dagster_schedules__schedule_name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DagsterScheduleOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 cron 수정",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/default": {
+      "post": {
+        "description": "운영 스케줄 cron override를 삭제하고 code location reload를 요청한다.",
+        "operationId": "reset_dagster_schedule_default_v1_ops_dagster_schedules__schedule_name__default_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 기본값 복귀",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/reset": {
+      "post": {
+        "operationId": "reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 상태 기본값 복귀",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/run": {
+      "post": {
+        "description": "스케줄이 가리키는 job을 현재 설정으로 1회 실행한다.",
+        "operationId": "run_dagster_schedule_now_v1_ops_dagster_schedules__schedule_name__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 즉시 실행",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/start": {
+      "post": {
+        "operationId": "start_dagster_schedule_v1_ops_dagster_schedules__schedule_name__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 시작",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/stop": {
+      "post": {
+        "operationId": "stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 중지",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
     "/v1/ops/dagster/summary": {
       "get": {
         "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.",
@@ -23795,7 +24599,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "Dagster 운영 요약",
+        "summary": "작업 자동화 요약",
         "tags": [
           "ops",
           "dagster"

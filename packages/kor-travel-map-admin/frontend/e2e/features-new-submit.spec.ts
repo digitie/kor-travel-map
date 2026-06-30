@@ -9,7 +9,7 @@ import type { KorTravelGeoResponse } from "../src/api/korTravelGeo";
  * `e2e/features-new.spec.ts`는 라이브 smoke 렌더 + 동기 클라이언트 검증만 덮는다.
  * 본 spec은 백엔드/지오코더 호출이 필요한 **결정적 mutation·조회 경로**를 route mock으로
  * 분리한다:
- *   - POST /v1/admin/features 성공 → change request 생성 알림 + 생성 요청 섹션
+ *   - POST /v1/admin/features 성공 → 변경 요청 생성 알림 + 생성 요청 섹션
  *   - GET /v1/features/nearby 자동 조회(유효 좌표) → 중복 후보 렌더 / 빈 응답 / 재조회
  *   - POST /v1/admin/features 422·409 → 'feature 작성 실패' 알림
  *   - POST :12501/v2/geocode, /v2/reverse → 후보 적용으로 좌표·주소 채움 / 실패 알림
@@ -194,7 +194,7 @@ async function fillCoord(page: Page, lon = "126.978", lat = "37.5665") {
 }
 
 test.describe("/admin/features/new (mocked routes)", () => {
-  test("제출 성공 — POST /v1/admin/features → change request 생성 알림 + 생성 요청 섹션", async ({
+  test("제출 성공 — POST /v1/admin/features → 변경 요청 생성 알림 + 생성 요청 섹션", async ({
     page,
   }) => {
     const nearby = await mockNearbyRoute(page, () => makeNearbyResponse([]));
@@ -241,7 +241,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     // 성공 Alert(role=status) + 라벨 텍스트.
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "change request 생성됨" });
+      .filter({ hasText: "변경 요청 생성됨" });
     await expect(successAlert).toBeVisible();
     await expect(page.getByText("add/pending")).toBeVisible();
     // 짧은 request_id(<18자)는 shortId가 그대로 노출 → 알림 링크.
@@ -340,7 +340,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
         .filter({ hasText: "(HTTP 422)" }),
     ).toBeVisible();
     // 성공 섹션은 렌더되지 않음.
-    await expect(page.getByText("change request 생성됨")).toHaveCount(0);
+    await expect(page.getByText("변경 요청 생성됨")).toHaveCount(0);
   });
 
   test("409 충돌 — 서버 409 응답이 'feature 작성 실패' 알림으로 노출", async ({
@@ -374,7 +374,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     await expect(
       page.getByRole("alert").filter({ hasText: "(HTTP 409)" }),
     ).toBeVisible();
-    await expect(page.getByText("change request 생성됨")).toHaveCount(0);
+    await expect(page.getByText("변경 요청 생성됨")).toHaveCount(0);
   });
 
   test("정지오코딩 — POST :12501/v2/geocode 후보 적용으로 좌표·주소 채움", async ({

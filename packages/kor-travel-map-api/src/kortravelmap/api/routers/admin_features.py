@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal, cast
@@ -31,7 +32,7 @@ from kortravelmap.infra.admin_feature_repo import (
     reject_feature_change_request,
     submit_feature_change_request,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_destructive_enabled
@@ -52,6 +53,9 @@ __all__ = [
 
 
 router = APIRouter(prefix="/admin/features", tags=["admin-features"])
+
+_PHONE_RE = re.compile(r"^\+?[0-9][0-9()\-\s]{6,24}$")
+_HTTP_URL_RE = re.compile(r"^https?://[^\s/$.?#].[^\s]*$")
 
 AdminFeatureSort = Literal[
     "name",
@@ -182,18 +186,58 @@ class AdminFeatureBaseMutation(BaseModel):
     coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
     geom: str | None = None
     address: dict[str, Any] | None = None
-    legal_dong_code: str | None = None
-    road_name_code: str | None = None
-    road_address_management_no: str | None = None
-    admin_dong_code: str | None = None
-    sido_code: str | None = None
-    sigungu_code: str | None = None
+    legal_dong_code: str | None = Field(default=None, pattern=r"^\d{10}$")
+    road_name_code: str | None = Field(default=None, pattern=r"^\d{7,12}$")
+    road_address_management_no: str | None = Field(
+        default=None,
+        pattern=r"^\d{20,26}$",
+    )
+    admin_dong_code: str | None = Field(default=None, pattern=r"^\d{7,10}$")
+    sido_code: str | None = Field(default=None, pattern=r"^\d{2}$")
+    sigungu_code: str | None = Field(default=None, pattern=r"^\d{5}$")
     urls: dict[str, Any] | None = None
     marker_icon: str | None = Field(default=None, min_length=1)
     marker_color: str | None = Field(default=None, pattern=r"^P-(0[1-9]|1[0-6])$")
     parent_feature_id: str | None = None
     sibling_group_id: str | None = None
     detail: dict[str, Any] | None = None
+
+    @field_validator("urls")
+    @classmethod
+    def _validate_urls(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not value:
+            return value
+        for key in ("homepage", "source"):
+            raw = value.get(key)
+            if raw is None or raw == "":
+                continue
+            if not isinstance(raw, str) or not _HTTP_URL_RE.match(raw):
+                raise ValueError(f"urls.{key}는 http(s) URL이어야 합니다.")
+        return value
+
+    @field_validator("detail")
+    @classmethod
+    def _validate_detail(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not value:
+            return value
+        phone = value.get("phone")
+        if phone not in (None, "") and (
+            not isinstance(phone, str) or not _PHONE_RE.match(phone)
+        ):
+            raise ValueError("detail.phone은 전화번호 형식이어야 합니다.")
+        for key in ("starts_at", "ends_at"):
+            raw = value.get(key)
+            if raw in (None, ""):
+                continue
+            if not isinstance(raw, str):
+                raise ValueError(f"detail.{key}는 ISO datetime 문자열이어야 합니다.")
+            try:
+                datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(
+                    f"detail.{key}는 ISO datetime 문자열이어야 합니다."
+                ) from exc
+        return value
 
 
 class AdminFeatureCreateRequest(AdminFeatureBaseMutation):

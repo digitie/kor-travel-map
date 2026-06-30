@@ -1322,6 +1322,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/dagster/schedules/{schedule_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 운영 스케줄 cron 수정
+         * @description 운영 스케줄의 cron override를 저장하고 code location reload를 요청한다. cron은 코드 정의를 직접 변경하지 않고 ops.dagster_schedule_overrides에 보관된다.
+         */
+        patch: operations["update_dagster_schedule_v1_ops_dagster_schedules__schedule_name__patch"];
+        trace?: never;
+    };
+    "/v1/ops/dagster/schedules/{schedule_name}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 운영 스케줄 기본값 복귀
+         * @description 운영 스케줄 cron override를 삭제하고 code location reload를 요청한다.
+         */
+        post: operations["reset_dagster_schedule_default_v1_ops_dagster_schedules__schedule_name__default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/schedules/{schedule_name}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 운영 스케줄 상태 기본값 복귀 */
+        post: operations["reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/schedules/{schedule_name}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 운영 스케줄 즉시 실행
+         * @description 스케줄이 가리키는 job을 현재 설정으로 1회 실행한다.
+         */
+        post: operations["run_dagster_schedule_now_v1_ops_dagster_schedules__schedule_name__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/schedules/{schedule_name}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 운영 스케줄 시작 */
+        post: operations["start_dagster_schedule_v1_ops_dagster_schedules__schedule_name__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/schedules/{schedule_name}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 운영 스케줄 중지 */
+        post: operations["stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/dagster/summary": {
         parameters: {
             query?: never;
@@ -1330,7 +1441,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Dagster 운영 요약
+         * 작업 자동화 요약
          * @description Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.
          */
         get: operations["get_dagster_summary_v1_ops_dagster_summary_get"];
@@ -3737,10 +3848,22 @@ export interface components {
         DagsterAssetGroup: {
             /** Asset Count */
             asset_count: number;
+            /** Asset Items */
+            asset_items?: components["schemas"]["DagsterAssetSummary"][];
             /** Assets */
             assets: string[];
             /** Group Name */
             group_name: string;
+        };
+        /**
+         * DagsterAssetSummary
+         * @description Dagster asset 표시 요약.
+         */
+        DagsterAssetSummary: {
+            /** Display Name */
+            display_name: string;
+            /** Name */
+            name: string;
         };
         /**
          * DagsterGraphqlError
@@ -3948,16 +4071,119 @@ export interface components {
          * @description Dagster schedule 요약.
          */
         DagsterSchedule: {
+            /**
+             * Can Reset
+             * @default false
+             */
+            can_reset: boolean;
             /** Cron Schedule */
             cron_schedule?: string | null;
+            /** Default Cron Schedule */
+            default_cron_schedule?: string | null;
+            /** Default Status */
+            default_status?: string | null;
+            /** Description */
+            description?: string | null;
             /** Execution Timezone */
             execution_timezone?: string | null;
+            /** Mode */
+            mode?: string | null;
             /** Name */
             name: string;
+            /** Override Cron Schedule */
+            override_cron_schedule?: string | null;
+            /** Pipeline Name */
+            pipeline_name?: string | null;
             /** Recent Ticks */
             recent_ticks?: components["schemas"]["DagsterInstigationTick"][];
+            /** Repository Location Name */
+            repository_location_name?: string | null;
+            /** Repository Name */
+            repository_name?: string | null;
+            /** Schedule Note */
+            schedule_note?: string | null;
+            /** Selector Id */
+            selector_id?: string | null;
+            /** State Id */
+            state_id?: string | null;
             /** Status */
             status?: string | null;
+        };
+        /**
+         * DagsterScheduleCommandData
+         * @description Schedule write 명령 결과.
+         */
+        DagsterScheduleCommandData: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Command
+             * @enum {string}
+             */
+            command: "update" | "default" | "start" | "stop" | "reset" | "run";
+            /** Cron Schedule */
+            cron_schedule?: string | null;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Default Cron Schedule */
+            default_cron_schedule?: string | null;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Override Cron Schedule */
+            override_cron_schedule?: string | null;
+            /**
+             * Reloaded
+             * @default false
+             */
+            reloaded: boolean;
+            /** Run Id */
+            run_id?: string | null;
+            /** Run Status */
+            run_status?: string | null;
+            /** Schedule Name */
+            schedule_name: string;
+            /** Schedule Status */
+            schedule_status?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+        };
+        /**
+         * DagsterScheduleCommandRequest
+         * @description Schedule start/stop/reset/run-now 명령 body.
+         */
+        DagsterScheduleCommandRequest: {
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DagsterScheduleCommandResponse
+         * @description Schedule write 명령 응답.
+         */
+        DagsterScheduleCommandResponse: {
+            data: components["schemas"]["DagsterScheduleCommandData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * DagsterScheduleOverrideRequest
+         * @description 운영 화면 schedule cron override 요청.
+         */
+        DagsterScheduleOverrideRequest: {
+            /** Cron Schedule */
+            cron_schedule: string;
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * DagsterSensor
@@ -11547,6 +11773,270 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DagsterRunDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    update_dagster_schedule_v1_ops_dagster_schedules__schedule_name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reset_dagster_schedule_default_v1_ops_dagster_schedules__schedule_name__default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleCommandRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleCommandRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    run_dagster_schedule_now_v1_ops_dagster_schedules__schedule_name__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleCommandRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    start_dagster_schedule_v1_ops_dagster_schedules__schedule_name__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleCommandRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DagsterScheduleCommandRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
             /** @description Validation Error */

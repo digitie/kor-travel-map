@@ -26,6 +26,8 @@ import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
 import {
   combine,
+  koreaLatitude,
+  koreaLongitude,
   numberInRange,
   required,
   validateForm,
@@ -194,26 +196,26 @@ export function PoiCacheTargetsClient() {
   const submit = () => {
     const values = { externalSystem, targetKey, lon, lat, radiusKm };
     const result = validateForm(values, [
-      { field: "externalSystem", validate: required("external_system은 필수입니다.") },
-      { field: "targetKey", validate: required("target_key는 필수입니다.") },
+      { field: "externalSystem", validate: required("외부 시스템을 입력하세요.") },
+      { field: "targetKey", validate: required("대상 키를 입력하세요.") },
       {
         field: "lon",
         validate: combine(
-          required("경도(lon)는 필수입니다."),
-          numberInRange({ min: 124, max: 132, message: "경도는 124~132 범위여야 합니다." }),
+          required("경도를 입력하세요."),
+          koreaLongitude(),
         ),
       },
       {
         field: "lat",
         validate: combine(
-          required("위도(lat)는 필수입니다."),
-          numberInRange({ min: 33, max: 43, message: "위도는 33~43 범위여야 합니다." }),
+          required("위도를 입력하세요."),
+          koreaLatitude(),
         ),
       },
       {
         field: "radiusKm",
         validate: combine(
-          required("반경(radius_km)은 필수입니다."),
+          required("반경을 입력하세요."),
           numberInRange({ min: 0.1, message: "반경은 0.1 이상이어야 합니다." }),
         ),
       },
@@ -282,15 +284,11 @@ export function PoiCacheTargetsClient() {
         <div className="rounded-lg border bg-background p-4">
           <div className="mb-4">
             <div className="font-medium">Target upsert</div>
-            <div className="text-sm text-muted-foreground">
-              external_system + target_key
-            </div>
           </div>
           <div className="flex flex-col gap-3">
             <FormField
               error={errors.externalSystem}
-              hint="POI 캐시 타깃을 제공하는 외부 시스템 식별자입니다."
-              label="external system"
+              label="외부 시스템"
               ref={externalSystemRef}
               required
               value={externalSystem}
@@ -298,24 +296,19 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.targetKey}
-              hint="외부 시스템에서의 타깃 고유 키입니다."
-              label="target key"
-              placeholder="target_key"
+              label="대상 키"
               ref={targetKeyRef}
               required
               value={targetKey}
               onChange={(event) => setTargetKey(event.target.value)}
             />
             <FormField
-              hint="타깃을 식별하는 표시 이름입니다(선택)."
-              label="target name"
-              placeholder="name"
+              label="이름"
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
             <FormField
               error={errors.lon}
-              hint="타깃 중심점의 경도입니다."
               label="경도"
               ref={lonRef}
               required
@@ -324,7 +317,6 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.lat}
-              hint="타깃 중심점의 위도입니다."
               label="위도"
               ref={latRef}
               required
@@ -333,25 +325,24 @@ export function PoiCacheTargetsClient() {
             />
             <FormField
               error={errors.radiusKm}
-              hint="중심점에서 이 반경(km) 안의 지점을 캐시 대상으로 합니다."
-              label="radius km"
+              label="반경(km)"
               ref={radiusKmRef}
               required
               value={radiusKm}
               onChange={(e) => setRadiusKm(e.target.value)}
             />
             <FormSelect
-              label="scope mode"
+              label="대상 범위"
               value={scopeMode}
               onChange={(event) =>
                 setScopeMode(event.target.value as "center_radius" | "sigungu_by_radius")
               }
             >
               <NativeSelectOption value="center_radius">
-                center_radius
+                중심점 반경
               </NativeSelectOption>
               <NativeSelectOption value="sigungu_by_radius">
-                sigungu_by_radius
+                시군구 반경
               </NativeSelectOption>
             </FormSelect>
             <Button disabled={upsert.isPending} type="button" onClick={submit}>

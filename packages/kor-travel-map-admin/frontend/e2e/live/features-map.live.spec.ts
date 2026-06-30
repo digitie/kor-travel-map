@@ -142,7 +142,7 @@ test.describe("/features live — page load + core controls", () => {
     await page.goto("/");
     await page
       .getByRole("navigation")
-      .getByRole("link", { name: "Features", exact: true })
+      .getByRole("link", { name: "Feature 지도", exact: true })
       .click();
     await expect(page).toHaveURL(/\/features$/, { timeout: 15000 });
     await expect(

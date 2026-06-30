@@ -49,6 +49,8 @@ function isLocalHost(hostname: string): boolean {
 
 /**
  * Playwright e2e — **LIVE(비-mock) 시나리오 전용** config (`e2e/live/**`).
+ * WSL에서는 실행하지 않는다. live UI e2e는 n150 Linux가 1순위이고,
+ * n150에서 실행할 수 없을 때만 Windows 호스트 브라우저로 fallback한다.
  *
  * 기본 config(playwright.config.ts)는 mock suite로 `e2e/live/**`를 testIgnore한다.
  * 본 config는 라이브 배포 대상(prod 등)에 실데이터로 admin UI/API 시나리오를

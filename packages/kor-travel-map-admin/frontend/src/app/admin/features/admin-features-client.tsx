@@ -4,6 +4,7 @@ import {
   AlertTriangleIcon,
   EyeIcon,
   ExternalLinkIcon,
+  PencilIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -134,11 +135,18 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
       <div className="rounded-lg border bg-background">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
           <div className="min-w-0">
-            <div className="font-medium">Feature detail</div>
+            <div className="font-medium">Feature 상세</div>
             <div className="break-all font-mono text-xs text-muted-foreground">
               {featureId}
             </div>
           </div>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
+          >
+            <PencilIcon data-icon="inline-start" />
+            편집
+          </Link>
         </div>
         {detail.isLoading ? <Skeleton className="m-4 h-48" /> : null}
         {detail.isError ? (
@@ -446,9 +454,9 @@ export function AdminFeaturesClient() {
           </Button>
         </>
       }
-      description="운영자용 feature 목록, 상세, weather, 단건 비활성화 표면입니다."
-      section="관리"
-      title="피처 관리"
+      description="운영자용 Feature 목록, 상세, weather, 단건 비활성화 표면입니다."
+      section="Feature"
+      title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
         {(features.isError || deactivate.isError) && (
@@ -589,7 +597,7 @@ export function AdminFeaturesClient() {
           <div className="min-w-0 rounded-lg border bg-background">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
               <div>
-                <div className="font-medium">Feature table</div>
+                <div className="font-medium">Feature 목록</div>
                 <div className="text-sm text-muted-foreground">
                   keyset cursor 기반 admin 목록
                 </div>

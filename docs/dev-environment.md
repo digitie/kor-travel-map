@@ -6,8 +6,8 @@
 `/mnt/f/dev/kor-travel-map-<agent>` 경로에서 Linux `git`/`gh`/`codegraph`와 개발 도구를
 실행한다는 정책(`AGENTS.md` §"개발 환경 정책 (Linux/WSL)", `SKILL.md`
 §"개발 환경 (Linux/WSL)", `README.md` §"빠른 시작")을 전제로 한다.
-Playwright e2e는 n150 Linux 환경에서 우선 실행하고, n150에서 실행할 수 없을 때만
-Windows 호스트 브라우저를 fallback으로 사용한다. 형제 라이브러리
+Playwright e2e는 **WSL에서 실행하지 않는다.** n150 Linux 환경에서 우선 실행하고,
+n150에서 실행할 수 없을 때만 Windows 호스트 브라우저를 fallback으로 사용한다. 형제 라이브러리
 (`kor-travel-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
 
 ## 0. dev vs prod 구분 (기본 = dev)
@@ -80,8 +80,8 @@ external Postgres host port override는 보존한다.
   사용한다. 일반 개발용 `git.exe`/Windows Node/npm은 사용하지 않는다.
 - WSL 경로는 agent worktree의 NTFS 마운트 경로를 직접 사용한다. 예:
   `/mnt/f/dev/kor-travel-map-codex`.
-- Playwright e2e는 n150 Linux에서 먼저 실행한다. n150 접근/브라우저 실행이 불가할 때만
-  Windows 호스트 브라우저로 fallback한다.
+- Playwright e2e는 **WSL에서 실행하지 않는다.** n150 Linux에서 먼저 실행하고,
+  n150 접근/브라우저 실행이 불가할 때만 Windows 호스트 브라우저로 fallback한다.
 
 ## 2. 파일 위치 정책
 
@@ -284,18 +284,22 @@ pytest -q
 pytest -m slow -q
 ```
 
-### 8.1 디버그 UI Playwright e2e — **n150 우선, Windows fallback**
+### 8.1 디버그 UI Playwright e2e — **WSL 금지, n150 우선, Windows fallback**
 
-debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 n150 Linux 환경에서 우선
-실행한다. n150에서 브라우저 실행·접속·권한 문제로 검증할 수 없을 때만 Windows
-호스트 브라우저를 fallback으로 사용한다.
+debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 **WSL에서 실행하지 않는다.**
+브라우저 실행은 n150 Linux 환경이 1순위다. n150에서 브라우저 실행·접속·권한 문제로
+검증할 수 없을 때만 Windows 호스트 브라우저를 2순위 fallback으로 사용한다.
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
 | backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12701` |
 | frontend (Next.js) | **WSL `/mnt/f` worktree** | `npm run start` (`next start :12705`) |
 | **Playwright (chromium)** | **n150 Linux 우선** | `cd packages/kor-travel-map-admin/frontend && npm run e2e` |
-| **Playwright fallback** | **Windows** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |
+| **Playwright fallback** | **Windows만** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |
+
+WSL은 backend/frontend 서버, 타입체크, lint, Vitest, build를 실행하는 곳이지 Playwright
+브라우저를 띄우는 곳이 아니다. WSL에서 `npm run e2e`, `npm run e2e:mocked`,
+`npm run e2e:live`, `npx playwright test`, `npx playwright install`을 실행하지 않는다.
 
 Frontend 실행(`npm run dev`/`npm run start`)은 Linux/WSL 고정이다. Windows fallback에서는
 frontend 서버를 띄우지 않고, e2e 검증용 Playwright만 실행한다.
@@ -314,8 +318,8 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
 종료하고 WSL frontend를 다시 띄운다.
 
 > **왜 n150 우선인가**: 운영 UI에 가까운 Linux 브라우저 환경에서 e2e를 먼저 검증해
-> Windows-only dependency와 localhost forwarding 착시를 줄인다. Windows 실행은 n150에서
-> 실행할 수 없을 때의 보조 검증 경로다.
+> Windows-only dependency와 localhost forwarding 착시를 줄인다. WSL은 개발 서버/정적
+> 검증 경계로만 쓰고, Windows 실행은 n150에서 실행할 수 없을 때의 보조 검증 경로다.
 
 자세히는 `packages/kor-travel-map-admin/frontend/README.md` §"e2e (Playwright)"
 + `frontend/playwright.config.ts` 상단 주석.

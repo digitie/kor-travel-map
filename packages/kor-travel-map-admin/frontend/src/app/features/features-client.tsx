@@ -362,33 +362,33 @@ export function FeaturesClient() {
             href="/admin/poi-cache-targets"
           >
             <RouteIcon data-icon="inline-start" />
-            Targets
+            POI 캐시 대상
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/dedup-reviews"
           >
             <GitCompareArrowsIcon data-icon="inline-start" />
-            Dedup
+            중복 검토
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/dagster"
           >
             <WorkflowIcon data-icon="inline-start" />
-            Dagster
+            작업 자동화
           </Link>
         </>
       }
       description={status}
-      section="지도"
-      title="피처 지도"
+      section="Feature"
+      title="Feature 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
         <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Features</Badge>
+            <Badge variant="secondary">Feature 지도</Badge>
             <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
               {status}
             </Badge>

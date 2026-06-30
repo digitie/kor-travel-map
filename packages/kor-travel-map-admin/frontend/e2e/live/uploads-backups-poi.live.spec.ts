@@ -793,7 +793,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/backups click Offline uploads to /admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/backups");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "Offline uploads", exact: true }).first().click();
+    await page.getByRole("link", { name: "오프라인 업로드", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/offline-uploads(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "Offline uploads");
   });
@@ -801,7 +801,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/offline-uploads click Backups to /admin/backups", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "Backups", exact: true }).first().click();
+    await page.getByRole("link", { name: "백업", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "Backups");
   });
@@ -809,7 +809,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/backups click POI targets to /admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/backups");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "POI targets", exact: true }).first().click();
+    await page.getByRole("link", { name: "POI 캐시 대상", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/poi-cache-targets(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "POI cache targets");
   });
@@ -817,7 +817,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/poi-cache-targets click Offline uploads to /admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "Offline uploads", exact: true }).first().click();
+    await page.getByRole("link", { name: "오프라인 업로드", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/offline-uploads(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "Offline uploads");
   });
@@ -825,7 +825,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/offline-uploads click POI targets to /admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "POI targets", exact: true }).first().click();
+    await page.getByRole("link", { name: "POI 캐시 대상", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/poi-cache-targets(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "POI cache targets");
   });
@@ -833,7 +833,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/poi-cache-targets click Backups to /admin/backups", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "Backups", exact: true }).first().click();
+    await page.getByRole("link", { name: "백업", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
     await expectHeading(page, "Backups");
   });

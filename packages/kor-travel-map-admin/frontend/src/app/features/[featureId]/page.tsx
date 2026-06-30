@@ -11,7 +11,7 @@ export async function generateMetadata({
 }: FeatureDetailPageProps): Promise<Metadata> {
   const { featureId } = await params;
   return {
-    title: `${featureId} | Feature detail`,
+    title: `${featureId} | Feature 상세`,
   };
 }
 

@@ -14,15 +14,15 @@ test.describe("home page (/)", () => {
     ).toBeVisible();
     const navigation = page.getByRole("navigation");
     for (const linkName of [
-      "Features",
-      "Import jobs",
-      "Providers",
-      "Consistency",
-      "Dedup reviews",
-      "Update requests",
-      "POI targets",
-      "Dagster",
-      "ETL preview",
+      "Feature 지도",
+      "적재 작업",
+      "Provider 상태",
+      "정합성 점검",
+      "Feature 중복 검토",
+      "Feature 갱신",
+      "POI 캐시 대상",
+      "작업 자동화",
+      "ETL 미리보기",
     ]) {
       await expect(
         navigation.getByRole("link", { name: linkName, exact: true }),
@@ -55,13 +55,13 @@ test.describe("home page (/)", () => {
 
   test("홈에서 새 운영 화면으로 이동", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: "Import jobs" }).click();
+    await page.getByRole("link", { name: "적재 작업" }).click();
     await expect(page).toHaveURL(/\/ops\/import-jobs$/);
     await expect(
       page.getByRole("heading", { level: 1, name: "Import jobs" }),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Update requests" }).click();
+    await page.getByRole("link", { name: "Feature 갱신" }).click();
     await expect(page).toHaveURL(/\/admin\/feature-update-requests$/);
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update requests" }),

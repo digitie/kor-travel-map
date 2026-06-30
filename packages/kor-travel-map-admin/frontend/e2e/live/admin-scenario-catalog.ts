@@ -101,7 +101,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "feature-detail",
     route: "/features/{feature_id}",
-    readyHeading: "Feature detail",
+    readyHeading: "Feature 상세",
     readApis: [
       "/v1/features/{feature_id}",
       "/v1/admin/features/{feature_id}",
@@ -114,7 +114,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "admin-features",
     route: "/admin/features",
-    readyHeading: "Admin features",
+    readyHeading: "Feature 목록",
     readApis: [
       "/v1/admin/features",
       "/v1/admin/features/{feature_id}",
@@ -130,10 +130,24 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "feature-change-requests",
     route: "/admin/features/change-requests",
-    readyHeading: "Feature change requests",
+    readyHeading: "Feature 변경",
+    readApis: [],
+    writeApis: [
+      writeApi("POST", "/v1/admin/features/change-requests"),
+      writeApi("POST", "/v1/admin/features"),
+    ],
+    reflectedSurfaces: [
+      "/admin/features/change-reviews",
+      "/admin/features",
+      "/features/{feature_id}",
+    ],
+  },
+  {
+    id: "feature-change-reviews",
+    route: "/admin/features/change-reviews",
+    readyHeading: "Feature 검수",
     readApis: ["/v1/admin/features/change-requests"],
     writeApis: [
-      writeApi("POST", "/v1/admin/features"),
       writeApi(
         "POST",
         "/v1/admin/features/change-requests/{request_id}/approve",
@@ -374,12 +388,19 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "dagster",
     route: "/admin/dagster",
-    readyHeading: "Dagster 운영",
+    readyHeading: "작업 자동화",
     readApis: [
       "/v1/ops/dagster/summary",
       "/v1/ops/dagster/runs/{run_id}",
     ],
-    writeApis: [writeApi("POST", "/v1/ops/dagster/nux-seen")],
+    writeApis: [
+      writeApi("POST", "/v1/ops/dagster/nux-seen"),
+      writeApi("PATCH", "/v1/ops/dagster/schedules/{schedule_name}"),
+      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/default"),
+      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/run"),
+      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/start"),
+      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/stop"),
+    ],
     reflectedSurfaces: ["/ops/import-jobs", "/ops/providers"],
   },
   {
@@ -606,12 +627,12 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
           addScenario(scenarios, {
             apiExpectation:
               "/v1/admin/features/change-requests plus approve/reject endpoints",
-            idParts: ["change-requests", action, status, term, String(size)],
+            idParts: ["change-reviews", action, status, term, String(size)],
             mode: "catalog",
             reflectedSurface: "/admin/features",
             risk: "write",
-            route: `/admin/features/change-requests?action=${action}&status=${status}&q=${encodeURIComponent(term)}&page_size=${size}`,
-            surface: "feature-change-requests",
+            route: `/admin/features/change-reviews?action=${action}&status=${status}&q=${encodeURIComponent(term)}&page_size=${size}`,
+            surface: "feature-change-reviews",
             uiAction: `action=${action}, status=${status}, q=${term}; approve/reject reflected in admin and public detail`,
           });
         }

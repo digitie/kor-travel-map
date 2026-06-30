@@ -5,8 +5,9 @@
 [README §2 표](./README.md#2-에이전트별-분기-공유-표)를 본다.
 
 > 요지: **Git/codegraph를 포함한 모든 개발 명령은 Linux/WSL에서
-> `/mnt/f/...` 경로로 실행한 뒤 PR로 머지한다.** Playwright e2e는 n150 Linux에서
-> 우선 실행하고, n150에서 불가할 때만 Windows 호스트 브라우저로 fallback한다.
+> `/mnt/f/...` 경로로 실행한 뒤 PR로 머지한다.** 단, Playwright e2e는 WSL에서 실행하지
+> 않는다. Playwright 브라우저 검증은 n150 Linux가 1순위이고, n150에서 불가할 때만
+> Windows 호스트 브라우저로 fallback한다.
 
 ## 1. 진입 (5분)
 
@@ -57,9 +58,9 @@ cd /mnt/f/dev/kor-travel-map-<agent>
   `python packages/kor-travel-map-api/scripts/export_openapi.py --profile all`
   로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
   재생성본을 NTFS로 복사해 커밋.
-- **Playwright e2e**는 n150 Linux에서 우선 실행한다. n150에서 실행할 수 없을 때만
-  Windows host Chromium fallback을 사용한다. fallback 때도 서버(backend `:12701` +
-  frontend `:12705`)는 WSL에서 실행한다. `docs/dev-environment.md` §8.1.
+- **Playwright e2e**는 WSL에서 실행하지 않는다. n150 Linux에서 우선 실행하고, n150에서
+  실행할 수 없을 때만 Windows host Chromium fallback을 사용한다. fallback 때도 서버
+  (backend `:12701` + frontend `:12705`)는 WSL에서 실행한다. `docs/dev-environment.md` §8.1.
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).
 
@@ -110,6 +111,7 @@ git -C <worktree> push origin sandbox/<agent>
 
 - [ ] feature 브랜치(`sandbox/*` 아님)에서 작업
 - [ ] 4 게이트 WSL에서 실제 실행, 전부 green (DTO/admin/frontend 변경이면 OpenAPI/frontend도)
+- [ ] Playwright e2e는 WSL이 아니라 n150에서 실행(불가 시 Windows fallback 사유 기록)
 - [ ] 결정·기록 5종 중 관련 문서 갱신 (CHANGELOG는 사용자 가시 변경 시)
 - [ ] 무관 파일(claude.json 등) 스테이징 제외
 - [ ] PR 본문에 실측 게이트 수치

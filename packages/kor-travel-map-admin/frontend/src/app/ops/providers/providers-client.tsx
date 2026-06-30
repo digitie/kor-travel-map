@@ -621,11 +621,37 @@ function DatasetDetailPanel({
   );
 }
 
-export function ProvidersFreshnessClient() {
+export function ProvidersFreshnessClient({
+  initialDatasetKey = null,
+  initialProvider = null,
+  initialSyncScope = null,
+}: {
+  initialDatasetKey?: string | null;
+  initialProvider?: string | null;
+  initialSyncScope?: string | null;
+}) {
   const providers = useOpsProviders();
   const items = useMemo(() => providers.data?.data.items ?? [], [providers.data]);
   const [selection, setSelection] = useState<ProviderSelection | null>(null);
-  const activeSelection = selection ?? (items[0] ? selectionFromItem(items[0]) : null);
+
+  const initialSelection = useMemo(() => {
+    if (!initialProvider || items.length === 0) {
+      return null;
+    }
+    const requested = items.find(
+      (item) =>
+        item.provider === initialProvider &&
+        (!initialDatasetKey || item.dataset_key === initialDatasetKey) &&
+        (!initialSyncScope || item.sync_scope === initialSyncScope),
+    ) ?? items.find((item) => item.provider === initialProvider);
+    if (!requested) {
+      return null;
+    }
+    return selectionFromItem(requested);
+  }, [initialDatasetKey, initialProvider, initialSyncScope, items]);
+
+  const activeSelection =
+    selection ?? initialSelection ?? (items[0] ? selectionFromItem(items[0]) : null);
   const detail = useOpsProvider(activeSelection?.provider ?? null);
 
   const selectedDetail = useMemo(() => {

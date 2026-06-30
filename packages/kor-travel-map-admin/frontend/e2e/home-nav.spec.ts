@@ -307,31 +307,33 @@ async function routeDagster(page: Page, handler: (route: Route) => Promise<void>
   });
 }
 
-// admin-shell.tsx navItems와 정확히 1:1로 거울처럼 박는다(18행). nav item이
-// 추가/삭제되면 이 표와 toHaveCount(18)가 함께 깨져 테스트가 drift를 잡는다.
+// admin-shell.tsx navItems와 정확히 1:1로 거울처럼 박는다. nav item이
+// 추가/삭제되면 이 표와 toHaveCount(19)가 함께 깨져 테스트가 drift를 잡는다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
-  { label: "Features", href: "/features" },
-  { label: "Admin features", href: "/admin/features" },
-  { label: "Feature changes", href: "/admin/features/change-requests" },
-  { label: "Curated features", href: "/admin/curated-features" },
-  { label: "Issues", href: "/admin/issues" },
-  { label: "Import jobs", href: "/ops/import-jobs" },
-  { label: "Providers", href: "/ops/providers" },
-  { label: "Consistency", href: "/ops/consistency" },
-  { label: "Logs", href: "/ops/logs" },
-  { label: "Dedup reviews", href: "/admin/dedup-reviews" },
-  { label: "Enrichment reviews", href: "/admin/enrichment-reviews" },
-  { label: "Update requests", href: "/admin/feature-update-requests" },
-  { label: "POI targets", href: "/admin/poi-cache-targets" },
-  { label: "Offline uploads", href: "/admin/offline-uploads" },
-  { label: "Backups", href: "/admin/backups" },
-  { label: "Dagster", href: "/admin/dagster" },
-  { label: "ETL preview", href: "/etl" },
+  { label: "Feature 지도", href: "/features" },
+  { label: "Feature 목록", href: "/admin/features" },
+  { label: "Feature 변경", href: "/admin/features/change-requests" },
+  { label: "Feature 검수", href: "/admin/features/change-reviews" },
+  { label: "Feature 큐레이션", href: "/admin/curated-features" },
+  { label: "이슈", href: "/admin/issues" },
+  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "Provider 상태", href: "/ops/providers" },
+  { label: "정합성 점검", href: "/ops/consistency" },
+  { label: "운영 로그", href: "/ops/logs" },
+  { label: "Feature 중복 검토", href: "/admin/dedup-reviews" },
+  { label: "Feature 보강 검토", href: "/admin/enrichment-reviews" },
+  { label: "Feature 갱신", href: "/admin/feature-update-requests" },
+  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "오프라인 업로드", href: "/admin/offline-uploads" },
+  { label: "백업", href: "/admin/backups" },
+  { label: "작업 자동화", href: "/admin/dagster" },
+  { label: "설정", href: "/admin/settings" },
+  { label: "ETL 미리보기", href: "/etl" },
 ];
 
 test.describe("home page (/) — nav + metric/status depth", () => {
-  test("admin shell: 18개 nav 링크가 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 19개 nav 링크가 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
@@ -349,8 +351,8 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 18개 — audit의 17→18 기대치를 잠근다(source navItems 기준).
-    await expect(navigation.getByRole("link")).toHaveCount(18);
+    // nav 링크는 정확히 19개 — source navItems 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(19);
   });
 
   test("metric/status 카드가 happy-path payload에서 렌더", async ({ page }) => {
@@ -436,7 +438,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(dagsterCard.getByText("2 assets")).toBeVisible();
     await expect(dagsterCard.getByText("1 schedules")).toBeVisible();
     await expect(
-      dagsterCard.getByRole("link", { name: "Dagster 관리" }),
+      dagsterCard.getByRole("link", { name: "작업 자동화" }),
     ).toHaveAttribute("href", "/admin/dagster");
 
     // ── Dedup pending 카드 ──
@@ -574,40 +576,40 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       h1: string;
     }> = [
       {
-        label: "Admin features",
+        label: "Feature 목록",
         href: "/admin/features",
-        h1: "Admin features",
+        h1: "Feature 목록",
       },
       {
-        label: "Feature changes",
+        label: "Feature 변경",
         href: "/admin/features/change-requests",
-        h1: "Feature change requests",
+        h1: "Feature 변경",
       },
-      { label: "Issues", href: "/admin/issues", h1: "Admin issues" },
-      { label: "Providers", href: "/ops/providers", h1: "Providers" },
-      { label: "Consistency", href: "/ops/consistency", h1: "Consistency" },
-      { label: "Logs", href: "/ops/logs", h1: "Logs" },
+      { label: "이슈", href: "/admin/issues", h1: "Admin issues" },
+      { label: "Provider 상태", href: "/ops/providers", h1: "Providers" },
+      { label: "정합성 점검", href: "/ops/consistency", h1: "Consistency" },
+      { label: "운영 로그", href: "/ops/logs", h1: "Logs" },
       {
-        label: "Dedup reviews",
+        label: "Feature 중복 검토",
         href: "/admin/dedup-reviews",
         h1: "Dedup review",
       },
       {
-        label: "Enrichment reviews",
+        label: "Feature 보강 검토",
         href: "/admin/enrichment-reviews",
         h1: "Enrichment review",
       },
       {
-        label: "POI targets",
+        label: "POI 캐시 대상",
         href: "/admin/poi-cache-targets",
         h1: "POI cache targets",
       },
       {
-        label: "Offline uploads",
+        label: "오프라인 업로드",
         href: "/admin/offline-uploads",
         h1: "Offline uploads",
       },
-      { label: "Backups", href: "/admin/backups", h1: "Backups" },
+      { label: "백업", href: "/admin/backups", h1: "Backups" },
     ];
 
     for (const { href, h1 } of targetsWithH1) {

@@ -18,27 +18,28 @@ import * as F from "./_fixtures";
 const TIMEOUT = { timeout: 15000 } as const;
 const ETL_TIMEOUT = { timeout: 45_000 } as const;
 
-// admin-shell nav 18행 — home-nav.spec NAV_ITEMS와 1:1.
+// admin-shell nav — home-nav.spec NAV_ITEMS와 1:1.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
-  { label: "Features", href: "/features" },
-  { label: "Admin features", href: "/admin/features" },
-  { label: "Feature changes", href: "/admin/features/change-requests" },
-  { label: "Curated features", href: "/admin/curated-features" },
-  { label: "Issues", href: "/admin/issues" },
-  { label: "Import jobs", href: "/ops/import-jobs" },
-  { label: "Providers", href: "/ops/providers" },
-  { label: "Consistency", href: "/ops/consistency" },
-  { label: "Logs", href: "/ops/logs" },
-  { label: "Dedup reviews", href: "/admin/dedup-reviews" },
-  { label: "Enrichment reviews", href: "/admin/enrichment-reviews" },
-  { label: "Update requests", href: "/admin/feature-update-requests" },
-  { label: "POI targets", href: "/admin/poi-cache-targets" },
-  { label: "Offline uploads", href: "/admin/offline-uploads" },
-  { label: "Backups", href: "/admin/backups" },
-  { label: "Dagster", href: "/admin/dagster" },
-  { label: "Settings", href: "/admin/settings" },
-  { label: "ETL preview", href: "/etl" },
+  { label: "Feature 지도", href: "/features" },
+  { label: "Feature 목록", href: "/admin/features" },
+  { label: "Feature 변경", href: "/admin/features/change-requests" },
+  { label: "Feature 검수", href: "/admin/features/change-reviews" },
+  { label: "Feature 큐레이션", href: "/admin/curated-features" },
+  { label: "이슈", href: "/admin/issues" },
+  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "Provider 상태", href: "/ops/providers" },
+  { label: "정합성 점검", href: "/ops/consistency" },
+  { label: "운영 로그", href: "/ops/logs" },
+  { label: "Feature 중복 검토", href: "/admin/dedup-reviews" },
+  { label: "Feature 보강 검토", href: "/admin/enrichment-reviews" },
+  { label: "Feature 갱신", href: "/admin/feature-update-requests" },
+  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "오프라인 업로드", href: "/admin/offline-uploads" },
+  { label: "백업", href: "/admin/backups" },
+  { label: "작업 자동화", href: "/admin/dagster" },
+  { label: "설정", href: "/admin/settings" },
+  { label: "ETL 미리보기", href: "/etl" },
 ];
 
 const VIEWPORTS: ReadonlyArray<{ name: string; width: number; height: number }> =
@@ -60,10 +61,11 @@ const HOME_METRIC_HEADINGS: ReadonlyArray<string> = [
 
 // /admin/dagster 페이지 내부 heading — dagster.spec 검증.
 const DAGSTER_HEADINGS: ReadonlyArray<string> = [
-  "Code locations",
-  "Recent runs",
+  "스케줄",
+  "최근 실행",
   "Run detail",
-  "Dagster webserver",
+  "상세 엔진 화면",
+  "코드 위치",
 ];
 
 // /admin/features/new 폼 섹션 h2 — features-new.spec 검증.
@@ -77,7 +79,7 @@ const NEW_FEATURE_SECTIONS: ReadonlyArray<string> = [
 ];
 
 // change-requests 폼 label — admin-ops.spec 검증.
-const CHANGE_REQUEST_LABELS: ReadonlyArray<string> = [
+const CHANGE_REQUEST_FORM_LABELS: ReadonlyArray<string> = [
   "change action",
   "change feature id",
   "change reason",
@@ -89,6 +91,9 @@ const CHANGE_REQUEST_LABELS: ReadonlyArray<string> = [
   "change lon",
   "change lat",
   "change detail JSON",
+];
+
+const CHANGE_REVIEW_LABELS: ReadonlyArray<string> = [
   "change search",
   "change status",
   "change action filter",
@@ -97,13 +102,13 @@ const CHANGE_REQUEST_LABELS: ReadonlyArray<string> = [
 
 // change-requests columnheader — admin-ops.spec 검증.
 const CHANGE_REQUEST_COLUMNS: ReadonlyArray<string> = [
-  "request",
-  "action/status",
+  "요청",
+  "작업/상태",
   "feature",
-  "review",
-  "reason",
-  "created",
-  "actions",
+  "리뷰",
+  "사유",
+  "생성",
+  "작업",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,11 +124,13 @@ test.describe("misc live — home (/)", () => {
     await expect(page.getByRole("navigation")).toBeVisible(TIMEOUT);
   });
 
-  test("home nav 링크 정확히 19개", async ({ page }) => {
+  test("home nav 링크 개수", async ({ page }) => {
     await page.goto("/");
     const navigation = page.getByRole("navigation");
-    // #520 admin 로그인/설정 도입으로 nav 링크가 18 → 19개로 늘었다.
-    await expect(navigation.getByRole("link")).toHaveCount(19, TIMEOUT);
+    await expect(navigation.getByRole("link")).toHaveCount(
+      NAV_ITEMS.length,
+      TIMEOUT,
+    );
   });
 
   test("home 새로고침 버튼 visible", async ({ page }) => {
@@ -219,13 +226,13 @@ test.describe("misc live — home (/)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test.describe("misc live — /admin/dagster", () => {
-  test("dagster H1 운영 + Dagster 열기 링크", async ({ page }) => {
+  test("작업 자동화 H1 + 엔진 화면 링크", async ({ page }) => {
     await page.goto("/admin/dagster");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Dagster 운영" }),
+      page.getByRole("heading", { level: 1, name: "작업 자동화" }),
     ).toBeVisible(TIMEOUT);
     await expect(
-      page.getByRole("link", { name: /Dagster 열기/ }),
+      page.getByRole("link", { name: /엔진 화면 열기/ }),
     ).toBeVisible(TIMEOUT);
   });
 
@@ -237,6 +244,10 @@ test.describe("misc live — /admin/dagster", () => {
   for (const heading of DAGSTER_HEADINGS) {
     test(`dagster heading: ${heading}`, async ({ page }) => {
       await page.goto("/admin/dagster");
+      if (heading === "코드 위치") {
+        await expect(page.getByText(heading).first()).toBeVisible(TIMEOUT);
+        return;
+      }
       await expect(
         page.getByRole("heading", { name: heading }),
       ).toBeVisible(TIMEOUT);
@@ -248,7 +259,7 @@ test.describe("misc live — /admin/dagster", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto("/admin/dagster");
       await expect(
-        page.getByRole("heading", { level: 1, name: "Dagster 운영" }),
+        page.getByRole("heading", { level: 1, name: "작업 자동화" }),
       ).toBeVisible(TIMEOUT);
     });
   }
@@ -312,7 +323,7 @@ test.describe("misc live — /etl preview", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /admin/features/change-requests — 빈/컨테이너, 필터, columnheader
+// /admin/features/change-requests — 작성 폼
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CHANGE_STATUS_OPTIONS: ReadonlyArray<string> = [
@@ -332,17 +343,12 @@ test.describe("misc live — /admin/features/change-requests", () => {
   test("change-requests H1 + form heading", async ({ page }) => {
     await page.goto("/admin/features/change-requests");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature change requests" }),
+      page.getByRole("heading", { level: 1, name: "Feature 변경" }),
     ).toBeVisible(TIMEOUT);
-    await expect(page.getByText("Change request form")).toBeVisible(TIMEOUT);
+    await expect(page.getByText("Feature 변경 요청")).toBeVisible(TIMEOUT);
   });
 
-  test("change-requests 상세 placeholder visible", async ({ page }) => {
-    await page.goto("/admin/features/change-requests");
-    await expect(page.getByText("요청 행을 선택하면")).toBeVisible(TIMEOUT);
-  });
-
-  for (const label of CHANGE_REQUEST_LABELS) {
+  for (const label of CHANGE_REQUEST_FORM_LABELS) {
     test(`change-requests label visible: ${label}`, async ({ page }) => {
       await page.goto("/admin/features/change-requests");
       await expect(
@@ -350,27 +356,49 @@ test.describe("misc live — /admin/features/change-requests", () => {
       ).toBeVisible(TIMEOUT);
     });
   }
+});
+
+// /admin/features/change-reviews — 검수 표, 필터, 상세 placeholder
+// ─────────────────────────────────────────────────────────────────────────────
+
+test.describe("misc live — /admin/features/change-reviews", () => {
+  test("change-reviews H1 + 상세 placeholder visible", async ({ page }) => {
+    await page.goto("/admin/features/change-reviews");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Feature 검수" }),
+    ).toBeVisible(TIMEOUT);
+    await expect(page.getByText("요청 행을 선택하면")).toBeVisible(TIMEOUT);
+  });
+
+  for (const label of CHANGE_REVIEW_LABELS) {
+    test(`change-reviews label visible: ${label}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
+      await expect(
+        page.getByLabel(label, { exact: true }),
+      ).toBeVisible(TIMEOUT);
+    });
+  }
 
   for (const column of CHANGE_REQUEST_COLUMNS) {
-    test(`change-requests columnheader: ${column}`, async ({ page }) => {
-      await page.goto("/admin/features/change-requests");
+    test(`change-reviews columnheader: ${column}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
       await expect(
-        page.getByRole("columnheader", { name: column }),
+        page.getByRole("columnheader", { exact: true, name: column }),
       ).toBeVisible(TIMEOUT);
     });
   }
 
   // status 필터 변경(GET 조회) — 컨테이너/H1 생존 확인(read-only).
   for (const status of CHANGE_STATUS_OPTIONS) {
-    test(`change-requests status filter → ${status}`, async ({ page }) => {
-      await page.goto("/admin/features/change-requests");
+    test(`change-reviews status filter → ${status}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
       await page
         .getByLabel("change status", { exact: true })
         .selectOption(status);
       await expect(
         page.getByRole("heading", {
           level: 1,
-          name: "Feature change requests",
+          name: "Feature 검수",
         }),
       ).toBeVisible(TIMEOUT);
     });
@@ -378,15 +406,15 @@ test.describe("misc live — /admin/features/change-requests", () => {
 
   // action filter 변경(GET 조회).
   for (const action of CHANGE_ACTION_FILTER_OPTIONS) {
-    test(`change-requests action filter → ${action}`, async ({ page }) => {
-      await page.goto("/admin/features/change-requests");
+    test(`change-reviews action filter → ${action}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
       await page
         .getByLabel("change action filter", { exact: true })
         .selectOption(action);
       await expect(
         page.getByRole("heading", {
           level: 1,
-          name: "Feature change requests",
+          name: "Feature 검수",
         }),
       ).toBeVisible(TIMEOUT);
     });
@@ -394,15 +422,15 @@ test.describe("misc live — /admin/features/change-requests", () => {
 
   // page size select 변경(GET 조회).
   for (const size of F.PAGE_SIZES) {
-    test(`change-requests page size → ${size}`, async ({ page }) => {
-      await page.goto("/admin/features/change-requests");
+    test(`change-reviews page size → ${size}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
       await page
         .getByLabel("change page size", { exact: true })
         .selectOption(String(size));
       await expect(
         page.getByRole("heading", {
           level: 1,
-          name: "Feature change requests",
+          name: "Feature 검수",
         }),
       ).toBeVisible(TIMEOUT);
     });
@@ -410,26 +438,26 @@ test.describe("misc live — /admin/features/change-requests", () => {
 
   // 검색창 타이핑(GET 조회 허용). 제출 버튼은 누르지 않는다.
   for (const term of F.SEARCH_TERMS.slice(0, 8)) {
-    test(`change-requests search type: ${term}`, async ({ page }) => {
-      await page.goto("/admin/features/change-requests");
+    test(`change-reviews search type: ${term}`, async ({ page }) => {
+      await page.goto("/admin/features/change-reviews");
       await page.getByLabel("change search").fill(term);
       await expect(
         page.getByRole("heading", {
           level: 1,
-          name: "Feature change requests",
+          name: "Feature 검수",
         }),
       ).toBeVisible(TIMEOUT);
     });
   }
 
   for (const vp of VIEWPORTS) {
-    test(`change-requests viewport ${vp.name}: H1 생존`, async ({ page }) => {
+    test(`change-reviews viewport ${vp.name}: H1 생존`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto("/admin/features/change-requests");
+      await page.goto("/admin/features/change-reviews");
       await expect(
         page.getByRole("heading", {
           level: 1,
-          name: "Feature change requests",
+          name: "Feature 검수",
         }),
       ).toBeVisible(TIMEOUT);
     });
@@ -444,7 +472,7 @@ test.describe("misc live — /admin/features/new", () => {
   test("new feature H1 + 제출 버튼 렌더", async ({ page }) => {
     await page.goto("/admin/features/new");
     await expect(
-      page.getByRole("heading", { level: 1, name: "New feature" }),
+      page.getByRole("heading", { level: 1, name: "새 피처" }),
     ).toBeVisible(TIMEOUT);
     await expect(
       page.getByRole("button", { name: "요청 생성" }),
@@ -454,15 +482,15 @@ test.describe("misc live — /admin/features/new", () => {
   test("new feature 핵심 필드 visible", async ({ page }) => {
     await page.goto("/admin/features/new");
     await expect(
-      page.getByLabel("name", { exact: true }),
+      page.getByLabel("이름", { exact: true }),
     ).toBeVisible(TIMEOUT);
-    await expect(page.getByLabel("lon", { exact: true })).toBeVisible(TIMEOUT);
-    await expect(page.getByLabel("lat", { exact: true })).toBeVisible(TIMEOUT);
+    await expect(page.getByLabel("경도", { exact: true })).toBeVisible(TIMEOUT);
+    await expect(page.getByLabel("위도", { exact: true })).toBeVisible(TIMEOUT);
   });
 
   test("new feature category 기본값 01070300", async ({ page }) => {
     await page.goto("/admin/features/new");
-    await expect(page.getByLabel("category", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("카테고리", { exact: true })).toHaveValue(
       "01070300",
       TIMEOUT,
     );
@@ -470,7 +498,7 @@ test.describe("misc live — /admin/features/new", () => {
 
   test("new feature kind 기본값 place", async ({ page }) => {
     await page.goto("/admin/features/new");
-    await expect(page.getByLabel("kind", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("종류", { exact: true })).toHaveValue(
       "place",
       TIMEOUT,
     );
@@ -491,7 +519,7 @@ test.describe("misc live — /admin/features/new", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto("/admin/features/new");
       await expect(
-        page.getByRole("heading", { level: 1, name: "New feature" }),
+        page.getByRole("heading", { level: 1, name: "새 피처" }),
       ).toBeVisible(TIMEOUT);
     });
 
@@ -499,7 +527,7 @@ test.describe("misc live — /admin/features/new", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto("/admin/features/new");
       await expect(
-        page.getByLabel("name", { exact: true }),
+        page.getByLabel("이름", { exact: true }),
       ).toBeVisible(TIMEOUT);
     });
   }
@@ -510,13 +538,17 @@ test.describe("misc live — /admin/features/new", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEEPLINK_TARGETS: ReadonlyArray<{ href: string; h1: string }> = [
-  { href: "/admin/dagster", h1: "Dagster 운영" },
+  { href: "/admin/dagster", h1: "작업 자동화" },
   { href: "/etl", h1: "ETL preview" },
   {
     href: "/admin/features/change-requests",
-    h1: "Feature change requests",
+    h1: "Feature 변경",
   },
-  { href: "/admin/features/new", h1: "New feature" },
+  {
+    href: "/admin/features/change-reviews",
+    h1: "Feature 검수",
+  },
+  { href: "/admin/features/new", h1: "새 피처" },
 ];
 
 test.describe("misc live — deeplink targets", () => {

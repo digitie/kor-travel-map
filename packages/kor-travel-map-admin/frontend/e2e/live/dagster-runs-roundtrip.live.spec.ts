@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page, type Response } from "@playwrigh
 import type { components } from "../../src/api/types";
 
 // LIVE (non-mock) e2e for the /admin/dagster ops surface (runs + assets read,
-// and an opt-in real run trigger).
+// schedule controls, and opt-in real write commands).
 //
 // PART A (NOT gated): read round-trip for the Dagster ops summary. The page auto-
 //   fetches GET /v1/ops/dagster/summary on mount and (when status==='ok') auto-POSTs
@@ -15,7 +15,11 @@ import type { components } from "../../src/api/types";
 //   dependent assertion is branched on data.status / list length (no flake when the
 //   Dagster webserver is unreachable -> status='unavailable', empty lists).
 //
-// PART B (GATED + HEAVY, DEFAULT-SKIP): trigger a REAL Dagster run/materialization of
+// PART B (GATED, DEFAULT-SKIP): change a real Dagster schedule override, restore its
+// default, start/stop it, and trigger its "run now" command through the admin UI/API.
+// The test records the original running state and restores cron/status in finally.
+//
+// PART C (GATED + HEAVY, DEFAULT-SKIP): trigger a REAL Dagster run/materialization of
 //   an operator-nominated SAFE job/asset-job, then assert the new run shows up in the
 //   admin summary (API) and the Recent runs table + Run detail (UI).
 //
@@ -28,22 +32,18 @@ import type { components } from "../../src/api/types";
 //   the safe target. Only enable against a disposable/local stack with a known
 //   config-free, side-effect-light job/asset-job.
 //
-//   *** WHY THE TRIGGER IS NOT AN ADMIN-PROXY POST ***
-//   Per ADR-045 (routers/dagster.py docstring) the admin API is read-only over Dagster
-//   GraphQL — it exposes GET summary, GET run detail, and a single POST nux-seen
-//   (setNuxSeen) mutation. There is deliberately NO admin endpoint to launch a run;
-//   runs are launched only through Dagster's own webserver/GraphQL. So PART B launches
-//   via Dagster GraphQL directly (Playwright `page.request`, Node-side, not CORS-bound)
-//   and then asserts the BACKEND + UI reflection through the admin proxy reads. The
-//   Dagster GraphQL mutation shape (launchPipelineExecution / PipelineSelector.
-//   pipelineName) is the long-standing Dagit launch call; if a future Dagster version
-//   renames it the operator may need to adjust this single helper.
+//   PART C still launches via Dagster GraphQL directly. It intentionally remains
+//   separate from the schedule "run now" UI/API command because it targets arbitrary
+//   operator-selected jobs and may have larger side effects.
 
 type DagsterSummaryResponse = components["schemas"]["DagsterSummaryResponse"];
 type DagsterRunDetailResponse =
   components["schemas"]["DagsterRunDetailResponse"];
 type DagsterNuxSeenResponse = components["schemas"]["DagsterNuxSeenResponse"];
 type DagsterRunSummary = components["schemas"]["DagsterRunSummary"];
+type DagsterSchedule = components["schemas"]["DagsterSchedule"];
+type DagsterScheduleCommandResponse =
+  components["schemas"]["DagsterScheduleCommandResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -73,6 +73,7 @@ const EXECUTE_DAGSTER_WRITE =
   process.env.E2E_ADMIN_WRITE === "1" || process.env.E2E_DAGSTER_WRITE === "1";
 const EXECUTE_DAGSTER_RUN =
   process.env.E2E_DAGSTER_RUN === "1" && EXECUTE_DAGSTER_WRITE;
+const DAGSTER_SCHEDULE_NAME = process.env.E2E_DAGSTER_SCHEDULE ?? "";
 
 // Dagster GraphQL endpoint for the PART B launch. Mirrors the project's existing
 // E2E_DAGSTER_URL / NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL conventions; default local.
@@ -175,6 +176,29 @@ function runDetailPath(runId: string): string {
   return `/v1/ops/dagster/runs/${runId}`;
 }
 
+function schedulePath(scheduleName: string, command?: string): string {
+  const base = `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}`;
+  return command ? `${base}/${command}` : base;
+}
+
+function allSchedules(summary: DagsterSummaryResponse): DagsterSchedule[] {
+  return summary.data.repositories.flatMap((repository) => repository.schedules);
+}
+
+function scheduleRow(page: Page, scheduleName: string): Locator {
+  return page.getByTestId(`dagster-schedule-row-${scheduleName}`);
+}
+
+async function clickScheduleButton(
+  page: Page,
+  scheduleName: string,
+  buttonName: string,
+): Promise<void> {
+  await scheduleRow(page, scheduleName)
+    .getByRole("button", { name: buttonName, exact: true })
+    .click();
+}
+
 // dagster-client.tsx renders every section as a shadcn Card (`div[data-slot="card"]`)
 // with a CardTitle that resolves to role=heading (proven by the passing mock specs).
 function card(page: Page, headingName: string): Locator {
@@ -184,18 +208,18 @@ function card(page: Page, headingName: string): Locator {
 }
 
 async function expectDagsterShell(page: Page): Promise<void> {
-  // AdminShell title -> h1 "Dagster 운영" (dagster-client.tsx line 781).
   await expect(
-    page.getByRole("heading", { level: 1, name: "Dagster 운영" }),
+    page.getByRole("heading", { level: 1, name: "작업 자동화" }),
   ).toBeVisible(T);
-  // Persistent ops surfaces (lines 768-776, 853, 873, 558, 900, 910).
-  await expect(page.getByRole("link", { name: /Dagster 열기/ })).toBeVisible(T);
   await expect(page.getByRole("button", { name: "새로고침" })).toBeVisible(T);
-  await expect(page.getByRole("heading", { name: "Code locations" })).toBeVisible(T);
-  await expect(page.getByRole("heading", { name: "Recent runs" })).toBeVisible(T);
-  await expect(page.getByRole("heading", { name: "Run detail" })).toBeVisible(T);
-  await expect(page.getByRole("heading", { name: "Dagster webserver" })).toBeVisible(T);
-  await expect(page.getByTestId("dagster-embed")).toBeVisible(T);
+  await expect(page.getByRole("heading", { name: "스케줄" })).toBeVisible(T);
+  await expect(page.getByRole("heading", { name: "최근 실행" })).toBeVisible(T);
+  await expect(page.getByRole("heading", { name: "실행 상세" })).toBeVisible(T);
+  await expect(page.getByRole("heading", { name: "상세 엔진 화면" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "코드 위치" }).first(),
+  ).toBeVisible(T);
+  await expect(page.getByTestId("dagster-embed")).toHaveCount(0);
 }
 
 // fallbackRun mirror of DagsterAdminClient: first FAILURE run, else recent_runs[0].
@@ -331,7 +355,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       expect(summary.meta.request_id.length).toBeGreaterThan(0);
     });
 
-    await test.step("summary 수치/리포지토리(assets)가 SummaryCard·Code locations에 반영된다", async () => {
+    await test.step("summary 수치/리포지토리(assets)가 SummaryCard·코드 위치에 반영된다", async () => {
       const fetched = await browserFetch<DagsterSummaryResponse>(
         page,
         SUMMARY_PATH,
@@ -352,18 +376,20 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       // SummaryCard value(text-2xl div) = repository_count / asset_count. 카드로 scope해
       // 설명 문구의 동일 숫자와의 strict-mode 충돌을 피한다.
       await expect(
-        card(page, "Repositories")
+        card(page, "코드 위치")
           .getByText(String(data.repository_count), { exact: true })
           .first(),
       ).toBeVisible(T);
       await expect(
-        card(page, "Assets")
+        card(page, "에셋")
           .getByText(String(data.asset_count), { exact: true })
           .first(),
       ).toBeVisible(T);
 
-      // assets list 읽기: repository가 있으면 location_name과 첫 asset group이 Code locations에 보인다.
-      const codeLocations = card(page, "Code locations");
+      // assets list 읽기: repository가 있으면 location_name과 첫 asset group이 코드 위치에 보인다.
+      const codeLocations = card(page, "코드 위치").filter({
+        hasText: "에셋 그룹과 코드 레벨 이름",
+      });
       if (data.repositories.length > 0) {
         const repo = data.repositories[0];
         await expect(codeLocations.getByText(repo.location_name).first()).toBeVisible(T);
@@ -374,7 +400,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
         }
       } else {
         await expect(
-          codeLocations.getByText("등록된 code location이 없습니다."),
+          codeLocations.getByText("등록된 코드 위치가 없습니다."),
         ).toBeVisible(T);
       }
     });
@@ -383,7 +409,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       const refreshResponse = waitForApiResponse(page, "GET", SUMMARY_PATH);
       await page.getByRole("button", { name: "새로고침" }).click();
       expect((await refreshResponse).status()).toBe(200);
-      await expect(page.getByRole("heading", { name: "Recent runs" })).toBeVisible(T);
+      await expect(page.getByRole("heading", { name: "최근 실행" })).toBeVisible(T);
     });
 
     await test.step("recent runs 유무에 따라 run 상세 round-trip 또는 empty-state를 확인한다", async () => {
@@ -393,17 +419,17 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
       );
       const data = (fetched.body as DagsterSummaryResponse).data;
       const runs = data.recent_runs;
-      const recentRunsCard = card(page, "Recent runs");
-      const runDetailCard = card(page, "Run detail");
+      const recentRunsCard = card(page, "최근 실행");
+      const runDetailCard = card(page, "실행 상세");
 
       if (data.status !== "ok" || runs.length === 0) {
         // Dagster down 또는 run 없음 — empty-state/placeholder만 단언(no flake).
         await expect(
-          recentRunsCard.getByText("최근 Dagster run이 없습니다."),
+          recentRunsCard.getByText("최근 실행이 없습니다."),
         ).toBeVisible(T);
         await expect(
           runDetailCard.getByText(
-            "최근 run을 선택하면 event log와 실패 원인이 표시됩니다.",
+            "최근 실행을 선택하면 이벤트와 실패 원인이 표시됩니다.",
           ),
         ).toBeVisible(T);
         return;
@@ -432,9 +458,9 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
         expect(autoDetailBody.data.run.run_id).toBe(fallbackId);
         await expect(runDetailCard.getByText(fallbackId).first()).toBeVisible(T);
       } else {
-        // not_found/unavailable여도 Run detail 카드는 상태 배지/안내를 렌더한다.
+        // not_found/unavailable여도 실행 상세 카드는 상태 배지/안내를 렌더한다.
         await expect(
-          runDetailCard.getByRole("heading", { name: "Run detail" }),
+          runDetailCard.getByRole("heading", { name: "실행 상세" }),
         ).toBeVisible(T);
       }
 
@@ -462,6 +488,176 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
         }
       }
     });
+  });
+
+  test("스케줄의 제공자 상태 버튼은 해당 제공자를 선택한 상태로 이동한다", async ({
+    page,
+  }) => {
+    await page.goto("/admin/dagster");
+    await expectDagsterShell(page);
+
+    const providerLink = page.getByRole("link", { name: "제공자 상태" }).first();
+    await expect(providerLink).toBeVisible(T);
+    const href = await providerLink.getAttribute("href");
+    expect(href).toMatch(/\/ops\/providers\?provider=/);
+
+    const expectedProvider = new URL(href ?? "", page.url()).searchParams.get(
+      "provider",
+    );
+    expect(expectedProvider).toBeTruthy();
+
+    await providerLink.click();
+    await expect(page).toHaveURL(/\/ops\/providers\?provider=/, T);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "제공자" }),
+    ).toBeVisible(T);
+    await expect(page.getByText(expectedProvider ?? "").first()).toBeVisible(T);
+  });
+
+  test("스케줄 수정/기본값/시작/중지/즉시 실행 명령이 live UI에서 동작한다", async ({
+    page,
+  }) => {
+    test.skip(
+      !EXECUTE_DAGSTER_WRITE,
+      "E2E_DAGSTER_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 스케줄 write e2e 실행",
+    );
+    test.setTimeout(FLOW_TIMEOUT);
+
+    let target: DagsterSchedule | null = null;
+    let originalRunning = false;
+
+    try {
+      await page.goto("/admin/dagster");
+      await expectDagsterShell(page);
+
+      const summaryFetch = await browserFetch<DagsterSummaryResponse>(
+        page,
+        SUMMARY_PATH,
+      );
+      expect(summaryFetch.status).toBe(200);
+      const summary = summaryFetch.body as DagsterSummaryResponse;
+      test.skip(
+        summary.data.status !== "ok",
+        `Dagster summary status=${summary.data.status} → 스케줄 명령 불가(skip)`,
+      );
+      const schedules = allSchedules(summary);
+      target =
+        schedules.find((schedule) => schedule.name === DAGSTER_SCHEDULE_NAME) ??
+        schedules.find((schedule) =>
+          schedule.name.includes("curated_features_refresh_daily_schedule"),
+        ) ??
+        schedules[0] ??
+        null;
+      test.skip(!target, "summary에 조작 가능한 스케줄이 없음(skip)");
+      if (!target) return;
+
+      originalRunning = target.status === "RUNNING";
+      await expect(scheduleRow(page, target.name)).toBeVisible(T);
+
+      await test.step("사람이 읽는 반복 주기와 실행 시각으로 수정한다", async () => {
+        const patchResponse = waitForApiResponse(
+          page,
+          "PATCH",
+          schedulePath(target!.name),
+        );
+        await clickScheduleButton(page, target!.name, "스케줄 수정");
+        const dialog = page.getByRole("dialog", { name: "스케줄 수정" });
+        await expect(dialog).toBeVisible(T);
+        await dialog.getByLabel(`${target!.name} frequency`).selectOption("daily");
+        await dialog.getByLabel(`${target!.name} time`).fill("04:11");
+        await dialog
+          .getByLabel(`${target!.name} reason`)
+          .fill("live e2e 스케줄 변경");
+        await dialog.getByRole("button", { name: "저장" }).click();
+
+        const response = await patchResponse;
+        expect(response.status()).toBe(200);
+        const body =
+          (await response.json()) as DagsterScheduleCommandResponse;
+        expect(body.data.command).toBe("update");
+        expect(body.data.status).toBe("ok");
+        await expect(page.getByText("스케줄 명령 결과")).toBeVisible(T);
+        await expect(page.getByText("매일 04:11에 실행")).toBeVisible(T);
+      });
+
+      await test.step("기본값 버튼으로 스케줄 override를 되돌린다", async () => {
+        const defaultResponse = waitForApiResponse(
+          page,
+          "POST",
+          schedulePath(target!.name, "default"),
+        );
+        await clickScheduleButton(page, target!.name, "기본값으로 되돌리기");
+        const response = await defaultResponse;
+        expect(response.status()).toBe(200);
+        const body =
+          (await response.json()) as DagsterScheduleCommandResponse;
+        expect(body.data.command).toBe("default");
+        expect(body.data.status).toBe("ok");
+        await expect(page.getByText("기본값으로 되돌리기 ·")).toBeVisible(T);
+      });
+
+      await test.step("시작/중지 버튼을 눌러 상태 명령을 확인하고 원래 상태로 복귀한다", async () => {
+        const firstCommand = originalRunning ? "stop" : "start";
+        const firstButton = originalRunning ? "스케줄 중지" : "스케줄 시작";
+        const firstResponse = waitForApiResponse(
+          page,
+          "POST",
+          schedulePath(target!.name, firstCommand),
+        );
+        await clickScheduleButton(page, target!.name, firstButton);
+        expect((await firstResponse).status()).toBe(200);
+        await expect(
+          page.getByText(`${originalRunning ? "스케줄 중지" : "스케줄 시작"} ·`),
+        ).toBeVisible(T);
+
+        const refreshAfterFirst = waitForApiResponse(page, "GET", SUMMARY_PATH);
+        await page.getByRole("button", { name: "새로고침" }).click();
+        await refreshAfterFirst;
+
+        const restoreCommand = originalRunning ? "start" : "stop";
+        const restoreButton = originalRunning ? "스케줄 시작" : "스케줄 중지";
+        const restoreResponse = waitForApiResponse(
+          page,
+          "POST",
+          schedulePath(target!.name, restoreCommand),
+        );
+        await clickScheduleButton(page, target!.name, restoreButton);
+        expect((await restoreResponse).status()).toBe(200);
+        await expect(
+          page.getByText(`${originalRunning ? "스케줄 시작" : "스케줄 중지"} ·`),
+        ).toBeVisible(T);
+      });
+
+      await test.step("즉시 실행 버튼이 run 명령을 만들고 run id를 노출한다", async () => {
+        const runResponse = waitForApiResponse(
+          page,
+          "POST",
+          schedulePath(target!.name, "run"),
+        );
+        await clickScheduleButton(page, target!.name, "즉시 실행");
+        const response = await runResponse;
+        expect(response.status()).toBe(200);
+        const body =
+          (await response.json()) as DagsterScheduleCommandResponse;
+        expect(body.data.command).toBe("run");
+        expect(body.data.status).toBe("ok");
+        expect(body.data.run_id?.length ?? 0).toBeGreaterThan(0);
+        await expect(page.getByText("즉시 실행 ·")).toBeVisible(T);
+      });
+    } finally {
+      if (target) {
+        await browserFetch<DagsterScheduleCommandResponse>(
+          page,
+          schedulePath(target.name, "default"),
+          { method: "POST", body: { reason: "live e2e cleanup" } },
+        ).catch(() => null);
+        await browserFetch<DagsterScheduleCommandResponse>(
+          page,
+          schedulePath(target.name, originalRunning ? "start" : "stop"),
+          { method: "POST", body: { reason: "live e2e cleanup" } },
+        ).catch(() => null);
+      }
+    }
   });
 
   test("안전한 job을 실제로 트리거하면 새 run이 summary(API)와 Recent runs(UI)에 나타난다", async ({
@@ -549,13 +745,13 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
         expect(found?.status.length).toBeGreaterThan(0);
       });
 
-      await test.step("Recent runs 목록과 Run detail(UI)이 새 run을 반영한다", async () => {
+      await test.step("Recent runs 목록과 실행 상세 UI가 새 run을 반영한다", async () => {
         const runId = launchedRunId as string;
         const refreshResponse = waitForApiResponse(page, "GET", SUMMARY_PATH);
         await page.getByRole("button", { name: "새로고침" }).click();
         await refreshResponse;
 
-        const recentRunsCard = card(page, "Recent runs");
+        const recentRunsCard = card(page, "최근 실행");
         const runButton = recentRunsCard.getByRole("button", {
           name: shortRunId(runId),
           exact: true,
@@ -569,7 +765,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
         );
         await runButton.click();
         expect((await detailResponse).status()).toBe(200);
-        await expect(card(page, "Run detail").getByText(runId)).toBeVisible(T);
+        await expect(card(page, "실행 상세").getByText(runId)).toBeVisible(T);
       });
     } finally {
       if (launchedRunId) {

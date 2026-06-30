@@ -660,6 +660,10 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     ).toBeVisible();
     // 헤더에 feature_id 원문(font-mono)이 그대로 보인다.
     await expect(detailView.getByText(FEATURE_ID)).toBeVisible();
+    await expect(page.getByRole("link", { name: "수정" })).toHaveAttribute(
+      "href",
+      `/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(FEATURE_ID)}`,
+    );
 
     // GET /v1/admin/features/{FEATURE_ID} 정확히 1회 + 그 path만 수신.
     await expect.poll(() => counters.detail).toBe(1);

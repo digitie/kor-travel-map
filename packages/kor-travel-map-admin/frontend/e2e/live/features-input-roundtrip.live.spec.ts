@@ -41,7 +41,7 @@ type BrowserFetchResult<T> = {
 };
 
 const ROUTE = "/admin/features";
-const HEADING = "Admin features";
+const HEADING = "Feature 목록";
 const ADMIN_FEATURES_PATH = "/v1/admin/features";
 
 const UI_TIMEOUT = 15_000;

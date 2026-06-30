@@ -35,8 +35,13 @@ function FormField({
   ...inputProps
 }: FormFieldProps) {
   const { fieldId, hintId, errorId } = useFieldIds(id);
+  const unavailable = inputProps.disabled || inputProps.readOnly;
   return (
-    <Field className={className} data-invalid={error ? true : undefined}>
+    <Field
+      className={className}
+      data-disabled={unavailable ? true : undefined}
+      data-invalid={error ? true : undefined}
+    >
       <FieldLabel className={labelClassName} htmlFor={fieldId}>
         {label}
         {required ? <span aria-hidden="true"> *</span> : null}

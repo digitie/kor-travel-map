@@ -2,6 +2,54 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-30 (codex) — Feature 변경/작업 자동화 운영 UI n150 배포
+
+Feature 변경 작성·검수 분리와 작업 자동화 스케줄 제어 UI를 n150에 배포하고 실제 live UI e2e로
+write 흐름을 검증했다.
+
+- **작업 자동화**: `/admin/dagster`를 `작업 자동화` 메뉴로 정리하고, 스케줄 cron override 저장,
+  기본값 복귀, 시작/중지, 즉시 실행 명령을 admin UI/API에서 수행할 수 있게 했다. reload timeout은
+  스케줄 저장 성공과 분리해 `reloaded=false` 경고로 표현한다.
+- **Dagster 표시**: asset 한국어 표기 상수를 추가해 UI에서는 한국어명을 우선 표시하고, 코드 레벨
+  이름은 작게 말줄임/툴팁으로 보여준다. Code locations는 하단으로 내려 compact하게 정리했다.
+- **Feature 변경**: 작성 페이지와 검수 페이지를 분리하고, 검수 페이지는 승인/반려·필터·상세 확인에
+  집중하도록 live spec을 보강했다. 생성/편집 폼의 한글 label과 상태 배지에 맞춰 e2e 기대값도 정리했다.
+- **검증**: n150 배포 후 로그인 POST 200 + Set-Cookie와 wrong password 401을 확인했다. 공식
+  Playwright Docker image로 `dagster-runs-roundtrip.live.spec.ts` 3 passed / 1 skipped,
+  `admin-features-change-requests-write.live.spec.ts` 3 passed,
+  `misc.live.spec.ts` 182 passed를 확인했다.
+- **로컬 게이트**: frontend `type-check`, `lint`(기존 경고 4개만), 관련 pytest 22건, ruff,
+  `git diff --check`를 통과했다.
+
+## 2026-06-29 (codex) — Feature change requests 편집 UX 보강
+
+Feature change request 작성 화면을 운영자가 실제 feature 수정에 바로 쓰기 쉽도록 정리했다.
+
+- **admin features 연계**: `/admin/features` 상세 패널에 `편집` 링크를 추가했고, change request
+  화면은 query의 `action=update`/`feature_id`를 받아 feature detail을 조회한 뒤 form을 prefill한다.
+- **feature 상세 연계**: `/features/[featureId]` 상세 페이지의 `수정` 링크도 같은 change request
+  update prefill 경로로 연결했다. prefill은 이름/카테고리/좌표뿐 아니라 주소, 행정코드, 관계 id,
+  좌표 정밀도, 전화·행사·URL 필드까지 개별 입력으로 채운다.
+- **form 구조**: 요청 메타, 기본 정보, 위치/마커, JSON payload 구간으로 나누고 `category`,
+  `marker_icon`, `marker_color`를 카탈로그 dropdown으로 바꿨다.
+- **위치/마커 다이얼로그**: 지도 중심 다이얼로그에서 lon/lat/icon/color/sigungu를 함께 수정한다.
+  지도 우클릭과 모바일 오래누르기는 선택 좌표를 form에 반영하고 reverse geocoder로 시군구 코드와
+  이름을 표시한다. 다이얼로그는 `적용`/`취소` 버튼으로 바깥 form 반영 시점을 분리한다.
+- **시군구 검색**: `sigungu_code`는 숫자 코드 prefix와 한글 이름 입력을 모두 geocoder 검색으로
+  즉시 후보화하며, 실제 코드가 잡히면 시군구명을 badge로 보여준다.
+- **geo 프록시**: 브라우저 CORS에 의존하지 않도록 admin UI의 `kor-travel-geo` 호출을 인증된
+  same-origin `/api/geo/...` 프록시로 보낸다.
+- **review 지도**: enrichment/dedup review 상세 비교 지도는 두 좌표가 모두 보이도록 bounds에 맞춰
+  중심과 zoom을 조정한다.
+- **메뉴명**: Admin UI 사이드 메뉴는 `Feature 지도`, `Feature 목록`, `Feature 변경`처럼
+  Feature 계열을 같은 이름 체계로 묶고, 나머지 운영 메뉴도 한글 중심의 직관적인 이름으로 바꿨다.
+- **문서**: Playwright UI/e2e는 WSL에서 실행하지 않고 n150을 1순위, Windows 호스트 브라우저를
+  2순위 fallback으로 쓴다는 기준을 개발 환경/runbook/playwright config 주석에 명시했다.
+- **검증**: frontend `type-check`, `type-check:e2e`, `lint`(기존 경고만), `test` 45건, `build`,
+  `git diff --check` 통과. n150에 배포한 뒤 공식 Playwright Docker image로 targeted live spec
+  `admin-features-change-requests-write.live.spec.ts`를 실행해 인증 setup과 read/edit UI 시나리오
+  2 passed, write opt-in spec 1 skipped를 확인했다.
+
 ## 2026-06-29 (codex) — tasks 백로그 정리
 
 사용자 결정에 따라 열린 백로그를 다시 정리했다.

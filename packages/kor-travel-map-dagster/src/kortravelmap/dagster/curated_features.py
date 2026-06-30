@@ -20,6 +20,7 @@ from dagster import (
 
 from .etl import _add_output_metadata
 from .maintenance import MAINTENANCE_RETRY_POLICY
+from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
 if TYPE_CHECKING:
@@ -168,7 +169,10 @@ CURATED_FEATURE_SCHEDULES: Final = [
     ScheduleDefinition(
         name="curated_features_refresh_daily_schedule",
         job=curated_features_refresh_job,
-        cron_schedule="55 4 * * *",
+        cron_schedule=cron_for_schedule(
+            "curated_features_refresh_daily_schedule",
+            "55 4 * * *",
+        ),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         tags={

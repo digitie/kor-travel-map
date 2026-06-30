@@ -180,11 +180,21 @@ async function cancelByApi(page: Page, requestId: string): Promise<void> {
 async function gotoUpdateRequests(page: Page): Promise<void> {
   await page.goto("/admin/feature-update-requests");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Feature update requests" }),
+    page.getByRole("heading", { level: 1, name: "갱신 요청" }),
   ).toBeVisible(T);
-  await expect(page.getByLabel("lon", { exact: true })).toBeVisible(T);
-  await expect(page.getByLabel("radius km", { exact: true })).toBeVisible(T);
+  await expect(page.getByLabel("경도", { exact: true })).toBeVisible(T);
+  await expect(page.getByLabel("반경(km)", { exact: true })).toBeVisible(T);
   await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible(T);
+}
+
+async function selectProvider(page: Page, provider: string): Promise<void> {
+  const combobox = page.getByRole("combobox", { name: "제공자" });
+  await expect(combobox).toBeVisible(T);
+  await expect(combobox).not.toContainText("불러오는 중", T);
+  await combobox.click();
+  await page.getByLabel("제공자 검색").fill(provider);
+  await page.getByRole("option", { name: new RegExp(escapeRegExp(provider)) }).click();
+  await expect(combobox).toContainText(provider);
 }
 
 function rowContaining(page: Page, text: string): Locator {
@@ -237,14 +247,14 @@ async function createRefreshableQueuedRequest(
     radiusKm?: string;
   },
 ): Promise<CreatedRequest> {
-  await page.getByLabel("lon", { exact: true }).fill(options.lon ?? SAFE_LON);
-  await page.getByLabel("lat", { exact: true }).fill(options.lat ?? SAFE_LAT);
+  await page.getByLabel("경도", { exact: true }).fill(options.lon ?? SAFE_LON);
+  await page.getByLabel("위도", { exact: true }).fill(options.lat ?? SAFE_LAT);
   await page
-    .getByLabel("radius km", { exact: true })
+    .getByLabel("반경(km)", { exact: true })
     .fill(options.radiusKm ?? SAFE_RADIUS_KM);
-  await page.getByLabel("providers", { exact: true }).fill(options.provider);
-  await page.getByLabel("dataset keys", { exact: true }).fill(options.dataset);
-  await page.getByLabel("run mode").selectOption("queued");
+  await selectProvider(page, options.provider);
+  await page.getByLabel("데이터셋 키", { exact: true }).fill(options.dataset);
+  await page.getByLabel("실행 모드").selectOption("queued");
   await page.getByLabel("dry-run").uncheck();
 
   const responsePromise = waitForApiResponse(page, "POST", LIST_PATH);
@@ -271,21 +281,23 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     try {
       await test.step("update request 폼/필터 표면을 확인한다", async () => {
         await gotoUpdateRequests(page);
-        await expect(page.getByLabel("lat", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("providers", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("dataset keys", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("run mode")).toBeVisible(T);
+        await expect(page.getByLabel("위도", { exact: true })).toBeVisible(T);
+        await expect(
+          page.getByRole("combobox", { name: "제공자" }),
+        ).toBeVisible(T);
+        await expect(page.getByLabel("데이터셋 키", { exact: true })).toBeVisible(T);
+        await expect(page.getByLabel("실행 모드")).toBeVisible(T);
         await expect(page.getByLabel("dry-run")).toBeVisible(T);
-        await expect(page.getByLabel("request status")).toBeVisible(T);
+        await expect(page.getByLabel("요청 상태 필터")).toBeVisible(T);
       });
 
       await test.step("dry-run을 끄고 SAFE provider/dataset로 queued 요청을 생성한다", async () => {
-        await page.getByLabel("lon", { exact: true }).fill(SAFE_LON);
-        await page.getByLabel("lat", { exact: true }).fill(SAFE_LAT);
-        await page.getByLabel("radius km", { exact: true }).fill(SAFE_RADIUS_KM);
-        await page.getByLabel("providers", { exact: true }).fill(PROVIDER);
-        await page.getByLabel("dataset keys", { exact: true }).fill(DATASET);
-        await page.getByLabel("run mode").selectOption("queued");
+        await page.getByLabel("경도", { exact: true }).fill(SAFE_LON);
+        await page.getByLabel("위도", { exact: true }).fill(SAFE_LAT);
+        await page.getByLabel("반경(km)", { exact: true }).fill(SAFE_RADIUS_KM);
+        await selectProvider(page, PROVIDER);
+        await page.getByLabel("데이터셋 키", { exact: true }).fill(DATASET);
+        await page.getByLabel("실행 모드").selectOption("queued");
         // dry-run 체크박스는 기본 checked → 실제 row를 만들기 위해 해제.
         await page.getByLabel("dry-run").uncheck();
         await expect(page.getByLabel("dry-run")).not.toBeChecked();
@@ -319,7 +331,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
 
       await test.step("목록(all 필터)에 새 요청 행이 나타난다", async () => {
         // 폼/목록은 같은 페이지 — 생성 onSuccess가 목록 쿼리를 invalidate해 refetch한다.
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await expect(row).toContainText(PROVIDER);
@@ -460,7 +472,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("목록 행이 provider와 request short id를 함께 노출한다", async () => {
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await expect(row).toContainText(PROVIDER);
@@ -500,48 +512,20 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
     }
   });
 
-  test("provider 개수 제한(>32)을 위반하면 422가 표면화되고 백엔드에 아무것도 쌓이지 않는다", async ({
+  test("제공자 combobox multiple에서 검색·선택·해제가 동작한다", async ({
     page,
   }) => {
-    test.skip(
-      !EXECUTE,
-      "E2E_FEATURE_UPDATE_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 write flow를 실행",
-    );
     test.setTimeout(FLOW_TIMEOUT);
-
-    // 라우터: providers list max_length=MAX_PROVIDER_FILTERS(32) → 33개면 서버 422.
-    const badBase = `e2e_bad_provider_${RUN_ID}`;
-    const tooManyProviders = [...Array(33).keys()].map(
-      (index) => `${badBase}_${index}`,
-    );
 
     await gotoUpdateRequests(page);
 
-    await test.step("33개 provider로 요청하면 POST가 422로 거절된다", async () => {
-      await page
-        .getByLabel("providers", { exact: true })
-        .fill(tooManyProviders.join(","));
-      const responsePromise = waitForApiResponse(page, "POST", LIST_PATH);
-      await page.getByRole("button", { name: "요청 생성" }).click();
-      const response = await responsePromise;
-      expect(response.status()).toBe(422);
-    });
+    const combobox = page.getByRole("combobox", { name: "제공자" });
+    await selectProvider(page, PROVIDER);
+    await expect(combobox).toContainText(PROVIDER);
 
-    await test.step("UI에 생성 실패 alert이 뜨고 성공 alert은 없다", async () => {
-      // destructive alert = role=alert (alert.tsx: variant=destructive → role=alert).
-      await expect(
-        page.getByRole("alert").filter({ hasText: "요청 생성 실패" }),
-      ).toBeVisible(T);
-      await expect(
-        page.getByRole("status").filter({ hasText: "요청 처리 완료" }),
-      ).toHaveCount(0);
-    });
-
-    await test.step("백엔드 목록에 해당 provider row가 없다(영속 안 됨)", async () => {
-      const list = await fetchListByProviderApi(page, `${badBase}_0`);
-      expect(list.status).toBe(200);
-      expect(list.body?.data.items ?? []).toHaveLength(0);
-    });
+    await page.getByRole("button", { name: `${PROVIDER} 제거` }).click();
+    await expect(combobox).not.toContainText(PROVIDER);
+    await expect(combobox).toContainText("전체 제공자");
   });
 
   test("request status 필터가 status query param으로 내려가고 목록이 그에 맞게 좁혀진다", async ({
@@ -568,7 +552,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("all 필터에서 우리 row가 보인다", async () => {
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await expect(row).toContainText(PROVIDER);
@@ -588,7 +572,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
 
       await test.step("failed 필터 선택 시 status=failed query가 나가고 우리 row는 사라진다", async () => {
         const responsePromise = waitForListStatusResponse(page, "failed");
-        await page.getByLabel("request status").selectOption("failed");
+        await page.getByLabel("요청 상태 필터").selectOption("failed");
         const response = await responsePromise;
         expect(new URL(response.url()).searchParams.get("status")).toBe(
           "failed",
@@ -614,7 +598,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
 
       await test.step("running 필터 선택 시 status=running query가 나가고 결과는 모두 running이다", async () => {
         const responsePromise = waitForListStatusResponse(page, "running");
-        await page.getByLabel("request status").selectOption("running");
+        await page.getByLabel("요청 상태 필터").selectOption("running");
         const response = await responsePromise;
         expect(new URL(response.url()).searchParams.get("status")).toBe(
           "running",
@@ -665,7 +649,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("행의 상세 링크로 이동한다", async () => {
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         await row.getByRole("link").click();
@@ -749,7 +733,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("queued row의 cancel 버튼이 POST /cancel을 호출하고 cancelled를 반환한다", async () => {
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         const cancelButton = row.getByRole("button", { name: "cancel" });
@@ -782,7 +766,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("cancelled 필터 목록에 row가 cancelled로 나타난다", async () => {
-        await page.getByLabel("request status").selectOption("cancelled");
+        await page.getByLabel("요청 상태 필터").selectOption("cancelled");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
         // status 컬럼은 <StatusBadge>로 렌더 → "cancelled"가 한글 "취소됨"으로 표시된다.
@@ -818,7 +802,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
       });
 
       await test.step("run-now 버튼이 run_mode=now 신규 row를 201로 enqueue한다", async () => {
-        await page.getByLabel("request status").selectOption("all");
+        await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
 

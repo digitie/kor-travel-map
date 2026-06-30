@@ -1,14 +1,4 @@
-import { publicUrlEnv } from "./env";
-
-const KOR_TRAVEL_GEO_BASE_URL = publicUrlEnv(
-  process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL,
-  "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
-  "http://127.0.0.1:12501",
-);
-const KOR_TRAVEL_GEO_API_KEY =
-  process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY?.trim() ||
-  process.env.NEXT_PUBLIC_VWORLD_API_KEY?.trim() ||
-  "";
+const KOR_TRAVEL_GEO_PROXY_BASE = "/api/geo";
 
 export interface KorTravelGeoPoint {
   x?: number | null;
@@ -50,6 +40,7 @@ export interface KorTravelGeoCandidate {
 export interface KorTravelGeoResponse {
   candidates: KorTravelGeoCandidate[];
   status: string;
+  total?: number;
 }
 
 export interface KorTravelGeoCoord {
@@ -66,20 +57,17 @@ export interface KorTravelGeoCodes {
 }
 
 async function postKorTravelGeo<T>(
-  path: "/v2/geocode" | "/v2/reverse",
+  path: "/v2/geocode" | "/v2/reverse" | "/v2/search",
   body: Record<string, unknown>,
 ): Promise<T> {
-  const url = new URL(path, KOR_TRAVEL_GEO_BASE_URL);
-  if (KOR_TRAVEL_GEO_API_KEY) {
-    url.searchParams.set("key", KOR_TRAVEL_GEO_API_KEY);
-  }
+  const url = `${KOR_TRAVEL_GEO_PROXY_BASE}${path}`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    credentials: "omit",
+    credentials: "same-origin",
     cache: "no-store",
     body: JSON.stringify(body),
   });
@@ -113,6 +101,19 @@ export function geocodeAddress(
     ...(type === "road"
       ? { road_address: address }
       : { jibun_address: address }),
+  });
+}
+
+export function searchDistricts(
+  query: string,
+  options: { sigCd?: string; size?: number } = {},
+): Promise<KorTravelGeoResponse> {
+  return postKorTravelGeo<KorTravelGeoResponse>("/v2/search", {
+    query,
+    type: "district",
+    page: 1,
+    size: options.size ?? 10,
+    ...(options.sigCd ? { sig_cd: options.sigCd } : {}),
   });
 }
 
@@ -209,4 +210,4 @@ function textOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
-export { KOR_TRAVEL_GEO_BASE_URL };
+export { KOR_TRAVEL_GEO_PROXY_BASE as KOR_TRAVEL_GEO_BASE_URL };

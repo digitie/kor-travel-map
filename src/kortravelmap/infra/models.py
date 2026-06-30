@@ -81,6 +81,7 @@ __all__ = [
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
     "ProviderRefreshPolicyRow",
+    "DagsterScheduleOverrideRow",
     "FeatureMergeHistoryRow",
 ]
 
@@ -1853,6 +1854,43 @@ class ProviderRefreshPolicyRow(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class DagsterScheduleOverrideRow(Base):
+    """``ops.dagster_schedule_overrides`` row mapping.
+
+    Dagster ``ScheduleDefinition``의 cron은 코드 location 로드 시점에 고정된다.
+    운영 화면은 이 테이블에 override를 저장하고 repository location reload를
+    요청해 다음 로드부터 수정된 cron을 사용하게 한다.
+    """
+
+    __tablename__ = "dagster_schedule_overrides"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(schedule_name) <> ''",
+            name="ck_dagster_schedule_overrides_schedule_name_not_blank",
+        ),
+        CheckConstraint(
+            "btrim(cron_schedule) <> ''",
+            name="ck_dagster_schedule_overrides_cron_schedule_not_blank",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name="ck_dagster_schedule_overrides_metadata_object",
+        ),
+        {"schema": "ops"},
+    )
+
+    schedule_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    cron_schedule: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )
 
 

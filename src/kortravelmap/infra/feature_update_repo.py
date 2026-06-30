@@ -51,6 +51,7 @@ __all__ = [
     "peek_update_requests",
     "peek_next_update_request",
     "claim_next_update_request",
+    "claim_update_requests",
     "feature_update_scope_advisory_key",
     "start_update_request",
     "finish_update_request",
@@ -577,6 +578,23 @@ async def claim_next_update_request(
             session, job_id=request.job_id, current_stage="claimed"
         )
         return request
+
+
+async def claim_update_requests(
+    session: AsyncSession,
+    *,
+    limit: int = 10,
+) -> tuple[FeatureUpdateRequest, ...]:
+    """claim 순서상 queued request 여러 건을 running으로 전이한다."""
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    claimed: list[FeatureUpdateRequest] = []
+    for _ in range(min(limit, _MAX_PEEK_LIMIT)):
+        request = await claim_next_update_request(session)
+        if request is None:
+            break
+        claimed.append(request)
+    return tuple(claimed)
 
 
 async def start_update_request(

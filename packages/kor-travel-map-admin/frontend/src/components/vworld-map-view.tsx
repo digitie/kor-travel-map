@@ -49,6 +49,11 @@ interface VWorldMapViewProps {
   style?: CSSProperties;
   testId?: string;
   children?: ReactNode;
+  onContextMenu?: (event: maplibregl.MapMouseEvent) => void;
+  onLongPress?: (event: {
+    lngLat: maplibregl.LngLat;
+    originalEvent: PointerEvent;
+  }) => void;
   onLoad?: (map: MapLibreMap) => void;
   onMoveEnd?: (map: MapLibreMap) => void;
   onError?: (event: maplibregl.ErrorEvent) => void;
@@ -67,6 +72,8 @@ export function VWorldMapView({
   style,
   testId,
   children,
+  onContextMenu,
+  onLongPress,
   onLoad,
   onMoveEnd,
   onError,
@@ -74,6 +81,8 @@ export function VWorldMapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const appliedStyleRef = useRef({ apiKey, layerType });
+  const onContextMenuRef = useRef(onContextMenu);
+  const onLongPressRef = useRef(onLongPress);
   const onLoadRef = useRef(onLoad);
   const onMoveEndRef = useRef(onMoveEnd);
   const onErrorRef = useRef(onError);
@@ -81,6 +90,8 @@ export function VWorldMapView({
   const [loaded, setLoaded] = useState(false);
 
   useLayoutEffect(() => {
+    onContextMenuRef.current = onContextMenu;
+    onLongPressRef.current = onLongPress;
     onLoadRef.current = onLoad;
     onMoveEndRef.current = onMoveEnd;
     onErrorRef.current = onError;
@@ -124,6 +135,9 @@ export function VWorldMapView({
     const handleMoveEnd = () => {
       onMoveEndRef.current?.(nextMap);
     };
+    const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
+      onContextMenuRef.current?.(event);
+    };
     const handleError = (event: maplibregl.ErrorEvent) => {
       if (onErrorRef.current) {
         onErrorRef.current(event);
@@ -141,6 +155,7 @@ export function VWorldMapView({
 
     nextMap.on("load", handleLoad);
     nextMap.on("idle", handleLoad);
+    nextMap.on("contextmenu", handleContextMenu);
     nextMap.on("moveend", handleMoveEnd);
     nextMap.on("error", handleError);
     loadFrame = requestAnimationFrame(() => {
@@ -148,6 +163,62 @@ export function VWorldMapView({
     });
 
     let resizeFrame = 0;
+    let longPressTimer = 0;
+    let longPressPointer:
+      | { id: number; startX: number; startY: number; currentEvent: PointerEvent }
+      | null = null;
+    const clearLongPress = () => {
+      if (longPressTimer !== 0) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = 0;
+      }
+      longPressPointer = null;
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "mouse" || !onLongPressRef.current) return;
+      clearLongPress();
+      longPressPointer = {
+        id: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentEvent: event,
+      };
+      longPressTimer = window.setTimeout(() => {
+        const pointer = longPressPointer;
+        const node = containerRef.current;
+        if (!pointer || !node || pointer.id !== event.pointerId) return;
+        const rect = node.getBoundingClientRect();
+        const lngLat = nextMap.unproject([
+          pointer.currentEvent.clientX - rect.left,
+          pointer.currentEvent.clientY - rect.top,
+        ]);
+        onLongPressRef.current?.({
+          lngLat,
+          originalEvent: pointer.currentEvent,
+        });
+        clearLongPress();
+      }, 600);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!longPressPointer || event.pointerId !== longPressPointer.id) return;
+      const moveX = Math.abs(event.clientX - longPressPointer.startX);
+      const moveY = Math.abs(event.clientY - longPressPointer.startY);
+      if (moveX > 12 || moveY > 12) {
+        clearLongPress();
+        return;
+      }
+      longPressPointer.currentEvent = event;
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (longPressPointer && event.pointerId === longPressPointer.id) {
+        clearLongPress();
+      }
+    };
+    containerNode?.addEventListener("pointerdown", handlePointerDown);
+    containerNode?.addEventListener("pointermove", handlePointerMove);
+    containerNode?.addEventListener("pointerup", handlePointerEnd);
+    containerNode?.addEventListener("pointercancel", handlePointerEnd);
+    containerNode?.addEventListener("pointerleave", handlePointerEnd);
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
@@ -182,9 +253,16 @@ export function VWorldMapView({
     return () => {
       if (loadFrame !== 0) cancelAnimationFrame(loadFrame);
       if (resizeFrame !== 0) cancelAnimationFrame(resizeFrame);
+      clearLongPress();
+      containerNode?.removeEventListener("pointerdown", handlePointerDown);
+      containerNode?.removeEventListener("pointermove", handlePointerMove);
+      containerNode?.removeEventListener("pointerup", handlePointerEnd);
+      containerNode?.removeEventListener("pointercancel", handlePointerEnd);
+      containerNode?.removeEventListener("pointerleave", handlePointerEnd);
       resizeObserver?.disconnect();
       nextMap.off("load", handleLoad);
       nextMap.off("idle", handleLoad);
+      nextMap.off("contextmenu", handleContextMenu);
       nextMap.off("moveend", handleMoveEnd);
       nextMap.off("error", handleError);
       for (const control of controls) {
@@ -223,7 +301,10 @@ export function VWorldMapView({
         ref={containerRef}
         className={className}
         data-testid={testId}
-        style={style}
+        style={{
+          ...style,
+          touchAction: onLongPress ? "none" : style?.touchAction,
+        }}
       />
       {loaded ? children : null}
     </VWorldMapContext.Provider>

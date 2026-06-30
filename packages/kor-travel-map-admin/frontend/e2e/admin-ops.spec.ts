@@ -21,6 +21,8 @@ type AdminFeatureDeleteRequest =
 type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
+type CategorySummary = components["schemas"]["CategorySummary"];
 type BackupRecord = components["schemas"]["BackupRecord"];
 type OpsProviderDatasetSummary =
   components["schemas"]["OpsProviderDatasetSummary"];
@@ -137,6 +139,48 @@ function makeFeatureChange(
     status: "pending",
     ...overrides,
   };
+}
+
+function makeCategory(code: string, label: string): CategorySummary {
+  return {
+    code,
+    db_active: null,
+    db_feature_count: null,
+    depth: 4,
+    is_active: true,
+    label,
+    maki_icon: "marker",
+    parent_code: code.slice(0, 6).padEnd(8, "0"),
+    path: ["여행", "관광", label],
+    sort_order: 1,
+    tier1_code: "01",
+    tier1_name: "여행",
+    tier2_code: "0107",
+    tier2_name: "관광",
+    tier3_code: code.slice(0, 6),
+    tier3_name: label,
+    tier4_code: code,
+    tier4_name: label,
+  };
+}
+
+function categoriesResponse(): CategoriesResponse {
+  return {
+    data: {
+      include_counts: false,
+      items: [
+        makeCategory("01070300", "관광지"),
+        makeCategory("01070400", "문화시설"),
+      ],
+    },
+    meta: { duration_ms: 1, request_id: "e2e-categories" },
+  };
+}
+
+async function mockCategories(page: Page) {
+  await page.route("**/v1/categories**", async (route) => {
+    await fulfillJson(route, categoriesResponse());
+  });
 }
 
 function makeOpsProviderDataset(
@@ -810,6 +854,10 @@ async function mockFeatureChangeMutations(
  * API 결과 행 수보다 운영자가 사용할 표면(제목, 필터, 폼, 표)을 우선 검증한다.
  */
 test.describe("admin/ops pages", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockCategories(page);
+  });
+
   test("/v1/ops/import-jobs", async ({ page }) => {
     await page.goto("/ops/import-jobs");
 
@@ -827,7 +875,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Admin features" }),
+      page.getByRole("heading", { level: 1, name: "Feature 목록" }),
     ).toBeVisible();
     await expect(page.getByLabel("feature search")).toBeVisible();
     await expect(page.getByLabel("feature kind")).toBeVisible();
@@ -853,9 +901,9 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features/change-requests");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature change requests" }),
+      page.getByRole("heading", { level: 1, name: "Feature 변경" }),
     ).toBeVisible();
-    await expect(page.getByText("Change request form")).toBeVisible();
+    await expect(page.getByText("Feature 변경 요청")).toBeVisible();
     for (const label of [
       "change action",
       "change feature id",
@@ -868,6 +916,18 @@ test.describe("admin/ops pages", () => {
       "change lon",
       "change lat",
       "change detail JSON",
+    ]) {
+      await expect(page.getByLabel(label, { exact: true })).toBeVisible();
+    }
+  });
+
+  test("/v1/admin/features/change-reviews", async ({ page }) => {
+    await page.goto("/admin/features/change-reviews");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Feature 검수" }),
+    ).toBeVisible();
+    for (const label of [
       "change search",
       "change status",
       "change action filter",
@@ -922,7 +982,7 @@ test.describe("admin/ops pages", () => {
       ],
     });
 
-    await page.goto("/admin/features/change-requests");
+    await page.goto("/admin/features/change-reviews");
     await page.getByLabel("change status", { exact: true }).selectOption("all");
 
     const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
@@ -966,6 +1026,7 @@ test.describe("admin/ops pages", () => {
       reason: "즉시 적용",
     });
 
+    await page.goto("/admin/features/change-reviews");
     await page.getByLabel("change status", { exact: true }).selectOption("all");
     const createdRow = page.getByRole("row", { name: /Immediate feature/ });
     await expect(createdRow).toBeVisible();
@@ -978,7 +1039,6 @@ test.describe("admin/ops pages", () => {
     const requests = await mockFeatureChangeMutations(page);
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change status", { exact: true }).selectOption("all");
 
     await page.getByLabel("change action", { exact: true }).selectOption("update");
     await page
@@ -993,8 +1053,11 @@ test.describe("admin/ops pages", () => {
       name: "Updated feature",
       reason: "이름 수정",
     });
+    await page.goto("/admin/features/change-reviews");
+    await page.getByLabel("change status", { exact: true }).selectOption("all");
     await expect(page.getByRole("row", { name: /Updated feature/ })).toBeVisible();
 
+    await page.goto("/admin/features/change-requests");
     await page.getByLabel("change action", { exact: true }).selectOption("delete");
     await page
       .getByLabel("change feature id", { exact: true })
@@ -1008,6 +1071,8 @@ test.describe("admin/ops pages", () => {
       reason: "soft delete",
     });
 
+    await page.goto("/admin/features/change-reviews");
+    await page.getByLabel("change status", { exact: true }).selectOption("all");
     const deleteRow = page.getByRole("row", { name: /feature-delete-1/ });
     await expect(deleteRow).toBeVisible();
     await deleteRow.getByRole("button", { name: "approve" }).click();
