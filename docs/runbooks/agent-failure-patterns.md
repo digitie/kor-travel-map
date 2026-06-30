@@ -91,6 +91,32 @@
 - **원칙**: Windows `git.exe`로 우회하지 않는다. rebase/merge/commit/push도 WSL
   `git`으로 실행한다.
 
+### B5 — worktree metadata 복구 중 diff 범위가 폭증함
+
+- **증상**: `.git`이 존재하지 않는 `.git/worktrees/<name>`을 가리켜 `git status`가
+  `fatal: not a git repository`로 실패한다. 임시로 `.git/worktrees/<name>`를 다시 만들거나
+  `git --git-dir=... --work-tree=... status`를 쓰면 수백 개 파일이 변경된 것처럼 보인다.
+- **원인**: worktree 전용 metadata와 index가 사라졌거나 branch/index 기준이 실제 작업 파일의
+  누적 상태와 어긋난 것이다. 이 상태에서 `git read-tree HEAD`나 `git add -A`를 바로 실행하면
+  현재 세션 변경뿐 아니라 이전 누적 변경·다른 작업의 산출물까지 한 PR에 섞일 수 있다.
+- **회피**: 작업 시작·중간 저장·push 직전마다 먼저 Git 연결을 확인한다.
+  ```bash
+  sed -n '1p' .git
+  git status -sb
+  git worktree list --porcelain | sed -n '1,80p'
+  ```
+  `git status`가 깨졌으면 코드 수정을 멈추고 metadata 복구부터 한다. 복구 전에는
+  `git add -A`, `git commit`, `git push`를 실행하지 않는다.
+- **복구 순서**:
+  1. `git --git-dir=<main.git> worktree repair <worktree>`를 먼저 시도한다.
+  2. 실패하면 `.git`/`gitdir`/`commondir`만 Linux 경로로 고치고, 바로 staging하지 않는다.
+  3. `git status -sb`, `git diff --stat`, `git diff --name-only`로 범위를 읽는다.
+  4. 의도 범위가 섞였으면 관련 파일만 `git add <path...>`로 stage한다.
+  5. 유실 위험이 더 크면 `codex/<topic>-save` 같은 **draft 보존 PR**을 먼저 만들고,
+     본 PR에서 후속으로 범위를 정리한다.
+- **보안 게이트**: emergency 보존 PR이어도 push 전에는 `*.local.md`/실제 `.env` staged 여부,
+  일반 민감값 패턴 검사, `scripts/check_prod_redaction.py`, prod-specific literal scan을 통과시킨다.
+
 ## C. 도메인 계약 (자연키 / 스키마 / upstream)
 
 ### C1 — 자연키에 `|` 사용 → make_feature_id 거부
@@ -343,3 +369,35 @@
   cmd.exe /c "curl.exe -sS -D - http://127.0.0.1:12705/ -o NUL"
   ```
   Windows `curl.exe`가 200을 보기 전에는 e2e를 돌리지 않는다.
+
+### F11 — n150 UI image 시각/번들 검증 오판
+
+- **증상**: n150 UI가 최신이라고 보고했는데 사용자는 이전 화면을 본다. 또는 Docker inspect의
+  `Created`/`StartedAt` 시각을 보고 오전 빌드로 오해한다.
+- **원인**:
+  - Docker inspect 시각은 UTC다. 예를 들어 `2026-06-30T10:49:30Z`는
+    `2026-06-30 19:49:30 KST`다.
+  - image 생성 시각은 “그 시각까지의 작업만 포함”한다. 그 이후 작업은 UI rebuild/recreate 전까지
+    반영되지 않는다.
+  - Next standalone image의 `.next` 위치를 잘못 보면 marker grep이 false negative가 된다. 이 repo
+    Docker image의 frontend bundle은 `/app/packages/kor-travel-map-admin/frontend/.next` 아래에 있다.
+  - 비로그인 HTML(`/login`)이나 다른 public entrypoint만 확인하면 authenticated admin UI가 최신인지
+    판단할 수 없다.
+- **확인 절차**:
+  ```bash
+  # n150에서 UI 컨테이너/image 시각 확인. 출력 시 UTC와 KST를 함께 적는다.
+  docker inspect -f '{{.Image}} {{.Created}} {{.State.StartedAt}}' <ui-container>
+  docker image inspect -f '{{.Id}} {{.Created}} {{json .RepoTags}}' <ui-image>
+
+  # image 내부 번들 marker 확인. /app/.next가 아니라 실제 frontend package 아래를 본다.
+  docker exec <ui-container> sh -lc \
+    'grep -R -q "적재 작업" /app/packages/kor-travel-map-admin/frontend/.next && echo marker=yes'
+  ```
+  public URL 검증은 반드시 로그인된 세션으로 사용자가 접속한 같은 origin을 연다. 캐시 혼동을 줄이기 위해
+  `?_check=<timestamp>`를 붙이고, 서버 응답(HTML/JS asset)과 실제 브라우저 DOM을 둘 다 확인한다.
+- **판정 기준**:
+  - 컨테이너 image 생성 시각이 마지막 UI 변경 시각보다 이전이면 최신 반영이 아니다. UI를 rebuild/recreate한다.
+  - image 내부 `.next`와 authenticated public DOM에 새 marker가 있으면 서버는 최신이다. 이 경우 사용자
+    브라우저 캐시/서비스워커/탭 상태를 의심하되, 먼저 같은 URL에서 hard reload 또는 새 시크릿 창으로 재확인한다.
+  - “최신”이라고 보고할 때는 `image_created_utc`, `image_created_kst`, `container_started_utc`,
+    `container_started_kst`, 확인한 marker, 확인한 route를 함께 남긴다.
