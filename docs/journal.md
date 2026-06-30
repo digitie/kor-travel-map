@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-30 (claude) — codex PR #613/#617 리뷰 후속 fix (#618)
+
+codex #613(feature ops + Dagster 컨트롤)·#617(세션 UI 재반영 + MOIS sync-before-reads)을
+상세 리뷰하고 findings를 #618로 반영했다.
+
+- **#617 HIGH — Phase B read마다 전국 MOIS Phase A sync(42업종 download+upsert)가
+  무조건 돌던 문제**: codex #617이 `feature_update_runner._mois_resources`와
+  `resources._sync_then_fetch_mois_license_records`에서 read 전 `sync_mois_source_db`를
+  무조건 호출 → RUNNING feature-update queue sensor를 통해 operator가 MOIS refresh를
+  큐잉할 때마다 전국 sync가 돌아 #614의 STOPPED 봉쇄를 우회했다. **freshness 게이트**
+  (`ensure_mois_source_db_fresh`)를 추가: 소스 DB가 존재·비어있지 않고 `<db>.synced`
+  마커가 TTL(`mois_source_sync_ttl_hours`=24h) 이내면 sync를 생략한다. 두 read 경로를
+  게이트 경유로 교체.
+- **#617 MED — 동시 worker run 경합**: sync 엔진에 `busy_timeout=30s` 부여 + `<db>.lock`
+  파일락으로 동시 Phase A sync를 1개로 제한(락 못 잡으면 sync 생략, 오래된 락은 회수).
+- **#617 MED — async 런너 이벤트 루프 블로킹**: `FeatureUpdateAssetRunner.__call__`에서
+  `spec.resources(...)`(MOIS는 게이트된 sync I/O 포함)를 `asyncio.to_thread`로 보냄.
+- **#617 LOW — 소스 볼륨**: `kor-travel-map-mois-source` 볼륨이 dagster·dagster-daemon에
+  마운트돼 있어 sensor-launch worker run·MOIS asset run 실행 컨텍스트를 커버한다(확인).
+- **#617/#613 reconcile — KREX 교통공지 10분 스케줄 vs 최소주기 가드**: #617이 추가한
+  `*/10` 스케줄을 #613 cron 가드가 거부하던 것을, 분 필드 `*/N`(N>=10) 허용으로 완화
+  (매분/매5분 runaway는 계속 거부). API `_DEFAULT_SCHEDULE_CRONS`의 stale monthly 항목을
+  `..._ten_minute_schedule: */10`로 정정. 해당 스케줄은 `default_status=STOPPED`(운영자
+  enable 필요)임을 확인.
+- 회귀 테스트: freshness 게이트(fresh→skip / missing→sync / stale→re-sync) 3건 추가.
+- 검증: ruff + mypy --strict clean, dagster+api 관련 pytest green.
+
 ## 2026-06-30 (codex) — 세션 개선 요청 후속 재반영
 
 PR #615를 문서 복기 PR로 정리해 병합한 뒤, 병합된 `main`에 세션 중 요청됐던 UI/Dagster 개선이

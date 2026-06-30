@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -315,7 +315,7 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_price_opinet_stations_daily_schedule": "18 18 * * *",
     "feature_place_krex_rest_areas_monthly_schedule": "20 2 1 * *",
     "feature_price_krex_rest_areas_twice_daily_schedule": "28 6,18 * * *",
-    "feature_notice_krex_traffic_notices_monthly_schedule": "7 3 1 * *",
+    "feature_notice_krex_traffic_notices_ten_minute_schedule": "*/10 * * * *",
     "feature_weather_krex_rest_areas_hourly_schedule": "35 * * * *",
     "feature_place_krheritage_items_monthly_schedule": "15 2 2 * *",
     "feature_event_krheritage_events_monthly_schedule": "25 3 2 * *",
@@ -813,6 +813,11 @@ def _parse_ticks(raw_ticks: object) -> list[DagsterInstigationTick]:
     return ticks
 
 
+# 운영자 cron override 분 필드 ``*/N`` 최소 step(분). 정당한 10분 주기(KREX 교통공지)는
+# 허용하되 그보다 잦은 고빈도는 막는다(#613 가드 + #617 KREX 10분 스케줄 reconcile).
+_MIN_CRON_MINUTE_STEP: Final[int] = 10
+
+
 def _cron_part_is_valid(part: str, *, min_value: int, max_value: int) -> bool:
     if part == "*":
         return True
@@ -858,14 +863,20 @@ def _validate_cron_schedule(cron_schedule: str) -> str:
     for part, (min_value, max_value) in zip(parts, ranges, strict=True):
         if not _cron_part_is_valid(part, min_value=min_value, max_value=max_value):
             raise ValueError(f"cron 필드 범위가 올바르지 않습니다: {part}")
-    # 운영자 override 최소 주기 가드(#613): 분 필드는 0~59 단일 고정값이어야 한다 →
-    # 시간당 1회 이하로 제한해 월간·대용량 작업을 매분/매5분으로 escalate하는 runaway를 막는다.
-    # (코드 기본 스케줄은 전부 분 고정값이라 영향 없음.)
+    # 운영자 override 최소 주기 가드(#613): 분 필드는 0~59 단일 고정값(시간당 1회 이하)
+    # 또는 ``*/N``(N>=10, 즉 10분 이상 주기)만 허용한다 → 월간·대용량 작업을 매분/매5분으로
+    # escalate하는 runaway는 막되, 정당한 10분 주기(예: 고속도로 교통공지 notice, #617)는
+    # 허용한다. ``*``·범위·목록·``*/N``(N<10)은 거부.
     minute_field = parts[0]
-    if not (minute_field.isdigit() and 0 <= int(minute_field) <= 59):
+    minute_ok = (minute_field.isdigit() and 0 <= int(minute_field) <= 59) or (
+        minute_field.startswith("*/")
+        and minute_field[2:].isdigit()
+        and int(minute_field[2:]) >= _MIN_CRON_MINUTE_STEP
+    )
+    if not minute_ok:
         raise ValueError(
-            "분 필드는 0~59 단일 값이어야 합니다(시간당 1회 이하). "
-            "'*', '*/N', 범위·목록은 허용하지 않습니다."
+            f"분 필드는 0~59 단일 값 또는 '*/N'(N>={_MIN_CRON_MINUTE_STEP})이어야 합니다 "
+            "(과도한 고빈도 방지). '*', 범위·목록, '*/N'(N<10)은 허용하지 않습니다."
         )
     return cron
 
