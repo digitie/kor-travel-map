@@ -30,6 +30,7 @@ from .resources import (
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
+from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
@@ -182,4 +183,10 @@ defs = Definitions(
         + tuple(DEFAULT_RESOURCE_DEFINITIONS)
     },
 )
+
+# schedule override는 위 FEATURE_LOAD_SCHEDULES 빌드에서 한 번 읽혀 cron에 baked된다.
+# 같은 프로세스에서 이후 다시 읽을 때 stale 캐시가 남지 않게 비운다(#613) — daemon은
+# code location reload(새 프로세스)로 최신 override를 반영하므로 webserver reload만으로는
+# 즉시 적용되지 않는다.
+load_schedule_cron_overrides.cache_clear()
 """``dagster dev -m kortravelmap.dagster.definitions`` 진입점."""

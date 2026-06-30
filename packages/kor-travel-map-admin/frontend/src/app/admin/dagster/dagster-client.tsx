@@ -669,6 +669,16 @@ function ScheduleControls({
       setEditError(error instanceof Error ? error.message : String(error));
       return;
     }
+    // 주기 변경은 대용량/월간 작업을 고빈도로 올려 provider 한도를 초과시킬 수 있어 확인을 받는다(#613).
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `'${editing.name}' 스케줄 주기를 '${cronSchedule}'(으)로 변경하시겠습니까? ` +
+          "대용량/월간 작업의 주기를 올리면 provider 호출 한도를 초과할 수 있습니다.",
+      )
+    ) {
+      return;
+    }
     setLastResult(null);
     setEditError(null);
     patchSchedule.mutate({
@@ -686,6 +696,16 @@ function ScheduleControls({
     scheduleName: string,
     nextCommand: "default" | "reset" | "run" | "start" | "stop",
   ) => {
+    // 즉시 실행/스케줄 시작은 즉시 부하를 유발하므로 확인을 받는다(#613 — runaway 작업 방지).
+    if (
+      (nextCommand === "run" || nextCommand === "start") &&
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `'${scheduleName}' ${scheduleCommandLabel(nextCommand)}을(를) 실행하시겠습니까?`,
+      )
+    ) {
+      return;
+    }
     setLastResult(null);
     command.mutate({
       scheduleName,
@@ -736,7 +756,12 @@ function ScheduleControls({
                   {lastResult.cron_schedule ? (
                     <span>{sentenceFromCron(lastResult.cron_schedule)}</span>
                   ) : null}
-                  {lastResult.reloaded ? <span>코드 위치 새로고침 요청됨</span> : null}
+                  {lastResult.reloaded ? (
+                    <span>
+                      코드 위치 새로고침 요청됨 — 스케줄러 daemon은 자체 code
+                      location reload 후 새 cron을 반영합니다(즉시 적용 아님).
+                    </span>
+                  ) : null}
                   {lastResult.run_id ? (
                     <span className="font-mono">run {shortRunId(lastResult.run_id)}</span>
                   ) : null}

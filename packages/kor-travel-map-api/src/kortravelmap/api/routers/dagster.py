@@ -345,6 +345,19 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_mcst_culture_monthly_schedule": "30 4 3 * *",
 }
 
+# 즉시 실행(run-now)이 schedule의 run_config를 복제하지 못하는 스케줄(#613). 이들은 동일
+# job을 run_config(dataset_key)로만 구분하므로, 빈 runConfigData로 즉시 실행하면 기본
+# dataset만 적재된다 → 잘못된 dataset을 조용히 적재하지 않도록 run-now를 거부한다.
+# (스케줄 tick으로는 정상 실행. 추후 GraphQL futureTicks runConfig 복제로 대체 가능.)
+_RUN_CONFIG_REQUIRED_SCHEDULES: frozenset[str] = frozenset(
+    {
+        "feature_place_datagokr_seoul_bookstores_monthly_schedule",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
+        "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
+        "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
+    }
+)
+
 _FILE_DOWNLOAD_SCHEDULE_HINTS = {
     "datagokr_filedata",
     "file_data",
@@ -845,6 +858,15 @@ def _validate_cron_schedule(cron_schedule: str) -> str:
     for part, (min_value, max_value) in zip(parts, ranges, strict=True):
         if not _cron_part_is_valid(part, min_value=min_value, max_value=max_value):
             raise ValueError(f"cron 필드 범위가 올바르지 않습니다: {part}")
+    # 운영자 override 최소 주기 가드(#613): 분 필드는 0~59 단일 고정값이어야 한다 →
+    # 시간당 1회 이하로 제한해 월간·대용량 작업을 매분/매5분으로 escalate하는 runaway를 막는다.
+    # (코드 기본 스케줄은 전부 분 고정값이라 영향 없음.)
+    minute_field = parts[0]
+    if not (minute_field.isdigit() and 0 <= int(minute_field) <= 59):
+        raise ValueError(
+            "분 필드는 0~59 단일 값이어야 합니다(시간당 1회 이하). "
+            "'*', '*/N', 범위·목록은 허용하지 않습니다."
+        )
     return cron
 
 
@@ -2119,6 +2141,20 @@ async def run_dagster_schedule_now(
                 schedule_name=schedule_name,
                 command="run",
                 error=" / ".join(errors) if errors else "schedule job 이름이 없습니다.",
+            ),
+            started_at=started_at,
+        )
+    if schedule_name in _RUN_CONFIG_REQUIRED_SCHEDULES:
+        return _schedule_command_response(
+            _command_error_data(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                schedule_name=schedule_name,
+                command="run",
+                error=(
+                    "이 스케줄은 run_config(dataset_key)로 동작해 즉시 실행이 잘못된 "
+                    "dataset을 적재할 수 있어 지원하지 않습니다 — 스케줄 tick으로 실행됩니다."
+                ),
             ),
             started_at=started_at,
         )
