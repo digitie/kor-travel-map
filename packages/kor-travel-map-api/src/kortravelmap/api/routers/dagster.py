@@ -1921,6 +1921,7 @@ async def _mutate_schedule_state(
         )
 
     selector = _schedule_selector(schedule)
+    variables: dict[str, object]
     if command == "start":
         query = _DAGSTER_START_SCHEDULE_MUTATION
         variables = {"selector": selector}
@@ -1931,10 +1932,24 @@ async def _mutate_schedule_state(
         result_key = "resetSchedule"
     else:
         query = _DAGSTER_STOP_SCHEDULE_MUTATION
+        state_id = schedule.state_id
+        origin_id = _schedule_origin_id(state_id)
+        selector_id = schedule.selector_id
+        if not state_id or not origin_id or not selector_id:
+            return _schedule_command_response(
+                _command_error_data(
+                    dagster_urls=dagster_urls,
+                    checked_at=checked_at,
+                    schedule_name=schedule_name,
+                    command=command,
+                    error="스케줄 상태 식별자를 찾을 수 없어 중지할 수 없습니다.",
+                ),
+                started_at=started_at,
+            )
         variables = {
-            "id": schedule.state_id,
-            "originId": _schedule_origin_id(schedule.state_id),
-            "selectorId": schedule.selector_id,
+            "id": state_id,
+            "originId": origin_id,
+            "selectorId": selector_id,
         }
         result_key = "stopRunningSchedule"
 
@@ -1958,24 +1973,26 @@ async def _mutate_schedule_state(
         )
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
-        error = " / ".join(_graphql_error_message(item) for item in graphql_errors)
+        graphql_error = " / ".join(
+            _graphql_error_message(item) for item in graphql_errors
+        )
         return _schedule_command_response(
             _command_error_data(
                 dagster_urls=dagster_urls,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command=command,
-                error=error,
+                error=graphql_error,
             ),
             started_at=started_at,
         )
 
     result = _dict(_dict(payload.get("data")).get(result_key))
-    error = _graphql_result_error(result)
+    result_error = _graphql_result_error(result)
     state = _dict(result.get("scheduleState"))
     return _schedule_command_response(
         DagsterScheduleCommandData(
-            status="ok" if error is None else "error",
+            status="ok" if result_error is None else "error",
             dagster_url=dagster_urls.dagster_url,
             graphql_url=dagster_urls.graphql_url,
             checked_at=checked_at,
@@ -1985,7 +2002,7 @@ async def _mutate_schedule_state(
             default_cron_schedule=schedule.default_cron_schedule,
             override_cron_schedule=schedule.override_cron_schedule,
             schedule_status=_optional_string(state.get("status")) or schedule.status,
-            errors=[] if error is None else [error],
+            errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
     )
@@ -2147,23 +2164,25 @@ async def run_dagster_schedule_now(
         )
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
-        error = " / ".join(_graphql_error_message(item) for item in graphql_errors)
+        graphql_error = " / ".join(
+            _graphql_error_message(item) for item in graphql_errors
+        )
         return _schedule_command_response(
             _command_error_data(
                 dagster_urls=dagster_urls,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command="run",
-                error=error,
+                error=graphql_error,
             ),
             started_at=started_at,
         )
     result = _dict(_dict(payload.get("data")).get("launchRun"))
-    error = _graphql_result_error(result)
+    result_error = _graphql_result_error(result)
     run = _dict(result.get("run"))
     return _schedule_command_response(
         DagsterScheduleCommandData(
-            status="ok" if error is None else "error",
+            status="ok" if result_error is None else "error",
             dagster_url=dagster_urls.dagster_url,
             graphql_url=dagster_urls.graphql_url,
             checked_at=checked_at,
@@ -2175,7 +2194,7 @@ async def run_dagster_schedule_now(
             schedule_status=schedule.status,
             run_id=_optional_string(run.get("runId")),
             run_status=_optional_string(run.get("status")),
-            errors=[] if error is None else [error],
+            errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
     )
