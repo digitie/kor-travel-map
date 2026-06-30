@@ -48,7 +48,7 @@ class _FakeFileClient:
 
 def _install_fake_mois(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     _FakeFileClient.instances = []
-    calls: dict[str, Any] = {}
+    calls: dict[str, Any] = {"sync_calls": []}
 
     def _create_sqlite_schema(engine: Any, **_kwargs: Any) -> bool:
         calls["schema_engine"] = engine
@@ -65,7 +65,7 @@ def _install_fake_mois(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         commit: bool = False,
     ) -> _FakeSyncResult:
         slugs = tuple(service_slugs)
-        calls["sync"] = {
+        call = {
             "session": session,
             "client": client,
             "service_slugs": slugs,
@@ -73,6 +73,8 @@ def _install_fake_mois(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             "batch_size": batch_size,
             "commit": commit,
         }
+        calls["sync"] = call
+        calls["sync_calls"].append(call)
         return _FakeSyncResult(slugs)
 
     module = ModuleType("mois")
@@ -102,16 +104,18 @@ def test_sync_uses_promoted_slugs_commits_and_closes(
     assert isinstance(summary, MoisSourceSyncSummary)
     # 기본 service_slugs는 PROMOTED_SERVICE_SLUGS 전체를 정렬해 쓴다.
     expected_slugs = tuple(sorted(PROMOTED_SERVICE_SLUGS))
-    assert calls["sync"]["service_slugs"] == expected_slugs
+    assert [call["service_slugs"] for call in calls["sync_calls"]] == [
+        (slug,) for slug in expected_slugs
+    ]
     assert summary.service_slugs == expected_slugs
-    # Phase A는 commit=True로 소스 DB에 영속화한다.
-    assert calls["sync"]["commit"] is True
-    assert calls["sync"]["org_code"] is None
-    # provider sync 결과 count가 그대로 복사된다.
-    assert summary.scanned_count == 10
-    assert summary.upserted_count == 8
-    assert summary.open_count == 6
-    assert summary.closed_count == 2
+    # Phase A는 업종별 commit=True로 영속화해 SQLite WAL을 주기적으로 줄인다.
+    assert all(call["commit"] is True for call in calls["sync_calls"])
+    assert all(call["org_code"] is None for call in calls["sync_calls"])
+    # provider sync 결과 count를 업종별로 합산한다.
+    assert summary.scanned_count == 10 * len(expected_slugs)
+    assert summary.upserted_count == 8 * len(expected_slugs)
+    assert summary.open_count == 6 * len(expected_slugs)
+    assert summary.closed_count == 2 * len(expected_slugs)
     assert summary.unknown_status_count == 0
     assert summary.db_path == str(db_file)
     # file client는 finally에서 닫힌다.
@@ -133,10 +137,13 @@ def test_sync_passes_custom_slugs_org_and_batch(
     )
 
     # 명시 slug도 정렬해서 전달한다.
-    assert calls["sync"]["service_slugs"] == ("bars_and_clubs", "restaurants")
+    assert [call["service_slugs"] for call in calls["sync_calls"]] == [
+        ("bars_and_clubs",),
+        ("restaurants",),
+    ]
     assert summary.service_slugs == ("bars_and_clubs", "restaurants")
-    assert calls["sync"]["org_code"] == "6110000"
-    assert calls["sync"]["batch_size"] == 250
+    assert all(call["org_code"] == "6110000" for call in calls["sync_calls"])
+    assert all(call["batch_size"] == 250 for call in calls["sync_calls"])
 
 
 def test_sync_creates_parent_directory(
@@ -163,8 +170,8 @@ def test_op_runs_sync_and_emits_metadata(
     )
     metadata = mois_localdata_source_sync_op(context)
 
-    assert metadata["open_count"] == 6
-    assert metadata["upserted_count"] == 8
+    assert metadata["open_count"] == 6 * len(PROMOTED_SERVICE_SLUGS)
+    assert metadata["upserted_count"] == 8 * len(PROMOTED_SERVICE_SLUGS)
     assert metadata["service_slug_count"] == len(PROMOTED_SERVICE_SLUGS)
     assert metadata["db_path"] == str(db_file)
-    assert calls["sync"]["commit"] is True
+    assert all(call["commit"] is True for call in calls["sync_calls"])
