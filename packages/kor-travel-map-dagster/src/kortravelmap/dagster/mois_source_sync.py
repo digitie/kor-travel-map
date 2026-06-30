@@ -28,7 +28,8 @@ from typing import Any, Final, cast
 
 from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
 from kortravelmap.settings import KorTravelMapSettings
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from dagster import (
@@ -87,6 +88,18 @@ class MoisSourceSyncSummary:
         }
 
 
+def _checkpoint_sqlite_wal(engine: Engine) -> None:
+    """MOIS source SQLite WAL 파일이 컨테이너 임시 공간에 누적되지 않게 줄인다."""
+    if engine.dialect.name != "sqlite":
+        return
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+    except Exception:
+        # provider sync 본 작업의 성공/실패 판단을 checkpoint 실패로 바꾸지는 않는다.
+        return
+
+
 def sync_mois_source_db(
     settings: KorTravelMapSettings,
     *,
@@ -129,38 +142,56 @@ def sync_mois_source_db(
     mois = cast(Any, importlib.import_module("mois"))
 
     engine = create_engine(f"sqlite:///{db_path}")
+    scanned_count = 0
+    upserted_count = 0
+    open_count = 0
+    closed_count = 0
+    unknown_status_count = 0
+    sync_kind = "localdata_full"
+    synced_slugs: list[str] = []
     try:
         mois.create_sqlite_schema(engine)
         client = mois.LocalDataFileClient()
         try:
-            session = Session(engine)
-            try:
-                result = mois.sync_localdata_source_db(
-                    session,
-                    client,
-                    service_slugs=slugs,
-                    org_code=org_code,
-                    batch_size=batch_size,
-                    commit=True,
-                )
-            finally:
-                session.close()
+            for slug in slugs:
+                session = Session(engine)
+                try:
+                    result = mois.sync_localdata_source_db(
+                        session,
+                        client,
+                        service_slugs=(slug,),
+                        org_code=org_code,
+                        batch_size=batch_size,
+                        commit=True,
+                    )
+                finally:
+                    session.close()
+                    _checkpoint_sqlite_wal(engine)
+
+                synced_slugs.extend(str(item) for item in result.service_slugs)
+                sync_kind = str(result.sync_kind)
+                scanned_count += int(result.scanned_count)
+                upserted_count += int(result.upserted_count)
+                open_count += int(result.open_count)
+                closed_count += int(result.closed_count)
+                unknown_status_count += int(result.unknown_status_count)
         finally:
             close = getattr(client, "close", None)
             if callable(close):
                 close()
     finally:
+        _checkpoint_sqlite_wal(engine)
         engine.dispose()
 
     return MoisSourceSyncSummary(
         db_path=str(db_path),
-        service_slugs=tuple(str(slug) for slug in result.service_slugs),
-        sync_kind=str(result.sync_kind),
-        scanned_count=int(result.scanned_count),
-        upserted_count=int(result.upserted_count),
-        open_count=int(result.open_count),
-        closed_count=int(result.closed_count),
-        unknown_status_count=int(result.unknown_status_count),
+        service_slugs=tuple(synced_slugs),
+        sync_kind=sync_kind,
+        scanned_count=scanned_count,
+        upserted_count=upserted_count,
+        open_count=open_count,
+        closed_count=closed_count,
+        unknown_status_count=unknown_status_count,
     )
 
 
