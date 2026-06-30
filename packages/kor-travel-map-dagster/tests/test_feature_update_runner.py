@@ -24,6 +24,7 @@ from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.providers.opinet import OPINET_PROVIDER_NAME, OPINET_STATION_DATASET_KEY
 from kortravelmap.settings import KorTravelMapSettings
 
+from kortravelmap.dagster import feature_update_runner as runner_mod
 from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateAssetRunner,
     FeatureUpdateRunnerSpec,
@@ -195,6 +196,35 @@ def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
             runner._spec_for_scope(  # noqa: SLF001 - default dispatch contract 회귀 테스트
                 _scope(provider=MOIS_PROVIDER_NAME, dataset_key=dataset_key)
             )
+
+
+def test_mois_runner_resources_sync_source_db_before_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    db_path = tmp_path / "mois.db"
+    calls: list[tuple[str, str | None]] = []
+    sentinel = [object()]
+    settings = KorTravelMapSettings.model_construct(mois_source_db_path=str(db_path))
+
+    def _fake_sync(actual_settings: KorTravelMapSettings) -> None:
+        calls.append(("sync", actual_settings.mois_source_db_path))
+
+    def _fake_fetch(actual_settings: KorTravelMapSettings) -> list[object]:
+        calls.append(("fetch", actual_settings.mois_source_db_path))
+        return sentinel
+
+    monkeypatch.setattr(runner_mod, "sync_mois_source_db", _fake_sync)
+    monkeypatch.setattr(runner_mod, "fetch_mois_license_records", _fake_fetch)
+
+    resources = runner_mod._mois_resources(  # noqa: SLF001 - runner resource contract
+        settings,
+        _scope(provider=MOIS_PROVIDER_NAME, dataset_key=DATASET_KEY_BULK),
+    )
+
+    assert resources.values["mois_license_records"] is sentinel
+    assert resources.values["mois_dataset_key"] == DATASET_KEY_BULK
+    assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
 
 
 def test_default_runner_accepts_datagokr_file_data_datasets() -> None:

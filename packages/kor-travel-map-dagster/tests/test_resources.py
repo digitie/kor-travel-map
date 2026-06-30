@@ -237,6 +237,35 @@ def test_datagokr_file_data_records_resource_uses_configured_dataset_key(
     assert calls == ["datagokr_ansan_world_restaurants"]
 
 
+def test_mois_license_records_resource_syncs_source_db_before_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "mois.db"
+    monkeypatch.setenv("KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH", str(db_path))
+    calls: list[tuple[str, str | None]] = []
+    sentinel = [object()]
+
+    def _fake_sync(settings: KorTravelMapSettings) -> None:
+        calls.append(("sync", settings.mois_source_db_path))
+
+    def _fake_fetch(settings: KorTravelMapSettings) -> list[object]:
+        calls.append(("fetch", settings.mois_source_db_path))
+        return sentinel
+
+    monkeypatch.setattr(resources, "sync_mois_source_db", _fake_sync)
+    monkeypatch.setattr(resources, "fetch_mois_license_records", _fake_fetch)
+    resource_def = resources.PROVIDER_RECORD_RESOURCE_DEFINITIONS[
+        "mois_license_records"
+    ]
+    resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
+
+    result = resource_fn(build_init_resource_context())
+
+    assert result is sentinel
+    assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
+
+
 def test_provider_record_resource_env_mapping() -> None:
     specs = {spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS}
 
@@ -255,6 +284,10 @@ def test_provider_record_resource_env_mapping() -> None:
     assert specs["krex_traffic_notices"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
     )
+    assert specs["mois_license_records"].kor_travel_map_env_names == (
+        "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH",
+    )
+    assert specs["mois_license_records"].source_env_names == ()
     assert specs["knps_point_records"].source_env_names == ()
     assert specs["kor_travel_concierge_youtube_features"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL",

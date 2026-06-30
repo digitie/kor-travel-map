@@ -107,7 +107,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `krex_traffic_notices` | `python-krex-api` | `KOR_TRAVEL_MAP_KREX_EX_API_KEY` | `KEX_GO_API_KEY` |
 | `krheritage_items` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krheritage_events` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `mois_license_records` | `python-mois-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `mois_license_records` | `python-mois-api` | `KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH` | 없음 |
 | `knps_point_records` | `python-knps-api` | 없음 | 없음 |
 | `knps_geometry_records` | `python-knps-api` | 없음 | 없음 |
 | `krforest_recreation_forests` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
@@ -132,7 +132,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` |
 | `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` |
 | `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` |
-| `feature_notice_krex_traffic_notices_monthly_schedule` | `feature_notice_krex_traffic_notices_job` | `7 3 1 * *` |
+| `feature_notice_krex_traffic_notices_ten_minute_schedule` | `feature_notice_krex_traffic_notices_job` | `*/10 * * * *` |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` |
 | `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` |

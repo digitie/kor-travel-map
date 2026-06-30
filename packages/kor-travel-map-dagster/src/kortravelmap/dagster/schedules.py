@@ -171,11 +171,11 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     FeatureLoadScheduleSpec(
         asset=feature_notice_krex_traffic_notices,
         job_name="feature_notice_krex_traffic_notices_job",
-        schedule_name="feature_notice_krex_traffic_notices_monthly_schedule",
-        cron_schedule="7 3 1 * *",
+        schedule_name="feature_notice_krex_traffic_notices_ten_minute_schedule",
+        cron_schedule="*/10 * * * *",
         provider="krex",
         dataset_key="krex_traffic_notices",
-        description="고속도로 교통공지 notice Feature 월 1회 적재.",
+        description="고속도로 교통공지 notice Feature 10분마다 적재.",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_krex_rest_areas,

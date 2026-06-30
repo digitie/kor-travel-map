@@ -47,8 +47,10 @@ const EVENT_LEVELS: Array<ImportJobEventLevel | "all"> = [
   "all",
 ];
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+type LogTab = "system" | "api" | "events";
 
 export function LogsClient() {
+  const [activeLogTab, setActiveLogTab] = useState<LogTab>("system");
   const [systemQ, setSystemQ] = useState("");
   const deferredSystemQ = useDeferredValue(systemQ.trim());
   const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">("all");
@@ -323,7 +325,7 @@ export function LogsClient() {
       },
       {
         id: "job",
-        header: "job",
+        header: "작업",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -412,12 +414,15 @@ export function LogsClient() {
               page size {pageSize}
             </Badge>
             <Badge variant={live.state === "live" ? "default" : "outline"}>
-              live {live.state}
+              {live.state === "live" ? "실시간" : live.state}
             </Badge>
           </div>
         </div>
 
-        <Tabs defaultValue="system">
+        <Tabs
+          value={activeLogTab}
+          onValueChange={(value) => setActiveLogTab(value as LogTab)}
+        >
           <TabsList>
             <TabsTrigger value="system">System logs</TabsTrigger>
             <TabsTrigger value="api">API call logs</TabsTrigger>

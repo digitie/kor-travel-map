@@ -82,11 +82,19 @@ function statusVariant(status: string) {
   return "outline" as const;
 }
 
-function formatEpoch(seconds: number | null | undefined) {
-  if (seconds === null || seconds === undefined) {
+function epochToMilliseconds(value: number): number {
+  const absolute = Math.abs(value);
+  if (absolute >= 100_000_000_000_000_000) return value / 1_000_000;
+  if (absolute >= 100_000_000_000_000) return value / 1_000;
+  if (absolute >= 100_000_000_000) return value;
+  return value * 1000;
+}
+
+function formatEpoch(value: number | null | undefined) {
+  if (value === null || value === undefined) {
     return "-";
   }
-  return runTimeFormatter.format(new Date(seconds * 1000));
+  return runTimeFormatter.format(new Date(epochToMilliseconds(value)));
 }
 
 function formatCheckedAt(value: string | undefined) {
@@ -102,7 +110,7 @@ function formatEventTimestamp(value: string | null | undefined) {
   }
   const numeric = Number(value);
   if (Number.isFinite(numeric)) {
-    return formatEpoch(numeric);
+    return runTimeFormatter.format(new Date(epochToMilliseconds(numeric)));
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -504,64 +512,69 @@ function TickRows({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {ticks.map((tick) => (
-        <div
-          className="rounded-md bg-background p-2 text-xs"
-          key={tick.tick_id}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <Badge variant={statusVariant(tick.status)}>
-                {statusLabel(tick.status)}
-              </Badge>
-              <span className="truncate font-mono text-muted-foreground">
-                {tick.tick_id}
+    <details className="rounded-md border bg-background/60">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
+        최근 실행 기록 {ticks.length}건
+      </summary>
+      <div className="flex flex-col gap-2 border-t p-2">
+        {ticks.map((tick) => (
+          <div
+            className="rounded-md bg-background p-2 text-xs"
+            key={tick.tick_id}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge variant={statusVariant(tick.status)}>
+                  {statusLabel(tick.status)}
+                </Badge>
+                <span className="truncate font-mono text-muted-foreground">
+                  {tick.tick_id}
+                </span>
+              </div>
+              <span className="text-muted-foreground">
+                {formatEpoch(tick.timestamp)}
               </span>
             </div>
-            <span className="text-muted-foreground">
-              {formatEpoch(tick.timestamp)}
-            </span>
+            {tick.skip_reason ? (
+              <p className="mt-2 break-words text-muted-foreground">
+                {tick.skip_reason}
+              </p>
+            ) : null}
+            {graphqlErrorText(tick.error) ? (
+              <p className="mt-2 break-words text-destructive">
+                {graphqlErrorText(tick.error)}
+              </p>
+            ) : null}
+            {graphqlErrorStack(tick.error) ? (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-destructive">
+                  stack
+                </summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/10 p-2 text-[11px] text-destructive">
+                  {graphqlErrorStack(tick.error)}
+                </pre>
+              </details>
+            ) : null}
+            {tick.run_ids?.length ? (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {tick.run_ids.map((runId) => (
+                  <Button
+                    className="font-mono"
+                    key={runId}
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => onSelectRun(runId)}
+                  >
+                    {shortRunId(runId)}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
           </div>
-          {tick.skip_reason ? (
-            <p className="mt-2 break-words text-muted-foreground">
-              {tick.skip_reason}
-            </p>
-          ) : null}
-          {graphqlErrorText(tick.error) ? (
-            <p className="mt-2 break-words text-destructive">
-              {graphqlErrorText(tick.error)}
-            </p>
-          ) : null}
-          {graphqlErrorStack(tick.error) ? (
-            <details className="mt-2">
-              <summary className="cursor-pointer text-destructive">
-                stack
-              </summary>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-destructive/10 p-2 text-[11px] text-destructive">
-                {graphqlErrorStack(tick.error)}
-              </pre>
-            </details>
-          ) : null}
-          {tick.run_ids?.length ? (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {tick.run_ids.map((runId) => (
-                <Button
-                  className="font-mono"
-                  key={runId}
-                  size="xs"
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onSelectRun(runId)}
-                >
-                  {shortRunId(runId)}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -747,6 +760,7 @@ function ScheduleControls({
             const isRunning = schedule.status === "RUNNING";
             const providerHref = scheduleProviderHref(schedule.name);
             const defaultSentence = defaultScheduleSentence(schedule);
+            const toggleCommand = isRunning ? "stop" : "start";
             return (
               <div
                 className="grid gap-2 rounded-md border bg-background p-3 lg:grid-cols-[minmax(0,1fr)_auto]"
@@ -821,12 +835,18 @@ function ScheduleControls({
                     disabled={pending}
                     size="sm"
                     type="button"
-                    variant="outline"
+                    variant={isRunning ? "destructive" : "default"}
                     onClick={() =>
-                      runCommand(schedule.name, isRunning ? "stop" : "start")
+                      runCommand(schedule.name, toggleCommand)
                     }
                   >
-                    <PowerIcon data-icon="inline-start" />
+                    {pending ? (
+                      <RefreshCwIcon className="animate-spin" data-icon="inline-start" />
+                    ) : isRunning ? (
+                      <PowerIcon data-icon="inline-start" />
+                    ) : (
+                      <PlayIcon data-icon="inline-start" />
+                    )}
                     {isRunning ? "스케줄 중지" : "스케줄 시작"}
                   </Button>
                   <Button

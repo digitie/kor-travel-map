@@ -117,6 +117,7 @@ from .kma_weather import (
     run_feature_weather_kma_ultra_short_nowcast,
 )
 from .mcst_features import run_feature_place_mcst_culture
+from .mois_source_sync import sync_mois_source_db
 from .provider_fetchers import (
     ProviderCredentialMissing,
     fetch_airkorea_air_quality,
@@ -395,6 +396,7 @@ def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    sync_mois_source_db(settings)
     return RunnerResources(
         {
             "mois_license_records": fetch_mois_license_records(settings),

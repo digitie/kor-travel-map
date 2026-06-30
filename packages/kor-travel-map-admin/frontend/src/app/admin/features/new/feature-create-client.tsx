@@ -43,6 +43,7 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
+import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -1040,12 +1041,13 @@ export function FeatureCreateClient() {
                   updateForm("addressAdmin", event.target.value)
                 }
               />
-              <FormField
+              <AdminRegionAutoSearch
+                id="create-sigungu-code"
+                kind="sigungu"
                 label="시군구 코드"
                 value={form.sigunguCode}
-                onChange={(event) =>
-                  updateForm("sigunguCode", event.target.value)
-                }
+                onChange={(value) => updateForm("sigunguCode", value)}
+                onSelectCandidate={applyCandidate}
               />
               <FormField
                 label="시도 코드"

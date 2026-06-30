@@ -25,7 +25,7 @@
 
 | dataset_key | provider | 갱신 주기 | 이유 |
 |-------------|---------|----------|------|
-| `krex_traffic_notices` | `python-krex-api` | **5분** | 사고/공사/통제 즉시 영향 |
+| `krex_traffic_notices` | `python-krex-api` | **10분** | 사고/공사/통제 즉시 영향 |
 | `kma_weather_alerts` | `python-kma-api` | **10분** | 특보 발효/해제 짧은 시간 변경 |
 | `forest_safety_notices` _(planned/미구현)_ | `python-krforest-api` | **30분** | 산사태/산불/탐방 위험 |
 | `khoa_coastal_notices` _(planned/미구현)_ | `python-khoa-api` | **60분** | 바다 갈라짐/해양 위험 |
@@ -257,7 +257,7 @@ def notice_job_specs() -> list[EtlJobSpec]:
 
 | asset | dataset_key | cron | group |
 |-------|-------------|------|-------|
-| `notice_krex_traffic` | `krex_traffic_notices` | `*/5 * * * *` | `features_notice` |
+| `notice_krex_traffic` | `krex_traffic_notices` | `*/10 * * * *` | `features_notice` |
 | `notice_kma_weather_alerts` | `kma_weather_alerts` | `*/10 * * * *` | `features_notice` |
 | `notice_krforest_safety` _(planned)_ | `forest_safety_notices` | `*/30 * * * *` | `features_notice` |
 | `notice_khoa_coastal` _(planned)_ | `khoa_coastal_notices` | `0 * * * *` | `features_notice` |

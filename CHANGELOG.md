@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### 운영 UI와 MOIS 적재 후속 보강 (2026-06-30)
+
+- **FIXED**: MOIS bulk 적재와 feature update runner가 `mois_localdata_source_sync`를 먼저 실행한
+  뒤 `mois_source_db_path`에서 license record를 읽도록 바꿔, MOIS provider 진행 시
+  `ProviderCredentialMissing`이 service key 누락으로 잘못 보이던 문제를 수정했다.
+- **CHANGED**: 고속도로 교통공지 notice schedule을 10분 주기로 조정했다.
+- **CHANGED**: 중복 검토의 provider/dataset/category 필터와 보강 검토의 provider 필터를 다중
+  combobox로 바꿨다.
+- **ADDED**: 신규 Feature 작성 화면의 시군구 코드 입력에 자동검색 후보 목록을 추가했다.
+- **FIXED**: Dagster 실행 시각 표시가 epoch 단위 차이로 비정상 날짜가 되는 문제를 보정하고,
+  스케줄 실행 기록을 기본 닫힘 collapsible로 표시한다.
+- **CHANGED**: 적재 작업 화면을 한국어 중심으로 정리하고, 작업 진행률/링크/오류/중지 위치와
+  payload 표시를 운영자가 읽기 쉬운 형태로 보강했다.
+- **FIXED**: 운영 로그의 live 상태 배지가 `live live`처럼 중복 표시되지 않게 했다.
+- **FIXED**: Feature 지도 kind 필터의 `초기화`를 명확한 버튼 형태로 표시한다.
+
 ### 작업 자동화와 Feature 변경 검수 분리 (2026-06-30)
 
 - **ADDED**: `/admin/dagster` 작업 자동화 화면에서 운영 스케줄 cron 수정, 기본값 복귀, 시작/중지,

@@ -429,15 +429,17 @@ export function FeaturesClient() {
                 </Button>
               );
             })}
-            <Button
-              disabled={activeFeatureKinds.size === 0}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={clearFeatureKinds}
-            >
-              초기화
-            </Button>
+            {activeFeatureKinds.size > 0 ? (
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={clearFeatureKinds}
+              >
+                <XIcon data-icon="inline-start" />
+                초기화
+              </Button>
+            ) : null}
           </div>
           <NativeSelect
             aria-label="소스 필터"
