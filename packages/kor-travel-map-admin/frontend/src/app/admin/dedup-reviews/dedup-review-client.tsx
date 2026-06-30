@@ -20,6 +20,10 @@ import {
   useDedupReviews,
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
+import {
+  MultiFilterCombobox,
+  uniqueSorted,
+} from "@/components/multi-filter-combobox";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -307,9 +311,9 @@ export function DedupReviewClient() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
   const [kind, setKind] = useState<DedupKindFilter>("all");
-  const [provider, setProvider] = useState("");
-  const [datasetKey, setDatasetKey] = useState("");
-  const [category, setCategory] = useState("");
+  const [providers, setProviders] = useState<string[]>([]);
+  const [datasetKeys, setDatasetKeys] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
@@ -318,18 +322,18 @@ export function DedupReviewClient() {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pageIndex, setPageIndex] = useState(1);
   const deferredQ = useDeferredValue(q.trim());
-  const deferredProvider = useDeferredValue(provider.trim());
-  const deferredDatasetKey = useDeferredValue(datasetKey.trim());
-  const deferredCategory = useDeferredValue(category.trim());
+  const deferredProviders = useDeferredValue(providers);
+  const deferredDatasetKeys = useDeferredValue(datasetKeys);
+  const deferredCategories = useDeferredValue(categories);
   const bounds = scoreBounds(scoreFilter);
   const reviewParams = useMemo(
     () => ({
       status: status === "all" ? undefined : [status],
       kind: kind === "all" ? undefined : [kind],
-      provider: deferredProvider.length > 0 ? [deferredProvider] : undefined,
+      provider: deferredProviders.length > 0 ? deferredProviders : undefined,
       dataset_key:
-        deferredDatasetKey.length > 0 ? [deferredDatasetKey] : undefined,
-      category: deferredCategory.length > 0 ? [deferredCategory] : undefined,
+        deferredDatasetKeys.length > 0 ? deferredDatasetKeys : undefined,
+      category: deferredCategories.length > 0 ? deferredCategories : undefined,
       min_score: bounds.min,
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
@@ -339,9 +343,9 @@ export function DedupReviewClient() {
     [
       bounds.max,
       bounds.min,
-      deferredCategory,
-      deferredDatasetKey,
-      deferredProvider,
+      deferredCategories,
+      deferredDatasetKeys,
+      deferredProviders,
       deferredQ,
       kind,
       pageIndex,
@@ -352,7 +356,43 @@ export function DedupReviewClient() {
   const reviews = useDedupReviews(reviewParams);
   const detail = useDedupReviewDetail(detailReviewId);
   const decision = useDedupDecisionMutation();
-  const items = reviews.data?.data.items ?? [];
+  const items = useMemo(
+    () => reviews.data?.data.items ?? [],
+    [reviews.data?.data.items],
+  );
+  const providerOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...providers,
+        ...items.flatMap((item) => [
+          item.feature_a.provider ?? "",
+          item.feature_b.provider ?? "",
+        ]),
+      ]),
+    [items, providers],
+  );
+  const datasetOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...datasetKeys,
+        ...items.flatMap((item) => [
+          item.feature_a.dataset_key ?? "",
+          item.feature_b.dataset_key ?? "",
+        ]),
+      ]),
+    [datasetKeys, items],
+  );
+  const categoryOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...categories,
+        ...items.flatMap((item) => [
+          item.feature_a.category,
+          item.feature_b.category,
+        ]),
+      ]),
+    [categories, items],
+  );
   const totalItems = reviews.data?.meta.page?.total ?? null;
   const totalPages =
     typeof totalItems === "number"
@@ -744,30 +784,33 @@ export function DedupReviewClient() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Input
-              aria-label="dedup provider"
+            <MultiFilterCombobox
+              ariaLabel="dedup provider"
+              options={providerOptions}
               placeholder="provider"
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
+              values={providers}
+              onChange={(values) => {
+                setProviders(values);
                 resetPage();
               }}
             />
-            <Input
-              aria-label="dedup dataset"
+            <MultiFilterCombobox
+              ariaLabel="dedup dataset"
+              options={datasetOptions}
               placeholder="dataset"
-              value={datasetKey}
-              onChange={(event) => {
-                setDatasetKey(event.target.value);
+              values={datasetKeys}
+              onChange={(values) => {
+                setDatasetKeys(values);
                 resetPage();
               }}
             />
-            <Input
-              aria-label="dedup category"
+            <MultiFilterCombobox
+              ariaLabel="dedup category"
+              options={categoryOptions}
               placeholder="category"
-              value={category}
-              onChange={(event) => {
-                setCategory(event.target.value);
+              values={categories}
+              onChange={(values) => {
+                setCategories(values);
                 resetPage();
               }}
             />

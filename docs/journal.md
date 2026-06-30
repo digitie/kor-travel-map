@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-30 (codex) — 세션 개선 요청 후속 재반영
+
+PR #615를 문서 복기 PR로 정리해 병합한 뒤, 병합된 `main`에 세션 중 요청됐던 UI/Dagster 개선이
+남아 있는지 다시 대조하고 누락분을 후속 브랜치에서 보강했다.
+
+- **MOIS/Dagster**: `mois_license_records` resource와 feature update runner가
+  `mois_localdata_source_sync`를 먼저 실행한 뒤 source DB에서 bulk record를 읽도록 연결했다.
+  Dagster/Dagster daemon compose env와 volume에 `KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH`를 추가했다.
+- **스케줄**: 고속도로 교통공지 notice schedule을 월간에서 10분 주기로 바꾸고 회귀 테스트를 추가했다.
+- **작업 자동화 UI**: Dagster 실행 시각 epoch 단위 보정, 스케줄 tick collapsible 기본 닫힘,
+  시작/중지 버튼 spinner·색상·아이콘을 보강했다.
+- **운영 UI**: 중복 검토 provider/dataset/category와 보강 검토 provider를 다중 combobox로 바꿨고,
+  신규 Feature 작성의 시군구 코드 입력은 자동검색 후보를 필드 하단에 표시한다.
+- **적재/로그/지도**: 적재 작업 목록·상세는 한국어 중심, 진행률/작업 링크/상단 오류/중지 위치/payload
+  시각화를 보강했다. 운영 로그의 `live live` 중복 표시는 `실시간`으로 정리했고, Feature 지도
+  kind 필터 초기화는 outline 버튼으로 표시한다.
+- **검증**: Dagster 대상 pytest 37 passed, Dagster ruff, compose config, frontend type-check,
+  frontend lint(기존 경고 4건), frontend unit 45 passed, Dagster mypy 19 source, import-linter
+  4 contracts kept를 확인했다.
+
 ## 2026-06-30 (codex) — PR #615 보존 브랜치 정리와 n150 UI 복기
 
 n150 UI가 이전 화면처럼 보인다는 보고를 받은 뒤, 배포 image 시각 해석과 git worktree metadata

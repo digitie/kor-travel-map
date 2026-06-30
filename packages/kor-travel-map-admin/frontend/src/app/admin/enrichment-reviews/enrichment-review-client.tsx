@@ -20,6 +20,10 @@ import {
   useEnrichmentReviews,
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
+import {
+  MultiFilterCombobox,
+  uniqueSorted,
+} from "@/components/multi-filter-combobox";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -375,7 +379,7 @@ function EnrichmentDetailDialog({
 
 export function EnrichmentReviewClient() {
   const [q, setQ] = useState("");
-  const [provider, setProvider] = useState("");
+  const [providers, setProviders] = useState<string[]>([]);
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
   const [status, setStatus] = useState<EnrichmentStatus | "all">("pending");
   const [pageSize, setPageSize] =
@@ -385,12 +389,12 @@ export function EnrichmentReviewClient() {
   const [selectedDetailSource, setSelectedDetailSource] =
     useState<EnrichmentDetailSource | null>(null);
   const deferredQ = useDeferredValue(q.trim());
-  const deferredProvider = useDeferredValue(provider.trim());
+  const deferredProviders = useDeferredValue(providers);
   const bounds = scoreBounds(scoreFilter);
   const reviewParams = useMemo(
     () => ({
       status: status === "all" ? undefined : [status],
-      provider: deferredProvider.length > 0 ? [deferredProvider] : undefined,
+      provider: deferredProviders.length > 0 ? deferredProviders : undefined,
       min_score: bounds.min,
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
@@ -400,7 +404,7 @@ export function EnrichmentReviewClient() {
     [
       bounds.max,
       bounds.min,
-      deferredProvider,
+      deferredProviders,
       deferredQ,
       pageIndex,
       pageSize,
@@ -411,7 +415,18 @@ export function EnrichmentReviewClient() {
   const detail = useEnrichmentReviewDetail(detailReviewId);
   const decision = useEnrichmentDecisionMutation();
 
-  const items = reviews.data?.data.items ?? [];
+  const items = useMemo(
+    () => reviews.data?.data.items ?? [],
+    [reviews.data?.data.items],
+  );
+  const providerOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...providers,
+        ...items.map((item) => item.source_provider),
+      ]),
+    [items, providers],
+  );
   const totalItems = reviews.data?.meta.page?.total ?? null;
   const totalPages =
     typeof totalItems === "number"
@@ -770,12 +785,13 @@ export function EnrichmentReviewClient() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Input
-              aria-label="enrichment provider"
+            <MultiFilterCombobox
+              ariaLabel="enrichment provider"
+              options={providerOptions}
               placeholder="소스 provider"
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
+              values={providers}
+              onChange={(values) => {
+                setProviders(values);
                 resetPage();
               }}
             />

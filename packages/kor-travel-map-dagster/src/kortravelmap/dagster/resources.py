@@ -28,6 +28,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
+from .mois_source_sync import sync_mois_source_db
 from .provider_fetchers import (
     fetch_airkorea_air_quality,
     fetch_airkorea_stations,
@@ -179,8 +180,7 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="mois_license_records",
         provider_package="python-mois-api",
         dataset_key="mois_license_features_bulk",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        setting_names=("mois_source_db_path",),
         note="MOIS는 LOCALDATA file download/source DB refresh 후 PlaceRecord stream이 필요하다.",
     ),
     ProviderRecordResourceSpec(
@@ -581,19 +581,20 @@ _MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
     if spec.resource_key == "mois_license_records"
 )
-"""MOIS 인허가 spec 참조 (live resource override용).
+"""MOIS 인허가 spec 참조 (live resource override용)."""
 
-NOTE: spec의 ``setting_names``는 Phase A download용 ``data_go_kr_service_key``를
-가리키며, live builder의 guard 활성 판정도 이 값을 본다. Phase B fetcher가 실제로
-필요로 하는 것은 ``mois_source_db_path``(소스 DB 경로)이며, fetcher 내부에서 이를
-검증해 부재 시 ``ProviderCredentialMissing``으로 실패한다. ``setting_names``는 guard
-메시지/env 매핑 보존을 위해 그대로 둔다(변경하지 않음).
-"""
+
+def _sync_then_fetch_mois_license_records(
+    settings: KorTravelMapSettings,
+) -> Iterable[Any]:
+    """MOIS Phase A source DB sync를 먼저 실행한 뒤 Phase B record를 읽는다."""
+    sync_mois_source_db(settings)
+    return fetch_mois_license_records(settings)
 
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = (
     build_provider_record_live_resource(
         _MOIS_LICENSE_RECORDS_SPEC,
-        fetch_mois_license_records,
+        _sync_then_fetch_mois_license_records,
     )
 )
 

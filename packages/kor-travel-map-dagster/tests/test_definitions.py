@@ -200,6 +200,19 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert schedule.tags["kor_travel_map.dataset_key"] == spec.dataset_key
 
 
+def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
+    schedule = defs.resolve_schedule_def(
+        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+    )
+
+    assert schedule.cron_schedule == "*/10 * * * *"
+    assert schedule.execution_timezone == KST_TIMEZONE
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    assert schedule.job_name == "feature_notice_krex_traffic_notices_job"
+    assert schedule.tags["kor_travel_map.provider"] == "krex"
+    assert schedule.tags["kor_travel_map.dataset_key"] == "krex_traffic_notices"
+
+
 def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:
     specs = {
         spec.dataset_key: spec

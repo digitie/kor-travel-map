@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-30 (codex) — 세션 개선 요청 후속 반영
+
+- **완료**: PR #615는 문서 복기 PR로 재구성한 뒤 merge commit
+  `ecf638701761441b94846350864711ef43f78c69`로 병합됐다.
+- **진행 중**: 병합된 `main` 기준 후속 브랜치 `fix/session-improvement-followups`에서 세션 중 요청됐던
+  MOIS/Dagster/UI 개선 누락분을 다시 반영했다.
+- **완료**: MOIS bulk/resource/feature update runner가 `mois_localdata_source_sync`를 먼저 실행하도록
+  연결했고, 고속도로 교통공지 notice schedule은 10분 주기로 바꿨다.
+- **완료**: 중복/보강 검토 다중 combobox 필터, 신규 Feature 시군구 자동검색, Dagster 실행 기록
+  collapsible/시각 보정/시작·중지 spinner, 적재 작업 한국어화·payload 시각화, 로그 `live live` 중복
+  제거, Feature 지도 초기화 버튼을 보강했다.
+- **검증**: Dagster 대상 pytest 37 passed, ruff, compose config, frontend type-check, frontend
+  lint(기존 경고 4건), frontend unit 45 passed, Dagster mypy 19 source, import-linter 4 contracts kept.
+- **다음 한 작업**: 보안 스캔 후 후속 PR을 올리고 CI green을 확인한다. 머지 뒤 n150 반영과 live UI e2e를
+  진행한다.
+
 ## 2026-06-30 (codex) — PR #615 보존 브랜치 정리와 복기 문서화
 
 - **완료**: n150 UI image inspect 시각은 UTC임을 runbook에 명시했다. 예:

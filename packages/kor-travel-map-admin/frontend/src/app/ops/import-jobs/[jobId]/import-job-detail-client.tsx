@@ -8,7 +8,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
 import {
   type ImportJobEventLevel,
@@ -21,7 +21,7 @@ import {
 import { DAGSTER_UI_URL } from "@/api/dagster";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,8 +51,138 @@ const eventLevels: Array<ImportJobEventLevel | "all"> = [
   "critical",
 ];
 
-function jsonBlock(value: unknown) {
-  return JSON.stringify(value ?? {}, null, 2);
+const eventLevelLabels: Record<ImportJobEventLevel | "all", string> = {
+  all: "전체",
+  debug: "debug",
+  info: "info",
+  warning: "warning",
+  error: "error",
+  critical: "critical",
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function payloadLabel(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (Array.isArray(value)) {
+    return `${value.length}개 항목`;
+  }
+  if (isRecord(value)) {
+    return `${Object.keys(value).length}개 필드`;
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  return String(value);
+}
+
+function PayloadValue({
+  depth = 0,
+  value,
+}: {
+  depth?: number;
+  value: unknown;
+}): ReactNode {
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-muted-foreground">없음</span>;
+    }
+    return (
+      <div className="flex flex-wrap gap-1">
+        {value.slice(0, 6).map((item, index) => (
+          <Badge key={index} variant="outline">
+            {payloadLabel(item)}
+          </Badge>
+        ))}
+        {value.length > 6 ? (
+          <Badge variant="outline">+{value.length - 6}</Badge>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (isRecord(value)) {
+    if (depth >= 2) {
+      return <span>{payloadLabel(value)}</span>;
+    }
+    return <PayloadFields depth={depth + 1} value={value} />;
+  }
+
+  return (
+    <span className={cn("break-words", value == null && "text-muted-foreground")}>
+      {payloadLabel(value)}
+    </span>
+  );
+}
+
+function PayloadFields({
+  compact = false,
+  depth = 0,
+  value,
+}: {
+  compact?: boolean;
+  depth?: number;
+  value: Record<string, unknown>;
+}) {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return <span className="text-sm text-muted-foreground">값이 없습니다.</span>;
+  }
+  return (
+    <dl
+      className={cn(
+        "grid gap-2",
+        compact ? "min-w-72 text-xs" : "md:grid-cols-2",
+      )}
+    >
+      {entries.map(([key, entryValue]) => (
+        <div
+          className={cn(
+            "rounded-md border bg-background p-2",
+            compact && "border-surface-muted",
+          )}
+          key={key}
+        >
+          <dt className="mb-1 truncate font-mono text-xs text-muted-foreground">
+            {key}
+          </dt>
+          <dd className="text-sm">
+            <PayloadValue depth={depth} value={entryValue} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function PayloadSummary({ value }: { value: unknown }) {
+  if (isRecord(value)) {
+    return <PayloadFields compact value={value} />;
+  }
+  return (
+    <div className="min-w-56 rounded-md border bg-background p-2 text-sm">
+      <PayloadValue value={value} />
+    </div>
+  );
+}
+
+function JobProgress({ value }: { value: number }) {
+  const progress = Math.min(100, Math.max(0, value));
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-2 min-w-40 flex-1 overflow-hidden rounded-full bg-surface-muted">
+        <div
+          className="h-full rounded-full bg-brand"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <span className="w-12 text-right font-mono text-sm">{progress}%</span>
+    </div>
+  );
 }
 
 function pathTail(path: string) {
@@ -152,20 +282,72 @@ function JobSummary({ job }: { job: OpsImportJobRecord }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Job</CardTitle>
-        <CardDescription>{job.kind}</CardDescription>
+        <CardTitle>작업</CardTitle>
+        <CardDescription>
+          <span className="font-mono">{shortId(job.job_id, 18)}</span>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={job.status} />
+          <Badge variant="outline">{job.kind}</Badge>
+          <Badge variant="outline">{job.current_stage ?? "단계 없음"}</Badge>
+        </div>
+        <JobProgress value={job.progress} />
+        <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <FieldRow label="작업 ID" value={job.job_id} />
+          <FieldRow label="배치 ID" value={job.load_batch_id} />
+          <FieldRow label="상위 작업 ID" value={job.parent_job_id} />
+          <FieldRow label="소스 체크섬" value={job.source_checksum} />
+          <FieldRow label="생성" value={formatDateTime(job.created_at)} />
+          <FieldRow label="시작" value={formatDateTime(job.started_at)} />
+          <FieldRow label="heartbeat" value={formatDateTime(job.heartbeat_at)} />
+          <FieldRow label="완료" value={formatDateTime(job.finished_at)} />
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CancelCard({
+  canCancel,
+  cancelReason,
+  isPending,
+  onReasonChange,
+  onSubmit,
+}: {
+  canCancel: boolean;
+  cancelReason: string;
+  isPending: boolean;
+  onReasonChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>중지</CardTitle>
+        <CardDescription>
+          {canCancel ? "대기/실행 중 작업에 중지 요청을 보냅니다." : "이미 종료된 작업입니다."}
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <FieldRow label="job_id" value={job.job_id} />
-          <FieldRow label="load_batch_id" value={job.load_batch_id} />
-          <FieldRow label="parent_job_id" value={job.parent_job_id} />
-          <FieldRow label="source_checksum" value={job.source_checksum} />
-          <FieldRow label="created_at" value={formatDateTime(job.created_at)} />
-          <FieldRow label="started_at" value={formatDateTime(job.started_at)} />
-          <FieldRow label="heartbeat_at" value={formatDateTime(job.heartbeat_at)} />
-          <FieldRow label="finished_at" value={formatDateTime(job.finished_at)} />
-        </dl>
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={onSubmit}>
+          <Input
+            disabled={!canCancel || isPending}
+            placeholder="중지 사유"
+            value={cancelReason}
+            onChange={(event) => onReasonChange(event.target.value)}
+          />
+          <Button
+            className="sm:w-fit"
+            disabled={!canCancel || isPending}
+            type="submit"
+            variant="destructive"
+          >
+            <BanIcon data-icon="inline-start" />
+            중지 요청
+          </Button>
+        </form>
       </CardContent>
     </Card>
   );
@@ -200,7 +382,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
     () => [
       {
         accessorKey: "occurred_at",
-        header: "time",
+        header: "시각",
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.occurred_at)}
@@ -209,24 +391,24 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
       },
       {
         accessorKey: "level",
-        header: "level",
+        header: "레벨",
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
       {
         accessorKey: "stage",
-        header: "stage",
+        header: "단계",
         cell: ({ row }) => <>{row.original.stage ?? "-"}</>,
       },
       {
         accessorKey: "code",
-        header: "code",
+        header: "코드",
         cell: ({ row }) => (
           <span className="font-mono text-xs">{row.original.code ?? "-"}</span>
         ),
       },
       {
         accessorKey: "message",
-        header: "message",
+        header: "메시지",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="min-w-80">{row.original.message}</span>
@@ -234,13 +416,9 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
       },
       {
         id: "payload",
-        header: "payload",
+        header: "세부값",
         enableSorting: false,
-        cell: ({ row }) => (
-          <pre className="max-h-28 min-w-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">
-            {jsonBlock(row.original.payload)}
-          </pre>
-        ),
+        cell: ({ row }) => <PayloadSummary value={row.original.payload} />,
       },
     ],
     [],
@@ -276,7 +454,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
             목록
           </Link>
           <Badge variant={live.state === "live" ? "default" : "outline"}>
-            {live.state}
+            {live.state === "live" ? "실시간" : live.state}
           </Badge>
           <Button
             disabled={job.isFetching || events.isFetching}
@@ -293,60 +471,67 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
         </>
       }
       description={jobData ? `${jobData.kind} · ${shortId(jobData.job_id, 18)}` : jobId}
-      section="Ops"
-      title="Import job"
+      section="운영"
+      title="적재 작업 상세"
     >
       <div className="flex flex-col gap-4">
         {job.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>import job 조회 실패</AlertTitle>
+            <AlertTitle>적재 작업 조회 실패</AlertTitle>
             <AlertDescription>{job.error.message}</AlertDescription>
           </Alert>
         ) : null}
         {events.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>event 조회 실패</AlertTitle>
+            <AlertTitle>이벤트 조회 실패</AlertTitle>
             <AlertDescription>{events.error.message}</AlertDescription>
           </Alert>
         ) : null}
         {cancelJob.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>cancel 실패</AlertTitle>
+            <AlertTitle>중지 실패</AlertTitle>
             <AlertDescription>{cancelJob.error.message}</AlertDescription>
           </Alert>
         ) : null}
         {cancelJob.isSuccess ? (
           <Alert>
-            <AlertTitle>cancel 요청됨</AlertTitle>
+            <AlertTitle>중지 요청됨</AlertTitle>
             <AlertDescription>
-              {statusLabel(cancelJob.data.data.status)} · {shortId(cancelJob.data.data.job_id)}
+              {cancelJob.data.data.status} · {shortId(cancelJob.data.data.job_id)}
             </AlertDescription>
+          </Alert>
+        ) : null}
+        {jobData?.error_message ? (
+          <Alert variant="destructive">
+            <AlertTitle>작업 오류</AlertTitle>
+            <AlertDescription>{jobData.error_message}</AlertDescription>
           </Alert>
         ) : null}
 
         {job.isLoading ? <Skeleton className="h-96" /> : null}
         {jobData ? (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={jobData.status} />
-              <Badge variant="outline">{jobData.progress}%</Badge>
-              <Badge variant="outline">{jobData.current_stage ?? "stage 없음"}</Badge>
-            </div>
-
             <JobSummary job={jobData} />
+            <CancelCard
+              canCancel={canCancel}
+              cancelReason={cancelReason}
+              isPending={cancelJob.isPending}
+              onReasonChange={setCancelReason}
+              onSubmit={handleCancel}
+            />
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
               <Card>
                 <CardHeader>
-                  <CardTitle>Events</CardTitle>
+                  <CardTitle>이벤트</CardTitle>
                   <CardDescription>
-                    {eventItems.length} rows · {events.isFetching ? "syncing" : "idle"}
+                    {eventItems.length}건 · {events.isFetching ? "동기화 중" : "대기"}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <NativeSelect
-                      aria-label="event level"
+                      aria-label="이벤트 레벨"
                       value={level}
                       onChange={(event) =>
                         setLevel(event.target.value as ImportJobEventLevel | "all")
@@ -354,7 +539,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                     >
                       {eventLevels.map((item) => (
                         <NativeSelectOption key={item} value={item}>
-                          {item}
+                          {eventLevelLabels[item]}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
@@ -365,7 +550,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                       onClick={() => void events.refetch()}
                     >
                       <RefreshCwIcon data-icon="inline-start" />
-                      event
+                      이벤트 새로고침
                     </Button>
                   </div>
                   <DataTable
@@ -373,7 +558,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                     data={eventItems}
                     getRowId={(row) => row.event_id}
                     isLoading={events.isLoading}
-                    emptyMessage="event가 없습니다."
+                    emptyMessage="이벤트가 없습니다."
                     manualSorting={false}
                     containerClassName="overflow-auto rounded-lg border"
                   />
@@ -383,35 +568,8 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
               <div className="flex flex-col gap-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Cancel</CardTitle>
-                    <CardDescription>
-                      {canCancel ? "queued/running" : "terminal"}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form className="flex flex-col gap-2" onSubmit={handleCancel}>
-                      <Input
-                        disabled={!canCancel || cancelJob.isPending}
-                        placeholder="reason"
-                        value={cancelReason}
-                        onChange={(event) => setCancelReason(event.target.value)}
-                      />
-                      <Button
-                        disabled={!canCancel || cancelJob.isPending}
-                        type="submit"
-                        variant="destructive"
-                      >
-                        <BanIcon data-icon="inline-start" />
-                        cancel
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Links</CardTitle>
-                    <CardDescription>{visibleLinks.length} related</CardDescription>
+                    <CardTitle>연결</CardTitle>
+                    <CardDescription>{visibleLinks.length}개</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-2">
                     {visibleLinks.map((link) => (
@@ -419,7 +577,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                     ))}
                     {visibleLinks.length === 0 ? (
                       <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                        연결 링크가 없습니다.
+                        연결 링크 없음
                       </div>
                     ) : null}
                   </CardContent>
@@ -429,19 +587,15 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
 
             <Card>
               <CardHeader>
-                <CardTitle>Payload</CardTitle>
+                <CardTitle>요청값</CardTitle>
                 <CardDescription>{jobData.status_url}</CardDescription>
               </CardHeader>
               <CardContent>
-                <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-3 font-mono text-xs">
-                  {jsonBlock(jobData.payload)}
-                </pre>
-                {jobData.error_message ? (
-                  <Alert className="mt-3" variant="destructive">
-                    <AlertTitle>error</AlertTitle>
-                    <AlertDescription>{jobData.error_message}</AlertDescription>
-                  </Alert>
-                ) : null}
+                {isRecord(jobData.payload) ? (
+                  <PayloadFields value={jobData.payload} />
+                ) : (
+                  <PayloadValue value={jobData.payload} />
+                )}
               </CardContent>
             </Card>
           </>

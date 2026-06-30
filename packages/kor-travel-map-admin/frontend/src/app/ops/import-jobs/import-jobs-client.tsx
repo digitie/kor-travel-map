@@ -1,14 +1,18 @@
 "use client";
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { RefreshCwIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  RefreshCwIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +31,15 @@ const statuses: Array<ImportJobStatus | "all"> = [
   "cancelled",
 ];
 
+const statusLabels: Record<ImportJobStatus | "all", string> = {
+  all: "전체",
+  queued: "대기",
+  running: "실행 중",
+  done: "완료",
+  failed: "실패",
+  cancelled: "취소됨",
+};
+
 type ImportJobsInitialFilters = {
   status?: string;
   kind?: string;
@@ -35,6 +48,58 @@ type ImportJobsInitialFilters = {
 };
 
 const emptyInitialFilters: ImportJobsInitialFilters = {};
+
+function JobLink({ jobId }: { jobId: string }) {
+  return (
+    <Link
+      className="inline-flex max-w-56 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs shadow-sm transition-colors hover:bg-surface-subtle"
+      href={`/ops/import-jobs/${encodeURIComponent(jobId)}`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <span className="font-mono font-semibold">{shortId(jobId)}</span>
+      <ArrowRightIcon className="size-3 text-muted-foreground" />
+    </Link>
+  );
+}
+
+function JobProgress({ value }: { value: number }) {
+  const progress = Math.min(100, Math.max(0, value));
+  return (
+    <div className="flex min-w-28 items-center gap-2">
+      <div className="h-2 w-24 overflow-hidden rounded-full bg-surface-muted">
+        <div
+          className="h-full rounded-full bg-brand"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <span className="w-10 text-right font-mono text-xs">{progress}%</span>
+    </div>
+  );
+}
+
+function MoisLocaldataNotice() {
+  return (
+    <Alert>
+      <WorkflowIcon data-icon="inline-start" />
+      <AlertTitle>MOIS 소스 동기화</AlertTitle>
+      <AlertDescription>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <span>
+            <span className="font-mono">mois_localdata_source_sync</span>는
+            MOIS bulk 적재 전에 먼저 실행되는 Dagster 선행 작업입니다.
+          </span>
+          <Link
+            className="inline-flex w-fit items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-surface-subtle"
+            href="/admin/dagster"
+          >
+            작업 자동화 열기
+            <ArrowRightIcon className="size-4" />
+          </Link>
+        </div>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 export function ImportJobsClient({
   initialFilters = emptyInitialFilters,
@@ -76,15 +141,15 @@ export function ImportJobsClient({
         id: "job",
         header: "작업",
         enableSorting: false,
+        cell: ({ row }) => <JobLink jobId={row.original.job_id} />,
+      },
+      {
+        id: "error",
+        header: "오류",
+        enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            <Link
-              className="text-primary underline-offset-4 hover:underline"
-              href={`/ops/import-jobs/${encodeURIComponent(row.original.job_id)}`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              {shortId(row.original.job_id)}
-            </Link>
+          <span className="block max-w-80 truncate text-destructive">
+            {row.original.error_message ?? ""}
           </span>
         ),
       },
@@ -102,7 +167,7 @@ export function ImportJobsClient({
       },
       {
         id: "parent",
-        header: "상위",
+        header: "상위 작업",
         enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
@@ -120,10 +185,8 @@ export function ImportJobsClient({
       },
       {
         accessorKey: "progress",
-        header: "진행률",
-        cell: ({ row }) => (
-          <span className="font-mono">{row.original.progress}%</span>
-        ),
+        header: "진행",
+        cell: ({ row }) => <JobProgress value={row.original.progress} />,
       },
       {
         id: "stage",
@@ -149,16 +212,6 @@ export function ImportJobsClient({
           </span>
         ),
       },
-      {
-        id: "error",
-        header: "오류",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="block max-w-80 truncate text-destructive">
-            {row.original.error_message ?? ""}
-          </span>
-        ),
-      },
     ],
     [],
   );
@@ -168,7 +221,7 @@ export function ImportJobsClient({
       actions={
         <>
           <Badge variant={live.state === "live" ? "default" : "outline"}>
-            {live.state}
+            {live.state === "live" ? "실시간" : live.state}
           </Badge>
           <Button
             disabled={jobs.isFetching}
@@ -181,21 +234,23 @@ export function ImportJobsClient({
           </Button>
         </>
       }
-      description="임포트 작업(ops.import_jobs)의 진행 상태와 배치/상위 연결을 확인합니다."
+      description="적재 작업의 진행 상태와 배치/상위 작업 연결을 확인합니다."
       section="운영"
-      title="임포트 작업"
+      title="적재 작업"
     >
       <div className="flex flex-col gap-4">
         {jobs.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>임포트 작업 조회 실패</AlertTitle>
+            <AlertTitle>적재 작업 조회 실패</AlertTitle>
             <AlertDescription>{jobs.error.message}</AlertDescription>
           </Alert>
         ) : null}
 
+        <MoisLocaldataNotice />
+
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect
-            aria-label="상태 필터"
+            aria-label="상태"
             value={status}
             onChange={(event) =>
               setStatus(event.target.value as ImportJobStatus | "all")
@@ -203,25 +258,25 @@ export function ImportJobsClient({
           >
             {statuses.map((item) => (
               <NativeSelectOption key={item} value={item}>
-                {item === "all" ? "전체" : statusLabel(item)}
+                {statusLabels[item]}
               </NativeSelectOption>
             ))}
           </NativeSelect>
           <Input
             className="max-w-72"
-            placeholder="종류(kind) 필터"
+            placeholder="작업 종류"
             value={kind}
             onChange={(event) => setKind(event.target.value)}
           />
           <Input
             className="max-w-80"
-            placeholder="배치 ID(load_batch_id) 필터"
+            placeholder="배치 ID"
             value={loadBatchId}
             onChange={(event) => setLoadBatchId(event.target.value)}
           />
           <Input
             className="max-w-80"
-            placeholder="상위 작업 ID(parent_job_id) 필터"
+            placeholder="상위 작업 ID"
             value={parentJobId}
             onChange={(event) => setParentJobId(event.target.value)}
           />
@@ -232,7 +287,7 @@ export function ImportJobsClient({
           data={items}
           getRowId={(row) => row.job_id}
           isLoading={jobs.isLoading}
-          emptyMessage="임포트 작업이 없습니다."
+          emptyMessage="적재 작업이 없습니다."
           manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
         />

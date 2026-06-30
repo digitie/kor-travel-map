@@ -125,6 +125,7 @@ services:
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
       KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
       KOR_TRAVEL_MAP_OPINET_API_KEY: ${KOR_TRAVEL_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
       KOR_TRAVEL_MAP_KREX_EX_API_KEY: ${KOR_TRAVEL_MAP_KREX_EX_API_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
       KOR_TRAVEL_MAP_KREX_GO_API_KEY: ${KOR_TRAVEL_MAP_KREX_GO_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}}
@@ -246,6 +247,8 @@ services:
         condition: service_completed_successfully
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
+    volumes:
+      - kor-travel-map-mois-source:/app/data/mois
     healthcheck:
       test:
         [
@@ -283,6 +286,7 @@ services:
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
       KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
       KOR_TRAVEL_MAP_OPINET_API_KEY: ${KOR_TRAVEL_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
       KOR_TRAVEL_MAP_KREX_EX_API_KEY: ${KOR_TRAVEL_MAP_KREX_EX_API_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
       KOR_TRAVEL_MAP_KREX_GO_API_KEY: ${KOR_TRAVEL_MAP_KREX_GO_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}}
@@ -296,10 +300,14 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+    volumes:
+      - kor-travel-map-mois-source:/app/data/mois
     command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
 
 volumes:
   kor-travel-map-postgres:
+  kor-travel-map-mois-source:
+    name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
     name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}
 
