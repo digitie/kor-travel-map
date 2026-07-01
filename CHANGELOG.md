@@ -11,7 +11,8 @@
 - **FIXED**: Feature 지도에서 숫자 클러스터 마커가 더 이상 의미 있게 확대되지 않으면 겹친 feature 선택
   메뉴를 열도록 수정했다.
 - **FIXED**: OpiNet `low_top_area` 유가 적재가 시군구를 서울부터 순차로 소비하다 호출 상한에 걸리지
-  않도록 시도별 round-robin 순회로 바꿨다. Docker compose에도 OpiNet scope env 매핑을 명시했다.
+  않도록 시도별 round-robin 순회로 바꿨다. OpiNet root area 응답에 라이브러리가 자식 조회를 허용하지
+  않는 시도 코드가 섞여도 건너뛰도록 보강했다. Docker compose에도 OpiNet scope env 매핑을 명시했다.
 
 ### 운영 UI와 MOIS 적재 후속 보강 (2026-06-30)
 

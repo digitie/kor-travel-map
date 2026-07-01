@@ -2,8 +2,8 @@
 
 ## 2026-07-01 (codex) — route/Feature 지도/OpiNet 유가 회귀 수정
 
-- **진행 중**: 후속 브랜치 `fix/route-marker-price-regressions`에서 route 적재 비매칭 제외, Feature 지도
-  숫자 클러스터 선택 메뉴, OpiNet price 전국 분포 회귀를 수정했다.
+- **완료**: PR #619(`fix/route-marker-price-regressions`)는 CI green 후 main에 머지했고, n150에
+  API/UI/Dagster/Dagster daemon을 재빌드·재시작했다.
 - **완료(코드)**: KNPS `knps_trails`는 `비매칭코스` 정확 일치뿐 아니라 변형 표기와 매칭 실패 상태값도
   제외한다. Feature 지도 숫자 클러스터는 더 이상 확대되지 않으면 기존 겹침 선택 팝업을 연다.
   OpiNet `low_top_area`는 시도별 시군구 round-robin으로 호출 상한 전 전국 표본을 먼저 확보한다.
@@ -12,8 +12,11 @@
 - **검증**: KNPS provider 53 passed, Dagster provider fetcher 75 passed/1 skipped, Docker Dagster
   runtime 9 passed, targeted ruff, frontend type-check, frontend lint(기존 경고 4건), frontend unit
   45 passed, compose config, `git diff --check`.
-- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green을 확인한다. 머지 뒤 n150에 재배포하고 route
-  비매칭/Feature 지도 겹침 선택/OpiNet price 분포를 운영 데이터로 smoke 확인한다.
+- **진행 중**: n150 수동 유가 materialize 중 OpiNet root area 응답의 invalid 시도 코드가 자식 조회로
+  들어가 retry되는 것을 확인했다. 후속 브랜치 `fix/opinet-valid-sido-codes`에서 유효 OpiNet 시도 코드만
+  자식 area 조회 대상으로 쓰도록 보강했다.
+- **다음 한 작업**: 후속 PR을 올려 CI green 후 머지하고 n150에 재배포한 뒤 유가 materialize와 운영
+  price 시도 분포를 다시 확인한다.
 
 ## 2026-06-30 (codex) — 세션 개선 요청 후속 반영
 
