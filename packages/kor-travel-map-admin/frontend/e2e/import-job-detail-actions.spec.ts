@@ -376,7 +376,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
       },
       { href: `${DETAIL_PATH}/events`, label: null, rel: "events" },
       {
-        href: "/v1/admin/feature-update-requests",
+        href: "/v1/admin/features/update-requests",
         label: "update request",
         rel: "feature_update_request",
       },
@@ -423,7 +423,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     const updateLink = linksCard.getByRole("link", { name: "update request" });
     await expect(updateLink).toHaveAttribute(
       "href",
-      "/admin/feature-update-requests",
+      "/admin/features/update-requests",
     );
 
     // events rel은 plain div(링크 아님) — rel 텍스트는 보이지만 link role 부재.

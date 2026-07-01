@@ -110,18 +110,18 @@ async function browserFetch<T>(
   );
 }
 
-const LIST_PATH = "/v1/admin/feature-update-requests";
+const LIST_PATH = "/v1/admin/features/update-requests";
 
 function detailPath(requestId: string): string {
-  return `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`;
+  return `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}`;
 }
 
 function cancelPath(requestId: string): string {
-  return `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/cancel`;
+  return `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}/cancel`;
 }
 
 function runNowPath(requestId: string): string {
-  return `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/run-now`;
+  return `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}/run-now`;
 }
 
 async function readCreateResponse(
@@ -178,7 +178,7 @@ async function cancelByApi(page: Page, requestId: string): Promise<void> {
 }
 
 async function gotoUpdateRequests(page: Page): Promise<void> {
-  await page.goto("/admin/feature-update-requests");
+  await page.goto("/admin/features/update-requests");
   await expect(
     page.getByRole("heading", { level: 1, name: "갱신 요청" }),
   ).toBeVisible(T);
@@ -265,7 +265,7 @@ async function createRefreshableQueuedRequest(
   return { create, requestId: requestId as string };
 }
 
-test.describe("/admin/feature-update-requests live write workflow", () => {
+test.describe("/admin/features/update-requests live write workflow", () => {
   test("UI 폼으로 queued feature update request를 생성하고 목록/상세/백엔드에 반영된다", async ({
     page,
   }) => {
@@ -343,7 +343,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         await row.getByRole("link").click();
         await expect(page).toHaveURL(
           new RegExp(
-            `/admin/feature-update-requests/${escapeRegExp(requestId as string)}$`,
+            `/admin/features/update-requests/${escapeRegExp(requestId as string)}$`,
           ),
           T,
         );
@@ -655,7 +655,7 @@ test.describe("/admin/feature-update-requests live write workflow", () => {
         await row.getByRole("link").click();
         await expect(page).toHaveURL(
           new RegExp(
-            `/admin/feature-update-requests/${escapeRegExp(
+            `/admin/features/update-requests/${escapeRegExp(
               requestId as string,
             )}$`,
           ),

@@ -278,13 +278,13 @@ async function routeImportJobs(
 }
 
 async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) {
-  await page.route("**/v1/admin/dedup-reviews**", async (route) => {
+  await page.route("**/v1/admin/features/dedup-reviews**", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
     }
     const url = new URL(route.request().url());
-    if (url.pathname !== "/v1/admin/dedup-reviews") {
+    if (url.pathname !== "/v1/admin/features/dedup-reviews") {
       await route.continue();
       return;
     }
@@ -315,15 +315,15 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "Feature 목록", href: "/admin/features" },
   { label: "Feature 변경", href: "/admin/features/change-requests" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
-  { label: "Feature 큐레이션", href: "/admin/curated-features" },
+  { label: "Feature 큐레이션", href: "/admin/features/curated" },
   { label: "이슈", href: "/admin/issues" },
   { label: "적재 작업", href: "/ops/import-jobs" },
   { label: "Provider 상태", href: "/ops/providers" },
   { label: "정합성 점검", href: "/ops/consistency" },
   { label: "운영 로그", href: "/ops/logs" },
-  { label: "Feature 중복 검토", href: "/admin/dedup-reviews" },
-  { label: "Feature 보강 검토", href: "/admin/enrichment-reviews" },
-  { label: "Feature 갱신", href: "/admin/feature-update-requests" },
+  { label: "Feature 중복 검토", href: "/admin/features/dedup-reviews" },
+  { label: "Feature 보강 검토", href: "/admin/features/enrichment-reviews" },
+  { label: "Feature 갱신", href: "/admin/features/update-requests" },
   { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
   { label: "백업", href: "/admin/backups" },
@@ -345,7 +345,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     for (const { label, href } of NAV_ITEMS) {
       // nav로 scope — 로고 Link(text "kor-travel-map", href="/")와 body의
-      // /ops/import-jobs("전체")·/admin/dagster·/admin/dedup-reviews Link 충돌 회피.
+      // /ops/import-jobs("전체")·/admin/dagster·/admin/features/dedup-reviews Link 충돌 회피.
       const link = navigation.getByRole("link", { name: label, exact: true });
       await expect(link).toBeVisible();
       await expect(link).toHaveAttribute("href", href);
@@ -449,7 +449,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       name: /Feature A \/ Feature B/,
     });
     await expect(dedupLink).toBeVisible();
-    await expect(dedupLink).toHaveAttribute("href", "/admin/dedup-reviews");
+    await expect(dedupLink).toHaveAttribute("href", "/admin/features/dedup-reviews");
   });
 
   test("health/metrics/dagster 5xx → destructive alert + 카드 degrade, shell 생존", async ({
@@ -591,12 +591,12 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       { label: "운영 로그", href: "/ops/logs", h1: "Logs" },
       {
         label: "Feature 중복 검토",
-        href: "/admin/dedup-reviews",
+        href: "/admin/features/dedup-reviews",
         h1: "Dedup review",
       },
       {
         label: "Feature 보강 검토",
-        href: "/admin/enrichment-reviews",
+        href: "/admin/features/enrichment-reviews",
         h1: "Enrichment review",
       },
       {
@@ -623,7 +623,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     // H1 미검증 목적지 — URL만 단언(grounding 유지).
     const urlOnlyTargets: ReadonlyArray<{ href: string }> = [
       { href: "/features" },
-      { href: "/admin/curated-features" },
+      { href: "/admin/features/curated" },
       { href: "/admin/dagster" },
       { href: "/etl" },
     ];

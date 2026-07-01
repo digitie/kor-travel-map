@@ -10,7 +10,7 @@
 > [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를
 > 우선한다. 이 문서의 오래된 후보 중 일반 `/v1/features/nearby`와 offline upload
 > preview/validation/load는 구현됐고, `/admin/providers/*` 직접 run 엔드포인트는 T-207b
-> 취소 결정에 따라 `/v1/admin/feature-update-requests` `provider_dataset` scope로
+> 취소 결정에 따라 `/v1/admin/features/update-requests` `provider_dataset` scope로
 > 대체한다.
 
 관련 결정:
@@ -72,7 +72,7 @@ kor-travel-map 독립 프로그램의 admin frontend/backend다. PinVi와는 Ope
 |--------|------|----|
 | `/debug/...` | 개발자용 provider preview | `/debug/etl/...` |
 | `/features/...` | 지도/상세 공통 feature 조회 + service batch read | `/features`, `/features/in-bounds`, `/features/search`, `/features/{feature_id}`, `/features/nearby/by-target`, `POST /features/batch`(ServiceToken) |
-| `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/feature-update-requests`, `/admin/poi-cache-targets`, `/admin/dedup-reviews`, `/admin/enrichment-reviews` |
+| `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/features/update-requests`, `/admin/poi-cache-targets`, `/admin/features/dedup-reviews`, `/admin/features/enrichment-reviews` |
 | `/ops/...` | 관측, 로그, 지표, consistency report | `/ops/logs`, `/ops/consistency`, `/ops/metrics` |
 
 기존 구현 주의:
@@ -108,18 +108,18 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 
 | Route | 목적 | 기본 API |
 |-------|------|----------|
-| `/` | 운영 홈. 최근 job, provider 실패, 열린 이슈, dedup pending 요약 | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-reviews`, `/ops/dagster/summary` |
+| `/` | 운영 홈. 최근 job, provider 실패, 열린 이슈, dedup pending 요약 | `/ops/metrics`, `/ops/import-jobs`, `/admin/features/dedup-reviews`, `/ops/dagster/summary` |
 | `/features` | feature 운영 목록. 지도/테이블 전환 | `/admin/features`, `/features`, `/features/{feature_id}` |
 | `/admin/features/new` | 수동 feature 추가 change request | `POST /v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 |
 | `/features/[feature_id]` | 상세, 위치, 원천, 이슈, 조치 | `/v1/features/{feature_id}`, `/v1/admin/features/{feature_id}`, `/v1/features/{feature_id}/weather` |
 | `/ops/providers` | provider별 상태 목록 + provider 상세, dataset 상태, sync cursor, refresh policy 편집 (구 `/admin/providers`, `/admin/providers/[provider]`는 별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/providers/*` REST는 backend-only) | `/ops/providers` |
 | `/ops/import-jobs` | 적재/검증 job 목록 | `/ops/import-jobs` |
 | `/ops/import-jobs/[job_id]` | 진행률과 상태 상세, event timeline, cancel, 관련 링크 | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel` |
-| `/admin/dedup-reviews` | 중복 후보 검토 | `/admin/dedup-reviews`, `/admin/dedup-reviews/{review_id}` |
-| `/admin/enrichment-reviews` | enrichment 후보 검토 | `/admin/enrichment-reviews`, `/admin/enrichment-reviews/{review_id}` |
+| `/admin/features/dedup-reviews` | 중복 후보 검토 | `/admin/features/dedup-reviews`, `/admin/features/dedup-reviews/{review_id}` |
+| `/admin/features/enrichment-reviews` | enrichment 후보 검토 | `/admin/features/enrichment-reviews`, `/admin/features/enrichment-reviews/{review_id}` |
 | `/admin/issues` | 이슈 있는 feature 지도/테이블 | `/admin/issues/features` |
 | `/admin/offline-uploads` | 오프라인 파일 업로드, 검증, 적재 | `/admin/offline-uploads` |
-| `/admin/feature-update-requests` | 좌표/반경/시군구/provider 기준 업데이트 요청 | `/admin/feature-update-requests` |
+| `/admin/features/update-requests` | 좌표/반경/시군구/provider 기준 업데이트 요청 | `/admin/features/update-requests` |
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
 | `/ops/providers` (refresh policy 편집) | provider별 update 주기/rate limit 정책 (별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/provider-refresh-policies` REST는 backend-only) | `/admin/provider-refresh-policies` |
 | `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
@@ -134,15 +134,15 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 - **Features**: `/features`, `/features/[feature_id]`, `/admin/features/new`, `/admin/issues`.
 - **Providers**: `/ops/providers` (provider 목록 + 상세 + 강제 실행/refresh policy 편집).
 - **Jobs**: `/ops/import-jobs`, job 상세, offline upload job.
-- **Review**: `/admin/dedup-reviews`, `/admin/enrichment-reviews`, missing data queue, consistency samples.
+- **Review**: `/admin/features/dedup-reviews`, `/admin/features/enrichment-reviews`, missing data queue, consistency samples.
 - **Ops**: `/admin/dagster`, `/admin/settings`, `/ops/logs`, `/ops/consistency`, `/ops/metrics`.
 - **Debug**: `/debug/etl`.
 
 ### 4.3 현재 구현과 남은 연결부 (2026-06-11)
 
 현재 구현된 admin/frontend 페이지 경로는 `/`, `/features`, `/etl`, `/admin/features`,
-`/admin/features/change-requests`, `/admin/issues`, `/admin/dedup-reviews`,
-`/admin/enrichment-reviews`, `/admin/feature-update-requests`,
+`/admin/features/change-requests`, `/admin/issues`, `/admin/features/dedup-reviews`,
+`/admin/features/enrichment-reviews`, `/admin/features/update-requests`,
 `/admin/poi-cache-targets`, `/admin/offline-uploads`, `/admin/backups`,
 `/admin/dagster`, `/admin/settings`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`,
 `/ops/providers`, `/ops/consistency`, `/ops/logs`다.
@@ -681,7 +681,7 @@ full upsert. `system_interval_seconds`/`optimal_interval_seconds`는
 
 - 응답은 `FeatureUpdateRequestRecord` envelope다.
 - 생성된 request의 `job_id`는 `/ops/import-jobs/{job_id}`에서 진행 상태를 본다.
-- request 상세는 `/admin/feature-update-requests/{request_id}`에서 확인한다.
+- request 상세는 `/admin/features/update-requests/{request_id}`에서 확인한다.
 - 같은 scope 동시 실행은 feature update request의 advisory lock과 queue 처리 규칙을 따른다.
 - provider client 호출은 provider 라이브러리 public API를 직접 사용한다.
 
@@ -895,7 +895,7 @@ CREATE INDEX idx_import_job_events_level_time
 
 ### 14.1 Backend API
 
-#### `GET /admin/dedup-reviews`
+#### `GET /admin/features/dedup-reviews`
 
 Query:
 
@@ -942,7 +942,7 @@ Query:
 }
 ```
 
-#### `PATCH /admin/dedup-reviews/{review_id}`
+#### `PATCH /admin/features/dedup-reviews/{review_id}`
 
 요청:
 
@@ -1521,10 +1521,10 @@ API module:
 - `src/api/importJobs.ts`: `/ops/import-jobs/*`.
 - `src/api/live.ts`: `WS /ops/live` signal → TanStack Query invalidation.
 - `src/api/ops.ts`: `/ops/metrics`, `/ops/consistency/*`.
-- `src/api/dedup.ts`: `/admin/dedup-reviews/*`.
+- `src/api/dedup.ts`: `/admin/features/dedup-reviews/*`.
 - `src/api/issues.ts`: `/admin/issues/*`.
 - `src/api/offlineUploads.ts`: `/admin/offline-uploads/*`.
-- `src/api/updateRequests.ts`: `/admin/feature-update-requests/*`.
+- `src/api/updateRequests.ts`: `/admin/features/update-requests/*`.
 - `src/api/poiCacheTargets.ts`: `/admin/poi-cache-targets/*`,
   `/features/nearby/by-target`.
 - `src/api/providerRefreshPolicies.ts`: `/admin/provider-refresh-policies/*`.
@@ -1696,7 +1696,7 @@ tradeoff 근거를 PR 설명이나 `docs/journal.md`에 남긴다.
    - `GET /admin/providers`
    - `GET /admin/providers/{provider}`
 6. **Provider run + import job progress**
-   - `POST /admin/feature-update-requests` (`scope_type=provider_dataset`)
+   - `POST /admin/features/update-requests` (`scope_type=provider_dataset`)
    - `/ops/import-jobs`
    - `/ops/import-jobs/{job_id}`
    - `/ops/import-jobs/{job_id}/cancel`
@@ -1717,7 +1717,7 @@ tradeoff 근거를 PR 설명이나 `docs/journal.md`에 남긴다.
     - load job.
 11. **Feature update request**
     - ✅ `ops.feature_update_requests` migration.
-    - ✅ `POST /admin/feature-update-requests`.
+    - ✅ `POST /admin/features/update-requests`.
     - ✅ `center_radius`, `sigungu_by_radius`, `cache_target_keys` dry-run.
     - ✅ runner 주입형 request 실행 본체.
     - ✅ Dagster sensor/worker 연결.

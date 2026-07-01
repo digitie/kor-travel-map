@@ -7383,7 +7383,7 @@
       },
       "DedupReviewDecisionRequest": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/dedup-reviews/{review_id}`` body.",
+        "description": "``PATCH /admin/features/dedup-reviews/{review_id}`` body.",
         "properties": {
           "decision": {
             "enum": [
@@ -7438,7 +7438,7 @@
       },
       "DedupReviewDecisionResponse": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/dedup-reviews/{review_id}`` response.",
+        "description": "``PATCH /admin/features/dedup-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DedupReviewDecisionData"
@@ -7555,7 +7555,7 @@
       },
       "DedupReviewDetailResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/dedup-reviews/{review_id}`` response.",
+        "description": "``GET /admin/features/dedup-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DedupReviewDetailData"
@@ -7591,7 +7591,7 @@
       },
       "DedupReviewListResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/dedup-reviews`` response.",
+        "description": "``GET /admin/features/dedup-reviews`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DedupReviewListData"
@@ -7609,7 +7609,7 @@
       },
       "DedupReviewRecord": {
         "additionalProperties": false,
-        "description": "``GET /admin/dedup-reviews`` item.",
+        "description": "``GET /admin/features/dedup-reviews`` item.",
         "properties": {
           "category_score": {
             "title": "Category Score",
@@ -7786,7 +7786,7 @@
       },
       "EnrichmentReviewDecisionRequest": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/enrichment-reviews/{review_id}`` body.",
+        "description": "``PATCH /admin/features/enrichment-reviews/{review_id}`` body.",
         "properties": {
           "decision": {
             "enum": [
@@ -7845,7 +7845,7 @@
       },
       "EnrichmentReviewDecisionResponse": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/enrichment-reviews/{review_id}`` response.",
+        "description": "``PATCH /admin/features/enrichment-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EnrichmentReviewDecisionData"
@@ -8052,7 +8052,7 @@
       },
       "EnrichmentReviewDetailResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/enrichment-reviews/{review_id}`` response.",
+        "description": "``GET /admin/features/enrichment-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EnrichmentReviewDetailData"
@@ -8088,7 +8088,7 @@
       },
       "EnrichmentReviewListResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/enrichment-reviews`` response.",
+        "description": "``GET /admin/features/enrichment-reviews`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EnrichmentReviewListData"
@@ -8106,7 +8106,7 @@
       },
       "EnrichmentReviewRecord": {
         "additionalProperties": false,
-        "description": "``GET /admin/enrichment-reviews`` item.",
+        "description": "``GET /admin/features/enrichment-reviews`` item.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -15647,645 +15647,6 @@
         ]
       }
     },
-    "/v1/admin/curated-features": {
-      "get": {
-        "operationId": "list_admin_curated_features_route_v1_admin_curated_features_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "theme_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Theme Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "theme_slug",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Theme Slug"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "in": "query",
-            "name": "curation_status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "candidate",
-                    "curated",
-                    "rejected",
-                    "archived"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Curation Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_archived",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Archived",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeaturesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "List Admin Curated Features Route",
-        "tags": [
-          "admin-curated"
-        ]
-      },
-      "post": {
-        "operationId": "create_admin_curated_feature_route_v1_admin_curated_features_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CuratedFeatureCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Create Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-features/{curated_feature_id}": {
-      "delete": {
-        "operationId": "delete_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Delete Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      },
-      "get": {
-        "operationId": "get_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Get Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      },
-      "patch": {
-        "operationId": "patch_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CuratedFeaturePatchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Patch Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot": {
-      "get": {
-        "operationId": "get_admin_curated_feature_detail_snapshot_route_v1_admin_curated_features__curated_feature_id__detail_snapshot_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureDetailSnapshotResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Get Admin Curated Feature Detail Snapshot Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-features/{curated_feature_id}/place-search": {
-      "get": {
-        "operationId": "search_admin_curated_feature_places_route_v1_admin_curated_features__curated_feature_id__place_search_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedPlaceSearchResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Search Admin Curated Feature Places Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-features/{curated_feature_id}/select": {
-      "post": {
-        "operationId": "select_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__select_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CuratedFeatureStatusRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Select Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-features/{curated_feature_id}/unselect": {
-      "post": {
-        "operationId": "unselect_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__unselect_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "curated_feature_id",
-            "required": true,
-            "schema": {
-              "title": "Curated Feature Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CuratedFeatureStatusRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Unselect Admin Curated Feature Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
     "/v1/admin/curated-source-rules": {
       "get": {
         "operationId": "list_admin_curated_source_rules_route_v1_admin_curated_source_rules_get",
@@ -17022,1141 +16383,6 @@
         ]
       }
     },
-    "/v1/admin/dedup-reviews": {
-      "get": {
-        "operationId": "list_reviews_v1_admin_dedup_reviews_get",
-        "parameters": [
-          {
-            "description": "dedup review status 반복 필터",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "enum": [
-                      "pending",
-                      "accepted",
-                      "rejected",
-                      "merged",
-                      "ignored"
-                    ],
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "dedup review status 반복 필터",
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          },
-          {
-            "in": "query",
-            "name": "category",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Category"
-            }
-          },
-          {
-            "in": "query",
-            "name": "min_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 100,
-                  "minimum": 0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Min Score"
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 100,
-                  "minimum": 0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Max Score"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DedupReviewListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "List Reviews",
-        "tags": [
-          "admin-dedup"
-        ]
-      }
-    },
-    "/v1/admin/dedup-reviews/{review_id}": {
-      "get": {
-        "operationId": "get_review_detail_v1_admin_dedup_reviews__review_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DedupReviewDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "review_id 없음"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Get Review Detail",
-        "tags": [
-          "admin-dedup"
-        ]
-      },
-      "patch": {
-        "operationId": "decide_review_v1_admin_dedup_reviews__review_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DedupReviewDecisionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DedupReviewDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "review_id 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "전이 불가"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Decide Review",
-        "tags": [
-          "admin-dedup"
-        ]
-      }
-    },
-    "/v1/admin/enrichment-reviews": {
-      "get": {
-        "operationId": "list_reviews_v1_admin_enrichment_reviews_get",
-        "parameters": [
-          {
-            "description": "enrichment review status 반복 필터",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "enum": [
-                      "pending",
-                      "accepted",
-                      "rejected",
-                      "ignored"
-                    ],
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "enrichment review status 반복 필터",
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "min_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 100,
-                  "minimum": 0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Min Score"
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 100,
-                  "minimum": 0,
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Max Score"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrichmentReviewListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "List Reviews",
-        "tags": [
-          "admin-enrichment"
-        ]
-      }
-    },
-    "/v1/admin/enrichment-reviews/{review_id}": {
-      "get": {
-        "operationId": "get_review_detail_v1_admin_enrichment_reviews__review_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrichmentReviewDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "review_id 없음"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Get Review Detail",
-        "tags": [
-          "admin-enrichment"
-        ]
-      },
-      "patch": {
-        "operationId": "decide_review_v1_admin_enrichment_reviews__review_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "review_id",
-            "required": true,
-            "schema": {
-              "title": "Review Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnrichmentReviewDecisionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrichmentReviewDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "이미 검토됨/없음"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Decide Review",
-        "tags": [
-          "admin-enrichment"
-        ]
-      }
-    },
-    "/v1/admin/feature-update-requests": {
-      "get": {
-        "operationId": "list_feature_update_requests_v1_admin_feature_update_requests_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "queued",
-                    "running",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "scope_type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Scope Type"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "in": "query",
-            "name": "created_from",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Created From"
-            }
-          },
-          {
-            "in": "query",
-            "name": "created_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Created To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "feature update request 목록",
-        "tags": [
-          "admin-update-requests"
-        ]
-      },
-      "post": {
-        "operationId": "create_feature_update_request_v1_admin_feature_update_requests_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeatureUpdateRequestCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "feature update request 생성 또는 dry-run",
-        "tags": [
-          "admin-update-requests"
-        ]
-      }
-    },
-    "/v1/admin/feature-update-requests/{request_id}": {
-      "get": {
-        "operationId": "get_feature_update_request_v1_admin_feature_update_requests__request_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "request_id 없음"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "feature update request 단건 조회",
-        "tags": [
-          "admin-update-requests"
-        ]
-      }
-    },
-    "/v1/admin/feature-update-requests/{request_id}/cancel": {
-      "post": {
-        "operationId": "cancel_feature_update_request_v1_admin_feature_update_requests__request_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/FeatureUpdateRequestCancelRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "request_id 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "이미 terminal 상태라 취소 불가"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "feature update request 취소",
-        "tags": [
-          "admin-update-requests"
-        ]
-      }
-    },
-    "/v1/admin/feature-update-requests/{request_id}/run-now": {
-      "post": {
-        "operationId": "run_feature_update_request_now_v1_admin_feature_update_requests__request_id__run_now_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/FeatureUpdateRequestRunNowRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "request_id 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "이미 running 상태 또는 동일 scope lock 경합"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "기존 request payload를 run_mode=now로 재큐잉",
-        "tags": [
-          "admin-update-requests"
-        ]
-      }
-    },
     "/v1/admin/features": {
       "get": {
         "operationId": "list_features_v1_admin_features_get",
@@ -18794,6 +17020,1780 @@
         "summary": "Reject Feature Change Request Route",
         "tags": [
           "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/curated": {
+      "get": {
+        "operationId": "list_admin_curated_features_route_v1_admin_features_curated_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme_slug",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme Slug"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "curation_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "candidate",
+                    "curated",
+                    "rejected",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Curation Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeaturesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Admin Curated Features Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "post": {
+        "operationId": "create_admin_curated_feature_route_v1_admin_features_curated_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedFeatureCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Create Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/curated/{curated_feature_id}": {
+      "delete": {
+        "operationId": "delete_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Delete Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedFeaturePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Patch Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/curated/{curated_feature_id}/detail-snapshot": {
+      "get": {
+        "operationId": "get_admin_curated_feature_detail_snapshot_route_v1_admin_features_curated__curated_feature_id__detail_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureDetailSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Admin Curated Feature Detail Snapshot Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/curated/{curated_feature_id}/place-search": {
+      "get": {
+        "operationId": "search_admin_curated_feature_places_route_v1_admin_features_curated__curated_feature_id__place_search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedPlaceSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Search Admin Curated Feature Places Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/curated/{curated_feature_id}/select": {
+      "post": {
+        "operationId": "select_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__select_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedFeatureStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Select Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/curated/{curated_feature_id}/unselect": {
+      "post": {
+        "operationId": "unselect_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__unselect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curated_feature_id",
+            "required": true,
+            "schema": {
+              "title": "Curated Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedFeatureStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Unselect Admin Curated Feature Route",
+        "tags": [
+          "admin-curated"
+        ]
+      }
+    },
+    "/v1/admin/features/dedup-reviews": {
+      "get": {
+        "operationId": "list_reviews_v1_admin_features_dedup_reviews_get",
+        "parameters": [
+          {
+            "description": "dedup review status 반복 필터",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "rejected",
+                      "merged",
+                      "ignored"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "dedup review status 반복 필터",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Reviews",
+        "tags": [
+          "admin-dedup"
+        ]
+      }
+    },
+    "/v1/admin/features/dedup-reviews/{review_id}": {
+      "get": {
+        "operationId": "get_review_detail_v1_admin_features_dedup_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "review_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Review Detail",
+        "tags": [
+          "admin-dedup"
+        ]
+      },
+      "patch": {
+        "operationId": "decide_review_v1_admin_features_dedup_reviews__review_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DedupReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "review_id 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "전이 불가"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Decide Review",
+        "tags": [
+          "admin-dedup"
+        ]
+      }
+    },
+    "/v1/admin/features/enrichment-reviews": {
+      "get": {
+        "operationId": "list_reviews_v1_admin_features_enrichment_reviews_get",
+        "parameters": [
+          {
+            "description": "enrichment review status 반복 필터",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "rejected",
+                      "ignored"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "enrichment review status 반복 필터",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Reviews",
+        "tags": [
+          "admin-enrichment"
+        ]
+      }
+    },
+    "/v1/admin/features/enrichment-reviews/{review_id}": {
+      "get": {
+        "operationId": "get_review_detail_v1_admin_features_enrichment_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "review_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Review Detail",
+        "tags": [
+          "admin-enrichment"
+        ]
+      },
+      "patch": {
+        "operationId": "decide_review_v1_admin_features_enrichment_reviews__review_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrichmentReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "이미 검토됨/없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Decide Review",
+        "tags": [
+          "admin-enrichment"
+        ]
+      }
+    },
+    "/v1/admin/features/update-requests": {
+      "get": {
+        "operationId": "list_feature_update_requests_v1_admin_features_update_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature update request 목록",
+        "tags": [
+          "admin-update-requests"
+        ]
+      },
+      "post": {
+        "operationId": "create_feature_update_request_feature_route_v1_admin_features_update_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureUpdateRequestCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature update request 생성 또는 dry-run",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/v1/admin/features/update-requests/{request_id}": {
+      "get": {
+        "operationId": "get_feature_update_request_v1_admin_features_update_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "request_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature update request 단건 조회",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/v1/admin/features/update-requests/{request_id}/cancel": {
+      "post": {
+        "operationId": "cancel_feature_update_request_v1_admin_features_update_requests__request_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FeatureUpdateRequestCancelRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "request_id 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "이미 terminal 상태라 취소 불가"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature update request 취소",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/v1/admin/features/update-requests/{request_id}/run-now": {
+      "post": {
+        "operationId": "run_feature_update_request_now_v1_admin_features_update_requests__request_id__run_now_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FeatureUpdateRequestRunNowRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "request_id 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "이미 running 상태 또는 동일 scope lock 경합"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "기존 request payload를 run_mode=now로 재큐잉",
+        "tags": [
+          "admin-update-requests"
         ]
       }
     },

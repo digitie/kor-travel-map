@@ -427,7 +427,7 @@ Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_pol
 
 ### 7.4 Target 기반 update request
 
-#### `POST /admin/feature-update-requests`
+#### `POST /admin/features/update-requests`
 
 feature update request는 운영자/admin 영역이다. scope에 `cache_target_keys`를
 추가해 등록된 target 묶음 기준 refresh를 실행한다. PinVi 사용자 제안 큐는

@@ -1198,8 +1198,8 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/v1/admin/dedup-reviews", async ({ page }) => {
-    await page.goto("/admin/dedup-reviews");
+  test("/v1/admin/features/dedup-reviews", async ({ page }) => {
+    await page.goto("/admin/features/dedup-reviews");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
@@ -1210,8 +1210,8 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/v1/admin/enrichment-reviews", async ({ page }) => {
-    await page.goto("/admin/enrichment-reviews");
+  test("/v1/admin/features/enrichment-reviews", async ({ page }) => {
+    await page.goto("/admin/features/enrichment-reviews");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Enrichment review" }),
@@ -1232,8 +1232,8 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
   });
 
-  test("/v1/admin/feature-update-requests", async ({ page }) => {
-    await page.goto("/admin/feature-update-requests");
+  test("/v1/admin/features/update-requests", async ({ page }) => {
+    await page.goto("/admin/features/update-requests");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update requests" }),

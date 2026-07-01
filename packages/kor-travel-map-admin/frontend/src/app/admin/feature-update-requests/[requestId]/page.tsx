@@ -1,23 +1,12 @@
-import type { Metadata } from "next";
-
-import { FeatureUpdateRequestDetailClient } from "./feature-update-request-detail-client";
+import { redirect } from "next/navigation";
 
 type FeatureUpdateRequestDetailPageProps = {
   params: Promise<{ requestId: string }>;
 };
 
-export async function generateMetadata({
-  params,
-}: FeatureUpdateRequestDetailPageProps): Promise<Metadata> {
-  const { requestId } = await params;
-  return {
-    title: `${requestId} | Feature update request`,
-  };
-}
-
-export default async function FeatureUpdateRequestDetailPage({
+export default async function LegacyFeatureUpdateRequestDetailPage({
   params,
 }: FeatureUpdateRequestDetailPageProps) {
   const { requestId } = await params;
-  return <FeatureUpdateRequestDetailClient requestId={requestId} />;
+  redirect(`/admin/features/update-requests/${encodeURIComponent(requestId)}`);
 }

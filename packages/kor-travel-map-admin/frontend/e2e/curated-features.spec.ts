@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * `/admin/curated-features` (1192줄 mutation 콘솔) — ZERO 커버 페이지 spec
+ * `/admin/features/curated` (1192줄 mutation 콘솔) — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.1).
  *
  * 이 콘솔은 select/unselect/patch/archive/source-rule-apply/detail-snapshot 등 6개
@@ -13,9 +13,9 @@ import { expect, test } from "@playwright/test";
  * NOTE: Playwright는 Windows 호스트에서만 실행되고, debug UI backend(:12701)/frontend
  * (:12705)는 WSL에서 기동된다. 빈 DB에서도 통과하도록 후보 0/N 양쪽을 허용한다.
  */
-test.describe("/admin/curated-features", () => {
+test.describe("/admin/features/curated", () => {
   test("페이지 렌더 + 필터 + 후보 테이블 구조", async ({ page }) => {
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Curated features" }),
@@ -42,7 +42,7 @@ test.describe("/admin/curated-features", () => {
   });
 
   test("status 필터 기본값 candidate + 전환", async ({ page }) => {
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     const status = page.getByLabel("curation status filter");
     await expect(status).toHaveValue("candidate");
@@ -53,7 +53,7 @@ test.describe("/admin/curated-features", () => {
   });
 
   test("page size 전환 25/50/100/200", async ({ page }) => {
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     const pageSize = page.getByLabel("page size");
     await expect(pageSize).toHaveValue("50");
@@ -62,7 +62,7 @@ test.describe("/admin/curated-features", () => {
   });
 
   test("source rules 패널 + 빈/행 양립", async ({ page }) => {
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     await expect(page.getByText("Source rules", { exact: true })).toBeVisible();
     await expect(page.getByLabel("rule enabled filter")).toBeVisible();

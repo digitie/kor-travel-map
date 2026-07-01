@@ -201,7 +201,7 @@ function relationHref(link: OpsImportJobLink) {
     return link.href.replace(/^\/v1/, "");
   }
   if (link.rel === "feature_update_request") {
-    return "/admin/feature-update-requests";
+    return "/admin/features/update-requests";
   }
   if (link.rel === "offline_upload") {
     return "/admin/offline-uploads";

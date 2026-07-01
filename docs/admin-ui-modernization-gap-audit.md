@@ -7,7 +7,7 @@
 > [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를
 > 우선한다. 특히 일반 `/v1/features/nearby`는 현재 구현됐고, offline upload
 > preview/validation/load도 화면에 연결됐다. `/admin/providers*` 직접 run 표면은
-> 취소됐으며 provider 실행은 `/v1/admin/feature-update-requests`의 `provider_dataset`
+> 취소됐으며 provider 실행은 `/v1/admin/features/update-requests`의 `provider_dataset`
 > scope로 유도한다.
 
 ## 목적
@@ -31,7 +31,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `src/api/importJobs.ts` | `/ops/import-jobs`, `/ops/import-jobs/{job_id}` | 신규. 화면 route가 admin navigation 아래여도 backend 정본은 `/ops` |
 | `src/api/ops.ts` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 신규. 홈/consistency 화면 공통 summary |
 | `src/api/dedup.ts` | `/admin/dedup-review`, `/admin/dedup-review/{review_id}` | 신규. 결정 mutation 후 feature/ops cache 무효화 |
-| `src/api/updateRequests.ts` | `/admin/feature-update-requests`, cancel, run-now | 신규. queue polling과 request detail polling 포함 |
+| `src/api/updateRequests.ts` | `/admin/features/update-requests`, cancel, run-now | 신규. queue polling과 request detail polling 포함 |
 | `src/api/poiCacheTargets.ts` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 신규. 외부 POI target CRUD와 target 기준 주변 feature 조회 |
 | `src/api/offlineUploads.ts` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}`, load 실행 | T-208h 신규. JSON/JSONL upload/list/detail/Dagster load launch |
 | `src/api/dagster.ts` | `/ops/dagster/summary`, `/ops/dagster/nux-seen` | summary 조회와 NUX seen POST를 분리. 공통 fetch wrapper 사용 |
@@ -51,7 +51,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `/admin/dedup-review` | 가능 | `useDedupReviews`, `useDedupDecisionMutation` | decision 이유/작성자 UI validation만 프론트에서 보강 |
 | `/ops/metrics` | 가능 | `useOpsMetrics` | 없음 |
 | `/ops/consistency` | 가능 | `useConsistencyReports`, `useIntegrityIssues` | issue resolve/ignore mutation 없음 |
-| `/admin/feature-update-requests` | 가능 | `useFeatureUpdateRequests`, create/cancel/run-now mutation | 실제 Dagster 실행 연결은 T-208e 구현분 사용. provider별 세부 rate-limit UI는 후속 |
+| `/admin/features/update-requests` | 가능 | `useFeatureUpdateRequests`, create/cancel/run-now mutation | 실제 Dagster 실행 연결은 T-208e 구현분 사용. provider별 세부 rate-limit UI는 후속 |
 | `/admin/poi-cache-targets` | 가능 | `usePoiCacheTargets`, `usePoiCacheTarget`, upsert/delete, `useNearbyFeaturesByTarget` | 없음 |
 | `/admin/dagster` | 가능 | `useDagsterSummary`, `useMarkDagsterNuxSeen`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 summary 성공 후 POST로 best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
 | `/ops/providers` | 구현 완료 | `useOpsProviders`, `useOpsProvider`, provider refresh policy mutation | provider/dataset 상세, `provider_dataset` update request, refresh policy 편집 구현 |
@@ -82,7 +82,7 @@ T-211b는 아래 범위를 구현했다.
 - `/ops/import-jobs`: state/kind filter가 있는 read-only job table.
 - `/ops/consistency`: metrics, consistency reports, integrity issue queue 조회.
 - `/admin/dedup-review`: 상태 filter와 accepted/rejected/ignored 결정 mutation.
-- `/admin/feature-update-requests`: center radius 기반 request 생성, dry-run,
+- `/admin/features/update-requests`: center radius 기반 request 생성, dry-run,
   cancel, run-now, request 상태 목록.
 - `/admin/poi-cache-targets`: 외부 POI target upsert/delete와 target 기준 주변 feature
   조회.
@@ -117,6 +117,6 @@ load 전 validation gate다. 이 범위는 T-208i로 분리한다.
 3. `/admin/dagster`를 Dagster iframe + 자체 summary cards/tables/run list로 보강한다.
 4. `/features`는 기존 map/table workflow를 유지하고 운영 화면 quick link를 추가한다.
 5. `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
-   `/admin/feature-update-requests`, `/admin/poi-cache-targets`를 신규 route로 추가한다.
+   `/admin/features/update-requests`, `/admin/poi-cache-targets`를 신규 route로 추가한다.
 6. React Doctor, ESLint, type-check, 필요한 Playwright e2e를 실행하고 결과를
    `docs/journal.md`와 PR 본문에 남긴다.

@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-01 (codex) — Feature 운영 경로 `/admin/features` 일원화
+
+Feature 관련 운영 UI와 API 경로를 `/admin/features/...` namespace로 모으고, 중복/보강 검토
+화면의 주요 표면을 맞췄다.
+
+- **UI route**: `/admin/features/curated`, `/admin/features/dedup-reviews`,
+  `/admin/features/enrichment-reviews`, `/admin/features/update-requests`와 상세 route를 추가했다.
+  기존 `/admin/curated-features`, `/admin/dedup-reviews`, `/admin/enrichment-reviews`,
+  `/admin/feature-update-requests`는 새 route로 redirect한다.
+- **API route**: curated/dedup/enrichment/update request admin API를
+  `/v1/admin/features/...`로 노출하고, 기존 API는 schema에서 숨긴 호환 alias로 유지했다.
+  `/v1/admin/features/{feature_id}`보다 구체 route가 먼저 mount되도록 app include 순서를 조정했다.
+- **검토 UI**: 중복 검토 테이블을 `리뷰/점수/거리/후보/상태/생성/작업` 순서로 정리하고,
+  pending/완료 row 모두 `detail` 버튼으로 상세 비교 다이얼로그에 진입할 수 있게 했다.
+  중복/보강 상세 다이얼로그 제목과 상단 metric surface도 같은 구조로 맞췄다.
+- **문서/e2e**: frontend API hook, admin nav, 관련 e2e, admin frontend README와 운영 정본 문서의
+  경로를 새 namespace로 갱신했다.
+- **검증**: ruff targeted clean, OpenAPI drift check 통과, frontend type-check 통과,
+  frontend gen:types:check 통과, frontend lint 오류 없음(기존 경고 4건), frontend unit 45 passed,
+  API router targeted 35 passed, provider/ops targeted 23 passed
+  (공개 키 검증 요구 off, `-s`로 pytest capture 우회),
+  `git diff --check` 통과.
+
 ## 2026-07-01 (codex) — Feature 작성/변경 요청 폼 공용화
 
 변경 요청 작성 화면의 레이아웃을 새 Feature 작성 화면 기준으로 맞추고, 좌표 미입력 상태의 지도

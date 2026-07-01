@@ -239,8 +239,8 @@ interface DedupMockHandle {
 /**
  * 상태있는(stateful) dedup 목록/결정 mock. PATCH가 in-memory record의 status를
  * 바꾸므로 invalidateQueries(['dedup-reviews']) 후 refetch가 '완료' 상태를 반영한다
- * (admin-ops storeChange 패턴). `/v1/admin/dedup-reviews`만 가로채 Next.js 문서/RSC
- * 네비게이션('/admin/dedup-reviews')은 건드리지 않는다.
+ * (admin-ops storeChange 패턴). `/v1/admin/features/dedup-reviews`만 가로채 Next.js 문서/RSC
+ * 네비게이션('/admin/features/dedup-reviews')은 건드리지 않는다.
  */
 async function mockDedupReviews(
   page: Page,
@@ -315,14 +315,14 @@ async function mockDedupReviews(
     });
   }
 
-  await page.route("**/v1/admin/dedup-reviews**", async (route) => {
+  await page.route("**/v1/admin/features/dedup-reviews**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = apiPathname(url);
 
     if (
       request.method() === "GET" &&
-      path === "/v1/admin/dedup-reviews"
+      path === "/v1/admin/features/dedup-reviews"
     ) {
       handle.requests.list += 1;
       handle.requests.lastListUrl = url;
@@ -343,10 +343,10 @@ async function mockDedupReviews(
 
     if (
       request.method() === "GET" &&
-      path.startsWith("/v1/admin/dedup-reviews/")
+      path.startsWith("/v1/admin/features/dedup-reviews/")
     ) {
       const reviewId = decodeURIComponent(
-        path.slice("/v1/admin/dedup-reviews/".length),
+        path.slice("/v1/admin/features/dedup-reviews/".length),
       );
       const review =
         pending.find((item) => item.review_id === reviewId) ??
@@ -357,13 +357,13 @@ async function mockDedupReviews(
 
     if (
       request.method() === "PATCH" &&
-      path.startsWith("/v1/admin/dedup-reviews/")
+      path.startsWith("/v1/admin/features/dedup-reviews/")
     ) {
       handle.requests.patch += 1;
       const body = request.postDataJSON() as DedupReviewDecisionRequest;
       handle.requests.bodies.push(body);
       const reviewId = decodeURIComponent(
-        path.slice("/v1/admin/dedup-reviews/".length),
+        path.slice("/v1/admin/features/dedup-reviews/".length),
       );
       handle.requests.paths.push(reviewId);
       const review =
@@ -392,7 +392,7 @@ async function mockDedupReviews(
 }
 
 /**
- * /admin/dedup-reviews 액션 depth (admin-ops smoke 위 추가분).
+ * /admin/features/dedup-reviews 액션 depth (admin-ops smoke 위 추가분).
  * accept/reject/ignore/merge(수동·자동)·취소·mutex·status filter·empty·error·bulk.
  */
 test.describe("admin/dedup-reviews actions", () => {
@@ -415,7 +415,7 @@ test.describe("admin/dedup-reviews actions", () => {
     });
     await mockDedupReviews(page, { byStatus: { pending: [review] } });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     const row = page.getByRole("row", { name: /DEDUP_A_detail/ });
     await expect(row).toBeVisible();
 
@@ -435,7 +435,7 @@ test.describe("admin/dedup-reviews actions", () => {
   }) => {
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     await expect(
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
     ).toBeVisible();
@@ -478,7 +478,7 @@ test.describe("admin/dedup-reviews actions", () => {
   }) => {
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     // 결정 후 refetch에서도 행이 유지되도록 'all'로 전환(기본 'pending' 필터면 rejected
     // record가 목록에서 빠져 '완료'를 못 본다).
     await page.getByLabel("dedup status").selectOption("all");
@@ -503,7 +503,7 @@ test.describe("admin/dedup-reviews actions", () => {
   test("ignore decision PATCHes decision=ignored", async ({ page }) => {
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     const row = page.getByRole("row", { name: /DEDUP_A_alpha/ });
     await expect(row).toBeVisible();
 
@@ -522,7 +522,7 @@ test.describe("admin/dedup-reviews actions", () => {
   }) => {
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     // 병합 후 refetch에서도 행이 유지되도록 'all'로 전환(기본 'pending' 필터면 merged
     // record가 목록에서 빠져 '완료'를 못 본다).
     await page.getByLabel("dedup status").selectOption("all");
@@ -562,7 +562,7 @@ test.describe("admin/dedup-reviews actions", () => {
   }) => {
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     const row = page.getByRole("row", { name: /DEDUP_A_alpha/ });
     await expect(row).toBeVisible();
 
@@ -585,7 +585,7 @@ test.describe("admin/dedup-reviews actions", () => {
     // PATCH 라우트를 등록하지 않는다 — '취소'가 decision.mutate를 호출하면 mock이 throw하며 fail.
     const handle = await mockDedupReviews(page);
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     const row = page.getByRole("row", { name: /DEDUP_A_alpha/ });
     await expect(row).toBeVisible();
 
@@ -629,7 +629,7 @@ test.describe("admin/dedup-reviews actions", () => {
       holdPatch: true,
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     // 병합 settle 후 refetch에서도 row1이 유지되도록 'all'로 전환(기본 'pending' 필터면
     // merged record가 목록에서 빠져 '완료'를 못 본다). 'all'은 byStatus.pending 행 집합을
     // status param 없이 그대로 반환한다(rowsForStatus(null) → base).
@@ -672,7 +672,7 @@ test.describe("admin/dedup-reviews actions", () => {
       },
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     await expect(page.getByRole("row", { name: /DEDUP_A_alpha/ })).toBeVisible();
     await expect(
       page.getByRole("columnheader", { name: "feature A" }),
@@ -724,7 +724,7 @@ test.describe("admin/dedup-reviews actions", () => {
       byStatus: { pending: [filterReview, otherReview] },
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     await page.getByLabel("dedup search").fill("filter");
     await page.getByLabel("dedup kind").selectOption("place");
     await page.getByLabel("dedup provider").fill("python-mois-api");
@@ -764,7 +764,7 @@ test.describe("admin/dedup-reviews actions", () => {
       byStatus: { pending: rows },
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     await page.getByLabel("dedup page size").selectOption("25");
 
     await expect(
@@ -798,7 +798,7 @@ test.describe("admin/dedup-reviews actions", () => {
   test("empty list renders the dedup empty message", async ({ page }) => {
     await mockDedupReviews(page, { byStatus: { pending: [] } });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
@@ -823,13 +823,13 @@ test.describe("admin/dedup-reviews actions", () => {
   test("list error renders the destructive alert (role=alert)", async ({
     page,
   }) => {
-    await page.route("**/v1/admin/dedup-reviews**", async (route) => {
+    await page.route("**/v1/admin/features/dedup-reviews**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const path = apiPathname(url);
       if (
         request.method() === "GET" &&
-        path === "/v1/admin/dedup-reviews"
+        path === "/v1/admin/features/dedup-reviews"
       ) {
         await route.fulfill({ status: 500, body: "" });
         return;
@@ -837,7 +837,7 @@ test.describe("admin/dedup-reviews actions", () => {
       await route.continue();
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
 
     // variant='destructive' Alert => role=alert (Wave-1 gotcha).
     await expect(
@@ -876,7 +876,7 @@ test.describe("admin/dedup-reviews actions", () => {
       byStatus: { pending: [reviewA, reviewB] },
     });
 
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
 
     // 행-준비 대기(Wave-1 early-click race guard): 첫 select 체크박스가 보일 때까지.
     const rowSelect = page.getByRole("checkbox", { name: "행 선택" });

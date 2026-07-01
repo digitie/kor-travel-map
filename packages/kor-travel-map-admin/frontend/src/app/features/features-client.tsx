@@ -352,7 +352,7 @@ export function FeaturesClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/feature-update-requests"
+            href="/admin/features/update-requests"
           >
             <RefreshCwIcon data-icon="inline-start" />
             Update
@@ -366,7 +366,7 @@ export function FeaturesClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/dedup-reviews"
+            href="/admin/features/dedup-reviews"
           >
             <GitCompareArrowsIcon data-icon="inline-start" />
             중복 검토

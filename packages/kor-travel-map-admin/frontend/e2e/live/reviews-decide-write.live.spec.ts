@@ -5,8 +5,8 @@ import * as F from "./_fixtures";
 
 // LIVE (non-mock) e2e for the dedup + enrichment review DECISION round-trip.
 //
-// PART A (NOT gated): read-input round-trip for both /admin/dedup-reviews and
-//   /admin/enrichment-reviews — status / score-band / search / page-size /
+// PART A (NOT gated): read-input round-trip for both /admin/features/dedup-reviews and
+//   /admin/features/enrichment-reviews — status / score-band / search / page-size /
 //   pagination drive the list GET query string (asserted via waitForResponse on
 //   the /api/proxy list path), the UI table/empty-state reflects it, and — when a
 //   candidate row exists — clicking it opens the comparison dialog and the dialog
@@ -166,9 +166,9 @@ interface Surface {
 
 const DEDUP: Surface = {
   key: "dedup",
-  route: "/admin/dedup-reviews",
+  route: "/admin/features/dedup-reviews",
   heading: "Dedup review",
-  listPath: "/v1/admin/dedup-reviews",
+  listPath: "/v1/admin/features/dedup-reviews",
   searchLabel: "dedup search",
   statusLabel: "dedup status",
   scoreLabel: "dedup score filter",
@@ -182,9 +182,9 @@ const DEDUP: Surface = {
 
 const ENRICHMENT: Surface = {
   key: "enrichment",
-  route: "/admin/enrichment-reviews",
+  route: "/admin/features/enrichment-reviews",
   heading: "Enrichment review",
-  listPath: "/v1/admin/enrichment-reviews",
+  listPath: "/v1/admin/features/enrichment-reviews",
   searchLabel: "enrichment search",
   statusLabel: "enrichment status",
   scoreLabel: "enrichment score filter",

@@ -219,21 +219,21 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 
 | Route | 백엔드 API | 비고 |
 |-------|-----------|------|
-| `/` | `/v1/ops/metrics`, `/v1/ops/import-jobs`, `/v1/admin/dedup-reviews`, `/v1/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
+| `/` | `/v1/ops/metrics`, `/v1/ops/import-jobs`, `/v1/admin/features/dedup-reviews`, `/v1/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
 | `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/deactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
-| `/admin/curated-features` | `/v1/admin/curated-features*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
+| `/admin/features/curated` | `/v1/admin/features/curated*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/v1/ops/import-jobs`, `WS /v1/ops/live` | 구현됨. 작업 큐 상태, status/kind/batch/parent filter, live invalidate |
 | `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |
-| `/ops/providers` | `/v1/ops/providers`, `/v1/ops/providers/{provider}`, `/v1/admin/provider-refresh-policies*`, `/v1/admin/feature-update-requests` | 구현됨. provider×dataset sync/detail, cursor, 최근 provider_dataset request, policy 편집/요청 생성 |
+| `/ops/providers` | `/v1/ops/providers`, `/v1/ops/providers/{provider}`, `/v1/admin/provider-refresh-policies*`, `/v1/admin/features/update-requests` | 구현됨. provider×dataset sync/detail, cursor, 최근 provider_dataset request, policy 편집/요청 생성 |
 | `/ops/consistency` | `/v1/ops/metrics`, `/v1/ops/consistency/reports`, `/v1/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
 | `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs`, `/v1/ops/import-job-events` | 구현됨. system/API log와 import job event stream 조회 |
-| `/admin/dedup-reviews` | `/v1/admin/dedup-reviews` | 구현됨. dedup 검토 큐와 결정 mutation |
-| `/admin/enrichment-reviews` | `/v1/admin/enrichment-reviews` | 구현됨. enrichment 검토 큐와 결정 mutation |
-| `/admin/feature-update-requests` | `/v1/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
-| `/admin/feature-update-requests/[request_id]` | `/v1/admin/feature-update-requests/{request_id}`, `WS /v1/ops/live` | 구현됨. scope/matched_scope/job/Dagster 상세, cancel/run-now |
+| `/admin/features/dedup-reviews` | `/v1/admin/features/dedup-reviews` | 구현됨. dedup 검토 큐와 결정 mutation |
+| `/admin/features/enrichment-reviews` | `/v1/admin/features/enrichment-reviews` | 구현됨. enrichment 검토 큐와 결정 mutation |
+| `/admin/features/update-requests` | `/v1/admin/features/update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
+| `/admin/features/update-requests/[request_id]` | `/v1/admin/features/update-requests/{request_id}`, `WS /v1/ops/live` | 구현됨. scope/matched_scope/job/Dagster 상세, cancel/run-now |
 | `/admin/poi-cache-targets` | `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/dagster` | `/v1/ops/dagster/summary`, `/v1/ops/dagster/runs/{run_id}`, `/v1/ops/dagster/nux-seen` | 구현됨. Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed |
 | `/admin/settings` | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` | 구현됨. public API key 생성/폐기와 로그인 감사 로그 조회 |

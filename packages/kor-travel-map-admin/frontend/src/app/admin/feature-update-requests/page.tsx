@@ -1,11 +1,5 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { FeatureUpdateRequestsClient } from "./feature-update-requests-client";
-
-export const metadata: Metadata = {
-  title: "갱신 요청 | kor-travel-map admin",
-};
-
-export default function FeatureUpdateRequestsPage() {
-  return <FeatureUpdateRequestsClient />;
+export default function LegacyFeatureUpdateRequestsPage() {
+  redirect("/admin/features/update-requests");
 }

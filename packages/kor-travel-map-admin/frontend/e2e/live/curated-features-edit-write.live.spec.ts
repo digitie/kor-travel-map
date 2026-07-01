@@ -26,7 +26,7 @@ const MARKER = `[e2e ${RUN_ID}]`;
 const REUSE_POLICIES = ["allowed", "blocked", "manual_review"] as const;
 type ReusePolicy = (typeof REUSE_POLICIES)[number];
 
-const LIST_ROUTE = "/admin/curated-features";
+const LIST_ROUTE = "/admin/features/curated";
 
 const EXECUTE_CURATED_WRITE =
   process.env.E2E_ADMIN_WRITE === "1" || process.env.E2E_CURATED_WRITE === "1";
@@ -99,11 +99,11 @@ async function browserFetch<T>(
 // --- curated-feature specific helpers ---
 
 function curatedPath(curatedFeatureId: string): string {
-  return `/v1/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`;
+  return `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`;
 }
 
 function detailRoute(curatedFeatureId: string): string {
-  return `/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`;
+  return `/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`;
 }
 
 async function fetchCuratedFeature(
@@ -221,7 +221,7 @@ async function gotoListSingleRow(
   return row;
 }
 
-test.describe("/admin/curated-features edit round-trip (self-restoring)", () => {
+test.describe("/admin/features/curated edit round-trip (self-restoring)", () => {
   test("기존 curated 후보의 display_title/reuse_policy를 편집하면 백엔드와 상세/목록 UI에 반영되고 원복된다", async ({
     page,
   }) => {

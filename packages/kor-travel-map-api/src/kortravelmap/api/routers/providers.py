@@ -235,7 +235,7 @@ def _dataset_links(provider: str, dataset_key: str) -> list[OpsProviderLink]:
         OpsProviderLink(
             rel="feature_update_requests",
             href=(
-                "/v1/admin/feature-update-requests"
+                "/v1/admin/features/update-requests"
                 f"?scope_type=provider_dataset&provider={provider_query}"
                 f"&dataset_key={dataset_query}"
             ),
@@ -243,7 +243,7 @@ def _dataset_links(provider: str, dataset_key: str) -> list[OpsProviderLink]:
         ),
         OpsProviderLink(
             rel="create_feature_update_request",
-            href="/v1/admin/feature-update-requests",
+            href="/v1/admin/features/update-requests",
             label="create provider_dataset update request",
         ),
         OpsProviderLink(
@@ -307,7 +307,7 @@ def _update_request_summary(
         dagster_run_id=request.dagster_run_id,
         created_at=request.created_at,
         updated_at=request.updated_at,
-        status_url=f"/v1/admin/feature-update-requests/{request.request_id}",
+        status_url=f"/v1/admin/features/update-requests/{request.request_id}",
     )
 
 

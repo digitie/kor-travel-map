@@ -224,10 +224,10 @@ POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
-GET/POST /v1/admin/feature-update-requests             # 재적재(admin 단일, legacy alias 제거됨)
-GET    /v1/admin/feature-update-requests/{request_id}
-POST   /v1/admin/feature-update-requests/{request_id}/cancel
-POST   /v1/admin/feature-update-requests/{request_id}/run-now    # kill-switch
+GET/POST /v1/admin/features/update-requests             # 재적재(admin 단일, legacy alias 제거됨)
+GET    /v1/admin/features/update-requests/{request_id}
+POST   /v1/admin/features/update-requests/{request_id}/cancel
+POST   /v1/admin/features/update-requests/{request_id}/run-now    # kill-switch
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
@@ -240,8 +240,8 @@ GET/PUT /v1/admin/provider-refresh-policies/{provider}/{dataset_key}       # 정
 GET/POST /v1/admin/backups   GET /v1/admin/backups/{backup_id}
 DELETE /v1/admin/backups/{backup_id}                   # 🆕 정리 lifecycle
 POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
-GET    /v1/admin/dedup-reviews   PATCH /v1/admin/dedup-reviews/{review_id}        # 🔁 복수+param
-GET    /v1/admin/enrichment-reviews   PATCH /v1/admin/enrichment-reviews/{review_id} # 🔁
+GET    /v1/admin/features/dedup-reviews   PATCH /v1/admin/features/dedup-reviews/{review_id}        # 🔁 복수+param
+GET    /v1/admin/features/enrichment-reviews   PATCH /v1/admin/features/enrichment-reviews/{review_id} # 🔁
 GET    /v1/admin/issues   GET/PATCH /v1/admin/issues/{issue_id}                  # 🔁 noun 일치
 ```
 - **version 0/1 모델(#317)**: provider 적재=`data_origin='provider', data_version=0`,

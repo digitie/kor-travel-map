@@ -249,12 +249,12 @@ GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 ### 4.2 Admin/write
 
 ```
-GET    /v1/admin/curated-features
-POST   /v1/admin/curated-features
-PATCH  /v1/admin/curated-features/{curated_feature_id}
-DELETE /v1/admin/curated-features/{curated_feature_id}
-POST   /v1/admin/curated-features/{curated_feature_id}/select
-POST   /v1/admin/curated-features/{curated_feature_id}/unselect
+GET    /v1/admin/features/curated
+POST   /v1/admin/features/curated
+PATCH  /v1/admin/features/curated/{curated_feature_id}
+DELETE /v1/admin/features/curated/{curated_feature_id}
+POST   /v1/admin/features/curated/{curated_feature_id}/select
+POST   /v1/admin/features/curated/{curated_feature_id}/unselect
 GET/POST/PATCH /v1/admin/curated-themes
 GET/POST/PATCH /v1/admin/curated-sources
 GET/POST/PATCH /v1/admin/curated-source-rules
@@ -329,7 +329,7 @@ PinVi는 `feature_id`를 파싱하지 않는다. kor-travel-map item에 `feature
 
 ## 6. Admin UI 요구사항
 
-Admin UI는 `/admin/curated-features` 화면에서 기존 feature/admin 흐름 위에 다음
+Admin UI는 `/admin/features/curated` 화면에서 기존 feature/admin 흐름 위에 다음
 운영 흐름을 제공한다(T-223c-3).
 
 - feature 목록·상세에서 "curated 후보/선정/제외" 상태를 볼 수 있다.

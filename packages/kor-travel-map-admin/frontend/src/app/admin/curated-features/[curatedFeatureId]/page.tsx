@@ -1,23 +1,12 @@
-import type { Metadata } from "next";
-
-import { CuratedFeatureDetailClient } from "./curated-feature-detail-client";
+import { redirect } from "next/navigation";
 
 type CuratedFeatureDetailPageProps = {
   params: Promise<{ curatedFeatureId: string }>;
 };
 
-export async function generateMetadata({
-  params,
-}: CuratedFeatureDetailPageProps): Promise<Metadata> {
-  const { curatedFeatureId } = await params;
-  return {
-    title: `${curatedFeatureId} | Curated feature detail`,
-  };
-}
-
-export default async function CuratedFeatureDetailPage({
+export default async function LegacyCuratedFeatureDetailPage({
   params,
 }: CuratedFeatureDetailPageProps) {
   const { curatedFeatureId } = await params;
-  return <CuratedFeatureDetailClient curatedFeatureId={curatedFeatureId} />;
+  redirect(`/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`);
 }

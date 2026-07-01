@@ -1,11 +1,5 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { EnrichmentReviewClient } from "./enrichment-review-client";
-
-export const metadata: Metadata = {
-  title: "Enrichment review | kor-travel-map admin",
-};
-
-export default function EnrichmentReviewPage() {
-  return <EnrichmentReviewClient />;
+export default function LegacyEnrichmentReviewPage() {
+  redirect("/admin/features/enrichment-reviews");
 }

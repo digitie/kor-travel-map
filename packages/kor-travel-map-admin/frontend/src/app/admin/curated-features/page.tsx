@@ -1,12 +1,5 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { CuratedFeaturesClient } from "./curated-features-client";
-
-export const metadata: Metadata = {
-  title: "Curated features | kor-travel-map",
-  description: "curated 후보, source rule, detail snapshot preview 운영 화면",
-};
-
-export default function CuratedFeaturesPage() {
-  return <CuratedFeaturesClient />;
+export default function LegacyCuratedFeaturesPage() {
+  redirect("/admin/features/curated");
 }

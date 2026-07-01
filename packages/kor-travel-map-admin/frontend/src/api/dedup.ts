@@ -1,5 +1,5 @@
 /**
- * `/v1/admin/dedup-reviews/*` 중복 후보 검토 hooks.
+ * `/v1/admin/features/dedup-reviews/*` 중복 후보 검토 hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type DedupSchemas = components["schemas"];
 type DedupReviewListQuery = NonNullable<
-  paths["/v1/admin/dedup-reviews"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features/dedup-reviews"]["get"]["parameters"]["query"]
 >;
 
 export type DedupStatus = Exclude<
@@ -50,7 +50,7 @@ function fetchDedupReviews(
   signal?: AbortSignal,
 ): Promise<DedupReviewListResponse> {
   return getJson<DedupReviewListResponse>(
-    pathWithQuery("/v1/admin/dedup-reviews", {
+    pathWithQuery("/v1/admin/features/dedup-reviews", {
       status: params.status,
       provider: params.provider,
       dataset_key: params.dataset_key,
@@ -71,7 +71,7 @@ function decideDedupReview(
   body: DedupReviewDecisionRequest,
 ): Promise<DedupReviewDecisionResponse> {
   return patchJson<DedupReviewDecisionResponse>(
-    `/v1/admin/dedup-reviews/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/features/dedup-reviews/${encodeURIComponent(reviewKey)}`,
     body,
   );
 }
@@ -81,7 +81,7 @@ function fetchDedupReviewDetail(
   signal?: AbortSignal,
 ): Promise<DedupReviewDetailResponse> {
   return getJson<DedupReviewDetailResponse>(
-    `/v1/admin/dedup-reviews/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/features/dedup-reviews/${encodeURIComponent(reviewKey)}`,
     { signal },
   );
 }

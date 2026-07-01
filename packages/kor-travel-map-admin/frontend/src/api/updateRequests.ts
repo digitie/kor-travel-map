@@ -1,5 +1,5 @@
 /**
- * `/v1/admin/feature-update-requests/*` 업데이트 요청 queue hooks.
+ * `/v1/admin/features/update-requests/*` 업데이트 요청 queue hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,10 +9,10 @@ import type { components, paths } from "./types";
 
 type FeatureUpdateSchemas = components["schemas"];
 type FeatureUpdateListQuery = NonNullable<
-  paths["/v1/admin/feature-update-requests"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features/update-requests"]["get"]["parameters"]["query"]
 >;
 type GeneratedFeatureUpdateRequestCreateRequest =
-  paths["/v1/admin/feature-update-requests"]["post"]["requestBody"]["content"]["application/json"];
+  paths["/v1/admin/features/update-requests"]["post"]["requestBody"]["content"]["application/json"];
 
 export type FeatureUpdateStatus = Exclude<
   FeatureUpdateListQuery["status"],
@@ -66,7 +66,7 @@ function fetchFeatureUpdateRequests(
   signal?: AbortSignal,
 ): Promise<FeatureUpdateRequestListResponse> {
   return getJson<FeatureUpdateRequestListResponse>(
-    pathWithQuery("/v1/admin/feature-update-requests", {
+    pathWithQuery("/v1/admin/features/update-requests", {
       status: params.status,
       scope_type: params.scope_type,
       provider: params.provider,
@@ -85,7 +85,7 @@ function fetchFeatureUpdateRequest(
   signal?: AbortSignal,
 ): Promise<FeatureUpdateRequestDetailResponse> {
   return getJson<FeatureUpdateRequestDetailResponse>(
-    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
+    `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}`,
     { signal },
   );
 }
@@ -94,7 +94,7 @@ function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    "/v1/admin/feature-update-requests",
+    "/v1/admin/features/update-requests",
     body,
   );
 }
@@ -104,7 +104,7 @@ function cancelFeatureUpdateRequest(
   body: FeatureUpdateRequestCancelRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/cancel`,
+    `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}/cancel`,
     body,
   );
 }
@@ -114,7 +114,7 @@ function runFeatureUpdateRequestNow(
   body: FeatureUpdateRequestRunNowRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/run-now`,
+    `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}/run-now`,
     body,
   );
 }

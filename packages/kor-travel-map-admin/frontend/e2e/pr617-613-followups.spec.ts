@@ -18,13 +18,13 @@ test.describe("PR #617/#613 후속 UI", () => {
   });
 
   test("중복 검토 — 다중 선택 combobox 필터(#617)", async ({ page }) => {
-    await page.goto("/admin/dedup-reviews");
+    await page.goto("/admin/features/dedup-reviews");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("combobox").first()).toBeVisible();
   });
 
   test("보강 검토 — 다중 선택 combobox 필터(#617)", async ({ page }) => {
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("combobox").first()).toBeVisible();
   });

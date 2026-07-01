@@ -46,6 +46,7 @@ from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
     "router",
+    "feature_router",
     "FeatureUpdateRequestCreateRequest",
     "FeatureUpdateRequestRecord",
     "FeatureUpdateRequestCreateResponse",
@@ -55,9 +56,16 @@ __all__ = [
 
 ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX = "/admin/feature-update-requests"
 ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX = "/v1/admin/feature-update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_ROUTE_PREFIX = "/admin/features/update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_URL_PREFIX = "/v1/admin/features/update-requests"
 
 router = APIRouter(
     prefix=ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX,
+    tags=["admin-update-requests"],
+    include_in_schema=False,
+)
+feature_router = APIRouter(
+    prefix=ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_ROUTE_PREFIX,
     tags=["admin-update-requests"],
 )
 
@@ -617,6 +625,35 @@ async def create_feature_update_request(
     )
 
 
+@feature_router.post(
+    "",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="feature update request 생성 또는 dry-run",
+    responses={
+        409: {
+            "description": (
+                "run_mode=now 요청의 동일 scope advisory lock 경합"
+            )
+        }
+    },
+)
+async def create_feature_update_request_feature_route(
+    body: FeatureUpdateRequestCreateRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestCreateResponse:
+    return await _create_feature_update_request_response(
+        body,
+        session,
+        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_URL_PREFIX,
+    )
+
+
+@feature_router.get(
+    "",
+    response_model=FeatureUpdateRequestListResponse,
+    summary="feature update request 목록",
+)
 @router.get(
     "",
     response_model=FeatureUpdateRequestListResponse,
@@ -660,6 +697,12 @@ async def list_feature_update_requests(
     )
 
 
+@feature_router.get(
+    "/{request_id}",
+    response_model=FeatureUpdateRequestDetailResponse,
+    summary="feature update request 단건 조회",
+    responses={404: {"description": "request_id 없음"}},
+)
 @router.get(
     "/{request_id}",
     response_model=FeatureUpdateRequestDetailResponse,
@@ -683,6 +726,15 @@ async def get_feature_update_request(
     )
 
 
+@feature_router.post(
+    "/{request_id}/cancel",
+    response_model=FeatureUpdateRequestCreateResponse,
+    summary="feature update request 취소",
+    responses={
+        404: {"description": "request_id 없음"},
+        409: {"description": "이미 terminal 상태라 취소 불가"},
+    },
+)
 @router.post(
     "/{request_id}/cancel",
     response_model=FeatureUpdateRequestCreateResponse,
@@ -721,6 +773,16 @@ async def cancel_feature_update_request(
     return _create_response(cancelled, started_at=started_at)
 
 
+@feature_router.post(
+    "/{request_id}/run-now",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="기존 request payload를 run_mode=now로 재큐잉",
+    responses={
+        404: {"description": "request_id 없음"},
+        409: {"description": "이미 running 상태 또는 동일 scope lock 경합"},
+    },
+)
 @router.post(
     "/{request_id}/run-now",
     response_model=FeatureUpdateRequestCreateResponse,

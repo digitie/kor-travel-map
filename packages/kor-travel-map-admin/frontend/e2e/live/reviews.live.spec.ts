@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 import * as F from "./_fixtures";
 
 // LIVE (non-mock) read-only e2e for the 4 review/queue pages.
-//   route: /admin/issues, /admin/dedup-reviews, /admin/enrichment-reviews,
-//          /admin/feature-update-requests
+//   route: /admin/issues, /admin/features/dedup-reviews, /admin/features/enrichment-reviews,
+//          /admin/features/update-requests
 // backend = prod 실데이터(1.09M features). PRESENCE for all four queues = 0
 // (issues/dedup/enrichment/update_requests). So every page is expected to be
 // EMPTY: we assert heading + (empty-state OR table container) + controls, never
@@ -39,7 +39,7 @@ const PAGES: ReviewPage[] = [
     sortHeaders: ["severity", "status", "detected"],
   },
   {
-    route: "/admin/dedup-reviews",
+    route: "/admin/features/dedup-reviews",
     heading: "Dedup review",
     navLabel: "Feature 중복 검토",
     empty: "dedup review가 없습니다.",
@@ -48,7 +48,7 @@ const PAGES: ReviewPage[] = [
     sortHeaders: ["score", "distance", "status", "created"],
   },
   {
-    route: "/admin/enrichment-reviews",
+    route: "/admin/features/enrichment-reviews",
     heading: "Enrichment review",
     navLabel: "Feature 보강 검토",
     empty: "enrichment review가 없습니다.",
@@ -57,7 +57,7 @@ const PAGES: ReviewPage[] = [
     sortHeaders: ["score", "distance", "status", "created"],
   },
   {
-    route: "/admin/feature-update-requests",
+    route: "/admin/features/update-requests",
     heading: "Feature update requests",
     navLabel: "Feature 갱신",
     empty: "요청이 없습니다.",
@@ -266,7 +266,7 @@ const ENRICH = PAGES[2];
 const DEDUP = PAGES[1];
 
 test.describe("reviews live — enrichment pager controls", () => {
-  test("/admin/enrichment-reviews top/bottom pager buttons present", async ({
+  test("/admin/features/enrichment-reviews top/bottom pager buttons present", async ({
     page,
   }) => {
     await page.goto(ENRICH.route);
@@ -276,7 +276,7 @@ test.describe("reviews live — enrichment pager controls", () => {
     await expect(page.getByLabel("마지막 페이지")).toHaveCount(2, { timeout: T });
   });
 
-  test("/admin/enrichment-reviews 이전 페이지 disabled on page 1", async ({
+  test("/admin/features/enrichment-reviews 이전 페이지 disabled on page 1", async ({
     page,
   }) => {
     await page.goto(ENRICH.route);
@@ -287,7 +287,7 @@ test.describe("reviews live — enrichment pager controls", () => {
     });
   });
 
-  test("/admin/enrichment-reviews next/last disabled when empty", async ({
+  test("/admin/features/enrichment-reviews next/last disabled when empty", async ({
     page,
   }) => {
     await page.goto(ENRICH.route);
@@ -304,7 +304,7 @@ test.describe("reviews live — enrichment pager controls", () => {
 
 test.describe("reviews live — enrichment search/filter/page-size dimensions", () => {
   for (const term of F.SEARCH_TERMS.slice(0, 8)) {
-    test(`/admin/enrichment-reviews search "${term}"`, async ({ page }) => {
+    test(`/admin/features/enrichment-reviews search "${term}"`, async ({ page }) => {
       await page.goto(ENRICH.route);
       await expectPageLoaded(page, ENRICH);
       const search = page.getByLabel("enrichment search");
@@ -316,7 +316,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
   }
 
   for (const size of F.PAGE_SIZES) {
-    test(`/admin/enrichment-reviews page size ${size}`, async ({ page }) => {
+    test(`/admin/features/enrichment-reviews page size ${size}`, async ({ page }) => {
       await page.goto(ENRICH.route);
       await expectPageLoaded(page, ENRICH);
       const sizeSelect = page.getByLabel("enrichment page size");
@@ -328,7 +328,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
   }
 
   for (const score of ["all", "high", "middle", "low"]) {
-    test(`/admin/enrichment-reviews score=${score}`, async ({ page }) => {
+    test(`/admin/features/enrichment-reviews score=${score}`, async ({ page }) => {
       await page.goto(ENRICH.route);
       await expectPageLoaded(page, ENRICH);
       const scoreSelect = page.getByLabel("enrichment score filter");
@@ -339,7 +339,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
     });
   }
 
-  test("/admin/enrichment-reviews provider filter input", async ({ page }) => {
+  test("/admin/features/enrichment-reviews provider filter input", async ({ page }) => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
     const provider = page.getByLabel("enrichment provider");
@@ -349,7 +349,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
     await expectEmptyOrTable(page, ENRICH);
   });
 
-  test("/admin/enrichment-reviews detail dialog map surface smoke", async ({ page }) => {
+  test("/admin/features/enrichment-reviews detail dialog map surface smoke", async ({ page }) => {
     await page.goto(ENRICH.route);
     await expectPageLoaded(page, ENRICH);
     await expect(page.getByRole("button", { name: "지도" })).toHaveCount(0);
@@ -361,7 +361,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
       const detailResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "GET" &&
-          response.url().includes("/api/proxy/v1/admin/enrichment-reviews/"),
+          response.url().includes("/api/proxy/v1/admin/features/enrichment-reviews/"),
       );
       await detailButton.click();
       await expect((await detailResponse).ok()).toBe(true);
@@ -380,7 +380,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
 });
 
 test.describe("reviews live — dedup search/filter/page-size dimensions", () => {
-  test("/admin/dedup-reviews pager controls present", async ({ page }) => {
+  test("/admin/features/dedup-reviews pager controls present", async ({ page }) => {
     await page.goto(DEDUP.route);
     await expectPageLoaded(page, DEDUP);
     await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2, {
@@ -398,7 +398,7 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
   });
 
   for (const term of F.SEARCH_TERMS.slice(0, 8)) {
-    test(`/admin/dedup-reviews search "${term}"`, async ({ page }) => {
+    test(`/admin/features/dedup-reviews search "${term}"`, async ({ page }) => {
       await page.goto(DEDUP.route);
       await expectPageLoaded(page, DEDUP);
       const search = page.getByLabel("dedup search");
@@ -410,7 +410,7 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
   }
 
   for (const size of F.PAGE_SIZES) {
-    test(`/admin/dedup-reviews page size ${size}`, async ({ page }) => {
+    test(`/admin/features/dedup-reviews page size ${size}`, async ({ page }) => {
       await page.goto(DEDUP.route);
       await expectPageLoaded(page, DEDUP);
       const sizeSelect = page.getByLabel("dedup page size");
@@ -422,7 +422,7 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
   }
 
   for (const kind of ["all", ...F.KINDS.slice(0, 4)]) {
-    test(`/admin/dedup-reviews kind=${kind}`, async ({ page }) => {
+    test(`/admin/features/dedup-reviews kind=${kind}`, async ({ page }) => {
       await page.goto(DEDUP.route);
       await expectPageLoaded(page, DEDUP);
       const kindSelect = page.getByLabel("dedup kind");
@@ -434,7 +434,7 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
   }
 
   for (const score of ["all", "high", "middle", "low"]) {
-    test(`/admin/dedup-reviews score=${score}`, async ({ page }) => {
+    test(`/admin/features/dedup-reviews score=${score}`, async ({ page }) => {
       await page.goto(DEDUP.route);
       await expectPageLoaded(page, DEDUP);
       const scoreSelect = page.getByLabel("dedup score filter");
@@ -445,7 +445,7 @@ test.describe("reviews live — dedup search/filter/page-size dimensions", () =>
     });
   }
 
-  test("/admin/dedup-reviews provider/dataset/category inputs", async ({ page }) => {
+  test("/admin/features/dedup-reviews provider/dataset/category inputs", async ({ page }) => {
     await page.goto(DEDUP.route);
     await expectPageLoaded(page, DEDUP);
     await page.getByLabel("dedup provider").fill("python-mois-api");

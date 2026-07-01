@@ -154,7 +154,7 @@ function featureHref(featureId: string): string {
 }
 
 function curatedFeatureHref(curatedFeatureId: string): string {
-  return `/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`;
+  return `/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`;
 }
 
 function isPlaceCandidateProvider(value: string): boolean {
