@@ -97,7 +97,6 @@ export interface FeatureDetailValues {
   homepageUrl: string;
   organizer: string;
   phone: string;
-  placeKind: string;
   sourceUrl: string;
   startDate: string;
   urlsExtraJson: string;
@@ -209,11 +208,13 @@ export function FeatureBasicInfoSection({
   kind,
   name,
   nameError,
+  placeKind,
   required = false,
   status,
   onCategoryChange,
   onKindChange,
   onNameChange,
+  onPlaceKindChange,
   onStatusChange,
 }: {
   actions?: ReactNode;
@@ -225,11 +226,13 @@ export function FeatureBasicInfoSection({
   kind: string;
   name: string;
   nameError?: string;
+  placeKind: string;
   required?: boolean;
   status: string;
   onCategoryChange: (value: string) => void;
   onKindChange: (value: FeatureFormKind) => void;
   onNameChange: (value: string) => void;
+  onPlaceKindChange: (value: string) => void;
   onStatusChange: (value: FeatureFormStatus) => void;
 }) {
   return (
@@ -241,7 +244,7 @@ export function FeatureBasicInfoSection({
       <div className="grid gap-3 lg:grid-cols-4">
         <FormSelect
           id={`${idPrefix}-kind`}
-          label="종류"
+          label="Feature 종류"
           value={kind}
           onChange={(event) => onKindChange(event.target.value as FeatureFormKind)}
         >
@@ -251,6 +254,24 @@ export function FeatureBasicInfoSection({
             </NativeSelectOption>
           ))}
         </FormSelect>
+        {kind === "place" ? (
+          <FormSelect
+            id={`${idPrefix}-place-kind`}
+            label="장소 종류"
+            value={placeKind}
+            onChange={(event) => onPlaceKindChange(event.target.value)}
+          >
+            {withCurrentOption(
+              PLACE_KIND_OPTIONS,
+              placeKind,
+              "현재 장소 종류",
+            ).map((option) => (
+              <NativeSelectOption key={option.value} value={option.value}>
+                {option.label}
+              </NativeSelectOption>
+            ))}
+          </FormSelect>
+        ) : null}
         <FormSelect
           id={`${idPrefix}-status`}
           label="상태"
@@ -479,22 +500,6 @@ export function FeatureDetailSection({
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          <FormSelect
-            id={`${idPrefix}-place-kind`}
-            label="장소 종류"
-            value={values.placeKind}
-            onChange={(event) => onChange("placeKind", event.target.value)}
-          >
-            {withCurrentOption(
-              PLACE_KIND_OPTIONS,
-              values.placeKind,
-              "현재 장소 종류",
-            ).map((option) => (
-              <NativeSelectOption key={option.value} value={option.value}>
-                {option.label}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
           <FormField
             error={errors?.phone ?? phoneError}
             id={`${idPrefix}-phone`}
