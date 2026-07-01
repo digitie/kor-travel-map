@@ -836,6 +836,7 @@ export function FeatureCreateClient() {
           kind={form.kind}
           name={form.name}
           nameError={fieldErrors.name}
+          placeKind={form.placeKind}
           required
           status={form.status}
           onCategoryChange={(value) => updateForm("category", value)}
@@ -843,6 +844,7 @@ export function FeatureCreateClient() {
             updateForm("kind", value as AdminFeatureCreateRequest["kind"])
           }
           onNameChange={(value) => updateForm("name", value)}
+          onPlaceKindChange={(value) => updateForm("placeKind", value)}
           onStatusChange={(value) =>
             updateForm("status", value as AdminFeatureCreateRequest["status"])
           }
@@ -965,7 +967,6 @@ export function FeatureCreateClient() {
               homepageUrl: form.homepageUrl,
               organizer: form.organizer,
               phone: form.phone,
-              placeKind: form.placeKind,
               sourceUrl: form.sourceUrl,
               startDate: form.startDate,
               urlsExtraJson: form.urlsExtraJson,

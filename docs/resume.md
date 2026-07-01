@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-01 (codex) — Feature 작성 폼 장소 종류 최상위화 로컬 구현 중
+
+- **완료(UI)**: 새 Feature 작성과 변경 요청 작성 화면에서 `장소 종류(place_kind)`를 상세 섹션에서
+  기본 정보 섹션으로 올렸다. `Feature 종류`가 `place`일 때만 표시한다.
+- **완료(UI)**: `area`/`route` Feature는 수동 생성·수정 대상이 아니므로, 변경 요청 작성 화면에서
+  기존 `area`/`route` Feature를 불러오면 경고를 표시하고 요청 생성을 막는다.
+- **검증**: frontend type-check 통과, frontend lint 오류 없음(기존 경고 4건), frontend unit
+  45 passed, `git diff --check` 통과.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지한다.
+
 ## 2026-07-01 (codex) — Feature 지도/주소 코드 후속 보강 로컬 구현 완료
 
 - **완료(UI)**: 겹친 Feature 점 마커 선택 팝업이 즉시 닫히지 않도록 마커/클러스터 클릭 이벤트와

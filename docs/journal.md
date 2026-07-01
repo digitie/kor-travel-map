@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-01 (codex) — Feature 작성 폼 장소 종류 최상위화
+
+새 Feature 작성과 변경 요청 작성 화면에서 `장소 종류(place_kind)`를 보조 상세 필드가 아닌 기본 정보
+영역의 최상위 입력으로 올렸다.
+
+- **UI 정리**: 공용 `FeatureBasicInfoSection`에 `장소 종류` 입력을 배치하고, `Feature 종류`가
+  `place`일 때만 표시한다. 상세 섹션에서는 전화번호·URL·행사 상세만 유지한다.
+- **수정 제한**: `area`와 `route` Feature는 수동 생성·수정 대상이 아니므로, 변경 요청 작성 화면에서
+  기존 `area`/`route` Feature를 불러오면 경고를 표시하고 요청 생성을 막는다.
+- **계약 유지**: API payload는 기존 계약대로 `detail.place_kind`에 저장한다. 화면상의 입력 위치만
+  기본 정보로 승격했다.
+
 ## 2026-07-01 (codex) — Feature 지도 겹침 선택/주소 코드 입력 후속 보강
 
 Feature 지도에서 겹친 점 마커 선택 팝업이 보이지 않는 회귀와 새 Feature 작성 화면의 주소 입력 후속

@@ -127,6 +127,7 @@ const SIDO_SEARCH_LABEL_BY_CODE: Record<string, string> = {
 
 type FeatureMutationStatus = (typeof FEATURE_STATUS_OPTIONS)[number]["value"];
 type FeatureMutationKind = (typeof FEATURE_KIND_OPTIONS)[number]["value"];
+const UNSUPPORTED_MANUAL_MUTATION_KINDS = new Set(["area", "route"]);
 
 interface SigunguCandidate {
   code: string;
@@ -244,6 +245,10 @@ function JsonBlock({ value }: { value: unknown }) {
 
 function isFeatureMutationKind(value: string): value is FeatureMutationKind {
   return FEATURE_KIND_OPTIONS.some((option) => option.value === value);
+}
+
+function isUnsupportedManualMutationKind(value: string): boolean {
+  return UNSUPPORTED_MANUAL_MUTATION_KINDS.has(value);
 }
 
 function isFeatureMutationStatus(value: string): value is FeatureMutationStatus {
@@ -979,6 +984,11 @@ export function FeatureChangeRequestsClient({
     prefillFeature.data?.data.feature?.feature_id === form.featureId.trim()
       ? prefillFeature.data.data.feature
       : null;
+  const unsupportedUpdateKind =
+    loadedUpdateFeature &&
+    isUnsupportedManualMutationKind(loadedUpdateFeature.kind)
+      ? loadedUpdateFeature.kind
+      : null;
 
   const params = useMemo(
     () => ({
@@ -1086,13 +1096,24 @@ export function FeatureChangeRequestsClient({
     if (!targetId || feature.feature_id !== targetId) return;
     const key = `${feature.feature_id}:${feature.updated_at}`;
     if (appliedFeaturePrefillRef.current === key) return;
-    setForm((current) => ({
-      ...current,
-      ...detailToFormPatch(feature),
-      reason: current.reason || "admin feature detail edit",
-    }));
+    if (isUnsupportedManualMutationKind(feature.kind)) {
+      appliedFeaturePrefillRef.current = key;
+      return;
+    }
     appliedFeaturePrefillRef.current = key;
-  }, [prefillFeature.data?.data.feature, prefillFeatureId, form.action, form.featureId]);
+    queueMicrotask(() => {
+      setForm((current) => ({
+        ...current,
+        ...detailToFormPatch(feature),
+        reason: current.reason || "admin feature detail edit",
+      }));
+    });
+  }, [
+    prefillFeature.data?.data.feature,
+    prefillFeatureId,
+    form.action,
+    form.featureId,
+  ]);
 
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1106,6 +1127,11 @@ export function FeatureChangeRequestsClient({
         const response = await createFeature.mutateAsync(buildCreatePayload(form));
         setSelectedRequest(response.data.request);
       } else if (form.action === "update") {
+        if (unsupportedUpdateKind) {
+          throw new Error(
+            `${unsupportedUpdateKind} Feature는 수동 생성/수정 대상이 아닙니다.`,
+          );
+        }
         const featureId = form.featureId.trim();
         const response = await patchFeature.mutateAsync({
           featureId,
@@ -1379,7 +1405,8 @@ export function FeatureChangeRequestsClient({
                 <Button
                   disabled={
                     anyMutationPending ||
-                    (form.action === "update" && prefillFeature.isFetching)
+                    (form.action === "update" && prefillFeature.isFetching) ||
+                    Boolean(unsupportedUpdateKind)
                   }
                   size="sm"
                   type="submit"
@@ -1485,12 +1512,14 @@ export function FeatureChangeRequestsClient({
                 idPrefix="change"
                 kind={form.kind}
                 name={form.name}
+                placeKind={form.placeKind}
                 status={form.status}
                 onCategoryChange={(value) => updateForm("category", value)}
                 onKindChange={(value) =>
                   updateForm("kind", value as FeatureMutationKind)
                 }
                 onNameChange={(value) => updateForm("name", value)}
+                onPlaceKindChange={(value) => updateForm("placeKind", value)}
                 onStatusChange={(value) =>
                   updateForm("status", value as FeatureMutationStatus)
                 }
@@ -1504,6 +1533,15 @@ export function FeatureChangeRequestsClient({
                 <Alert variant="destructive">
                   <AlertTitle>feature 상세 prefill 실패</AlertTitle>
                   <AlertDescription>{prefillFeature.error.message}</AlertDescription>
+                </Alert>
+              ) : null}
+              {unsupportedUpdateKind ? (
+                <Alert variant="destructive">
+                  <AlertTitle>수동 수정 불가</AlertTitle>
+                  <AlertDescription>
+                    {unsupportedUpdateKind} Feature는 이 화면에서 생성하거나 수정할 수
+                    없습니다.
+                  </AlertDescription>
                 </Alert>
               ) : null}
 
@@ -1629,7 +1667,6 @@ export function FeatureChangeRequestsClient({
                     homepageUrl: form.homepageUrl,
                     organizer: form.organizer,
                     phone: form.phone,
-                    placeKind: form.placeKind,
                     sourceUrl: form.sourceUrl,
                     startDate: form.startDate,
                     urlsExtraJson: form.urlsJson,
