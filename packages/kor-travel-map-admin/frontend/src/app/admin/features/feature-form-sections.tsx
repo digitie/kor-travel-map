@@ -4,6 +4,8 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 import type { ReactNode } from "react";
 
 import type { CategorySummary } from "@/api/categories";
+import type { KorTravelGeoCandidate } from "@/api/korTravelGeo";
+import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { FormTextArea } from "@/components/ui/form-textarea";
@@ -36,9 +38,57 @@ export interface FeatureAddressValues {
   roadAddressManagementNo: string;
   roadNameCode: string;
   sidoCode: string;
+  sigunguCode: string;
 }
 
 type FeatureAddressField = keyof FeatureAddressValues;
+
+const ADDRESS_CODE_RULES: Record<
+  Extract<
+    FeatureAddressField,
+    | "adminDongCode"
+    | "legalDongCode"
+    | "roadAddressManagementNo"
+    | "roadNameCode"
+    | "sidoCode"
+    | "sigunguCode"
+  >,
+  { label: string; length: number }
+> = {
+  adminDongCode: { label: "행정동 코드", length: 10 },
+  legalDongCode: { label: "법정동 코드", length: 10 },
+  roadAddressManagementNo: { label: "도로명주소 관리번호", length: 25 },
+  roadNameCode: { label: "도로명 코드", length: 12 },
+  sidoCode: { label: "시도 코드", length: 2 },
+  sigunguCode: { label: "시군구 코드", length: 5 },
+};
+
+export function addressCodeError(
+  field: keyof typeof ADDRESS_CODE_RULES,
+  value: string,
+): string | undefined {
+  const raw = value.trim();
+  if (raw.length === 0) return undefined;
+  const rule = ADDRESS_CODE_RULES[field];
+  if (!/^\d+$/.test(raw)) {
+    return `${rule.label}는 ${rule.length}자리 숫자여야 합니다.`;
+  }
+  if (raw.length !== rule.length) {
+    return `${rule.label}는 ${rule.length}자리여야 합니다.`;
+  }
+  return undefined;
+}
+
+export function validateAddressCodes(
+  values: Pick<FeatureAddressValues, keyof typeof ADDRESS_CODE_RULES>,
+): void {
+  for (const field of Object.keys(ADDRESS_CODE_RULES) as Array<
+    keyof typeof ADDRESS_CODE_RULES
+  >) {
+    const error = addressCodeError(field, values[field]);
+    if (error) throw new Error(error);
+  }
+}
 
 export interface FeatureDetailValues {
   detailExtraJson: string;
@@ -95,7 +145,7 @@ export function FeatureLocationPreviewSection({
   const zoom = coord ? zoomWhenCoord : DEFAULT_VIEWPORT.zoom;
 
   return (
-    <div className={cn("min-w-0 rounded-lg border bg-background", className)}>
+    <div className={cn("flex min-w-0 flex-col rounded-lg border bg-background", className)}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <h2 className="font-medium">좌표</h2>
@@ -107,7 +157,7 @@ export function FeatureLocationPreviewSection({
         </div>
         {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </div>
-      <div className={cn("relative overflow-hidden", heightClassName)}>
+      <div className={cn("relative min-h-0 overflow-hidden", heightClassName)}>
         <VWorldMapView
           apiKey={apiKey}
           center={center}
@@ -248,13 +298,13 @@ export function FeatureBasicInfoSection({
 export function FeatureAddressSection({
   className,
   idPrefix,
-  sigunguControl,
+  onSelectRegionCandidate,
   values,
   onChange,
 }: {
   className?: string;
   idPrefix: string;
-  sigunguControl: ReactNode;
+  onSelectRegionCandidate?: (candidate: KorTravelGeoCandidate) => void;
   values: FeatureAddressValues;
   onChange: (field: FeatureAddressField, value: string) => void;
 }) {
@@ -280,34 +330,55 @@ export function FeatureAddressSection({
           value={values.addressAdmin}
           onChange={(event) => onChange("addressAdmin", event.target.value)}
         />
-        {sigunguControl}
-        <FormField
+        <AdminRegionAutoSearch
           id={`${idPrefix}-sido-code`}
+          kind="sido"
           label="시도 코드"
           value={values.sidoCode}
-          onChange={(event) => onChange("sidoCode", event.target.value)}
+          onChange={(value) => onChange("sidoCode", value)}
+          onSelectCandidate={onSelectRegionCandidate}
+          placeholder="시도명 또는 코드 검색"
         />
-        <FormField
+        <AdminRegionAutoSearch
+          id={`${idPrefix}-sigungu-code`}
+          kind="sigungu"
+          label="시군구 코드"
+          value={values.sigunguCode}
+          onChange={(value) => onChange("sigunguCode", value)}
+          onSelectCandidate={onSelectRegionCandidate}
+        />
+        <AdminRegionAutoSearch
           id={`${idPrefix}-legal-dong-code`}
+          kind="legal_dong"
           label="법정동 코드"
           value={values.legalDongCode}
-          onChange={(event) => onChange("legalDongCode", event.target.value)}
+          onChange={(value) => onChange("legalDongCode", value)}
+          onSelectCandidate={onSelectRegionCandidate}
         />
-        <FormField
+        <AdminRegionAutoSearch
           id={`${idPrefix}-admin-dong-code`}
+          kind="admin_dong"
           label="행정동 코드"
           value={values.adminDongCode}
-          onChange={(event) => onChange("adminDongCode", event.target.value)}
+          onChange={(value) => onChange("adminDongCode", value)}
+          onSelectCandidate={onSelectRegionCandidate}
         />
         <FormField
+          error={addressCodeError("roadNameCode", values.roadNameCode)}
           id={`${idPrefix}-road-name-code`}
+          inputMode="numeric"
           label="도로명 코드"
           value={values.roadNameCode}
           onChange={(event) => onChange("roadNameCode", event.target.value)}
         />
         <FormField
           className="md:col-span-2"
+          error={addressCodeError(
+            "roadAddressManagementNo",
+            values.roadAddressManagementNo,
+          )}
           id={`${idPrefix}-road-address-management-no`}
+          inputMode="numeric"
           label="도로명주소 관리번호"
           value={values.roadAddressManagementNo}
           onChange={(event) =>

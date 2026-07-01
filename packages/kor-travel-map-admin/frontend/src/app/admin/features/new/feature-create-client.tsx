@@ -41,7 +41,6 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
-import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +71,7 @@ import {
   FeatureBasicInfoSection,
   FeatureDetailSection,
   FeatureLocationPreviewSection,
+  validateAddressCodes,
 } from "../feature-form-sections";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
@@ -242,6 +242,7 @@ function validateCreateTextFields(
   ) {
     throw new Error("목록에 있는 카테고리를 선택하세요.");
   }
+  validateAddressCodes(form);
 }
 
 function coordOrNull(
@@ -360,6 +361,25 @@ function korTravelGeoCandidateKey(candidate: KorTravelGeoCandidate): string {
     .join("|");
 }
 
+function korTravelGeoCandidateAddressText(
+  candidate: KorTravelGeoCandidate,
+): string {
+  const address = candidate.address;
+  const region = candidate.region;
+  const regionText = [region?.sido, region?.sigungu, region?.legal_dong ?? region?.admin_dong]
+    .map((item) => item?.trim())
+    .filter(Boolean)
+    .join(" ");
+  return (
+    address?.road_address ??
+    address?.parcel_address ??
+    address?.full ??
+    (regionText.length > 0 ? regionText : undefined) ??
+    candidate.match_kind ??
+    ""
+  );
+}
+
 export function FeatureCreateClient() {
   const mapRef = useRef<MapLibreMap | null>(null);
 
@@ -369,6 +389,8 @@ export function FeatureCreateClient() {
   const [korTravelGeoError, setKorTravelGeoError] = useState<string | null>(null);
   const [korTravelGeoCandidates, setKorTravelGeoCandidates] = useState<KorTravelGeoCandidate[]>([]);
   const [korTravelGeoPending, setKorTravelGeoPending] = useState(false);
+  const [selectedKorTravelGeoKey, setSelectedKorTravelGeoKey] =
+    useState<string | null>(null);
   const [createdRequest, setCreatedRequest] =
     useState<AdminFeatureChangeRecord | null>(null);
 
@@ -466,11 +488,14 @@ export function FeatureCreateClient() {
     const nextCoord = korTravelGeoCandidateToCoord(candidate);
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
+    const addressText = korTravelGeoCandidateAddressText(candidate);
+    setSelectedKorTravelGeoKey(korTravelGeoCandidateKey(candidate));
     setForm((current) => ({
       ...current,
       addressAdmin: fieldText(address.admin) ?? current.addressAdmin,
       addressLegal: fieldText(address.legal) ?? current.addressLegal,
       addressRoad: fieldText(address.road) ?? current.addressRoad,
+      geocodeQuery: addressText || current.geocodeQuery,
       adminDongCode: codes.admin_dong_code ?? current.adminDongCode,
       legalDongCode: codes.legal_dong_code ?? current.legalDongCode,
       roadNameCode: codes.road_name_code ?? current.roadNameCode,
@@ -495,6 +520,7 @@ export function FeatureCreateClient() {
       const selectedCoord = parseCoord(form);
       const response = await reverseGeocode(selectedCoord);
       setKorTravelGeoCandidates(response.candidates);
+      setSelectedKorTravelGeoKey(null);
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
@@ -516,6 +542,7 @@ export function FeatureCreateClient() {
     try {
       const response = await geocodeAddress(query, form.geocodeType);
       setKorTravelGeoCandidates(response.candidates);
+      setSelectedKorTravelGeoKey(null);
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
@@ -538,6 +565,7 @@ export function FeatureCreateClient() {
     setFieldErrors({});
     setKorTravelGeoError(null);
     setKorTravelGeoCandidates([]);
+    setSelectedKorTravelGeoKey(null);
     setCreatedRequest(null);
   };
 
@@ -623,7 +651,9 @@ export function FeatureCreateClient() {
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
           <FeatureLocationPreviewSection
             apiKey={VWORLD_KEY}
+            className="h-full"
             coord={coord}
+            heightClassName="min-h-[28rem] flex-1"
             markerColor={form.markerColor}
             markerIcon={form.markerIcon}
             testId="feature-create-location-map"
@@ -703,10 +733,15 @@ export function FeatureCreateClient() {
                   {korTravelGeoCandidates.slice(0, 4).map((candidate) => {
                     const candidateCoord = korTravelGeoCandidateToCoord(candidate);
                     const address = candidate.address;
+                    const candidateKey = korTravelGeoCandidateKey(candidate);
+                    const selected = candidateKey === selectedKorTravelGeoKey;
                     return (
                       <button
-                        className="rounded-md border px-3 py-2 text-left text-sm hover:bg-muted"
-                        key={korTravelGeoCandidateKey(candidate)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
+                          selected ? "border-primary bg-primary/10 text-primary" : null,
+                        )}
+                        key={candidateKey}
                         type="button"
                         onClick={() => applyCandidate(candidate)}
                       >
@@ -910,17 +945,9 @@ export function FeatureCreateClient() {
               roadAddressManagementNo: form.roadAddressManagementNo,
               roadNameCode: form.roadNameCode,
               sidoCode: form.sidoCode,
+              sigunguCode: form.sigunguCode,
             }}
-            sigunguControl={
-              <AdminRegionAutoSearch
-                id="create-sigungu-code"
-                kind="sigungu"
-                label="시군구 코드"
-                value={form.sigunguCode}
-                onChange={(value) => updateForm("sigunguCode", value)}
-                onSelectCandidate={applyCandidate}
-              />
-            }
+            onSelectRegionCandidate={applyCandidate}
             onChange={(field, value) => updateForm(field, value)}
           />
           <FeatureDetailSection
