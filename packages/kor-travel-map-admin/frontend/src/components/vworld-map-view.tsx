@@ -49,6 +49,7 @@ interface VWorldMapViewProps {
   style?: CSSProperties;
   testId?: string;
   children?: ReactNode;
+  onClick?: (event: maplibregl.MapMouseEvent) => void;
   onContextMenu?: (event: maplibregl.MapMouseEvent) => void;
   onLongPress?: (event: {
     lngLat: maplibregl.LngLat;
@@ -72,6 +73,7 @@ export function VWorldMapView({
   style,
   testId,
   children,
+  onClick,
   onContextMenu,
   onLongPress,
   onLoad,
@@ -81,6 +83,7 @@ export function VWorldMapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const appliedStyleRef = useRef({ apiKey, layerType });
+  const onClickRef = useRef(onClick);
   const onContextMenuRef = useRef(onContextMenu);
   const onLongPressRef = useRef(onLongPress);
   const onLoadRef = useRef(onLoad);
@@ -90,6 +93,7 @@ export function VWorldMapView({
   const [loaded, setLoaded] = useState(false);
 
   useLayoutEffect(() => {
+    onClickRef.current = onClick;
     onContextMenuRef.current = onContextMenu;
     onLongPressRef.current = onLongPress;
     onLoadRef.current = onLoad;
@@ -135,6 +139,9 @@ export function VWorldMapView({
     const handleMoveEnd = () => {
       onMoveEndRef.current?.(nextMap);
     };
+    const handleClick = (event: maplibregl.MapMouseEvent) => {
+      onClickRef.current?.(event);
+    };
     const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
       onContextMenuRef.current?.(event);
     };
@@ -155,6 +162,7 @@ export function VWorldMapView({
 
     nextMap.on("load", handleLoad);
     nextMap.on("idle", handleLoad);
+    nextMap.on("click", handleClick);
     nextMap.on("contextmenu", handleContextMenu);
     nextMap.on("moveend", handleMoveEnd);
     nextMap.on("error", handleError);
@@ -262,6 +270,7 @@ export function VWorldMapView({
       resizeObserver?.disconnect();
       nextMap.off("load", handleLoad);
       nextMap.off("idle", handleLoad);
+      nextMap.off("click", handleClick);
       nextMap.off("contextmenu", handleContextMenu);
       nextMap.off("moveend", handleMoveEnd);
       nextMap.off("error", handleError);

@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-01 (codex) — Feature 작성/변경 요청 폼 공용화
+
+변경 요청 작성 화면의 레이아웃을 새 Feature 작성 화면 기준으로 맞추고, 좌표 미입력 상태의 지도
+프리뷰 공백을 제거했다.
+
+- **공용 섹션**: 기본 정보, 좌표 프리뷰, 주소, 상세 입력 섹션을 `feature-form-sections.tsx`로
+  분리해 새 Feature 작성과 변경 요청 작성 화면이 같은 컴포넌트를 쓰도록 했다.
+- **변경 요청 작성**: `변경 요청 작성` 카드 바로 아래에 `기본 정보`를 배치했다. 본문 시군구 입력은
+  새 Feature 작성 화면과 같은 `AdminRegionAutoSearch`를 사용하고, 후보 선택 시 주소·행정코드·좌표를
+  함께 채운다.
+- **좌표 지도**: 변경 요청 작성 화면의 좌표 프리뷰가 좌표 없음 상태에서도 기본 한국 본토 중심
+  지도 뷰를 렌더링한다. 빈 안내 박스 대신 동일한 지도 영역이 보이며, 지도 클릭으로 좌표 입력도
+  갱신할 수 있다.
+- **검증**: frontend type-check 통과, frontend lint 오류 없음(기존 경고 4건), frontend unit
+  45 passed, production build 통과(`NEXT_PUBLIC_KOR_TRAVEL_MAP_API`,
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` 임시 지정), `git diff --check` 통과.
+
 ## 2026-07-01 (codex) — route/Feature 지도/OpiNet 유가 회귀 수정
 
 세션 후속 확인 중 route 적재, Feature 지도 겹침 선택, OpiNet price 전국 분포가 다시 깨진 것을

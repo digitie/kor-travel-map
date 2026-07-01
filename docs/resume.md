@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-01 (codex) — Feature 작성/변경 요청 폼 공용화 로컬 구현 완료
+
+- **완료(로컬)**: 새 Feature 작성 화면과 변경 요청 작성 화면의 기본 정보·좌표·주소·상세 입력 섹션을
+  공용 컴포넌트로 정리했다.
+- **완료(UI)**: 변경 요청 작성 화면은 `변경 요청 작성` 카드 바로 아래에 `기본 정보`를 표시한다.
+  좌표가 없어도 기본 한국 본토 중심 지도 뷰를 렌더링하고, 지도 아래 빈 안내 영역은 제거했다.
+- **완료(UI)**: 변경 요청 작성 화면의 본문 시군구 입력은 새 Feature 작성 화면과 같은 자동검색 필드를
+  사용한다. 후보 선택 시 주소·행정코드·좌표를 함께 채운다.
+- **검증**: frontend type-check, frontend lint(기존 경고 4건), frontend unit 45 passed,
+  production build 통과(`NEXT_PUBLIC_KOR_TRAVEL_MAP_API`,
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` 임시 지정), `git diff --check` 통과.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green을 확인한다.
+
 ## 2026-07-01 (codex) — route/Feature 지도/OpiNet 유가 회귀 수정 배포 완료
 
 - **완료**: PR #619(`fix/route-marker-price-regressions`)는 CI green 후 main에 머지했고, n150에
