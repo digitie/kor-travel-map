@@ -40,6 +40,7 @@ import {
   useRejectAdminFeatureChangeMutation,
 } from "@/api/features";
 import {
+  korTravelGeoCandidateToAddressRecord,
   korTravelGeoCandidateToCoord,
   korTravelGeoCodesFromCandidate,
   reverseGeocode,
@@ -47,6 +48,7 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
+import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -55,23 +57,19 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { DataTable } from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
-import { FormTextArea } from "@/components/ui/form-textarea";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import {
-  EVENT_STATUS_OPTIONS,
   FEATURE_CHANGE_ACTION_OPTIONS,
   FEATURE_KIND_OPTIONS,
   FEATURE_STATUS_OPTIONS,
   MARKER_COLOR_OPTIONS,
   MARKER_ICON_OPTIONS,
-  PLACE_KIND_OPTIONS,
   markerColorSelectStyle,
   markerIconLabel,
   readableTextColor,
-  withCurrentOption,
 } from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import {
@@ -82,6 +80,13 @@ import {
 } from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 import { DEFAULT_VIEWPORT } from "@/state/map";
+
+import {
+  FeatureAddressSection,
+  FeatureBasicInfoSection,
+  FeatureDetailSection,
+  FeatureLocationPreviewSection,
+} from "../feature-form-sections";
 
 const CHANGE_STATUSES: Array<AdminFeatureChangeStatus | "all"> = [
   "pending",
@@ -311,11 +316,6 @@ function dateTimeLocalText(value: unknown): string {
   if (text.length === 0) return "";
   const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(text);
   return match ? `${match[1]}T${match[2]}` : text;
-}
-
-function categoryOptionLabel(category: CategorySummary): string {
-  const path = category.path.length > 0 ? category.path.join(" > ") : category.label;
-  return `${category.code} · ${path}`;
 }
 
 function optionLabel(
@@ -1086,9 +1086,6 @@ export function FeatureChangeRequestsClient({
   const [form, setForm] = useState<FeatureChangeFormState>(() => initialForm());
   const [formError, setFormError] = useState<string | null>(null);
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
-  const [sigunguCandidates, setSigunguCandidates] = useState<SigunguCandidate[]>([]);
-  const [sigunguSearchError, setSigunguSearchError] = useState<string | null>(null);
-  const [sigunguSearching, setSigunguSearching] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
   const categories = useCategories({ active_only: false, include_counts: false });
@@ -1137,12 +1134,6 @@ export function FeatureChangeRequestsClient({
     approveChange.error ??
     rejectChange.error;
   const categoryItems = categories.data?.data.items ?? [];
-  const selectedSigungu = sigunguCandidates.find(
-    (candidate) => candidate.code === form.sigunguCode.trim(),
-  );
-  const selectedSigunguLabel = selectedSigungu
-    ? `${selectedSigungu.label} · ${selectedSigungu.code}`
-    : null;
   const formCoord = parseCoordInput(form.lon, form.lat);
   const formCoordError =
     form.action === "delete" ? null : coordValidationMessage(form.lon, form.lat);
@@ -1162,6 +1153,29 @@ export function FeatureChangeRequestsClient({
     setFormError(null);
     appliedQueryPrefillRef.current = null;
     appliedFeaturePrefillRef.current = null;
+  };
+
+  const applyRegionCandidate = (candidate: KorTravelGeoCandidate) => {
+    const nextCoord = korTravelGeoCandidateToCoord(candidate);
+    const address = korTravelGeoCandidateToAddressRecord(candidate);
+    const codes = korTravelGeoCodesFromCandidate(candidate);
+    setForm((current) => ({
+      ...current,
+      addressAdmin: fieldText(address.admin) || current.addressAdmin,
+      addressLegal: fieldText(address.legal) || current.addressLegal,
+      addressRoad: fieldText(address.road) || current.addressRoad,
+      adminDongCode: codes.admin_dong_code ?? current.adminDongCode,
+      legalDongCode: codes.legal_dong_code ?? current.legalDongCode,
+      roadNameCode: codes.road_name_code ?? current.roadNameCode,
+      sidoCode: codes.sido_code ?? current.sidoCode,
+      sigunguCode: codes.sigungu_code ?? current.sigunguCode,
+      ...(nextCoord
+        ? {
+            lat: nextCoord.lat.toFixed(6),
+            lon: nextCoord.lon.toFixed(6),
+          }
+        : {}),
+    }));
   };
 
   useEffect(() => {
@@ -1201,43 +1215,6 @@ export function FeatureChangeRequestsClient({
     }));
     appliedFeaturePrefillRef.current = key;
   }, [prefillFeature.data?.data.feature, prefillFeatureId, form.action, form.featureId]);
-
-  useEffect(() => {
-    const raw = form.sigunguCode.trim();
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (cancelled) return;
-      setSigunguSearchError(null);
-      if (form.action === "delete" || raw.length === 0) {
-        setSigunguCandidates([]);
-        setSigunguSearching(false);
-        return;
-      }
-      const run = async () => {
-        setSigunguSearching(true);
-        try {
-          const candidates = await searchSigunguCandidates(raw);
-          if (!cancelled) setSigunguCandidates(candidates);
-        } catch (error) {
-          if (!cancelled) {
-            setSigunguCandidates([]);
-            setSigunguSearchError(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        } finally {
-          if (!cancelled) setSigunguSearching(false);
-        }
-      };
-      void run();
-    }, form.action === "delete" || raw.length === 0 ? 0 : 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [form.action, form.sigunguCode]);
 
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1622,26 +1599,46 @@ export function FeatureChangeRequestsClient({
             </div>
           </section>
 
-          {prefillFeature.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>feature 상세 prefill 실패</AlertTitle>
-              <AlertDescription>{prefillFeature.error.message}</AlertDescription>
-            </Alert>
-          ) : null}
-
           {form.action !== "delete" ? (
             <>
+              <FeatureBasicInfoSection
+                category={form.category}
+                categoryItems={categoryItems}
+                idPrefix="change"
+                kind={form.kind}
+                name={form.name}
+                status={form.status}
+                onCategoryChange={(value) => updateForm("category", value)}
+                onKindChange={(value) =>
+                  updateForm("kind", value as FeatureMutationKind)
+                }
+                onNameChange={(value) => updateForm("name", value)}
+                onStatusChange={(value) =>
+                  updateForm("status", value as FeatureMutationStatus)
+                }
+              />
+              {categories.isError ? (
+                <div className="text-sm text-destructive">
+                  {categories.error.message}
+                </div>
+              ) : null}
+              {prefillFeature.isError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>feature 상세 prefill 실패</AlertTitle>
+                  <AlertDescription>{prefillFeature.error.message}</AlertDescription>
+                </Alert>
+              ) : null}
+
               <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
-                <div className="min-w-0 rounded-lg border bg-background">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-                    <div>
-                      <h2 className="font-medium">좌표</h2>
-                      <p className="font-mono text-sm text-muted-foreground">
-                        {formCoord
-                          ? `${formCoord.lon.toFixed(6)}, ${formCoord.lat.toFixed(6)}`
-                          : "좌표 없음"}
-                      </p>
-                    </div>
+                <FeatureLocationPreviewSection
+                  apiKey={VWORLD_KEY}
+                  coord={formCoord}
+                  heightClassName="h-[18rem] sm:h-[24rem]"
+                  markerColor={form.markerColor}
+                  markerIcon={form.markerIcon}
+                  testId="feature-change-location-preview-map"
+                  title={form.name || "feature change point"}
+                  actions={
                     <Button
                       type="button"
                       variant="outline"
@@ -1650,43 +1647,15 @@ export function FeatureChangeRequestsClient({
                       <MapPinIcon data-icon="inline-start" />
                       위치 편집
                     </Button>
-                  </div>
-                  <div className="relative h-[18rem] overflow-hidden sm:h-[24rem]">
-                    {formCoord ? (
-                      <VWorldMapView
-                        apiKey={VWORLD_KEY}
-                        center={[formCoord.lon, formCoord.lat]}
-                        className="absolute inset-0 h-full w-full"
-                        key={`${formCoord.lon}:${formCoord.lat}`}
-                        navigation
-                        scale
-                        testId="feature-change-location-preview-map"
-                        zoom={13}
-                      >
-                        <VWorldMarker
-                          lngLat={[formCoord.lon, formCoord.lat]}
-                          markerColor={form.markerColor}
-                          markerIcon={form.markerIcon}
-                          selected
-                          size={30}
-                          title={form.name || "feature change point"}
-                        />
-                      </VWorldMapView>
-                    ) : (
-                      <div className="flex h-full items-center justify-center border-t border-dashed text-sm text-muted-foreground">
-                        위치 편집에서 좌표를 선택하세요.
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  }
+                  onMapClick={({ lon, lat }) => {
+                    updateForm("lon", lon.toFixed(6));
+                    updateForm("lat", lat.toFixed(6));
+                  }}
+                />
 
                 <section className="rounded-lg border bg-background p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="font-medium">위치/마커</h2>
-                    {selectedSigunguLabel ? (
-                      <Badge variant="secondary">{selectedSigunguLabel}</Badge>
-                    ) : null}
-                  </div>
+                  <h2 className="mb-3 font-medium">위치/마커</h2>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                     <FormField
                       aria-label="change lon"
@@ -1744,373 +1713,68 @@ export function FeatureChangeRequestsClient({
                         </NativeSelectOption>
                       ))}
                     </FormSelect>
-                    <FormField
-                      aria-label="change sigungu code"
-                      id="change-sigungu-code"
-                      inputMode="text"
-                      label="시군구 코드"
-                      value={form.sigunguCode}
-                      onChange={(event) =>
-                        updateForm("sigunguCode", event.target.value)
-                      }
-                    />
                   </div>
-                  <div className="mt-3 flex min-h-6 flex-wrap gap-2">
-                    {sigunguSearching ? <Badge variant="outline">검색 중</Badge> : null}
-                  </div>
-                  {sigunguSearchError ? (
-                    <div className="mt-2 text-sm text-destructive">
-                      {sigunguSearchError}
-                    </div>
-                  ) : null}
-                  {sigunguCandidates.length > 0 ? (
-                    <div className="mt-3 grid gap-1">
-                      {sigunguCandidates.map((candidate) => (
-                        <button
-                          className="rounded-md border px-2.5 py-2 text-left text-sm hover:bg-muted"
-                          key={candidate.code}
-                          type="button"
-                          onClick={() => updateForm("sigunguCode", candidate.code)}
-                        >
-                          <span className="font-mono">{candidate.code}</span>
-                          <span className="ml-2 text-muted-foreground">
-                            {candidate.label}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                 </section>
               </section>
 
-              <section className="rounded-lg border bg-background p-4">
-                <h2 className="mb-4 font-medium">기본 정보</h2>
-                <div className="grid gap-3 lg:grid-cols-4">
-                  <FormSelect
-                    aria-label="change kind"
-                    id="change-kind"
-                    label="종류"
-                    value={form.kind}
-                    onChange={(event) =>
-                      updateForm(
-                        "kind",
-                        event.target.value as FeatureMutationKind,
-                      )
-                    }
-                  >
-                    {FEATURE_KIND_OPTIONS.map((item) => (
-                      <NativeSelectOption key={item.value} value={item.value}>
-                        {item.label}
-                      </NativeSelectOption>
-                    ))}
-                  </FormSelect>
-                  <FormSelect
-                    aria-label="change feature status"
-                    id="change-status"
-                    label="상태"
-                    value={form.status}
-                    onChange={(event) =>
-                      updateForm(
-                        "status",
-                        event.target.value as FeatureMutationStatus,
-                      )
-                    }
-                  >
-                    {FEATURE_STATUS_OPTIONS.map((item) => (
-                      <NativeSelectOption key={item.value} value={item.value}>
-                        {item.label}
-                      </NativeSelectOption>
-                    ))}
-                  </FormSelect>
-                  <FormField
-                    aria-label="change name"
-                    id="change-name"
-                    label="이름"
-                    value={form.name}
-                    onChange={(event) => updateForm("name", event.target.value)}
-                  />
-                  <FormSelect
-                    aria-label="change category"
-                    id="change-category"
-                    label="카테고리"
-                    value={form.category}
-                    onChange={(event) => updateForm("category", event.target.value)}
-                  >
-                    {form.category &&
-                    !categoryItems.some((item) => item.code === form.category) ? (
-                      <NativeSelectOption value={form.category}>
-                        {form.category}
-                      </NativeSelectOption>
-                    ) : null}
-                    {categoryItems.map((item) => (
-                      <NativeSelectOption key={item.code} value={item.code}>
-                        {categoryOptionLabel(item)}
-                      </NativeSelectOption>
-                    ))}
-                  </FormSelect>
-                </div>
-                {categories.isError ? (
-                  <div className="mt-2 text-sm text-destructive">
-                    {categories.error.message}
-                  </div>
-                ) : null}
-              </section>
-
               <section className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-lg border bg-background p-4">
-                  <h2 className="mb-4 font-medium">주소</h2>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <FormField
-                      aria-label="change road address"
-                      id="change-address-road"
-                      label="도로명 주소"
-                      value={form.addressRoad}
-                      onChange={(event) =>
-                        updateForm("addressRoad", event.target.value)
-                      }
+                <FeatureAddressSection
+                  idPrefix="change"
+                  values={{
+                    addressAdmin: form.addressAdmin,
+                    addressExtraJson: form.addressJson,
+                    addressLegal: form.addressLegal,
+                    addressRoad: form.addressRoad,
+                    adminDongCode: form.adminDongCode,
+                    legalDongCode: form.legalDongCode,
+                    roadAddressManagementNo: form.roadAddressManagementNo,
+                    roadNameCode: form.roadNameCode,
+                    sidoCode: form.sidoCode,
+                  }}
+                  sigunguControl={
+                    <AdminRegionAutoSearch
+                      id="change-sigungu-code"
+                      kind="sigungu"
+                      label="시군구 코드"
+                      value={form.sigunguCode}
+                      onChange={(value) => updateForm("sigunguCode", value)}
+                      onSelectCandidate={applyRegionCandidate}
                     />
-                    <FormField
-                      aria-label="change legal address"
-                      id="change-address-legal"
-                      label="법정동 주소"
-                      value={form.addressLegal}
-                      onChange={(event) =>
-                        updateForm("addressLegal", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change admin address"
-                      id="change-address-admin"
-                      label="행정동 주소"
-                      value={form.addressAdmin}
-                      onChange={(event) =>
-                        updateForm("addressAdmin", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change sido code"
-                      id="change-sido-code"
-                      inputMode="numeric"
-                    label="시도 코드"
-                      value={form.sidoCode}
-                      onChange={(event) =>
-                        updateForm("sidoCode", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change legal dong code"
-                      id="change-legal-dong-code"
-                      inputMode="numeric"
-                    label="법정동 코드"
-                      value={form.legalDongCode}
-                      onChange={(event) =>
-                        updateForm("legalDongCode", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change admin dong code"
-                      id="change-admin-dong-code"
-                      inputMode="numeric"
-                    label="행정동 코드"
-                      value={form.adminDongCode}
-                      onChange={(event) =>
-                        updateForm("adminDongCode", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change road name code"
-                      id="change-road-name-code"
-                      inputMode="numeric"
-                    label="도로명 코드"
-                      value={form.roadNameCode}
-                      onChange={(event) =>
-                        updateForm("roadNameCode", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change road address management no"
-                      id="change-road-address-management-no"
-                      inputMode="numeric"
-                      label="도로명주소 관리번호"
-                      value={form.roadAddressManagementNo}
-                      onChange={(event) =>
-                        updateForm(
-                          "roadAddressManagementNo",
-                          event.target.value,
-                        )
-                      }
-                    />
-                  </div>
-                  <details className="mt-3 rounded-md border border-dashed p-3">
-                    <summary className="cursor-pointer text-sm font-medium">
-                      고급 추가 정보
-                    </summary>
-                    <FormTextArea
-                      className="mt-3"
-                      aria-label="change address JSON"
-                      id="change-address-json"
-                      label="주소 추가 정보"
-                      hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
-                      value={form.addressJson}
-                      onChange={(event) =>
-                        updateForm("addressJson", event.target.value)
-                      }
-                    />
-                  </details>
-                </div>
-                <div className="rounded-lg border bg-background p-4">
-                  <h2 className="mb-4 font-medium">상세</h2>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <FormField
-                      aria-label="change phone"
-                      id="change-phone"
-                      label="전화"
-                      error={
-                        phoneNumber<FeatureChangeFormState>()(form.phone, form)
-                      }
-                      inputMode="tel"
-                      placeholder="예: 02-123-4567"
-                      value={form.phone}
-                      onChange={(event) =>
-                        updateForm("phone", event.target.value)
-                      }
-                    />
-                    <FormSelect
-                      aria-label="change place kind"
-                      id="change-place-kind"
-                      label="장소 종류"
-                      value={form.placeKind}
-                      onChange={(event) =>
-                        updateForm("placeKind", event.target.value)
-                      }
-                    >
-                      {withCurrentOption(
-                        PLACE_KIND_OPTIONS,
-                        form.placeKind,
-                        "현재 장소 종류",
-                      ).map((option) => (
-                        <NativeSelectOption key={option.value} value={option.value}>
-                          {option.label}
-                        </NativeSelectOption>
-                      ))}
-                    </FormSelect>
-                    {form.kind === "event" ? (
-                      <>
-                        <FormSelect
-                          aria-label="change event status"
-                          id="change-event-status"
-                          label="행사 상태"
-                          value={form.eventStatus}
-                          onChange={(event) =>
-                            updateForm("eventStatus", event.target.value)
-                          }
-                        >
-                          {withCurrentOption(
-                            EVENT_STATUS_OPTIONS,
-                            form.eventStatus,
-                            "현재 행사 상태",
-                          ).map((option) => (
-                            <NativeSelectOption
-                              key={option.value}
-                              value={option.value}
-                            >
-                              {option.label}
-                            </NativeSelectOption>
-                          ))}
-                        </FormSelect>
-                        <FormField
-                          aria-label="change event start"
-                          id="change-start-date"
-                          label="행사 시작"
-                          type="datetime-local"
-                          value={form.startDate}
-                          onChange={(event) =>
-                            updateForm("startDate", event.target.value)
-                          }
-                        />
-                        <FormField
-                          aria-label="change event end"
-                          id="change-end-date"
-                          label="행사 종료"
-                          type="datetime-local"
-                          value={form.endDate}
-                          onChange={(event) =>
-                            updateForm("endDate", event.target.value)
-                          }
-                        />
-                        <FormField
-                          aria-label="change organizer"
-                          id="change-organizer"
-                          label="주최"
-                          value={form.organizer}
-                          onChange={(event) =>
-                            updateForm("organizer", event.target.value)
-                          }
-                        />
-                        <FormField
-                          aria-label="change venue"
-                          id="change-venue"
-                          label="행사 장소"
-                          value={form.venue}
-                          onChange={(event) =>
-                            updateForm("venue", event.target.value)
-                          }
-                        />
-                      </>
-                    ) : null}
-                    <FormField
-                      aria-label="change homepage url"
-                      id="change-homepage-url"
-                      label="홈페이지"
-                      error={httpUrl<FeatureChangeFormState>("홈페이지")(form.homepageUrl, form)}
-                      placeholder="https://example.kr"
-                      type="url"
-                      value={form.homepageUrl}
-                      onChange={(event) =>
-                        updateForm("homepageUrl", event.target.value)
-                      }
-                    />
-                    <FormField
-                      aria-label="change source url"
-                      id="change-source-url"
-                      label="출처"
-                      error={httpUrl<FeatureChangeFormState>("출처")(form.sourceUrl, form)}
-                      placeholder="https://example.kr/source"
-                      type="url"
-                      value={form.sourceUrl}
-                      onChange={(event) =>
-                        updateForm("sourceUrl", event.target.value)
-                      }
-                    />
-                  </div>
-                  <details className="mt-3 rounded-md border border-dashed p-3">
-                    <summary className="cursor-pointer text-sm font-medium">
-                      고급 추가 정보
-                    </summary>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <FormTextArea
-                        aria-label="change detail JSON"
-                        id="change-detail-json"
-                        label="상세 추가 정보"
-                        hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
-                        value={form.detailJson}
-                        onChange={(event) =>
-                          updateForm("detailJson", event.target.value)
-                        }
-                      />
-                      <FormTextArea
-                        aria-label="change urls JSON"
-                        id="change-urls-json"
-                        label="URL 추가 정보"
-                        hint="홈페이지/출처 외 추가 URL만 JSON으로 입력합니다."
-                        value={form.urlsJson}
-                        onChange={(event) =>
-                          updateForm("urlsJson", event.target.value)
-                        }
-                      />
-                    </div>
-                  </details>
-                </div>
+                  }
+                  onChange={(field, value) => {
+                    if (field === "addressExtraJson") {
+                      updateForm("addressJson", value);
+                    } else {
+                      updateForm(field, value);
+                    }
+                  }}
+                />
+                <FeatureDetailSection
+                  idPrefix="change"
+                  kind={form.kind}
+                  values={{
+                    detailExtraJson: form.detailJson,
+                    endDate: form.endDate,
+                    eventStatus: form.eventStatus,
+                    homepageUrl: form.homepageUrl,
+                    organizer: form.organizer,
+                    phone: form.phone,
+                    placeKind: form.placeKind,
+                    sourceUrl: form.sourceUrl,
+                    startDate: form.startDate,
+                    urlsExtraJson: form.urlsJson,
+                    venue: form.venue,
+                  }}
+                  onChange={(field, value) => {
+                    if (field === "detailExtraJson") {
+                      updateForm("detailJson", value);
+                    } else if (field === "urlsExtraJson") {
+                      updateForm("urlsJson", value);
+                    } else {
+                      updateForm(field, value);
+                    }
+                  }}
+                />
               </section>
             </>
           ) : null}
