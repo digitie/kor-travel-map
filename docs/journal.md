@@ -15,10 +15,13 @@
   않는 zoom에서는 cluster leaves를 읽어 기존 겹침 선택 팝업을 열도록 바꿨다.
 - **OpiNet price**: `low_top_area`가 시군구 목록을 서울부터 순차 소비해 `area×product` 호출 상한에
   먼저 걸릴 수 있어, 시도별 시군구를 round-robin으로 섞어 전국 표본이 먼저 잡히도록 바꿨다. compose의
-  `api`/`dagster`/`dagster-daemon`에도 `KOR_TRAVEL_MAP_OPINET_SCOPE_*` env 매핑을 명시했다.
+  `api`/`dagster`/`dagster-daemon`에도 `KOR_TRAVEL_MAP_OPINET_SCOPE_*` env 매핑을 명시했다. n150
+  배포 후 수동 materialize 중 OpiNet root area 응답의 invalid 시도 코드가 자식 조회로 들어가던
+  회귀를 확인해, provider 라이브러리가 허용하는 시도 코드만 자식 조회 대상으로 쓰도록 추가 보강했다.
 - **검증**: KNPS provider 53 passed, Dagster provider fetcher 75 passed/1 skipped, Docker Dagster
   runtime 9 passed, ruff targeted clean, frontend type-check, frontend lint(기존 경고 4건), frontend
-  unit 45 passed, `docker compose --env-file /dev/null config -q`, `git diff --check` 통과.
+  unit 45 passed, `docker compose --env-file /dev/null config -q`, `git diff --check` 통과. 추가 보강은
+  Dagster provider fetcher 76 passed/1 skipped, targeted ruff, targeted mypy 통과.
 
 ## 2026-06-30 (claude) — codex PR #613/#617 리뷰 후속 fix (#618)
 

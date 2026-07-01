@@ -1353,6 +1353,31 @@ def test_opinet_sigungu_area_codes_interleaves_sidos(
     assert client.area_calls == [None, "01", "02", "03"]
 
 
+def test_opinet_sigungu_area_codes_skips_invalid_root_sidos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[
+            _FakeOpinetArea("01"),
+            _FakeOpinetArea("20"),
+            _FakeOpinetArea("14"),
+        ],
+        child_areas={
+            "01": [_FakeOpinetArea("0101")],
+            "20": [_FakeOpinetArea("2001")],
+            "14": [_FakeOpinetArea("1401")],
+        },
+    )
+    client = fake()
+
+    areas = provider_fetchers._opinet_sigungu_area_codes(client)
+
+    assert areas == ["0101", "1401"]
+    assert client.area_calls == [None, "01", "14"]
+
+
 def test_opinet_stations_disabled_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="disabled"

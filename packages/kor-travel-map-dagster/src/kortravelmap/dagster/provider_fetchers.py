@@ -994,6 +994,29 @@ _OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = (
 _OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
 """quota-safe 전국 분포용 제품 코드: 휘발유, 경유, 고급휘발유."""
 
+_OPINET_VALID_SIDO_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "06",
+        "07",
+        "08",
+        "09",
+        "10",
+        "11",
+        "14",
+        "15",
+        "16",
+        "17",
+        "18",
+        "19",
+    }
+)
+"""``python-opinet-api``가 자식 area 조회에서 허용하는 OpiNet 시도 코드."""
+
 _OPINET_LOW_TOP_COUNT: Final[int] = 20
 """OpiNet ``lowTop10`` endpoint 최대 허용 건수."""
 
@@ -1168,6 +1191,8 @@ def _opinet_sigungu_area_codes(
     for sido in client.get_area_codes():
         sido_code = str(getattr(sido, "code", "")).strip()
         if not sido_code:
+            continue
+        if sido_code not in _OPINET_VALID_SIDO_CODES:
             continue
         if budget is not None and not budget.spend():
             break
