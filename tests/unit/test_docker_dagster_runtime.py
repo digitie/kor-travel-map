@@ -70,6 +70,20 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
 
 
 @pytest.mark.unit
+def test_docker_compose_maps_opinet_scope_to_runtime_services() -> None:
+    services = _compose()["services"]
+    expected_keys = {
+        "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
+        "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
+        "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
+    }
+
+    for service_name in ("api", "dagster", "dagster-daemon"):
+        environment = services[service_name]["environment"]
+        assert expected_keys <= set(environment), service_name
+
+
+@pytest.mark.unit
 def test_docker_compose_publishes_host_ports_on_localhost_by_default() -> None:
     services = _compose()["services"]
     bind_prefix = "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:"

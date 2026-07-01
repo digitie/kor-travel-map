@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-01 (codex) — route/Feature 지도/OpiNet 유가 회귀 수정
+
+세션 후속 확인 중 route 적재, Feature 지도 겹침 선택, OpiNet price 전국 분포가 다시 깨진 것을
+수정했다.
+
+- **KNPS route**: `knps_trails`의 비매칭 placeholder 제외가 정확히 `비매칭코스`/`Nonmatching Course`
+  일치에 의존하던 문제를 보강했다. `비매칭 코스`, `미매칭`, `unmatched`/`nonmatching` 계열 표기와
+  `MATCH_YN=N` 같은 매칭 실패 상태값도 route 적재에서 제외한다. 관련 raw key가 아닌 일반 메모에
+  `비매칭`이 들어간 정상 route는 유지하는 회귀 테스트를 추가했다.
+- **Feature 지도**: 숫자 클러스터 마커 클릭이 항상 확대만 시도하던 것을, 더 이상 의미 있게 확대되지
+  않는 zoom에서는 cluster leaves를 읽어 기존 겹침 선택 팝업을 열도록 바꿨다.
+- **OpiNet price**: `low_top_area`가 시군구 목록을 서울부터 순차 소비해 `area×product` 호출 상한에
+  먼저 걸릴 수 있어, 시도별 시군구를 round-robin으로 섞어 전국 표본이 먼저 잡히도록 바꿨다. compose의
+  `api`/`dagster`/`dagster-daemon`에도 `KOR_TRAVEL_MAP_OPINET_SCOPE_*` env 매핑을 명시했다.
+- **검증**: KNPS provider 53 passed, Dagster provider fetcher 75 passed/1 skipped, Docker Dagster
+  runtime 9 passed, ruff targeted clean, frontend type-check, frontend lint(기존 경고 4건), frontend
+  unit 45 passed, `docker compose --env-file /dev/null config -q`, `git diff --check` 통과.
+
 ## 2026-06-30 (claude) — codex PR #613/#617 리뷰 후속 fix (#618)
 
 codex #613(feature ops + Dagster 컨트롤)·#617(세션 UI 재반영 + MOIS sync-before-reads)을

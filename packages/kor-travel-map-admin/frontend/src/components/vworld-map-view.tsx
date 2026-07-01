@@ -600,6 +600,31 @@ function featureKindLabel(kind: string): string {
   return FEATURE_KIND_LABELS[kind] ?? kind;
 }
 
+function coincidentEntriesFromPointFeatures(
+  features: Array<GeoJSON.Feature<GeoJSON.Point, GeoJSON.GeoJsonProperties>>,
+): CoincidentEntry[] {
+  const entries: CoincidentEntry[] = [];
+  for (const feature of features) {
+    const properties = feature.properties ?? {};
+    const featureId = properties.feature_id;
+    if (featureId == null) continue;
+    const [lon, lat] = feature.geometry.coordinates;
+    entries.push({
+      feature_id: String(featureId),
+      name: String(properties.name ?? featureId),
+      kind: String(properties.kind ?? ""),
+      lon,
+      lat,
+    });
+  }
+  entries.sort((a, b) =>
+    a.kind === b.kind
+      ? a.name.localeCompare(b.name, "ko")
+      : a.kind.localeCompare(b.kind),
+  );
+  return entries;
+}
+
 /** 마커 우상단에 겹침 개수 배지를 단다(클릭하면 선택 팝업이 뜬다는 신호). */
 function appendCountBadge(el: HTMLElement, count: number, color: string): void {
   if (!el.style.position) el.style.position = "relative";
@@ -824,9 +849,11 @@ export function VWorldFeatureClusters({
   // 현재 떠 있는 선택 팝업을 추적한다(동일 좌표 KMA 초단기/단기 등 겹침 분기).
   const coincidentGroupsRef = useRef(new Map<string, CoincidentEntry[]>());
   const popupRef = useRef<MapLibrePopup | null>(null);
+  const clusterMaxZoomRef = useRef(clusterMaxZoom);
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
+    clusterMaxZoomRef.current = clusterMaxZoom;
     const summaries = new Map<string, readonly ClusterPriceSummaryPoint[]>();
     const weatherSummaries = new Map<string, ClusterWeatherSummaryPoint>();
     for (const feature of features) {
@@ -1118,7 +1145,10 @@ export function VWorldFeatureClusters({
 
     // 겹친 좌표의 feature들을 나열해 선택하게 하는 팝업. 동일 좌표(KMA 초단기/단기
     // 격자처럼)나 근접해 마커가 겹치는 경우, 마커 클릭이 이 팝업으로 분기한다.
-    const showCoincidentPopup = (group: CoincidentEntry[]) => {
+    const showCoincidentPopup = (
+      group: CoincidentEntry[],
+      lngLat: [number, number] = [group[0].lon, group[0].lat],
+    ) => {
       popupRef.current?.remove();
       const container = document.createElement("div");
       container.style.font = "13px/1.4 system-ui, -apple-system, sans-serif";
@@ -1185,9 +1215,35 @@ export function VWorldFeatureClusters({
         closeOnClick: true,
         maxWidth: "260px",
       })
-        .setLngLat([group[0].lon, group[0].lat])
+        .setLngLat(lngLat)
         .setDOMContent(container)
         .addTo(map);
+    };
+
+    const showClusterSelectionPopup = (
+      source: maplibregl.GeoJSONSource,
+      clusterId: number,
+      lngLat: [number, number],
+      pointCount: number,
+    ) => {
+      const limit = Math.max(1, Math.min(pointCount, 100));
+      void source
+        .getClusterLeaves(clusterId, limit, 0)
+        .then((leaves) => {
+          const group = coincidentEntriesFromPointFeatures(
+            leaves as Array<
+              GeoJSON.Feature<GeoJSON.Point, GeoJSON.GeoJsonProperties>
+            >,
+          );
+          if (group.length === 1) {
+            onSelectRef.current?.(group[0].feature_id);
+            return;
+          }
+          if (group.length > 1) showCoincidentPopup(group, lngLat);
+        })
+        .catch(() => {
+          /* 클러스터가 사라졌으면 무시 */
+        });
     };
 
     const updateMarkers = () => {
@@ -1250,21 +1306,42 @@ export function VWorldFeatureClusters({
             // 캐시 HIT 재사용 시 stale closure로 옛 클러스터를 확대하지 않게 한다.
             element.dataset.lon = String(coords[0]);
             element.dataset.lat = String(coords[1]);
+            element.dataset.pointCount = String(count);
             element.addEventListener("click", () => {
               const source = map.getSource(SRC) as maplibregl.GeoJSONSource;
               const currentClusterId = Number(element.dataset.clusterId);
+              const currentPointCount = Number(element.dataset.pointCount) || 0;
               const currentCoords: [number, number] = [
                 Number(element.dataset.lon),
                 Number(element.dataset.lat),
               ];
+              const openSelection = () => {
+                showClusterSelectionPopup(
+                  source,
+                  currentClusterId,
+                  currentCoords,
+                  currentPointCount,
+                );
+              };
               void source
                 .getClusterExpansionZoom(currentClusterId)
                 .then((zoom) => {
+                  const currentZoom = map.getZoom();
+                  const maxUsefulZoom = Math.min(
+                    map.getMaxZoom(),
+                    clusterMaxZoomRef.current + 1,
+                  );
+                  if (
+                    !Number.isFinite(zoom) ||
+                    zoom <= currentZoom + 0.05 ||
+                    currentZoom >= maxUsefulZoom - 0.05
+                  ) {
+                    openSelection();
+                    return;
+                  }
                   map.easeTo({ center: currentCoords, zoom });
                 })
-                .catch(() => {
-                  /* 클러스터가 사라졌으면 무시 */
-                });
+                .catch(openSelection);
             });
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);
@@ -1276,6 +1353,7 @@ export function VWorldFeatureClusters({
             element.dataset.clusterId = String(clusterId);
             element.dataset.lon = String(coords[0]);
             element.dataset.lat = String(coords[1]);
+            element.dataset.pointCount = String(count);
             if (element.textContent !== label) element.textContent = label;
             const ariaLabel = `feature 클러스터 ${count}건`;
             if (element.getAttribute("aria-label") !== ariaLabel) {

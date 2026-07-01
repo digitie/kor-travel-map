@@ -471,6 +471,36 @@ def test_unmatched_trail_course_is_skipped() -> None:
     assert [b.feature.name for b in bundles] == ["북한산 둘레길"]
 
 
+def test_unmatched_trail_course_variant_is_skipped() -> None:
+    assert (
+        _geo_one(
+            "knps_trails",
+            _LINE,
+            source_id="G-unmatched-variant",
+            name="북한산 둘레길",
+            raw={
+                "COURSE_NM": "비매칭 코스",
+                "MATCH_YN": "N",
+            },
+        )
+        == []
+    )
+
+    bundles = knps_geometry_records_to_bundles(
+        [
+            _GRec(
+                source_id="G-valid",
+                name="북한산 둘레길",
+                geom_wkt=_LINE,
+                raw={"비고": "비매칭 후보 검토 메모"},
+            )
+        ],
+        dataset_key="knps_trails",
+        fetched_at=_FETCHED,
+    )
+    assert [b.feature.name for b in bundles] == ["북한산 둘레길"]
+
+
 def test_geometry_deterministic_and_primary() -> None:
     b1 = _geo_one("knps_trails", _LINE)[0]
     b2 = _geo_one("knps_trails", _LINE)[0]

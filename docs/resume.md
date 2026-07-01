@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-01 (codex) — route/Feature 지도/OpiNet 유가 회귀 수정
+
+- **진행 중**: 후속 브랜치 `fix/route-marker-price-regressions`에서 route 적재 비매칭 제외, Feature 지도
+  숫자 클러스터 선택 메뉴, OpiNet price 전국 분포 회귀를 수정했다.
+- **완료(코드)**: KNPS `knps_trails`는 `비매칭코스` 정확 일치뿐 아니라 변형 표기와 매칭 실패 상태값도
+  제외한다. Feature 지도 숫자 클러스터는 더 이상 확대되지 않으면 기존 겹침 선택 팝업을 연다.
+  OpiNet `low_top_area`는 시도별 시군구 round-robin으로 호출 상한 전 전국 표본을 먼저 확보한다.
+- **완료(설정)**: `api`/`dagster`/`dagster-daemon` compose env에 `KOR_TRAVEL_MAP_OPINET_SCOPE_*`
+  매핑을 명시했다.
+- **검증**: KNPS provider 53 passed, Dagster provider fetcher 75 passed/1 skipped, Docker Dagster
+  runtime 9 passed, targeted ruff, frontend type-check, frontend lint(기존 경고 4건), frontend unit
+  45 passed, compose config, `git diff --check`.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green을 확인한다. 머지 뒤 n150에 재배포하고 route
+  비매칭/Feature 지도 겹침 선택/OpiNet price 분포를 운영 데이터로 smoke 확인한다.
+
 ## 2026-06-30 (codex) — 세션 개선 요청 후속 반영
 
 - **완료**: PR #615는 문서 복기 PR로 재구성한 뒤 merge commit

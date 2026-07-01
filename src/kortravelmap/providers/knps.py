@@ -487,6 +487,37 @@ _UNMATCHED_TRAIL_KOREAN_NAMES: Final[frozenset[str]] = frozenset({"비매칭코�
 _UNMATCHED_TRAIL_ENGLISH_NAMES: Final[frozenset[str]] = frozenset(
     {"nonmatching course", "non matching course", "unmatched course"}
 )
+_UNMATCHED_TRAIL_KOREAN_MARKERS: Final[frozenset[str]] = frozenset(
+    {"비매칭", "미매칭"}
+)
+_UNMATCHED_TRAIL_ENGLISH_MARKERS: Final[frozenset[str]] = frozenset(
+    {"nonmatching", "non matching", "unmatched"}
+)
+_UNMATCHED_TRAIL_NAME_KEYS: Final[tuple[str, ...]] = (
+    "탐방코스(한글)",
+    "탐방코스(영문)",
+    "COURSE_NM",
+    "COURSE_ENG",
+    "ENG_NM",
+    "course_name",
+    "name",
+    "NAME",
+    "name_en",
+)
+_UNMATCHED_TRAIL_STATUS_KEYS: Final[tuple[str, ...]] = (
+    "MATCH_YN",
+    "MATCHED",
+    "IS_MATCHED",
+    "match_yn",
+    "matched",
+    "is_matched",
+    "match_status",
+    "매칭여부",
+    "매칭상태",
+)
+_UNMATCHED_TRAIL_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"0", "n", "no", "false", "f", "x", "비매칭", "미매칭", "unmatched", "nonmatching"}
+)
 
 
 KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
@@ -620,20 +651,68 @@ def _ascii_course_key(value: str | None) -> str | None:
     return " ".join(text.replace("-", " ").replace("_", " ").split()).casefold()
 
 
+def _is_unmatched_trail_text(value: str | None) -> bool:
+    text = normalize_korean_text(value)
+    if text is None:
+        return False
+    compact = "".join(text.split())
+    if text in _UNMATCHED_TRAIL_KOREAN_NAMES:
+        return True
+    if any(marker in compact for marker in _UNMATCHED_TRAIL_KOREAN_MARKERS):
+        return True
+    ascii_key = _ascii_course_key(text)
+    if ascii_key is None:
+        return False
+    return ascii_key in _UNMATCHED_TRAIL_ENGLISH_NAMES or any(
+        marker in ascii_key for marker in _UNMATCHED_TRAIL_ENGLISH_MARKERS
+    )
+
+
+def _is_unmatched_trail_status(value: Any) -> bool:
+    text = normalize_korean_text(str(value))
+    if text is None:
+        return False
+    ascii_key = _ascii_course_key(text)
+    return (
+        ascii_key in _UNMATCHED_TRAIL_STATUS_VALUES
+        if ascii_key is not None
+        else False
+    ) or _is_unmatched_trail_text(text)
+
+
+def _raw_key_can_describe_unmatched_trail(key: object) -> bool:
+    key_text = str(key)
+    ascii_key = _ascii_course_key(key_text) or ""
+    return any(part in key_text for part in ("코스", "경로", "노선", "매칭")) or any(
+        part in ascii_key for part in ("course", "route", "trail", "match", "name")
+    )
+
+
 def _is_unmatched_trail_course(record: KnpsGeometryRecord) -> bool:
     """KNPS 원천의 공식 코스 미매칭 placeholder를 route 적재에서 제외한다."""
     raw = record.raw
+    if _is_unmatched_trail_text(record.name):
+        return True
     for source_name in (
-        normalize_korean_text(record.name),
-        _raw_text(raw, "탐방코스(한글)", "COURSE_NM", "course_name", "name", "NAME"),
+        _raw_text(raw, *_UNMATCHED_TRAIL_NAME_KEYS),
+        _raw_text(raw, "탐방코스(영문)", "COURSE_ENG", "ENG_NM", "name_en"),
     ):
-        if source_name in _UNMATCHED_TRAIL_KOREAN_NAMES:
+        if _is_unmatched_trail_text(source_name):
             return True
 
-    english_name = _ascii_course_key(
-        _raw_text(raw, "탐방코스(영문)", "COURSE_ENG", "ENG_NM", "name_en")
-    )
-    return english_name in _UNMATCHED_TRAIL_ENGLISH_NAMES
+    for key in _UNMATCHED_TRAIL_STATUS_KEYS:
+        value = raw.get(key)
+        if value is not None and _is_unmatched_trail_status(value):
+            return True
+
+    for key, value in raw.items():
+        if (
+            value is not None
+            and _raw_key_can_describe_unmatched_trail(key)
+            and _is_unmatched_trail_text(str(value))
+        ):
+            return True
+    return False
 
 
 def _geometry_record_name(
