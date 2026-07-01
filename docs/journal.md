@@ -22,6 +22,13 @@
   runtime 9 passed, ruff targeted clean, frontend type-check, frontend lint(기존 경고 4건), frontend
   unit 45 passed, `docker compose --env-file /dev/null config -q`, `git diff --check` 통과. 추가 보강은
   Dagster provider fetcher 76 passed/1 skipped, targeted ruff, targeted mypy 통과.
+- **머지/배포**: PR #619/#620을 CI green 후 main에 머지하고 n150에 재배포했다. 배포 후 Alembic head,
+  map 컨테이너 health, 공개 UI 로그인 POST(200 + Set-Cookie, 오답 401), Dagster hotfix 코드 반영을
+  확인했다. OpiNet price asset 수동 materialize는 `RUN_SUCCESS`로 끝났고 운영 price feature는 15개
+  시도 코드/2,624건으로 분포했다. 활성 `비매칭` route는 0건이다.
+- **live e2e**: Windows Playwright live targeted run에서 Feature 지도 마커 렌더와 클러스터 클릭 zoom
+  증가가 3 passed(인증 setup 포함)로 통과했다. 실제 점 마커 클릭 상세 패널 round-trip 테스트는 운영
+  타일/응답 대기에서 5분 timeout이 나 별도 후속 검증 대상으로 남겼다.
 
 ## 2026-06-30 (claude) — codex PR #613/#617 리뷰 후속 fix (#618)
 
