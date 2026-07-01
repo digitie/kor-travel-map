@@ -51,7 +51,7 @@ export function FeatureUpdateRequestDetailClient({
         <>
           <Link
             className={buttonVariants({ variant: "outline" })}
-            href="/admin/feature-update-requests"
+            href="/admin/features/update-requests"
           >
             <ArrowLeftIcon data-icon="inline-start" />
             목록

@@ -24,7 +24,7 @@ type ReviewSourceDetailRecord =
 type Meta = components["schemas"]["Meta"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
-const ENRICHMENT_GLOB = "**/v1/admin/enrichment-reviews**";
+const ENRICHMENT_GLOB = "**/v1/admin/features/enrichment-reviews**";
 
 function apiPathname(url: URL): string {
   return url.pathname.replace(/^\/api\/proxy/, "");
@@ -252,9 +252,9 @@ async function mockEnrichmentReviews(
 
     if (request.method() === "GET") {
       const path = apiPathname(url);
-      if (path.startsWith("/v1/admin/enrichment-reviews/")) {
+      if (path.startsWith("/v1/admin/features/enrichment-reviews/")) {
         const reviewId = decodeURIComponent(
-          path.slice("/v1/admin/enrichment-reviews/".length),
+          path.slice("/v1/admin/features/enrichment-reviews/".length),
         );
         const review =
           records.find((item) => item.review_id === reviewId) ??
@@ -368,7 +368,7 @@ async function mockPageNumberPages(
 }
 
 /**
- * admin-ops smoke(`/v1/admin/enrichment-reviews`)는 헤더·컬럼·페이저 가시성만 본다.
+ * admin-ops smoke(`/v1/admin/features/enrichment-reviews`)는 헤더·컬럼·페이저 가시성만 본다.
  * 이 spec은 그 위에 **결정(accept/reject/ignore) mutation·payload·page 전진·
  * compare cell 렌더·empty·error** 동작 depth를 추가한다(중복 smoke 금지).
  */
@@ -386,7 +386,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       initial: [review],
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
     const row = page.getByRole("row", { name: /Datagokr Detail Festival/ });
     await expect(row).toBeVisible();
 
@@ -424,7 +424,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     });
     const requests = await mockEnrichmentReviews(page, { initial: [review] });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
 
     // 결정 후 refetch에서도 행이 유지되도록 status 필터를 'all'로 먼저 바꾼다
     // (기본 'pending' 필터면 accepted record가 목록에서 빠져 '완료'를 못 본다).
@@ -443,7 +443,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       reviewed_by: "local-admin",
     } satisfies EnrichmentReviewDecisionRequest);
     expect(requests.patchPathnames[0]).toBe(
-      `/v1/admin/enrichment-reviews/${encodeURIComponent("enrich-accept-1")}`,
+      `/v1/admin/features/enrichment-reviews/${encodeURIComponent("enrich-accept-1")}`,
     );
 
     // refetch 후 accepted 행이 유지되고 actions cell이 '완료'로 바뀐다.
@@ -470,7 +470,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       initial: [rejectReview, ignoreReview],
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
     // 각 mutation 후 refetch에서 두 행이 모두 유지되도록 'all'로 전환.
     await page.getByLabel("enrichment status").selectOption("all");
 
@@ -501,10 +501,10 @@ test.describe("admin/enrichment-reviews actions", () => {
 
     // 각 PATCH가 자기 review_id를 URL path에 담는다.
     expect(requests.patchPathnames).toContain(
-      `/v1/admin/enrichment-reviews/${encodeURIComponent("enrich-reject-1")}`,
+      `/v1/admin/features/enrichment-reviews/${encodeURIComponent("enrich-reject-1")}`,
     );
     expect(requests.patchPathnames).toContain(
-      `/v1/admin/enrichment-reviews/${encodeURIComponent("enrich-ignore-1")}`,
+      `/v1/admin/features/enrichment-reviews/${encodeURIComponent("enrich-ignore-1")}`,
     );
   });
 
@@ -528,7 +528,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       two: [page2],
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
 
     // 1페이지: 상/하단 페이지바 2벌, 이전 disabled, 다음/마지막 enabled.
     await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
@@ -585,7 +585,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       ],
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
     await page.getByLabel("enrichment search").fill("Filter");
     await page.getByLabel("enrichment provider").fill("python-visitkorea-api");
     await page.getByLabel("enrichment score filter").selectOption("high");
@@ -618,7 +618,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     });
     await mockEnrichmentReviews(page, { initial: [review] });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
     const row = page.getByRole("row", { name: /Datagokr Map Festival/ });
     await expect(row).toBeVisible();
     await expect(row.getByRole("button", { name: "지도" })).toHaveCount(0);
@@ -653,7 +653,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     });
     await mockEnrichmentReviews(page, { initial: [review] });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
 
     const row = page.getByRole("row", { name: /Datagokr Festival/ });
     await expect(row).toBeVisible();
@@ -684,7 +684,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       );
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
 
     await expect(page.getByText("enrichment review가 없습니다.")).toBeVisible();
     await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
@@ -704,7 +704,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       await fulfillJson(route, { detail: "boom" }, 500);
     });
 
-    await page.goto("/admin/enrichment-reviews");
+    await page.goto("/admin/features/enrichment-reviews");
 
     // destructive Alert만 role=alert (alert.tsx L32); 성공 Alert는 role=status.
     const alert = page.getByRole("alert");

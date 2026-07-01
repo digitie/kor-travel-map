@@ -3,11 +3,11 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 import type { components } from "../src/api/types";
 
 /**
- * `/admin/feature-update-requests/[requestId]` 상세 — ZERO 커버 페이지 spec
+ * `/admin/features/update-requests/[requestId]` 상세 — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.3).
  *
  * 임의 requestId는 빈 DB에서 404가 되므로, `admin-ops.spec.ts`와 같은 mocked-route
- * 패턴으로 상세 GET / cancel / run-now만 가로채고(`**​/v1/admin/feature-update-requests/**`),
+ * 패턴으로 상세 GET / cancel / run-now만 가로채고(`**​/v1/admin/features/update-requests/**`),
  * 페이지 document·RSC·WS(`/v1/ops/live`)는 그대로 통과시킨다. mock body는 생성된
  * OpenAPI 타입에 바인딩해 계약 drift를 컴파일 단계에서 잡는다.
  *
@@ -24,7 +24,7 @@ type FeatureUpdateRequestCreateResponse =
 
 const REQUEST_ID = "66666666-6666-4666-8666-666666666666";
 const JOB_ID = "77777777-7777-4777-8777-777777777777";
-const DETAIL_PATH = `/v1/admin/feature-update-requests/${REQUEST_ID}`;
+const DETAIL_PATH = `/v1/admin/features/update-requests/${REQUEST_ID}`;
 
 function makeUpdateRequest(
   overrides: Partial<FeatureUpdateRequestRecord> = {},
@@ -73,7 +73,7 @@ async function mockUpdateRequest(
   let status = options.initialStatus ?? "queued";
 
   await page.route(
-    "**/v1/admin/feature-update-requests/**",
+    "**/v1/admin/features/update-requests/**",
     async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -123,12 +123,12 @@ async function mockUpdateRequest(
   return calls;
 }
 
-test.describe("/admin/feature-update-requests/[requestId]", () => {
+test.describe("/admin/features/update-requests/[requestId]", () => {
   test("queued 상세 render — scope/policy + cancel + run-now 노출", async ({
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update request" }),
@@ -149,7 +149,7 @@ test.describe("/admin/feature-update-requests/[requestId]", () => {
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "done" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update request" }),
@@ -160,7 +160,7 @@ test.describe("/admin/feature-update-requests/[requestId]", () => {
 
   test("running — cancel 노출, run-now 숨김", async ({ page }) => {
     await mockUpdateRequest(page, { initialStatus: "running" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(page.getByRole("button", { name: "cancel" })).toBeVisible();
     await expect(page.getByRole("button", { name: "run-now" })).toBeHidden();
@@ -168,7 +168,7 @@ test.describe("/admin/feature-update-requests/[requestId]", () => {
 
   test("cancel 액션 → 성공 re-fetch 후 cancel 버튼 사라짐", async ({ page }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const cancel = page.getByRole("button", { name: "cancel" });
     await expect(cancel).toBeVisible();
@@ -180,7 +180,7 @@ test.describe("/admin/feature-update-requests/[requestId]", () => {
 
   test("run-now 액션 → POST /run-now(201) 수신", async ({ page }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "run-now" });
     await expect(runNow).toBeVisible();
@@ -192,7 +192,7 @@ test.describe("/admin/feature-update-requests/[requestId]", () => {
 
   test("404 — request 조회 실패 alert", async ({ page }) => {
     await mockUpdateRequest(page, { detailStatus: 404 });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(page.getByText("request 조회 실패")).toBeVisible();
   });

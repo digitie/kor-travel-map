@@ -1,4 +1,4 @@
-"""``/v1/admin/feature-update-requests`` 라우터 단위 테스트."""
+"""``/v1/admin/features/update-requests`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -102,10 +102,12 @@ def _preview() -> FeatureUpdateRequestPreview:
 @pytest.mark.unit
 def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/v1/admin/feature-update-requests" in spec["paths"]
-    assert "/v1/admin/feature-update-requests/{request_id}" in spec["paths"]
-    assert "/v1/admin/feature-update-requests/{request_id}/cancel" in spec["paths"]
-    assert "/v1/admin/feature-update-requests/{request_id}/run-now" in spec["paths"]
+    assert "/v1/admin/features/update-requests" in spec["paths"]
+    assert "/v1/admin/features/update-requests/{request_id}" in spec["paths"]
+    assert "/v1/admin/features/update-requests/{request_id}/cancel" in spec["paths"]
+    assert "/v1/admin/features/update-requests/{request_id}/run-now" in spec["paths"]
+    assert "/v1/admin/feature-update-requests" not in spec["paths"]
+    assert "/v1/admin/feature-update-requests/{request_id}" not in spec["paths"]
     assert "FeatureUpdateRequestCreateRequest" in spec["components"]["schemas"]
     assert "FeatureUpdateRequestRecord" in spec["components"]["schemas"]
     request_schema = spec["components"]["schemas"][
@@ -135,7 +137,7 @@ def test_create_dry_run_returns_preview_without_transaction(
     monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "providers": [MOIS_PROVIDER_NAME],
@@ -168,7 +170,7 @@ def test_create_actual_request_uses_transaction(
     monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "run_mode": "queued",
@@ -178,7 +180,7 @@ def test_create_actual_request_uses_transaction(
 
     assert response.status_code == 201
     assert response.json()["data"]["status_url"] == (
-        "/v1/admin/feature-update-requests/req-1"
+        "/v1/admin/features/update-requests/req-1"
     )
     assert session.begin_count == 1
 
@@ -219,7 +221,7 @@ def test_create_rejects_legacy_center_radius_shape_before_enqueue(
     )
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {
                 "type": "center_radius",
@@ -242,7 +244,7 @@ def test_create_rejects_unknown_update_policy_key(
     session: _FakeSession,
 ) -> None:
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "update_policy": {"surprise": True},
@@ -262,7 +264,7 @@ def test_create_rejects_unbounded_provider_filter_list(
     session: _FakeSession,
 ) -> None:
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "providers": [f"python-provider-{index}-api" for index in range(33)],
@@ -292,7 +294,7 @@ def test_create_rejects_non_refreshable_provider_dataset_before_enqueue(
     )
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "providers": [MOIS_PROVIDER_NAME],
@@ -322,7 +324,7 @@ def test_create_sigungu_scope_without_kor_travel_geo_returns_503(
     monkeypatch.setattr(router_mod, "KorTravelMapSettings", _Settings)
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {
                 "type": "sigungu_by_radius",
@@ -355,7 +357,7 @@ def test_list_requests_passes_filters(
     monkeypatch.setattr(router_mod, "list_update_requests", _list)
 
     response = client.get(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         params={
             "status": "queued",
             "scope_type": "feature_ids",
@@ -388,7 +390,7 @@ def test_get_request_404_when_missing(
 
     monkeypatch.setattr(router_mod, "get_update_request", _missing)
 
-    response = client.get("/v1/admin/feature-update-requests/missing")
+    response = client.get("/v1/admin/features/update-requests/missing")
 
     assert response.status_code == 404
 
@@ -411,7 +413,7 @@ def test_cancel_request_returns_cancelled(
     monkeypatch.setattr(router_mod, "cancel_update_request", _cancel)
 
     response = client.post(
-        "/v1/admin/feature-update-requests/req-1/cancel",
+        "/v1/admin/features/update-requests/req-1/cancel",
         json={"error_message": "stop"},
     )
 
@@ -441,7 +443,7 @@ def test_run_now_requeues_existing_request(
     monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/feature-update-requests/req-1/run-now",
+        "/v1/admin/features/update-requests/req-1/run-now",
         json={"priority": 90, "reason": "force"},
     )
 
@@ -464,7 +466,7 @@ def test_create_run_now_lock_busy_returns_retry_after(
     monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "run_mode": "now",
@@ -491,7 +493,7 @@ def test_create_unknown_enqueue_error_hides_internal_message(
     monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/feature-update-requests",
+        "/v1/admin/features/update-requests",
         json={"scope": {"type": "feature_ids", "feature_ids": ["feature-1"]}},
     )
 

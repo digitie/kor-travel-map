@@ -4,7 +4,7 @@ import type { components } from "../src/api/types";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
- * `/admin/feature-update-requests/[requestId]` 상세 — 액션/에러/실시간 depth spec
+ * `/admin/features/update-requests/[requestId]` 상세 — 액션/에러/실시간 depth spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.3 후속).
  *
  * `feature-update-request-detail.spec.ts`(smoke + 버튼 가시성)와 **중복되지 않는**
@@ -18,7 +18,7 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  *    deterministic 대체 — 아래 NOTE 참고)
  *
  * 패턴은 `admin-ops.spec.ts`/`feature-update-request-detail.spec.ts`와 동일하게
- * `**​/v1/admin/feature-update-requests/**`만 가로채고, 페이지 document·RSC·WS는 그대로
+ * `**​/v1/admin/features/update-requests/**`만 가로채고, 페이지 document·RSC·WS는 그대로
  * 통과시킨다. mock body는 모두 생성된 OpenAPI 타입에 바인딩해 계약 drift를 컴파일에서
  * 잡는다.
  *
@@ -48,8 +48,8 @@ type Meta = components["schemas"]["Meta"];
 
 const REQUEST_ID = "88888888-8888-4888-8888-888888888888";
 const JOB_ID = "99999999-9999-4999-8999-999999999999";
-const DETAIL_PATH = `/v1/admin/feature-update-requests/${REQUEST_ID}`;
-const LIST_PATH = "/admin/feature-update-requests";
+const DETAIL_PATH = `/v1/admin/features/update-requests/${REQUEST_ID}`;
+const LIST_PATH = "/admin/features/update-requests";
 
 const meta: Meta = { duration_ms: 1, request_id: "e2e-fur-detail-actions" };
 
@@ -140,7 +140,7 @@ async function mockUpdateRequest(
   const mutationFails = mutationStatus >= 400;
 
   await page.route(
-    "**/v1/admin/feature-update-requests/**",
+    "**/v1/admin/features/update-requests/**",
     async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -225,7 +225,7 @@ async function mockUpdateRequest(
   return calls;
 }
 
-test.describe("/admin/feature-update-requests/[requestId] actions", () => {
+test.describe("/admin/features/update-requests/[requestId] actions", () => {
   // #503: 모든 시나리오에서 ops-live WS를 inert로 만들어 라이브 백엔드 snapshot/update가
   // mock GET 버스트를 유발하지 않게 한다(타이밍 단언 결정성 확보). page.goto 전에 적용.
   test.beforeEach(async ({ page }) => {
@@ -236,7 +236,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     page,
   }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const cancel = page.getByRole("button", { name: "cancel" });
     await expect(cancel).toBeVisible();
@@ -260,7 +260,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     page,
   }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "run-now" });
     await expect(runNow).toBeVisible();
@@ -284,7 +284,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "failed" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update request" }),
@@ -301,7 +301,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "cancelled" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update request" }),
@@ -319,7 +319,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
       initialStatus: "queued",
       mutationStatus: 409,
     });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const cancel = page.getByRole("button", { name: "cancel" });
     await expect(cancel).toBeVisible();
@@ -340,7 +340,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
       initialStatus: "queued",
       mutationStatus: 409,
     });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "run-now" });
     await expect(runNow).toBeVisible();
@@ -357,7 +357,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
   test("새로고침 버튼 → 수동 refetch 발사", async ({ page }) => {
     // done(폴링 off)로 mock해 자동 refetchInterval과 수동 refetch 증가를 구분.
     const calls = await mockUpdateRequest(page, { initialStatus: "done" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature update request" }),
@@ -372,11 +372,11 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     await expect.poll(() => calls.detail).toBeGreaterThan(detailBefore);
   });
 
-  test("목록 back-link → /admin/feature-update-requests href", async ({
+  test("목록 back-link → /admin/features/update-requests href", async ({
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "queued" });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     // "목록" 링크(component line 52-58, ArrowLeftIcon + "목록").
     await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
@@ -399,7 +399,7 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
       transitionAfterDetailCalls: 1,
       shouldTransition: () => allowTransition,
     });
-    await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const cancel = page.getByRole("button", { name: "cancel" });
     // running → canCancel=true, canRunNow=false.

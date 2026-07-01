@@ -5,7 +5,14 @@ import {
   type Row,
   type RowSelectionState,
 } from "@tanstack/react-table";
-import { CheckIcon, MergeIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  EyeIcon,
+  MergeIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
@@ -221,7 +228,7 @@ function DedupDetailDialog({
       >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold">Dedup 상세 비교</h2>
+            <h2 className="text-lg font-semibold">중복 상세 비교</h2>
             <div className="text-sm text-muted-foreground">
               {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
             </div>
@@ -240,13 +247,15 @@ function DedupDetailDialog({
             </Alert>
           ) : detail && featureA && featureB ? (
             <>
-              <dl className="grid gap-3 rounded-lg border bg-muted/40 p-3 sm:grid-cols-5">
-                <DetailMetric label="total" value={formatScore(detail.total_score)} />
-                <DetailMetric label="이름" value={formatScore(detail.name_score)} />
-                <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
-                <DetailMetric label="카테고리" value={formatScore(detail.category_score)} />
-                <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
-              </dl>
+              <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
+                <dl className="grid flex-1 gap-3 sm:grid-cols-5">
+                  <DetailMetric label="total" value={formatScore(detail.total_score)} />
+                  <DetailMetric label="이름" value={formatScore(detail.name_score)} />
+                  <DetailMetric label="distance score" value={formatScore(detail.spatial_score)} />
+                  <DetailMetric label="카테고리" value={formatScore(detail.category_score)} />
+                  <DetailMetric label="거리" value={formatDistance(detail.distance_m)} />
+                </dl>
+              </div>
               {hasMap ? (
                 <section className="overflow-hidden rounded-lg border">
                   <div className="border-b px-4 py-2 text-sm font-medium">
@@ -291,12 +300,12 @@ function DedupDetailDialog({
                 <FeatureDetailPanel
                   accentClassName="text-blue-700"
                   feature={featureA}
-                  label="Feature A"
+                  label="후보 A"
                 />
                 <FeatureDetailPanel
                   accentClassName="text-red-700"
                   feature={featureB}
-                  label="Feature B"
+                  label="후보 B"
                 />
               </div>
             </>
@@ -464,6 +473,11 @@ export function DedupReviewClient() {
     );
   }, [decision]);
 
+  const openDetail = useCallback((reviewId: string) => {
+    setDetailReviewId(reviewId);
+    setMergeKey(null);
+  }, []);
+
   const renderPagination = (placement: "top" | "bottom") => (
     <nav
       aria-label={`dedup pagination ${placement}`}
@@ -532,6 +546,7 @@ export function DedupReviewClient() {
       {
         accessorKey: "total_score",
         header: "점수",
+        enableSorting: false,
         cell: ({ row }) => (
           <div className="space-y-1 font-mono text-xs">
             <div>total {formatScore(row.original.total_score)}</div>
@@ -541,8 +556,18 @@ export function DedupReviewClient() {
         ),
       },
       {
+        accessorKey: "distance_m",
+        header: "거리",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono">
+            {formatDistance(row.original.distance_m)}
+          </span>
+        ),
+      },
+      {
         id: "feature_a",
-        header: "feature A",
+        header: "후보 A",
         enableSorting: false,
         cell: ({ row }) => (
           <>
@@ -556,7 +581,7 @@ export function DedupReviewClient() {
       },
       {
         id: "feature_b",
-        header: "feature B",
+        header: "후보 B",
         enableSorting: false,
         cell: ({ row }) => (
           <>
@@ -569,10 +594,19 @@ export function DedupReviewClient() {
         ),
       },
       {
-        accessorKey: "distance_m",
-        header: "거리",
+        accessorKey: "status",
+        header: "상태",
+        enableSorting: false,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "created_at",
+        header: "생성",
+        enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono">{formatDistance(row.original.distance_m)}</span>
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
         ),
       },
       {
@@ -591,6 +625,15 @@ export function DedupReviewClient() {
                   master 선택 (병합 시 나머지는 master로 흡수)
                 </span>
                 <div className="flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => openDetail(item.review_id)}
+                  >
+                    <EyeIcon data-icon="inline-start" />
+                    detail
+                  </Button>
                   <Button
                     disabled={decision.isPending}
                     size="sm"
@@ -641,6 +684,15 @@ export function DedupReviewClient() {
                 onClick={(event) => event.stopPropagation()}
               >
                 <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => openDetail(item.review_id)}
+                >
+                  <EyeIcon data-icon="inline-start" />
+                  detail
+                </Button>
+                <Button
                   disabled={decision.isPending}
                   size="sm"
                   type="button"
@@ -682,26 +734,26 @@ export function DedupReviewClient() {
               </div>
             )
           ) : (
-            <span className="text-sm text-muted-foreground">완료</span>
+            <div
+              className="flex flex-wrap items-center gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => openDetail(item.review_id)}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
+              <span className="text-sm text-muted-foreground">완료</span>
+            </div>
           );
         },
       },
-      {
-        accessorKey: "status",
-        header: "상태",
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
-      },
-      {
-        accessorKey: "created_at",
-        header: "생성",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.created_at)}
-          </span>
-        ),
-      },
     ],
-    [decide, decision.isPending, merge, mergeKey],
+    [decide, decision.isPending, merge, mergeKey, openDetail],
   );
 
   return (
@@ -718,7 +770,7 @@ export function DedupReviewClient() {
         </Button>
       }
       description="중복 후보를 운영자가 검토합니다. accept/reject/ignore 또는 merge(master 수동 선택 또는 자동 선정)로 처리합니다."
-      section="관리"
+      section="Feature"
       title="중복 검토"
     >
       <div className="flex flex-col gap-4">
@@ -855,7 +907,7 @@ export function DedupReviewClient() {
           emptyMessage="dedup review가 없습니다."
           manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
-          onRowClick={(row) => setDetailReviewId(row.review_id)}
+          onRowClick={(row) => openDetail(row.review_id)}
           isRowActive={(row) => row.review_id === detailReviewId}
           enableRowSelection={(row) => row.original.status === "pending"}
           rowSelection={rowSelection}

@@ -22,11 +22,20 @@ from kortravelmap.api.routers.categories import router as categories_router
 from kortravelmap.api.routers.curated import admin_router as admin_curated_router
 from kortravelmap.api.routers.curated import router as curated_router
 from kortravelmap.api.routers.dagster import router as dagster_router
+from kortravelmap.api.routers.dedup_review import (
+    feature_router as feature_dedup_review_router,
+)
 from kortravelmap.api.routers.dedup_review import router as dedup_review_router
+from kortravelmap.api.routers.enrichment_review import (
+    feature_router as feature_enrichment_review_router,
+)
 from kortravelmap.api.routers.enrichment_review import (
     router as enrichment_review_router,
 )
 from kortravelmap.api.routers.etl import router as etl_router
+from kortravelmap.api.routers.feature_update_requests import (
+    feature_router as feature_update_requests_feature_router,
+)
 from kortravelmap.api.routers.feature_update_requests import (
     router as feature_update_requests_router,
 )
@@ -57,8 +66,11 @@ __all__ = [
     "admin_curated_router",
     "admin_issues_router",
     "dedup_review_router",
+    "feature_dedup_review_router",
     "enrichment_review_router",
+    "feature_enrichment_review_router",
     "feature_update_requests_router",
+    "feature_update_requests_feature_router",
     "poi_cache_targets_router",
     "provider_refresh_policies_router",
     "features_router",

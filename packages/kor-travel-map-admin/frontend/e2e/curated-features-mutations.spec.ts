@@ -3,7 +3,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 import type { components } from "../src/api/types";
 
 /**
- * `/admin/curated-features` — **route-mocked mutation/depth** spec
+ * `/admin/features/curated` — **route-mocked mutation/depth** spec
  * (T-AUDIT-0616 후속, `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
  *
  * 자매 파일 `curated-features.spec.ts`는 라이브 smoke(렌더/필터/페이지 구조)만 덮는다.
@@ -395,7 +395,7 @@ async function mockCuratedConsole(
   }
 
   // curated-features: list(GET) + select/unselect(POST) + patch(PATCH) + archive(DELETE).
-  await page.route("**/v1/admin/curated-features**", async (route) => {
+  await page.route("**/v1/admin/features/curated**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
@@ -417,7 +417,7 @@ async function mockCuratedConsole(
       return;
     }
 
-    if (method === "GET" && path === "/v1/admin/curated-features") {
+    if (method === "GET" && path === "/v1/admin/features/curated") {
       requests.featuresList += 1;
       requests.lastPageSize = url.searchParams.get("page_size");
       requests.lastCursor = url.searchParams.get("cursor");
@@ -447,7 +447,7 @@ async function mockCuratedConsole(
       return;
     }
 
-    if (method === "GET" && path.startsWith("/v1/admin/curated-features/")) {
+    if (method === "GET" && path.startsWith("/v1/admin/features/curated/")) {
       requests.featureDetail += 1;
       const id = decodeURIComponent(path.split("/").at(-1) ?? "");
       await fulfillJson(
@@ -486,7 +486,7 @@ async function mockCuratedConsole(
       return;
     }
 
-    if (method === "PATCH" && path.startsWith("/v1/admin/curated-features/")) {
+    if (method === "PATCH" && path.startsWith("/v1/admin/features/curated/")) {
       requests.patch += 1;
       const body = request.postDataJSON() as Partial<CuratedFeatureView>;
       requests.patchBodies.push(body);
@@ -496,7 +496,7 @@ async function mockCuratedConsole(
       return;
     }
 
-    if (method === "DELETE" && path.startsWith("/v1/admin/curated-features/")) {
+    if (method === "DELETE" && path.startsWith("/v1/admin/features/curated/")) {
       requests.delete += 1;
       requests.deleteBodies.push(request.postDataJSON());
       const id = decodeURIComponent(path.split("/").at(-1) ?? "");
@@ -565,7 +565,7 @@ async function mockCuratedConsole(
   });
 
   await page.route(
-    "**/v1/admin/curated-features/*/detail-snapshot**",
+    "**/v1/admin/features/curated/*/detail-snapshot**",
     async (route) => {
       requests.detail += 1;
       await fulfillJson(route, detailSnapshotResponse(detailItems));
@@ -575,22 +575,22 @@ async function mockCuratedConsole(
   return requests;
 }
 
-test.describe("/admin/curated-features mutations (route-mocked)", () => {
+test.describe("/admin/features/curated mutations (route-mocked)", () => {
   test("curated detail 링크와 전용 상세 화면 렌더", async ({ page }) => {
     const requests = await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(
       page.getByRole("link", { name: "curated detail" }).first(),
-    ).toHaveAttribute("href", `/admin/curated-features/${FEATURE_A_ID}`);
+    ).toHaveAttribute("href", `/admin/features/curated/${FEATURE_A_ID}`);
 
-    await page.goto(`/admin/curated-features/${FEATURE_A_ID}`, {
+    await page.goto(`/admin/features/curated/${FEATURE_A_ID}`, {
       waitUntil: "domcontentloaded",
     });
     await expect(page).toHaveURL(
-      new RegExp(`/admin/curated-features/${FEATURE_A_ID}$`),
+      new RegExp(`/admin/features/curated/${FEATURE_A_ID}$`),
     );
     await expect(
       page.getByRole("heading", { name: "Curated feature detail" }),
@@ -607,7 +607,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       features: [makeCuratedFeature()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     const row = page.getByRole("row", { name: /경복궁/ });
     await expect(row).toBeVisible();
@@ -640,7 +640,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await page.getByLabel("curation status filter").selectOption("curated");
 
     const row = page.getByRole("row", { name: /경복궁/ });
@@ -665,7 +665,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       features: [makeCuratedFeature()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     // 첫 행이 자동 선택되어 FeatureEditor가 렌더된다.
     await expect(page.getByText("Curated display")).toBeVisible();
@@ -701,7 +701,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Place search")).toBeVisible();
     await expect(page.getByLabel("place search query")).toHaveValue("경복궁");
     await expect.poll(() => requests.placeSearch).toBe(0);
@@ -730,7 +730,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Place search")).toBeVisible();
 
     await page.getByLabel("place search query").fill("경복궁");
@@ -773,7 +773,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Curated display")).toBeVisible();
 
     await page.getByLabel("display title").fill("   ");
@@ -799,7 +799,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Curated display")).toBeVisible();
 
     const detailPolicy = page.getByLabel("reuse policy");
@@ -830,7 +830,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       features: [makeCuratedFeature()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     const row = page.getByRole("row", { name: /경복궁/ });
     const archiveButton = row.getByRole("button", { name: "archive" });
     await expect(archiveButton).toBeVisible();
@@ -864,7 +864,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       rules: [makeCuratedSourceRule()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     // 첫 rule이 자동 선택되어 RuleEditor가 렌더된다.
     await expect(page.getByText("Source rule editor")).toBeVisible();
@@ -896,7 +896,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       rules: [makeCuratedSourceRule()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Source rule editor")).toBeVisible();
 
     // metadata에 JSON 배열 → parseJsonObject가 동기 throw → jsonError 표시, PATCH 미호출.
@@ -921,7 +921,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       applyInsertedOrUpdated: 7,
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Source rule editor")).toBeVisible();
 
     await page.getByRole("button", { name: "Apply" }).click();
@@ -940,7 +940,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       detailItems: [makeDetailItem()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     // 첫 행 자동 선택 → snapshot 쿼리 enabled → detail-snapshot GET 1회.
     await expect(page.getByText("Detail snapshot preview")).toBeVisible();
@@ -969,7 +969,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       detailItems: [],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect(page.getByText("Detail snapshot preview")).toBeVisible();
     await expect(page.getByText("detail item이 없습니다.")).toBeVisible();
   });
@@ -982,7 +982,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       cursorPaging: true,
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     const firstButton = page.getByRole("button", { name: "처음" });
     const nextButton = page.getByRole("button", { name: "다음" });
@@ -1012,7 +1012,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       features: [makeCuratedFeature()],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
     await expect.poll(() => requests.featuresList).toBeGreaterThanOrEqual(1);
 
     await page.getByLabel("page size").selectOption("200");
@@ -1029,7 +1029,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       themes: [],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     await expect(
       page.getByText("조건에 맞는 curated 후보가 없습니다."),
@@ -1060,7 +1060,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       featuresError: true,
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     await expect(
       page.getByRole("alert").filter({ hasText: "curated admin 처리 실패" }),
@@ -1071,7 +1071,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     const feature = makeCuratedFeature();
     await mockCuratedConsole(page, { features: [feature] });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     const detailLink = page.getByRole("link", { name: "feature detail" });
     await expect(detailLink).toHaveAttribute(
@@ -1092,7 +1092,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     // 행이 렌더된 뒤에 select-all을 눌러야 토글이 반영된다(이른 클릭 레이스 방지).
     await expect(
@@ -1122,7 +1122,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       ],
     });
 
-    await page.goto("/admin/curated-features");
+    await page.goto("/admin/features/curated");
 
     // 행이 렌더된 뒤에 select-all을 눌러야 토글이 반영된다(이른 클릭 레이스 방지).
     await expect(

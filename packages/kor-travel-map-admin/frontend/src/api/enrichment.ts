@@ -1,5 +1,5 @@
 /**
- * `/v1/admin/enrichment-reviews/*` 축제 enrichment 매칭 검토 hooks (T-RV-52c).
+ * `/v1/admin/features/enrichment-reviews/*` 축제 enrichment 매칭 검토 hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type EnrichmentSchemas = components["schemas"];
 type EnrichmentReviewListQuery = NonNullable<
-  paths["/v1/admin/enrichment-reviews"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features/enrichment-reviews"]["get"]["parameters"]["query"]
 >;
 
 export type EnrichmentStatus = Exclude<
@@ -42,7 +42,7 @@ function fetchEnrichmentReviews(
   signal?: AbortSignal,
 ): Promise<EnrichmentReviewListResponse> {
   return getJson<EnrichmentReviewListResponse>(
-    pathWithQuery("/v1/admin/enrichment-reviews", {
+    pathWithQuery("/v1/admin/features/enrichment-reviews", {
       status: params.status,
       provider: params.provider,
       min_score: params.min_score,
@@ -60,7 +60,7 @@ function decideEnrichmentReview(
   body: EnrichmentReviewDecisionRequest,
 ): Promise<EnrichmentReviewDecisionResponse> {
   return patchJson<EnrichmentReviewDecisionResponse>(
-    `/v1/admin/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/features/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
     body,
   );
 }
@@ -70,7 +70,7 @@ function fetchEnrichmentReviewDetail(
   signal?: AbortSignal,
 ): Promise<EnrichmentReviewDetailResponse> {
   return getJson<EnrichmentReviewDetailResponse>(
-    `/v1/admin/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/features/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
     { signal },
   );
 }

@@ -52,7 +52,7 @@ export function CuratedFeatureDetailClient({
         <>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/curated-features"
+            href="/admin/features/curated"
           >
             <ArrowLeftIcon data-icon="inline-start" />
             목록

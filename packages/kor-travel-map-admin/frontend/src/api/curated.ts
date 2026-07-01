@@ -6,7 +6,7 @@ import type { components, paths } from "./types";
 type CuratedSchemas = components["schemas"];
 
 type AdminCuratedFeaturesQuery = NonNullable<
-  paths["/v1/admin/curated-features"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features/curated"]["get"]["parameters"]["query"]
 >;
 type AdminCuratedSourcesQuery = NonNullable<
   paths["/v1/admin/curated-sources"]["get"]["parameters"]["query"]
@@ -81,7 +81,7 @@ async function fetchAdminCuratedFeatures(
   signal?: AbortSignal,
 ): Promise<CuratedFeaturesResponse> {
   return getJson<CuratedFeaturesResponse>(
-    pathWithQuery("/v1/admin/curated-features", {
+    pathWithQuery("/v1/admin/features/curated", {
       theme_id: params.theme_id,
       theme_slug: params.theme_slug,
       source_id: params.source_id,
@@ -109,7 +109,7 @@ async function fetchAdminCuratedFeature(
   signal?: AbortSignal,
 ): Promise<CuratedFeatureResponse> {
   return getJson<CuratedFeatureResponse>(
-    `/v1/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`,
+    `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
     { signal },
   );
 }
@@ -206,7 +206,7 @@ async function fetchCuratedFeatureDetailSnapshot(
   signal?: AbortSignal,
 ): Promise<CuratedFeatureDetailSnapshotResponse> {
   return getJson<CuratedFeatureDetailSnapshotResponse>(
-    `/v1/admin/curated-features/${encodeURIComponent(
+    `/v1/admin/features/curated/${encodeURIComponent(
       curatedFeatureId,
     )}/detail-snapshot`,
     { signal },
@@ -230,7 +230,7 @@ async function fetchCuratedFeaturePlaceSearch(
 ): Promise<CuratedPlaceSearchResponse> {
   return getJson<CuratedPlaceSearchResponse>(
     pathWithQuery(
-      `/v1/admin/curated-features/${encodeURIComponent(
+      `/v1/admin/features/curated/${encodeURIComponent(
         curatedFeatureId,
       )}/place-search`,
       { q: query },
@@ -266,7 +266,7 @@ export function useSelectCuratedFeatureMutation() {
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
       postJson<CuratedFeatureResponse>(
-        `/v1/admin/curated-features/${encodeURIComponent(
+        `/v1/admin/features/curated/${encodeURIComponent(
           curatedFeatureId,
         )}/select`,
         body,
@@ -284,7 +284,7 @@ export function useUnselectCuratedFeatureMutation() {
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
       postJson<CuratedFeatureResponse>(
-        `/v1/admin/curated-features/${encodeURIComponent(
+        `/v1/admin/features/curated/${encodeURIComponent(
           curatedFeatureId,
         )}/unselect`,
         body,
@@ -302,7 +302,7 @@ export function useArchiveCuratedFeatureMutation() {
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
       deleteJson<CuratedFeatureResponse>(
-        `/v1/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`,
+        `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
         body,
       ),
     onSuccess: () => invalidateCurated(queryClient),
@@ -318,7 +318,7 @@ export function usePatchCuratedFeatureMutation() {
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
       patchJson<CuratedFeatureResponse>(
-        `/v1/admin/curated-features/${encodeURIComponent(curatedFeatureId)}`,
+        `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
         body,
       ),
     onSuccess: () => invalidateCurated(queryClient),

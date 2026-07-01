@@ -106,7 +106,7 @@ function makeUpdateRequest(
     status: "succeeded",
     run_mode: "queued",
     dry_run: false,
-    status_url: `/v1/admin/feature-update-requests/${REQUEST_ID}`,
+    status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
     created_at: MOCK_NOW,
     updated_at: MOCK_NOW,
     ...overrides,
@@ -357,7 +357,7 @@ test.describe("/ops/providers refresh policy depth", () => {
     await expect(requestRow).toBeVisible();
     await expect(requestRow.getByRole("link", { name: "상세" })).toHaveAttribute(
       "href",
-      `/admin/feature-update-requests/${REQUEST_ID}`,
+      `/admin/features/update-requests/${REQUEST_ID}`,
     );
     await expect(
       requestRow.getByRole("link", { name: JOB_ID.slice(0, 12) }),

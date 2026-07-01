@@ -348,7 +348,7 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
         links.append(
             OpsImportJobLink(
                 rel="feature_update_request",
-                href=f"/v1/admin/feature-update-requests/{request_id}",
+                href=f"/v1/admin/features/update-requests/{request_id}",
                 label="feature update request",
             )
         )

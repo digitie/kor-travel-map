@@ -401,7 +401,7 @@ export function HomePageClient() {
                 {(dedup.data?.data.items ?? []).slice(0, 4).map((item) => (
                   <Link
                     className="rounded-xl bg-surface-subtle px-4 py-3 text-[14px] text-text-primary transition-colors hover:bg-brand-tint"
-                    href="/admin/dedup-reviews"
+                    href="/admin/features/dedup-reviews"
                     key={item.review_id}
                   >
                     <div className="font-medium">

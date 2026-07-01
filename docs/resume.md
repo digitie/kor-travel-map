@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-01 (codex) — Feature 운영 경로 일원화 로컬 구현 완료
+
+- **완료(UI)**: Feature 큐레이션/중복 검토/보강 검토/갱신 요청 화면을
+  `/admin/features/...` 아래로 이동했고, 기존 경로는 새 경로로 redirect한다.
+- **완료(API)**: 관련 admin API를 `/v1/admin/features/...` 하위로 노출하고 OpenAPI 정본은 새
+  경로만 포함하도록 했다. 기존 API path는 호환 alias로 남겼다.
+- **완료(UI 통일)**: 중복 검토 테이블과 상세 다이얼로그를 보강 검토 화면 기준으로 맞추고,
+  완료 row에서도 `detail` 버튼으로 상세 비교를 열 수 있게 했다.
+- **검증**: ruff targeted clean, OpenAPI drift check, frontend type-check, frontend
+  gen:types:check, frontend lint(기존 경고 4건), frontend unit 45 passed, API router targeted
+  35 passed, provider/ops targeted 23 passed, `git diff --check` 통과.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지한다.
+
 ## 2026-07-01 (codex) — Feature 작성/변경 요청 폼 공용화 로컬 구현 완료
 
 - **완료(로컬)**: 새 Feature 작성 화면과 변경 요청 작성 화면의 기본 정보·좌표·주소·상세 입력 섹션을

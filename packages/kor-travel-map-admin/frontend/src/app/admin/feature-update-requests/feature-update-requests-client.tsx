@@ -104,7 +104,7 @@ export function FeatureUpdateRequestsClient() {
               {id ? (
                 <Link
                   className="underline underline-offset-2"
-                  href={`/admin/feature-update-requests/${id}`}
+                  href={`/admin/features/update-requests/${id}`}
                 >
                   {shortId(id)}
                 </Link>

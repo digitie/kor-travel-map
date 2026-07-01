@@ -58,6 +58,9 @@ from kortravelmap.api.routers import (
     dedup_review_router,
     enrichment_review_router,
     etl_router,
+    feature_dedup_review_router,
+    feature_enrichment_review_router,
+    feature_update_requests_feature_router,
     feature_update_requests_router,
     features_router,
     mois_detail_router,
@@ -533,13 +536,30 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
                 Depends(require_admin_destructive_enabled),
             ],
         )
+        # `/admin/features/{feature_id}`보다 구체적인 feature 하위 운영 route를
+        # 먼저 mount해야 `dedup-reviews` 같은 segment가 feature_id로 잡히지 않는다.
         application.include_router(
-            admin_features_router,
+            admin_curated_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )
         application.include_router(
-            admin_curated_router,
+            feature_dedup_review_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            feature_enrichment_review_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            feature_update_requests_feature_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_features_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

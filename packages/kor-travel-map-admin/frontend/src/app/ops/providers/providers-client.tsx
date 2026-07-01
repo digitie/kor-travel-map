@@ -513,7 +513,7 @@ const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
     cell: ({ row }) => (
       <Link
         className={buttonVariants({ size: "sm", variant: "ghost" })}
-        href={`/admin/feature-update-requests/${row.original.request_id}`}
+        href={`/admin/features/update-requests/${row.original.request_id}`}
       >
         <ExternalLinkIcon data-icon="inline-start" />
         상세
@@ -576,7 +576,7 @@ function DatasetDetailPanel({
             <AlertDescription>
               <Link
                 className="underline underline-offset-2"
-                href={`/admin/feature-update-requests/${createdRequestId}`}
+                href={`/admin/features/update-requests/${createdRequestId}`}
               >
                 {shortId(createdRequestId)}
               </Link>

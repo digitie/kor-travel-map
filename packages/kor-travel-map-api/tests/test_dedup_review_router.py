@@ -1,4 +1,4 @@
-"""``/v1/admin/dedup-reviews`` 라우터 단위 테스트."""
+"""``/v1/admin/features/dedup-reviews`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -180,8 +180,10 @@ def _review_detail() -> DedupReviewDetail:
 @pytest.mark.unit
 def test_dedup_review_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/v1/admin/dedup-reviews" in spec["paths"]
-    assert "/v1/admin/dedup-reviews/{review_id}" in spec["paths"]
+    assert "/v1/admin/features/dedup-reviews" in spec["paths"]
+    assert "/v1/admin/features/dedup-reviews/{review_id}" in spec["paths"]
+    assert "/v1/admin/dedup-reviews" not in spec["paths"]
+    assert "/v1/admin/dedup-reviews/{review_id}" not in spec["paths"]
     assert "DedupReviewRecord" in spec["components"]["schemas"]
     assert "DedupReviewDetailResponse" in spec["components"]["schemas"]
     assert "next_cursor" not in spec["components"]["schemas"]["OffsetPageMeta"][
@@ -211,7 +213,7 @@ def test_list_dedup_reviews_passes_filters(
     monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
 
     response = client.get(
-        "/v1/admin/dedup-reviews",
+        "/v1/admin/features/dedup-reviews",
         params={
             "status": "pending",
             "provider": "python-mois-api",
@@ -243,7 +245,7 @@ def test_get_dedup_review_detail_returns_two_feature_payloads(
 
     monkeypatch.setattr(router_mod, "get_dedup_review_detail", _get)
 
-    response = client.get("/v1/admin/dedup-reviews/review-1")
+    response = client.get("/v1/admin/features/dedup-reviews/review-1")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -266,7 +268,7 @@ def test_get_dedup_review_detail_missing_returns_404(
 
     monkeypatch.setattr(router_mod, "get_dedup_review_detail", _get)
 
-    response = client.get("/v1/admin/dedup-reviews/missing")
+    response = client.get("/v1/admin/features/dedup-reviews/missing")
 
     assert response.status_code == 404
     assert "dedup review 없음" in response.json()["detail"]
@@ -289,7 +291,7 @@ def test_patch_accepted_uses_transaction(
     monkeypatch.setattr(router_mod, "set_dedup_review_decision", _set)
 
     response = client.patch(
-        "/v1/admin/dedup-reviews/review-1",
+        "/v1/admin/features/dedup-reviews/review-1",
         json={
             "decision": "accepted",
             "decision_reason": "같은 장소",
@@ -333,7 +335,7 @@ def test_patch_merged_uses_advisory_lock(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/v1/admin/dedup-reviews/review-1",
+        "/v1/admin/features/dedup-reviews/review-1",
         json={
             "decision": "merged",
             "master_feature_id": "feature-a",
@@ -366,7 +368,7 @@ def test_patch_merged_not_found_returns_404(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/v1/admin/dedup-reviews/missing",
+        "/v1/admin/features/dedup-reviews/missing",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 
@@ -392,7 +394,7 @@ def test_patch_merged_conflict_returns_409(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/v1/admin/dedup-reviews/review-1",
+        "/v1/admin/features/dedup-reviews/review-1",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 
@@ -418,7 +420,7 @@ def test_patch_merged_unknown_merge_error_hides_internal_message(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/v1/admin/dedup-reviews/review-1",
+        "/v1/admin/features/dedup-reviews/review-1",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 

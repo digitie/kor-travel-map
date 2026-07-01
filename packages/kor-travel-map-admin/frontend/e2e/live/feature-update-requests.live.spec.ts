@@ -14,9 +14,9 @@ async function expectUpdateRequestsReady(
   await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible(T);
 }
 
-test.describe("/admin/feature-update-requests live", () => {
+test.describe("/admin/features/update-requests live", () => {
   test("페이지 로드 — form controls + status filter", async ({ page }) => {
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     await expectUpdateRequestsReady(page);
     await expect(page.getByLabel("request status")).toBeVisible(T);
@@ -27,7 +27,7 @@ test.describe("/admin/feature-update-requests live", () => {
   test("validation errors — lon required + lat range + radius min", async ({
     page,
   }) => {
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
     await expectUpdateRequestsReady(page);
 
     await page.getByLabel("lon").fill("");
@@ -43,7 +43,7 @@ test.describe("/admin/feature-update-requests live", () => {
   test("dry-run 생성 — 실제 API preview 응답을 성공 alert로 표시", async ({
     page,
   }) => {
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
     await expectUpdateRequestsReady(page);
 
     await expect(page.getByLabel("dry-run")).toBeChecked();

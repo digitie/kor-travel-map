@@ -120,9 +120,9 @@ async function mockFeatureUpdateRequests(
     runNowBodies: [],
     cancelBodies: [],
   };
-  const base = "/v1/admin/feature-update-requests";
+  const base = "/v1/admin/features/update-requests";
 
-  await page.route("**/v1/admin/feature-update-requests**", async (route) => {
+  await page.route("**/v1/admin/features/update-requests**", async (route) => {
     const request = route.request();
     if (request.resourceType() === "document") {
       await route.continue();
@@ -240,7 +240,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
   }) => {
     const mocks = await mockFeatureUpdateRequests(page);
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     // pre-fill 기본값(lon=126.9780, lat=37.5665, radius km=5) 확인.
     await expect(page.getByLabel("lon")).toHaveValue("126.9780");
@@ -286,7 +286,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
   }) => {
     const mocks = await mockFeatureUpdateRequests(page);
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     // Branch A — dry-run(기본 checked) 그대로 제출.
     await expect(page.getByLabel("dry-run")).toBeChecked();
@@ -336,7 +336,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       ],
     });
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
     await page.getByLabel("request status").selectOption("done");
 
     const doneRow = page.getByRole("row", {
@@ -372,7 +372,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
   }) => {
     await mockFeatureUpdateRequests(page, { initial: [] });
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     // 목록 쿼리가 끝나기 전 절대단언 race를 막기 위해 empty 행이 렌더될 때까지 대기.
     await expect(page.getByText("요청이 없습니다.")).toBeVisible();
@@ -383,7 +383,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     page,
   }) => {
     await page.route(
-      "**/v1/admin/feature-update-requests**",
+      "**/v1/admin/features/update-requests**",
       async (route) => {
         const request = route.request();
         if (request.resourceType() === "document") {
@@ -399,7 +399,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       },
     );
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     // 목록 실패 배너는 role=alert(destructive) + 'request 처리 실패'(CREATE 실패는 '요청 생성 실패').
     const errorAlert = page
@@ -415,7 +415,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
   }) => {
     const mocks = await mockFeatureUpdateRequests(page);
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
 
     await page.getByLabel("lon").fill("");
     await page.getByLabel("lat").fill("44");
@@ -436,7 +436,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       createErrorBody: { detail: "radius_km must be less than or equal to 500" },
     });
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => mocks.create).toBe(1);
@@ -461,7 +461,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       ],
     });
 
-    await page.goto("/admin/feature-update-requests");
+    await page.goto("/admin/features/update-requests");
     await page.getByLabel("request status").selectOption("all");
 
     const row = page.getByRole("row", {
@@ -472,7 +472,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     // href는 FULL id(표시 텍스트는 truncate되지만 링크 대상은 전체 id).
     await expect(link).toHaveAttribute(
       "href",
-      `/admin/feature-update-requests/${DONE_REQUEST_ID}`,
+      `/admin/features/update-requests/${DONE_REQUEST_ID}`,
     );
     // 표시 텍스트는 shortId(첫 12자 + "...").
     await expect(link).toHaveText(`${DONE_REQUEST_ID.slice(0, 12)}...`);

@@ -881,7 +881,12 @@ async def get_curated_feature_route(
     )
 
 
-@admin_router.get("/curated-features", response_model=CuratedFeaturesResponse)
+@admin_router.get("/features/curated", response_model=CuratedFeaturesResponse)
+@admin_router.get(
+    "/curated-features",
+    response_model=CuratedFeaturesResponse,
+    include_in_schema=False,
+)
 async def list_admin_curated_features_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_id: Annotated[str | None, Query()] = None,
@@ -917,8 +922,13 @@ async def list_admin_curated_features_route(
 
 
 @admin_router.get(
+    "/features/curated/{curated_feature_id}",
+    response_model=CuratedFeatureResponse,
+)
+@admin_router.get(
     "/curated-features/{curated_feature_id}",
     response_model=CuratedFeatureResponse,
+    include_in_schema=False,
 )
 async def get_admin_curated_feature_route(
     curated_feature_id: str,
@@ -933,8 +943,13 @@ async def get_admin_curated_feature_route(
 
 
 @admin_router.get(
+    "/features/curated/{curated_feature_id}/detail-snapshot",
+    response_model=CuratedFeatureDetailSnapshotResponse,
+)
+@admin_router.get(
     "/curated-features/{curated_feature_id}/detail-snapshot",
     response_model=CuratedFeatureDetailSnapshotResponse,
+    include_in_schema=False,
 )
 async def get_admin_curated_feature_detail_snapshot_route(
     curated_feature_id: str,
@@ -954,8 +969,13 @@ async def get_admin_curated_feature_detail_snapshot_route(
 
 
 @admin_router.get(
+    "/features/curated/{curated_feature_id}/place-search",
+    response_model=CuratedPlaceSearchResponse,
+)
+@admin_router.get(
     "/curated-features/{curated_feature_id}/place-search",
     response_model=CuratedPlaceSearchResponse,
+    include_in_schema=False,
 )
 async def search_admin_curated_feature_places_route(
     curated_feature_id: str,
@@ -979,7 +999,12 @@ async def search_admin_curated_feature_places_route(
     )
 
 
-@admin_router.post("/curated-features", response_model=CuratedFeatureResponse)
+@admin_router.post("/features/curated", response_model=CuratedFeatureResponse)
+@admin_router.post(
+    "/curated-features",
+    response_model=CuratedFeatureResponse,
+    include_in_schema=False,
+)
 async def create_admin_curated_feature_route(
     body: CuratedFeatureCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1002,8 +1027,13 @@ async def create_admin_curated_feature_route(
 
 
 @admin_router.patch(
+    "/features/curated/{curated_feature_id}",
+    response_model=CuratedFeatureResponse,
+)
+@admin_router.patch(
     "/curated-features/{curated_feature_id}",
     response_model=CuratedFeatureResponse,
+    include_in_schema=False,
 )
 async def patch_admin_curated_feature_route(
     curated_feature_id: str,
@@ -1029,8 +1059,13 @@ async def patch_admin_curated_feature_route(
 
 
 @admin_router.delete(
+    "/features/curated/{curated_feature_id}",
+    response_model=CuratedFeatureResponse,
+)
+@admin_router.delete(
     "/curated-features/{curated_feature_id}",
     response_model=CuratedFeatureResponse,
+    include_in_schema=False,
 )
 async def delete_admin_curated_feature_route(
     curated_feature_id: str,
@@ -1051,8 +1086,13 @@ async def delete_admin_curated_feature_route(
 
 
 @admin_router.post(
+    "/features/curated/{curated_feature_id}/select",
+    response_model=CuratedFeatureResponse,
+)
+@admin_router.post(
     "/curated-features/{curated_feature_id}/select",
     response_model=CuratedFeatureResponse,
+    include_in_schema=False,
 )
 async def select_admin_curated_feature_route(
     curated_feature_id: str,
@@ -1077,8 +1117,13 @@ async def select_admin_curated_feature_route(
 
 
 @admin_router.post(
+    "/features/curated/{curated_feature_id}/unselect",
+    response_model=CuratedFeatureResponse,
+)
+@admin_router.post(
     "/curated-features/{curated_feature_id}/unselect",
     response_model=CuratedFeatureResponse,
+    include_in_schema=False,
 )
 async def unselect_admin_curated_feature_route(
     curated_feature_id: str,

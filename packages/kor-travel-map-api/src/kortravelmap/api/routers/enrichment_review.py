@@ -1,4 +1,4 @@
-"""``/admin/enrichment-reviews`` 축제 enrichment 매칭 수동 검토 라우터 (T-RV-52c).
+"""``/admin/features/enrichment-reviews`` 축제 enrichment 매칭 수동 검토 라우터.
 
 visitkorea(2차)↔datagokr(1차) 축제 이름 유사도가 자동 확정 임계 미만·검토 하한 이상인
 모호한 매칭(``ops.enrichment_review_queue``)을 운영자가 accept/reject/ignore 한다. accept는
@@ -35,6 +35,7 @@ from kortravelmap.api.routers.dedup_review import (
 
 __all__ = [
     "router",
+    "feature_router",
     "EnrichmentReviewRecord",
     "EnrichmentReviewListResponse",
     "EnrichmentReviewDetailResponse",
@@ -43,7 +44,15 @@ __all__ = [
 ]
 
 
-router = APIRouter(prefix="/admin/enrichment-reviews", tags=["admin-enrichment"])
+router = APIRouter(
+    prefix="/admin/enrichment-reviews",
+    tags=["admin-enrichment"],
+    include_in_schema=False,
+)
+feature_router = APIRouter(
+    prefix="/admin/features/enrichment-reviews",
+    tags=["admin-enrichment"],
+)
 
 EnrichmentStatus = Literal["pending", "accepted", "rejected", "ignored"]
 EnrichmentDecision = Literal["accepted", "rejected", "ignored"]
@@ -52,7 +61,7 @@ EnrichmentDetailSourceEffect = Literal["audit_only"]
 
 
 class EnrichmentReviewRecord(BaseModel):
-    """``GET /admin/enrichment-reviews`` item."""
+    """``GET /admin/features/enrichment-reviews`` item."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,7 +101,7 @@ class EnrichmentReviewListData(BaseModel):
 
 
 class EnrichmentReviewListResponse(BaseModel):
-    """``GET /admin/enrichment-reviews`` response."""
+    """``GET /admin/features/enrichment-reviews`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -132,7 +141,7 @@ class EnrichmentReviewDetailData(BaseModel):
 
 
 class EnrichmentReviewDetailResponse(BaseModel):
-    """``GET /admin/enrichment-reviews/{review_id}`` response."""
+    """``GET /admin/features/enrichment-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -141,7 +150,7 @@ class EnrichmentReviewDetailResponse(BaseModel):
 
 
 class EnrichmentReviewDecisionRequest(BaseModel):
-    """``PATCH /admin/enrichment-reviews/{review_id}`` body."""
+    """``PATCH /admin/features/enrichment-reviews/{review_id}`` body."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -173,7 +182,7 @@ class EnrichmentReviewDecisionData(BaseModel):
 
 
 class EnrichmentReviewDecisionResponse(BaseModel):
-    """``PATCH /admin/enrichment-reviews/{review_id}`` response."""
+    """``PATCH /admin/features/enrichment-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -276,6 +285,7 @@ def _reason_with_detail_source(
     return f"{reason}; {marker}" if reason else marker
 
 
+@feature_router.get("", response_model=EnrichmentReviewListResponse)
 @router.get("", response_model=EnrichmentReviewListResponse)
 async def list_reviews(
     request: Request,
@@ -318,6 +328,11 @@ async def list_reviews(
     )
 
 
+@feature_router.get(
+    "/{review_id}",
+    response_model=EnrichmentReviewDetailResponse,
+    responses={404: {"description": "review_id 없음"}},
+)
 @router.get(
     "/{review_id}",
     response_model=EnrichmentReviewDetailResponse,
@@ -341,6 +356,11 @@ async def get_review_detail(
     )
 
 
+@feature_router.patch(
+    "/{review_id}",
+    response_model=EnrichmentReviewDecisionResponse,
+    responses={409: {"description": "이미 검토됨/없음"}},
+)
 @router.patch(
     "/{review_id}",
     response_model=EnrichmentReviewDecisionResponse,

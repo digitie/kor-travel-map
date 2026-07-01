@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Feature 운영 경로 일원화 (2026-07-01)
+
+- **CHANGED**: Feature 큐레이션, 중복 검토, 보강 검토, 갱신 요청 UI를
+  `/admin/features/...` 하위 경로로 일원화했다. 기존 `/admin/curated-features`,
+  `/admin/dedup-reviews`, `/admin/enrichment-reviews`, `/admin/feature-update-requests`
+  화면은 새 경로로 redirect한다.
+- **CHANGED**: 관련 admin API의 OpenAPI 정본도 `/v1/admin/features/...` 하위 경로로
+  옮기고, 기존 API 경로는 호환 alias로만 남겼다.
+- **CHANGED**: 중복 검토 목록/상세 UI를 보강 검토 화면 기준에 맞춰 컬럼 순서와 상세
+  진입 버튼, 상세 비교 다이얼로그 구조를 정리했다.
+
 ### Feature 작성 폼 레이아웃 공용화 (2026-07-01)
 
 - **CHANGED**: 새 Feature 작성 화면과 Feature 변경 요청 작성 화면의 기본 정보·좌표·주소·상세 입력

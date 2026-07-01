@@ -1,4 +1,4 @@
-"""``/v1/admin/enrichment-reviews`` 라우터 단위 테스트 (T-RV-52c)."""
+"""``/v1/admin/features/enrichment-reviews`` 라우터 단위 테스트 (T-RV-52c)."""
 
 from __future__ import annotations
 
@@ -172,8 +172,10 @@ def _review_detail(*, target_detail: dict[str, Any] | None = None) -> Enrichment
 @pytest.mark.unit
 def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/v1/admin/enrichment-reviews" in spec["paths"]
-    assert "/v1/admin/enrichment-reviews/{review_id}" in spec["paths"]
+    assert "/v1/admin/features/enrichment-reviews" in spec["paths"]
+    assert "/v1/admin/features/enrichment-reviews/{review_id}" in spec["paths"]
+    assert "/v1/admin/enrichment-reviews" not in spec["paths"]
+    assert "/v1/admin/enrichment-reviews/{review_id}" not in spec["paths"]
     assert "EnrichmentReviewRecord" in spec["components"]["schemas"]
     assert "EnrichmentReviewDetailResponse" in spec["components"]["schemas"]
     assert (
@@ -215,7 +217,7 @@ def test_list_enrichment_reviews_passes_filters(
     monkeypatch.setattr(router_mod, "list_enrichment_reviews", _list)
 
     response = client.get(
-        "/v1/admin/enrichment-reviews",
+        "/v1/admin/features/enrichment-reviews",
         params={
             "status": "pending",
             "provider": "python-visitkorea-api",
@@ -252,7 +254,7 @@ def test_get_enrichment_review_detail_returns_compare_payload(
 
     monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
 
-    response = client.get("/v1/admin/enrichment-reviews/review-1")
+    response = client.get("/v1/admin/features/enrichment-reviews/review-1")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -276,7 +278,7 @@ def test_get_enrichment_review_detail_defaults_to_visitkorea_without_clean_detai
 
     monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
 
-    response = client.get("/v1/admin/enrichment-reviews/review-1")
+    response = client.get("/v1/admin/features/enrichment-reviews/review-1")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -296,7 +298,7 @@ def test_get_enrichment_review_detail_missing_returns_404(
 
     monkeypatch.setattr(router_mod, "get_enrichment_review_detail", _get)
 
-    response = client.get("/v1/admin/enrichment-reviews/missing")
+    response = client.get("/v1/admin/features/enrichment-reviews/missing")
 
     assert response.status_code == 404
     assert "enrichment review 없음" in response.json()["detail"]
@@ -333,7 +335,7 @@ def test_patch_accepted_applies_and_uses_transaction(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/v1/admin/enrichment-reviews/review-1",
+        "/v1/admin/features/enrichment-reviews/review-1",
         json={
             "decision": "accepted",
             "decision_reason": "같은 축제",
@@ -369,7 +371,7 @@ def test_patch_reject_does_not_apply(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/v1/admin/enrichment-reviews/review-1",
+        "/v1/admin/features/enrichment-reviews/review-1",
         json={"decision": "rejected"},
     )
 
@@ -398,7 +400,7 @@ def test_patch_already_reviewed_returns_409(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/v1/admin/enrichment-reviews/review-1",
+        "/v1/admin/features/enrichment-reviews/review-1",
         json={"decision": "accepted"},
     )
 

@@ -107,7 +107,7 @@ ADR-045 이후 PinVi와 kor-travel-map 사이의 운영 계약은 OpenAPI다.
 
 - PinVi는 generated OpenAPI client로 feature read API(`GET /features/*` 또는
   목표 v1 계약의 `GET /v1/features/*`)와 batch 조회를 호출한다. Feature update
-  request는 사용자/서비스 표면이 아니라 `/admin/feature-update-requests*` 운영
+  request는 사용자/서비스 표면이 아니라 `/admin/features/update-requests*` 운영
   표면에서만 실행한다.
 - PinVi는 kor-travel-map PostgreSQL에 직접 연결하지 않는다.
 - PinVi는 `kor-travel-map`을 직접 import하지 않는다.
@@ -142,7 +142,7 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 │   ├── /providers/{name}/sync-state               (Sprint 4)     │
 │   ├── /ops/logs                                  (T-221e)       │
 │   ├── /admin/dedup-review, /admin/integrity      (Sprint 4~5)   │
-│   └── /admin/feature-update-requests             (ADR-045)      │
+│   └── /admin/features/update-requests             (ADR-045)      │
 └──────────────────────────────────────────────────────────────────┘
         │  authentication: 없음 (내부망 / localhost 전제)
         │  내부 호출

@@ -40,7 +40,7 @@ const navItems = [
     icon: ListChecksIcon,
   },
   {
-    href: "/admin/curated-features",
+    href: "/admin/features/curated",
     label: "Feature 큐레이션",
     icon: SparklesIcon,
   },
@@ -49,14 +49,18 @@ const navItems = [
   { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
   { href: "/ops/consistency", label: "정합성 점검", icon: RadarIcon },
   { href: "/ops/logs", label: "운영 로그", icon: ActivityIcon },
-  { href: "/admin/dedup-reviews", label: "Feature 중복 검토", icon: GitCompareArrowsIcon },
   {
-    href: "/admin/enrichment-reviews",
+    href: "/admin/features/dedup-reviews",
+    label: "Feature 중복 검토",
+    icon: GitCompareArrowsIcon,
+  },
+  {
+    href: "/admin/features/enrichment-reviews",
     label: "Feature 보강 검토",
     icon: LinkIcon,
   },
   {
-    href: "/admin/feature-update-requests",
+    href: "/admin/features/update-requests",
     label: "Feature 갱신",
     icon: RefreshCwIcon,
   },

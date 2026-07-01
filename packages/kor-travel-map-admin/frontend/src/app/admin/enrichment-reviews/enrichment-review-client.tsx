@@ -181,7 +181,7 @@ function EnrichmentDetailDialog({
       >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold">Enrichment 상세 비교</h2>
+            <h2 className="text-lg font-semibold">보강 상세 비교</h2>
             <div className="text-sm text-muted-foreground">
               {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
             </div>
@@ -720,7 +720,7 @@ export function EnrichmentReviewClient() {
         </Button>
       }
       description="축제 enrichment 매칭(visitkorea 2차 → datagokr 1차)을 운영자가 검토합니다. accept하면 1차 축제에 visitkorea source가 enrichment로 연결되고, 상세 source 선택값은 decision reason에 기록됩니다."
-      section="관리"
+      section="Feature"
       title="보강 검토"
     >
       <div className="flex flex-col gap-4">

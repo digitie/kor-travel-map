@@ -38,7 +38,7 @@ function makeJob(
     links: [
       { href: `/v1/ops/import-jobs/${JOB_ID}`, label: null, rel: "self" },
       {
-        href: "/v1/admin/feature-update-requests",
+        href: "/v1/admin/features/update-requests",
         label: "update request",
         rel: "feature_update_request",
       },

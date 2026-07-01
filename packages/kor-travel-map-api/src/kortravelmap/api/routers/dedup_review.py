@@ -1,4 +1,4 @@
-"""``/admin/dedup-reviews`` 운영 중복 후보 검토 라우터."""
+"""``/admin/features/dedup-reviews`` 운영 중복 후보 검토 라우터."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from kortravelmap.api.response import Meta, OffsetMeta, make_meta, make_offset_m
 
 __all__ = [
     "router",
+    "feature_router",
     "DedupReviewRecord",
     "DedupReviewListResponse",
     "DedupReviewDetailResponse",
@@ -42,7 +43,15 @@ __all__ = [
 ]
 
 
-router = APIRouter(prefix="/admin/dedup-reviews", tags=["admin-dedup"])
+router = APIRouter(
+    prefix="/admin/dedup-reviews",
+    tags=["admin-dedup"],
+    include_in_schema=False,
+)
+feature_router = APIRouter(
+    prefix="/admin/features/dedup-reviews",
+    tags=["admin-dedup"],
+)
 
 DedupStatus = Literal["pending", "accepted", "rejected", "merged", "ignored"]
 DedupDecision = Literal["accepted", "rejected", "merged", "ignored"]
@@ -64,7 +73,7 @@ class DedupFeatureRecord(BaseModel):
 
 
 class DedupReviewRecord(BaseModel):
-    """``GET /admin/dedup-reviews`` item."""
+    """``GET /admin/features/dedup-reviews`` item."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,7 +101,7 @@ class DedupReviewListData(BaseModel):
 
 
 class DedupReviewListResponse(BaseModel):
-    """``GET /admin/dedup-reviews`` response."""
+    """``GET /admin/features/dedup-reviews`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -173,7 +182,7 @@ class DedupReviewDetailData(BaseModel):
 
 
 class DedupReviewDetailResponse(BaseModel):
-    """``GET /admin/dedup-reviews/{review_id}`` response."""
+    """``GET /admin/features/dedup-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -182,7 +191,7 @@ class DedupReviewDetailResponse(BaseModel):
 
 
 class DedupReviewDecisionRequest(BaseModel):
-    """``PATCH /admin/dedup-reviews/{review_id}`` body."""
+    """``PATCH /admin/features/dedup-reviews/{review_id}`` body."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -208,7 +217,7 @@ class DedupReviewDecisionData(BaseModel):
 
 
 class DedupReviewDecisionResponse(BaseModel):
-    """``PATCH /admin/dedup-reviews/{review_id}`` response."""
+    """``PATCH /admin/features/dedup-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -316,6 +325,7 @@ def _decision_response(
     )
 
 
+@feature_router.get("", response_model=DedupReviewListResponse)
 @router.get("", response_model=DedupReviewListResponse)
 async def list_reviews(
     request: Request,
@@ -364,6 +374,11 @@ async def list_reviews(
     )
 
 
+@feature_router.get(
+    "/{review_id}",
+    response_model=DedupReviewDetailResponse,
+    responses={404: {"description": "review_id 없음"}},
+)
 @router.get(
     "/{review_id}",
     response_model=DedupReviewDetailResponse,
@@ -387,6 +402,11 @@ async def get_review_detail(
     )
 
 
+@feature_router.patch(
+    "/{review_id}",
+    response_model=DedupReviewDecisionResponse,
+    responses={404: {"description": "review_id 없음"}, 409: {"description": "전이 불가"}},
+)
 @router.patch(
     "/{review_id}",
     response_model=DedupReviewDecisionResponse,

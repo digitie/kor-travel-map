@@ -1,11 +1,5 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { DedupReviewClient } from "./dedup-review-client";
-
-export const metadata: Metadata = {
-  title: "Dedup review | kor-travel-map admin",
-};
-
-export default function DedupReviewPage() {
-  return <DedupReviewClient />;
+export default function LegacyDedupReviewPage() {
+  redirect("/admin/features/dedup-reviews");
 }
