@@ -1328,6 +1328,31 @@ def test_opinet_sample_grid_centers_start_with_major_city_anchors() -> None:
     ]
 
 
+def test_opinet_sigungu_area_codes_interleaves_sidos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[
+            _FakeOpinetArea("01"),
+            _FakeOpinetArea("02"),
+            _FakeOpinetArea("03"),
+        ],
+        child_areas={
+            "01": [_FakeOpinetArea("0101"), _FakeOpinetArea("0102")],
+            "02": [_FakeOpinetArea("0201"), _FakeOpinetArea("0202")],
+            "03": [_FakeOpinetArea("0301"), _FakeOpinetArea("0302")],
+        },
+    )
+    client = fake()
+
+    areas = provider_fetchers._opinet_sigungu_area_codes(client)
+
+    assert areas == ["0101", "0201", "0301", "0102", "0202", "0302"]
+    assert client.area_calls == [None, "01", "02", "03"]
+
+
 def test_opinet_stations_disabled_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="disabled"

@@ -1159,11 +1159,12 @@ def _opinet_sigungu_area_codes(
     ``lowTop10`` 전국 분포 모드에서 사용한다. 시도별 시군구가 없으면 해당 시도
     코드를 fallback으로 사용해 호출량을 bounded하게 유지한다. ``budget``이 주어지면
     각 ``get_area_codes`` 호출을 run 예산에서 차감하고, 소진되면 지금까지 모은 area를
-    반환하고 조기 종료한다(#545).
+    반환하고 조기 종료한다(#545). 반환 순서는 시도별 round-robin으로 섞어 호출 상한에
+    걸려도 서울/수도권 같은 첫 시도에만 표본이 몰리지 않게 한다.
     """
-    areas: list[str] = []
+    groups: list[list[str]] = []
     if budget is not None and not budget.spend():
-        return areas
+        return []
     for sido in client.get_area_codes():
         sido_code = str(getattr(sido, "code", "")).strip()
         if not sido_code:
@@ -1175,7 +1176,14 @@ def _opinet_sigungu_area_codes(
             for sigungu in client.get_area_codes(sido_code)
         ]
         sigungu_codes = [code for code in sigungu_codes if code]
-        areas.extend(sigungu_codes or [sido_code])
+        groups.append(sigungu_codes or [sido_code])
+
+    areas: list[str] = []
+    max_group_len = max((len(group) for group in groups), default=0)
+    for index in range(max_group_len):
+        for group in groups:
+            if index < len(group):
+                areas.append(group[index])
     return areas
 
 
