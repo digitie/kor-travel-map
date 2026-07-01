@@ -2403,6 +2403,11 @@ export interface components {
             /** Is Primary Source */
             is_primary_source: boolean;
             /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
+            /**
              * Linked At
              * Format: date-time
              */

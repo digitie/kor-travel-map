@@ -232,7 +232,7 @@ ON CONFLICT (feature_id, version) DO UPDATE SET
 """
 
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
-# 같은 source_record_key 재적재는 DO NOTHING (idempotent).
+# 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
 _UPSERT_SOURCE_RECORD_SQL: Final[str] = """
 INSERT INTO provider_sync.source_records (
     source_record_key, provider, dataset_key,
@@ -246,8 +246,12 @@ INSERT INTO provider_sync.source_records (
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
     :expires_at
 )
-ON CONFLICT (source_record_key) DO NOTHING
-RETURNING source_record_key
+ON CONFLICT (source_record_key) DO UPDATE SET
+    last_seen_at = GREATEST(
+        provider_sync.source_records.last_seen_at,
+        clock_timestamp()
+    )
+RETURNING (xmax = 0) AS inserted
 """
 
 _UPSERT_SOURCE_LINK_SQL: Final[str] = """
@@ -306,6 +310,89 @@ FROM feature.features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
+_FEATURE_EXISTS_SQL: Final[str] = """
+SELECT EXISTS (
+    SELECT 1
+    FROM feature.features
+    WHERE feature_id = :feature_id
+)
+"""
+
+
+def _notice_lineage_sql(alias: str) -> str:
+    return f"""
+    CASE
+      WHEN {alias}.provider = 'python-krex-api'
+       AND {alias}.dataset_key = 'krex_traffic_notices'
+       AND {alias}.source_entity_type = 'traffic_notice'
+      THEN concat_ws(
+        '::',
+        NULLIF({alias}.raw_data->>'occurred_date', ''),
+        NULLIF({alias}.raw_data->>'occurred_time', ''),
+        NULLIF({alias}.raw_data->>'route_no', ''),
+        NULLIF({alias}.raw_data->>'direction', ''),
+        NULLIF({alias}.raw_data->>'point_name', ''),
+        NULLIF({alias}.raw_data->>'incident_type_code', ''),
+        NULLIF({alias}.raw_data->>'series_no', '')
+      )
+      ELSE {alias}.source_entity_id
+    END
+    """
+
+
+_LATEST_NOTICE_BBOX_FILTER_SQL: Final[str] = f"""
+  AND (
+    f.kind <> 'notice'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM (
+        SELECT
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {_notice_lineage_sql("cur_sr")} AS lineage_key,
+            max(
+                COALESCE(cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at)
+            ) AS seen_at,
+            max(cur_sr.source_record_key) AS source_record_key
+        FROM provider_sync.source_links AS cur_sl
+        JOIN provider_sync.source_records AS cur_sr
+          ON cur_sr.source_record_key = cur_sl.source_record_key
+        WHERE cur_sl.feature_id = f.feature_id
+          AND cur_sl.is_primary_source
+        GROUP BY
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {_notice_lineage_sql("cur_sr")}
+      ) AS current_notice
+      JOIN provider_sync.source_records AS other_sr
+        ON other_sr.provider = current_notice.provider
+       AND other_sr.dataset_key = current_notice.dataset_key
+       AND other_sr.source_entity_type = current_notice.source_entity_type
+       AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+      JOIN provider_sync.source_links AS other_sl
+        ON other_sl.source_record_key = other_sr.source_record_key
+      JOIN feature.features AS other_f
+        ON other_f.feature_id = other_sl.feature_id
+      WHERE other_sl.is_primary_source
+        AND other_f.feature_id <> f.feature_id
+        AND other_f.kind = 'notice'
+        AND other_f.deleted_at IS NULL
+        AND (
+          COALESCE(other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at)
+            > current_notice.seen_at
+          OR (
+            COALESCE(
+                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+            ) = current_notice.seen_at
+            AND other_sr.source_record_key > current_notice.source_record_key
+          )
+        )
+    )
+  )
+"""
+
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
@@ -343,7 +430,7 @@ LIMIT 1
 
 # bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
-_FEATURES_IN_BBOX_SQL: Final[str] = """
+_FEATURES_IN_BBOX_SQL: Final[str] = f"""
 SELECT
     f.feature_id, f.kind, f.name, f.category,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
@@ -443,11 +530,12 @@ WHERE f.deleted_at IS NULL
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
+{_LATEST_NOTICE_BBOX_FILTER_SQL}
 ORDER BY f.feature_id ASC
 LIMIT :limit
 """
 
-_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = """
+_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = f"""
 SELECT
     f.feature_id, f.kind, f.name, f.category,
     x_extension.ST_X(f.coord) AS lon,
@@ -574,6 +662,7 @@ WHERE f.deleted_at IS NULL
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
+{_LATEST_NOTICE_BBOX_FILTER_SQL}
 ORDER BY f.feature_id ASC
 LIMIT :limit
 """
@@ -1387,13 +1476,21 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:
     """``provider_sync.source_records`` insert. 신규면 ``True``, 이미 있으면 ``False``.
 
-    payload_hash가 UNIQUE 구성요소라 동일 key 재적재는 ``DO NOTHING`` (ADR-017
-    이력 보존).
+    payload_hash가 UNIQUE 구성요소라 payload 변경은 새 row로 이력을 남긴다.
+    동일 key 재적재는 raw payload를 갱신하지 않고 ``last_seen_at``만 갱신한다.
     """
     result = await session.execute(
         text(_UPSERT_SOURCE_RECORD_SQL), _source_record_params(record)
     )
-    return result.first() is not None
+    return bool(result.scalar_one())
+
+
+async def _feature_exists(session: AsyncSession, feature_id: str) -> bool:
+    result = await session.execute(
+        text(_FEATURE_EXISTS_SQL),
+        {"feature_id": feature_id},
+    )
+    return bool(result.scalar_one())
 
 
 async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
@@ -1405,18 +1502,29 @@ async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
 
 
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
-    """``FeatureBundle`` 하나를 적재 (feature → source_record → source_link 순).
+    """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
-    FK 순서: feature와 source_record가 먼저 있어야 source_link INSERT 가능
-    (source_links → features / source_records FK). commit은 호출자 책임.
+    동일 source_record_key 재수집이면 원문 내용은 이미 같은 payload라는 뜻이므로
+    feature 본문/version은 갱신하지 않고 ``source_records.last_seen_at``만 갱신한다.
+    단, source_record만 있고 feature가 없는 비정상 상태라면 FK 복구를 위해 feature를
+    생성한다. commit은 호출자 책임.
     """
-    feature_inserted = await upsert_feature(session, bundle.feature)
     record_inserted = await upsert_source_record(session, bundle.source_record)
+    feature_inserted = False
+    feature_updated = False
+    feature_missing = False
+    if not record_inserted:
+        feature_missing = not await _feature_exists(
+            session, bundle.feature.feature_id
+        )
+    if record_inserted or feature_missing:
+        feature_inserted = await upsert_feature(session, bundle.feature)
+        feature_updated = not feature_inserted
     link_inserted = await upsert_source_link(session, bundle.source_link)
     return FeatureLoadResult(
         bundles_total=1,
         features_inserted=int(feature_inserted),
-        features_updated=int(not feature_inserted),
+        features_updated=int(feature_updated),
         source_records_inserted=int(record_inserted),
         source_links_inserted=int(link_inserted),
         source_links_updated=int(not link_inserted),

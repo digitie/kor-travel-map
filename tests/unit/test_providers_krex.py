@@ -890,7 +890,7 @@ def test_traffic_notice_time_missing_falls_back_to_midnight() -> None:
 @pytest.mark.unit
 def test_traffic_notice_natural_key_stable_and_collision() -> None:
     """파생 자연키는 결정적 — 동일 입력은 동일 feature_id/자연키(충돌),
-    raw가 다르면 분리(payload hash 성분)."""
+    서로 다른 사건은 분리."""
     twin = _Notice(  # _N_ROADWORK과 byte-identical → 동일 자연키.
         occurred_date="2026.05.28",
         occurred_time="05:00:00",
@@ -912,9 +912,9 @@ def test_traffic_notice_natural_key_stable_and_collision() -> None:
     assert (
         b1.source_record.source_entity_id == b2.source_record.source_entity_id
     )
-    # 자연키 = occurred_date::occurred_time::route_no::raw_hash (ADR-009 '::').
-    assert b1.source_record.source_entity_id.startswith(
-        "2026.05.28::05:00:00::0150::"
+    assert (
+        b1.source_record.source_entity_id
+        == "2026.05.28::05:00:00::0150::부산방향::서산나들목::3"
     )
     # 자연키 구분자는 '|' 미포함(ADR-009), '::' 사용.
     assert "|" not in b1.source_record.source_entity_id
@@ -923,8 +923,8 @@ def test_traffic_notice_natural_key_stable_and_collision() -> None:
 
 
 @pytest.mark.unit
-def test_traffic_notice_natural_key_differs_on_raw_change() -> None:
-    """동일 route/발생시각이라도 raw payload가 다르면 자연키 분리."""
+def test_traffic_notice_payload_change_keeps_feature_identity() -> None:
+    """같은 사건의 본문 변경은 feature를 나누지 않고 source_record 이력으로 남긴다."""
     base = _N_ROADWORK
     variant = _Notice(
         occurred_date=base.occurred_date,
@@ -932,19 +932,19 @@ def test_traffic_notice_natural_key_differs_on_raw_change() -> None:
         incident_type=base.incident_type,
         incident_type_code=base.incident_type_code,
         direction=base.direction,
-        message=base.message,
+        message="서해안고속도로 105km 지점 공사 내용 수정",
         point_name=base.point_name,
         route_no=base.route_no,
         route_name=base.route_name,
         process_status=base.process_status,
         process_status_code=base.process_status_code,
-        raw={**base.raw, "smsText": "내용 수정됨"},
+        raw={**base.raw, "smsText": "서해안고속도로 105km 지점 공사 내용 수정"},
     )
     [b1, b2] = traffic_notices_to_bundles([base, variant], fetched_at=_NOW)
-    assert (
-        b1.source_record.source_entity_id != b2.source_record.source_entity_id
-    )
-    assert b1.feature.feature_id != b2.feature.feature_id
+    assert b1.source_record.source_entity_id == b2.source_record.source_entity_id
+    assert b1.feature.feature_id == b2.feature.feature_id
+    assert b1.source_record.raw_payload_hash != b2.source_record.raw_payload_hash
+    assert b1.source_record.source_record_key != b2.source_record.source_record_key
 
 
 @pytest.mark.unit

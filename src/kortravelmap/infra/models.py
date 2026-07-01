@@ -358,6 +358,10 @@ class SourceRecordRow(Base):
             postgresql_using="brin",
         ),
         Index(
+            "idx_source_records_last_seen_at_brin", "last_seen_at",
+            postgresql_using="brin",
+        ),
+        Index(
             "idx_source_records_expires_at", "expires_at",
             postgresql_where=text("expires_at IS NOT NULL"),
         ),
@@ -382,6 +386,9 @@ class SourceRecordRow(Base):
         DateTime(timezone=True), nullable=False,
     )
     imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

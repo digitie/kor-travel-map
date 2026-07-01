@@ -175,6 +175,7 @@ class AdminFeatureDetailSource:
     raw_data: dict[str, Any]
     fetched_at: datetime
     imported_at: datetime
+    last_seen_at: datetime
     expires_at: datetime | None
     linked_at: datetime
 
@@ -845,6 +846,7 @@ SELECT
     sr.raw_data,
     sr.fetched_at,
     sr.imported_at,
+    sr.last_seen_at,
     sr.expires_at,
     sl.created_at AS linked_at
 FROM provider_sync.source_links AS sl
@@ -1026,6 +1028,7 @@ def _admin_feature_detail_source(row: Any) -> AdminFeatureDetailSource:
         raw_data=_json_object(row["raw_data"]),
         fetched_at=row["fetched_at"],
         imported_at=row["imported_at"],
+        last_seen_at=row["last_seen_at"],
         expires_at=row["expires_at"],
         linked_at=row["linked_at"],
     )

@@ -593,6 +593,7 @@ type CoincidentEntry = {
   kind: string;
   lon: number;
   lat: number;
+  marker_color?: string | null;
 };
 
 const FEATURE_KIND_LABELS: Record<string, string> = {
@@ -605,8 +606,23 @@ const FEATURE_KIND_LABELS: Record<string, string> = {
   area: "구역",
 };
 
+const FEATURE_KIND_FALLBACK_COLORS: Record<string, string> = {
+  place: "#2563eb",
+  event: "#db2777",
+  notice: "#dc2626",
+  price: "#16a34a",
+  weather: "#0284c7",
+  route: "#7c3aed",
+  area: "#d97706",
+};
+
 function featureKindLabel(kind: string): string {
   return FEATURE_KIND_LABELS[kind] ?? kind;
+}
+
+function coincidentEntryColor(entry: CoincidentEntry): string {
+  if (entry.marker_color) return resolveMarkerColor(entry.marker_color);
+  return FEATURE_KIND_FALLBACK_COLORS[entry.kind] ?? "#64748b";
 }
 
 function coincidentEntriesFromPointFeatures(
@@ -624,6 +640,10 @@ function coincidentEntriesFromPointFeatures(
       kind: String(properties.kind ?? ""),
       lon,
       lat,
+      marker_color:
+        typeof properties.marker_color === "string"
+          ? properties.marker_color
+          : null,
     });
   }
   entries.sort((a, b) =>
@@ -1170,58 +1190,98 @@ export function VWorldFeatureClusters({
     ) => {
       popupRef.current?.remove();
       const container = document.createElement("div");
+      container.style.minWidth = "248px";
       container.style.font = "13px/1.4 system-ui, -apple-system, sans-serif";
       container.style.color = "#111827";
+      container.style.background = "#ffffff";
       const header = document.createElement("div");
-      header.textContent = `겹친 지점 ${group.length}개`;
-      header.style.fontSize = "11px";
-      header.style.fontWeight = "700";
-      header.style.color = "#6b7280";
-      header.style.padding = "2px 4px 6px";
+      header.style.display = "flex";
+      header.style.alignItems = "center";
+      header.style.justifyContent = "space-between";
+      header.style.gap = "10px";
+      header.style.padding = "2px 2px 10px";
+      const title = document.createElement("div");
+      title.textContent = "겹친 지점";
+      title.style.fontSize = "13px";
+      title.style.fontWeight = "800";
+      title.style.letterSpacing = "0";
+      title.style.color = "#0f172a";
+      const count = document.createElement("span");
+      count.textContent = `${group.length}개`;
+      count.style.flex = "0 0 auto";
+      count.style.borderRadius = "9999px";
+      count.style.background = "#e0f2fe";
+      count.style.border = "1px solid #bae6fd";
+      count.style.color = "#075985";
+      count.style.fontSize = "11px";
+      count.style.fontWeight = "800";
+      count.style.lineHeight = "1";
+      count.style.padding = "5px 8px";
+      header.append(title, count);
       container.appendChild(header);
       const list = document.createElement("div");
       list.style.display = "flex";
       list.style.flexDirection = "column";
-      list.style.gap = "2px";
-      list.style.maxHeight = "220px";
+      list.style.gap = "4px";
+      list.style.maxHeight = "260px";
       list.style.overflowY = "auto";
       for (const f of group) {
+        const color = coincidentEntryColor(f);
         const row = document.createElement("button");
         row.type = "button";
         row.style.display = "flex";
         row.style.alignItems = "center";
-        row.style.gap = "6px";
+        row.style.gap = "8px";
         row.style.width = "100%";
-        row.style.padding = "5px 6px";
-        row.style.border = "none";
-        row.style.borderRadius = "5px";
-        row.style.background = "transparent";
+        row.style.minHeight = "42px";
+        row.style.padding = "8px 9px";
+        row.style.border = "1px solid #e5e7eb";
+        row.style.borderRadius = "8px";
+        row.style.background = "#ffffff";
+        row.style.boxShadow = "0 1px 2px rgba(15, 23, 42, 0.06)";
         row.style.cursor = "pointer";
         row.style.textAlign = "left";
         row.style.font = "inherit";
         row.style.color = "inherit";
+        row.style.transition = "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease";
+        row.setAttribute("aria-label", `${featureKindLabel(f.kind)} ${f.name}`);
         row.addEventListener("mouseenter", () => {
-          row.style.background = "#f3f4f6";
+          row.style.background = "#f8fafc";
+          row.style.borderColor = color;
+          row.style.boxShadow = "0 4px 12px rgba(15, 23, 42, 0.12)";
         });
         row.addEventListener("mouseleave", () => {
-          row.style.background = "transparent";
+          row.style.background = "#ffffff";
+          row.style.borderColor = "#e5e7eb";
+          row.style.boxShadow = "0 1px 2px rgba(15, 23, 42, 0.06)";
         });
+        const colorDot = document.createElement("span");
+        colorDot.style.flex = "0 0 auto";
+        colorDot.style.width = "9px";
+        colorDot.style.height = "9px";
+        colorDot.style.borderRadius = "9999px";
+        colorDot.style.background = color;
+        colorDot.style.boxShadow = `0 0 0 3px ${color}22`;
         const kindBadge = document.createElement("span");
         kindBadge.textContent = featureKindLabel(f.kind);
         kindBadge.style.flex = "0 0 auto";
         kindBadge.style.fontSize = "10px";
-        kindBadge.style.fontWeight = "700";
-        kindBadge.style.padding = "1px 5px";
-        kindBadge.style.borderRadius = "4px";
-        kindBadge.style.background = "#e5e7eb";
-        kindBadge.style.color = "#374151";
+        kindBadge.style.fontWeight = "800";
+        kindBadge.style.lineHeight = "1";
+        kindBadge.style.padding = "4px 6px";
+        kindBadge.style.borderRadius = "9999px";
+        kindBadge.style.background = `${color}1f`;
+        kindBadge.style.color = color;
+        kindBadge.style.border = `1px solid ${color}33`;
         const nameSpan = document.createElement("span");
         nameSpan.textContent = f.name;
         nameSpan.style.flex = "1 1 auto";
+        nameSpan.style.minWidth = "0";
         nameSpan.style.whiteSpace = "nowrap";
         nameSpan.style.overflow = "hidden";
         nameSpan.style.textOverflow = "ellipsis";
-        row.append(kindBadge, nameSpan);
+        nameSpan.style.fontWeight = "650";
+        row.append(colorDot, kindBadge, nameSpan);
         row.addEventListener("click", () => {
           onSelectRef.current?.(f.feature_id);
           popupRef.current?.remove();
@@ -1283,13 +1343,15 @@ export function VWorldFeatureClusters({
         const c = feat.geometry.coordinates as [number, number];
         const p = map.project(c);
         const cellKey = `${Math.round(p.x / OVERLAP_PX)}:${Math.round(p.y / OVERLAP_PX)}`;
-        const entry: CoincidentEntry = {
-          feature_id: String(props.feature_id),
-          name: String(props.name),
-          kind: String(props.kind),
-          lon: c[0],
-          lat: c[1],
-        };
+          const entry: CoincidentEntry = {
+            feature_id: String(props.feature_id),
+            name: String(props.name),
+            kind: String(props.kind),
+            lon: c[0],
+            lat: c[1],
+            marker_color:
+              typeof props.marker_color === "string" ? props.marker_color : null,
+          };
         const arr = cellGroups.get(cellKey);
         if (arr) arr.push(entry);
         else cellGroups.set(cellKey, [entry]);

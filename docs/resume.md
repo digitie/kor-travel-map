@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-02 (codex) — Feature 지도 notice 최신 표시/이력화 로컬 구현 완료
+
+- **완료(UI)**: Feature 지도 겹친 점 선택 팝업을 선택 메뉴처럼 보이도록 정리했다. 기존 `겹친 지점 N개`
+  텍스트와 선택 흐름은 유지한다.
+- **완료(데이터)**: `provider_sync.source_records.last_seen_at`을 추가하고, 동일 source payload 재수집은
+  Feature 본문/version을 갱신하지 않고 마지막 확인 시각만 갱신한다.
+- **완료(notice)**: KREX 교통공지 notice는 사건 단서 기반 stable key로 같은 사건의 payload 변경을
+  같은 Feature에 누적한다. Feature 지도 bbox 조회는 같은 notice lineage의 최신 feature만 표시한다.
+- **완료(상세)**: admin feature 상세 API/source row에 `last_seen_at`을 노출하고, notice 상세 화면에
+  `Notice History` 표를 추가했다. OpenAPI와 frontend generated types를 갱신했다.
+- **검증**: targeted unit/API 63 passed, Dagster runner/load enrichment 11 passed, integration 28 passed,
+  perf EXPLAIN 7 passed, frontend type-check/gen:types:check/OpenAPI drift/frontend lint(기존 경고 4건)/
+  frontend unit 45 passed, frontend production build 통과(필수 env 로컬값 지정), 전체 pytest 1378 passed,
+  전체 ruff, `mypy src/kortravelmap`, import-linter 4 contracts, `git diff --check` 통과.
+- **미검증**: mocked Playwright e2e는 WSL Playwright Chromium 미설치 + Ubuntu 26.04 미지원으로 실행 불가.
+  Windows Chrome fallback launch도 remote debugging pipe 문제로 실패했다.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지한다.
+
 ## 2026-07-01 (codex) — Feature 작성 폼 장소 종류 최상위화 로컬 구현 중
 
 - **완료(UI)**: 새 Feature 작성과 변경 요청 작성 화면에서 `장소 종류(place_kind)`를 상세 섹션에서

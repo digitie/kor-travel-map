@@ -164,12 +164,20 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
       },
       {
         id: "imported",
-        header: "imported",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.imported_at)}
-          </span>
-        ),
+        header: "seen",
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <>
+              <div className="text-muted-foreground">
+                {formatDateTime(source.last_seen_at)}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                imported {formatDateTime(source.imported_at)}
+              </div>
+            </>
+          );
+        },
       },
     ],
     [],
@@ -180,6 +188,121 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
       <DataTable
         columns={columns}
         data={data.sources}
+        getRowId={(row) => row.source_record_key}
+        emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
+        containerClassName="overflow-auto"
+      />
+    </Section>
+  );
+}
+
+function noticeRawValue(source: SourceRow, key: string): string | null {
+  const value = source.raw_data[key];
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
+}
+
+function noticeHistorySummary(source: SourceRow): string {
+  return (
+    noticeRawValue(source, "message") ??
+    noticeRawValue(source, "description") ??
+    noticeRawValue(source, "title") ??
+    source.raw_name ??
+    source.source_record_key
+  );
+}
+
+function noticeHistoryState(source: SourceRow): string {
+  return (
+    noticeRawValue(source, "process_status") ??
+    noticeRawValue(source, "level") ??
+    noticeRawValue(source, "incident_type") ??
+    "-"
+  );
+}
+
+function NoticeHistoryPanel({ data }: { data: AdminFeatureDetailData }) {
+  const rows = useMemo(() => {
+    const primary = data.sources.filter((source) => source.is_primary_source);
+    return (primary.length > 0 ? primary : data.sources).toSorted(
+      (a, b) =>
+        Date.parse(b.last_seen_at) - Date.parse(a.last_seen_at) ||
+        Date.parse(b.imported_at) - Date.parse(a.imported_at) ||
+        b.source_record_key.localeCompare(a.source_record_key),
+    );
+  }, [data.sources]);
+
+  const columns = useMemo<ColumnDef<SourceRow, unknown>[]>(
+    () => [
+      {
+        id: "seen",
+        header: "seen",
+        cell: ({ row }) => (
+          <>
+            <div className="text-muted-foreground">
+              {formatDateTime(row.original.last_seen_at)}
+            </div>
+            <div className="mt-1 font-mono text-xs text-muted-foreground">
+              {shortId(row.original.raw_payload_hash, 12)}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "notice",
+        header: "notice",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <div className="max-w-md">
+              <div className="truncate font-medium">
+                {noticeHistorySummary(source)}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                <Badge variant="outline">{source.provider}</Badge>
+                <Badge variant="secondary">{source.dataset_key}</Badge>
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: "state",
+        header: "state",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {noticeHistoryState(row.original)}
+          </span>
+        ),
+      },
+      {
+        id: "raw",
+        header: "raw",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <details>
+            <summary className="cursor-pointer font-mono text-xs">
+              {shortId(row.original.source_record_key, 18)}
+            </summary>
+            <div className="mt-2 min-w-72">
+              <JsonBlock value={row.original.raw_data} />
+            </div>
+          </details>
+        ),
+      },
+    ],
+    [],
+  );
+
+  if (data.feature.kind !== "notice") return null;
+
+  return (
+    <Section count={rows.length} icon={ScrollTextIcon} title="Notice History">
+      <DataTable
+        columns={columns}
+        data={rows}
         getRowId={(row) => row.source_record_key}
         emptyMessage={EMPTY_MESSAGE}
         manualSorting={false}
@@ -712,6 +835,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_28rem]">
         <div className="flex min-w-0 flex-col gap-4">
           <SourcesTable data={data} />
+          <NoticeHistoryPanel data={data} />
           <IssuesTable data={data} />
           <OverridesTable data={data} />
           <HistoryPanel data={data} />
