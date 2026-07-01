@@ -687,7 +687,11 @@ function createFeatureMarkerElement({
   if (!markerLabel) {
     if (onClick) {
       icon.style.cursor = "pointer";
-      icon.addEventListener("click", onClick);
+      icon.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick(event);
+      });
     }
     if (badgeCount && badgeCount > 1) {
       appendCountBadge(icon, badgeCount, resolveMarkerColor(markerColor ?? null));
@@ -721,7 +725,13 @@ function createFeatureMarkerElement({
   label.style.pointerEvents = "none";
 
   wrapper.append(icon, label);
-  if (onClick) wrapper.addEventListener("click", onClick);
+  if (onClick) {
+    wrapper.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick(event);
+    });
+  }
   if (badgeCount && badgeCount > 1) {
     appendCountBadge(wrapper, badgeCount, color);
   }
@@ -1221,7 +1231,7 @@ export function VWorldFeatureClusters({
       container.appendChild(list);
       popupRef.current = new maplibregl.Popup({
         closeButton: true,
-        closeOnClick: true,
+        closeOnClick: false,
         maxWidth: "260px",
       })
         .setLngLat(lngLat)
@@ -1316,7 +1326,9 @@ export function VWorldFeatureClusters({
             element.dataset.lon = String(coords[0]);
             element.dataset.lat = String(coords[1]);
             element.dataset.pointCount = String(count);
-            element.addEventListener("click", () => {
+            element.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
               const source = map.getSource(SRC) as maplibregl.GeoJSONSource;
               const currentClusterId = Number(element.dataset.clusterId);
               const currentPointCount = Number(element.dataset.pointCount) || 0;

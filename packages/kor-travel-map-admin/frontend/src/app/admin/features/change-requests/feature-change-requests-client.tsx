@@ -44,7 +44,6 @@ import {
   korTravelGeoCandidateToCoord,
   korTravelGeoCodesFromCandidate,
   reverseGeocode,
-  searchDistricts,
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
@@ -86,6 +85,8 @@ import {
   FeatureBasicInfoSection,
   FeatureDetailSection,
   FeatureLocationPreviewSection,
+  addressCodeError,
+  validateAddressCodes,
 } from "../feature-form-sections";
 
 const CHANGE_STATUSES: Array<AdminFeatureChangeStatus | "all"> = [
@@ -336,7 +337,10 @@ function sigunguCandidateFromGeoCandidate(
   const code = codes.sigungu_code;
   if (!code || code.length !== 5) return null;
   const region = candidate.region;
-  const label = [region?.sido, region?.sigungu]
+  const label = [
+    region?.sido ?? SIDO_SEARCH_LABEL_BY_CODE[code.slice(0, 2)],
+    region?.sigungu,
+  ]
     .map((value) => value?.trim())
     .filter((value): value is string => Boolean(value))
     .join(" ");
@@ -347,44 +351,6 @@ function sigunguCandidateFromGeoCandidate(
     label,
     ...(coord ? { lon: coord.lon, lat: coord.lat } : {}),
   };
-}
-
-function uniqueSigunguCandidates(
-  candidates: readonly KorTravelGeoCandidate[],
-  filter?: (candidate: SigunguCandidate) => boolean,
-): SigunguCandidate[] {
-  const seen = new Set<string>();
-  const results: SigunguCandidate[] = [];
-  for (const rawCandidate of candidates) {
-    const candidate = sigunguCandidateFromGeoCandidate(rawCandidate);
-    if (!candidate || seen.has(candidate.code)) continue;
-    if (filter && !filter(candidate)) continue;
-    seen.add(candidate.code);
-    results.push(candidate);
-    if (results.length >= 10) break;
-  }
-  return results;
-}
-
-async function searchSigunguCandidates(rawValue: string): Promise<SigunguCandidate[]> {
-  const raw = rawValue.trim();
-  if (raw.length === 0) return [];
-  if (/^\d+$/.test(raw)) {
-    if (raw.length < 2) return [];
-    const sidoCode = raw.slice(0, 2);
-    const sidoQuery = SIDO_SEARCH_LABEL_BY_CODE[sidoCode];
-    if (!sidoQuery) return [];
-    const response = await searchDistricts(sidoQuery, {
-      sigCd: raw.length >= 5 ? raw.slice(0, 5) : sidoCode,
-      size: 100,
-    });
-    return uniqueSigunguCandidates(
-      response.candidates,
-      (candidate) => candidate.code.startsWith(raw),
-    );
-  }
-  const response = await searchDistricts(raw, { size: 10 });
-  return uniqueSigunguCandidates(response.candidates);
 }
 
 function detailToFormPatch(
@@ -576,20 +542,7 @@ function validateTextFields(
   form: FeatureChangeFormState,
   categoryItems: readonly CategorySummary[],
 ): void {
-  const checks: Array<[string, string, RegExp]> = [
-    ["sido_code", form.sidoCode, /^\d{2}$/],
-    ["sigungu_code", form.sigunguCode, /^\d{5}$/],
-    ["legal_dong_code", form.legalDongCode, /^\d{10}$/],
-    ["admin_dong_code", form.adminDongCode, /^\d{7,10}$/],
-    ["road_name_code", form.roadNameCode, /^\d{7,12}$/],
-    ["road_address_management_no", form.roadAddressManagementNo, /^\d{20,26}$/],
-  ];
-  for (const [label, value, pattern] of checks) {
-    const raw = value.trim();
-    if (raw.length > 0 && !pattern.test(raw)) {
-      throw new Error(`${label} 형식이 올바르지 않습니다.`);
-    }
-  }
+  validateAddressCodes(form);
   parseOptionalCoord(form.lon, form.lat);
   const phoneError = phoneNumber<FeatureChangeFormState>()(form.phone, form);
   if (phoneError) {
@@ -778,23 +731,14 @@ function LocationEditDialog({
   const [draft, setDraft] = useState<LocationDraft>(() =>
     locationDraftFromForm(form),
   );
-  const [dialogSigunguCandidates, setDialogSigunguCandidates] = useState<
-    SigunguCandidate[]
-  >([]);
-  const [dialogSigunguSearchError, setDialogSigunguSearchError] = useState<
-    string | null
-  >(null);
-  const [dialogSigunguSearching, setDialogSigunguSearching] = useState(false);
   const mountedRef = useRef(true);
   const coord = parseCoordInput(draft.lon, draft.lat);
   const coordError = coordValidationMessage(draft.lon, draft.lat);
+  const sigunguCodeError = addressCodeError("sigunguCode", draft.sigunguCode);
   const markerColorStyle = markerColorSelectStyle(draft.markerColor);
   const markerIconOptions = MARKER_ICON_OPTIONS.includes(draft.markerIcon)
     ? MARKER_ICON_OPTIONS
     : [draft.markerIcon, ...MARKER_ICON_OPTIONS].filter(Boolean);
-  const dialogSigunguLabel = dialogSigunguCandidates.find(
-    (candidate) => candidate.code === draft.sigunguCode.trim(),
-  );
   const dialogCenter: [number, number] = coord
     ? [coord.lon, coord.lat]
     : [DEFAULT_VIEWPORT.lon, DEFAULT_VIEWPORT.lat];
@@ -812,43 +756,6 @@ function LocationEditDialog({
     [],
   );
 
-  useEffect(() => {
-    const raw = draft.sigunguCode.trim();
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (cancelled) return;
-      setDialogSigunguSearchError(null);
-      if (form.action === "delete" || raw.length === 0) {
-        setDialogSigunguCandidates([]);
-        setDialogSigunguSearching(false);
-        return;
-      }
-      const run = async () => {
-        setDialogSigunguSearching(true);
-        try {
-          const candidates = await searchSigunguCandidates(raw);
-          if (!cancelled) setDialogSigunguCandidates(candidates);
-        } catch (error) {
-          if (!cancelled) {
-            setDialogSigunguCandidates([]);
-            setDialogSigunguSearchError(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        } finally {
-          if (!cancelled) setDialogSigunguSearching(false);
-        }
-      };
-      void run();
-    }, form.action === "delete" || raw.length === 0 ? 0 : 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [draft.sigunguCode, form.action]);
-
   const selectPoint = async (lon: number, lat: number) => {
     setDraft((current) => ({
       ...current,
@@ -865,10 +772,6 @@ function LocationEditDialog({
       if (!mountedRef.current) return;
       if (sigungu) {
         setDraft((current) => ({ ...current, sigunguCode: sigungu.code }));
-        setDialogSigunguCandidates((current) => [
-          sigungu,
-          ...current.filter((candidate) => candidate.code !== sigungu.code),
-        ]);
         setReverseMessage(`${sigungu.label} · ${sigungu.code}`);
       } else {
         setReverseMessage("시군구 후보 없음");
@@ -996,49 +899,24 @@ function LocationEditDialog({
                   </NativeSelectOption>
                 ))}
               </FormSelect>
-              <FormField
-                inputMode="text"
+              <AdminRegionAutoSearch
+                id="change-location-sigungu-code"
+                kind="sigungu"
                 label="시군구 코드"
                 value={draft.sigunguCode}
-                onChange={(event) =>
-                  updateDraft("sigunguCode", event.target.value)
-                }
+                onChange={(value) => updateDraft("sigunguCode", value)}
+                onSelectCandidate={(candidate) => {
+                  const sigungu = sigunguCandidateFromGeoCandidate(candidate);
+                  if (sigungu) {
+                    setReverseMessage(`${sigungu.label} · ${sigungu.code}`);
+                  }
+                }}
               />
               <div className="flex flex-wrap gap-2">
-                {dialogSigunguLabel ? (
-                  <Badge variant="secondary">
-                    {dialogSigunguLabel.label} · {dialogSigunguLabel.code}
-                  </Badge>
-                ) : null}
                 {reverseMessage ? (
                   <Badge variant="outline">{reverseMessage}</Badge>
                 ) : null}
-                {dialogSigunguSearching ? (
-                  <Badge variant="outline">검색 중</Badge>
-                ) : null}
               </div>
-              {dialogSigunguSearchError ? (
-                <div className="text-sm text-destructive">
-                  {dialogSigunguSearchError}
-                </div>
-              ) : null}
-              {dialogSigunguCandidates.length > 0 ? (
-                <div className="grid gap-1">
-                  {dialogSigunguCandidates.map((candidate) => (
-                    <button
-                      className="rounded-md border px-2.5 py-2 text-left text-sm hover:bg-muted"
-                      key={candidate.code}
-                      type="button"
-                      onClick={() => updateDraft("sigunguCode", candidate.code)}
-                    >
-                      <span className="font-mono">{candidate.code}</span>
-                      <span className="ml-2 text-muted-foreground">
-                        {candidate.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -1054,7 +932,7 @@ function LocationEditDialog({
           </Button>
           <Button
             className="flex-1 sm:flex-none"
-            disabled={Boolean(coordError)}
+            disabled={Boolean(coordError || sigunguCodeError)}
             type="button"
             onClick={applyDraft}
           >
@@ -1730,17 +1608,9 @@ export function FeatureChangeRequestsClient({
                     roadAddressManagementNo: form.roadAddressManagementNo,
                     roadNameCode: form.roadNameCode,
                     sidoCode: form.sidoCode,
+                    sigunguCode: form.sigunguCode,
                   }}
-                  sigunguControl={
-                    <AdminRegionAutoSearch
-                      id="change-sigungu-code"
-                      kind="sigungu"
-                      label="시군구 코드"
-                      value={form.sigunguCode}
-                      onChange={(value) => updateForm("sigunguCode", value)}
-                      onSelectCandidate={applyRegionCandidate}
-                    />
-                  }
+                  onSelectRegionCandidate={applyRegionCandidate}
                   onChange={(field, value) => {
                     if (field === "addressExtraJson") {
                       updateForm("addressJson", value);
