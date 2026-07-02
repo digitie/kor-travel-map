@@ -100,6 +100,25 @@ _MAX_PAGE_SIZE: Final[int] = 200
 _MAX_LIST_LIMIT: Final[int] = 500
 _CONCIERGE_PROVIDER: Final[str] = "kor-travel-concierge-youtube"
 _CONCIERGE_DATASET_KEY: Final[str] = "youtube_place_candidates"
+_PROVIDER_TITLE_SOURCE_PROVIDERS: Final[frozenset[str]] = frozenset(
+    {
+        "data.go.kr-standard",
+        "python-airkorea-api",
+        "python-datagokr-api",
+        "python-kasi-api",
+        "python-khoa-api",
+        "python-kma-api",
+        "python-knps-api",
+        "python-krairport-api",
+        "python-krex-api",
+        "python-krforest-api",
+        "python-krheritage-api",
+        "python-mcst-api",
+        "python-mois-api",
+        "python-opinet-api",
+        "python-visitkorea-api",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -575,6 +594,23 @@ upserted AS (
                 NULLIF(f.detail #>> '{facility_info,youtube_playlist_title}', ''),
                 NULLIF(f.detail #>> '{facility_info,youtube_channel_title}', '')
             )), '')
+            WHEN s.provider IN (
+                'data.go.kr-standard',
+                'python-airkorea-api',
+                'python-datagokr-api',
+                'python-kasi-api',
+                'python-khoa-api',
+                'python-kma-api',
+                'python-knps-api',
+                'python-krairport-api',
+                'python-krex-api',
+                'python-krforest-api',
+                'python-krheritage-api',
+                'python-mcst-api',
+                'python-mois-api',
+                'python-opinet-api',
+                'python-visitkorea-api'
+            ) THEN s.provider
             ELSE NULL
         END,
         CASE
@@ -630,11 +666,10 @@ upserted AS (
         source_id = EXCLUDED.source_id,
         source_record_key = EXCLUDED.source_record_key,
         rank_score = GREATEST(feature.curated_features.rank_score, EXCLUDED.rank_score),
-        display_title = CASE
-            WHEN feature.curated_features.selection_origin = 'source_rule'
-            THEN EXCLUDED.display_title
-            ELSE COALESCE(feature.curated_features.display_title, EXCLUDED.display_title)
-        END,
+        display_title = COALESCE(
+            feature.curated_features.display_title,
+            EXCLUDED.display_title
+        ),
         curation_relation = EXCLUDED.curation_relation,
         reuse_policy = EXCLUDED.reuse_policy,
         metadata = feature.curated_features.metadata || EXCLUDED.metadata,
@@ -975,7 +1010,7 @@ def _feature_snapshot(feature: CuratedFeature) -> dict[str, Any]:
 
 
 def _feature_detail_snapshot(feature: CuratedFeature) -> CuratedFeatureDetailSnapshot:
-    title = feature.display_title or _concierge_source_title(feature) or feature.feature_name
+    title = feature.display_title or _default_source_title(feature) or feature.feature_name
     summary = feature.display_summary
     if summary is None:
         summary = feature.metadata.get("summary")
@@ -1109,6 +1144,15 @@ def _concierge_source_title(feature: CuratedFeature) -> str | None:
         title = _nested_text(feature.detail, *path)
         if title is not None:
             return title
+    return None
+
+
+def _default_source_title(feature: CuratedFeature) -> str | None:
+    title = _concierge_source_title(feature)
+    if title is not None:
+        return title
+    if feature.provider in _PROVIDER_TITLE_SOURCE_PROVIDERS:
+        return feature.provider
     return None
 
 
@@ -1402,6 +1446,7 @@ async def update_curated_feature(
 
     allowed = {
         "curation_status",
+        "theme_id",
         "source_record_key",
         "rank_score",
         "display_title",

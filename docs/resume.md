@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-02 (codex) — 큐레이션 feature theme/title 편집 로컬 구현 완료
+
+- **완료(기본 제목)**: 정부·공공기관 source rule 후보의 `display_title` 기본값을 provider 이름으로
+  채우고, concierge YouTube 후보는 `youtube.source_title`을 우선 쓰도록 테스트를 보강했다.
+- **완료(admin 편집)**: curated feature patch API와 Feature 큐레이션 편집 패널에서 `theme_id`와
+  `display_title`을 함께 수정할 수 있게 했다. source rule 재적용은 기존 제목을 덮지 않는다.
+- **검증**: curated repo unit 6 passed, curated repo integration 7 passed, 전체 pytest 1380 passed,
+  전체 ruff, `mypy src/kortravelmap`, import-linter 4 contracts, OpenAPI drift check,
+  frontend gen:types:check/type-check/lint(기존 warning 4건), Windows Playwright fallback
+  route-mocked curated mutations e2e 21 passed, frontend production build 통과.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지, n150 반영과 live UI e2e를 진행한다.
+
 ## 2026-07-02 (codex) — 큐레이션 theme set 확장과 Source rules job 연결 로컬 구현 완료
 
 - **완료(테마 seed)**: 기본 큐레이션 theme set에 계절별 여행지 4종과 지역별 여행지 6종을 추가했다.

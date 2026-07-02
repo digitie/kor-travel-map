@@ -453,8 +453,15 @@ export function CuratedPlaceSearchPanel({
   );
 }
 
-export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
+export function FeatureEditor({
+  feature,
+  themes = [],
+}: {
+  feature: CuratedFeature | null;
+  themes?: readonly CuratedTheme[];
+}) {
   const patchFeature = usePatchCuratedFeatureMutation();
+  const [themeId, setThemeId] = useState(feature?.theme_id ?? "");
   const [title, setTitle] = useState(feature?.display_title ?? "");
   const [summary, setSummary] = useState(feature?.display_summary ?? "");
   const [rankScore, setRankScore] = useState(String(feature?.rank_score ?? 0));
@@ -476,6 +483,7 @@ export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
       {
         curatedFeatureId: feature.curated_feature_id,
         body: {
+          theme_id: themeId || feature.theme_id,
           display_title: title.trim().length > 0 ? title.trim() : null,
           display_summary: summary.trim().length > 0 ? summary.trim() : null,
           rank_score: Number(rankScore),
@@ -488,6 +496,7 @@ export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
           toast.success("저장 완료", {
             description: (
               <div className="grid gap-0.5 text-xs">
+                <div>theme: {themeId || feature.theme_id}</div>
                 <div>display title: {title.trim() || "—"}</div>
                 <div>display summary: {summary.trim() || "—"}</div>
                 <div>
@@ -512,6 +521,8 @@ export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
     );
   }
 
+  const hasCurrentTheme = themes.some((theme) => theme.theme_id === feature.theme_id);
+
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
@@ -521,6 +532,25 @@ export function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
         </div>
       </div>
       <form className="flex flex-col gap-3 p-4" onSubmit={save}>
+        <label className="grid gap-1 text-sm">
+          <span className="text-muted-foreground">curated theme</span>
+          <NativeSelect
+            className="w-full"
+            value={themeId}
+            onChange={(event) => setThemeId(event.target.value)}
+          >
+            {!hasCurrentTheme ? (
+              <NativeSelectOption value={feature.theme_id}>
+                {feature.theme_name} · {feature.theme_slug}
+              </NativeSelectOption>
+            ) : null}
+            {themes.map((theme) => (
+              <NativeSelectOption key={theme.theme_id} value={theme.theme_id}>
+                {theme.theme_name} · {theme.theme_slug}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">display title</span>
           <Input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -1699,6 +1729,7 @@ export function CuratedFeaturesClient() {
             <FeatureEditor
               feature={selectedFeature}
               key={`${selectedFeature?.curated_feature_id ?? "empty"}:${selectedFeature?.updated_at ?? ""}:editor`}
+              themes={themes.data?.data.items ?? []}
             />
             <CuratedFeatureDetailPreview feature={selectedFeature} />
           </div>

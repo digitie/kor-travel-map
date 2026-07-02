@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-02 (codex) — 큐레이션 feature theme/title 편집
+
+curated feature의 theme 연결과 theme 아래 세부 POI 묶음 제목(`display_title`) 운영 방식을 정리했다.
+
+- **기본 제목 정책**: data.go.kr, MCST 등 정부·공공기관 source rule 후보는 provider 이름을
+  기본 `display_title`로 채운다. `kor-travel-concierge-youtube/youtube_place_candidates`는
+  API가 제공하는 `youtube.source_title`을 우선 사용하고, playlist/channel/search 제목은 fallback으로
+  유지한다.
+- **admin 편집**: Feature 큐레이션 편집 패널과 전용 상세 화면에서 theme와 `display_title`을 함께
+  patch할 수 있게 했다. source rule 재적용은 이미 입력된 제목을 덮어쓰지 않고 빈 제목만 채운다.
+- **계약 갱신**: admin patch DTO/OpenAPI/generated type, curated repo 단위·통합 테스트,
+  route-mocked e2e를 새 정책에 맞췄다.
+- **검증**: curated repo unit 6 passed, curated repo integration 7 passed, 전체 pytest 1380 passed,
+  전체 ruff, `mypy src/kortravelmap`, import-linter 4 contracts, OpenAPI drift check,
+  frontend gen:types:check/type-check/lint(기존 warning 4건), Windows Playwright fallback
+  route-mocked curated mutations e2e 21 passed, frontend production build 통과.
+
 ## 2026-07-02 (codex) — 큐레이션 theme set 확장과 Source rules job 연결
 
 Feature 큐레이션 화면의 기본 theme set과 운영 실행 경로를 보강했다.

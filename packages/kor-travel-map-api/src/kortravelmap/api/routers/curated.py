@@ -455,6 +455,7 @@ class CuratedFeaturePatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     curation_status: CurationStatus | None = None
+    theme_id: str | None = None
     source_record_key: str | None = None
     rank_score: float | None = None
     display_title: str | None = None
@@ -1048,6 +1049,8 @@ async def patch_admin_curated_feature_route(
                 curated_feature_id=curated_feature_id,
                 updates=body.model_dump(exclude_unset=True),
             )
+    except IntegrityError as exc:
+        raise _integrity_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if row is None:

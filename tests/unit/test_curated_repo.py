@@ -287,6 +287,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         session,
         curated_feature_id=_CURATED_ID,
         updates={
+            "theme_id": "99999999-9999-9999-9999-999999999999",
             "display_summary": "patched",
             "metadata": {"patched": True},
             "curation_relation": "bookstore_stop",
@@ -294,6 +295,10 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
     )
     assert patched is not None
     assert "content_version = content_version + 1" in session.calls[3][0]
+    assert (
+        session.calls[3][1]["theme_id"]
+        == "99999999-9999-9999-9999-999999999999"
+    )
 
     for status_name in ("curated", "rejected", "candidate"):
         changed = await curated_repo.set_curated_feature_status(
@@ -438,6 +443,14 @@ async def test_curated_detail_snapshot_uses_concierge_source_title() -> None:
                 display_title=None,
                 detail={
                     "place_kind": "youtube_place_candidate",
+                    "payload": {
+                        "kor_travel_concierge": {
+                            "youtube": {
+                                "source_title": "제주 동쪽 영상 묶음",
+                                "playlist_title": "제주 플레이리스트",
+                            }
+                        }
+                    },
                     "facility_info": {
                         "youtube_channel_title": "여행 채널",
                         "youtube_playlist_title": "제주 플레이리스트",
@@ -453,7 +466,20 @@ async def test_curated_detail_snapshot_uses_concierge_source_title() -> None:
     )
 
     assert snapshot is not None
-    assert snapshot.content["title"] == "제주 플레이리스트"
+    assert snapshot.content["title"] == "제주 동쪽 영상 묶음"
+
+
+@pytest.mark.asyncio
+async def test_curated_detail_snapshot_uses_provider_title_for_public_source() -> None:
+    session = _FakeSession([_feature_row(display_title=None)])
+
+    snapshot = await curated_repo.get_curated_feature_detail_snapshot(
+        session,
+        curated_feature_id=_CURATED_ID,
+    )
+
+    assert snapshot is not None
+    assert snapshot.content["title"] == "python-datagokr-api"
 
 
 @pytest.mark.asyncio

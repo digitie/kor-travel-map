@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-import { useAdminCuratedFeature } from "@/api/curated";
+import { useAdminCuratedFeature, useAdminCuratedThemes } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/components/status-badge";
@@ -44,6 +44,7 @@ export function CuratedFeatureDetailClient({
   curatedFeatureId: string;
 }) {
   const feature = useAdminCuratedFeature(curatedFeatureId);
+  const themes = useAdminCuratedThemes({ limit: 200 });
   const item = feature.data?.data ?? null;
 
   return (
@@ -138,6 +139,7 @@ export function CuratedFeatureDetailClient({
                 <FeatureEditor
                   feature={item}
                   key={`${item.curated_feature_id}:${item.updated_at}:editor`}
+                  themes={themes.data?.data.items ?? []}
                 />
               </aside>
             </div>

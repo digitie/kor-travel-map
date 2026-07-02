@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 큐레이션 feature theme/title 편집 (2026-07-02)
+
+- **ADDED**: Feature 큐레이션 편집 패널에서 개별 curated feature의 theme와
+  `display_title`을 함께 수정할 수 있게 했다.
+- **CHANGED**: data.go.kr, MCST 등 정부·공공기관 source rule이 만드는 후보의 기본
+  `display_title`은 provider 이름으로 채운다. concierge YouTube source는 API가 제공하는
+  `youtube.source_title`을 우선 사용한다.
+- **CHANGED**: source rule 재적용은 이미 지정된 `display_title`을 덮어쓰지 않고, 비어 있는
+  경우에만 source별 기본 제목을 채운다.
+
 ### 큐레이션 테마와 Source rules 실행 연결 (2026-07-02)
 
 - **ADDED**: 기본 큐레이션 theme set에 계절별 여행지 4종과 지역별 여행지 6종을 추가했다.

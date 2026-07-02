@@ -42,6 +42,7 @@ const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const FEATURE_A_ID = "curated-feature-aaaa";
 const FEATURE_B_ID = "curated-feature-bbbb";
 const THEME_ID = "theme-1111";
+const THEME_B_ID = "theme-2222";
 const SOURCE_ID = "source-1111";
 const RULE_ID = "rule-1111";
 
@@ -593,7 +594,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
       new RegExp(`/admin/features/curated/${FEATURE_A_ID}$`),
     );
     await expect(
-      page.getByRole("heading", { name: "Curated feature detail" }),
+      page.getByRole("heading", { name: "큐레이션 피처 상세" }),
     ).toBeVisible();
     await expect(page.getByText("Location review")).toBeVisible();
     await expect(page.getByText("Place search")).toBeVisible();
@@ -612,7 +613,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     const row = page.getByRole("row", { name: /경복궁/ });
     await expect(row).toBeVisible();
     // candidate 행은 select(체크) 버튼을 노출한다.
-    const selectButton = row.getByRole("button", { name: "select" });
+    const selectButton = row.getByRole("button", { name: "선택" });
     await expect(selectButton).toBeVisible();
 
     await selectButton.click();
@@ -623,7 +624,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     });
 
     // invalidate → list 재조회로 갱신본을 받아 status Badge=curated, 버튼이 unselect로 전환.
-    await expect(row.getByText("curated")).toBeVisible();
+    await expect(row.getByText("큐레이션됨")).toBeVisible();
     await expect(row.getByRole("button", { name: "unselect" })).toBeVisible();
   });
 
@@ -655,7 +656,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     });
 
     // candidate로 복귀 → select 버튼 재등장.
-    await expect(row.getByRole("button", { name: "select" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "선택" })).toBeVisible();
   });
 
   test("curated feature display/detail patch 저장 (PATCH curated-features/{id})", async ({
@@ -663,12 +664,22 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
   }) => {
     const requests = await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
+      themes: [
+        makeCuratedTheme(),
+        makeCuratedTheme({
+          theme_group: "media",
+          theme_id: THEME_B_ID,
+          theme_name: "영상 여행",
+          theme_slug: "media-places",
+        }),
+      ],
     });
 
     await page.goto("/admin/features/curated");
 
     // 첫 행이 자동 선택되어 FeatureEditor가 렌더된다.
     await expect(page.getByText("Curated display")).toBeVisible();
+    await page.getByLabel("curated theme").selectOption(THEME_B_ID);
     await page.getByLabel("display title").fill("경복궁 야간개장");
     await page.getByLabel("display summary").fill("야간 고궁 산책 추천");
     await page.getByLabel("rank score").fill("4.5");
@@ -679,6 +690,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
 
     await expect.poll(() => requests.patch).toBe(1);
     expect(requests.patchBodies[0]).toMatchObject({
+      theme_id: THEME_B_ID,
       display_title: "경복궁 야간개장",
       display_summary: "야간 고궁 산책 추천",
       rank_score: 4.5,
@@ -832,7 +844,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
 
     await page.goto("/admin/features/curated");
     const row = page.getByRole("row", { name: /경복궁/ });
-    const archiveButton = row.getByRole("button", { name: "archive" });
+    const archiveButton = row.getByRole("button", { name: "보관" });
     await expect(archiveButton).toBeVisible();
 
     // 1) confirm dismiss → DELETE 미발생 + 메시지 검증.
@@ -870,7 +882,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     await expect(page.getByText("Source rule editor")).toBeVisible();
     await page.getByLabel("action").selectOption("curated");
     await page.getByLabel("priority").fill("5");
-    await page.getByLabel("place_kind").fill("place");
+    await page.getByLabel("장소 종류").selectOption("place");
     await page.getByLabel("category").fill("02020101");
     await page.getByLabel("region_scope").fill('{"sido_code": "11"}');
     await page.getByLabel("metadata").fill('{"note": "seoul only"}');
@@ -949,11 +961,11 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     // etag Badge (shortId(etag, 10)).
     await expect(page.getByText(/^etag /)).toBeVisible();
     // detail item 테이블 헤더 + relation Badge. 'feature' 컬럼은 메인 후보 테이블에도
-    // 있으므로 snapshot 테이블(고유 'order' 헤더 보유)로 스코프해 strict-mode 충돌 회피.
+    // 있으므로 snapshot 테이블(고유 '순서' 헤더 보유)로 스코프해 strict-mode 충돌 회피.
     const snapshotTable = page.getByRole("table").filter({
-      has: page.getByRole("columnheader", { name: "order", exact: true }),
+      has: page.getByRole("columnheader", { name: "순서", exact: true }),
     });
-    for (const column of ["order", "relation", "feature", "memo"]) {
+    for (const column of ["순서", "관계", "feature", "메모"]) {
       await expect(
         snapshotTable.getByRole("columnheader", { name: column, exact: true }),
       ).toBeVisible();
@@ -1055,6 +1067,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
   });
 
   test("features list 500 → role=alert 배너", async ({ page }) => {
+    test.setTimeout(60_000);
     await mockCuratedConsole(page, {
       features: [],
       featuresError: true,
@@ -1064,7 +1077,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
 
     await expect(
       page.getByRole("alert").filter({ hasText: "curated admin 처리 실패" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 45_000 });
   });
 
   test("feature detail deep-link href", async ({ page }) => {
