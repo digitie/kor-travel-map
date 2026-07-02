@@ -174,7 +174,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "curated-features",
     route: "/admin/features/curated",
-    readyHeading: "Curated features",
+    readyHeading: "큐레이션 관리",
     readApis: [
       "/v1/admin/features/curated",
       "/v1/admin/curated-source-rules",
@@ -197,7 +197,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "curated-feature-detail",
     route: "/admin/features/curated/{curated_feature_id}",
-    readyHeading: "Curated feature detail",
+    readyHeading: "큐레이션 상세",
     readApis: ["/v1/admin/features/curated/{curated_feature_id}"],
     writeApis: [
       writeApi("PATCH", "/v1/admin/features/curated/{curated_feature_id}"),

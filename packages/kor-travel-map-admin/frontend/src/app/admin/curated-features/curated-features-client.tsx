@@ -670,12 +670,12 @@ export function FeatureEditor({
           onChange={(event) => setField("summary", event.target.value)}
         />
         <div className="grid gap-3 sm:grid-cols-2">
+          {/* type=number는 브라우저가 비숫자 입력을 조용히 버려 검증이 무의미해진다
+              — text+decimal 키패드로 받고 Number.isFinite로 검증해 저장을 막는다. */}
           <FormField
             error={rankInvalid ? "숫자를 입력하세요" : undefined}
+            inputMode="decimal"
             label="노출 순위"
-            min="0"
-            step="0.01"
-            type="number"
             value={rankScore}
             onChange={(event) => setField("rankScore", event.target.value)}
           />

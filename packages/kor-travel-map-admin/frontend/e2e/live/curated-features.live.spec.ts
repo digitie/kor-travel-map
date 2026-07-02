@@ -9,12 +9,12 @@ import * as F from "./_fixtures";
  *
  * Selectors are reused verbatim from the verified reference spec
  * (e2e/curated-features.spec.ts) and the page source:
- *   - heading: getByRole("heading", { level: 1, name: "큐레이션 피처" })
+ *   - heading: getByRole("heading", { level: 1, name: "큐레이션 관리" })
  *   - filters: getByLabel("curated feature search" | "theme filter" |
  *     "provider filter" | "dataset filter" | "curation status filter" |
  *     "page size" | "rule enabled filter")
- *   - column headers: 상태 / feature / 소스 / 테마 / 재사용 / 수정 / 작업
- *   - count line: /개 표시/ ; source rules: getByText("Source rules")
+ *   - column headers: 상태 / feature / 소스 / 테마 / 정책·관계 / 수정 / 작업
+ *   - count line: /페이지 크기/ ; source rules: '소스 규칙' 탭 뒤 패널
  *
  * The list also exposes an admin /{id} detail page, but this live smoke stays
  * read-only on the list route and asserts on stable landmarks.
@@ -41,7 +41,7 @@ const VIEWPORTS = [
 // Stable selector helpers — assert the curated-features console rendered.
 async function expectConsoleLoaded(page: import("@playwright/test").Page) {
   await expect(
-    page.getByRole("heading", { level: 1, name: "큐레이션 피처" }),
+    page.getByRole("heading", { level: 1, name: "큐레이션 관리" }),
   ).toBeVisible(TIMEOUT);
 }
 
@@ -79,7 +79,7 @@ test.describe("curated-features live: page load + controls", () => {
       "feature",
       "소스",
       "테마",
-      "재사용",
+      "정책·관계",
       "수정",
       "작업",
     ]) {
@@ -91,14 +91,15 @@ test.describe("curated-features live: page load + controls", () => {
 
   test("page load: count line renders (0 or N candidates)", async ({ page }) => {
     await page.goto(ROUTE);
-    await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+    await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
   });
 
-  test("page load: source rules panel + enabled filter", async ({ page }) => {
+  test("page load: source rules tab + enabled filter", async ({ page }) => {
     await page.goto(ROUTE);
-    await expect(page.getByText("Source rules", { exact: true })).toBeVisible(
-      TIMEOUT,
-    );
+    await page.getByRole("tab", { name: "소스 규칙" }).click();
+    await expect(
+      page.getByText(/provider source를 curated 후보로 끌어올리는 규칙/),
+    ).toBeVisible(TIMEOUT);
     await expect(page.getByLabel("rule enabled filter")).toBeVisible(TIMEOUT);
   });
 
@@ -116,6 +117,7 @@ test.describe("curated-features live: page load + controls", () => {
     page,
   }) => {
     await page.goto(ROUTE);
+    await page.getByRole("tab", { name: "소스 규칙" }).click();
     const link = page.getByRole("link", { name: "관련 job 실행" });
     await expect(link).toHaveAttribute(
       "href",
@@ -167,16 +169,17 @@ test.describe("curated-features live: page load + controls", () => {
 
   test("rule enabled filter default value is all", async ({ page }) => {
     await page.goto(ROUTE);
+    await page.getByRole("tab", { name: "소스 규칙" }).click();
     await expect(page.getByLabel("rule enabled filter")).toHaveValue(
       "all",
       TIMEOUT,
     );
   });
 
-  test("nav link to Feature 큐레이션 is present", async ({ page }) => {
+  test("nav link to 큐레이션 관리 is present", async ({ page }) => {
     await page.goto(ROUTE);
     await expect(
-      page.getByRole("link", { name: "Feature 큐레이션" }),
+      page.getByRole("link", { name: "큐레이션 관리" }),
     ).toBeVisible(TIMEOUT);
   });
 
@@ -202,7 +205,7 @@ test.describe("curated-features live: status filter", () => {
       await status.selectOption(value);
       await expect(status).toHaveValue(value, TIMEOUT);
       await expectConsoleLoaded(page);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
@@ -218,7 +221,7 @@ test.describe("curated-features live: page size", () => {
       await pageSize.selectOption(String(size));
       await expect(pageSize).toHaveValue(String(size), TIMEOUT);
       await expectConsoleLoaded(page);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
@@ -230,11 +233,12 @@ test.describe("curated-features live: rule enabled filter", () => {
   for (const value of ["all", "enabled", "disabled"] as const) {
     test(`rule enabled filter selectOption=${value}`, async ({ page }) => {
       await page.goto(ROUTE);
+      await page.getByRole("tab", { name: "소스 규칙" }).click();
       const enabled = page.getByLabel("rule enabled filter");
       await enabled.selectOption(value);
       await expect(enabled).toHaveValue(value, TIMEOUT);
       await expect(
-        page.getByText("Source rules", { exact: true }),
+        page.getByText(/provider source를 curated 후보로 끌어올리는 규칙/),
       ).toBeVisible(TIMEOUT);
     });
   }
@@ -252,7 +256,7 @@ test.describe("curated-features live: search typing", () => {
       await search.fill(term);
       await expect(search).toHaveValue(term, TIMEOUT);
       await expectConsoleLoaded(page);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
@@ -270,7 +274,7 @@ test.describe("curated-features live: search by curated id", () => {
       await expect(search).toHaveValue(id, TIMEOUT);
       await expectConsoleLoaded(page);
       // empty result -> empty-state OR populated table; both keep count line.
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
@@ -287,7 +291,7 @@ test.describe("curated-features live: search by feature id", () => {
       await search.fill(fid);
       await expect(search).toHaveValue(fid, TIMEOUT);
       await expectConsoleLoaded(page);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
@@ -302,7 +306,7 @@ test.describe("curated-features live: deep-link query params", () => {
       await page.goto(`${ROUTE}?status=${status}`);
       await expectConsoleLoaded(page);
       await expect(page).toHaveURL(new RegExp(`status=${status}`), TIMEOUT);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 
@@ -340,7 +344,7 @@ test.describe("curated-features live: status x page-size matrix", () => {
         await pageSizeSel.selectOption(String(size));
         await expect(statusSel).toHaveValue(status, TIMEOUT);
         await expect(pageSizeSel).toHaveValue(String(size), TIMEOUT);
-        await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+        await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
       });
     }
   }
@@ -372,16 +376,17 @@ test.describe("curated-features live: responsive viewports", () => {
     }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto(ROUTE);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
 
-    test(`viewport ${vp.name} ${vp.width}x${vp.height}: source rules panel`, async ({
+    test(`viewport ${vp.name} ${vp.width}x${vp.height}: source rules tab`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto(ROUTE);
+      await page.getByRole("tab", { name: "소스 규칙" }).click();
       await expect(
-        page.getByText("Source rules", { exact: true }),
+        page.getByText(/provider source를 curated 후보로 끌어올리는 규칙/),
       ).toBeVisible(TIMEOUT);
     });
   }
@@ -399,7 +404,7 @@ test.describe("curated-features live: search by category code", () => {
       await search.fill(code);
       await expect(search).toHaveValue(code, TIMEOUT);
       await expectConsoleLoaded(page);
-      await expect(page.getByText(/개 표시/).first()).toBeVisible(TIMEOUT);
+      await expect(page.getByText(/페이지 크기/).first()).toBeVisible(TIMEOUT);
     });
   }
 });
