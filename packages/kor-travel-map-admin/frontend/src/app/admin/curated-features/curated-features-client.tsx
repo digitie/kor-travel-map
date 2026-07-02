@@ -208,8 +208,8 @@ function featureAddressLabel(feature: CuratedFeature): string {
 function featureSearchQuery(feature: CuratedFeature | null): string {
   if (!feature) return "";
   return (
-    feature.display_title ??
     feature.feature_name ??
+    feature.display_title ??
     feature.source_name ??
     ""
   ).trim();
@@ -252,7 +252,7 @@ export function CuratedFeatureLocationPanel({
                 lngLat={[feature.lon as number, feature.lat as number]}
                 markerColor="#2563eb"
                 selected
-                title={feature.display_title ?? feature.feature_name}
+                title={feature.feature_name}
               />
             </VWorldMapView>
           </div>
@@ -1135,8 +1135,13 @@ export function CuratedFeaturesClient() {
           return (
             <div className="max-w-[20rem] whitespace-normal">
               <div className="font-medium">
-                {feature.display_title ?? feature.feature_name}
+                {feature.feature_name}
               </div>
+              {feature.display_title ? (
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {feature.display_title}
+                </div>
+              ) : null}
               <div className="break-all font-mono text-xs text-muted-foreground">
                 {shortId(feature.feature_id, 18)}
               </div>
@@ -1648,9 +1653,13 @@ export function CuratedFeaturesClient() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-lg font-semibold">
-                        {selectedFeature.display_title ??
-                          selectedFeature.feature_name}
+                        {selectedFeature.feature_name}
                       </div>
+                      {selectedFeature.display_title ? (
+                        <div className="text-sm text-muted-foreground">
+                          {selectedFeature.display_title}
+                        </div>
+                      ) : null}
                       <div className="break-all font-mono text-xs text-muted-foreground">
                         {selectedFeature.curated_feature_id}
                       </div>

@@ -104,8 +104,13 @@ export function CuratedFeatureDetailClient({
                     </Badge>
                   </div>
                   <h2 className="mt-3 break-keep text-xl font-semibold">
-                    {item.display_title ?? item.feature_name}
+                    {item.feature_name}
                   </h2>
+                  {item.display_title ? (
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {item.display_title}
+                    </div>
+                  ) : null}
                   <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
                     {shortId(item.curated_feature_id, 32)}
                   </div>

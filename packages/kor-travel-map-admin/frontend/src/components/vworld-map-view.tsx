@@ -889,6 +889,7 @@ export function VWorldFeatureClusters({
   const coincidentGroupsRef = useRef(new Map<string, CoincidentEntry[]>());
   const popupRef = useRef<MapLibrePopup | null>(null);
   const clusterMaxZoomRef = useRef(clusterMaxZoom);
+  const schedulePointMarkerUpdateRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
@@ -958,6 +959,7 @@ export function VWorldFeatureClusters({
       | maplibregl.GeoJSONSource
       | undefined;
     source?.setData(data);
+    schedulePointMarkerUpdateRef.current?.();
   }, [map, data]);
 
   useEffect(() => {
@@ -1544,6 +1546,7 @@ export function VWorldFeatureClusters({
     };
 
     ensureSource();
+    schedulePointMarkerUpdateRef.current = scheduleUpdate;
     map.on("moveend", scheduleUpdate);
     map.on("zoomend", scheduleUpdate);
     map.on("sourcedata", scheduleUpdate);
@@ -1552,6 +1555,9 @@ export function VWorldFeatureClusters({
     scheduleUpdate();
 
     return () => {
+      if (schedulePointMarkerUpdateRef.current === scheduleUpdate) {
+        schedulePointMarkerUpdateRef.current = null;
+      }
       if (raf !== 0) cancelAnimationFrame(raf);
       map.off("moveend", scheduleUpdate);
       map.off("zoomend", scheduleUpdate);

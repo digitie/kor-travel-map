@@ -3271,6 +3271,38 @@
           },
           {
             "in": "query",
+            "name": "feature_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "display_title",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Display Title"
+            }
+          },
+          {
+            "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {

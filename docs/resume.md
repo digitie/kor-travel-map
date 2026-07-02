@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-02 (codex) — Notice/Curated Feature 지도 후속 수정 로컬 구현 완료
+
+- **완료(notice)**: KREX notice 자연키/지도 최신값 lineage에서 `series_no`를 제외하고, 원천 시간이
+  없으면 최초 probing 시각을 detail 시작 시간으로 저장하도록 바꿨다. payload 변경 재수집은 최초
+  probing 시작 시각을 보존한다.
+- **완료(Feature 지도)**: bbox/zoom query key와 tile zoom 계산, GeoJSON source data 변경 후 marker
+  갱신 예약을 보강해 kind 변경/확대축소 반영성을 높였다.
+- **완료(curated 지도)**: `/curated-features` 지도/테이블 화면을 추가했다. 필터는 POI명, 테마명,
+  제목, 데이터소스이며 실제 feature 정보를 주 표시로 사용한다.
+- **완료(curated 표시)**: 기존 큐레이션 관리 화면과 상세 화면도 `display_title`이 아닌 `feature_name`
+  중심으로 보여주도록 정리했다.
+- **검증**: KREX/curated repo/routes unit 48 passed, feature_repo notice integration 2 passed,
+  전체 ruff, `mypy --strict src`, import-linter, OpenAPI drift check, frontend gen:types:check/type-check,
+  user-client gen:types:check/type-check, frontend lint(기존 warning 4건), frontend production build
+  통과. mocked Playwright e2e는 WSL Ubuntu 26.04 Chromium install 미지원으로 실행 불가.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지, n150 반영과 live UI e2e를 진행한다.
+
 ## 2026-07-02 (codex) — 큐레이션 feature theme/title 편집 로컬 구현 완료
 
 - **완료(기본 제목)**: 정부·공공기관 source rule 후보의 `display_title` 기본값을 provider 이름으로

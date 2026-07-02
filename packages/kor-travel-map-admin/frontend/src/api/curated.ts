@@ -62,7 +62,18 @@ export type CuratedRuleAction = Exclude<
   null | undefined
 >;
 
-export type AdminCuratedFeaturesParams = AdminCuratedFeaturesQuery;
+export type AdminCuratedFeaturesParams = AdminCuratedFeaturesQuery & {
+  region_code?: string | null;
+  sido_code?: string | null;
+  sigungu_code?: string | null;
+  min_lon?: number | null;
+  min_lat?: number | null;
+  max_lon?: number | null;
+  max_lat?: number | null;
+  q?: string | null;
+  feature_name?: string | null;
+  display_title?: string | null;
+};
 export type AdminCuratedSourcesParams = AdminCuratedSourcesQuery;
 export type AdminCuratedSourceRulesParams = AdminCuratedSourceRulesQuery;
 export type AdminCuratedThemesParams = AdminCuratedThemesQuery;
@@ -88,6 +99,16 @@ async function fetchAdminCuratedFeatures(
       provider: params.provider,
       dataset_key: params.dataset_key,
       curation_status: params.curation_status,
+      region_code: params.region_code,
+      sido_code: params.sido_code,
+      sigungu_code: params.sigungu_code,
+      min_lon: params.min_lon,
+      min_lat: params.min_lat,
+      max_lon: params.max_lon,
+      max_lat: params.max_lat,
+      q: params.q,
+      feature_name: params.feature_name,
+      display_title: params.display_title,
       include_archived: params.include_archived,
       page_size: params.page_size,
       cursor: params.cursor,

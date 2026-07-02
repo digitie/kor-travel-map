@@ -820,6 +820,7 @@ def test_traffic_notice_bundle_metadata() -> None:
     assert detail.payload["process_status"] == "진행"  # type: ignore[union-attr]
     assert detail.payload["process_status_code"] == "1"  # type: ignore[union-attr]
     assert detail.payload["incident_type_code"] == "3"  # type: ignore[union-attr]
+    assert detail.payload["valid_start_origin"] == "source"  # type: ignore[union-attr]
 
 
 @pytest.mark.unit
@@ -860,18 +861,19 @@ def test_traffic_notice_unknown_type_falls_back_to_traffic() -> None:
 
 
 @pytest.mark.unit
-def test_traffic_notice_unparseable_datetime_is_none() -> None:
-    """occurred_date 파싱 실패 → valid_start_time None (방어적 파싱)."""
+def test_traffic_notice_unparseable_datetime_uses_first_probe() -> None:
+    """occurred_date 파싱 실패 → 최초 probing 시각으로 강등."""
     [bundle] = traffic_notices_to_bundles([_N_UNKNOWN_TYPE], fetched_at=_NOW)
     detail = bundle.feature.detail
     assert detail is not None
-    assert detail.valid_start_time is None  # type: ignore[union-attr]
+    assert detail.valid_start_time == _NOW  # type: ignore[union-attr]
     assert detail.valid_end_time is None  # type: ignore[union-attr]
+    assert detail.payload["valid_start_origin"] == "first_probe"  # type: ignore[union-attr]
 
 
 @pytest.mark.unit
-def test_traffic_notice_time_missing_falls_back_to_midnight() -> None:
-    """occurred_time 부재/파싱 실패 → 해당 일자 KST 자정으로 강등."""
+def test_traffic_notice_time_missing_uses_first_probe() -> None:
+    """occurred_time 부재/파싱 실패 → 최초 probing 시각으로 강등."""
     notice = _Notice(
         occurred_date="2026.05.28",
         occurred_time=None,
@@ -882,16 +884,15 @@ def test_traffic_notice_time_missing_falls_back_to_midnight() -> None:
     [bundle] = traffic_notices_to_bundles([notice], fetched_at=_NOW)
     detail = bundle.feature.detail
     assert detail is not None
-    assert detail.valid_start_time == datetime(  # type: ignore[union-attr]
-        2026, 5, 28, 0, 0, tzinfo=KST
-    )
+    assert detail.valid_start_time == _NOW  # type: ignore[union-attr]
+    assert detail.payload["valid_start_origin"] == "first_probe"  # type: ignore[union-attr]
 
 
 @pytest.mark.unit
 def test_traffic_notice_natural_key_stable_and_collision() -> None:
     """파생 자연키는 결정적 — 동일 입력은 동일 feature_id/자연키(충돌),
     서로 다른 사건은 분리."""
-    twin = _Notice(  # _N_ROADWORK과 byte-identical → 동일 자연키.
+    twin = _Notice(  # series_no만 달라도 동일 사건이면 같은 자연키.
         occurred_date="2026.05.28",
         occurred_time="05:00:00",
         incident_type="공사",
@@ -903,7 +904,8 @@ def test_traffic_notice_natural_key_stable_and_collision() -> None:
         route_name="서해안고속도로",
         process_status="진행",
         process_status_code="1",
-        raw=dict(_N_ROADWORK.raw),
+        series_no=100,
+        raw={**_N_ROADWORK.raw, "seriesNM": 100},
     )
     [b1, b2, b3] = traffic_notices_to_bundles(
         [_N_ROADWORK, twin, _N_ACCIDENT_ALIAS], fetched_at=_NOW
