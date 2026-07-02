@@ -93,6 +93,7 @@ async def _load_concierge_place(session: AsyncSession) -> str:
                     },
                 },
                 "youtube": {
+                    "source_title": "제주 동쪽 영상 묶음",
                     "video_id": "video-curated-1",
                     "video_url": "https://www.youtube.com/watch?v=video-curated-1",
                     "video_title": "제주 동쪽 여행",
@@ -163,6 +164,7 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     row = next(item for item in candidates.items if item.feature_id == feature_id)
     assert row.provider == "python-datagokr-api"
     assert row.dataset_key == "datagokr_seoul_bookstores"
+    assert row.display_title == "python-datagokr-api"
     assert row.curation_relation == "bookstore_stop"
     assert row.reuse_policy == "allowed"
 
@@ -190,7 +192,7 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     assert snapshot is not None
     assert snapshot.etag.startswith("sha256:")
     assert snapshot.theme["theme_slug"] == "bookstores"
-    assert snapshot.content["title"] == "통합테스트 헌책방"
+    assert snapshot.content["title"] == "python-datagokr-api"
     assert snapshot.items[0].feature_snapshot["name"] == "통합테스트 헌책방"
 
     refreshed = await curated_repo.refresh_curated_source_metadata(
@@ -222,7 +224,7 @@ async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     ).mappings().one()
     assert cached["content_version"] == selected.content_version
     assert cached["etag"] == snapshot.etag
-    assert cached["snapshot"]["content"]["title"] == "통합테스트 헌책방"
+    assert cached["snapshot"]["content"]["title"] == "python-datagokr-api"
 
 
 async def test_concierge_seed_rule_creates_curated_with_source_title(
@@ -252,7 +254,7 @@ async def test_concierge_seed_rule_creates_curated_with_source_title(
     )
     row = next(item for item in page.items if item.feature_id == feature_id)
     assert row.curation_status == "curated"
-    assert row.display_title == "제주 동쪽 코스"
+    assert row.display_title == "제주 동쪽 영상 묶음"
     assert row.selected_at is not None
 
     snapshot = await curated_repo.get_curated_feature_detail_snapshot(
@@ -260,7 +262,7 @@ async def test_concierge_seed_rule_creates_curated_with_source_title(
         curated_feature_id=row.curated_feature_id,
     )
     assert snapshot is not None
-    assert snapshot.content["title"] == "제주 동쪽 코스"
+    assert snapshot.content["title"] == "제주 동쪽 영상 묶음"
     assert snapshot.items[0].feature_snapshot["name"] == "월정리 해변"
 
 
@@ -310,11 +312,12 @@ async def test_manual_create_patch_and_archive_curated_feature(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_seoul_bookstore(migrated_session)
-    [theme] = await curated_repo.list_curated_themes(
+    themes = await curated_repo.list_curated_themes(
         migrated_session,
-        theme_group="books",
-        limit=1,
+        limit=50,
     )
+    theme = next(item for item in themes if item.theme_group == "books")
+    target_theme = next(item for item in themes if item.theme_id != theme.theme_id)
     [source] = await curated_repo.list_curated_sources(
         migrated_session,
         provider="python-datagokr-api",
@@ -339,9 +342,15 @@ async def test_manual_create_patch_and_archive_curated_feature(
     patched = await curated_repo.update_curated_feature(
         migrated_session,
         curated_feature_id=created.curated_feature_id,
-        updates={"display_summary": "수동 추천 책방"},
+        updates={
+            "theme_id": target_theme.theme_id,
+            "display_title": "관리자 지정 묶음 제목",
+            "display_summary": "수동 추천 책방",
+        },
     )
     assert patched is not None
+    assert patched.theme_id == target_theme.theme_id
+    assert patched.display_title == "관리자 지정 묶음 제목"
     assert patched.display_summary == "수동 추천 책방"
     assert patched.content_version == 2
 

@@ -3353,6 +3353,8 @@ export interface components {
             reuse_policy?: ("allowed" | "blocked" | "manual_review") | null;
             /** Source Record Key */
             source_record_key?: string | null;
+            /** Theme Id */
+            theme_id?: string | null;
         };
         /** CuratedFeatureResponse */
         CuratedFeatureResponse: {

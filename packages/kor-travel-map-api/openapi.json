@@ -4444,6 +4444,17 @@
               }
             ],
             "title": "Source Record Key"
+          },
+          "theme_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme Id"
           }
         },
         "title": "CuratedFeaturePatchRequest",
