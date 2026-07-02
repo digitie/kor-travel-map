@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 (라이프사이클 스트립·한국어 액션·워크플로 가이드)
+
+curated feature 관리 화면(UI/UX·워크플로)을 처음 온 운영자도 흐름을 읽을 수 있게 개편했다.
+backend/OpenAPI/migration 변경 없음 — admin frontend + e2e만.
+
+- **라이프사이클 스트립**: 후보→큐레이션됨→거절됨/보관됨 4칩(=상태 필터 버튼, aria-pressed)과
+  상태별 결과 캡션, '이 화면의 동작 방식' 설명을 목록 상단에 상시 노출. DETAIL은 compact 변형.
+- **탭 재구성**: '후보 검토'(필터+목록+검토 패널)와 '소스 규칙'을 탭으로 분리해 한 화면의 인지
+  부하를 낮췄다. 빈 목록에는 '소스 규칙 탭 열기'/'새로고침 job 실행' 다음 행동을 제안.
+- **동사 통일(한국어)**: 채택/채택 해제/보관/결과 적용/규칙 적용. 상태 전환마다 토스트로 결과를
+  설명하고, 채택 토스트는 '큐레이션됨 보기' 필터 점프 액션으로 "행이 어디 갔지?"를 해소.
+- **행 단위 pending**: 전역 mutation 잠금을 mutation.variables 기반 행 잠금으로 교체. bulk는
+  Promise.allSettled로 성공 N·실패 M 집계 토스트 + 실패 행만 체크 유지.
+- **서버 검색**: client 텍스트 필터(현재 페이지만)를 서버 `q` 검색(300ms 디바운스, 전 페이지)으로
+  교체하고 카운트 라인을 'page N · 이 페이지 M개 · 페이지 크기 K'로 정직하게 바꿨다.
+- **editor dirty 가드**: override 패턴(입력 전엔 서버 값 렌더)으로 refetch 자동 반영 + 입력 중
+  다른 작업이 patch하면 Alert('최신 값 불러오기')로만 교체. 수정됨 배지·초기화 버튼. 노출 순위는
+  Number.isFinite 검증으로 silent NaN PATCH를 차단(입력을 text+decimal로 전환).
+- **장소 대조 검색**: '결과 적용' 시 재사용 정책 allowed 전환을 opt-out 체크박스(기본 on)로
+  노출 — 해제하면 PATCH body에서 reuse_policy 생략. metadata에만 저장됨 캡션 상시 표시.
+- **소스 규칙**: Apply를 폼 footer '규칙 적용 (후보 생성)'로 이동 + confirm(동작·비되살림 설명) +
+  생성/갱신 건수 토스트. sticky Alert 제거, 규칙 저장 토스트, 라벨 한국어(enumOption raw 병기).
+- **라벨 sweep**: nav 'Feature 큐레이션'→'큐레이션 관리', 'Curated 지도'→'큐레이션 지도',
+  정책·관계 컬럼(한글 라벨+title=raw), 필터 option 텍스트 한국어(**value는 raw enum 유지** — e2e
+  locator 안정), filter aria-label은 영문 유지.
+- **e2e**: mocked 스펙에 신규 시나리오 12종(토스트 점프/부분 실패/서버 검색/dirty 가드/opt-out/
+  규칙 confirm 등) + 전 curated 스펙 locator 이행. live write 스펙의 **이미 stale이던 영문 헤딩**
+  (Curated features/Curated feature detail)도 이번 이행에서 수정. live 실행은 n150에서 별도 진행.
+- **검증**: `tsc --noEmit`(src+e2e) clean, eslint 변경 파일 0 errors. e2e 실행은 하지 않음(오케스트레이터가
+  n150 배포 후 live 실행 예정).
+
 ## 2026-07-02 (codex) — Notice 중복/시간과 Curated Feature 지도 후속 수정
 
 notice와 curated feature 운영 화면의 follow-up 회귀를 수정했다.

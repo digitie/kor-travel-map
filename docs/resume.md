@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 로컬 구현 완료
+
+- **완료**: 큐레이션 관리 화면을 라이프사이클 스트립(상태 칩=필터)+후보 검토/소스 규칙 탭으로
+  재구성하고 채택/채택 해제/보관/결과 적용/규칙 적용 동사 체계·상태 전환 토스트(채택은 필터 점프)·
+  행 단위 pending·bulk 집계·서버 q 검색·editor dirty 가드·재사용 정책 opt-out·규칙 적용 confirm을
+  구현했다. backend 변경 없음.
+- **e2e**: mocked 신규 12 시나리오 + curated 전 스펙(live 포함) locator 이행. live write 스펙의
+  기존 stale 영문 헤딩도 수정.
+- **검증**: tsc(src+e2e) clean, eslint 변경 파일 0 errors. Playwright 실행은 하지 않음.
+- **다음 한 작업**: PR CI green 확인 → n150 배포 → live UI e2e(read-only + E2E_CURATED_WRITE) 실행
+  → 결과 확인 후 머지.
+
 ## 2026-07-02 (codex) — Notice/Curated Feature 지도 후속 수정 로컬 구현 완료
 
 - **완료(notice)**: KREX notice 자연키/지도 최신값 lineage에서 `series_no`를 제외하고, 원천 시간이
