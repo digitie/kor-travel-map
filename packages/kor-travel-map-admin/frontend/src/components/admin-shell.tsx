@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "홈", icon: HomeIcon },
   { href: "/features", label: "Feature 지도", icon: MapIcon },
+  { href: "/curated-features", label: "Curated 지도", icon: SparklesIcon },
   { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
   {
     href: "/admin/features/change-reviews",

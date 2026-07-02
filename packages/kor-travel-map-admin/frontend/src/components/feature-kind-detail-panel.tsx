@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangleIcon,
   CalendarDaysIcon,
   ClipboardListIcon,
   RouteIcon,
@@ -365,6 +366,41 @@ function MoisPlaceDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   );
 }
 
+function noticeStartOriginLabel(value: string | null): string | null {
+  if (value === "source") return "원천 시간";
+  if (value === "first_probe") return "최초 probing";
+  return value;
+}
+
+function NoticeDetailPanel({ feature }: { feature: FeatureKindDetail }) {
+  const detail = feature.detail;
+  const payload = objectValue(detail, "payload") ?? {};
+
+  return (
+    <PanelShell
+      description="공지 시간, 출처, 도로 돌발 메타"
+      icon={<AlertTriangleIcon className="size-4" />}
+      title="Notice"
+    >
+      <InfoRows
+        rows={[
+          ["종류", textValue(detail, "notice_type")],
+          ["시작", formatDateTime(textValue(detail, "valid_start_time"))],
+          ["시작 기준", noticeStartOriginLabel(textValue(payload, "valid_start_origin"))],
+          ["종료", formatDateTime(textValue(detail, "valid_end_time"))],
+          ["발령 기관", textValue(detail, "source_agency")],
+          ["심각도", textValue(detail, "severity")],
+          ["노선", textValue(payload, "route_name") ?? textValue(payload, "route_no")],
+          ["방향", textValue(payload, "direction")],
+          ["위치", textValue(payload, "point_name")],
+          ["상태", textValue(payload, "process_status")],
+          ["설명", textValue(payload, "description")],
+        ]}
+      />
+    </PanelShell>
+  );
+}
+
 function GenericDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   return (
     <PanelShell
@@ -401,6 +437,9 @@ export function FeatureKindDetailPanel({
   }
   if (feature.kind === "event") {
     return <EventDetailPanel feature={feature} />;
+  }
+  if (feature.kind === "notice") {
+    return <NoticeDetailPanel feature={feature} />;
   }
   if (feature.kind === "area") {
     return (

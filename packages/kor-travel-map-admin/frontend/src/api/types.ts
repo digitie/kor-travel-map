@@ -8216,6 +8216,16 @@ export interface operations {
                 provider?: string | null;
                 dataset_key?: string | null;
                 curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
+                region_code?: string | null;
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+                q?: string | null;
+                feature_name?: string | null;
+                display_title?: string | null;
                 include_archived?: boolean;
                 page_size?: number;
                 cursor?: string | null;
@@ -10687,6 +10697,8 @@ export interface operations {
                 max_lon?: number | null;
                 max_lat?: number | null;
                 q?: string | null;
+                feature_name?: string | null;
+                display_title?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };

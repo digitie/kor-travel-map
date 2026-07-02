@@ -167,7 +167,19 @@ ON CONFLICT (feature_id) DO UPDATE SET
         THEN features.sibling_group_id ELSE EXCLUDED.sibling_group_id END,
     detail = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
-        THEN features.detail ELSE EXCLUDED.detail END,
+        THEN features.detail
+        WHEN features.kind = 'notice'
+          AND EXCLUDED.kind = 'notice'
+          AND EXCLUDED.detail #>> '{payload,valid_start_origin}' = 'first_probe'
+          AND features.detail ? 'valid_start_time'
+          AND features.detail -> 'valid_start_time' <> 'null'::jsonb
+        THEN jsonb_set(
+            EXCLUDED.detail,
+            '{valid_start_time}',
+            features.detail -> 'valid_start_time',
+            true
+        )
+        ELSE EXCLUDED.detail END,
     raw_refs = CASE
         WHEN features.data_origin = 'user_request' AND features.data_version > 0
         THEN features.raw_refs ELSE EXCLUDED.raw_refs END,
@@ -325,15 +337,20 @@ def _notice_lineage_sql(alias: str) -> str:
       WHEN {alias}.provider = 'python-krex-api'
        AND {alias}.dataset_key = 'krex_traffic_notices'
        AND {alias}.source_entity_type = 'traffic_notice'
-      THEN concat_ws(
-        '::',
-        NULLIF({alias}.raw_data->>'occurred_date', ''),
-        NULLIF({alias}.raw_data->>'occurred_time', ''),
-        NULLIF({alias}.raw_data->>'route_no', ''),
-        NULLIF({alias}.raw_data->>'direction', ''),
-        NULLIF({alias}.raw_data->>'point_name', ''),
-        NULLIF({alias}.raw_data->>'incident_type_code', ''),
-        NULLIF({alias}.raw_data->>'series_no', '')
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_date')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'occurred_time')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'route_no')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'direction')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'point_name')), ''),
+            NULLIF(lower(btrim({alias}.raw_data->>'incident_type_code')), '')
+          ),
+          ''
+        ),
+        {alias}.source_entity_id
       )
       ELSE {alias}.source_entity_id
     END

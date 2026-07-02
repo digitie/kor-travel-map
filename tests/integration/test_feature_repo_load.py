@@ -18,6 +18,17 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import (
+    Address,
+    Feature,
+    FeatureBundle,
+    FeatureKind,
+    NoticeDetail,
+    SourceLink,
+    SourceRecord,
+    SourceRole,
+)
 from kortravelmap.infra import feature_repo
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
@@ -81,6 +92,74 @@ async def _bundle(seed: str = "FEST-REPO-001"):
             fetched_at=_FETCHED,
         )
     )[0]
+
+
+def _first_probe_notice_bundle(
+    *,
+    message: str,
+    fetched_at: datetime,
+) -> FeatureBundle:
+    raw_data = {
+        "natural_key": "2026.06.01::0010::서울방향::천안분기점::3",
+        "message": message,
+    }
+    raw_payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        source_entity_id=raw_data["natural_key"],
+        raw_payload_hash=raw_payload_hash,
+    )
+    feature_id = "f_global_n_first_probe_notice"
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.NOTICE,
+        name="[경부고속도로] 공사",
+        address=Address(),
+        category="99000000",
+        marker_icon="roadblock",
+        marker_color="P-13",
+        detail=NoticeDetail(
+            feature_id=feature_id,
+            notice_type="roadwork",
+            valid_start_time=fetched_at,
+            source_agency="한국도로공사",
+            payload={
+                "domain": "highway",
+                "description": message,
+                "valid_start_origin": "first_probe",
+            },
+        ),
+        created_at=fetched_at,
+        updated_at=fetched_at,
+    )
+    source_record = SourceRecord(
+        provider="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        source_entity_type="traffic_notice",
+        source_entity_id=raw_data["natural_key"],
+        raw_payload_hash=raw_payload_hash,
+        raw_name=message,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        imported_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+        created_at=fetched_at,
+    )
+    return FeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+    )
 
 
 async def test_load_bundle_inserts_and_roundtrips(
@@ -187,6 +266,36 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     ).mappings().one()
     assert source_row["count"] == 1
     assert source_row["last_seen_at"] > before
+
+
+async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
+    migrated_session: AsyncSession,
+) -> None:
+    first_seen = datetime(2026, 6, 1, 9, 0, tzinfo=_KST)
+    second_seen = datetime(2026, 6, 1, 9, 5, tzinfo=_KST)
+    first = _first_probe_notice_bundle(
+        message="공사 시작",
+        fetched_at=first_seen,
+    )
+    second = _first_probe_notice_bundle(
+        message="공사 내용 수정",
+        fetched_at=second_seen,
+    )
+
+    await feature_repo.load_bundle(migrated_session, first)
+    await feature_repo.load_bundle(migrated_session, second)
+    await migrated_session.flush()
+
+    detail = (
+        await migrated_session.execute(
+            text("SELECT detail FROM feature.features WHERE feature_id = :fid"),
+            {"fid": first.feature.feature_id},
+        )
+    ).scalar_one()
+
+    assert detail["valid_start_time"] == first_seen.isoformat()
+    assert detail["payload"]["description"] == "공사 내용 수정"
+    assert detail["payload"]["valid_start_origin"] == "first_probe"
 
 
 async def test_load_bundles_aggregates_counts(
@@ -305,9 +414,9 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             """
         )
     )
-    for suffix, message, seen_at in (
-        ("old", "공사 시작", old_seen),
-        ("new", "공사 내용 수정", new_seen),
+    for suffix, message, series_no, seen_at in (
+        ("old", "공사 시작", "100", old_seen),
+        ("new", "공사 내용 수정", "101", new_seen),
     ):
         await migrated_session.execute(
             text(
@@ -339,6 +448,7 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
                     '"direction":"서울방향",'
                     '"point_name":"천안분기점",'
                     '"incident_type_code":"3",'
+                    f'"series_no":"{series_no}",'
                     f'"message":"{message}"'
                     "}"
                 ),

@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### Notice/Curated Feature 지도 후속 수정 (2026-07-02)
+
+- **FIXED**: KREX notice 중복 표시를 줄이기 위해 `series_no`를 notice 자연키/지도 최신값 lineage에서
+  제외하고, 같은 사건의 최신 source record만 지도에 남기도록 보강했다.
+- **CHANGED**: notice source에 발생 시간이 있으면 그 시간을 쓰고, 없거나 파싱할 수 없으면 최초
+  probing 시각을 `valid_start_time`으로 표시한다. 이후 payload 변경 재수집 때도 최초 probing 시작
+  시각은 보존한다.
+- **FIXED**: Feature 지도 bbox/tile query key와 DOM marker 갱신을 더 민감하게 조정해 kind 변경,
+  확대/축소, source data 변경 시 이전 marker가 오래 남는 현상을 줄였다.
+- **ADDED**: `/curated-features` 운영 지도 화면을 추가했다. 필터는 POI명, 테마명, 제목,
+  데이터소스이며 지도/테이블/상세에서 curated title이 아닌 실제 feature 정보를 주 표시로 보여준다.
+- **CHANGED**: 기존 Feature 큐레이션 목록/상세/위치 검토에서도 `display_title`보다 실제
+  `feature_name`을 주 표시로 사용한다.
+
 ### 큐레이션 feature theme/title 편집 (2026-07-02)
 
 - **ADDED**: Feature 큐레이션 편집 패널에서 개별 curated feature의 theme와

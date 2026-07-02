@@ -1516,6 +1516,8 @@ export interface operations {
                 max_lon?: number | null;
                 max_lat?: number | null;
                 q?: string | null;
+                feature_name?: string | null;
+                display_title?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };

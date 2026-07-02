@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-02 (codex) — Notice 중복/시간과 Curated Feature 지도 후속 수정
+
+notice와 curated feature 운영 화면의 follow-up 회귀를 수정했다.
+
+- **notice 중복**: KREX 교통공지 자연키와 bbox 최신값 lineage에서 `series_no`를 제외했다. 같은 사건의
+  series 변경은 새 feature로 보지 않고, 지도에는 최신 source record에 연결된 notice만 남긴다.
+- **notice 시간**: 원천 발생일+시각이 있으면 `valid_start_time`에 사용하고, 시각이 없거나 파싱할 수
+  없으면 최초 probing 시각(`fetched_at`)을 시작 시간으로 채운다. payload 변경 재수집은 description 등
+  본문을 업데이트하되 최초 probing 시작 시각은 보존한다.
+- **지도 갱신**: Feature 지도 tile zoom 계산을 `ceil` 기반으로 바꾸고 bbox/zoom signature를 query key에
+  포함했다. GeoJSON source data 변경 직후 DOM marker 업데이트도 예약한다.
+- **curated 지도**: `/curated-features` 화면을 추가했다. 기존 Feature 지도와 같은 지도/테이블/상세
+  형태이며 POI명, 테마명, 제목, 데이터소스 필터를 제공한다.
+- **curated 표시**: 기존 큐레이션 목록/상세/위치 검토와 새 지도 화면 모두 실제 `feature_name`을
+  주 표시로 쓰고, `display_title`은 보조 제목으로 분리했다.
+- **검증**: KREX/curated repo/routes unit 48 passed, feature_repo notice integration 2 passed, 전체
+  ruff, `mypy --strict src`, import-linter, OpenAPI drift check, frontend gen:types:check/type-check,
+  user-client gen:types:check/type-check, frontend lint(기존 warning 4건), frontend production build
+  통과(필수 public env 로컬값 지정). mocked Playwright e2e spec은 추가했지만 WSL Ubuntu 26.04에서
+  Playwright Chromium install이 미지원이라 로컬 실행 전 실패했다.
+
 ## 2026-07-02 (codex) — 큐레이션 feature theme/title 편집
 
 curated feature의 theme 연결과 theme 아래 세부 POI 묶음 제목(`display_title`) 운영 방식을 정리했다.

@@ -46,7 +46,7 @@ ADR 참조
   (`_traffic_notice_item_to_bundle`)가 생성한다.
 - Incident에는 안정 식별자가 없어 자연키를 krtour 측에서 파생한다
   (`_traffic_notice_natural_key`): occurred_date + occurred_time + route_no +
-  direction + point_name + incident_type_code + series_no. 좌표(latitude/longitude)는
+  direction + point_name + incident_type_code. 좌표(latitude/longitude)는
   일부 row에만 있다(실측 36/99) —
   좌표가 있으면 Coordinate + reverse geocoding, 없으면 **coordless**
   (bjd_code 미상 → global feature_id, 노선/지점/방향이 위치 단서).
@@ -1295,7 +1295,8 @@ def _parse_krex_occurrence(
 
     realTimeSms는 발생 시각을 ``accDate``("2023.09.27") + ``accHour``("09:11:24")
     두 컬럼으로 쪼개 내려준다(ADR-044 실측, #378). 일자 파싱 실패 시 None,
-    시각 파싱 실패/부재 시 해당 일자의 자정으로 강등한다(일자만이라도 보존).
+    시각 파싱 실패/부재 시 None을 반환한다. date-only는 운영자가 기대하는
+    "시작 시각"으로 오해되기 쉬워 호출부에서 최초 probing 시각으로 강등한다.
     naive 결과엔 KST tzinfo를 부착한다(ADR-019).
     """
     date_text = (occurred_date or "").strip()
@@ -1310,15 +1311,18 @@ def _parse_krex_occurrence(
             continue
     if parsed_date is None:
         return None
-    parsed_time = time(0, 0)
     time_text = (occurred_time or "").strip()
-    if time_text:
-        for fmt in _KREX_OCCURRED_TIME_FORMATS:
-            try:
-                parsed_time = datetime.strptime(time_text, fmt).time()
-                break
-            except ValueError:
-                continue
+    if not time_text:
+        return None
+    parsed_time: time | None = None
+    for fmt in _KREX_OCCURRED_TIME_FORMATS:
+        try:
+            parsed_time = datetime.strptime(time_text, fmt).time()
+            break
+        except ValueError:
+            continue
+    if parsed_time is None:
+        return None
     return datetime.combine(parsed_date, parsed_time, tzinfo=_KST)
 
 
@@ -1342,9 +1346,6 @@ def _traffic_notice_natural_key(item: KrexTrafficNoticeItem) -> str:
             (item.direction or "").strip().lower(),
             (item.point_name or "").strip().lower(),
             (item.incident_type_code or "").strip().lower(),
-            str(item.series_no).strip().lower()
-            if item.series_no is not None
-            else "",
         )
         if part
     )
@@ -1412,7 +1413,11 @@ async def _traffic_notice_item_to_bundle(
     natural_key = _traffic_notice_natural_key(item)
     notice_type = _safe_notice_type(item.incident_type)
     title = _synthesize_notice_title(item)
-    valid_from = _parse_krex_occurrence(item.occurred_date, item.occurred_time)
+    source_valid_from = _parse_krex_occurrence(
+        item.occurred_date, item.occurred_time
+    )
+    valid_from = source_valid_from or fetched_at
+    valid_start_origin = "source" if source_valid_from is not None else "first_probe"
     # realTimeSms에는 종료 시각 컬럼이 없다(#378) — transient feed 만료는 refresh
     # (사라짐) + process_status(payload 보존)가 표현한다(모듈 docstring).
     valid_until: datetime | None = None
@@ -1495,6 +1500,7 @@ async def _traffic_notice_item_to_bundle(
                 "direction": item.direction,
                 "process_status": item.process_status,
                 "process_status_code": item.process_status_code,
+                "valid_start_origin": valid_start_origin,
             },
         ),
     )
@@ -1539,7 +1545,7 @@ async def traffic_notices_to_bundles(
     reconciliation): 자연키(`_traffic_notice_natural_key`), 제목
     (`_synthesize_notice_title`), notice_type(`_safe_notice_type` — 매핑 실패 시
     ``traffic``), 발생 시각(`_parse_krex_occurrence` → valid_start_time;
-    종료 컬럼이 없어 valid_end_time은 None), source_agency(``한국도로공사`` 고정).
+    원천 시각이 없거나 파싱 실패하면 fetched_at), source_agency(``한국도로공사`` 고정).
     좌표가 있는 row(실측 36/99)는 Coordinate + reverse geocoding, 없는 row는
     coordless(global feature_id, 노선/지점/방향이 raw_address 위치 단서)다.
 

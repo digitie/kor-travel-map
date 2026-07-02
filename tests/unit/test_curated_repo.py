@@ -210,12 +210,16 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
         max_lon=128.0,
         max_lat=38.0,
         q="책방",
+        feature_name="서점",
+        display_title="서울 책방",
         page_size=1,
     )
     assert len(page.items) == 1
     assert page.next_cursor is not None
     assert session.calls[-1][1]["bbox_enabled"] is True
     assert session.calls[-1][1]["q_pattern"] == "%책방%"
+    assert session.calls[-1][1]["feature_name_pattern"] == "%서점%"
+    assert session.calls[-1][1]["display_title"] == "서울 책방"
 
     feature = await curated_repo.get_curated_feature(
         session,

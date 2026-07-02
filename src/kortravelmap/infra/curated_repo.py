@@ -488,6 +488,14 @@ WHERE (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
     OR COALESCE(cf.display_summary, '') ILIKE CAST(:q_pattern AS text)
   )
   AND (
+    CAST(:feature_name_pattern AS text) IS NULL
+    OR f.name ILIKE CAST(:feature_name_pattern AS text)
+  )
+  AND (
+    CAST(:display_title AS text) IS NULL
+    OR COALESCE(cf.display_title, '') = CAST(:display_title AS text)
+  )
+  AND (
     CAST(:cursor_updated_at AS timestamptz) IS NULL
     OR (
       cf.updated_at,
@@ -1253,6 +1261,8 @@ async def list_curated_features(
     max_lon: float | None = None,
     max_lat: float | None = None,
     q: str | None = None,
+    feature_name: str | None = None,
+    display_title: str | None = None,
     include_archived: bool = False,
     page_size: int = 50,
     cursor: str | None = None,
@@ -1276,6 +1286,8 @@ async def list_curated_features(
                 "sido_code": sido_code,
                 "sigungu_code": sigungu_code,
                 "q_pattern": _q_pattern(q),
+                "feature_name_pattern": _q_pattern(feature_name),
+                "display_title": _text(display_title),
                 "include_archived": include_archived,
                 **_bbox_params(
                     min_lon=min_lon,

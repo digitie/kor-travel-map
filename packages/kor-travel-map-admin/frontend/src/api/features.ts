@@ -114,7 +114,7 @@ function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
   // false partial이 뜨기 쉽다. 한 단계 더 잘게 나눠 누락/재시도 체감을 줄인다.
   const tileZoomBias = isGeometryLightOnly(params.kinds) ? 1 : 0;
   const desiredZoom = clampNumber(
-    Math.floor(rawZoom) + tileZoomBias,
+    Math.ceil(rawZoom) + tileZoomBias,
     MIN_FEATURE_TILE_ZOOM,
     MAX_FEATURE_TILE_ZOOM,
   );
@@ -353,9 +353,17 @@ export function useFeaturesInBbox(
   // tile 분할은 한 번만 계산해 queryKey와 fetch에 함께 쓴다(이전엔 hook과 fetcher가
   // 각각 buildFeatureTiles를 호출해 동일 계산을 두 번 했다).
   const tiles = buildFeatureTiles(queryParams);
+  const viewportSignature = [
+    params.min_lon.toFixed(4),
+    params.min_lat.toFixed(4),
+    params.max_lon.toFixed(4),
+    params.max_lat.toFixed(4),
+    (params.zoom ?? 0).toFixed(1),
+  ].join(",");
   const key = [
     "features",
     "viewport",
+    viewportSignature,
     tiles.map((tile) => tile.key).join("|"),
     params.kinds?.join(",") ?? "",
     params.provider?.join(",") ?? "",
@@ -368,7 +376,7 @@ export function useFeaturesInBbox(
       fetchFeaturesInTiles(queryClient, queryParams, tiles, signal),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
 }
 
