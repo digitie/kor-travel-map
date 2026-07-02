@@ -91,6 +91,8 @@ const CURATION_RELATION_OPTIONS: CuratedCurationRelation[] = [
   "theme_area_anchor",
 ];
 const RULE_ACTION_OPTIONS: CuratedRuleAction[] = ["candidate", "curated", "ignore"];
+const CURATED_FEATURES_REFRESH_SCHEDULE =
+  "curated_features_refresh_daily_schedule";
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const PLACE_SEARCH_PROVIDERS = ["google", "kakao", "naver"] as const;
 const PLACE_SEARCH_PROVIDER_LABELS: Record<string, string> = {
@@ -1710,18 +1712,29 @@ export function CuratedFeaturesClient() {
                 provider source를 curated 후보로 끌어올리는 규칙
               </div>
             </div>
-            <NativeSelect
-              aria-label="rule enabled filter"
-              className="w-full sm:w-40"
-              value={ruleEnabled}
-              onChange={(event) =>
-                setRuleEnabled(event.target.value as EnabledFilter)
-              }
-            >
-              <NativeSelectOption value="all">enabled 전체</NativeSelectOption>
-              <NativeSelectOption value="enabled">enabled</NativeSelectOption>
-              <NativeSelectOption value="disabled">disabled</NativeSelectOption>
-            </NativeSelect>
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <Link
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                href={`/admin/dagster?schedule=${encodeURIComponent(
+                  CURATED_FEATURES_REFRESH_SCHEDULE,
+                )}`}
+              >
+                <PlayIcon data-icon="inline-start" />
+                관련 job 실행
+              </Link>
+              <NativeSelect
+                aria-label="rule enabled filter"
+                className="w-full sm:w-40"
+                value={ruleEnabled}
+                onChange={(event) =>
+                  setRuleEnabled(event.target.value as EnabledFilter)
+                }
+              >
+                <NativeSelectOption value="all">enabled 전체</NativeSelectOption>
+                <NativeSelectOption value="enabled">enabled</NativeSelectOption>
+                <NativeSelectOption value="disabled">disabled</NativeSelectOption>
+              </NativeSelect>
+            </div>
           </div>
           <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_32rem]">
             <div className="rounded-lg border">

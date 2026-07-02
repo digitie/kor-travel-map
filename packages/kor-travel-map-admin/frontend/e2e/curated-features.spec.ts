@@ -18,7 +18,7 @@ test.describe("/admin/features/curated", () => {
     await page.goto("/admin/features/curated");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Curated features" }),
+      page.getByRole("heading", { level: 1, name: "큐레이션 피처" }),
     ).toBeVisible();
 
     // 필터 컨트롤(aria-label로 접근 — data-testid 없음).
@@ -31,7 +31,7 @@ test.describe("/admin/features/curated", () => {
 
     // 후보 목록 테이블 컬럼 헤더 — source rules 테이블과 겹치지 않는 고유 컬럼만 단언
     // (source/theme/updated는 두 테이블에 모두 있어 strict-mode 충돌).
-    for (const col of ["status", "feature", "reuse", "actions"]) {
+    for (const col of ["상태", "feature", "재사용", "작업"]) {
       await expect(
         page.getByRole("columnheader", { name: col, exact: true }),
       ).toBeVisible();
@@ -65,6 +65,12 @@ test.describe("/admin/features/curated", () => {
     await page.goto("/admin/features/curated");
 
     await expect(page.getByText("Source rules", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "관련 job 실행" }),
+    ).toHaveAttribute(
+      "href",
+      "/admin/dagster?schedule=curated_features_refresh_daily_schedule",
+    );
     await expect(page.getByLabel("rule enabled filter")).toBeVisible();
     // 후보 미선택 시 상세/에디터 안내 문구.
     await expect(

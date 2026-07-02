@@ -638,6 +638,36 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
     );
   });
 
+  test("schedule query param은 관련 스케줄 row를 강조하고 즉시 실행 버튼을 노출한다", async ({
+    page,
+  }) => {
+    const scheduleName = "curated_features_refresh_daily_schedule";
+    await mockDagster(page, {
+      summary: () =>
+        makeSummary({
+          repositories: [
+            makeRepository({
+              schedules: [
+                makeSchedule({
+                  description: "큐레이션 후보와 detail snapshot refresh",
+                  name: scheduleName,
+                  pipeline_name: "curated_features_refresh",
+                }),
+              ],
+            }),
+          ],
+        }),
+      runDetail: () => makeRunDetail(),
+    });
+
+    await page.goto(`/admin/dagster?schedule=${scheduleName}`);
+
+    const row = page.getByTestId(`dagster-schedule-row-${scheduleName}`);
+    await expect(row).toBeVisible();
+    await expect(row).toHaveClass(/ring-2/);
+    await expect(row.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+  });
+
   test("스케줄 수정/기본값/시작/즉시 실행 명령을 API로 보낸다", async ({
     page,
   }) => {

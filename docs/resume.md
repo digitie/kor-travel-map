@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-02 (codex) — 큐레이션 theme set 확장과 Source rules job 연결 로컬 구현 완료
+
+- **완료(테마 seed)**: 기본 큐레이션 theme set에 계절별 여행지 4종과 지역별 여행지 6종을 추가했다.
+  확장 테마는 `public` visibility와 `default_curated=false`로 seed한다.
+- **완료(UI)**: Feature 큐레이션 `Source rules` 패널에 `관련 job 실행` 버튼을 추가했다. 버튼은
+  `curated_features_refresh_daily_schedule`이 강조된 작업 자동화 화면으로 이동하며, 운영자는 해당
+  row의 `즉시 실행`으로 관련 job을 바로 실행한다.
+- **완료(검증 보강)**: 확장 테마 seed와 `kor-travel-concierge-youtube/youtube_place_candidates`
+  import/curated snapshot 흐름을 통합 테스트에서 함께 확인한다.
+- **검증**: curated repo integration 7 passed, Dagster concierge fetcher targeted 5 passed/72 deselected,
+  curated refresh schedule 등록 1 passed, 전체 ruff, `mypy src/kortravelmap`, import-linter 4 contracts,
+  frontend type-check, frontend lint(기존 warning 4건), frontend build, Windows Playwright targeted e2e
+  2 passed. WSL Playwright는 Chromium 바이너리 부재로 실행 전 실패했다.
+- **다음 한 작업**: 보안 스캔 후 PR을 올리고 CI green 확인 뒤 머지, n150 반영과 live UI e2e를 진행한다.
+
 ## 2026-07-02 (codex) — Feature 지도 notice 최신 표시/이력화 로컬 구현 완료
 
 - **완료(UI)**: Feature 지도 겹친 점 선택 팝업을 선택 메뉴처럼 보이도록 정리했다. 기존 `겹친 지점 N개`
