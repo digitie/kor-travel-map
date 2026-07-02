@@ -25,7 +25,7 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "Feature 목록", href: "/admin/features" },
   { label: "Feature 변경", href: "/admin/features/change-requests" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
-  { label: "Feature 큐레이션", href: "/admin/features/curated" },
+  { label: "큐레이션 관리", href: "/admin/features/curated" },
   { label: "이슈", href: "/admin/issues" },
   { label: "적재 작업", href: "/ops/import-jobs" },
   { label: "Provider 상태", href: "/ops/providers" },

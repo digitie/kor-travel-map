@@ -16,6 +16,14 @@ type BrowserFetchResult<T> = {
 
 const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
+
+// UI 목록 배지는 한국어 라벨을 렌더한다(src/lib/curated-labels.ts와 동일 값).
+const REUSE_POLICY_BADGE_LABELS: Record<string, string> = {
+  allowed: "재사용 허용",
+  blocked: "재사용 차단",
+  manual_review: "수동 검토",
+};
+
 const T = { timeout: UI_TIMEOUT } as const;
 
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -157,7 +165,7 @@ async function pickCuratedTarget(
 
 async function expectListConsoleLoaded(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Curated features" }),
+    page.getByRole("heading", { level: 1, name: "큐레이션 관리" }),
   ).toBeVisible(T);
   await expect(page.getByLabel("curated feature search")).toBeVisible(T);
 }
@@ -199,7 +207,7 @@ async function collectCuratedTargets(
  * the widened page; the client text filter (which matches curated_feature_id —
  * curated-features-client.tsx line 986 `item.curated_feature_id`) then isolates
  * it. Verified selectors: `aria-label="curation status filter"` (line 1453),
- * `aria-label="page size"` (line 1469), `archived 포함` checkbox label (line 1493),
+ * `aria-label="page size"`, `보관됨 포함` checkbox label,
  * `aria-label="curated feature search"` (line 1371), `rowTestId(() =>
  * "curated-feature-row")` (line 1589).
  */
@@ -213,7 +221,7 @@ async function gotoListSingleRow(
   await page.getByLabel("curation status filter").selectOption(status);
   await page.getByLabel("page size").selectOption("200");
   if (status === "archived") {
-    await page.getByLabel("archived 포함").check();
+    await page.getByLabel("보관됨 포함").check();
   }
   await page.getByLabel("curated feature search").fill(curatedId);
   const row = page.getByTestId("curated-feature-row");
@@ -271,7 +279,7 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
       await test.step("curated feature 상세 화면을 열고 editor가 현재 값으로 시드되어 있음을 확인한다", async () => {
         await page.goto(detailRoute(curatedId));
         await expect(
-          page.getByRole("heading", { level: 1, name: "Curated feature detail" }),
+          page.getByRole("heading", { level: 1, name: "큐레이션 상세" }),
         ).toBeVisible(T);
         // FeatureEditor header renders the full curated_feature_id, confirming we
         // opened the right row: `<div ...>{feature.curated_feature_id}</div>`.
@@ -279,20 +287,20 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
           T,
         );
         // Editor inputs are seeded from the server feature (label-wrapped controls).
-        await expect(page.getByLabel("display title", { exact: true })).toHaveValue(
+        await expect(page.getByLabel("표시 제목", { exact: true })).toHaveValue(
           originalDisplayTitle ?? "",
           T,
         );
-        await expect(page.getByLabel("reuse policy", { exact: true })).toHaveValue(
+        await expect(page.getByLabel("재사용 정책", { exact: true })).toHaveValue(
           originalReusePolicy,
           T,
         );
       });
 
       await test.step("editor에서 display_title을 수정하고 reuse_policy를 토글한 뒤 저장하면 PATCH가 반영된다", async () => {
-        await page.getByLabel("display title", { exact: true }).fill(newTitle);
+        await page.getByLabel("표시 제목", { exact: true }).fill(newTitle);
         await page
-          .getByLabel("reuse policy", { exact: true })
+          .getByLabel("재사용 정책", { exact: true })
           .selectOption(newPolicy);
 
         const responsePromise = waitForApiResponse(
@@ -342,7 +350,7 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
           .selectOption(originalStatus);
         await page.getByLabel("page size").selectOption("200");
         if (originalStatus === "archived") {
-          await page.getByLabel("archived 포함").check();
+          await page.getByLabel("보관됨 포함").check();
         }
         await page.getByLabel("curated feature search").fill(RUN_ID);
 
@@ -351,7 +359,7 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
           .filter({ hasText: RUN_ID });
         await expect(row).toHaveCount(1, T);
         await expect(row).toContainText(MARKER);
-        await expect(row).toContainText(newPolicy);
+        await expect(row).toContainText(REUSE_POLICY_BADGE_LABELS[newPolicy]);
       });
     } finally {
       // Restore the captured originals (display_title + reuse_policy) regardless
@@ -417,23 +425,23 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
       await test.step("상세 editor가 현재 rank_score로 시드되어 있음을 확인한다", async () => {
         await page.goto(detailRoute(curatedId));
         await expect(
-          page.getByRole("heading", { level: 1, name: "Curated feature detail" }),
+          page.getByRole("heading", { level: 1, name: "큐레이션 상세" }),
         ).toBeVisible(T);
         // FeatureEditor header renders the full curated_feature_id:
         // `<div ...>{feature.curated_feature_id}</div>` (line 513).
         await expect(page.getByText(curatedId, { exact: true }).first()).toBeVisible(
           T,
         );
-        // `<label><span>rank score</span><Input type="number" .../></label>`
+        // FormField label="노출 순위" (inputMode=decimal 텍스트 입력)
         // (lines 530-538) → label-addressable.
-        await expect(page.getByLabel("rank score", { exact: true })).toHaveValue(
+        await expect(page.getByLabel("노출 순위", { exact: true })).toHaveValue(
           String(originalRankScore),
           T,
         );
       });
 
       await test.step("rank score 입력을 바꾸고 저장하면 PATCH 응답 rank_score가 새 값이다", async () => {
-        await page.getByLabel("rank score", { exact: true }).fill(String(newRank));
+        await page.getByLabel("노출 순위", { exact: true }).fill(String(newRank));
 
         const responsePromise = waitForApiResponse(
           page,
@@ -457,16 +465,16 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
       });
 
       await test.step("상세 화면 rank 요약과 editor 입력이 refetch된 새 rank_score로 다시 렌더된다", async () => {
-        // detail header dl renders `<dt>rank</dt><dd>{item.rank_score.toFixed(2)}</dd>`
-        // (curated-feature-detail-client.tsx lines 114-115); driven by the
-        // refetched server feature, not editor state.
-        await expect(page.locator('dt:has-text("rank") + dd').first()).toHaveText(
+        // detail header dl renders `<dt>순위</dt><dd>{item.rank_score.toFixed(2)}</dd>`
+        // (curated-feature-detail-client.tsx); driven by the refetched server
+        // feature, not editor state.
+        await expect(page.locator('dt:has-text("순위") + dd').first()).toHaveText(
           newRank.toFixed(2),
           T,
         );
-        // editor remounts on the new updated_at (key on detail line 137) and
-        // re-seeds from the server value, proving persistence.
-        await expect(page.getByLabel("rank score", { exact: true })).toHaveValue(
+        // editor는 pristine 상태에서 서버 값을 그대로 렌더(override 패턴)하므로
+        // refetch된 값이 입력에 반영된다 — persistence 증명.
+        await expect(page.getByLabel("노출 순위", { exact: true })).toHaveValue(
           String(newRank),
           T,
         );
@@ -531,11 +539,10 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
             .toBe(policy);
         });
 
-        await test.step(`목록 행 reuse 배지가 ${policy}로 갱신된다`, async () => {
-          // reuse column renders `<Badge>{feature.reuse_policy}</Badge>` (line
-          // 1145); the just-patched row is freshest so it tops its partition.
+        await test.step(`목록 행 reuse 배지가 ${policy}(한국어 라벨)로 갱신된다`, async () => {
+          // 정책·관계 컬럼은 한국어 라벨 Badge(title=raw)를 렌더한다.
           const row = await gotoListSingleRow(page, originalStatus, curatedId);
-          await expect(row).toContainText(policy);
+          await expect(row).toContainText(REUSE_POLICY_BADGE_LABELS[policy]);
         });
       }
     } finally {
@@ -605,17 +612,17 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
 
         await test.step(`${curatedId} 목록 선택 패널이 새 content_version/rank를 보여준다`, async () => {
           await gotoListSingleRow(page, original.curation_status, curatedId);
-          // single filtered row auto-selects (selectedFeature = filteredItems[0]);
-          // panel renders the full id (line 1608) and the dl `<dt>content version</dt>
-          // <dd>{content_version}</dd>` / `<dt>rank</dt><dd>{rank_score.toFixed(2)}</dd>`
-          // (lines 1644-1647).
+          // single filtered row auto-selects (selectedFeature = items[0]);
+          // panel renders the full id and the Koreanized dl
+          // `<dt>콘텐츠 버전</dt><dd>{content_version}</dd>` /
+          // `<dt>순위</dt><dd>{rank_score.toFixed(2)}</dd>`.
           await expect(
             page.getByText(curatedId, { exact: true }).first(),
           ).toBeVisible(T);
           await expect(
-            page.locator('dt:has-text("content version") + dd'),
+            page.locator('dt:has-text("콘텐츠 버전") + dd'),
           ).toHaveText(String(finalVersion), T);
-          await expect(page.locator('dt:has-text("rank") + dd')).toHaveText(
+          await expect(page.locator('dt:has-text("순위") + dd')).toHaveText(
             finalRank.toFixed(2),
             T,
           );
@@ -694,13 +701,13 @@ test.describe("/admin/features/curated edit round-trip (self-restoring)", () => 
       // the no-op left updated_at unchanged (row may sit deep in its partition).
       await page.goto(detailRoute(curatedId));
       await expect(
-        page.getByRole("heading", { level: 1, name: "Curated feature detail" }),
+        page.getByRole("heading", { level: 1, name: "큐레이션 상세" }),
       ).toBeVisible(T);
-      await expect(page.getByLabel("reuse policy", { exact: true })).toHaveValue(
+      await expect(page.getByLabel("재사용 정책", { exact: true })).toHaveValue(
         originalReusePolicy,
         T,
       );
-      await expect(page.getByLabel("rank score", { exact: true })).toHaveValue(
+      await expect(page.getByLabel("노출 순위", { exact: true })).toHaveValue(
         String(originalRankScore),
         T,
       );

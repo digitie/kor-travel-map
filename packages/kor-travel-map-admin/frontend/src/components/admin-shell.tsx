@@ -11,6 +11,7 @@ import {
   LinkIcon,
   ListChecksIcon,
   MapIcon,
+  MapPinnedIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   UploadCloudIcon,
@@ -33,7 +34,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "홈", icon: HomeIcon },
   { href: "/features", label: "Feature 지도", icon: MapIcon },
-  { href: "/curated-features", label: "Curated 지도", icon: SparklesIcon },
+  { href: "/curated-features", label: "큐레이션 지도", icon: MapPinnedIcon },
   { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
   {
     href: "/admin/features/change-reviews",
@@ -42,7 +43,7 @@ const navItems = [
   },
   {
     href: "/admin/features/curated",
-    label: "Feature 큐레이션",
+    label: "큐레이션 관리",
     icon: SparklesIcon,
   },
   { href: "/admin/issues", label: "이슈", icon: AlertTriangleIcon },
