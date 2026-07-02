@@ -154,6 +154,7 @@ def _feature_detail() -> AdminFeatureDetail:
         raw_data={"id": "sr-feature-1"},
         fetched_at=now,
         imported_at=now,
+        last_seen_at=now,
         expires_at=None,
         linked_at=now,
     )

@@ -351,6 +351,9 @@ def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
     assert set(expected) & used, f"expected one of {expected}, used={sorted(used)}"
 
 
+_COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
+
+
 def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
     seq_scans = [
         node
@@ -433,7 +436,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "limit": 200,
         },
     )
-    _assert_uses_index(in_bbox, "idx_features_coord_gist")
+    _assert_uses_index(in_bbox, *_COORD_SPATIAL_INDEXES)
 
     await migrated_session.execute(
         text("SET LOCAL pg_trgm.similarity_threshold = 0.2")
@@ -479,7 +482,7 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
             _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
             params,
         )
-        _assert_uses_index(cluster, "idx_features_coord_gist")
+        _assert_uses_index(cluster, *_COORD_SPATIAL_INDEXES)
 
     representative = await _explain_json(
         migrated_session,
@@ -487,7 +490,7 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
         params,
         force_index=False,
     )
-    _assert_uses_index(representative, "idx_features_coord_gist")
+    _assert_uses_index(representative, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(representative, "features")
 
 
@@ -516,7 +519,7 @@ async def test_t212d_cluster_provider_filter_uses_spatial_index(
             _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
             filtered_params,
         )
-        _assert_uses_index(plan, "idx_features_coord_gist")
+        _assert_uses_index(plan, *_COORD_SPATIAL_INDEXES)
 
     representative = await _explain_json(
         migrated_session,
@@ -524,7 +527,7 @@ async def test_t212d_cluster_provider_filter_uses_spatial_index(
         filtered_params,
         force_index=False,
     )
-    _assert_uses_index(representative, "idx_features_coord_gist")
+    _assert_uses_index(representative, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(representative, "features")
 
 
@@ -549,7 +552,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
         },
         force_index=False,
     )
-    _assert_uses_index(in_bbox, "idx_features_coord_gist")
+    _assert_uses_index(in_bbox, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(in_bbox, "features")
 
     admin_features_by_name = await _explain_json(

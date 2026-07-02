@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-02 (codex) — Feature 지도 notice 최신 표시와 source last_seen 이력화
+
+Feature 지도 겹침 선택 메뉴를 시각적으로 정리하고, notice source 이력/중복 재수집 정책을 보강했다.
+
+- **지도 UI**: 겹친 점 마커 팝업의 제목/카운트 pill, feature kind 배지, 색상 dot, hover/focus에 가까운
+  행 affordance를 추가했다. 기존 겹침 선택 동작과 e2e selector 텍스트(`겹친 지점 N개`)는 유지했다.
+- **notice 최신 표시**: bbox 조회에서 `kind='notice'`는 같은 provider/dataset/entity lineage 중 더
+  최근 source record가 다른 feature에 연결된 경우 오래된 feature를 제외한다. KREX 레거시 raw-hash
+  feature도 raw_data의 발생일시/노선/방향/지점/유형/series 단서로 묶어 최신 marker만 남긴다.
+- **KREX 적재**: 교통공지 자연키에서 raw payload hash를 제거하고 사건 단서 기반 stable key로 바꿨다.
+  문구/처리 상태 변경은 같은 Feature에 source_record 이력으로 누적된다.
+- **중복 재수집**: `provider_sync.source_records.last_seen_at` 컬럼과 BRIN index를 추가했다. 같은
+  `source_record_key` 재수집은 raw payload/Feature/version을 갱신하지 않고 `last_seen_at`만 갱신한다.
+- **상세 UI/API**: admin feature 상세 source row에 `last_seen_at`을 노출하고, notice feature 상세에는
+  primary source 이력을 `Notice History` 표로 표시한다. OpenAPI와 frontend generated types도 갱신했다.
+- **검증**: targeted unit/API 63 passed, Dagster runner/load enrichment 11 passed, integration
+  `test_feature_repo_load.py` + `test_mois_loader.py` 28 passed, perf EXPLAIN 7 passed,
+  frontend type-check/gen:types:check, OpenAPI drift check, frontend lint(기존 경고 4건),
+  frontend unit 45 passed, frontend production build 통과(`NEXT_PUBLIC_KOR_TRAVEL_MAP_API`,
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` 로컬값 지정), 전체 pytest 1378 passed,
+  전체 `ruff check .`, `mypy src/kortravelmap`, import-linter 4 contracts, `git diff --check` 통과.
+- **미검증**: mocked Playwright e2e는 현재 WSL의 Playwright Chromium 바이너리 부재와
+  `playwright install chromium`의 `ubuntu26.04-x64` 미지원으로 실행되지 않았다. Windows Chrome 직접
+  launch도 remote debugging pipe 문제로 실패했다.
+
 ## 2026-07-01 (codex) — Feature 작성 폼 장소 종류 최상위화
 
 새 Feature 작성과 변경 요청 작성 화면에서 `장소 종류(place_kind)`를 보조 상세 필드가 아닌 기본 정보

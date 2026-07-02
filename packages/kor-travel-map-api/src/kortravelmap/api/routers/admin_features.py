@@ -405,6 +405,7 @@ class AdminFeatureDetailSourceRecord(BaseModel):
     raw_data: dict[str, Any]
     fetched_at: datetime
     imported_at: datetime
+    last_seen_at: datetime
     expires_at: datetime | None = None
     linked_at: datetime
 

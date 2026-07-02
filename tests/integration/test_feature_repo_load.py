@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -132,12 +133,30 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     assert first.features_inserted == 1
     assert first.source_records_inserted == 1
 
-    # 동일 bundle 재적재 — ON CONFLICT (test-strategy §4.4)
-    second = await feature_repo.load_bundle(migrated_session, bundle)
+    before = (
+        await migrated_session.execute(
+            text(
+                "SELECT last_seen_at FROM provider_sync.source_records "
+                "WHERE source_record_key = :k"
+            ),
+            {"k": bundle.source_record.source_record_key},
+        )
+    ).scalar_one()
+
+    await asyncio.sleep(0.01)
+    mutated = bundle.model_copy(
+        update={
+            "feature": bundle.feature.model_copy(
+                update={"name": "중복 재수집에서 바뀌면 안 되는 이름"}
+            )
+        }
+    )
+
+    # 동일 source_record_key 재적재 — 원문/feature 내용은 건드리지 않고 last_seen만 갱신.
+    second = await feature_repo.load_bundle(migrated_session, mutated)
     await migrated_session.flush()
     assert second.features_inserted == 0
-    assert second.features_updated == 1
-    # source_record는 DO NOTHING (이력 보존, ADR-017)
+    assert second.features_updated == 0
     assert second.source_records_inserted == 0
     assert second.source_links_updated == 1
 
@@ -149,16 +168,25 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
         )
     ).scalar_one()
     assert fcount == 1
-    scount = (
+    feature_name = (
+        await migrated_session.execute(
+            text("SELECT name FROM feature.features WHERE feature_id = :fid"),
+            {"fid": bundle.feature.feature_id},
+        )
+    ).scalar_one()
+    assert feature_name == bundle.feature.name
+    source_row = (
         await migrated_session.execute(
             text(
-                "SELECT count(*) FROM provider_sync.source_records "
+                "SELECT count(*) AS count, max(last_seen_at) AS last_seen_at "
+                "FROM provider_sync.source_records "
                 "WHERE source_record_key = :k"
             ),
             {"k": bundle.source_record.source_record_key},
         )
-    ).scalar_one()
-    assert scount == 1
+    ).mappings().one()
+    assert source_row["count"] == 1
+    assert source_row["last_seen_at"] > before
 
 
 async def test_load_bundles_aggregates_counts(
@@ -248,6 +276,108 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 1.1, max_lat=lat + 1.1,
     )
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
+
+
+async def test_features_in_bbox_hides_stale_notice_revisions(
+    migrated_session: AsyncSession,
+) -> None:
+    old_seen = datetime(2026, 6, 1, 9, 0, tzinfo=_KST)
+    new_seen = datetime(2026, 6, 1, 9, 5, tzinfo=_KST)
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category,
+                coord, coord_precision_digits,
+                marker_icon, marker_color, status
+            )
+            VALUES
+            (
+                'f_notice_legacy_old', 'notice', '이전 교통 공지', '99000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
+                6, 'warning', 'P-05', 'active'
+            ),
+            (
+                'f_notice_legacy_new', 'notice', '최신 교통 공지', '99000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
+                6, 'warning', 'P-05', 'active'
+            )
+            """
+        )
+    )
+    for suffix, message, seen_at in (
+        ("old", "공사 시작", old_seen),
+        ("new", "공사 내용 수정", new_seen),
+    ):
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_records (
+                    source_record_key, provider, dataset_key,
+                    source_entity_type, source_entity_id,
+                    raw_name, raw_data, raw_payload_hash,
+                    fetched_at, imported_at, last_seen_at
+                )
+                VALUES (
+                    :source_record_key, 'python-krex-api', 'krex_traffic_notices',
+                    'traffic_notice', :source_entity_id,
+                    :raw_name, CAST(:raw_data AS jsonb), :raw_payload_hash,
+                    :seen_at, :seen_at, :seen_at
+                )
+                """
+            ),
+            {
+                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "source_entity_id": f"legacy-hash-key-{suffix}",
+                "raw_name": message,
+                "raw_payload_hash": f"hash-{suffix}",
+                "raw_data": (
+                    "{"
+                    '"occurred_date":"2026.06.01",'
+                    '"occurred_time":"09:00:00",'
+                    '"route_no":"0010",'
+                    '"direction":"서울방향",'
+                    '"point_name":"천안분기점",'
+                    '"incident_type_code":"3",'
+                    f'"message":"{message}"'
+                    "}"
+                ),
+                "seen_at": seen_at,
+            },
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_links (
+                    feature_id, source_record_key, source_role,
+                    match_method, confidence, is_primary_source, created_at
+                )
+                VALUES (
+                    :feature_id, :source_record_key, 'primary',
+                    'natural_key', 100, true, :seen_at
+                )
+                """
+            ),
+            {
+                "feature_id": f"f_notice_legacy_{suffix}",
+                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "seen_at": seen_at,
+            },
+        )
+    await migrated_session.flush()
+
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=127.5,
+        min_lat=36.0,
+        max_lon=127.7,
+        max_lat=36.2,
+        kinds=["notice"],
+    )
+    ids = {row["feature_id"] for row in rows}
+
+    assert "f_notice_legacy_new" in ids
+    assert "f_notice_legacy_old" not in ids
 
 
 async def test_features_in_bbox_include_geometry_returns_route_area_shape(

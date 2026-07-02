@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Feature 지도 notice 이력/겹침 메뉴 보강 (2026-07-02)
+
+- **CHANGED**: Feature 지도에서 겹친 점 마커 선택 팝업의 헤더, 후보 행, 종류 배지, hover 상태를
+  더 명확한 선택 메뉴 형태로 정리했다.
+- **CHANGED**: KREX 교통공지 notice는 같은 사건의 문구/처리 상태 변경을 같은 Feature에 누적하고,
+  source record 이력으로 보존한다. Feature 지도 bbox 조회는 같은 notice lineage에서 최신 값만
+  표시한다.
+- **ADDED**: `provider_sync.source_records.last_seen_at`을 추가해 동일 payload 재수집 시 원문/Feature
+  본문은 갱신하지 않고 마지막 확인 시각만 갱신한다. Feature 상세 화면은 notice source 이력을
+  별도 `Notice History` 섹션으로 표시한다.
+
 ### Feature 작성 폼 장소 종류 정리 (2026-07-01)
 
 - **CHANGED**: 새 Feature 작성과 Feature 변경 요청 작성 화면에서 `장소 종류(place_kind)`를

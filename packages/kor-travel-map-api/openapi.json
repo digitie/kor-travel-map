@@ -1678,6 +1678,11 @@
             "title": "Is Primary Source",
             "type": "boolean"
           },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
           "linked_at": {
             "format": "date-time",
             "title": "Linked At",
@@ -1786,6 +1791,7 @@
           "raw_data",
           "fetched_at",
           "imported_at",
+          "last_seen_at",
           "linked_at"
         ],
         "title": "AdminFeatureDetailSourceRecord",

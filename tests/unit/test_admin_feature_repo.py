@@ -233,6 +233,7 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "raw_data": '{"id": "sr-feature-1"}',
         "fetched_at": _NOW,
         "imported_at": _NOW,
+        "last_seen_at": _NOW,
         "expires_at": None,
         "linked_at": _NOW,
     }

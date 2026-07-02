@@ -46,7 +46,8 @@ ADR 참조
   (`_traffic_notice_item_to_bundle`)가 생성한다.
 - Incident에는 안정 식별자가 없어 자연키를 krtour 측에서 파생한다
   (`_traffic_notice_natural_key`): occurred_date + occurred_time + route_no +
-  raw payload hash. 좌표(latitude/longitude)는 일부 row에만 있다(실측 36/99) —
+  direction + point_name + incident_type_code + series_no. 좌표(latitude/longitude)는
+  일부 row에만 있다(실측 36/99) —
   좌표가 있으면 Coordinate + reverse geocoding, 없으면 **coordless**
   (bjd_code 미상 → global feature_id, 노선/지점/방향이 위치 단서).
 - **transient 주의**: EX 돌발(incident) feed는 해소된 사건이 사라지는 휘발성
@@ -1322,26 +1323,34 @@ def _parse_krex_occurrence(
 
 
 def _traffic_notice_natural_key(item: KrexTrafficNoticeItem) -> str:
-    """krtour 측 파생 자연키 — ``occurred_date::occurred_time::route_no::raw_hash``.
+    """krtour 측 파생 자연키 — 사건 단서 기반 stable key.
 
-    provider ``Incident``에 안정 식별자가 없어(ADR-044) 네 성분을 normalize
-    (strip→lower) 후 ``::``로 잇는다 — ID 시스템이 예약한 ``|``를 피한다
-    (mois/rest_areas와 동일 구분자, ADR-009 `_validate_component`). raw payload
-    hash로 동일 노선/발생시각이라도 본문이 다른 사건을 구분한다.
+    provider ``Incident``에 안정 식별자가 없어(ADR-044) 사건 단서를 normalize
+    (strip→lower) 후 ``::``로 잇는다 — ID 시스템이 예약한 ``|``를 피한다.
+    raw payload hash는 ``source_record_key``에만 들어가므로, 문구/처리 상태만 바뀐
+    같은 사건은 같은 Feature에 source_record 이력으로 누적된다.
 
-    tradeoff (#378): raw에는 ``accProcessCode``(처리 상태)·``smsText``가 포함되어
-    상태 전이(진행→완료)나 문구 수정만으로도 raw hash가 바뀌어 새 Feature로
-    적재된다 — transient feed라 재실행 refresh가 전제이므로 수용(구 scheme의
-    started_at 성분을 occurred_date+occurred_time으로 대체, 나머지 성질 동일).
-    충돌·재적재 tradeoff는 ``KrexTrafficNoticeItem`` docstring 참조.
+    안정 단서가 하나도 없으면 raw hash fallback을 쓴다. 이 경우는 서로 다른
+    coordless/message-only row 충돌을 피하는 방어 경로다.
     """
-    parts = (
-        (item.occurred_date or "").strip().lower(),
-        (item.occurred_time or "").strip().lower(),
-        (item.route_no or "").strip().lower(),
-        make_payload_hash(item.raw),
+    parts = tuple(
+        part
+        for part in (
+            (item.occurred_date or "").strip().lower(),
+            (item.occurred_time or "").strip().lower(),
+            (item.route_no or "").strip().lower(),
+            (item.direction or "").strip().lower(),
+            (item.point_name or "").strip().lower(),
+            (item.incident_type_code or "").strip().lower(),
+            str(item.series_no).strip().lower()
+            if item.series_no is not None
+            else "",
+        )
+        if part
     )
-    return "::".join(parts)
+    if parts:
+        return "::".join(parts)
+    return f"raw::{make_payload_hash(item.raw)}"
 
 
 def _safe_notice_type(incident_type: str | None) -> str:

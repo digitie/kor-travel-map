@@ -89,6 +89,7 @@ function makeSource(
     expires_at: null,
     fetched_at: "2026-06-07T00:00:00.000Z",
     imported_at: "2026-06-07T01:00:00.000Z",
+    last_seen_at: "2026-06-07T02:00:00.000Z",
     is_primary_source: true,
     linked_at: "2026-06-07T01:30:00.000Z",
     match_method: "exact",

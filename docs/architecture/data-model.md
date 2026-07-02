@@ -266,6 +266,7 @@ CREATE TABLE provider_sync.source_records (
   raw_payload_hash       TEXT NOT NULL,
   fetched_at             TIMESTAMPTZ NOT NULL,
   imported_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at             TIMESTAMPTZ,
 
   CONSTRAINT uq_source_records UNIQUE (provider, dataset_key, source_entity_type, source_entity_id, raw_payload_hash)
@@ -277,6 +278,8 @@ CREATE INDEX idx_source_records_imported_at_brin
   ON provider_sync.source_records USING BRIN (imported_at);
 CREATE INDEX idx_source_records_fetched_at_brin
   ON provider_sync.source_records USING BRIN (fetched_at);
+CREATE INDEX idx_source_records_last_seen_at_brin
+  ON provider_sync.source_records USING BRIN (last_seen_at);
 CREATE INDEX idx_source_records_expires_at
   ON provider_sync.source_records (expires_at) WHERE expires_at IS NOT NULL;
 ```

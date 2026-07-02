@@ -167,14 +167,14 @@ async def test_loader_idempotent_reload(migrated_session: AsyncSession) -> None:
     assert first.features_inserted == 2
     assert await _feature_count(migrated_session) == 2
 
-    # 재적재 — 같은 record → feature 수 불변, update 경로.
+    # 재적재 — 같은 source_record_key는 feature 본문을 건드리지 않고 last_seen만 갱신.
     second = await load_mois_license_features_bulk(
         migrated_session, records, fetched_at=_FETCHED
     )
     await migrated_session.flush()
     assert second.bundles_total == 2
     assert second.features_inserted == 0
-    assert second.features_updated == 2
+    assert second.features_updated == 0
     assert await _feature_count(migrated_session) == 2
 
 
