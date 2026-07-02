@@ -28,6 +28,7 @@ import {
 } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
+import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -173,7 +174,9 @@ function CuratedDetailPanel({
               <div className="flex flex-wrap gap-2">
                 <Badge>{feature.feature_kind}</Badge>
                 <Badge variant="secondary">{feature.theme_name}</Badge>
-                <Badge variant="outline">{feature.curation_status}</Badge>
+                <Badge title={feature.curation_status} variant="outline">
+                  {statusLabel(feature.curation_status)}
+                </Badge>
               </div>
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">

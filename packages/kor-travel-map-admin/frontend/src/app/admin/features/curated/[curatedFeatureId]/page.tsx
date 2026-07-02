@@ -11,7 +11,7 @@ export async function generateMetadata({
 }: CuratedFeatureDetailPageProps): Promise<Metadata> {
   const { curatedFeatureId } = await params;
   return {
-    title: `${curatedFeatureId} | Feature 큐레이션 상세`,
+    title: `${curatedFeatureId} | 큐레이션 상세`,
   };
 }
 

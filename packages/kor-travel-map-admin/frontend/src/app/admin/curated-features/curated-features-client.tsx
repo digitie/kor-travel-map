@@ -18,7 +18,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
@@ -54,18 +54,41 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DataTable } from "@/components/ui/data-table";
+import {
+  FormField,
+  FormSelect,
+  FormTextArea,
+} from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
+import {
+  curationRelationLabel,
+  enumOption,
+  notifyStatusTransition,
+  reusePolicyLabel,
+  ruleActionLabel,
+  CURATION_RELATION_LABELS,
+  REUSE_POLICY_LABELS,
+  RULE_ACTION_LABELS,
+} from "@/lib/curated-labels";
 import {
   PLACE_KIND_OPTIONS,
   withCurrentOption,
 } from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+import { CuratedLifecycleStrip } from "./curated-lifecycle";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 const CURATION_STATUS_OPTIONS: CuratedFeatureStatus[] = [
@@ -100,9 +123,12 @@ const PLACE_SEARCH_PROVIDER_LABELS: Record<string, string> = {
   kakao: "Kakao",
   naver: "Naver",
 };
+/** 서버 검색(q) 디바운스 — 타이핑마다 keyset 재조회하지 않게 300ms. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 type StatusFilter = CuratedFeatureStatus | "all";
 type EnabledFilter = "all" | "enabled" | "disabled";
+type ConsoleTab = "review" | "rules";
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -231,7 +257,7 @@ export function CuratedFeatureLocationPanel({
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
-        <div className="font-medium">Location review</div>
+        <div className="font-medium">위치 확인</div>
         <div className="text-xs text-muted-foreground">
           위치, 주소, 카테고리 확인
         </div>
@@ -262,11 +288,11 @@ export function CuratedFeatureLocationPanel({
           </div>
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">coord</dt>
+          <dt className="text-muted-foreground">좌표</dt>
           <dd className="font-mono">{coordLabel(feature)}</dd>
-          <dt className="text-muted-foreground">address</dt>
+          <dt className="text-muted-foreground">주소</dt>
           <dd>{featureAddressLabel(feature)}</dd>
-          <dt className="text-muted-foreground">category</dt>
+          <dt className="text-muted-foreground">카테고리</dt>
           <dd>
             <Badge variant="outline">{feature.feature_category}</Badge>
           </dd>
@@ -289,6 +315,9 @@ export function CuratedPlaceSearchPanel({
   const defaultQuery = featureSearchQuery(feature);
   const [query, setQuery] = useState(defaultQuery);
   const [activeQuery, setActiveQuery] = useState("");
+  // 결과 적용 시 재사용 정책을 '재사용 허용'으로 바꿀지의 opt-out — 기본 체크.
+  // 해제하면 PATCH body에서 reuse_policy 키 자체를 뺀다(기존 값 유지).
+  const [applyAllowedPolicy, setApplyAllowedPolicy] = useState(true);
   const search = useCuratedFeaturePlaceSearch(
     feature?.curated_feature_id ?? null,
     activeQuery,
@@ -307,7 +336,7 @@ export function CuratedPlaceSearchPanel({
         curatedFeatureId: feature.curated_feature_id,
         body: {
           display_title: hit.name ?? feature.display_title,
-          reuse_policy: "allowed",
+          ...(applyAllowedPolicy ? { reuse_policy: "allowed" as const } : {}),
           metadata: {
             ...feature.metadata,
             place_search_review: {
@@ -329,21 +358,24 @@ export function CuratedPlaceSearchPanel({
             hit.latitude != null && hit.longitude != null
               ? ` · ${hit.latitude.toFixed(5)}, ${hit.longitude.toFixed(5)}`
               : "";
-          toast.success("반영 완료", {
+          toast.success("적용 완료", {
             description: (
               <div className="grid gap-0.5 text-xs">
-                <div>display title: {hit.name ?? "—"}</div>
+                <div>표시 제목: {hit.name ?? "—"}</div>
                 <div>
                   {hit.provider} · {placeHitAddress(hit)}
                   {coord}
                 </div>
                 {hit.category ? <div>분류: {hit.category}</div> : null}
+                {applyAllowedPolicy ? (
+                  <div>재사용 정책: 재사용 허용으로 설정됨</div>
+                ) : null}
               </div>
             ),
           });
         },
         onError: (error) => {
-          toast.error("반영 실패", { description: uiLabel(error.message) });
+          toast.error("적용 실패", { description: error.message });
         },
       },
     );
@@ -352,9 +384,9 @@ export function CuratedPlaceSearchPanel({
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
-        <div className="font-medium">Place search</div>
+        <div className="font-medium">장소 대조 검색</div>
         <div className="text-xs text-muted-foreground">
-          Google/Kakao/Naver 후보 비교
+          Google·Kakao·Naver 결과와 이름·주소를 대조합니다
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
@@ -375,10 +407,23 @@ export function CuratedPlaceSearchPanel({
             검색
           </Button>
         </form>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            checked={applyAllowedPolicy}
+            className="size-4"
+            type="checkbox"
+            onChange={(event) => setApplyAllowedPolicy(event.target.checked)}
+          />
+          <span>적용 시 재사용 정책을 &lsquo;재사용 허용&rsquo;으로 변경</span>
+        </label>
+        <div className="text-xs text-muted-foreground">
+          좌표·주소는 검토 기록(metadata)에만 저장되며 지도 마커는 바뀌지
+          않습니다.
+        </div>
         {search.isError ? (
           <Alert variant="destructive">
             <AlertTitle>장소 검색 실패</AlertTitle>
-            <AlertDescription>{uiLabel(search.error.message)}</AlertDescription>
+            <AlertDescription>{search.error.message}</AlertDescription>
           </Alert>
         ) : null}
         {!search.data && !search.isFetching && !search.isError ? (
@@ -428,7 +473,7 @@ export function CuratedPlaceSearchPanel({
                         variant="outline"
                         onClick={() => applyHit(hit)}
                       >
-                        반영
+                        결과 적용
                       </Button>
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs">
@@ -453,6 +498,16 @@ export function CuratedPlaceSearchPanel({
   );
 }
 
+/** FeatureEditor의 사용자 입력 override — null/부재 = 서버 값 그대로(pristine). */
+interface EditorOverrides {
+  themeId?: string;
+  title?: string;
+  summary?: string;
+  rankScore?: string;
+  reusePolicy?: CuratedReusePolicy;
+  relation?: CuratedCurationRelation;
+}
+
 export function FeatureEditor({
   feature,
   themes = [],
@@ -461,24 +516,49 @@ export function FeatureEditor({
   themes?: readonly CuratedTheme[];
 }) {
   const patchFeature = usePatchCuratedFeatureMutation();
-  const [themeId, setThemeId] = useState(feature?.theme_id ?? "");
-  const [title, setTitle] = useState(feature?.display_title ?? "");
-  const [summary, setSummary] = useState(feature?.display_summary ?? "");
-  const [rankScore, setRankScore] = useState(String(feature?.rank_score ?? 0));
-  const [reusePolicy, setReusePolicy] =
-    useState<CuratedReusePolicy>(
-      (feature?.reuse_policy as CuratedReusePolicy | undefined) ??
-        "manual_review",
-    );
-  const [relation, setRelation] =
-    useState<CuratedCurationRelation>(
-      (feature?.curation_relation as CuratedCurationRelation | undefined) ??
-        "nearby_option",
-    );
+  // override 패턴: 입력 전(pristine)에는 항상 서버 값을 렌더해 refetch를 자동
+  // 반영하고(effect-없는 resync), 입력이 생기면(dirty) 사용자의 값을 유지한다.
+  // editBaseline은 첫 입력 시점의 updated_at — 이후 서버가 움직이면(다른 작업의
+  // patch) 아래 Alert로 알리고 '최신 값 불러오기'로만 교체한다.
+  const [overrides, setOverrides] = useState<EditorOverrides>({});
+  const [editBaseline, setEditBaseline] = useState<string | null>(null);
+
+  const dirty = Object.keys(overrides).length > 0;
+  const serverMoved =
+    dirty &&
+    feature !== null &&
+    editBaseline !== null &&
+    feature.updated_at !== editBaseline;
+
+  const setField = <K extends keyof EditorOverrides>(
+    key: K,
+    value: EditorOverrides[K],
+  ) => {
+    setOverrides((prev) => ({ ...prev, [key]: value }));
+    setEditBaseline((prev) => prev ?? feature?.updated_at ?? null);
+  };
+  const resetToServer = () => {
+    setOverrides({});
+    setEditBaseline(null);
+  };
+
+  const themeId = overrides.themeId ?? feature?.theme_id ?? "";
+  const title = overrides.title ?? feature?.display_title ?? "";
+  const summary = overrides.summary ?? feature?.display_summary ?? "";
+  const rankScore = overrides.rankScore ?? String(feature?.rank_score ?? 0);
+  const reusePolicy =
+    overrides.reusePolicy ??
+    ((feature?.reuse_policy as CuratedReusePolicy | undefined) ??
+      "manual_review");
+  const relation =
+    overrides.relation ??
+    ((feature?.curation_relation as CuratedCurationRelation | undefined) ??
+      "nearby_option");
+  const rankInvalid = !Number.isFinite(Number(rankScore));
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!feature) return;
+    if (!feature || rankInvalid) return;
     patchFeature.mutate(
       {
         curatedFeatureId: feature.curated_feature_id,
@@ -493,21 +573,24 @@ export function FeatureEditor({
       },
       {
         onSuccess: () => {
+          // 저장 후 override를 비워 입력이 refetch된 서버 값을 따라가게 한다.
+          resetToServer();
           toast.success("저장 완료", {
             description: (
               <div className="grid gap-0.5 text-xs">
-                <div>theme: {themeId || feature.theme_id}</div>
-                <div>display title: {title.trim() || "—"}</div>
-                <div>display summary: {summary.trim() || "—"}</div>
+                <div>테마: {themeId || feature.theme_id}</div>
+                <div>표시 제목: {title.trim() || "—"}</div>
+                <div>표시 요약: {summary.trim() || "—"}</div>
                 <div>
-                  rank {Number(rankScore)} · {reusePolicy} · {relation}
+                  순위 {Number(rankScore)} · {reusePolicyLabel(reusePolicy)} ·{" "}
+                  {curationRelationLabel(relation)}
                 </div>
               </div>
             ),
           });
         },
         onError: (error) => {
-          toast.error("저장 실패", { description: uiLabel(error.message) });
+          toast.error("저장 실패", { description: error.message });
         },
       },
     );
@@ -516,7 +599,7 @@ export function FeatureEditor({
   if (!feature) {
     return (
       <section className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-        후보를 선택하면 display text와 공개 재사용 속성을 편집할 수 있습니다.
+        후보를 선택하면 노출 정보를 편집할 수 있습니다.
       </section>
     );
   }
@@ -526,95 +609,121 @@ export function FeatureEditor({
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
-        <div className="font-medium">Curated display</div>
+        <div className="flex items-center gap-2">
+          <div className="font-medium">노출 정보 편집</div>
+          {dirty ? <Badge variant="secondary">수정됨</Badge> : null}
+        </div>
         <div className="break-all font-mono text-xs text-muted-foreground">
           {feature.curated_feature_id}
         </div>
       </div>
       <form className="flex flex-col gap-3 p-4" onSubmit={save}>
-        <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">curated theme</span>
-          <NativeSelect
-            className="w-full"
-            value={themeId}
-            onChange={(event) => setThemeId(event.target.value)}
-          >
-            {!hasCurrentTheme ? (
-              <NativeSelectOption value={feature.theme_id}>
-                {feature.theme_name} · {feature.theme_slug}
-              </NativeSelectOption>
-            ) : null}
-            {themes.map((theme) => (
-              <NativeSelectOption key={theme.theme_id} value={theme.theme_id}>
-                {theme.theme_name} · {theme.theme_slug}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">display title</span>
-          <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">display summary</span>
-          <Textarea
-            className="min-h-24"
-            value={summary}
-            onChange={(event) => setSummary(event.target.value)}
-          />
-        </label>
+        {serverMoved ? (
+          <Alert>
+            <AlertTriangleIcon data-icon="inline-start" />
+            <AlertTitle>다른 작업이 이 항목을 수정했습니다.</AlertTitle>
+            <AlertDescription>
+              <div className="flex flex-col gap-2">
+                <span>
+                  &lsquo;최신 값 불러오기&rsquo;를 누르면 입력이 서버 값으로
+                  교체됩니다.
+                </span>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={resetToServer}
+                >
+                  최신 값 불러오기
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        <FormSelect
+          hint="이 후보가 속할 큐레이션 테마"
+          label="테마"
+          value={themeId}
+          onChange={(event) => setField("themeId", event.target.value)}
+        >
+          {!hasCurrentTheme ? (
+            <NativeSelectOption value={feature.theme_id}>
+              {feature.theme_name} · {feature.theme_slug}
+            </NativeSelectOption>
+          ) : null}
+          {themes.map((theme) => (
+            <NativeSelectOption key={theme.theme_id} value={theme.theme_id}>
+              {theme.theme_name} · {theme.theme_slug}
+            </NativeSelectOption>
+          ))}
+        </FormSelect>
+        <FormField
+          hint="비우면 원본 feature 이름이 사용됩니다. 규칙 재적용은 관리자가 넣은 제목을 덮어쓰지 않습니다."
+          label="표시 제목"
+          value={title}
+          onChange={(event) => setField("title", event.target.value)}
+        />
+        <FormTextArea
+          className="min-h-24"
+          label="표시 요약"
+          value={summary}
+          onChange={(event) => setField("summary", event.target.value)}
+        />
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">rank score</span>
-            <Input
-              min="0"
-              step="0.01"
-              type="number"
-              value={rankScore}
-              onChange={(event) => setRankScore(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">reuse policy</span>
-            <NativeSelect
-              className="w-full"
-              value={reusePolicy}
-              onChange={(event) =>
-                setReusePolicy(event.target.value as CuratedReusePolicy)
-              }
-            >
-              {REUSE_POLICY_OPTIONS.map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {option}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-        </div>
-        <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">curation relation</span>
-          <NativeSelect
-            className="w-full"
-            value={relation}
+          <FormField
+            error={rankInvalid ? "숫자를 입력하세요" : undefined}
+            label="노출 순위"
+            min="0"
+            step="0.01"
+            type="number"
+            value={rankScore}
+            onChange={(event) => setField("rankScore", event.target.value)}
+          />
+          <FormSelect
+            hint="다운스트림(PinVi 등)이 이 항목을 복사해 가도 되는지의 계약입니다."
+            label="재사용 정책"
+            value={reusePolicy}
             onChange={(event) =>
-              setRelation(event.target.value as CuratedCurationRelation)
+              setField("reusePolicy", event.target.value as CuratedReusePolicy)
             }
           >
-            {CURATION_RELATION_OPTIONS.map((option) => (
+            {REUSE_POLICY_OPTIONS.map((option) => (
               <NativeSelectOption key={option} value={option}>
-                {option}
+                {enumOption(REUSE_POLICY_LABELS[option] ?? option, option)}
               </NativeSelectOption>
             ))}
-          </NativeSelect>
-        </label>
+          </FormSelect>
+        </div>
+        <FormSelect
+          hint="테마 안에서 이 장소가 맡는 역할입니다."
+          label="큐레이션 관계"
+          value={relation}
+          onChange={(event) =>
+            setField("relation", event.target.value as CuratedCurationRelation)
+          }
+        >
+          {CURATION_RELATION_OPTIONS.map((option) => (
+            <NativeSelectOption key={option} value={option}>
+              {enumOption(CURATION_RELATION_LABELS[option] ?? option, option)}
+            </NativeSelectOption>
+          ))}
+        </FormSelect>
         {patchFeature.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>curated feature 저장 실패</AlertTitle>
+            <AlertTitle>저장 실패</AlertTitle>
             <AlertDescription>{patchFeature.error.message}</AlertDescription>
           </Alert>
         ) : null}
-        <div className="flex justify-end">
-          <Button disabled={patchFeature.isPending} type="submit">
+        <div className="flex justify-end gap-2">
+          <Button
+            disabled={!dirty}
+            type="button"
+            variant="ghost"
+            onClick={resetToServer}
+          >
+            초기화
+          </Button>
+          <Button disabled={patchFeature.isPending || rankInvalid} type="submit">
             <SaveIcon data-icon="inline-start" />
             저장
           </Button>
@@ -678,9 +787,10 @@ export function CuratedFeatureDetailPreview({
     <section className="rounded-lg border bg-background">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="font-medium">Detail snapshot preview</div>
+          <div className="font-medium">배포 스냅샷 미리보기</div>
           <div className="text-xs text-muted-foreground">
-            detail snapshot item 미리보기
+            다운스트림(PinVi 등)이 복사해 가는 최종 payload — version/etag로
+            변경을 감지합니다.
           </div>
         </div>
         {data ? (
@@ -689,13 +799,13 @@ export function CuratedFeatureDetailPreview({
       </div>
       {!feature ? (
         <div className="p-4 text-sm text-muted-foreground">
-          후보를 선택하면 detail snapshot을 조회합니다.
+          후보를 선택하면 배포 스냅샷을 조회합니다.
         </div>
       ) : null}
       {snapshot.isLoading ? <Skeleton className="m-4 h-40" /> : null}
       {snapshot.isError ? (
         <Alert className="m-4" variant="destructive">
-          <AlertTitle>detail preview 조회 실패</AlertTitle>
+          <AlertTitle>배포 스냅샷 조회 실패</AlertTitle>
           <AlertDescription>{snapshot.error.message}</AlertDescription>
         </Alert>
       ) : null}
@@ -704,7 +814,7 @@ export function CuratedFeatureDetailPreview({
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
             <dt className="text-muted-foreground">version</dt>
             <dd>{data.version}</dd>
-            <dt className="text-muted-foreground">updated</dt>
+            <dt className="text-muted-foreground">수정 시각</dt>
             <dd>{formatDateTime(data.updated_at)}</dd>
             <dt className="text-muted-foreground">items</dt>
             <dd>{formatCount(data.items.length)}</dd>
@@ -768,27 +878,63 @@ function RuleEditor({
       const regionScope = parseJsonObject(regionScopeJson, "region_scope");
       const metadata = parseJsonObject(metadataJson, "metadata");
       setJsonError(null);
-      patchRule.mutate({
-        ruleId: rule.rule_id,
-        body: {
-          category: category.trim().length > 0 ? category.trim() : null,
-          default_action: defaultAction,
-          enabled,
-          metadata,
-          place_kind: placeKind.trim().length > 0 ? placeKind.trim() : null,
-          priority: Number(priority),
-          region_scope: regionScope,
+      patchRule.mutate(
+        {
+          ruleId: rule.rule_id,
+          body: {
+            category: category.trim().length > 0 ? category.trim() : null,
+            default_action: defaultAction,
+            enabled,
+            metadata,
+            place_kind: placeKind.trim().length > 0 ? placeKind.trim() : null,
+            priority: Number(priority),
+            region_scope: regionScope,
+          },
         },
-      });
+        {
+          onSuccess: () => {
+            toast.success("규칙 저장 완료");
+          },
+          onError: (error) => {
+            toast.error("규칙 저장 실패", { description: error.message });
+          },
+        },
+      );
     } catch (error) {
       setJsonError(error instanceof Error ? error.message : String(error));
     }
   };
 
+  const applyNow = () => {
+    if (!rule) return;
+    // 규칙 적용은 조건에 맞는 feature를 일괄 등록하는 대량 mutation — 1회 확인.
+    const ok = window.confirm(
+      `이 규칙을 지금 적용하면 조건에 맞는 feature가 '${ruleActionLabel(
+        defaultAction,
+      )}' 상태로 등록됩니다. 이미 거절·보관된 항목은 되살아나지 않습니다. 계속할까요?`,
+    );
+    if (!ok) return;
+    applyRule.mutate(
+      { ruleId: rule.rule_id },
+      {
+        onSuccess: (response) => {
+          toast.success("규칙 적용 완료", {
+            description: `${formatCount(
+              response.data.inserted_or_updated,
+            )}개 후보를 생성/갱신했습니다 — '후보 검토' 탭에서 확인하세요.`,
+          });
+        },
+        onError: (error) => {
+          toast.error("규칙 적용 실패", { description: error.message });
+        },
+      },
+    );
+  };
+
   if (!rule) {
     return (
       <section className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-        source rule을 선택하면 조건과 기본 action을 편집할 수 있습니다.
+        소스 규칙을 선택하면 조건과 기본 동작을 편집할 수 있습니다.
       </section>
     );
   }
@@ -798,37 +944,26 @@ function RuleEditor({
 
   return (
     <section className="rounded-lg border bg-background">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
-          <div className="font-medium">Source rule editor</div>
-          <div className="break-all font-mono text-xs text-muted-foreground">
-            {rule.rule_id}
-          </div>
+      <div className="border-b px-4 py-3">
+        <div className="font-medium">소스 규칙 편집</div>
+        <div className="break-all font-mono text-xs text-muted-foreground">
+          {rule.rule_id}
         </div>
-        <Button
-          disabled={applyRule.isPending}
-          type="button"
-          variant="outline"
-          onClick={() => applyRule.mutate({ ruleId: rule.rule_id })}
-        >
-          <PlayIcon data-icon="inline-start" />
-          Apply
-        </Button>
       </div>
       <form className="flex flex-col gap-3 p-4" onSubmit={save}>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">theme</dt>
+          <dt className="text-muted-foreground">테마</dt>
           <dd>{theme?.theme_name ?? rule.theme_slug}</dd>
-          <dt className="text-muted-foreground">source</dt>
+          <dt className="text-muted-foreground">소스</dt>
           <dd>{uiLabel(source?.source_name ?? rule.source_id)}</dd>
-          <dt className="text-muted-foreground">dataset</dt>
+          <dt className="text-muted-foreground">데이터셋</dt>
           <dd className="break-all font-mono text-xs">{rule.dataset_key}</dd>
           <dt className="text-muted-foreground">provider</dt>
           <dd>{providerLabel(rule.provider)}</dd>
         </dl>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">action</span>
+            <span className="text-muted-foreground">기본 동작</span>
             <NativeSelect
               className="w-full"
               value={defaultAction}
@@ -838,13 +973,13 @@ function RuleEditor({
             >
               {RULE_ACTION_OPTIONS.map((option) => (
                 <NativeSelectOption key={option} value={option}>
-                  {option}
+                  {enumOption(RULE_ACTION_LABELS[option] ?? option, option)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
           </label>
           <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">priority</span>
+            <span className="text-muted-foreground">우선순위</span>
             <Input
               step="1"
               type="number"
@@ -853,7 +988,7 @@ function RuleEditor({
             />
           </label>
           <label className="grid gap-2 text-sm">
-            <span className="text-muted-foreground">enabled</span>
+            <span className="text-muted-foreground">사용</span>
             <span className="flex h-8 items-center gap-2 rounded-lg border px-2.5">
               <input
                 checked={enabled}
@@ -861,7 +996,7 @@ function RuleEditor({
                 type="checkbox"
                 onChange={(event) => setEnabled(event.target.checked)}
               />
-              <span>{enabled ? "enabled" : "disabled"}</span>
+              <span>{enabled ? "사용 중" : "사용 안 함"}</span>
             </span>
           </label>
         </div>
@@ -884,7 +1019,7 @@ function RuleEditor({
             </NativeSelect>
           </label>
           <label className="grid gap-1 text-sm">
-            <span className="text-muted-foreground">category</span>
+            <span className="text-muted-foreground">카테고리</span>
             <Input
               value={category}
               onChange={(event) => setCategory(event.target.value)}
@@ -898,6 +1033,9 @@ function RuleEditor({
             value={regionScopeJson}
             onChange={(event) => setRegionScopeJson(event.target.value)}
           />
+          <span className="text-xs text-muted-foreground">
+            JSON object — 예: {"{"}&quot;sido_code&quot;: &quot;11&quot;{"}"}
+          </span>
         </label>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">metadata</span>
@@ -906,10 +1044,13 @@ function RuleEditor({
             value={metadataJson}
             onChange={(event) => setMetadataJson(event.target.value)}
           />
+          <span className="text-xs text-muted-foreground">
+            JSON object — 규칙 운영 메모 등 자유 필드
+          </span>
         </label>
         {jsonError || patchRule.isError || applyRule.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>source rule 처리 실패</AlertTitle>
+            <AlertTitle>소스 규칙 처리 실패</AlertTitle>
             <AlertDescription>
               {jsonError ??
                 patchRule.error?.message ??
@@ -917,20 +1058,19 @@ function RuleEditor({
             </AlertDescription>
           </Alert>
         ) : null}
-        {applyRule.data ? (
-          <Alert>
-            <CheckIcon data-icon="inline-start" />
-            <AlertTitle>source rule apply 완료</AlertTitle>
-            <AlertDescription>
-              {formatCount(applyRule.data.data.inserted_or_updated)}개 후보를
-              반영했습니다.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            disabled={applyRule.isPending}
+            type="button"
+            variant="outline"
+            onClick={applyNow}
+          >
+            <PlayIcon data-icon="inline-start" />
+            규칙 적용 (후보 생성)
+          </Button>
           <Button disabled={patchRule.isPending} type="submit">
             <SaveIcon data-icon="inline-start" />
-            Rule 저장
+            규칙 저장
           </Button>
         </div>
       </form>
@@ -939,6 +1079,7 @@ function RuleEditor({
 }
 
 export function CuratedFeaturesClient() {
+  const [activeTab, setActiveTab] = useState<ConsoleTab>("review");
   const [provider, setProvider] = useState("all");
   const [datasetKey, setDatasetKey] = useState("all");
   const [themeSlug, setThemeSlug] = useState("all");
@@ -949,7 +1090,9 @@ export function CuratedFeaturesClient() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(1);
   const [featureSearch, setFeatureSearch] = useState("");
-  const deferredFeatureSearch = useDeferredValue(featureSearch.trim());
+  // 서버 검색(q) — 300ms 디바운스 후 keyset 목록을 재조회한다(전 페이지 검색).
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedCuratedFeatureId, setSelectedCuratedFeatureId] =
     useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
@@ -997,10 +1140,20 @@ export function CuratedFeaturesClient() {
       dataset_key: datasetKey === "all" ? undefined : datasetKey,
       curation_status: status === "all" ? undefined : status,
       include_archived: includeArchived,
+      q: debouncedSearch.length > 0 ? debouncedSearch : undefined,
       page_size: pageSize,
       cursor: cursor ?? undefined,
     }),
-    [cursor, datasetKey, includeArchived, pageSize, provider, status, themeSlug],
+    [
+      cursor,
+      datasetKey,
+      debouncedSearch,
+      includeArchived,
+      pageSize,
+      provider,
+      status,
+      themeSlug,
+    ],
   );
 
   const ruleParams = useMemo<AdminCuratedSourceRulesParams>(
@@ -1022,42 +1175,33 @@ export function CuratedFeaturesClient() {
   const unselectFeature = useUnselectCuratedFeatureMutation();
   const archiveFeature = useArchiveCuratedFeatureMutation();
 
-  const filteredItems = useMemo(() => {
-    const items = features.data?.data.items ?? [];
-    if (deferredFeatureSearch.length === 0) {
-      return items;
-    }
-    const query = deferredFeatureSearch.toLowerCase();
-    return items.filter((item) =>
-      [
-        item.curated_feature_id,
-        item.feature_id,
-        item.feature_name,
-        item.display_title,
-        item.source_name,
-        item.provider,
-        item.dataset_key,
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query)),
-    );
-  }, [deferredFeatureSearch, features.data?.data.items]);
-
+  const items = features.data?.data.items ?? [];
   const ruleItems = rules.data?.data.items ?? [];
   const allRuleItems = allRules.data?.data.items ?? [];
   const selectedFeature =
-    filteredItems.find(
+    items.find(
       (item) => item.curated_feature_id === selectedCuratedFeatureId,
     ) ??
-    filteredItems[0] ??
+    items[0] ??
     null;
   const selectedRule =
     ruleItems.find((rule) => rule.rule_id === selectedRuleId) ??
     ruleItems[0] ??
     null;
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
-  const anyFeatureMutationPending =
-    selectFeature.isPending || unselectFeature.isPending || archiveFeature.isPending;
+  // 행 단위 pending — 진행 중인 mutation의 variables로 해당 행만 잠근다
+  // (전역 잠금은 다른 행의 버튼까지 회색으로 만들어 오해를 줬다).
+  const pendingRowId =
+    (selectFeature.isPending
+      ? selectFeature.variables?.curatedFeatureId
+      : null) ??
+    (unselectFeature.isPending
+      ? unselectFeature.variables?.curatedFeatureId
+      : null) ??
+    (archiveFeature.isPending
+      ? archiveFeature.variables?.curatedFeatureId
+      : null) ??
+    null;
 
   const resetCursor = () => {
     setCursor(null);
@@ -1080,40 +1224,132 @@ export function CuratedFeaturesClient() {
     void themes.refetch();
   };
 
+  const onSearchChange = (value: string) => {
+    setFeatureSearch(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(value.trim());
+      setCursor(null);
+      setPageIndex(1);
+    }, SEARCH_DEBOUNCE_MS);
+  };
+
+  const jumpToCurated = () => {
+    setStatus("curated");
+    resetCursor();
+    setActiveTab("review");
+  };
+
   const selectCurated = (feature: CuratedFeature) => {
-    selectFeature.mutate({
-      curatedFeatureId: feature.curated_feature_id,
-      body: {
-        actor: "admin-ui",
-        reason: "admin curated selection",
+    selectFeature.mutate(
+      {
+        curatedFeatureId: feature.curated_feature_id,
+        body: {
+          actor: "admin-ui",
+          reason: "admin curated selection",
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          notifyStatusTransition("select", feature.feature_name, jumpToCurated);
+        },
+        onError: (error) => {
+          toast.error("채택 실패", { description: error.message });
+        },
+      },
+    );
   };
 
   const unselectCurated = (feature: CuratedFeature) => {
-    unselectFeature.mutate({
-      curatedFeatureId: feature.curated_feature_id,
-      body: {
-        actor: "admin-ui",
-        reason: "admin curated unselect",
+    unselectFeature.mutate(
+      {
+        curatedFeatureId: feature.curated_feature_id,
+        body: {
+          actor: "admin-ui",
+          reason: "admin curated unselect",
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          notifyStatusTransition("unselect", feature.feature_name);
+        },
+        onError: (error) => {
+          toast.error("채택 해제 실패", { description: error.message });
+        },
+      },
+    );
   };
 
   const archiveCurated = (feature: CuratedFeature) => {
-    const ok = window.confirm(`${feature.feature_name} 후보를 archive할까요?`);
+    const ok = window.confirm(
+      `"${feature.feature_name}"을(를) 보관할까요? 보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.`,
+    );
     if (!ok) return;
-    archiveFeature.mutate({
-      curatedFeatureId: feature.curated_feature_id,
-      body: {
-        actor: "admin-ui",
-        reason: "admin curated archive",
+    archiveFeature.mutate(
+      {
+        curatedFeatureId: feature.curated_feature_id,
+        body: {
+          actor: "admin-ui",
+          reason: "admin curated archive",
+        },
       },
-    });
+      {
+        onSuccess: () => {
+          notifyStatusTransition("archive", feature.feature_name);
+        },
+        onError: (error) => {
+          toast.error("보관 실패", { description: error.message });
+        },
+      },
+    );
+  };
+
+  /** bulk 채택/보관 — allSettled로 전 행을 시도하고 성공/실패를 집계 보고한다. */
+  const runBulk = async (
+    rows: Row<CuratedFeature>[],
+    kind: "select" | "archive",
+  ) => {
+    const mutateAsync =
+      kind === "select" ? selectFeature.mutateAsync : archiveFeature.mutateAsync;
+    const reason =
+      kind === "select" ? "admin curated selection" : "admin curated archive";
+    const results = await Promise.allSettled(
+      rows.map((row) =>
+        mutateAsync({
+          curatedFeatureId: row.original.curated_feature_id,
+          body: { actor: "admin-ui", reason },
+        }),
+      ),
+    );
+    const failedIds = rows
+      .filter((_, index) => results[index]?.status === "rejected")
+      .map((row) => row.original.curated_feature_id);
+    const ok = results.length - failedIds.length;
+    if (failedIds.length > 0) {
+      const firstError = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      const message =
+        firstError?.reason instanceof Error ? firstError.reason.message : "";
+      toast.warning("일괄 처리 일부 실패", {
+        description: `성공 ${ok}건 · 실패 ${failedIds.length}건${
+          message ? ` — ${message}` : ""
+        }`,
+      });
+    } else {
+      toast.success("일괄 처리 완료", {
+        description: `성공 ${ok}건 · 실패 0건`,
+      });
+    }
+    // 실패한 행만 체크 상태를 유지해 재시도가 쉽게 한다.
+    setRowSelection(
+      Object.fromEntries(failedIds.map((id) => [id, true] as const)),
+    );
   };
 
   const featureColumns = useMemo<ColumnDef<CuratedFeature, unknown>[]>(
-    // curated 후보는 keyset cursor 목록(next_cursor) + client text 필터 — 서버가 정렬을
+    // curated 후보는 keyset cursor 목록(next_cursor) + 서버 검색(q) — 서버가 정렬을
     // 소유하므로 컬럼 정렬을 끈다(#502: client 정렬은 현재 페이지만 재배열해 오해를 줌).
     () => [
       {
@@ -1188,16 +1424,21 @@ export function CuratedFeaturesClient() {
       },
       {
         id: "reuse",
-        header: "재사용",
+        header: "정책·관계",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
             <div className="flex flex-col gap-1">
-              <Badge variant={reusePolicyVariant(feature.reuse_policy)}>
-                {feature.reuse_policy}
+              <Badge
+                title={feature.reuse_policy}
+                variant={reusePolicyVariant(feature.reuse_policy)}
+              >
+                {reusePolicyLabel(feature.reuse_policy)}
               </Badge>
-              <Badge variant="outline">{feature.curation_relation}</Badge>
+              <Badge title={feature.curation_relation} variant="outline">
+                {curationRelationLabel(feature.curation_relation)}
+              </Badge>
             </div>
           );
         },
@@ -1214,23 +1455,23 @@ export function CuratedFeaturesClient() {
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
+          const rowPending = pendingRowId === feature.curated_feature_id;
           return (
-            <div className="flex w-52 justify-end gap-1 text-right">
+            <div className="flex w-72 flex-wrap justify-end gap-1 text-right">
               <Link
-                aria-label="curated detail"
                 className={cn(
                   buttonVariants({
                     variant: "outline",
-                    size: "icon-sm",
+                    size: "sm",
                   }),
                 )}
                 href={curatedFeatureHref(feature.curated_feature_id)}
                 onClick={(event) => event.stopPropagation()}
               >
-                <EyeIcon />
+                상세
               </Link>
               <Link
-                aria-label="feature detail"
+                aria-label="원본 feature 열기"
                 className={cn(
                   buttonVariants({
                     variant: "ghost",
@@ -1238,27 +1479,16 @@ export function CuratedFeaturesClient() {
                   }),
                 )}
                 href={featureHref(feature.feature_id)}
+                title="원본 feature 열기"
                 onClick={(event) => event.stopPropagation()}
               >
                 <ExternalLinkIcon />
               </Link>
-              <Button
-                aria-label="미리보기"
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSelectedCuratedFeatureId(feature.curated_feature_id);
-                }}
-              >
-                <EyeIcon />
-              </Button>
               {feature.curation_status === "curated" ? (
                 <Button
-                  aria-label="unselect"
-                  disabled={anyFeatureMutationPending}
-                  size="icon-sm"
+                  disabled={rowPending}
+                  size="sm"
+                  title="공개에서 제외(거절)"
                   type="button"
                   variant="outline"
                   onClick={(event) => {
@@ -1266,26 +1496,28 @@ export function CuratedFeaturesClient() {
                     unselectCurated(feature);
                   }}
                 >
-                  <RotateCcwIcon />
+                  <RotateCcwIcon data-icon="inline-start" />
+                  채택 해제
                 </Button>
               ) : (
                 <Button
-                  aria-label="선택"
-                  disabled={anyFeatureMutationPending}
-                  size="icon-sm"
+                  disabled={rowPending}
+                  size="sm"
+                  title="공개 목록에 추가"
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     selectCurated(feature);
                   }}
                 >
-                  <CheckIcon />
+                  <CheckIcon data-icon="inline-start" />
+                  채택
                 </Button>
               )}
               <Button
-                aria-label="보관"
-                disabled={anyFeatureMutationPending}
-                size="icon-sm"
+                disabled={rowPending}
+                size="sm"
+                title="소프트 삭제"
                 type="button"
                 variant="destructive"
                 onClick={(event) => {
@@ -1293,7 +1525,8 @@ export function CuratedFeaturesClient() {
                   archiveCurated(feature);
                 }}
               >
-                <ArchiveIcon />
+                <ArchiveIcon data-icon="inline-start" />
+                보관
               </Button>
             </div>
           );
@@ -1301,9 +1534,9 @@ export function CuratedFeaturesClient() {
       },
     ],
     // handlers (selectCurated/unselectCurated/archiveCurated) are stable closures;
-    // re-memo only when mutation pending state used inside action cells changes.
+    // re-memo only when the per-row pending id used inside action cells changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [anyFeatureMutationPending],
+    [pendingRowId],
   );
 
   const ruleColumns = useMemo<ColumnDef<CuratedSourceRule, unknown>[]>(
@@ -1313,7 +1546,7 @@ export function CuratedFeaturesClient() {
         header: "사용",
         cell: ({ row }) => (
           <Badge variant={row.original.enabled ? "default" : "outline"}>
-            {row.original.enabled ? "enabled" : "disabled"}
+            {row.original.enabled ? "사용 중" : "사용 안 함"}
           </Badge>
         ),
       },
@@ -1348,9 +1581,11 @@ export function CuratedFeaturesClient() {
       },
       {
         accessorKey: "default_action",
-        header: "작업",
+        header: "기본 동작",
         cell: ({ row }) => (
-          <Badge variant="outline">{row.original.default_action}</Badge>
+          <Badge title={row.original.default_action} variant="outline">
+            {ruleActionLabel(row.original.default_action)}
+          </Badge>
         ),
       },
       {
@@ -1366,6 +1601,13 @@ export function CuratedFeaturesClient() {
     ],
     [sourceById],
   );
+
+  const emptyMessage =
+    status === "curated"
+      ? "채택된 항목이 없습니다. '후보' 상태에서 채택하면 여기에 표시됩니다."
+      : status === "rejected" || status === "archived"
+        ? "이 상태의 항목이 없습니다. 거절·보관된 항목은 자동으로 되살아나지 않습니다."
+        : "조건에 맞는 후보가 없습니다. 후보는 '소스 규칙' 적용 또는 새로고침 job 실행으로 만들어집니다.";
 
   return (
     <AdminShell
@@ -1386,417 +1628,456 @@ export function CuratedFeaturesClient() {
           새로고침
         </Button>
       }
-      description="curated overlay 후보를 검토하고 source rule을 적용하며 detail snapshot을 확인합니다."
+      description="소스 규칙이 만든 후보를 검토해 공개(큐레이션)하고, 배포 스냅샷을 확인합니다."
       section="관리"
-      title="큐레이션 피처"
+      title="큐레이션 관리"
     >
       <div className="flex flex-col gap-4">
         {features.isError ||
         rules.isError ||
         allRules.isError ||
         sources.isError ||
-        themes.isError ||
-        selectFeature.isError ||
-        unselectFeature.isError ||
-        archiveFeature.isError ? (
+        themes.isError ? (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
-            <AlertTitle>curated admin 처리 실패</AlertTitle>
+            <AlertTitle>큐레이션 데이터 조회 실패</AlertTitle>
             <AlertDescription>
               {features.error?.message ??
                 rules.error?.message ??
                 allRules.error?.message ??
                 sources.error?.message ??
-                themes.error?.message ??
-                selectFeature.error?.message ??
-                unselectFeature.error?.message ??
-                archiveFeature.error?.message}
+                themes.error?.message}
             </AlertDescription>
           </Alert>
         ) : null}
 
-        <section className="rounded-lg border bg-background p-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label="curated feature search"
-                className="pl-8"
-                placeholder="feature, source, provider"
-                value={featureSearch}
-                onChange={(event) => setFeatureSearch(event.target.value)}
-              />
-            </div>
-            <NativeSelect
-              aria-label="theme filter"
-              className="w-full"
-              value={themeSlug}
-              onChange={(event) => {
-                setThemeSlug(event.target.value);
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">theme 전체</NativeSelectOption>
-              {(themes.data?.data.items ?? []).map((theme) => (
-                <NativeSelectOption
-                  key={theme.theme_id}
-                  value={theme.theme_slug}
-                >
-                  {theme.theme_name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="provider filter"
-              className="w-full"
-              value={provider}
-              onChange={(event) => {
-                const nextProvider = event.target.value;
-                setProvider(nextProvider);
-                setDatasetKey("all");
-                if (isPlaceCandidateProvider(nextProvider)) {
-                  setThemeSlug(
-                    themeSlugForProvider(
-                      nextProvider,
-                      "all",
-                      sources.data?.data.items ?? [],
-                      allRuleItems.length > 0 ? allRuleItems : ruleItems,
-                    ) ?? "all",
-                  );
-                }
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">provider 전체</NativeSelectOption>
-              {providerOptions.map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {providerLabel(option)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="dataset filter"
-              className="w-full"
-              value={datasetKey}
-              onChange={(event) => {
-                const nextDatasetKey = event.target.value;
-                setDatasetKey(nextDatasetKey);
-                if (isPlaceCandidateProvider(provider)) {
-                  setThemeSlug(
-                    themeSlugForProvider(
-                      provider,
-                      nextDatasetKey,
-                      sources.data?.data.items ?? [],
-                      allRuleItems.length > 0 ? allRuleItems : ruleItems,
-                    ) ?? "all",
-                  );
-                }
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">dataset 전체</NativeSelectOption>
-              {datasetOptions.map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {option}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="curation status filter"
-              className="w-full"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as StatusFilter);
-                resetCursor();
-              }}
-            >
-              <NativeSelectOption value="all">status 전체</NativeSelectOption>
-              {CURATION_STATUS_OPTIONS.map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {option}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="page size"
-              className="w-full"
-              value={String(pageSize)}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value) as typeof pageSize);
-                resetCursor();
-              }}
-            >
-              {PAGE_SIZE_OPTIONS.map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {option}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <label className="flex h-8 items-center gap-2 rounded-lg border px-2.5 text-sm">
-              <input
-                checked={includeArchived}
-                className="size-4"
-                type="checkbox"
-                onChange={(event) => {
-                  setIncludeArchived(event.target.checked);
-                  resetCursor();
-                }}
-              />
-              <span className="whitespace-nowrap">archived 포함</span>
-            </label>
-          </div>
-        </section>
+        <CuratedLifecycleStrip
+          activeStatus={status === "all" ? null : status}
+          onSelectStatus={(next) => {
+            setStatus(next);
+            resetCursor();
+            setActiveTab("review");
+          }}
+        />
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
-          <section className="rounded-lg border bg-background">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">후보 목록</div>
-                <div className="text-xs text-muted-foreground">
-                  page {formatCount(pageIndex)} · {formatCount(filteredItems.length)}개
-                  표시 · page size {formatCount(pageSize)}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={pageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={goFirstPage}
-                >
-                  처음
-                </Button>
-                <Button
-                  disabled={nextCursor === null}
-                  type="button"
-                  variant="outline"
-                  onClick={goNextPage}
-                >
-                  다음
-                </Button>
-              </div>
-            </div>
-            <DataTable
-              columns={featureColumns}
-              data={filteredItems}
-              getRowId={(feature) => feature.curated_feature_id}
-              isLoading={features.isLoading}
-              emptyMessage="조건에 맞는 curated 후보가 없습니다."
-              enableRowSelection
-              rowSelection={rowSelection}
-              onRowSelectionChange={setRowSelection}
-              renderBulkActions={(rows: Row<CuratedFeature>[]) => (
-                <>
-                  <Button
-                    disabled={selectFeature.isPending}
-                    size="sm"
-                    type="button"
-                    onClick={() => {
-                      for (const row of rows) {
-                        selectFeature.mutate({
-                          curatedFeatureId: row.original.curated_feature_id,
-                          body: {
-                            actor: "admin-ui",
-                            reason: "admin curated selection",
-                          },
-                        });
-                      }
-                      setRowSelection({});
-                    }}
-                  >
-                    <CheckIcon data-icon="inline-start" />
-                    선택 채택
-                  </Button>
-                  <Button
-                    disabled={archiveFeature.isPending}
-                    size="sm"
-                    type="button"
-                    variant="destructive"
-                    onClick={() => {
-                      // bulk 보관은 되돌리기 부담이 있어 일괄 confirm 1회(단일 행
-                      // archive의 per-row confirm 대체).
-                      if (!window.confirm(`선택한 ${rows.length}건을 보관할까요?`)) {
-                        return;
-                      }
-                      for (const row of rows) {
-                        archiveFeature.mutate({
-                          curatedFeatureId: row.original.curated_feature_id,
-                          body: {
-                            actor: "admin-ui",
-                            reason: "admin curated archive",
-                          },
-                        });
-                      }
-                      setRowSelection({});
-                    }}
-                  >
-                    <ArchiveIcon data-icon="inline-start" />
-                    선택 보관
-                  </Button>
-                </>
-              )}
-              onRowClick={(feature) =>
-                setSelectedCuratedFeatureId(feature.curated_feature_id)
-              }
-              rowTestId={() => "curated-feature-row"}
-              isRowActive={(feature) =>
-                feature.curated_feature_id ===
-                selectedFeature?.curated_feature_id
-              }
-            />
-          </section>
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as ConsoleTab)}
+        >
+          <TabsList>
+            <TabsTrigger value="review">후보 검토</TabsTrigger>
+            <TabsTrigger value="rules">소스 규칙</TabsTrigger>
+          </TabsList>
 
-          <div className="flex flex-col gap-4">
+          <TabsContent className="flex flex-col gap-4" value="review">
             <section className="rounded-lg border bg-background p-4">
-              {selectedFeature ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold">
-                        {selectedFeature.feature_name}
-                      </div>
-                      {selectedFeature.display_title ? (
-                        <div className="text-sm text-muted-foreground">
-                          {selectedFeature.display_title}
-                        </div>
-                      ) : null}
-                      <div className="break-all font-mono text-xs text-muted-foreground">
-                        {selectedFeature.curated_feature_id}
-                      </div>
-                    </div>
-                    <Badge
-                      variant={featureStatusVariant(
-                        selectedFeature.curation_status,
-                      )}
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                  <Input
+                    aria-label="curated feature search"
+                    className="pl-8"
+                    placeholder="이름·제목·소스·provider 서버 검색"
+                    value={featureSearch}
+                    onChange={(event) => onSearchChange(event.target.value)}
+                  />
+                </div>
+                <NativeSelect
+                  aria-label="theme filter"
+                  className="w-full"
+                  value={themeSlug}
+                  onChange={(event) => {
+                    setThemeSlug(event.target.value);
+                    resetCursor();
+                  }}
+                >
+                  <NativeSelectOption value="all">테마 전체</NativeSelectOption>
+                  {(themes.data?.data.items ?? []).map((theme) => (
+                    <NativeSelectOption
+                      key={theme.theme_id}
+                      value={theme.theme_slug}
                     >
-                      {statusLabel(selectedFeature.curation_status)}
-                    </Badge>
+                      {theme.theme_name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <NativeSelect
+                  aria-label="provider filter"
+                  className="w-full"
+                  value={provider}
+                  onChange={(event) => {
+                    const nextProvider = event.target.value;
+                    setProvider(nextProvider);
+                    setDatasetKey("all");
+                    if (isPlaceCandidateProvider(nextProvider)) {
+                      setThemeSlug(
+                        themeSlugForProvider(
+                          nextProvider,
+                          "all",
+                          sources.data?.data.items ?? [],
+                          allRuleItems.length > 0 ? allRuleItems : ruleItems,
+                        ) ?? "all",
+                      );
+                    }
+                    resetCursor();
+                  }}
+                >
+                  <NativeSelectOption value="all">
+                    provider 전체
+                  </NativeSelectOption>
+                  {providerOptions.map((option) => (
+                    <NativeSelectOption key={option} value={option}>
+                      {providerLabel(option)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <NativeSelect
+                  aria-label="dataset filter"
+                  className="w-full"
+                  value={datasetKey}
+                  onChange={(event) => {
+                    const nextDatasetKey = event.target.value;
+                    setDatasetKey(nextDatasetKey);
+                    if (isPlaceCandidateProvider(provider)) {
+                      setThemeSlug(
+                        themeSlugForProvider(
+                          provider,
+                          nextDatasetKey,
+                          sources.data?.data.items ?? [],
+                          allRuleItems.length > 0 ? allRuleItems : ruleItems,
+                        ) ?? "all",
+                      );
+                    }
+                    resetCursor();
+                  }}
+                >
+                  <NativeSelectOption value="all">
+                    데이터셋 전체
+                  </NativeSelectOption>
+                  {datasetOptions.map((option) => (
+                    <NativeSelectOption key={option} value={option}>
+                      {option}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <NativeSelect
+                  aria-label="curation status filter"
+                  className="w-full"
+                  value={status}
+                  onChange={(event) => {
+                    setStatus(event.target.value as StatusFilter);
+                    resetCursor();
+                  }}
+                >
+                  <NativeSelectOption value="all">상태 전체</NativeSelectOption>
+                  {CURATION_STATUS_OPTIONS.map((option) => (
+                    <NativeSelectOption key={option} value={option}>
+                      {statusLabel(option)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <NativeSelect
+                  aria-label="page size"
+                  className="w-full"
+                  value={String(pageSize)}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value) as typeof pageSize);
+                    resetCursor();
+                  }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <NativeSelectOption key={option} value={option}>
+                      {option}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <label className="flex h-8 items-center gap-2 rounded-lg border px-2.5 text-sm">
+                  <input
+                    checked={includeArchived}
+                    className="size-4"
+                    type="checkbox"
+                    onChange={(event) => {
+                      setIncludeArchived(event.target.checked);
+                      resetCursor();
+                    }}
+                  />
+                  <span className="whitespace-nowrap">보관됨 포함</span>
+                </label>
+              </div>
+            </section>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_25rem]">
+              <section className="rounded-lg border bg-background">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                  <div>
+                    <div className="font-medium">후보 목록</div>
+                    <div className="text-xs text-muted-foreground">
+                      page {formatCount(pageIndex)} · 이 페이지{" "}
+                      {formatCount(items.length)}개 · 페이지 크기{" "}
+                      {formatCount(pageSize)}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Link
-                      className={cn(
-                        buttonVariants({ variant: "outline", size: "sm" }),
-                      )}
-                      href={curatedFeatureHref(
-                        selectedFeature.curated_feature_id,
-                      )}
+                    <Button
+                      disabled={pageIndex <= 1}
+                      type="button"
+                      variant="outline"
+                      onClick={goFirstPage}
                     >
-                      <EyeIcon data-icon="inline-start" />
-                      상세
-                    </Link>
+                      처음
+                    </Button>
+                    <Button
+                      disabled={nextCursor === null}
+                      type="button"
+                      variant="outline"
+                      onClick={goNextPage}
+                    >
+                      다음
+                    </Button>
+                  </div>
+                </div>
+                <DataTable
+                  columns={featureColumns}
+                  data={items}
+                  getRowId={(feature) => feature.curated_feature_id}
+                  isLoading={features.isLoading}
+                  emptyMessage={emptyMessage}
+                  enableRowSelection
+                  rowSelection={rowSelection}
+                  onRowSelectionChange={setRowSelection}
+                  renderBulkActions={(rows: Row<CuratedFeature>[]) => (
+                    <>
+                      <Button
+                        disabled={selectFeature.isPending}
+                        size="sm"
+                        type="button"
+                        onClick={() => {
+                          void runBulk(rows, "select");
+                        }}
+                      >
+                        <CheckIcon data-icon="inline-start" />
+                        체크한 {rows.length}건 채택
+                      </Button>
+                      <Button
+                        disabled={archiveFeature.isPending}
+                        size="sm"
+                        type="button"
+                        variant="destructive"
+                        onClick={() => {
+                          // bulk 보관은 되돌리기 부담이 있어 일괄 confirm 1회.
+                          if (
+                            !window.confirm(
+                              `체크한 ${rows.length}건을 보관할까요? 보관은 규칙 재적용으로 되살아나지 않습니다.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          void runBulk(rows, "archive");
+                        }}
+                      >
+                        <ArchiveIcon data-icon="inline-start" />
+                        체크한 {rows.length}건 보관
+                      </Button>
+                    </>
+                  )}
+                  onRowClick={(feature) =>
+                    setSelectedCuratedFeatureId(feature.curated_feature_id)
+                  }
+                  rowTestId={() => "curated-feature-row"}
+                  isRowActive={(feature) =>
+                    feature.curated_feature_id ===
+                    selectedFeature?.curated_feature_id
+                  }
+                />
+                {!features.isLoading && items.length === 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => setActiveTab("rules")}
+                    >
+                      소스 규칙 탭 열기
+                    </Button>
                     <Link
                       className={cn(
                         buttonVariants({ variant: "ghost", size: "sm" }),
                       )}
-                      href={featureHref(selectedFeature.feature_id)}
+                      href={`/admin/dagster?schedule=${encodeURIComponent(
+                        CURATED_FEATURES_REFRESH_SCHEDULE,
+                      )}`}
                     >
-                      <ExternalLinkIcon data-icon="inline-start" />
-                      feature
+                      <PlayIcon data-icon="inline-start" />
+                      새로고침 job 실행
                     </Link>
                   </div>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                    <dt className="text-muted-foreground">selected</dt>
-                    <dd>{formatDateTime(selectedFeature.selected_at)}</dd>
-                    <dt className="text-muted-foreground">content version</dt>
-                    <dd>{selectedFeature.content_version}</dd>
-                    <dt className="text-muted-foreground">rank</dt>
-                    <dd>{selectedFeature.rank_score.toFixed(2)}</dd>
-                    <dt className="text-muted-foreground">source record</dt>
-                    <dd className="break-all font-mono text-xs">
-                      {selectedFeature.source_record_key ?? "-"}
-                    </dd>
-                  </dl>
-                  <details>
-                    <summary className="cursor-pointer text-sm font-medium">
-                      metadata
-                    </summary>
-                    <JsonBlock value={selectedFeature.metadata} />
-                  </details>
-                  <details>
-                    <summary className="cursor-pointer text-sm font-medium">
-                      detail
-                    </summary>
-                    <JsonBlock value={selectedFeature.detail} />
-                  </details>
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  후보를 선택하면 상세를 확인할 수 있습니다.
-                </div>
-              )}
-            </section>
-            <CuratedFeatureLocationPanel feature={selectedFeature} />
-            {/* Sibling keys MUST be distinct (`:place-search` vs `:editor`): the
-                same key on two siblings duplicates React keys and stacks the
-                panel instead of resetting it on reselect. The editor key adds
-                updated_at so it remounts and re-syncs its inputs after a
-                patch/save (same curated_feature_id, new data). */}
-            <CuratedPlaceSearchPanel
-              feature={selectedFeature}
-              key={`${selectedFeature?.curated_feature_id ?? "empty"}:place-search`}
-            />
-            <FeatureEditor
-              feature={selectedFeature}
-              key={`${selectedFeature?.curated_feature_id ?? "empty"}:${selectedFeature?.updated_at ?? ""}:editor`}
-              themes={themes.data?.data.items ?? []}
-            />
-            <CuratedFeatureDetailPreview feature={selectedFeature} />
-          </div>
-        </div>
+                ) : null}
+              </section>
 
-        <section className="rounded-lg border bg-background">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-            <div>
-              <div className="font-medium">Source rules</div>
-              <div className="text-xs text-muted-foreground">
-                provider source를 curated 후보로 끌어올리는 규칙
+              <div className="flex flex-col gap-4">
+                <section className="rounded-lg border bg-background p-4">
+                  {selectedFeature ? (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-lg font-semibold">
+                            {selectedFeature.feature_name}
+                          </div>
+                          {selectedFeature.display_title ? (
+                            <div className="text-sm text-muted-foreground">
+                              {selectedFeature.display_title}
+                            </div>
+                          ) : null}
+                          <div className="break-all font-mono text-xs text-muted-foreground">
+                            {selectedFeature.curated_feature_id}
+                          </div>
+                        </div>
+                        <Badge
+                          variant={featureStatusVariant(
+                            selectedFeature.curation_status,
+                          )}
+                        >
+                          {statusLabel(selectedFeature.curation_status)}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          className={cn(
+                            buttonVariants({ variant: "outline", size: "sm" }),
+                          )}
+                          href={curatedFeatureHref(
+                            selectedFeature.curated_feature_id,
+                          )}
+                        >
+                          <EyeIcon data-icon="inline-start" />
+                          상세
+                        </Link>
+                        <Link
+                          className={cn(
+                            buttonVariants({ variant: "ghost", size: "sm" }),
+                          )}
+                          href={featureHref(selectedFeature.feature_id)}
+                        >
+                          <ExternalLinkIcon data-icon="inline-start" />
+                          feature
+                        </Link>
+                      </div>
+                      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+                        <dt className="text-muted-foreground">채택 시각</dt>
+                        <dd>{formatDateTime(selectedFeature.selected_at)}</dd>
+                        <dt className="text-muted-foreground">콘텐츠 버전</dt>
+                        <dd>{selectedFeature.content_version}</dd>
+                        <dt className="text-muted-foreground">순위</dt>
+                        <dd>{selectedFeature.rank_score.toFixed(2)}</dd>
+                        <dt className="text-muted-foreground">소스 레코드</dt>
+                        <dd className="break-all font-mono text-xs">
+                          {selectedFeature.source_record_key ?? "-"}
+                        </dd>
+                      </dl>
+                      <details>
+                        <summary className="cursor-pointer text-sm font-medium">
+                          metadata
+                        </summary>
+                        <JsonBlock value={selectedFeature.metadata} />
+                      </details>
+                      <details>
+                        <summary className="cursor-pointer text-sm font-medium">
+                          detail
+                        </summary>
+                        <JsonBlock value={selectedFeature.detail} />
+                      </details>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      후보를 선택하면 상세를 확인할 수 있습니다.
+                    </div>
+                  )}
+                </section>
+                <CuratedFeatureLocationPanel feature={selectedFeature} />
+                {/* Sibling keys MUST be distinct (`:place-search` vs `:editor`): the
+                    same key on two siblings duplicates React keys and stacks the
+                    panel instead of resetting it on reselect. The editor keeps its
+                    inputs in an override state that follows the server values while
+                    pristine, so the key no longer needs updated_at to re-sync. */}
+                <CuratedPlaceSearchPanel
+                  feature={selectedFeature}
+                  key={`${selectedFeature?.curated_feature_id ?? "empty"}:place-search`}
+                />
+                <FeatureEditor
+                  feature={selectedFeature}
+                  key={`${selectedFeature?.curated_feature_id ?? "empty"}:editor`}
+                  themes={themes.data?.data.items ?? []}
+                />
+                <CuratedFeatureDetailPreview feature={selectedFeature} />
               </div>
             </div>
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-              <Link
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                href={`/admin/dagster?schedule=${encodeURIComponent(
-                  CURATED_FEATURES_REFRESH_SCHEDULE,
-                )}`}
-              >
-                <PlayIcon data-icon="inline-start" />
-                관련 job 실행
-              </Link>
-              <NativeSelect
-                aria-label="rule enabled filter"
-                className="w-full sm:w-40"
-                value={ruleEnabled}
-                onChange={(event) =>
-                  setRuleEnabled(event.target.value as EnabledFilter)
-                }
-              >
-                <NativeSelectOption value="all">enabled 전체</NativeSelectOption>
-                <NativeSelectOption value="enabled">enabled</NativeSelectOption>
-                <NativeSelectOption value="disabled">disabled</NativeSelectOption>
-              </NativeSelect>
-            </div>
-          </div>
-          <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_32rem]">
-            <div className="rounded-lg border">
-              <DataTable
-                columns={ruleColumns}
-                data={ruleItems}
-                getRowId={(rule) => rule.rule_id}
-                isLoading={rules.isLoading}
-                emptyMessage="조건에 맞는 source rule이 없습니다."
-                onRowClick={(rule) => setSelectedRuleId(rule.rule_id)}
-                isRowActive={(rule) => rule.rule_id === selectedRule?.rule_id}
-                manualSorting={false}
-              />
-            </div>
-            <RuleEditor
-              key={selectedRule?.rule_id ?? "empty-rule"}
-              rule={selectedRule}
-              sourceById={sourceById}
-              themeById={themeById}
-            />
-          </div>
-        </section>
+          </TabsContent>
+
+          <TabsContent value="rules">
+            <section className="rounded-lg border bg-background">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+                <div>
+                  <div className="font-medium">소스 규칙</div>
+                  <div className="text-xs text-muted-foreground">
+                    provider source를 curated 후보로 끌어올리는 규칙 — 매일 새벽
+                    배치로도 실행됩니다.
+                  </div>
+                </div>
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                  <Link
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                    )}
+                    href={`/admin/dagster?schedule=${encodeURIComponent(
+                      CURATED_FEATURES_REFRESH_SCHEDULE,
+                    )}`}
+                  >
+                    <PlayIcon data-icon="inline-start" />
+                    관련 job 실행
+                  </Link>
+                  <NativeSelect
+                    aria-label="rule enabled filter"
+                    className="w-full sm:w-40"
+                    value={ruleEnabled}
+                    onChange={(event) =>
+                      setRuleEnabled(event.target.value as EnabledFilter)
+                    }
+                  >
+                    <NativeSelectOption value="all">
+                      사용 전체
+                    </NativeSelectOption>
+                    <NativeSelectOption value="enabled">
+                      사용 중
+                    </NativeSelectOption>
+                    <NativeSelectOption value="disabled">
+                      사용 안 함
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </div>
+              </div>
+              <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_32rem]">
+                <div className="rounded-lg border">
+                  <DataTable
+                    columns={ruleColumns}
+                    data={ruleItems}
+                    getRowId={(rule) => rule.rule_id}
+                    isLoading={rules.isLoading}
+                    emptyMessage="조건에 맞는 소스 규칙이 없습니다."
+                    onRowClick={(rule) => setSelectedRuleId(rule.rule_id)}
+                    isRowActive={(rule) => rule.rule_id === selectedRule?.rule_id}
+                    manualSorting={false}
+                  />
+                </div>
+                <RuleEditor
+                  key={selectedRule?.rule_id ?? "empty-rule"}
+                  rule={selectedRule}
+                  sourceById={sourceById}
+                  themeById={themeById}
+                />
+              </div>
+            </section>
+          </TabsContent>
+        </Tabs>
       </div>
     </AdminShell>
   );
