@@ -626,9 +626,11 @@ function InstigationList({
 }
 
 function ScheduleControls({
+  highlightedScheduleName,
   schedules,
   onSelectRun,
 }: {
+  highlightedScheduleName?: string;
   schedules: DagsterSchedule[];
   onSelectRun: (runId: string) => void;
 }) {
@@ -645,6 +647,17 @@ function ScheduleControls({
   >(null);
   const pending = command.isPending || patchSchedule.isPending;
   const error = command.error ?? patchSchedule.error;
+
+  useEffect(() => {
+    if (!highlightedScheduleName) return;
+    const expectedTestId = `dagster-schedule-row-${highlightedScheduleName}`;
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid^="dagster-schedule-row-"]',
+      ),
+    ).find((element) => element.dataset.testid === expectedTestId);
+    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [highlightedScheduleName, schedules.length]);
 
   const beginEdit = (schedule: DagsterSchedule) => {
     setEditing(schedule);
@@ -786,9 +799,13 @@ function ScheduleControls({
             const providerHref = scheduleProviderHref(schedule.name);
             const defaultSentence = defaultScheduleSentence(schedule);
             const toggleCommand = isRunning ? "stop" : "start";
+            const isHighlighted = highlightedScheduleName === schedule.name;
             return (
               <div
-                className="grid gap-2 rounded-md border bg-background p-3 lg:grid-cols-[minmax(0,1fr)_auto]"
+                className={cn(
+                  "grid gap-2 rounded-md border bg-background p-3 lg:grid-cols-[minmax(0,1fr)_auto]",
+                  isHighlighted && "border-brand bg-brand/5 ring-2 ring-brand/25",
+                )}
                 data-testid={`dagster-schedule-row-${schedule.name}`}
                 key={schedule.name}
               >
@@ -1554,6 +1571,9 @@ export function DagsterAdminClient() {
   const { mutate: markNuxSeen, status: markNuxSeenStatus } =
     useMarkDagsterNuxSeen();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [highlightedScheduleName, setHighlightedScheduleName] = useState<
+    string | undefined
+  >(undefined);
   const data = summary.data?.data;
   const recentRuns = data?.recent_runs ?? [];
   const schedules =
@@ -1564,6 +1584,17 @@ export function DagsterAdminClient() {
   const failedRuns = data?.run_counts.FAILURE ?? 0;
   const fallbackRun = recentRuns.find((run) => run.status === "FAILURE") ?? recentRuns[0];
   const effectiveSelectedRunId = selectedRunId ?? fallbackRun?.run_id ?? null;
+
+  useEffect(() => {
+    const scheduleName = new URLSearchParams(window.location.search).get(
+      "schedule",
+    );
+    if (!scheduleName) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      setHighlightedScheduleName(scheduleName);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     if (data?.status !== "ok" || markNuxSeenStatus !== "idle") {
@@ -1658,7 +1689,11 @@ export function DagsterAdminClient() {
         </section>
 
         {summary.isLoading ? <Skeleton className="h-56 w-full" /> : (
-          <ScheduleControls schedules={schedules} onSelectRun={setSelectedRunId} />
+          <ScheduleControls
+            highlightedScheduleName={highlightedScheduleName}
+            schedules={schedules}
+            onSelectRun={setSelectedRunId}
+          />
         )}
 
         <section className="grid gap-4 xl:grid-cols-[minmax(28rem,0.9fr)_minmax(32rem,1.1fr)]">

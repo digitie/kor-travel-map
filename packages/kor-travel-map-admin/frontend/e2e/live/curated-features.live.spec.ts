@@ -9,11 +9,11 @@ import * as F from "./_fixtures";
  *
  * Selectors are reused verbatim from the verified reference spec
  * (e2e/curated-features.spec.ts) and the page source:
- *   - heading: getByRole("heading", { level: 1, name: "Curated features" })
+ *   - heading: getByRole("heading", { level: 1, name: "큐레이션 피처" })
  *   - filters: getByLabel("curated feature search" | "theme filter" |
  *     "provider filter" | "dataset filter" | "curation status filter" |
  *     "page size" | "rule enabled filter")
- *   - column headers: status / feature / source / theme / reuse / updated / actions
+ *   - column headers: 상태 / feature / 소스 / 테마 / 재사용 / 수정 / 작업
  *   - count line: /개 표시/ ; source rules: getByText("Source rules")
  *
  * The list also exposes an admin /{id} detail page, but this live smoke stays
@@ -22,6 +22,15 @@ import * as F from "./_fixtures";
 
 const TIMEOUT = { timeout: 15000 } as const;
 const ROUTE = "/admin/features/curated";
+const CURATED_REFRESH_SCHEDULE = "curated_features_refresh_daily_schedule";
+const EXPANDED_THEME_LABELS = [
+  "봄꽃 여행지",
+  "여름 바다 여행지",
+  "가을 단풍 여행지",
+  "겨울 눈꽃 여행지",
+  "서울·수도권 여행지",
+  "제주 여행지",
+] as const;
 const STATUS_FILTERS = ["all", "candidate", "curated", "rejected", "archived"] as const;
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 800 },
@@ -32,7 +41,7 @@ const VIEWPORTS = [
 // Stable selector helpers — assert the curated-features console rendered.
 async function expectConsoleLoaded(page: import("@playwright/test").Page) {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Curated features" }),
+    page.getByRole("heading", { level: 1, name: "큐레이션 피처" }),
   ).toBeVisible(TIMEOUT);
 }
 
@@ -66,13 +75,13 @@ test.describe("curated-features live: page load + controls", () => {
     await page.goto(ROUTE);
     await expectConsoleLoaded(page);
     for (const col of [
-      "status",
+      "상태",
       "feature",
-      "source",
-      "theme",
-      "reuse",
-      "updated",
-      "actions",
+      "소스",
+      "테마",
+      "재사용",
+      "수정",
+      "작업",
     ]) {
       await expect(
         page.getByRole("columnheader", { name: col, exact: true }).first(),
@@ -91,6 +100,41 @@ test.describe("curated-features live: page load + controls", () => {
       TIMEOUT,
     );
     await expect(page.getByLabel("rule enabled filter")).toBeVisible(TIMEOUT);
+  });
+
+  test("page load: expanded seasonal/regional theme options", async ({ page }) => {
+    await page.goto(ROUTE);
+    const themeFilter = page.getByLabel("theme filter");
+    for (const label of EXPANDED_THEME_LABELS) {
+      await expect(
+        themeFilter.locator("option", { hasText: label }),
+      ).toHaveCount(1, TIMEOUT);
+    }
+  });
+
+  test("page load: source rules related job link opens Dagster run row", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+    const link = page.getByRole("link", { name: "관련 job 실행" });
+    await expect(link).toHaveAttribute(
+      "href",
+      `/admin/dagster?schedule=${CURATED_REFRESH_SCHEDULE}`,
+      TIMEOUT,
+    );
+
+    await link.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/admin/dagster\\?schedule=${CURATED_REFRESH_SCHEDULE}$`),
+      TIMEOUT,
+    );
+    const row = page.getByTestId(
+      `dagster-schedule-row-${CURATED_REFRESH_SCHEDULE}`,
+    );
+    await expect(row).toBeVisible(TIMEOUT);
+    await expect(row.getByRole("button", { name: "즉시 실행" })).toBeVisible(
+      TIMEOUT,
+    );
   });
 
   test("page load: empty selection detail hint visible", async ({ page }) => {
@@ -129,10 +173,10 @@ test.describe("curated-features live: page load + controls", () => {
     );
   });
 
-  test("nav link to Curated features is present", async ({ page }) => {
+  test("nav link to Feature 큐레이션 is present", async ({ page }) => {
     await page.goto(ROUTE);
     await expect(
-      page.getByRole("link", { name: "Curated features" }),
+      page.getByRole("link", { name: "Feature 큐레이션" }),
     ).toBeVisible(TIMEOUT);
   });
 

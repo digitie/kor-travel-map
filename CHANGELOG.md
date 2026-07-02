@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 큐레이션 테마와 Source rules 실행 연결 (2026-07-02)
+
+- **ADDED**: 기본 큐레이션 theme set에 계절별 여행지 4종과 지역별 여행지 6종을 추가했다.
+- **ADDED**: Feature 큐레이션 화면의 `Source rules` 패널에서 관련 Dagster schedule로 이동해
+  `curated_features_refresh` job을 바로 실행할 수 있는 버튼을 추가했다.
+- **CHANGED**: `kor-travel-concierge-youtube/youtube_place_candidates` seed rule과 import 경로를
+  확장 테마 seed와 함께 통합 테스트에서 재확인한다.
+
 ### Feature 지도 notice 이력/겹침 메뉴 보강 (2026-07-02)
 
 - **CHANGED**: Feature 지도에서 겹친 점 마커 선택 팝업의 헤더, 후보 행, 종류 배지, hover 상태를

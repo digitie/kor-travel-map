@@ -24,6 +24,18 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 12, 18, 0, tzinfo=_KST)
+_EXPANDED_THEME_SLUGS = {
+    "seasonal-spring-blossom",
+    "seasonal-summer-coast",
+    "seasonal-autumn-foliage",
+    "seasonal-winter-snow",
+    "region-seoul-capital",
+    "region-busan-coast",
+    "region-jeju-island",
+    "region-gangwon-nature",
+    "region-jeolla-food",
+    "region-gyeongju-history",
+}
 
 
 async def _reverse(_coord: Coordinate) -> Address:
@@ -104,6 +116,23 @@ async def _load_concierge_place(session: AsyncSession) -> str:
     await feature_repo.load_bundle(session, bundle)
     await session.flush()
     return bundle.feature.feature_id
+
+
+async def test_seeded_theme_sets_include_seasonal_and_regional_expansion(
+    migrated_session: AsyncSession,
+) -> None:
+    themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
+    by_slug = {theme.theme_slug: theme for theme in themes}
+
+    assert len(themes) >= 18
+    assert set(by_slug) >= _EXPANDED_THEME_SLUGS
+    assert {by_slug[slug].theme_group for slug in _EXPANDED_THEME_SLUGS} == {
+        "regional",
+        "seasonal",
+    }
+    assert {by_slug[slug].visibility for slug in _EXPANDED_THEME_SLUGS} == {
+        "public"
+    }
 
 
 async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(

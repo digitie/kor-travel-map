@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-02 (codex) — 큐레이션 theme set 확장과 Source rules job 연결
+
+Feature 큐레이션 화면의 기본 theme set과 운영 실행 경로를 보강했다.
+
+- **테마 seed**: 계절별 여행지 4종(봄꽃, 여름 바다, 가을 단풍, 겨울 눈꽃)과 지역별 여행지 6종
+  (서울·수도권, 부산·동남권, 제주, 강원 자연, 전라 맛·문화, 경주·신라 역사)을
+  `feature.curated_themes` seed로 추가했다.
+- **Source rules UI**: `Source rules` 패널에 `관련 job 실행` 버튼을 추가해
+  `/admin/dagster?schedule=curated_features_refresh_daily_schedule`로 이동하고, 작업 자동화 화면이
+  해당 스케줄 row를 강조하도록 했다. 운영자는 기존 `즉시 실행` 버튼으로 관련 job을 바로 실행한다.
+- **concierge 재확인**: 기존 `kor-travel-concierge-youtube/youtube_place_candidates` source rule이
+  `media-places` 큐레이션과 detail snapshot을 만드는 통합 테스트에 확장 테마 seed 검증을 추가했다.
+- **검증**: `tests/integration/test_curated_repo.py` 7 passed, Dagster concierge fetcher targeted
+  5 passed/72 deselected, curated refresh schedule 등록 1 passed, 전체 ruff, `mypy src/kortravelmap`,
+  import-linter 4 contracts, frontend type-check, frontend lint(기존 warning 4건), frontend build 통과.
+  Windows Playwright fallback으로 Source rules job link와 Dagster schedule query highlight targeted e2e
+  2건을 통과했다. WSL Playwright는 Chromium 바이너리 부재로 실행 전 실패했다.
+
 ## 2026-07-02 (codex) — Feature 지도 notice 최신 표시와 source last_seen 이력화
 
 Feature 지도 겹침 선택 메뉴를 시각적으로 정리하고, notice source 이력/중복 재수집 정책을 보강했다.
