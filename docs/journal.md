@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-03 (claude) — notice 중복 근본 해결: 사건 단위 identity + 라이프사이클 (#632)
+
+notice feature가 "로직을 보강해도 계속" 중복되던 문제의 근본 원인을 잡았다 —
+정체성이 발표/스냅샷 단위였다(prod: KREX 6,164건 중 계보 1,317개 ≈ 4.7×,
+KMA 특보 43건 전부 발표 단위, valid_end 100% NULL·purge 없음 → 영구 누적).
+
+- **KMA 특보(사건 단위 재키잉)**: 자연키 `{alert_id(tm_fc/seq)}::{region}` →
+  `{region_code}::{현상 토큰}`(`kma_alert_natural_key`). 현상 토큰(호우/풍랑/…)
+  기준이라 notice_type이 generic으로 접는 특보끼리도 안 붕괴. 재발표·등급
+  변경은 같은 feature upsert(발표 이력은 source_records). **해제는 feature를
+  만들지 않고** `weather_alert_lift_closures`가 열린 feature의
+  `valid_end_time`을 채운다(결합 해제문 현상별 fan-out, 배치 내 최신만).
+- **KREX 교통 돌발**: feature_id에서 reverse-geocoded bjd_code 제거 — 이동하는
+  정체가 동 경계를 넘을 때 같은 사건이 재키잉되던 잔존 버그(4680f17 이후에도
+  1–2건/일 누적). 적재 직후 `reconcile_notice_features`가 ① 같은 계보 중복
+  soft-delete(latest 유지) ② 이번 feed에 없는 계보 `valid_end=fetched_at` 종료.
+- **일회성 정리**: `0040_notice_dedup_cleanup` — KMA 구세대 전부 + KREX 계보별
+  latest 아닌 것 soft-delete(ADR-017, 원문 source_records 보존). 예상 ~4.8k건.
+- **read 필터**: `_notice_lineage_sql`에 KMA 분기 추가(구세대 raw_data로도 계보
+  합류), bbox 필터에 종료 notice 숨김 추가, 이름 검색도 종료 notice 제외.
+  admin 목록은 감사 목적 show-everything이라 의도적으로 미적용.
+- **§9 보존 구현**: `purge_expired_notices`(종료/발표 +1년, 기본)를
+  maintenance job op로 추가.
+- 검증: kma_alerts/krex 단위 테스트(재발표 안정성·해제 closure·결합 해제·배치
+  dedupe·좌표 이동 안정성) + `test_notice_lifecycle` 통합(supersede/close/
+  bbox 숨김/purge, testcontainers).
+- 배포 후: alembic 0040 자동 적용 → KMA/KREX notice asset 재실행 → 중복 계보
+  카운트 재확인(오케스트레이터가 prod 검증 예정).
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 (라이프사이클 스트립·한국어 액션·워크플로 가이드)
 
 curated feature 관리 화면(UI/UX·워크플로)을 처음 온 운영자도 흐름을 읽을 수 있게 개편했다.

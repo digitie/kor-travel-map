@@ -181,6 +181,23 @@ krex#8/PR#9, #378) 기준:
 | `valid_period` | `valid_*_time` |
 | `location_name` | `Feature.name` |
 
+### 5.5 사건 단위 identity + 라이프사이클 (#632)
+
+notice feature의 정체성은 **발표/스냅샷이 아니라 사건**이다 — 발표 단위 키가
+재발표마다 새 feature를 만들던 중복(prod 6,164건 중 계보 1,317개, ~4.7×)을
+identity 재설계로 해소했다:
+
+| dataset | 자연키 (사건 단위) | 라이프사이클 |
+|---------|-------------------|-------------|
+| `kma_weather_alerts` | `{region_code}::{현상 토큰}` (`kma_alert_natural_key`) — tm_fc/seq/등급 제외. 현상 토큰(호우/풍랑/…)은 `notice_type`이 generic으로 접는 특보를 구분한다 | **해제** title은 feature를 만들지 않고 `weather_alert_lift_closures` → `close_notice_features`가 열린 feature의 `valid_end_time`을 채운다(결합 해제문은 현상별 fan-out). 재발표·등급 변경은 같은 feature upsert + source_records 이력 |
+| `krex_traffic_notices` | 사건 단서 `occurred_date::…::incident_type_code` (기존) — **feature_id에서 bjd_code 제거**(이동하는 정체가 동 경계를 넘으면 재키잉되던 버그) | 적재 직후 `reconcile_notice_features`: 같은 계보 중복 soft-delete(latest 1개 유지) + 이번 feed에 없는 계보는 `valid_end_time=fetched_at`으로 종료 |
+
+read 경로: 지도 bbox는 계보별 latest만 + `valid_end_time` 지난 notice 숨김
+(`_LATEST_NOTICE_BBOX_FILTER_SQL`), 이름 검색도 종료 notice를 숨긴다. admin
+feature 목록은 감사 목적의 show-everything 표면이라 필터하지 않는다(중복은
+write-시점 reconcile이 soft-delete). 구세대 identity 잔존분은 마이그레이션
+`0040_notice_dedup_cleanup`이 일회성 정리했다.
+
 ## 6. 핵심 함수
 
 ```python
@@ -267,14 +284,12 @@ ConcurrencyConfig: provider별 `max_concurrent=1`.
 ## 9. 보관 정책
 
 `docs/architecture/data-model.md` §7 + ADR-017:
-- notice 종료일 또는 발표일 +1년 후 purge
-- 활성(현재 유효) notice만 frontend에 표시
-
-```sql
-DELETE FROM feature.feature_notice_details d USING feature.features f
-WHERE d.feature_id=f.feature_id AND f.kind='notice'
-  AND d.valid_end_time < now() - interval '1 year';
-```
+- notice 종료일(없으면 발표일) +1년 후 purge — **구현됨(#632)**:
+  `feature_repo.purge_expired_notices`(soft-delete, ADR-017 원문 보존)를
+  maintenance job(`consistency_dedup_refresh`)의 `purge_expired_notices` op가
+  주기 실행한다. 보존 기간은 op config `retention`(기본 `'1 year'`).
+- 활성(현재 유효) notice만 frontend에 표시 — bbox/검색 read 필터가
+  `valid_end_time` 지난 notice를 숨긴다(§5.5).
 
 ## 10. 검증
 
