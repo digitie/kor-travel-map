@@ -22,8 +22,8 @@ const ETL_TIMEOUT = { timeout: 45_000 } as const;
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
   { label: "Feature 지도", href: "/features" },
+  { label: "큐레이션 지도", href: "/curated-features" },
   { label: "Feature 목록", href: "/admin/features" },
-  { label: "Feature 변경", href: "/admin/features/change-requests" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
   { label: "큐레이션 관리", href: "/admin/features/curated" },
   { label: "이슈", href: "/admin/issues" },
@@ -49,22 +49,20 @@ const VIEWPORTS: ReadonlyArray<{ name: string; width: number; height: number }> 
     { name: "mobile-390", width: 390, height: 844 },
   ];
 
-// 홈 metric/status 카드 제목 — home.spec 검증.
+// 홈 metric/status 카드 제목 — home-client.tsx MetricCard/CardTitle 현행(한국어화 후).
 const HOME_METRIC_HEADINGS: ReadonlyArray<string> = [
-  "Features",
-  "Import jobs",
-  "Dedup queue",
-  "Issues",
+  "Feature",
+  "적재 작업",
+  "중복 검수",
+  "이슈",
   "서비스 상태",
-  "Dedup pending",
 ];
 
-// /admin/dagster 페이지 내부 heading — dagster.spec 검증.
+// /admin/dagster 페이지 내부 heading — dagster.spec 검증(embed/상세 엔진 화면 제거 후).
 const DAGSTER_HEADINGS: ReadonlyArray<string> = [
   "스케줄",
   "최근 실행",
-  "Run detail",
-  "상세 엔진 화면",
+  "실행 상세",
   "코드 위치",
 ];
 
@@ -78,19 +76,19 @@ const NEW_FEATURE_SECTIONS: ReadonlyArray<string> = [
   "상세",
 ];
 
-// change-requests 폼 label — admin-ops.spec 검증.
+// change-requests 폼 label — #622 공용 폼 섹션 전환 후: kind/status/name/category는
+// feature-form-sections.tsx의 한국어 label, 나머지는 클라이언트 aria-label 유지.
 const CHANGE_REQUEST_FORM_LABELS: ReadonlyArray<string> = [
   "change action",
   "change feature id",
   "change reason",
   "change operator",
-  "change kind",
-  "change feature status",
-  "change name",
-  "change category",
+  "Feature 종류",
+  "상태",
+  "이름",
+  "카테고리",
   "change lon",
   "change lat",
-  "change detail JSON",
 ];
 
 const CHANGE_REVIEW_LABELS: ReadonlyArray<string> = [
@@ -148,10 +146,10 @@ test.describe("misc live — home (/)", () => {
     await expect(page.getByTestId("service-dagster")).toBeVisible(TIMEOUT);
   });
 
-  test("home 최근 import jobs heading visible", async ({ page }) => {
+  test("home 최근 적재 작업 heading visible", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "최근 import jobs" }),
+      page.getByRole("heading", { name: "최근 적재 작업" }),
     ).toBeVisible(TIMEOUT);
   });
 
@@ -226,28 +224,21 @@ test.describe("misc live — home (/)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test.describe("misc live — /admin/dagster", () => {
-  test("작업 자동화 H1 + 엔진 화면 링크", async ({ page }) => {
+  test("작업 자동화 H1 + 레거시 embed 제거", async ({ page }) => {
     await page.goto("/admin/dagster");
     await expect(
       page.getByRole("heading", { level: 1, name: "작업 자동화" }),
     ).toBeVisible(TIMEOUT);
+    // dagster.spec와 동일: iframe embed와 '상세 엔진 화면' 카드는 제거된 상태가 정상.
+    await expect(page.getByTestId("dagster-embed")).toHaveCount(0, TIMEOUT);
     await expect(
-      page.getByRole("link", { name: /엔진 화면 열기/ }),
-    ).toBeVisible(TIMEOUT);
-  });
-
-  test("dagster embed testid visible", async ({ page }) => {
-    await page.goto("/admin/dagster");
-    await expect(page.getByTestId("dagster-embed")).toBeVisible(TIMEOUT);
+      page.getByRole("heading", { name: "상세 엔진 화면" }),
+    ).toHaveCount(0, TIMEOUT);
   });
 
   for (const heading of DAGSTER_HEADINGS) {
     test(`dagster heading: ${heading}`, async ({ page }) => {
       await page.goto("/admin/dagster");
-      if (heading === "코드 위치") {
-        await expect(page.getByText(heading).first()).toBeVisible(TIMEOUT);
-        return;
-      }
       await expect(
         page.getByRole("heading", { name: heading }),
       ).toBeVisible(TIMEOUT);
@@ -343,9 +334,11 @@ test.describe("misc live — /admin/features/change-requests", () => {
   test("change-requests H1 + form heading", async ({ page }) => {
     await page.goto("/admin/features/change-requests");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature 변경" }),
+      page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
     ).toBeVisible(TIMEOUT);
-    await expect(page.getByText("Feature 변경 요청")).toBeVisible(TIMEOUT);
+    await expect(
+      page.getByRole("heading", { level: 2, name: "변경 요청 작성" }),
+    ).toBeVisible(TIMEOUT);
   });
 
   for (const label of CHANGE_REQUEST_FORM_LABELS) {
@@ -472,7 +465,7 @@ test.describe("misc live — /admin/features/new", () => {
   test("new feature H1 + 제출 버튼 렌더", async ({ page }) => {
     await page.goto("/admin/features/new");
     await expect(
-      page.getByRole("heading", { level: 1, name: "새 피처" }),
+      page.getByRole("heading", { level: 1, name: "새 Feature" }),
     ).toBeVisible(TIMEOUT);
     await expect(
       page.getByRole("button", { name: "요청 생성" }),
@@ -498,10 +491,9 @@ test.describe("misc live — /admin/features/new", () => {
 
   test("new feature kind 기본값 place", async ({ page }) => {
     await page.goto("/admin/features/new");
-    await expect(page.getByLabel("종류", { exact: true })).toHaveValue(
-      "place",
-      TIMEOUT,
-    );
+    await expect(
+      page.getByLabel("Feature 종류", { exact: true }),
+    ).toHaveValue("place", TIMEOUT);
   });
 
   // 폼 섹션 h2 6개.
@@ -519,7 +511,7 @@ test.describe("misc live — /admin/features/new", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto("/admin/features/new");
       await expect(
-        page.getByRole("heading", { level: 1, name: "새 피처" }),
+        page.getByRole("heading", { level: 1, name: "새 Feature" }),
       ).toBeVisible(TIMEOUT);
     });
 
@@ -542,13 +534,13 @@ const DEEPLINK_TARGETS: ReadonlyArray<{ href: string; h1: string }> = [
   { href: "/etl", h1: "ETL preview" },
   {
     href: "/admin/features/change-requests",
-    h1: "Feature 변경",
+    h1: "변경 요청 작성",
   },
   {
     href: "/admin/features/change-reviews",
     h1: "Feature 검수",
   },
-  { href: "/admin/features/new", h1: "새 피처" },
+  { href: "/admin/features/new", h1: "새 Feature" },
 ];
 
 test.describe("misc live — deeplink targets", () => {
