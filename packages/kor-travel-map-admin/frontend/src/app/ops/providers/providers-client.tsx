@@ -560,6 +560,20 @@ function DatasetDetailPanel({
             <div className="break-all font-mono text-xs text-muted-foreground">
               {selection.provider}/{selection.datasetKey}
             </div>
+            <div className="mt-1 flex flex-wrap gap-3 text-xs">
+              <Link
+                className="text-primary underline-offset-2 hover:underline"
+                href={`/admin/features?provider=${encodeURIComponent(selection.provider)}&dataset_key=${encodeURIComponent(selection.datasetKey)}`}
+              >
+                생성된 Feature 보기
+              </Link>
+              <Link
+                className="text-primary underline-offset-2 hover:underline"
+                href={`/ops/logs?tab=events&provider=${encodeURIComponent(selection.provider)}&dataset_key=${encodeURIComponent(selection.datasetKey)}`}
+              >
+                작업 이벤트 로그
+              </Link>
+            </div>
           </div>
           <Button
             disabled={createRequest.isPending}
@@ -816,8 +830,7 @@ export function ProvidersFreshnessClient({
         </Button>
       }
       description="전 provider×dataset의 동기화 상태, 갱신 요청, 갱신 정책을 추적합니다."
-      section="운영"
-      title="제공자"
+      title="Provider 상태"
     >
       <div className="flex flex-col gap-4">
         {providers.isError || showDetailError ? (
@@ -850,12 +863,18 @@ export function ProvidersFreshnessClient({
           <Alert variant="destructive">
             <AlertTitle>연속 실패 중인 dataset</AlertTitle>
             <AlertDescription>
-              {summary.failing
-                .map(
-                  (item) =>
-                    `${item.provider}/${item.dataset_key} (${item.consecutive_failures}회)`,
-                )
-                .join(", ")}
+              <span className="flex flex-wrap gap-x-3 gap-y-1">
+                {summary.failing.map((item) => (
+                  <Link
+                    className="underline underline-offset-2"
+                    href={`/admin/issues?provider=${encodeURIComponent(item.provider)}&dataset_key=${encodeURIComponent(item.dataset_key)}`}
+                    key={`${item.provider}/${item.dataset_key}`}
+                  >
+                    {item.provider}/{item.dataset_key} (
+                    {item.consecutive_failures}회)
+                  </Link>
+                ))}
+              </span>
             </AlertDescription>
           </Alert>
         ) : null}

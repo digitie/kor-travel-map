@@ -47,6 +47,7 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -699,7 +700,13 @@ function ChangeRequestDetail({
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
         <dt className="text-muted-foreground">Feature</dt>
-        <dd className="break-all font-mono">{request.feature_id}</dd>
+        <dd className="break-all font-mono">
+          {request.feature_id ? (
+            <EntityLink id={request.feature_id} kind="feature" />
+          ) : (
+            "-"
+          )}
+        </dd>
         <dt className="text-muted-foreground">검수 방식</dt>
         <dd>{request.review_mode}</dd>
         <dt className="text-muted-foreground">요청자</dt>
@@ -953,9 +960,12 @@ function LocationEditDialog({
 export function FeatureChangeRequestsClient({
   prefill,
   view = "request",
+  highlightRequestId = null,
 }: {
   prefill?: FeatureChangeRequestPrefill;
   view?: "request" | "review";
+  /** ?request_id= 딥링크 — 목록에서 해당 요청 행을 강조한다(선택 전까지). */
+  highlightRequestId?: string | null;
 }) {
   const queryPrefillKey = prefill?.key ?? "";
   const prefillFeatureId = prefill?.featureId?.trim() || null;
@@ -1222,9 +1232,17 @@ export function FeatureChangeRequestsClient({
           const request = row.original;
           return (
             <div className="max-w-64">
-              <div className="break-all font-mono text-xs">
-                {shortId(request.feature_id, 28)}
-              </div>
+              {request.feature_id ? (
+                <EntityLink
+                  className="text-xs"
+                  id={request.feature_id}
+                  kind="feature"
+                >
+                  {shortId(request.feature_id, 28)}
+                </EntityLink>
+              ) : (
+                <div className="break-all font-mono text-xs">-</div>
+              )}
               {typeof request.payload.name === "string" ? (
                 <div className="mt-1 truncate text-sm">
                   {request.payload.name}
@@ -1364,7 +1382,6 @@ export function FeatureChangeRequestsClient({
           ? "변경 요청을 검수합니다."
           : "Feature를 추가·수정·삭제하는 요청을 작성합니다."
       }
-      section="Feature"
       title={showReview ? "Feature 검수" : "변경 요청 작성"}
     >
       <div className="flex flex-col gap-4">
@@ -1789,7 +1806,10 @@ export function FeatureChangeRequestsClient({
             containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
             onRowClick={(row) => setSelectedRequest(row)}
             isRowActive={(row) =>
-              selectedRequest?.request_id === row.request_id
+              selectedRequest?.request_id === row.request_id ||
+              (selectedRequest === null &&
+                highlightRequestId !== null &&
+                row.request_id === highlightRequestId)
             }
           />
 

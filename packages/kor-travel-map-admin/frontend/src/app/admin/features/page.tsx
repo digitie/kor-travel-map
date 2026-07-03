@@ -7,6 +7,24 @@ export const metadata: Metadata = {
   description: "운영자용 feature 목록과 상세 검토 화면",
 };
 
-export default function AdminFeaturesPage() {
-  return <AdminFeaturesClient />;
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function AdminFeaturesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = (await searchParams) ?? {};
+  return (
+    <AdminFeaturesClient
+      initialDatasetKey={firstParam(params.dataset_key)}
+      initialHasIssue={firstParam(params.has_issue)}
+      initialKind={firstParam(params.kind)}
+      initialProvider={firstParam(params.provider)}
+      initialQ={firstParam(params.q)}
+      initialStatus={firstParam(params.status)}
+    />
+  );
 }

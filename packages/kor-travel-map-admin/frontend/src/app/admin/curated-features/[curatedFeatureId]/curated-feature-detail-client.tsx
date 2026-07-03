@@ -200,8 +200,13 @@ export function CuratedFeatureDetailClient({
           </Button>
         </>
       }
+      breadcrumbs={[
+        { label: "Feature 관리" },
+        { label: "큐레이션 관리", href: "/admin/features/curated" },
+        { label: curatedFeatureId },
+      ]}
       description="curated 후보의 위치, 장소 검색 결과, 노출 정보, 배포 스냅샷을 한 화면에서 검토합니다."
-      section="관리"
+      section="Feature 관리"
       title="큐레이션 상세"
     >
       <div className="flex flex-col gap-4">

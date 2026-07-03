@@ -619,7 +619,6 @@ export function FeatureCreateClient() {
         </>
       }
       description="새 Feature를 등록합니다."
-      section="관리"
       title="새 Feature"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>

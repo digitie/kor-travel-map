@@ -49,11 +49,33 @@ const EVENT_LEVELS: Array<ImportJobEventLevel | "all"> = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 type LogTab = "system" | "api" | "events";
 
-export function LogsClient() {
-  const [activeLogTab, setActiveLogTab] = useState<LogTab>("system");
+export function LogsClient({
+  initialTab,
+  initialJobId,
+  initialProvider,
+  initialDatasetKey,
+  initialLevel,
+}: {
+  initialTab?: string;
+  initialJobId?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialLevel?: string;
+} = {}) {
+  const [activeLogTab, setActiveLogTab] = useState<LogTab>(() =>
+    initialTab === "system" || initialTab === "api" || initialTab === "events"
+      ? initialTab
+      : "system",
+  );
   const [systemQ, setSystemQ] = useState("");
   const deferredSystemQ = useDeferredValue(systemQ.trim());
-  const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">("all");
+  const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">(() =>
+    initialTab !== "events" &&
+    initialLevel &&
+    (LEVELS as readonly string[]).includes(initialLevel)
+      ? (initialLevel as SystemLogLevel)
+      : "all",
+  );
   const [systemSource, setSystemSource] = useState("");
   const [systemCursor, setSystemCursor] = useState<string | null>(null);
   const [systemPageIndex, setSystemPageIndex] = useState(1);
@@ -64,10 +86,18 @@ export function LogsClient() {
   const [apiCursor, setApiCursor] = useState<string | null>(null);
   const [apiPageIndex, setApiPageIndex] = useState(1);
 
-  const [eventJobId, setEventJobId] = useState("");
-  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">("all");
-  const [eventProvider, setEventProvider] = useState("");
-  const [eventDatasetKey, setEventDatasetKey] = useState("");
+  const [eventJobId, setEventJobId] = useState(initialJobId ?? "");
+  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">(() =>
+    initialTab === "events" &&
+    initialLevel &&
+    (EVENT_LEVELS as readonly string[]).includes(initialLevel)
+      ? (initialLevel as ImportJobEventLevel)
+      : "all",
+  );
+  const [eventProvider, setEventProvider] = useState(initialProvider ?? "");
+  const [eventDatasetKey, setEventDatasetKey] = useState(
+    initialDatasetKey ?? "",
+  );
   const [eventCursor, setEventCursor] = useState<string | null>(null);
   const [eventPageIndex, setEventPageIndex] = useState(1);
 
@@ -367,8 +397,7 @@ export function LogsClient() {
         </Button>
       }
       description="system log와 opt-in API call log를 같은 운영 화면에서 조회합니다."
-      section="Ops"
-      title="Logs"
+      title="운영 로그"
     >
       <div className="flex flex-col gap-4">
         {(systemLogs.isError || apiLogs.isError || jobEvents.isError) && (

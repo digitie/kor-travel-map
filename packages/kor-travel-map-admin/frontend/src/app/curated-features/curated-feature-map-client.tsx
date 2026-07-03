@@ -350,9 +350,24 @@ export function CuratedFeatureMapClient() {
 
   return (
     <AdminShell
+      actions={
+        <>
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            href="/features"
+          >
+            Feature 지도
+          </Link>
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            href="/admin/features/curated"
+          >
+            큐레이션 관리
+          </Link>
+        </>
+      }
       description={status}
-      section="Curated Feature"
-      title="Curated Feature 지도"
+      title="큐레이션 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
         <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 xl:flex-row xl:items-center xl:justify-between">

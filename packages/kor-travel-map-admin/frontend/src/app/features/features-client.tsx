@@ -8,6 +8,7 @@ import {
   ListChecksIcon,
   ListIcon,
   MapIcon,
+  MapPinnedIcon,
   RefreshCwIcon,
   RouteIcon,
   WorkflowIcon,
@@ -345,6 +346,13 @@ export function FeaturesClient() {
         <>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
+            href="/curated-features"
+          >
+            <MapPinnedIcon data-icon="inline-start" />
+            큐레이션 지도
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
             href="/ops/import-jobs"
           >
             <ListChecksIcon data-icon="inline-start" />
@@ -381,7 +389,6 @@ export function FeaturesClient() {
         </>
       }
       description={status}
-      section="Feature"
       title="Feature 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">

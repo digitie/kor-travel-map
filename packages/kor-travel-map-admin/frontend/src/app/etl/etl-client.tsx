@@ -2,17 +2,17 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { DatabaseIcon, PlayIcon } from "lucide-react";
-import Link from "next/link";
 import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
 import { useEtlPreviewMutation, useProviders } from "@/api/etl";
+import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Card,
   CardContent,
@@ -30,7 +30,6 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
 
 const etlPreviewSchema = z.object({
   provider: z.string().min(1, "provider를 선택하세요."),
@@ -107,26 +106,11 @@ export function EtlPreviewClient() {
   });
 
   return (
-    <main className="min-h-screen bg-muted/30">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-        <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Debug</Badge>
-              <Badge variant="outline">fixture replay</Badge>
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">ETL preview</h1>
-            <p className="max-w-3xl text-sm text-muted-foreground">
-              provider 변환 함수 출력을 적재 없이 확인합니다. form 상태는 React
-              Hook Form, 값 검증은 Zod, 실행 상태는 TanStack Query mutation이
-              관리합니다.
-            </p>
-          </div>
-          <Link className={cn(buttonVariants({ variant: "outline" }))} href="/">
-            홈
-          </Link>
-        </header>
-
+    <AdminShell
+      description="provider 변환 함수 출력을 적재 없이 확인합니다 (fixture replay)."
+      title="ETL 미리보기"
+    >
+      <div className="flex w-full flex-col gap-6">
         <div className="grid gap-4 lg:grid-cols-[24rem_1fr]">
           <Card>
             <CardHeader>
@@ -212,6 +196,14 @@ export function EtlPreviewClient() {
                       </FieldDescription>
                       {selectedDataset ? (
                         <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <EntityLink
+                            className="text-xs"
+                            id={provider}
+                            kind="provider"
+                            params={{ dataset_key: dataset }}
+                          >
+                            Provider 상태 보기
+                          </EntityLink>
                           <Badge variant="outline">
                             {selectedDataset.feature_kind}
                           </Badge>
@@ -314,6 +306,6 @@ export function EtlPreviewClient() {
           </Card>
         </div>
       </div>
-    </main>
+    </AdminShell>
   );
 }

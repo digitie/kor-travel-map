@@ -10,7 +10,7 @@ import {
   Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   type OfflineUploadColumnMapping,
@@ -26,6 +26,7 @@ import {
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -150,7 +151,7 @@ function mappingComplete(mapping: OfflineUploadColumnMapping): boolean {
   });
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]">
       <dt className="text-muted-foreground">{label}</dt>
@@ -188,8 +189,26 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
         <DetailRow label="size" value={formatBytes(upload.byte_size)} />
         <DetailRow label="sha256" value={upload.checksum_sha256} />
         <DetailRow label="형식" value={upload.detected_format ?? "-"} />
-        <DetailRow label="validation job" value={upload.validation_job_id ?? "-"} />
-        <DetailRow label="load job" value={upload.load_job_id ?? "-"} />
+        <DetailRow
+          label="validation job"
+          value={
+            upload.validation_job_id ? (
+              <EntityLink id={upload.validation_job_id} kind="importJob" />
+            ) : (
+              "-"
+            )
+          }
+        />
+        <DetailRow
+          label="load job"
+          value={
+            upload.load_job_id ? (
+              <EntityLink id={upload.load_job_id} kind="importJob" />
+            ) : (
+              "-"
+            )
+          }
+        />
         <DetailRow label="updated" value={formatDateTime(upload.updated_at)} />
       </dl>
     </div>
@@ -432,7 +451,11 @@ function ValidationPanel({
           검증 실행
         </Button>
         {selected.validation_job_id ? (
-          <Badge variant="outline">job {shortId(selected.validation_job_id)}</Badge>
+          <EntityLink id={selected.validation_job_id} kind="importJob">
+            <Badge variant="outline">
+              job {shortId(selected.validation_job_id)}
+            </Badge>
+          </EntityLink>
         ) : null}
       </div>
 
@@ -688,7 +711,6 @@ export function OfflineUploadsClient() {
         </Button>
       }
       description="RustFS에 보존한 JSON/JSONL FeatureBundle 또는 CSV/TSV 원본을 검증하고 Dagster offline_upload_load job으로 적재합니다."
-      section="관리"
       title="오프라인 업로드"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">

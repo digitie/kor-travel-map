@@ -199,10 +199,11 @@ function relationHref(link: OpsImportJobLink) {
     return `/ops/import-jobs/${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "load_batch") {
-    return link.href.replace(/^\/v1/, "");
+    // API href(/v1/...)를 그대로 노출하던 dead link — 배치 필터 목록으로 연결.
+    return `/ops/import-jobs?load_batch_id=${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "feature_update_request") {
-    return "/admin/features/update-requests";
+    return `/admin/features/update-requests/${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "offline_upload") {
     return "/admin/offline-uploads";
@@ -443,6 +444,12 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
             <ArrowLeftIcon data-icon="inline-start" />
             목록
           </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={`/ops/logs?tab=events&job_id=${encodeURIComponent(jobId)}`}
+          >
+            운영 로그
+          </Link>
           <Badge variant={live.state === "live" ? "default" : "outline"}>
             {live.state === "live" ? "실시간" : live.state}
           </Badge>
@@ -460,8 +467,12 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
           </Button>
         </>
       }
+      breadcrumbs={[
+        { label: "수집 파이프라인" },
+        { label: "적재 작업", href: "/ops/import-jobs" },
+        { label: shortId(jobId, 18) },
+      ]}
       description={jobData ? `${jobData.kind} · ${shortId(jobData.job_id, 18)}` : jobId}
-      section="운영"
       title="적재 작업 상세"
     >
       <div className="flex flex-col gap-4">

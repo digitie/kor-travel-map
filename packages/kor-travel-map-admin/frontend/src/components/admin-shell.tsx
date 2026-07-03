@@ -28,55 +28,104 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { HelpTip } from "@/components/help-tip";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { href: "/", label: "홈", icon: HomeIcon },
-  { href: "/features", label: "Feature 지도", icon: MapIcon },
-  { href: "/curated-features", label: "큐레이션 지도", icon: MapPinnedIcon },
-  { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
+/**
+ * 작업 지향 nav 그룹 (§1) — nav·섹션 배지·브레드크럼 라벨의 단일 정본.
+ * 그룹 헤더는 비링크, href 20개는 기존 경로 그대로(라우트 이동 없음).
+ */
+export const NAV_GROUPS = [
   {
-    href: "/admin/features/change-reviews",
-    label: "Feature 검수",
-    icon: ListChecksIcon,
+    group: null,
+    badge: "개요",
+    items: [{ href: "/", label: "홈", icon: HomeIcon }],
   },
   {
-    href: "/admin/features/curated",
-    label: "큐레이션 관리",
-    icon: SparklesIcon,
+    group: "Feature 관리",
+    badge: "Feature 관리",
+    items: [
+      { href: "/features", label: "Feature 지도", icon: MapIcon },
+      { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
+      {
+        href: "/admin/features/change-reviews",
+        label: "Feature 검수",
+        icon: ListChecksIcon,
+      },
+      {
+        href: "/admin/features/dedup-reviews",
+        label: "중복 검토",
+        icon: GitCompareArrowsIcon,
+      },
+      {
+        href: "/admin/features/enrichment-reviews",
+        label: "보강 검토",
+        icon: LinkIcon,
+      },
+      { href: "/admin/issues", label: "이슈", icon: AlertTriangleIcon },
+      {
+        href: "/admin/features/curated",
+        label: "큐레이션 관리",
+        icon: SparklesIcon,
+      },
+      { href: "/curated-features", label: "큐레이션 지도", icon: MapPinnedIcon },
+    ],
   },
-  { href: "/admin/issues", label: "이슈", icon: AlertTriangleIcon },
-  { href: "/ops/import-jobs", label: "적재 작업", icon: ListChecksIcon },
-  { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
-  { href: "/ops/consistency", label: "정합성 점검", icon: RadarIcon },
-  { href: "/ops/logs", label: "운영 로그", icon: ActivityIcon },
   {
-    href: "/admin/features/dedup-reviews",
-    label: "Feature 중복 검토",
-    icon: GitCompareArrowsIcon,
+    group: "수집 파이프라인",
+    badge: "수집 파이프라인",
+    items: [
+      { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
+      { href: "/ops/import-jobs", label: "적재 작업", icon: ListChecksIcon },
+      {
+        href: "/admin/features/update-requests",
+        label: "갱신 요청",
+        icon: RefreshCwIcon,
+      },
+      {
+        href: "/admin/offline-uploads",
+        label: "오프라인 업로드",
+        icon: UploadCloudIcon,
+      },
+      { href: "/admin/dagster", label: "작업 자동화", icon: WorkflowIcon },
+      { href: "/etl", label: "ETL 미리보기", icon: DatabaseIcon },
+      {
+        href: "/admin/poi-cache-targets",
+        label: "POI 캐시 대상",
+        icon: RouteIcon,
+      },
+    ],
   },
   {
-    href: "/admin/features/enrichment-reviews",
-    label: "Feature 보강 검토",
-    icon: LinkIcon,
+    group: "모니터링",
+    badge: "모니터링",
+    items: [
+      { href: "/ops/logs", label: "운영 로그", icon: ActivityIcon },
+      { href: "/ops/consistency", label: "정합성 점검", icon: RadarIcon },
+    ],
   },
   {
-    href: "/admin/features/update-requests",
-    label: "Feature 갱신",
-    icon: RefreshCwIcon,
+    group: "시스템",
+    badge: "시스템",
+    items: [
+      { href: "/admin/backups", label: "백업", icon: ArchiveIcon },
+      { href: "/admin/settings", label: "설정", icon: SettingsIcon },
+    ],
   },
-  { href: "/admin/poi-cache-targets", label: "POI 캐시 대상", icon: RouteIcon },
-  {
-    href: "/admin/offline-uploads",
-    label: "오프라인 업로드",
-    icon: UploadCloudIcon,
-  },
-  { href: "/admin/backups", label: "백업", icon: ArchiveIcon },
-  { href: "/admin/dagster", label: "작업 자동화", icon: WorkflowIcon },
-  { href: "/admin/settings", label: "설정", icon: SettingsIcon },
-  { href: "/etl", label: "ETL 미리보기", icon: DatabaseIcon },
 ] as const;
+
+const navItems = NAV_GROUPS.flatMap((group) =>
+  group.items.map((item) => ({ ...item, badge: group.badge })),
+);
 
 const SIDEBAR_COLLAPSED_KEY = "kor-travel-map:sidebar-collapsed";
 
@@ -87,16 +136,23 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+export type AdminBreadcrumb = { label: string; href?: string };
+
 export function AdminShell({
   title,
   description,
   section,
+  breadcrumbs,
+  help,
   actions,
   children,
 }: {
   title: string;
   description?: string;
+  /** 명시 오버라이드 — 생략 시 NAV_GROUPS longest-prefix로 유도(§1). */
   section?: string;
+  breadcrumbs?: AdminBreadcrumb[];
+  help?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -106,9 +162,11 @@ export function AdminShell({
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
   });
-  const activeHref = navItems
+  const activeItem = navItems
     .filter((item) => isActive(pathname, item.href))
-    .toSorted((a, b) => b.href.length - a.href.length)[0]?.href;
+    .toSorted((a, b) => b.href.length - a.href.length)[0];
+  const activeHref = activeItem?.href;
+  const sectionBadge = section ?? activeItem?.badge;
 
   useEffect(() => {
     if (typeof window === "undefined" || window.innerWidth >= 1024) return;
@@ -189,32 +247,53 @@ export function AdminShell({
                 sidebarCollapsed && "lg:items-center lg:pr-0",
               )}
             >
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = item.href === activeHref;
-                return (
-                  <Link
-                    aria-label={sidebarCollapsed ? item.label : undefined}
-                    className={cn(
-                      buttonVariants({
-                        variant: active ? "secondary" : "ghost",
-                        size: "sm",
-                      }),
-                      "justify-start whitespace-nowrap",
-                      sidebarCollapsed && "lg:size-10 lg:justify-center lg:p-0",
-                    )}
-                    href={item.href}
-                    key={item.href}
-                    ref={active ? activeNavItemRef : undefined}
-                    title={item.label}
-                  >
-                    <Icon data-icon="inline-start" />
-                    <span className={cn(sidebarCollapsed && "lg:hidden")}>
-                      {item.label}
-                    </span>
-                  </Link>
-                );
-              })}
+              {NAV_GROUPS.map((group) => (
+                <div
+                  className={cn(
+                    "flex gap-1 lg:flex-col",
+                    sidebarCollapsed && "lg:items-center",
+                  )}
+                  key={group.group ?? "root"}
+                >
+                  {group.group ? (
+                    <div
+                      className={cn(
+                        "hidden px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-text-secondary uppercase lg:block",
+                        sidebarCollapsed && "lg:hidden",
+                      )}
+                    >
+                      {group.group}
+                    </div>
+                  ) : null}
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = item.href === activeHref;
+                    return (
+                      <Link
+                        aria-label={sidebarCollapsed ? item.label : undefined}
+                        className={cn(
+                          buttonVariants({
+                            variant: active ? "secondary" : "ghost",
+                            size: "sm",
+                          }),
+                          "justify-start whitespace-nowrap",
+                          sidebarCollapsed &&
+                            "lg:size-10 lg:justify-center lg:p-0",
+                        )}
+                        href={item.href}
+                        key={item.href}
+                        ref={active ? activeNavItemRef : undefined}
+                        title={item.label}
+                      >
+                        <Icon data-icon="inline-start" />
+                        <span className={cn(sidebarCollapsed && "lg:hidden")}>
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
             </nav>
             <ButtonLogout collapsed={sidebarCollapsed} />
           </div>
@@ -224,12 +303,39 @@ export function AdminShell({
             <div className="flex flex-col gap-4 rounded-2xl bg-card p-6 shadow-[var(--shadow-card)] ring-1 ring-border/70 xl:flex-row xl:items-start xl:justify-between">
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  {section ? <Badge variant="secondary">{section}</Badge> : null}
+                  {sectionBadge ? (
+                    <Badge variant="secondary">{sectionBadge}</Badge>
+                  ) : null}
                   <span className="break-all font-mono text-[12px] text-text-secondary">
                     {pathname}
                   </span>
                 </div>
-                <h1 className="text-[24px] leading-snug font-bold">{title}</h1>
+                {breadcrumbs && breadcrumbs.length > 0 ? (
+                  <Breadcrumb>
+                    <BreadcrumbList>
+                      {breadcrumbs.flatMap((crumb, index) => [
+                        ...(index > 0
+                          ? [<BreadcrumbSeparator key={`sep-${index}`} />]
+                          : []),
+                        <BreadcrumbItem key={`${crumb.label}-${index}`}>
+                          {crumb.href ? (
+                            <BreadcrumbLink href={crumb.href}>
+                              {crumb.label}
+                            </BreadcrumbLink>
+                          ) : index === breadcrumbs.length - 1 ? (
+                            <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                          ) : (
+                            <span>{crumb.label}</span>
+                          )}
+                        </BreadcrumbItem>,
+                      ])}
+                    </BreadcrumbList>
+                  </Breadcrumb>
+                ) : null}
+                <div className="flex items-center gap-2">
+                  <h1 className="text-[24px] leading-snug font-bold">{title}</h1>
+                  {help ? <HelpTip label={title}>{help}</HelpTip> : null}
+                </div>
                 {description ? (
                   <p className="max-w-4xl text-[13px] leading-normal text-text-secondary">
                     {description}

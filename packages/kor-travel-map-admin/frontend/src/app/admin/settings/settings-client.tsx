@@ -187,7 +187,6 @@ export function AdminSettingsClient() {
     <AdminShell
       title="설정"
       description="관리자 로그인 감사 기록과 VWorld 호환 public API key를 관리합니다."
-      section="관리"
       actions={
         <Button type="button" variant="outline" onClick={refresh}>
           <RefreshCwIcon data-icon="inline-start" />
@@ -199,7 +198,7 @@ export function AdminSettingsClient() {
         <section className="space-y-4 rounded-lg border border-surface-muted bg-card p-5">
           <div className="flex items-center gap-2">
             <KeyRoundIcon className="size-4 text-brand" />
-            <h2 className="text-[16px] font-semibold">Public API keys</h2>
+            <h2 className="text-[16px] font-semibold">공개 API 키</h2>
           </div>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <Input
@@ -249,7 +248,7 @@ export function AdminSettingsClient() {
         <section className="space-y-4 rounded-lg border border-surface-muted bg-card p-5">
           <div className="flex items-center gap-2">
             <ShieldCheckIcon className="size-4 text-brand" />
-            <h2 className="text-[16px] font-semibold">Login audit</h2>
+            <h2 className="text-[16px] font-semibold">로그인 감사</h2>
           </div>
           {authEvents.isError ? (
             <Alert variant="destructive">

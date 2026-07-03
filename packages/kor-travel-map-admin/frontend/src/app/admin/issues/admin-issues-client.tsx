@@ -25,6 +25,7 @@ import {
   type AdminIssueStatus,
 } from "@/api/issues";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -195,10 +196,10 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           {issue?.feature_id ? (
             <Link
               className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-              href="/features"
+              href={`/features/${encodeURIComponent(issue.feature_id)}`}
             >
               <MapIcon data-icon="inline-start" />
-              지도
+              Feature 상세
             </Link>
           ) : null}
         </div>
@@ -224,7 +225,11 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
               <dd>{issue.dataset_key ?? "-"}</dd>
               <dt className="text-muted-foreground">feature</dt>
               <dd className="break-all font-mono">
-                {issue.feature_id ?? "-"}
+                {issue.feature_id ? (
+                  <EntityLink id={issue.feature_id} kind="feature" />
+                ) : (
+                  "-"
+                )}
               </dd>
               <dt className="text-muted-foreground">source</dt>
               <dd className="break-all font-mono">
@@ -379,14 +384,35 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   );
 }
 
-export function AdminIssuesClient() {
+function parseInitialStatus(
+  value: string | undefined,
+): AdminIssueStatus | "all" {
+  return value && (ISSUE_STATUSES as string[]).includes(value)
+    ? (value as AdminIssueStatus | "all")
+    : "open";
+}
+
+export function AdminIssuesClient({
+  initialFeatureId,
+  initialProvider,
+  initialDatasetKey,
+  initialStatus,
+}: {
+  initialFeatureId?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialStatus?: string;
+} = {}) {
   const [q, setQ] = useState("");
   const deferredQ = useDeferredValue(q.trim());
-  const [status, setStatus] = useState<AdminIssueStatus | "all">("open");
+  const [status, setStatus] = useState<AdminIssueStatus | "all">(() =>
+    parseInitialStatus(initialStatus),
+  );
   const [severity, setSeverity] = useState<AdminIssueSeverity | "all">("all");
   const [issueType, setIssueType] = useState("");
-  const [provider, setProvider] = useState("");
-  const [datasetKey, setDatasetKey] = useState("");
+  const [provider, setProvider] = useState(initialProvider ?? "");
+  const [datasetKey, setDatasetKey] = useState(initialDatasetKey ?? "");
+  const [featureId, setFeatureId] = useState(initialFeatureId ?? "");
   const [bbox, setBbox] = useState("");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -401,6 +427,7 @@ export function AdminIssuesClient() {
       provider: provider.trim().length > 0 ? provider.trim() : undefined,
       dataset_key:
         datasetKey.trim().length > 0 ? datasetKey.trim() : undefined,
+      feature_id: featureId.trim().length > 0 ? featureId.trim() : undefined,
       ...(bbox.trim().length > 0 ? parseBbox(bbox) : {}),
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
@@ -411,6 +438,7 @@ export function AdminIssuesClient() {
       cursor,
       datasetKey,
       deferredQ,
+      featureId,
       issueType,
       pageSize,
       provider,
@@ -503,11 +531,18 @@ export function AdminIssuesClient() {
         id: "feature",
         header: "feature",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {linkedFeatureLabel(row.original)}
-          </span>
-        ),
+        cell: ({ row }) =>
+          row.original.feature_id ? (
+            <EntityLink
+              className="font-mono text-xs"
+              id={row.original.feature_id}
+              kind="feature"
+            >
+              {linkedFeatureLabel(row.original)}
+            </EntityLink>
+          ) : (
+            <span className="font-mono text-xs">-</span>
+          ),
       },
       {
         accessorKey: "detected_at",
@@ -576,7 +611,6 @@ export function AdminIssuesClient() {
         </Button>
       }
       description="주소/정합성 이슈 목록, 상세 payload, resolve/ignore/reopen/manual override를 처리합니다."
-      section="관리"
       title="이슈"
     >
       <div className="flex flex-col gap-4">
@@ -657,6 +691,7 @@ export function AdminIssuesClient() {
                 setIssueType("");
                 setProvider("");
                 setDatasetKey("");
+                setFeatureId("");
                 setBbox("");
                 resetCursor();
               }}
@@ -689,6 +724,16 @@ export function AdminIssuesClient() {
               value={datasetKey}
               onChange={(event) => {
                 setDatasetKey(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="issue feature id"
+              className="font-mono"
+              placeholder="feature_id"
+              value={featureId}
+              onChange={(event) => {
+                setFeatureId(event.target.value);
                 resetCursor();
               }}
             />

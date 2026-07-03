@@ -11,6 +11,7 @@ import {
   useOpsMetrics,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -63,9 +64,13 @@ export function ConsistencyClient() {
         header: "배치",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
+          <EntityLink
+            className="text-xs"
+            id={row.original.batch_id}
+            kind="loadBatch"
+          >
             {shortId(row.original.batch_id)}
-          </span>
+          </EntityLink>
         ),
       },
       {
@@ -108,7 +113,18 @@ export function ConsistencyClient() {
       {
         accessorKey: "provider",
         header: "provider",
-        cell: ({ row }) => row.original.provider ?? "-",
+        cell: ({ row }) =>
+          row.original.provider ? (
+            <EntityLink
+              id=""
+              kind="issue"
+              params={{ provider: row.original.provider }}
+            >
+              {row.original.provider}
+            </EntityLink>
+          ) : (
+            "-"
+          ),
       },
       {
         accessorKey: "message",
@@ -140,8 +156,7 @@ export function ConsistencyClient() {
         </Button>
       }
       description="consistency report와 data integrity issue queue를 조회합니다."
-      section="Ops"
-      title="Consistency"
+      title="정합성 점검"
     >
       <div className="flex flex-col gap-4">
         {(metrics.isError || reports.isError || issues.isError) && (
