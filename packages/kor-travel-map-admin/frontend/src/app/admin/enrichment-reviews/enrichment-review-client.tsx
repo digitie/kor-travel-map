@@ -20,14 +20,23 @@ import {
   useEnrichmentReviews,
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import {
   MultiFilterCombobox,
   uniqueSorted,
 } from "@/components/multi-filter-combobox";
+import { OffsetPager } from "@/components/pagination-bar";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
@@ -115,10 +124,6 @@ function formatPeriod(
   return `${left} ~ ${right}`;
 }
 
-function formatCount(value: number | null | undefined): string {
-  return typeof value === "number" ? value.toLocaleString("ko-KR") : "-";
-}
-
 type EnrichmentReviewDetail = EnrichmentReviewDetailResponse["data"];
 type EnrichmentDetailSource = EnrichmentReviewDetail["default_detail_source"];
 
@@ -172,24 +177,24 @@ function EnrichmentDetailDialog({
     typeof source?.raw_longitude === "number" &&
     typeof source.raw_latitude === "number";
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/45 p-4">
-      <div
-        aria-label="enrichment review detail"
-        aria-modal="true"
-        className="w-full max-w-6xl rounded-lg border bg-background shadow-xl"
-        role="dialog"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent aria-label="enrichment review detail" className="max-w-6xl">
+        <DialogHeader>
           <div>
-            <h2 className="text-lg font-semibold">보강 상세 비교</h2>
-            <div className="text-sm text-muted-foreground">
+            <DialogTitle>보강 상세 비교</DialogTitle>
+            <DialogDescription>
               {detail ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}` : "loading"}
-            </div>
+            </DialogDescription>
           </div>
           <Button size="sm" type="button" variant="ghost" onClick={onClose}>
             닫기
           </Button>
-        </div>
+        </DialogHeader>
         <div className="space-y-4 p-4">
           {isLoading ? (
             <div className="text-sm text-muted-foreground">불러오는 중</div>
@@ -297,7 +302,12 @@ function EnrichmentDetailDialog({
                       {target.name}
                     </h3>
                     <div className="break-all font-mono text-xs text-muted-foreground">
-                      {target.feature_id}
+                      <EntityLink
+                        className="text-xs"
+                        id={target.feature_id}
+                        kind="feature"
+                        newTab
+                      />
                     </div>
                   </div>
                   <dl className="grid gap-3 sm:grid-cols-2">
@@ -372,8 +382,8 @@ function EnrichmentDetailDialog({
             </>
           ) : null}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -444,26 +454,13 @@ export function EnrichmentReviewClient() {
     setStatus(value);
     resetPage();
   };
-  const goFirst = () => {
-    resetPage();
-  };
-  const goLast = () => {
-    if (totalPages !== null) {
-      setPageIndex(totalPages);
-      setDetailReviewId(null);
-      setSelectedDetailSource(null);
-    }
-  };
-  const goNext = () => {
-    if (!hasNextPage) return;
-    setPageIndex((current) =>
-      totalPages === null ? current + 1 : Math.min(totalPages, current + 1),
-    );
-    setDetailReviewId(null);
-    setSelectedDetailSource(null);
-  };
-  const goPrev = () => {
-    setPageIndex((current) => Math.max(1, current - 1));
+  // 페이지 이동 시 상세/소스 선택을 함께 초기화한다(기존 go* 동작 유지).
+  const goToPage = (nextPage: number) => {
+    const clamped =
+      totalPages === null
+        ? Math.max(1, nextPage)
+        : Math.min(Math.max(1, nextPage), totalPages);
+    setPageIndex(clamped);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
@@ -490,57 +487,18 @@ export function EnrichmentReviewClient() {
   };
 
   const renderPagination = (placement: "top" | "bottom") => (
-    <nav
-      aria-label={`enrichment pagination ${placement}`}
-      className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <span className="text-sm text-muted-foreground">
-        페이지 {pageIndex} / {totalPages ?? "-"} · 총 {formatCount(totalItems)}건
-        · 현재 {formatCount(items.length)}건
-      </span>
-      <div className="flex flex-wrap gap-1">
-        <Button
-          aria-label="첫 페이지"
-          disabled={!hasPreviousPage || reviews.isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={goFirst}
-        >
-          첫 페이지
-        </Button>
-        <Button
-          aria-label="이전 페이지"
-          disabled={!hasPreviousPage || reviews.isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={goPrev}
-        >
-          이전
-        </Button>
-        <Button
-          aria-label="다음 페이지"
-          disabled={!hasNextPage || reviews.isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={goNext}
-        >
-          다음
-        </Button>
-        <Button
-          aria-label="마지막 페이지"
-          disabled={totalPages === null || !hasNextPage || reviews.isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={goLast}
-        >
-          마지막 페이지
-        </Button>
-      </div>
-    </nav>
+    <OffsetPager
+      currentCount={items.length}
+      hasNextPage={hasNextPage}
+      hasPreviousPage={hasPreviousPage}
+      isFetching={reviews.isFetching}
+      navAriaPrefix="enrichment"
+      page={pageIndex}
+      placement={placement}
+      totalCount={totalItems}
+      totalPages={totalPages}
+      onPageChange={goToPage}
+    />
   );
   type ReviewRow = NonNullable<typeof reviews.data>["data"]["items"][number];
   const columns = useMemo<ColumnDef<ReviewRow, unknown>[]>(
@@ -586,7 +544,17 @@ export function EnrichmentReviewClient() {
             <div className="font-medium">{row.original.target_name}</div>
             <div className="text-xs text-muted-foreground">
               {row.original.target_category ?? "-"} ·{" "}
-              {shortId(row.original.target_feature_id)}
+              {/* 행 클릭(상세 열기)과 분리 — 링크 클릭은 전파를 막는다. */}
+              <span onClick={(event) => event.stopPropagation()}>
+                <EntityLink
+                  className="text-xs"
+                  id={row.original.target_feature_id}
+                  kind="feature"
+                  newTab
+                >
+                  {shortId(row.original.target_feature_id)}
+                </EntityLink>
+              </span>
             </div>
             <div className="text-xs text-muted-foreground">
               {formatPeriod(
