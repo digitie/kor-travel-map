@@ -92,6 +92,9 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
     )
     assert [p.product_key for p in card.current] == ["gasoline"]
     assert {p.product_key for p in card.history} == {"gasoline", "diesel"}
+    # is_stale 기본 임계는 지평선(4일)에서 파생 — 지평선 안 관측이 있으면 fresh.
+    # (로테이션 주기 안에서 정상 갱신 중인 주유소가 stale로 보이지 않게.)
+    assert card.is_stale is False
 
     # 지평선 off(None): 옛 관측도 current로 복귀.
     card_all = await price_repo.build_price_card(
@@ -106,6 +109,40 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
         asof=now - timedelta(days=9),
     )
     assert [p.product_key for p in card_asof.current] == ["diesel"]
+
+
+async def test_stale_only_feature_is_stale_and_current_empty(
+    migrated_session: AsyncSession,
+) -> None:
+    """지평선 밖 관측만 있으면 current가 비고 is_stale=True — 두 신호가 일치한다."""
+    now = datetime.now(tz=_KST)
+
+    class _StaleArea(_RestArea):
+        name = "묵은가격휴게소"
+        lat = 36.30
+        lon = 127.10
+
+    bundles = await rest_areas_to_bundles([_StaleArea()], fetched_at=now)
+    await feature_repo.load_bundles(migrated_session, bundles)
+    feature_id = bundles[0].feature.feature_id
+    await price_repo.load_price_values(
+        migrated_session,
+        [
+            _price_value(
+                feature_id,
+                product_key="gasoline",
+                observed_at=now - timedelta(days=10),
+                price=1650,
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    card = await price_repo.build_price_card(migrated_session, feature_id=feature_id)
+    assert card.current == []
+    assert card.is_stale is True
+    # 이력은 보존된다.
+    assert [p.product_key for p in card.history] == ["gasoline"]
 
 
 async def test_stale_price_excluded_from_bbox_price_summary(

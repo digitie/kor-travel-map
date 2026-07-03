@@ -38,8 +38,17 @@ __all__ = [
     "load_price_values",
 ]
 
-DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = 18 * 60 * 60
-"""하루 2회 price ETL 기준 freshness 여유값(12h 주기 + 지연)."""
+DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = (
+    DEFAULT_PRICE_STALE_HIDE_DAYS * 24 * 60 * 60
+)
+"""price card ``is_stale`` 기본 임계 — 현재가 표시 지평선과 동일 값에서 파생.
+
+과거엔 18h(일 1회 ETL 가정)였지만, OpiNet 시군 윈도 로테이션(전국 ≈4일 1주기)
+아래에서는 정상 갱신 중인 주유소도 최장 ~4일 관측 공백이 생긴다 — 18h 기준이면
+대부분이 항상 stale로 표시된다(사용자 가시 증상). 이제 ``is_stale``은 "현재가
+지평선(``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS``, 기본 4일) 안에 관측이 없다"를
+뜻하며, 지평선이 ``current``를 비우는 조건과 일치한다(단일 노브, drift 없음).
+호출별 ``freshness_seconds`` override는 그대로 유지."""
 
 
 @dataclass(frozen=True)
