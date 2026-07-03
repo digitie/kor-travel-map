@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Collection, Iterable, Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +62,10 @@ __all__ = [
     "soft_delete_features_not_in_snapshot",
     "inactivate_features_by_source_entity_ids",
     "inactivate_geometryless_area_features_by_source",
+    "NoticeReconcileResult",
+    "close_notice_features",
+    "supersede_stale_notice_features",
+    "purge_expired_notices",
     "get_feature_row",
     "get_feature_rows_by_ids",
     "list_active_place_coords",
@@ -352,12 +356,45 @@ def _notice_lineage_sql(alias: str) -> str:
         ),
         {alias}.source_entity_id
       )
+      WHEN {alias}.provider = 'python-kma-api'
+       AND {alias}.dataset_key = 'kma_weather_alerts'
+       AND {alias}.source_entity_type = 'weather_alert'
+      THEN COALESCE(
+        NULLIF(
+          concat_ws(
+            '::',
+            NULLIF(btrim({alias}.raw_data->>'region_code'), ''),
+            NULLIF(
+              btrim(
+                COALESCE(
+                  {alias}.raw_data->>'phenomenon',
+                  {alias}.raw_data->>'alert_type'
+                )
+              ),
+              ''
+            )
+          ),
+          ''
+        ),
+        {alias}.source_entity_id
+      )
       ELSE {alias}.source_entity_id
     END
     """
 
 
-_LATEST_NOTICE_BBOX_FILTER_SQL: Final[str] = f"""
+# 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
+# (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
+# valid_end_time이 이 필터로 즉시 반영된다.
+_ENDED_NOTICE_HIDDEN_SQL: Final[str] = """
+  AND (
+    f.kind <> 'notice'
+    OR (f.detail ->> 'valid_end_time') IS NULL
+    OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+  )
+"""
+
+_LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
   AND (
     f.kind <> 'notice'
     OR NOT EXISTS (
@@ -409,6 +446,9 @@ _LATEST_NOTICE_BBOX_FILTER_SQL: Final[str] = f"""
     )
   )
 """
+
+# 지도 bbox용 결합 필터 — 계보별 latest만 + 종료 notice 숨김(#632).
+_LATEST_NOTICE_BBOX_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
 
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
@@ -762,20 +802,24 @@ async def cluster_features_in_bbox(
     if min_lon > max_lon or min_lat > max_lat:
         raise ValueError("invalid bbox")
     rows = (
-        await session.execute(
-            text(_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
-            {
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-                "kinds": _normalized_filter(kinds),
-                "categories": _normalized_filter(categories),
-                "providers": _normalized_filter(providers),
-                "limit": limit,
-            },
+        (
+            await session.execute(
+                text(_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
+                {
+                    "min_lon": min_lon,
+                    "min_lat": min_lat,
+                    "max_lon": max_lon,
+                    "max_lat": max_lat,
+                    "kinds": _normalized_filter(kinds),
+                    "categories": _normalized_filter(categories),
+                    "providers": _normalized_filter(providers),
+                    "limit": limit,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [
         {
             "cluster_key": str(row["cluster_key"]),
@@ -827,6 +871,11 @@ WITH candidates AS (
         CAST(:categories AS text[]) IS NULL
         OR category = ANY(CAST(:categories AS text[]))
       )
+      AND (
+        kind <> 'notice'
+        OR (detail ->> 'valid_end_time') IS NULL
+        OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
+      )
 )
 """
 
@@ -845,6 +894,11 @@ WITH name_candidates AS MATERIALIZED (
         x_extension.similarity(name, CAST(:q AS text)) AS score
     FROM feature.features
     WHERE name OPERATOR(x_extension.%) CAST(:q AS text)
+      AND (
+        kind <> 'notice'
+        OR (detail ->> 'valid_end_time') IS NULL
+        OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
+      )
 ),
 candidates AS (
     SELECT
@@ -1254,15 +1308,9 @@ class FeatureLoadResult:
             bundles_total=self.bundles_total + other.bundles_total,
             features_inserted=self.features_inserted + other.features_inserted,
             features_updated=self.features_updated + other.features_updated,
-            source_records_inserted=(
-                self.source_records_inserted + other.source_records_inserted
-            ),
-            source_links_inserted=(
-                self.source_links_inserted + other.source_links_inserted
-            ),
-            source_links_updated=(
-                self.source_links_updated + other.source_links_updated
-            ),
+            source_records_inserted=(self.source_records_inserted + other.source_records_inserted),
+            source_links_inserted=(self.source_links_inserted + other.source_links_inserted),
+            source_links_updated=(self.source_links_updated + other.source_links_updated),
         )
 
 
@@ -1303,15 +1351,9 @@ class EnrichmentLoadResult:
     def merge(self, other: EnrichmentLoadResult) -> EnrichmentLoadResult:
         return EnrichmentLoadResult(
             enrichments_total=self.enrichments_total + other.enrichments_total,
-            source_records_inserted=(
-                self.source_records_inserted + other.source_records_inserted
-            ),
-            source_links_inserted=(
-                self.source_links_inserted + other.source_links_inserted
-            ),
-            source_links_updated=(
-                self.source_links_updated + other.source_links_updated
-            ),
+            source_records_inserted=(self.source_records_inserted + other.source_records_inserted),
+            source_links_inserted=(self.source_links_inserted + other.source_links_inserted),
+            source_links_updated=(self.source_links_updated + other.source_links_updated),
         )
 
 
@@ -1416,9 +1458,7 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
         "marker_color": feature.marker_color,
         "parent_feature_id": feature.parent_feature_id,
         "sibling_group_id": feature.sibling_group_id,
-        "detail": (
-            feature.detail.model_dump_json() if feature.detail is not None else "{}"
-        ),
+        "detail": (feature.detail.model_dump_json() if feature.detail is not None else "{}"),
         "raw_refs": _dump_raw_refs(feature),
         "status": feature.status.value,
         "created_at": feature.created_at,
@@ -1496,9 +1536,7 @@ async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> b
     payload_hash가 UNIQUE 구성요소라 payload 변경은 새 row로 이력을 남긴다.
     동일 key 재적재는 raw payload를 갱신하지 않고 ``last_seen_at``만 갱신한다.
     """
-    result = await session.execute(
-        text(_UPSERT_SOURCE_RECORD_SQL), _source_record_params(record)
-    )
+    result = await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), _source_record_params(record))
     return bool(result.scalar_one())
 
 
@@ -1512,9 +1550,7 @@ async def _feature_exists(session: AsyncSession, feature_id: str) -> bool:
 
 async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
     """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``."""
-    result = await session.execute(
-        text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link)
-    )
+    result = await session.execute(text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link))
     return bool(result.scalar_one())
 
 
@@ -1531,9 +1567,7 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     feature_updated = False
     feature_missing = False
     if not record_inserted:
-        feature_missing = not await _feature_exists(
-            session, bundle.feature.feature_id
-        )
+        feature_missing = not await _feature_exists(session, bundle.feature.feature_id)
     if record_inserted or feature_missing:
         feature_inserted = await upsert_feature(session, bundle.feature)
         feature_updated = not feature_inserted
@@ -1672,14 +1706,218 @@ async def inactivate_geometryless_area_features_by_source(
     return len(result.fetchall())
 
 
+# ── notice 라이프사이클 (#632 — 사건 단위 identity + 중복 정리) ─────────────
+
+# 특보 해제 등 "닫기" — 열린 notice의 detail.valid_end_time을 채운다.
+# 재발표로 이미 더 새 valid_start를 가진 feature는 건드리지 않는다(해제가
+# 재발표보다 과거인 경우 — 배치 내 해제→재발표 순서 역전 방어).
+# :closed_at(timestamptz 비교)와 :closed_at_iso(jsonb 텍스트)는 같은 값의 두
+# 표현 — asyncpg가 한 바인드를 두 타입으로 추론하지 못해 분리한다.
+_CLOSE_NOTICE_FEATURE_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET detail = jsonb_set(
+        f.detail, '{valid_end_time}', to_jsonb(CAST(:closed_at_iso AS text)), true
+    ),
+    updated_at = now()
+WHERE f.feature_id = :feature_id
+  AND f.kind = 'notice'
+  AND f.deleted_at IS NULL
+  AND (f.detail ->> 'valid_end_time') IS NULL
+  AND (
+    (f.detail ->> 'valid_start_time') IS NULL
+    OR CAST(f.detail ->> 'valid_start_time' AS timestamptz)
+       <= CAST(:closed_at AS timestamptz)
+  )
+RETURNING f.feature_id
+"""
+
+
+def _supersede_stale_notice_sql(close_missing: bool) -> str:
+    """notice 정리 SQL 2종 — 계보별 latest 아닌 feature soft-delete(+계보 소멸 닫기).
+
+    ``_LATEST_NOTICE_BBOX_FILTER_SQL``(read 필터)과 동일 계보/최신 판정을
+    write 시점에 set 기반으로 적용한다. ``close_missing=True``면 soft-delete
+    대신, 현재 feed에 없는 계보의 latest feature에 ``valid_end_time``을 채운다.
+    """
+    lineage_cte = f"""
+WITH lineage AS (
+    SELECT
+        f.feature_id,
+        {_notice_lineage_sql("sr")} AS lineage_key,
+        max(
+            COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at)
+        ) AS seen_at,
+        max(sr.source_record_key) AS tiebreak
+    FROM feature.features AS f
+    JOIN provider_sync.source_links AS sl
+      ON sl.feature_id = f.feature_id
+     AND sl.is_primary_source
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = sl.source_record_key
+    WHERE f.kind = 'notice'
+      AND f.deleted_at IS NULL
+      AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+      AND sr.provider = :provider
+      AND sr.dataset_key = :dataset_key
+      AND sr.source_entity_type = :source_entity_type
+    GROUP BY f.feature_id, {_notice_lineage_sql("sr")}
+),
+ranked AS (
+    SELECT
+        feature_id,
+        lineage_key,
+        row_number() OVER (
+            PARTITION BY lineage_key
+            ORDER BY seen_at DESC, tiebreak DESC
+        ) AS rn
+    FROM lineage
+)
+"""
+    if close_missing:
+        return (
+            lineage_cte
+            + """
+UPDATE feature.features AS f
+SET detail = jsonb_set(
+        f.detail, '{valid_end_time}', to_jsonb(CAST(:closed_at AS text)), true
+    ),
+    updated_at = now()
+FROM ranked AS r
+WHERE f.feature_id = r.feature_id
+  AND r.rn = 1
+  AND NOT (r.lineage_key = ANY(CAST(:active_keys AS text[])))
+  AND f.deleted_at IS NULL
+  AND (f.detail ->> 'valid_end_time') IS NULL
+RETURNING f.feature_id
+"""
+        )
+    return (
+        lineage_cte
+        + """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+FROM ranked AS r
+WHERE f.feature_id = r.feature_id
+  AND r.rn > 1
+  AND f.deleted_at IS NULL
+RETURNING f.feature_id
+"""
+    )
+
+
+@dataclass(frozen=True)
+class NoticeReconcileResult:
+    """notice 정리 결과 — ``superseded``(중복 soft-delete) / ``closed``(계보 소멸 닫기)."""
+
+    superseded: int = 0
+    closed: int = 0
+
+
+async def close_notice_features(
+    session: AsyncSession,
+    *,
+    closures: Mapping[str, datetime],
+) -> int:
+    """열린 notice feature의 ``valid_end_time``을 채운다 (특보 해제 등, #632).
+
+    ``closures``는 ``feature_id → 닫기 시각``. 이미 닫혔거나 soft-delete됐거나,
+    닫기 시각보다 **나중에 재발표**된 feature는 건드리지 않는다. 빈 매핑은
+    no-op(0). commit은 호출자 책임.
+    """
+    if not closures:
+        return 0
+    closed = 0
+    for feature_id, closed_at in sorted(closures.items()):
+        result = await session.execute(
+            text(_CLOSE_NOTICE_FEATURE_SQL),
+            {
+                "feature_id": feature_id,
+                "closed_at": closed_at,
+                "closed_at_iso": closed_at.isoformat(),
+            },
+        )
+        closed += len(result.fetchall())
+    return closed
+
+
+async def supersede_stale_notice_features(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    active_lineage_keys: Collection[str] | None = None,
+    closed_at: datetime | None = None,
+) -> NoticeReconcileResult:
+    """notice 중복/소멸 정리 — 적재 직후 호출하는 write-시점 reconciliation(#632).
+
+    1. **중복 정리**: 같은 계보(``_notice_lineage_sql``)에 feature가 2개 이상이면
+       latest(최근 확인 시각) 1개만 남기고 나머지를 soft-delete
+       (``status='inactive'`` + ``deleted_at``, ADR-017). identity 스킴 변경으로
+       재키잉된 구세대 feature가 신세대에 밀려나는 경로다.
+    2. **소멸 닫기** (``active_lineage_keys``/``closed_at`` 제공 시): 현재 feed에
+       없는 계보의 latest feature에 ``valid_end_time=closed_at``을 채운다 —
+       transient feed(KREX 실시간 돌발)에서 사라진 사건의 종료 표현.
+
+    commit은 호출자 책임.
+    """
+    result = await session.execute(
+        text(_supersede_stale_notice_sql(close_missing=False)),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+        },
+    )
+    superseded = len(result.fetchall())
+    closed = 0
+    if active_lineage_keys is not None and closed_at is not None:
+        result = await session.execute(
+            text(_supersede_stale_notice_sql(close_missing=True)),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "active_keys": sorted(active_lineage_keys),
+                "closed_at": closed_at.isoformat(),
+            },
+        )
+        closed = len(result.fetchall())
+    return NoticeReconcileResult(superseded=superseded, closed=closed)
+
+
+# 만료 notice purge (docs/etl/notice-feature-etl.md §9) — 종료일(없으면 발표일)
+# +1년 지난 notice를 soft-delete. maintenance job에서 주기 실행(#632).
+_PURGE_EXPIRED_NOTICES_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.kind = 'notice'
+  AND f.deleted_at IS NULL
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+  AND COALESCE(
+        CAST(f.detail ->> 'valid_end_time' AS timestamptz),
+        CAST(f.detail ->> 'valid_start_time' AS timestamptz)
+      ) < now() - CAST(CAST(:retention AS text) AS interval)
+RETURNING f.feature_id
+"""
+
+
+async def purge_expired_notices(session: AsyncSession, *, retention: str = "1 year") -> int:
+    """보존 기간이 지난 notice를 soft-delete한다 (§9 보관 정책, #632).
+
+    ``valid_end_time``(없으면 ``valid_start_time``) + ``retention`` 경과분.
+    commit은 호출자 책임.
+    """
+    result = await session.execute(text(_PURGE_EXPIRED_NOTICES_SQL), {"retention": retention})
+    return len(result.fetchall())
+
+
 # JSONB 컬럼 — raw ``text()`` 쿼리는 driver에 따라 str(asyncpg)로 돌려줄 수 있어
 # (typed 컬럼이 없으면 SQLAlchemy JSON 디시리얼라이저 미작동) 명시적으로 파싱한다.
 _JSONB_COLUMNS: Final[tuple[str, ...]] = ("address", "detail", "urls", "raw_refs")
 
 
-async def get_feature_row(
-    session: AsyncSession, feature_id: str
-) -> dict[str, Any] | None:
+async def get_feature_row(session: AsyncSession, feature_id: str) -> dict[str, Any] | None:
     """``feature.features`` 단건 조회 (raw row dict). 없으면 ``None``.
 
     좌표는 ``lon``/``lat`` (4326)으로 분해해서 반환. ``coord_5179_srid``로
@@ -1690,9 +1928,7 @@ async def get_feature_row(
     """
     import json
 
-    result = await session.execute(
-        text(_GET_FEATURE_SQL), {"feature_id": feature_id}
-    )
+    result = await session.execute(text(_GET_FEATURE_SQL), {"feature_id": feature_id})
     row = result.mappings().first()
     if row is None:
         return None
@@ -1727,14 +1963,9 @@ async def get_feature_rows_by_ids(
     normalized = _normalized_filter(feature_ids)
     if normalized is None:
         return {}
-    result = await session.execute(
-        text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized}
-    )
+    result = await session.execute(text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized})
     rows = result.mappings().all()
-    return {
-        str(row["feature_id"]): _deserialize_feature_row(row)
-        for row in rows
-    }
+    return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
 
 
 _LIST_ACTIVE_PLACE_COORDS_SQL: Final[str] = """
@@ -1760,9 +1991,7 @@ async def list_active_place_coords(
     feature에 weather 값을 적재한다. 좌표 3컬럼만 조회하므로 수만 행에도 가볍고,
     정렬은 결정적(feature_id).
     """
-    rows = (
-        await session.execute(text(_LIST_ACTIVE_PLACE_COORDS_SQL))
-    ).all()
+    rows = (await session.execute(text(_LIST_ACTIVE_PLACE_COORDS_SQL))).all()
     return [(str(row.feature_id), float(row.lon), float(row.lat)) for row in rows]
 
 
@@ -1901,16 +2130,20 @@ async def find_place_features_without_phone(
     import json
 
     rows = (
-        await session.execute(
-            text(_FIND_PLACE_NO_PHONE_SQL),
-            {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "source_entity_type": source_entity_type,
-                "limit": limit,
-            },
+        (
+            await session.execute(
+                text(_FIND_PLACE_NO_PHONE_SQL),
+                {
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                    "source_entity_type": source_entity_type,
+                    "limit": limit,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     out: list[dict[str, Any]] = []
     for row in rows:
         data = dict(row)
@@ -1921,9 +2154,7 @@ async def find_place_features_without_phone(
     return out
 
 
-async def set_feature_phones(
-    session: AsyncSession, feature_id: str, phones: list[str]
-) -> bool:
+async def set_feature_phones(session: AsyncSession, feature_id: str, phones: list[str]) -> bool:
     """feature의 ``detail.phones`` 배열을 통째로 교체. 갱신되면 ``True``.
 
     phone enrichment가 정규화·dedup·max3을 적용한 최종 배열을 넘긴다. commit은
@@ -1963,25 +2194,29 @@ async def features_in_bbox(
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     """
     rows = (
-        await session.execute(
-            text(
-                _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
-                if include_geometry
-                else _FEATURES_IN_BBOX_SQL
-            ),
-            {
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-                "kinds": kinds,
-                "categories": _normalized_filter(categories),
-                "providers": _normalized_filter(providers),
-                "limit": limit,
-                "cursor_feature_id": _bbox_cursor_feature_id(cursor),
-            },
+        (
+            await session.execute(
+                text(
+                    _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
+                    if include_geometry
+                    else _FEATURES_IN_BBOX_SQL
+                ),
+                {
+                    "min_lon": min_lon,
+                    "min_lat": min_lat,
+                    "max_lon": max_lon,
+                    "max_lat": max_lat,
+                    "kinds": kinds,
+                    "categories": _normalized_filter(categories),
+                    "providers": _normalized_filter(providers),
+                    "limit": limit,
+                    "cursor_feature_id": _bbox_cursor_feature_id(cursor),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(r) for r in rows]
 
 
@@ -2031,15 +2266,19 @@ async def features_contained_in_area(
     적용한다. ``ST_Transform``을 공간 술어에 넣지 않는다.
     """
     rows = (
-        await session.execute(
-            text(_FEATURES_CONTAINED_IN_AREA_SQL),
-            {
-                "feature_id": feature_id,
-                "kinds": _normalized_filter(kinds),
-                "limit": limit,
-            },
+        (
+            await session.execute(
+                text(_FEATURES_CONTAINED_IN_AREA_SQL),
+                {
+                    "feature_id": feature_id,
+                    "kinds": _normalized_filter(kinds),
+                    "limit": limit,
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
@@ -2110,11 +2349,7 @@ def _encode_search_cursor(item: FeatureSearchRow, *, q_enabled: bool) -> str:
         "feature_id": item.feature_id,
     }
     if q_enabled:
-        payload["score"] = (
-            item.score_cursor
-            if item.score_cursor is not None
-            else str(item.score)
-        )
+        payload["score"] = item.score_cursor if item.score_cursor is not None else str(item.score)
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -2175,27 +2410,29 @@ async def search_features(
 
     q_enabled = normalized_q is not None
     if q_enabled:
-        await session.execute(
-            text("SET LOCAL pg_trgm.similarity_threshold = 0.2")
-        )
+        await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
     effective_limit = min(limit, 200)
     rows = (
-        await session.execute(
-            text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
-            {
-                "q": normalized_q,
-                "bbox_enabled": bbox is not None,
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-                "kinds": _normalized_filter(kinds),
-                "categories": _normalized_filter(categories),
-                "limit_plus_one": effective_limit + 1,
-                **_search_cursor_params(cursor, q_enabled=q_enabled),
-            },
+        (
+            await session.execute(
+                text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
+                {
+                    "q": normalized_q,
+                    "bbox_enabled": bbox is not None,
+                    "min_lon": min_lon,
+                    "min_lat": min_lat,
+                    "max_lon": max_lon,
+                    "max_lat": max_lat,
+                    "kinds": _normalized_filter(kinds),
+                    "categories": _normalized_filter(categories),
+                    "limit_plus_one": effective_limit + 1,
+                    **_search_cursor_params(cursor, q_enabled=q_enabled),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     count_result = await session.execute(
         text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
         {
@@ -2342,20 +2579,24 @@ async def features_nearby_poi_cache_target(
 
     effective_limit = min(limit, 500)
     rows = (
-        await session.execute(
-            text(_NEARBY_SQL_BY_SORT[sort]),
-            {
-                "target_id": target_id,
-                "radius_km": radius_km,
-                "kinds": _normalized_filter(kinds),
-                "categories": _normalized_filter(categories),
-                "statuses": _normalized_filter(statuses),
-                "providers": _normalized_filter(providers),
-                "limit_plus_one": effective_limit + 1,
-                **_nearby_cursor_params(cursor, sort=sort),
-            },
+        (
+            await session.execute(
+                text(_NEARBY_SQL_BY_SORT[sort]),
+                {
+                    "target_id": target_id,
+                    "radius_km": radius_km,
+                    "kinds": _normalized_filter(kinds),
+                    "categories": _normalized_filter(categories),
+                    "statuses": _normalized_filter(statuses),
+                    "providers": _normalized_filter(providers),
+                    "limit_plus_one": effective_limit + 1,
+                    **_nearby_cursor_params(cursor, sort=sort),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     items = tuple(_nearby_row(row) for row in rows[:effective_limit])
     next_cursor = (
         _encode_nearby_cursor(items[-1], sort=sort)
@@ -2396,21 +2637,25 @@ async def features_nearby(
 
     effective_limit = min(limit, 500)
     rows = (
-        await session.execute(
-            text(_NEARBY_COORD_SQL_BY_SORT[sort]),
-            {
-                "lon": lon,
-                "lat": lat,
-                "radius_m": radius_m,
-                "kinds": _normalized_filter(kinds),
-                "categories": _normalized_filter(categories),
-                "statuses": _normalized_filter(statuses),
-                "providers": _normalized_filter(providers),
-                "limit_plus_one": effective_limit + 1,
-                **_nearby_cursor_params(cursor, sort=sort),
-            },
+        (
+            await session.execute(
+                text(_NEARBY_COORD_SQL_BY_SORT[sort]),
+                {
+                    "lon": lon,
+                    "lat": lat,
+                    "radius_m": radius_m,
+                    "kinds": _normalized_filter(kinds),
+                    "categories": _normalized_filter(categories),
+                    "statuses": _normalized_filter(statuses),
+                    "providers": _normalized_filter(providers),
+                    "limit_plus_one": effective_limit + 1,
+                    **_nearby_cursor_params(cursor, sort=sort),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     items = tuple(_nearby_row(row) for row in rows[:effective_limit])
     next_cursor = (
         _encode_nearby_cursor(items[-1], sort=sort)
@@ -2440,8 +2685,6 @@ async def category_feature_counts(
     카탈로그와 교차한다.
     """
     rows = (
-        await session.execute(
-            text(_CATEGORY_FEATURE_COUNTS_SQL), {"active_only": active_only}
-        )
+        await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL), {"active_only": active_only})
     ).all()
     return {str(row[0]): int(row[1]) for row in rows}

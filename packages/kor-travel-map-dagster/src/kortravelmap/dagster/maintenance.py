@@ -42,7 +42,9 @@ __all__ = [
     "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
+    "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
+    "purge_expired_notices_op",
     "refresh_dedup_candidates_op",
     "run_consistency_check_op",
 ]
@@ -183,9 +185,7 @@ async def refresh_dedup_candidates_op(
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     config = cast(Mapping[str, object], context.op_config)
     include_auto_merge = bool(config.get("include_auto_merge", True))
-    default_limit = _int_config(
-        config.get("limit"), default=DEDUP_REFRESH_DEFAULT_LIMIT
-    )
+    default_limit = _int_config(config.get("limit"), default=DEDUP_REFRESH_DEFAULT_LIMIT)
 
     pairs = _mapping_list(config.get("pairs"))
     sibling_scopes = _mapping_list(config.get("sibling_scopes"))
@@ -246,14 +246,44 @@ async def run_consistency_check_op(
     return metadata
 
 
+NOTICE_PURGE_DEFAULT_RETENTION: Final[str] = "1 year"
+"""만료 notice 보존 기간 — 종료일(없으면 발표일) + 본 기간 경과 시 soft-delete(§9)."""
+
+
+@op(
+    name="purge_expired_notices",
+    required_resource_keys={"kor_travel_map_client"},
+    config_schema={
+        "retention": Field(
+            str,
+            default_value=NOTICE_PURGE_DEFAULT_RETENTION,
+            description="PostgreSQL interval 문자열 (예: '1 year').",
+        ),
+    },
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, object]:
+    """보존 기간이 지난 notice feature를 soft-delete한다 (#632, §9 보관 정책)."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retention = str(context.op_config.get("retention", NOTICE_PURGE_DEFAULT_RETENTION))
+    purged = await client.purge_expired_notices(retention=retention)
+    metadata: dict[str, object] = {"purged": purged, "retention": retention}
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 @job(
     name="consistency_dedup_refresh",
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
-    description="DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장한다.",
+    description=(
+        "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고, "
+        "보존 기간이 지난 notice를 정리한다."
+    ),
 )
 def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
     run_consistency_check_op(refresh_dedup_candidates_op())
+    purge_expired_notices_op()
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [

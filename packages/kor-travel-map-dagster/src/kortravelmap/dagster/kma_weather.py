@@ -46,6 +46,7 @@ from kortravelmap.providers.kma import (
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
+    weather_alert_lift_closures,
     weather_alerts_to_notice_bundles,
 )
 
@@ -228,15 +229,11 @@ def _fetch_nowcast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaNowcastRow
     return nowcast_rows_from_snapshot(kma_client.forecast.now(nx=nx, ny=ny))
 
 
-def _fetch_ultra_short_forecast_rows(
-    kma_client: Any, nx: int, ny: int
-) -> list[KmaForecastRow]:
+def _fetch_ultra_short_forecast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaForecastRow]:
     return forecast_rows_from_items(kma_client.forecast.short(nx=nx, ny=ny))
 
 
-def _fetch_short_forecast_rows(
-    kma_client: Any, nx: int, ny: int
-) -> list[KmaForecastRow]:
+def _fetch_short_forecast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaForecastRow]:
     return forecast_rows_from_items(kma_client.forecast.vilage(nx=nx, ny=ny))
 
 
@@ -372,9 +369,7 @@ async def _run_kma_weather_asset(
     max_grids = int(
         cast(
             "int",
-            await _resource_value(
-                context, "kma_weather_max_grids_per_run", default=300
-            ),
+            await _resource_value(context, "kma_weather_max_grids_per_run", default=300),
         )
     )
 
@@ -652,9 +647,7 @@ def mid_land_rows_from_items(items: Sequence[Any]) -> list[KmaMidLandRow]:
             for period in ("Am", "Pm"):
                 suffix = period.lower()
                 kwargs[f"wf_{day}_{suffix}"] = _str_or_none(raw.get(f"wf{day}{period}"))
-                kwargs[f"rn_st_{day}_{suffix}"] = _int_or_none(
-                    raw.get(f"rnSt{day}{period}")
-                )
+                kwargs[f"rn_st_{day}_{suffix}"] = _int_or_none(raw.get(f"rnSt{day}{period}"))
         for day in (8, 9, 10):
             kwargs[f"wf_{day}"] = _str_or_none(raw.get(f"wf{day}"))
             kwargs[f"rn_st_{day}"] = _int_or_none(raw.get(f"rnSt{day}"))
@@ -774,9 +767,7 @@ async def run_feature_weather_kma_mid_forecast(
                 cast(Any, datagokr_client).mid_land_forecast(reg_id=spec.land_reg_id)
             )
             temp_rows: Sequence[Any] = mid_temp_rows_from_items(
-                cast(Any, datagokr_client).mid_temperature_forecast(
-                    reg_id=spec.ta_reg_id
-                )
+                cast(Any, datagokr_client).mid_temperature_forecast(reg_id=spec.ta_reg_id)
             )
             regions_fetched += 1
             # 복제 제거(메인 격자 루프와 동일 원칙): region 응답을 대표 feature
@@ -956,13 +947,29 @@ async def run_feature_notice_kma_weather_alerts(
             len(records),
         )
     fetched_at = await _fetched_at(context)
+    # 발표 → 사건 단위 upsert bundle / 해제 → 열린 feature 닫기 지시(#632).
     bundles = weather_alerts_to_notice_bundles(rows, fetched_at=fetched_at)
-    return await _load(
+    result = await _load(
         context,
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
         bundles=bundles,
     )
+    closures = weather_alert_lift_closures(rows)
+    if closures:
+        client = cast(
+            "AsyncKorTravelMapClient",
+            _resource_object(context, "kor_travel_map_client"),
+        )
+        closed = await client.close_notice_features(
+            closures={c.feature_id: c.closed_at for c in closures}
+        )
+        context.log.info(
+            "KMA 특보 해제 %d건 → 열린 notice %d건 닫음(valid_end_time).",
+            len(closures),
+            closed,
+        )
+    return result
 
 
 @asset(
