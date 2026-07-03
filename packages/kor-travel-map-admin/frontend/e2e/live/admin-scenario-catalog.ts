@@ -130,7 +130,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "feature-change-requests",
     route: "/admin/features/change-requests",
-    readyHeading: "Feature 변경",
+    readyHeading: "변경 요청 작성",
     readApis: [],
     writeApis: [
       writeApi("POST", "/v1/admin/features/change-requests"),
@@ -162,7 +162,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "new-feature",
     route: "/admin/features/new",
-    readyHeading: "New feature",
+    readyHeading: "새 Feature",
     readApis: ["/v1/features/nearby"],
     writeApis: [writeApi("POST", "/v1/admin/features")],
     reflectedSurfaces: [
@@ -212,7 +212,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "issues",
     route: "/admin/issues",
-    readyHeading: "Issues",
+    readyHeading: "이슈",
     readApis: ["/v1/admin/issues", "/v1/admin/issues/{issue_id}"],
     writeApis: [writeApi("PATCH", "/v1/admin/issues/{issue_id}")],
     reflectedSurfaces: ["/features/{feature_id}", "/ops/consistency"],
@@ -220,7 +220,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "import-jobs",
     route: "/ops/import-jobs",
-    readyHeading: "Import jobs",
+    readyHeading: "적재 작업",
     readApis: ["/v1/ops/import-jobs", "/v1/ops/live"],
     writeApis: [],
     reflectedSurfaces: ["/ops/logs", "/admin/dagster"],
@@ -228,7 +228,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "import-job-detail",
     route: "/ops/import-jobs/{job_id}",
-    readyHeading: "Import job",
+    readyHeading: "적재 작업 상세",
     readApis: [
       "/v1/ops/import-jobs/{job_id}",
       "/v1/ops/import-jobs/{job_id}/events",
@@ -239,7 +239,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "providers",
     route: "/ops/providers",
-    readyHeading: "Providers",
+    readyHeading: "제공자",
     readApis: [
       "/v1/ops/providers",
       "/v1/ops/providers/{provider}",
@@ -281,7 +281,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "dedup-reviews",
     route: "/admin/features/dedup-reviews",
-    readyHeading: "Dedup review",
+    readyHeading: "중복 검토",
     readApis: ["/v1/admin/features/dedup-reviews", "/v1/admin/features/dedup-reviews/{review_id}"],
     writeApis: [writeApi("PATCH", "/v1/admin/features/dedup-reviews/{review_id}")],
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
@@ -289,7 +289,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "enrichment-reviews",
     route: "/admin/features/enrichment-reviews",
-    readyHeading: "Enrichment review",
+    readyHeading: "보강 검토",
     readApis: [
       "/v1/admin/features/enrichment-reviews",
       "/v1/admin/features/enrichment-reviews/{review_id}",
@@ -300,7 +300,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "feature-update-requests",
     route: "/admin/features/update-requests",
-    readyHeading: "Feature update requests",
+    readyHeading: "갱신 요청",
     readApis: ["/v1/admin/features/update-requests"],
     writeApis: [
       writeApi("POST", "/v1/admin/features/update-requests"),
@@ -318,7 +318,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "feature-update-request-detail",
     route: "/admin/features/update-requests/{request_id}",
-    readyHeading: "Feature update request",
+    readyHeading: "갱신 요청 상세",
     readApis: ["/v1/admin/features/update-requests/{request_id}"],
     writeApis: [
       writeApi(
@@ -335,7 +335,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "poi-cache-targets",
     route: "/admin/poi-cache-targets",
-    readyHeading: "POI cache targets",
+    readyHeading: "POI 캐시 대상",
     readApis: ["/v1/admin/poi-cache-targets", "/v1/features/nearby/by-target"],
     writeApis: [
       writeApi(
@@ -354,7 +354,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "offline-uploads",
     route: "/admin/offline-uploads",
-    readyHeading: "Offline uploads",
+    readyHeading: "오프라인 업로드",
     readApis: [
       "/v1/admin/offline-uploads",
       "/v1/admin/offline-uploads/{upload_id}/preview",
@@ -375,7 +375,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "backups",
     route: "/admin/backups",
-    readyHeading: "Backups",
+    readyHeading: "백업",
     readApis: ["/v1/admin/backups", "/v1/admin/backups/{backup_id}"],
     writeApis: [
       writeApi("POST", "/v1/admin/backups"),
@@ -406,7 +406,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "settings",
     route: "/admin/settings",
-    readyHeading: "Settings",
+    readyHeading: "설정",
     readApis: ["/v1/admin/public-api-keys", "/v1/admin/auth-events"],
     writeApis: [
       writeApi("POST", "/v1/admin/public-api-keys"),
