@@ -131,14 +131,35 @@ OpiNet 공개 API에는 전국/지역 단위 전체 주유소 bulk endpoint가 �
   (`_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS`) 이상을 산출하면 grid fallback은
   건너뛴다(#545).
 
+시군 윈도 로테이션 (staleness 근본 수정):
+
+- `lowTop10` 호출 상한(기본 180 = 시군 60개 윈도/run)이 전국 ~230 시군을 한 run에
+  다 덮지 못하는데, 이전에는 시군 목록 앞쪽 윈도만 매일 소비해 **같은 ~60개 시군의
+  top-20 저가 주유소만 갱신**됐다 — 한 번 dataset에 들어온 뒤 윈도/top-20 밖으로
+  밀린 주유소는 영구 stale(prod 실측: price feature 37%가 3–7일 stale, 일간 동일
+  주유소 겹침 93%, 사용 호출 ~198/1,500).
+- 이제 run 날짜(KST) 기반 결정적 offset(`_opinet_rotation_offset`, `toordinal() ×
+  윈도 크기`)으로 시군 목록을 회전시켜 매일 윈도 크기만큼 전진한다 → 전국 1주기
+  ≈ ceil(230/60) = **4일**, 호출량은 그대로(~198/run). round-robin 인접 시군은 서로
+  다른 시도라 윈도 안 지리 분포 공정성도 유지된다.
+- 표시 계층 정합: 로테이션 주기보다 오래된 price 관측은 현재가에서 숨긴다(아래
+  `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`, 기본 4일 — 지도 `price_summary` 마커와
+  price card `current`에서 제외, 이력은 보존).
+
 OpiNet 쿼터 가드(#545):
 
 - 분당 60회 — Dagster `ConcurrencyConfig(opinet_api, max_concurrent=1)` + provider
   라이브러리의 token bucket.
 - 일일 1,500회 — `low_top_area` fetcher가 run당 hard call budget
-  (`_OPINET_RUN_CALL_BUDGET=600`, `get_area_codes`+`lowTop10`+`aroundAll` 합산)을
-  적용하고, 서버가 먼저 `OpinetRateLimitError`를 던지면 조기 종료한다. 가격 적재는
-  일 1회로 낮춰 월간 place job과 같은 날 겹쳐도 한도 아래를 유지한다.
+  (`KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`, 기본 600, `get_area_codes`+`lowTop10`+
+  `aroundAll` 합산)을 적용하고, 서버가 먼저 `OpinetRateLimitError`를 던지면 조기
+  종료한다. 가격 적재는 일 1회로 낮춰 월간 place job과 같은 날 겹쳐도 한도 아래를
+  유지한다.
+- 운영 노브: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180)로 윈도를 키울 수
+  있다 — 예: 700이면 시군 ~230개 전부를 매일 1회 갱신(≈ 18 + 230×3 = 708회/run).
+  이때 budget도 함께 상향해야 하며, **매월 1일에는 place job이 같은 lowTop10 경로를
+  한 번 더 돌므로** 두 run 합이 1,500 아래인지 확인할 것(708×2 = 1,416은 여유가
+  얇다 — place job 날짜를 옮기거나 place 쪽 노브를 기본값으로 둘 것).
 
 ### 8.3 가격 시계열만 갱신 (일 1회)
 

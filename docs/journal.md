@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-03 (claude) — OpiNet price staleness 근본 수정: 시군 윈도 로테이션 + 현재가 신선도 지평선
+
+가격 스케줄이 매일 돌아도 price feature 37%(1,066/2,883)가 3–7일 stale로 단조
+누적되던 문제의 근본 원인을 찾고 수정했다.
+
+- **원인 (prod 실측)**: `low_top_area` fetcher의 `lowTop10` 호출 상한(180 = 시군
+  60개 윈도)이 전국 ~230 시군을 못 덮는데 시군 목록에 로테이션이 없어 **매일 같은
+  ~60개 시군의 top-20 저가 주유소만 갱신**(일간 동일 주유소 겹침 93%). top-20/윈도
+  밖으로 밀린 주유소는 영구 stale. 쿼터 소진 아님(사용 ~198/1,500), cursor 문제
+  아님, UI 타임스탬프 문제 아님.
+- **수정 1 — 로테이션**: run 날짜(KST) 기반 결정적 offset(`_opinet_rotation_offset`,
+  `toordinal() × 윈도 크기`)으로 시군 목록 회전 → 매일 윈도만큼 전진, 전국 1주기
+  ≈ 4일, 호출량 불변. 목록이 한 윈도에 다 들어가면 no-op. round-robin 시도 공정성
+  유지.
+- **수정 2 — 운영 노브**: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180),
+  `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`(기본 600)를 settings 필드로 노출 — 코드
+  변경 없이 커버리지 상향 가능. 쿼터 수학은 `docs/etl/opinet-place-price-etl.md`
+  §8.2 (매월 1일 place job 겹침 주의 포함).
+- **수정 3 — 신선도 지평선**: `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`(기본 4 =
+  로테이션 1주기)보다 오래된 관측은 지도 `price_summary` 마커와 price card
+  `current`에서 제외(이력·값은 보존, `asof` 과거 시점 질의에는 미적용) — 로테이션
+  주기 밖 옛 가격이 현재가처럼 보이지 않게.
+- 배포 후 확인: 신선도 분포가 ~4일에 걸쳐 <1d ~25% / 1-4d ~75% 형태로 수렴하는지,
+  3–7d 버킷이 0으로 떨어지는지 (`max(observed_at)` 버킷 쿼리).
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 (라이프사이클 스트립·한국어 액션·워크플로 가이드)
 
 curated feature 관리 화면(UI/UX·워크플로)을 처음 온 운영자도 흐름을 읽을 수 있게 개편했다.
