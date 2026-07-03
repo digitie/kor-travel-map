@@ -188,7 +188,7 @@ function issueDetailCard(page: Page): Locator {
 async function gotoAdminIssues(page: Page): Promise<void> {
   await page.goto("/admin/issues");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin issues" }),
+    page.getByRole("heading", { level: 1, name: "이슈" }),
   ).toBeVisible(T);
   await expect(page.getByText("Issue table")).toBeVisible(T);
 }

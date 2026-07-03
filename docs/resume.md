@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-04 (claude) — 관리 UI 개편 A+B 로컬 완료 (PR 스택)
+
+- **완료**: PR-A(공용 컴포넌트 16종+검증 헬퍼+파일럿, #634) 위에 PR-B(nav 4그룹·헤딩 정본·
+  크로스링크/딥링크 전체·브레드크럼 4곳·spec 정합화 29파일) 스택 구현.
+- **검증**: tsc clean · eslint 0 errors · vitest 57 passed.
+- **다음 한 작업**: PR-C(페이지 이관+validation/assist+텍스트 절약) → 통합 브랜치 n150 배포 →
+  docker-playwright live e2e 전체 green 확인 → A/B/C + notice(#633) + opinet(#632) 순차 머지.
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 로컬 구현 완료
 
 - **완료**: 큐레이션 관리 화면을 라이프사이클 스트립(상태 칩=필터)+후보 검토/소스 규칙 탭으로

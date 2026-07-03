@@ -149,7 +149,7 @@ test.describe("admin/backups execute depth", () => {
     await page.goto("/admin/backups");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Backups" }),
+      page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
     // command_enabled:true → Badge가 'plan only'가 아니라 'execute enabled'.
     await expect(page.getByText("execute enabled")).toBeVisible();
@@ -302,7 +302,7 @@ test.describe("admin/backups execute depth", () => {
     await page.goto("/admin/backups");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Backups" }),
+      page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
     // items.length=0 → DataTable emptyMessage.
     await expect(page.getByText("백업이 없습니다.")).toBeVisible();
@@ -342,7 +342,7 @@ test.describe("admin/backups execute depth", () => {
     await page.goto("/admin/backups");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Backups" }),
+      page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
 
     // activeError = backups.error → destructive Alert(role=alert, assertive).

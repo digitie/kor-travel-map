@@ -31,7 +31,7 @@ interface ReviewPage {
 const PAGES: ReviewPage[] = [
   {
     route: "/admin/issues",
-    heading: "Admin issues",
+    heading: "이슈",
     navLabel: "Issues",
     empty: "issue가 없습니다.",
     statusLabel: "issue status",
@@ -40,8 +40,8 @@ const PAGES: ReviewPage[] = [
   },
   {
     route: "/admin/features/dedup-reviews",
-    heading: "Dedup review",
-    navLabel: "Feature 중복 검토",
+    heading: "중복 검토",
+    navLabel: "중복 검토",
     empty: "dedup review가 없습니다.",
     statusLabel: "dedup status",
     statuses: ["pending", "accepted", "rejected", "merged", "ignored", "all"],
@@ -49,8 +49,8 @@ const PAGES: ReviewPage[] = [
   },
   {
     route: "/admin/features/enrichment-reviews",
-    heading: "Enrichment review",
-    navLabel: "Feature 보강 검토",
+    heading: "보강 검토",
+    navLabel: "보강 검토",
     empty: "enrichment review가 없습니다.",
     statusLabel: "enrichment status",
     statuses: ["pending", "accepted", "rejected", "ignored", "all"],
@@ -59,7 +59,7 @@ const PAGES: ReviewPage[] = [
   {
     route: "/admin/features/update-requests",
     heading: "Feature update requests",
-    navLabel: "Feature 갱신",
+    navLabel: "갱신 요청",
     empty: "요청이 없습니다.",
     statusLabel: "request status",
     statuses: ["queued", "running", "done", "failed", "cancelled", "all"],

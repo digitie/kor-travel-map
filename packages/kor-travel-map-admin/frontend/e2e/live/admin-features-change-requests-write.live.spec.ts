@@ -345,7 +345,7 @@ async function expectFeaturePrefillLoaded(
 
 async function expectChangeRequestsReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Feature 변경" }),
+    page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
   ).toBeVisible(T);
   await expect(page.getByText("Feature 변경 요청")).toBeVisible(T);
 }

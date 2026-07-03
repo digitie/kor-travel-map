@@ -22,27 +22,28 @@ const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const IMPORT_JOB_ID = "import-job-0123456789abcdef-density";
 const DEDUP_REVIEW_ID = "dedup-review-0123456789abcdef-density";
 
+// admin-shell.tsx NAV_GROUPS 평탄화 순서와 동일 (home-nav.spec.ts와 같은 정본).
 const NAV_ITEMS = [
   { label: "홈", href: "/" },
   { label: "Feature 지도", href: "/features" },
   { label: "Feature 목록", href: "/admin/features" },
-  { label: "Feature 변경", href: "/admin/features/change-requests" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
-  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "중복 검토", href: "/admin/features/dedup-reviews" },
+  { label: "보강 검토", href: "/admin/features/enrichment-reviews" },
   { label: "이슈", href: "/admin/issues" },
-  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "큐레이션 지도", href: "/curated-features" },
   { label: "Provider 상태", href: "/ops/providers" },
-  { label: "정합성 점검", href: "/ops/consistency" },
-  { label: "운영 로그", href: "/ops/logs" },
-  { label: "Feature 중복 검토", href: "/admin/features/dedup-reviews" },
-  { label: "Feature 보강 검토", href: "/admin/features/enrichment-reviews" },
-  { label: "Feature 갱신", href: "/admin/features/update-requests" },
-  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "갱신 요청", href: "/admin/features/update-requests" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
-  { label: "백업", href: "/admin/backups" },
   { label: "작업 자동화", href: "/admin/dagster" },
-  { label: "설정", href: "/admin/settings" },
   { label: "ETL 미리보기", href: "/etl" },
+  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "운영 로그", href: "/ops/logs" },
+  { label: "정합성 점검", href: "/ops/consistency" },
+  { label: "백업", href: "/admin/backups" },
+  { label: "설정", href: "/admin/settings" },
 ] as const;
 
 type HomeEndpoint =
@@ -456,10 +457,10 @@ test.describe("home/shell dense matrix", () => {
     },
     { text: "새로고침", role: "button" },
     { text: "Dagster", role: "link" },
-    { text: "최근 import jobs", role: "heading" },
+    { text: "최근 적재 작업", role: "heading" },
     { text: "서비스 상태", role: "heading" },
     { text: "Backend", role: "panel" },
-    { text: "Dedup pending", role: "heading" },
+    { text: "중복 검수 대기", role: "heading" },
     { text: "Dagster", role: "panel" },
   ] as const) {
     test(`home shell surface: ${shellCase.role} ${shellCase.text}`, async ({
@@ -490,14 +491,14 @@ test.describe("home/shell dense matrix", () => {
 
 test.describe("home metrics dense matrix", () => {
   for (const item of [
-    { total: 0, active: 0, inactive: 0, value: "0", desc: "0 active / 0 inactive" },
-    { total: 1, active: 1, inactive: 0, value: "1", desc: "1 active / 0 inactive" },
-    { total: 42, active: 30, inactive: 12, value: "42", desc: "30 active / 12 inactive" },
-    { total: 1000, active: 998, inactive: 2, value: "1,000", desc: "998 active / 2 inactive" },
-    { total: 12001, active: 11000, inactive: 1001, value: "12,001", desc: "11,000 active / 1,001 inactive" },
-    { total: 2000000, active: 1500000, inactive: 500000, value: "2,000,000", desc: "1,500,000 active / 500,000 inactive" },
-    { total: 7, active: 0, inactive: 7, value: "7", desc: "0 active / 7 inactive" },
-    { total: 8, active: 8, inactive: 0, value: "8", desc: "8 active / 0 inactive" },
+    { total: 0, active: 0, inactive: 0, value: "0", desc: "활성 0 / 비활성 0" },
+    { total: 1, active: 1, inactive: 0, value: "1", desc: "활성 1 / 비활성 0" },
+    { total: 42, active: 30, inactive: 12, value: "42", desc: "활성 30 / 비활성 12" },
+    { total: 1000, active: 998, inactive: 2, value: "1,000", desc: "활성 998 / 비활성 2" },
+    { total: 12001, active: 11000, inactive: 1001, value: "12,001", desc: "활성 11,000 / 비활성 1,001" },
+    { total: 2000000, active: 1500000, inactive: 500000, value: "2,000,000", desc: "활성 1,500,000 / 비활성 500,000" },
+    { total: 7, active: 0, inactive: 7, value: "7", desc: "활성 0 / 비활성 7" },
+    { total: 8, active: 8, inactive: 0, value: "8", desc: "활성 8 / 비활성 0" },
   ]) {
     test(`features metric value: total ${item.total}`, async ({ page }) => {
       await gotoHome(page, {
@@ -507,7 +508,7 @@ test.describe("home metrics dense matrix", () => {
           features_total: item.total,
         }),
       });
-      await expect(card(page, "Features").getByText(item.value, { exact: true })).toBeVisible();
+      await expect(card(page, "Feature").getByText(item.value, { exact: true })).toBeVisible();
     });
 
     test(`features metric description: total ${item.total}`, async ({ page }) => {
@@ -518,7 +519,7 @@ test.describe("home metrics dense matrix", () => {
           features_total: item.total,
         }),
       });
-      await expect(card(page, "Features").getByText(item.desc, { exact: true })).toBeVisible();
+      await expect(card(page, "Feature").getByText(item.desc, { exact: true })).toBeVisible();
     });
   }
 
@@ -538,7 +539,7 @@ test.describe("home metrics dense matrix", () => {
           import_jobs_by_status: item.counts as Record<string, number>,
         }),
       });
-      await expect(card(page, "Import jobs").getByText(item.value, { exact: true })).toBeVisible();
+      await expect(card(page, "적재 작업").getByText(item.value, { exact: true })).toBeVisible();
     });
 
     test(`import jobs metric description remains stable: ${item.value}`, async ({
@@ -555,7 +556,7 @@ test.describe("home metrics dense matrix", () => {
         }),
       });
       await expect(
-        card(page, "Import jobs").getByText(expectedDescription, {
+        card(page, "적재 작업").getByText(expectedDescription, {
           exact: true,
         }),
       ).toBeVisible();
@@ -563,14 +564,14 @@ test.describe("home metrics dense matrix", () => {
   }
 
   for (const [index, item] of [
-    { queue: {}, pending: 0, value: "0", desc: "pending review 0건" },
-    { queue: { pending: 1 }, pending: 1, value: "1", desc: "pending review 1건" },
-    { queue: { pending: 6, resolved: 3 }, pending: 6, value: "9", desc: "pending review 6건" },
-    { queue: { accepted: 5, pending: 12, rejected: 3 }, pending: 12, value: "20", desc: "pending review 12건" },
-    { queue: { ignored: 99, pending: 1 }, pending: 1, value: "100", desc: "pending review 1건" },
-    { queue: { pending: 1000, resolved: 1 }, pending: 1000, value: "1,001", desc: "pending review 1,000건" },
-    { queue: { pending: 0, resolved: 7 }, pending: 0, value: "7", desc: "pending review 0건" },
-    { queue: { pending: 500000, resolved: 500000 }, pending: 500000, value: "1,000,000", desc: "pending review 500,000건" },
+    { queue: {}, pending: 0, value: "0", desc: "대기 0건" },
+    { queue: { pending: 1 }, pending: 1, value: "1", desc: "대기 1건" },
+    { queue: { pending: 6, resolved: 3 }, pending: 6, value: "9", desc: "대기 6건" },
+    { queue: { accepted: 5, pending: 12, rejected: 3 }, pending: 12, value: "20", desc: "대기 12건" },
+    { queue: { ignored: 99, pending: 1 }, pending: 1, value: "100", desc: "대기 1건" },
+    { queue: { pending: 1000, resolved: 1 }, pending: 1000, value: "1,001", desc: "대기 1,000건" },
+    { queue: { pending: 0, resolved: 7 }, pending: 0, value: "7", desc: "대기 0건" },
+    { queue: { pending: 500000, resolved: 500000 }, pending: 500000, value: "1,000,000", desc: "대기 500,000건" },
   ].entries() as IterableIterator<
     [number, { queue: Record<string, number>; pending: number; value: string; desc: string }]
   >) {
@@ -589,7 +590,7 @@ test.describe("home metrics dense matrix", () => {
           dedup_queue_by_status: item.queue,
         }),
       });
-      await expect(card(page, "Dedup queue").getByText(item.value, { exact: true })).toBeVisible();
+      await expect(card(page, "중복 검수").getByText(item.value, { exact: true })).toBeVisible();
     });
 
     test(`dedup queue metric description ${index}: ${item.desc}`, async ({ page }) => {
@@ -607,7 +608,7 @@ test.describe("home metrics dense matrix", () => {
           dedup_queue_by_status: item.queue,
         }),
       });
-      await expect(card(page, "Dedup queue").getByText(item.desc, { exact: true })).toBeVisible();
+      await expect(card(page, "중복 검수").getByText(item.desc, { exact: true })).toBeVisible();
     });
   }
 
@@ -632,7 +633,7 @@ test.describe("home metrics dense matrix", () => {
           },
         }),
       });
-      await expect(card(page, "Issues").getByText(item.value, { exact: true })).toBeVisible();
+      await expect(card(page, "이슈").getByText(item.value, { exact: true })).toBeVisible();
     });
 
     test(`issues metric description stable: ${item.value}`, async ({ page }) => {
@@ -648,7 +649,7 @@ test.describe("home metrics dense matrix", () => {
         }),
       });
       await expect(
-        card(page, "Issues").getByText(expectedDescription, {
+        card(page, "이슈").getByText(expectedDescription, {
           exact: true,
         }),
       ).toBeVisible();
@@ -669,21 +670,21 @@ test.describe("home import job and dedup dense matrix", () => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 import jobs").getByText(item.status, { exact: true })).toBeVisible();
+      await expect(card(page, "최근 적재 작업").getByText(item.status, { exact: true })).toBeVisible();
     });
 
     test(`import job row progress: ${item.status}`, async ({ page }) => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 import jobs").getByText(`${item.progress}%`, { exact: true })).toBeVisible();
+      await expect(card(page, "최근 적재 작업").getByText(`${item.progress}%`, { exact: true })).toBeVisible();
     });
 
     test(`import job row kind: ${item.status}`, async ({ page }) => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 import jobs").getByText(item.kind, { exact: true })).toBeVisible();
+      await expect(card(page, "최근 적재 작업").getByText(item.kind, { exact: true })).toBeVisible();
     });
 
     test(`import job table keeps status column: ${item.status}`, async ({
@@ -692,7 +693,7 @@ test.describe("home import job and dedup dense matrix", () => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 import jobs").getByRole("columnheader", { name: "status" })).toBeVisible();
+      await expect(card(page, "최근 적재 작업").getByRole("columnheader", { name: "status" })).toBeVisible();
     });
 
     test(`import job table keeps progress column: ${item.status}`, async ({
@@ -701,7 +702,7 @@ test.describe("home import job and dedup dense matrix", () => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 import jobs").getByRole("columnheader", { name: "progress" })).toBeVisible();
+      await expect(card(page, "최근 적재 작업").getByRole("columnheader", { name: "progress" })).toBeVisible();
     });
   }
 
@@ -736,7 +737,7 @@ test.describe("home import job and dedup dense matrix", () => {
           }),
         ],
       });
-      await expect(card(page, "Dedup pending").getByText(`score ${item.expectedScore}`, { exact: false })).toBeVisible();
+      await expect(card(page, "중복 검수 대기").getByText(`score ${item.expectedScore}`, { exact: false })).toBeVisible();
     });
 
     test(`dedup pending link target: ${item.a}`, async ({ page }) => {
@@ -749,7 +750,7 @@ test.describe("home import job and dedup dense matrix", () => {
           }),
         ],
       });
-      await expect(card(page, "Dedup pending").getByRole("link").first()).toHaveAttribute("href", "/admin/features/dedup-reviews");
+      await expect(card(page, "중복 검수 대기").getByRole("link").first()).toHaveAttribute("href", "/admin/features/dedup-reviews");
     });
   }
 
@@ -842,10 +843,10 @@ test.describe("home backend/dagster/error dense matrix", () => {
 
   for (const item of [
     { endpoint: "health", status: 503, surface: "Backend", statusTextVisible: true },
-    { endpoint: "metrics", status: 500, surface: "Features", statusTextVisible: true },
+    { endpoint: "metrics", status: 500, surface: "Feature", statusTextVisible: true },
     { endpoint: "dagster", status: 503, surface: "Dagster", statusTextVisible: true },
-    { endpoint: "importJobs", status: 502, surface: "최근 import jobs", statusTextVisible: true },
-    { endpoint: "dedup", status: 500, surface: "Dedup pending", statusTextVisible: false },
+    { endpoint: "importJobs", status: 502, surface: "최근 적재 작업", statusTextVisible: true },
+    { endpoint: "dedup", status: 500, surface: "중복 검수 대기", statusTextVisible: false },
     { endpoint: "version", status: 503, surface: "Backend", statusTextVisible: false },
   ] as const) {
     test(`endpoint failure keeps shell: ${item.endpoint}`, async ({ page }) => {

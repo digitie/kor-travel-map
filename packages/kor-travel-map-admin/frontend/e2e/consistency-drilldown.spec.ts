@@ -204,7 +204,7 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await page.goto("/ops/consistency");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Consistency" }),
+      page.getByRole("heading", { level: 1, name: "정합성 점검" }),
     ).toBeVisible();
 
     // metrics cards — scope each value to its owning bordered card.
@@ -234,6 +234,12 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     });
     await expect(reportBRow.getByText("critical")).toBeVisible();
 
+    // 개편 B 크로스링크: 배치 셀은 해당 배치로 필터된 적재 작업 목록으로 딥링크.
+    await expect(reportBRow.getByRole("link")).toHaveAttribute(
+      "href",
+      `/ops/import-jobs?load_batch_id=${BATCH_B_ID}`,
+    );
+
     // issues 카드 — unique message + severity 'critical' + provider cell.
     const issuesCard = metricsCard(page, "Integrity issues");
     await expect(
@@ -241,6 +247,10 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     ).toBeVisible();
     await expect(issuesCard.getByText("critical")).toBeVisible();
     await expect(issuesCard.getByText("python-mois-api")).toBeVisible();
+    // 개편 B 크로스링크: provider 셀은 provider로 필터된 이슈 목록으로 딥링크.
+    await expect(
+      issuesCard.getByRole("link", { name: "python-mois-api" }),
+    ).toHaveAttribute("href", "/admin/issues?provider=python-mois-api");
 
     // columnheaders for both tables.
     for (const name of ["report", "batch", "finished"]) {
@@ -386,7 +396,7 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await page.goto("/ops/consistency");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Consistency" }),
+      page.getByRole("heading", { level: 1, name: "정합성 점검" }),
     ).toBeVisible();
 
     const reportsCard = metricsCard(page, "Reports");

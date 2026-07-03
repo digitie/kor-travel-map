@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-04 (claude) — 관리 UI 개편 B: nav 그룹·크로스링크·헤딩 정본·spec 정합화
+
+관리 UI 개편(조사→설계 종합→PR A/B/C)의 B 단계. PR-A(공용 컴포넌트) 위에 스택.
+
+- **nav 재편(`admin-shell.tsx`)**: 평면 20링크 → `NAV_GROUPS`(홈 / Feature 관리 /
+  수집 파이프라인 / 모니터링 / 시스템) 단일 정본. 라벨 3건 정정(중복 검토/보강 검토/갱신 요청 —
+  nav=H1 불변식). 섹션 배지는 NAV_GROUPS longest-prefix로 유도, 클라이언트 `section=` prop
+  21곳 삭제(듀얼라우트 3곳만 오버라이드 유지). `breadcrumbs`/`help` prop 추가.
+- **헤딩 정본**: Provider 상태·운영 로그·정합성 점검·큐레이션 지도·ETL 미리보기(+AdminShell 편입,
+  마지막 셸 밖 페이지 해소)·공개 API 키/로그인 감사(h2)·중복 검수 대기(h2).
+- **크로스링크(§2 전체, EntityLink 단일 URL 테이블)**: 이슈 행/상세→feature 상세, 업로드
+  validation/load job→작업 상세, feature 상세 Sources→Provider 상태·Issues→이슈 필터·History→
+  변경요청 강조, 목록 provider/이슈 셀, 정합성 배치→작업 목록·provider→이슈, 작업 목록 배치/상위,
+  작업 상세 load_batch dead-link 수정+갱신요청 상세 딥링크+운영 로그 버튼, 갱신요청 dagster run
+  외부링크, 홈 메트릭 카드 4종+최근 작업 행, POI nearby, ETL→Provider 상태, Feature 지도↔큐레이션
+  지도 토글, providers 실패 alert→이슈·dataset 패널→생성된 Feature 보기/이벤트 로그, 백업 결과→
+  운영 로그, dagster 실패→운영 로그.
+- **딥링크 plumbing**: `/ops/logs`(tab=system|api|events·job_id·provider·dataset_key·level),
+  `/admin/issues`(feature_id·provider·dataset_key·status + feature_id 필터 입력 신설),
+  `/admin/features`(q·kind·status·provider·dataset_key·has_issue + provider/dataset 셀렉트 —
+  API 클라이언트가 이미 지원), change-requests/change-reviews `?request_id=` 행 강조.
+- **브레드크럼**: feature 상세·큐레이션 상세·갱신 요청 상세·적재 작업 상세 4곳.
+- **spec 정합화**: NAV 미러 3곳(home-nav 20개 정본+그룹 헤더 단언, home-density, misc.live) 재작성,
+  기존 stale 영문 h1/카드 제목(Providers/Logs/Consistency/Admin issues/Backups/Import jobs/
+  Dedup review/Enrichment review/ETL preview/Features/Dedup queue/Issues/POI cache targets/
+  Offline uploads/Feature update requests/이슈 상세 등) 29파일 일괄 정정, 신규 링크 스모크 4종
+  (홈 카드 href·logs 딥링크 초기화·정합성 배치 링크·이슈 Feature 상세 href) 추가.
+- **검증**: tsc(src+e2e) clean · eslint 변경 69파일 0 errors · vitest 57 passed. 라우트 이동/
+  리다이렉트/API 변경 없음. Playwright 실행은 최종 게이트(n150 live)에서.
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 (라이프사이클 스트립·한국어 액션·워크플로 가이드)
 
 curated feature 관리 화면(UI/UX·워크플로)을 처음 온 운영자도 흐름을 읽을 수 있게 개편했다.

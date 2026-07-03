@@ -509,7 +509,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
     await providerLink.click();
     await expect(page).toHaveURL(/\/ops\/providers\?provider=/, T);
     await expect(
-      page.getByRole("heading", { level: 1, name: "제공자" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible(T);
     await expect(page.getByText(expectedProvider ?? "").first()).toBeVisible(T);
   });

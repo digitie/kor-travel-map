@@ -162,9 +162,9 @@ async function waitForListResponse(
 /** 목록 페이지 로드 + 안정 landmark. */
 async function gotoListReady(page: Page): Promise<void> {
   await page.goto(LIST_ROUTE);
-  // import-jobs-client.tsx: AdminShell title="Import jobs" (line 186).
+  // import-jobs-client.tsx: AdminShell title="적재 작업" (line 186).
   await expect(
-    page.getByRole("heading", { level: 1, name: "Import jobs" }),
+    page.getByRole("heading", { level: 1, name: "적재 작업" }),
   ).toBeVisible(T);
   // DataTable thead는 비어도 렌더 → columnheader "job"은 항상 존재.
   await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible(T);

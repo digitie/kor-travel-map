@@ -22,24 +22,24 @@ const ETL_TIMEOUT = { timeout: 45_000 } as const;
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
   { label: "Feature 지도", href: "/features" },
-  { label: "큐레이션 지도", href: "/curated-features" },
   { label: "Feature 목록", href: "/admin/features" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
-  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "중복 검토", href: "/admin/features/dedup-reviews" },
+  { label: "보강 검토", href: "/admin/features/enrichment-reviews" },
   { label: "이슈", href: "/admin/issues" },
-  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "큐레이션 지도", href: "/curated-features" },
   { label: "Provider 상태", href: "/ops/providers" },
-  { label: "정합성 점검", href: "/ops/consistency" },
-  { label: "운영 로그", href: "/ops/logs" },
-  { label: "Feature 중복 검토", href: "/admin/features/dedup-reviews" },
-  { label: "Feature 보강 검토", href: "/admin/features/enrichment-reviews" },
-  { label: "Feature 갱신", href: "/admin/features/update-requests" },
-  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "갱신 요청", href: "/admin/features/update-requests" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
-  { label: "백업", href: "/admin/backups" },
   { label: "작업 자동화", href: "/admin/dagster" },
-  { label: "설정", href: "/admin/settings" },
   { label: "ETL 미리보기", href: "/etl" },
+  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "운영 로그", href: "/ops/logs" },
+  { label: "정합성 점검", href: "/ops/consistency" },
+  { label: "백업", href: "/admin/backups" },
+  { label: "설정", href: "/admin/settings" },
 ];
 
 const VIEWPORTS: ReadonlyArray<{ name: string; width: number; height: number }> =
@@ -271,7 +271,7 @@ test.describe("misc live — /etl preview", () => {
   test("etl H1 visible", async ({ page }) => {
     await page.goto("/etl");
     await expect(
-      page.getByRole("heading", { level: 1, name: "ETL preview" }),
+      page.getByRole("heading", { level: 1, name: "ETL 미리보기" }),
     ).toBeVisible(TIMEOUT);
   });
 
@@ -307,7 +307,7 @@ test.describe("misc live — /etl preview", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto("/etl");
       await expect(
-        page.getByRole("heading", { level: 1, name: "ETL preview" }),
+        page.getByRole("heading", { level: 1, name: "ETL 미리보기" }),
       ).toBeVisible(TIMEOUT);
     });
   }
@@ -531,7 +531,7 @@ test.describe("misc live — /admin/features/new", () => {
 
 const DEEPLINK_TARGETS: ReadonlyArray<{ href: string; h1: string }> = [
   { href: "/admin/dagster", h1: "작업 자동화" },
-  { href: "/etl", h1: "ETL preview" },
+  { href: "/etl", h1: "ETL 미리보기" },
   {
     href: "/admin/features/change-requests",
     h1: "변경 요청 작성",
