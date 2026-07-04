@@ -534,7 +534,7 @@ export function AdminFeaturesClient({
           </Button>
         </>
       }
-      description="운영자용 Feature 목록, 상세, weather, 단건 비활성화 표면입니다."
+      description="Feature를 조회하고 단건 비활성화합니다."
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">

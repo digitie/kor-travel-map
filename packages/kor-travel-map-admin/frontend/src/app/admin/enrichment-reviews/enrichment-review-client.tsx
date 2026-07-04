@@ -687,7 +687,7 @@ export function EnrichmentReviewClient() {
           새로고침
         </Button>
       }
-      description="축제 enrichment 매칭(visitkorea 2차 → datagokr 1차)을 운영자가 검토합니다. accept하면 1차 축제에 visitkorea source가 enrichment로 연결되고, 상세 source 선택값은 decision reason에 기록됩니다."
+      description="축제 enrichment 후보를 검토해 연결하거나 거절합니다."
       title="보강 검토"
     >
       <div className="flex flex-col gap-4">

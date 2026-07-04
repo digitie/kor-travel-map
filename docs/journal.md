@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-05 (claude) — 관리 UI 개편 C: 검증/어시스트·텍스트 절약
+
+관리 UI 개편 C(#636). 인라인 검증(JSON/좌표/정책)·useConfirm 전환·CursorPager 통일·
+Dagster/오프라인 업로드 입력 어시스트를 반영하고, 화면 설명문의 영어 전문용어·제목 반복을
+간결한 한국어로 정리했다(7개 화면 description + 자명 힌트 제거). type-check·eslint·vitest(57) green.
+남은 후속: 상세 힌트→HelpTip 전환, curated region_scope 구조화 미니폼, 커스텀 모달 2건의
+공용 Dialog 이관, 공용 컴포넌트(SectionCard/DetailList/JsonViewer/FilterBar) 채택 sweep.
+
 ## 2026-07-04 (claude) — 관리 UI 개편 B: nav 그룹·크로스링크·헤딩 정본·spec 정합화
 
 관리 UI 개편(조사→설계 종합→PR A/B/C)의 B 단계. PR-A(공용 컴포넌트) 위에 스택.

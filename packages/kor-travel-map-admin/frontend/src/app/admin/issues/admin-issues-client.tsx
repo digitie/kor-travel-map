@@ -614,7 +614,7 @@ export function AdminIssuesClient({
           새로고침
         </Button>
       }
-      description="주소/정합성 이슈 목록, 상세 payload, resolve/ignore/reopen/manual override를 처리합니다."
+      description="주소·정합성 이슈를 확인하고 처리합니다."
       title="이슈"
     >
       <div className="flex flex-col gap-4">

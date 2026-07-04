@@ -642,7 +642,6 @@ export function FeatureEditor({
           </Alert>
         ) : null}
         <FormSelect
-          hint="이 후보가 속할 큐레이션 테마"
           label="테마"
           value={themeId}
           onChange={(event) => setField("themeId", event.target.value)}

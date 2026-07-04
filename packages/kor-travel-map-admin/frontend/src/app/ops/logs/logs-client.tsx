@@ -397,7 +397,7 @@ export function LogsClient({
           새로고침
         </Button>
       }
-      description="system log와 opt-in API call log를 같은 운영 화면에서 조회합니다."
+      description="시스템 로그와 API 호출 로그를 조회합니다."
       title="운영 로그"
     >
       <div className="flex flex-col gap-4">

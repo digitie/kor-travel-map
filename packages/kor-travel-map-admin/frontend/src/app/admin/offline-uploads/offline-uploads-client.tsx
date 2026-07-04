@@ -769,7 +769,7 @@ export function OfflineUploadsClient() {
           새로고침
         </Button>
       }
-      description="RustFS에 보존한 JSON/JSONL FeatureBundle 또는 CSV/TSV 원본을 검증하고 Dagster offline_upload_load job으로 적재합니다."
+      description="저장된 FeatureBundle·CSV 원본을 검증하고 적재합니다."
       title="오프라인 업로드"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
