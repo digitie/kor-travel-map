@@ -31,6 +31,7 @@ import {
 } from "@/api/features";
 import { useProviders } from "@/api/etl";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
@@ -272,6 +273,7 @@ export function AdminFeaturesClient({
   );
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
+  const confirm = useConfirm();
   const providersQuery = useProviders();
   const providerOptions = providersQuery.data?.data.providers ?? [];
   const datasetOptions = useMemo(
@@ -301,9 +303,14 @@ export function AdminFeaturesClient({
     void features.refetch();
   };
 
-  const deactivateFeature = (feature: AdminFeatureRecord) => {
+  const deactivateFeature = async (feature: AdminFeatureRecord) => {
     if (feature.status === "deleted") return;
-    const ok = window.confirm(`${feature.name} feature를 비활성화할까요?`);
+    const ok = await confirm({
+      title: `${feature.name} feature를 비활성화할까요?`,
+      description: "provider 재적재로 다시 활성화되지 않도록 잠급니다.",
+      confirmLabel: "비활성화",
+      destructive: true,
+    });
     if (!ok) return;
     deactivate.mutate({
       featureId: feature.feature_id,
@@ -489,7 +496,7 @@ export function AdminFeaturesClient({
                 variant="ghost"
                 onClick={(event) => {
                   event.stopPropagation();
-                  deactivateFeature(feature);
+                  void deactivateFeature(feature);
                 }}
               >
                 <XCircleIcon data-icon="inline-start" />

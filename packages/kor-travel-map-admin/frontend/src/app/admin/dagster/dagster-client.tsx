@@ -39,6 +39,7 @@ import {
   useDagsterSummary,
 } from "@/api/dagster";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -636,6 +637,7 @@ function ScheduleControls({
 }) {
   const command = useDagsterScheduleCommand();
   const patchSchedule = usePatchDagsterSchedule();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<DagsterSchedule | null>(null);
   const [draft, setDraft] = useState<ScheduleEditDraft>(() =>
     draftFromCron(null),
@@ -673,7 +675,7 @@ function ScheduleControls({
     key: K,
     value: ScheduleEditDraft[K],
   ) => setDraft((current) => ({ ...current, [key]: value }));
-  const submitEdit = () => {
+  const submitEdit = async () => {
     if (!editing) return;
     let cronSchedule: string;
     try {
@@ -683,15 +685,12 @@ function ScheduleControls({
       return;
     }
     // 주기 변경은 대용량/월간 작업을 고빈도로 올려 provider 한도를 초과시킬 수 있어 확인을 받는다(#613).
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `'${editing.name}' 스케줄 주기를 '${cronSchedule}'(으)로 변경하시겠습니까? ` +
-          "대용량/월간 작업의 주기를 올리면 provider 호출 한도를 초과할 수 있습니다.",
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "스케줄 주기를 변경할까요?",
+      description: `'${editing.name}' 주기를 '${cronSchedule}'(으)로 변경합니다. 대용량/월간 작업의 주기를 올리면 provider 호출 한도를 초과할 수 있습니다.`,
+      confirmLabel: "주기 변경",
+    });
+    if (!ok) return;
     setLastResult(null);
     setEditError(null);
     patchSchedule.mutate({
@@ -705,19 +704,18 @@ function ScheduleControls({
       },
     });
   };
-  const runCommand = (
+  const runCommand = async (
     scheduleName: string,
     nextCommand: "default" | "reset" | "run" | "start" | "stop",
   ) => {
     // 즉시 실행/스케줄 시작은 즉시 부하를 유발하므로 확인을 받는다(#613 — runaway 작업 방지).
-    if (
-      (nextCommand === "run" || nextCommand === "start") &&
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `'${scheduleName}' ${scheduleCommandLabel(nextCommand)}을(를) 실행하시겠습니까?`,
-      )
-    ) {
-      return;
+    if (nextCommand === "run" || nextCommand === "start") {
+      const ok = await confirm({
+        title: `${scheduleCommandLabel(nextCommand)}을(를) 실행할까요?`,
+        description: `'${scheduleName}' 스케줄에 즉시 부하가 발생합니다.`,
+        confirmLabel: scheduleCommandLabel(nextCommand),
+      });
+      if (!ok) return;
     }
     setLastResult(null);
     command.mutate({
@@ -868,7 +866,7 @@ function ScheduleControls({
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={() => runCommand(schedule.name, "run")}
+                    onClick={() => void runCommand(schedule.name, "run")}
                   >
                     <PlayIcon data-icon="inline-start" />
                     즉시 실행
@@ -879,7 +877,7 @@ function ScheduleControls({
                     type="button"
                     variant={isRunning ? "destructive" : "default"}
                     onClick={() =>
-                      runCommand(schedule.name, toggleCommand)
+                      void runCommand(schedule.name, toggleCommand)
                     }
                   >
                     {pending ? (
@@ -906,7 +904,7 @@ function ScheduleControls({
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={() => runCommand(schedule.name, "default")}
+                    onClick={() => void runCommand(schedule.name, "default")}
                   >
                     <RotateCcwIcon data-icon="inline-start" />
                     기본값으로 되돌리기
@@ -1092,7 +1090,7 @@ function ScheduleControls({
                 <XIcon data-icon="inline-start" />
                 취소
               </Button>
-              <Button disabled={pending} type="button" onClick={submitEdit}>
+              <Button disabled={pending} type="button" onClick={() => void submitEdit()}>
                 <CheckIcon data-icon="inline-start" />
                 저장
               </Button>

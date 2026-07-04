@@ -47,7 +47,9 @@ import {
   type CuratedReusePolicy,
   type CuratedCurationRelation,
 } from "@/api/curated";
+import { useCategories } from "@/api/categories";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +88,11 @@ import {
   withCurrentOption,
 } from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import {
+  integerString,
+  jsonObject,
+  parseJsonObjectField,
+} from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 
 import { CuratedLifecycleStrip } from "./curated-lifecycle";
@@ -139,19 +146,12 @@ function JsonBlock({ value }: { value: unknown }) {
 }
 
 function parseJsonObject(value: string, label: string): Record<string, unknown> {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return {};
+  // §4: 제출 변환은 parseJsonObjectField로 통일(raw SyntaxError 누출 방지).
+  const parsed = parseJsonObjectField(value, label);
+  if (parsed.error) {
+    throw new Error(`${label}: ${parsed.error}`);
   }
-  const parsed = JSON.parse(trimmed) as unknown;
-  if (
-    parsed === null ||
-    typeof parsed !== "object" ||
-    Array.isArray(parsed)
-  ) {
-    throw new Error(`${label}은 JSON object여야 합니다.`);
-  }
-  return parsed as Record<string, unknown>;
+  return parsed.value ?? {};
 }
 
 function stringifyJson(value: unknown): string {
@@ -854,6 +854,7 @@ function RuleEditor({
   themeById: Map<string, CuratedTheme>;
 }) {
   const patchRule = usePatchCuratedSourceRuleMutation();
+  const confirm = useConfirm();
   const applyRule = useApplyCuratedSourceRuleMutation();
   const [defaultAction, setDefaultAction] =
     useState<CuratedRuleAction>(
@@ -870,10 +871,29 @@ function RuleEditor({
     stringifyJson(rule?.metadata ?? {}),
   );
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const categories = useCategories();
+  const categoryItems = categories.data?.data.items ?? [];
+  // §4: 인라인 검증 — 저장 전에 필드 옆에서 바로 보여준다.
+  const priorityError = integerString<Record<string, unknown>>({
+    message: "정수를 입력하세요.",
+  })(priority, {});
+  const priorityEmpty = priority.trim().length === 0;
+  const regionScopeError = jsonObject<Record<string, unknown>>()(
+    regionScopeJson,
+    {},
+  );
+  const metadataError = jsonObject<Record<string, unknown>>()(metadataJson, {});
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!rule) return;
+    if (priorityError || priorityEmpty) {
+      // §4: Number("")===0으로 우선순위가 조용히 0이 되던 버그 방지.
+      setJsonError(
+        priorityError ?? "우선순위를 입력하세요(정수).",
+      );
+      return;
+    }
     try {
       const regionScope = parseJsonObject(regionScopeJson, "region_scope");
       const metadata = parseJsonObject(metadataJson, "metadata");
@@ -905,14 +925,16 @@ function RuleEditor({
     }
   };
 
-  const applyNow = () => {
+  const applyNow = async () => {
     if (!rule) return;
     // 규칙 적용은 조건에 맞는 feature를 일괄 등록하는 대량 mutation — 1회 확인.
-    const ok = window.confirm(
-      `이 규칙을 지금 적용하면 조건에 맞는 feature가 '${ruleActionLabel(
+    const ok = await confirm({
+      title: "규칙을 지금 적용할까요?",
+      description: `조건에 맞는 feature가 '${ruleActionLabel(
         defaultAction,
-      )}' 상태로 등록됩니다. 이미 거절·보관된 항목은 되살아나지 않습니다. 계속할까요?`,
-    );
+      )}' 상태로 등록됩니다. 이미 거절·보관된 항목은 되살아나지 않습니다.`,
+      confirmLabel: "규칙 적용",
+    });
     if (!ok) return;
     applyRule.mutate(
       { ruleId: rule.rule_id },
@@ -981,11 +1003,14 @@ function RuleEditor({
           <label className="grid gap-1 text-sm">
             <span className="text-muted-foreground">우선순위</span>
             <Input
-              step="1"
-              type="number"
+              aria-invalid={Boolean(priorityError)}
+              inputMode="numeric"
               value={priority}
               onChange={(event) => setPriority(event.target.value)}
             />
+            {priorityError ? (
+              <span className="text-xs text-destructive">{priorityError}</span>
+            ) : null}
           </label>
           <label className="grid gap-2 text-sm">
             <span className="text-muted-foreground">사용</span>
@@ -1021,32 +1046,50 @@ function RuleEditor({
           <label className="grid gap-1 text-sm">
             <span className="text-muted-foreground">카테고리</span>
             <Input
+              list="curated-rule-category-options"
               value={category}
               onChange={(event) => setCategory(event.target.value)}
             />
+            <datalist id="curated-rule-category-options">
+              {categoryItems.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
+            </datalist>
           </label>
         </div>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">region_scope</span>
           <Textarea
+            aria-invalid={Boolean(regionScopeError)}
             className="min-h-28 font-mono text-xs"
             value={regionScopeJson}
             onChange={(event) => setRegionScopeJson(event.target.value)}
           />
-          <span className="text-xs text-muted-foreground">
-            JSON object — 예: {"{"}&quot;sido_code&quot;: &quot;11&quot;{"}"}
-          </span>
+          {regionScopeError ? (
+            <span className="text-xs text-destructive">{regionScopeError}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              JSON object — 예: {"{"}&quot;sido_code&quot;: &quot;11&quot;{"}"}
+            </span>
+          )}
         </label>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">metadata</span>
           <Textarea
+            aria-invalid={Boolean(metadataError)}
             className="min-h-28 font-mono text-xs"
             value={metadataJson}
             onChange={(event) => setMetadataJson(event.target.value)}
           />
-          <span className="text-xs text-muted-foreground">
-            JSON object — 규칙 운영 메모 등 자유 필드
-          </span>
+          {metadataError ? (
+            <span className="text-xs text-destructive">{metadataError}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              JSON object — 규칙 운영 메모 등 자유 필드
+            </span>
+          )}
         </label>
         {jsonError || patchRule.isError || applyRule.isError ? (
           <Alert variant="destructive">
@@ -1063,7 +1106,7 @@ function RuleEditor({
             disabled={applyRule.isPending}
             type="button"
             variant="outline"
-            onClick={applyNow}
+            onClick={() => void applyNow()}
           >
             <PlayIcon data-icon="inline-start" />
             규칙 적용 (후보 생성)
@@ -1174,6 +1217,7 @@ export function CuratedFeaturesClient() {
   const selectFeature = useSelectCuratedFeatureMutation();
   const unselectFeature = useUnselectCuratedFeatureMutation();
   const archiveFeature = useArchiveCuratedFeatureMutation();
+  const confirm = useConfirm();
 
   const items = features.data?.data.items ?? [];
   const ruleItems = rules.data?.data.items ?? [];
@@ -1280,10 +1324,14 @@ export function CuratedFeaturesClient() {
     );
   };
 
-  const archiveCurated = (feature: CuratedFeature) => {
-    const ok = window.confirm(
-      `"${feature.feature_name}"을(를) 보관할까요? 보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.`,
-    );
+  const archiveCurated = async (feature: CuratedFeature) => {
+    const ok = await confirm({
+      title: `"${feature.feature_name}"을(를) 보관할까요?`,
+      description:
+        "보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.",
+      confirmLabel: "보관",
+      destructive: true,
+    });
     if (!ok) return;
     archiveFeature.mutate(
       {
@@ -1522,7 +1570,7 @@ export function CuratedFeaturesClient() {
                 variant="destructive"
                 onClick={(event) => {
                   event.stopPropagation();
-                  archiveCurated(feature);
+                  void archiveCurated(feature);
                 }}
               >
                 <ArchiveIcon data-icon="inline-start" />
@@ -1864,14 +1912,17 @@ export function CuratedFeaturesClient() {
                         variant="destructive"
                         onClick={() => {
                           // bulk 보관은 되돌리기 부담이 있어 일괄 confirm 1회.
-                          if (
-                            !window.confirm(
-                              `체크한 ${rows.length}건을 보관할까요? 보관은 규칙 재적용으로 되살아나지 않습니다.`,
-                            )
-                          ) {
-                            return;
-                          }
-                          void runBulk(rows, "archive");
+                          void (async () => {
+                            const ok = await confirm({
+                              title: `체크한 ${rows.length}건을 보관할까요?`,
+                              description:
+                                "보관은 규칙 재적용으로 되살아나지 않습니다.",
+                              confirmLabel: "보관",
+                              destructive: true,
+                            });
+                            if (!ok) return;
+                            await runBulk(rows, "archive");
+                          })();
                         }}
                       >
                         <ArchiveIcon data-icon="inline-start" />

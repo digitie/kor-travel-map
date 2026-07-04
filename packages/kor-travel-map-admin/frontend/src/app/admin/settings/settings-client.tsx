@@ -20,6 +20,7 @@ import {
   type PublicApiKeyRecord,
 } from "@/api/adminSettings";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,7 @@ export function AdminSettingsClient() {
   const authEvents = useAdminAuthEvents();
   const createKey = useCreatePublicApiKeyMutation();
   const revokeKey = useRevokePublicApiKeyMutation();
+  const confirm = useConfirm();
   const keyItems = apiKeys.data?.data.items ?? [];
   const eventItems = authEvents.data?.data.items ?? [];
 
@@ -98,7 +100,19 @@ export function AdminSettingsClient() {
               size="sm"
               type="button"
               variant="ghost"
-              onClick={() => revokeKey.mutate(row.original.public_api_key_id)}
+              onClick={() => {
+                void (async () => {
+                  const ok = await confirm({
+                    title: "이 공개 API 키를 폐기할까요?",
+                    description:
+                      "폐기 즉시 해당 키의 요청이 거부되며 되돌릴 수 없습니다.",
+                    confirmLabel: "폐기",
+                    destructive: true,
+                  });
+                  if (!ok) return;
+                  revokeKey.mutate(row.original.public_api_key_id);
+                })();
+              }}
             >
               <Trash2Icon data-icon="inline-start" />
               폐기
@@ -106,7 +120,7 @@ export function AdminSettingsClient() {
           ) : null,
       },
     ],
-    [revokeKey],
+    [confirm, revokeKey],
   );
 
   const authColumns = useMemo<ColumnDef<AdminAuthEventRecord, unknown>[]>(
