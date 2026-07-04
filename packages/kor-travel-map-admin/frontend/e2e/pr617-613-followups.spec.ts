@@ -55,19 +55,16 @@ test.describe("PR #617/#613 후속 UI", () => {
       page,
     }) => {
       await page.goto("/admin/dagster");
-      // 확인 다이얼로그를 dismiss(취소)해 실제 실행은 하지 않는다.
-      let dialogShown = false;
-      page.on("dialog", (dialog) => {
-        dialogShown = true;
-        void dialog.dismiss();
-      });
       const control = page
         .getByRole("button", { name: /시작|즉시 실행/ })
         .first();
       if ((await control.count()) > 0 && (await control.isEnabled())) {
         await control.click();
-        // #613 가드: 확인 단계 없이 바로 mutate되면 안 된다.
-        expect(dialogShown).toBe(true);
+        // #613 가드: 확인 단계(AlertDialog) 없이 바로 mutate되면 안 된다.
+        const dialog = page.getByRole("alertdialog");
+        await expect(dialog).toBeVisible();
+        // 실제 실행하지 않도록 취소.
+        await dialog.getByRole("button", { name: "취소" }).click();
       }
     });
   });

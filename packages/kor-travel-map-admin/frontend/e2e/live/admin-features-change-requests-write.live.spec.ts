@@ -1007,13 +1007,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
         const row = rowContaining(page, UPDATED_NAME);
         await expect(row).toBeVisible(T);
 
-        page.once("dialog", (dialog) => void dialog.accept());
         const responsePromise = waitForApiResponse(
           page,
           "POST",
           `${decodeURIComponent(adminFeaturePath(FEATURE_ID))}/deactivate`,
         );
         await row.getByRole("button", { name: "deactivate" }).click();
+        // deactivate 확인 AlertDialog의 '비활성화' 버튼 클릭.
+        await page
+          .getByRole("alertdialog")
+          .getByRole("button", { name: "비활성화" })
+          .click();
         const response = await responsePromise;
         expect(response.status()).toBe(200);
         const body = (await response.json()) as AdminFeatureDeactivateResponse;

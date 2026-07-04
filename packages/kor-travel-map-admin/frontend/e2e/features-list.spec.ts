@@ -409,11 +409,6 @@ test.describe("admin/features list depth", () => {
       handler: () => listResponse([activeFeature, inactiveFeature]),
     });
 
-    // deactivateFeature가 window.confirm을 띄우므로 클릭 전에 accept 등록.
-    page.on("dialog", (dialog) => {
-      void dialog.accept();
-    });
-
     await page.goto("/admin/features");
 
     const activeRow = page.getByRole("row", { name: /Mock active feature/ });
@@ -426,6 +421,11 @@ test.describe("admin/features list depth", () => {
     ).toBeDisabled();
 
     await activeRow.getByRole("button", { name: "deactivate" }).click();
+    // deactivate는 이제 AlertDialog 확인 — 다이얼로그의 '비활성화' 버튼 클릭.
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "비활성화" })
+      .click();
 
     await expect.poll(() => mocks.deactivateBodies.length).toBe(1);
     expect(mocks.deactivateBodies[0]).toMatchObject({
