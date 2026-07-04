@@ -2044,7 +2044,8 @@ class ManagedFileRow(Base):
             "upload_id",
             postgresql_where=text("upload_id IS NOT NULL"),
         ),
-        {"schema": "ops", "postgresql_with": {"fillfactor": "90"}},
+        # fillfactor=90은 마이그레이션 DDL이 소유한다(ORM 물리 스토리지 파라미터 불필요).
+        {"schema": "ops"},
     )
 
     file_id: Mapped[int] = mapped_column(
