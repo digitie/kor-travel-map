@@ -19,6 +19,7 @@ import {
   type SystemLogLevel,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -497,23 +498,14 @@ export function LogsClient({
                     resetSystemPage();
                   }}
                 />
-                <Badge variant="outline">page {systemPageIndex}</Badge>
-                <Button
-                  disabled={systemPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetSystemPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!systemLogs.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextSystemPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="system log"
+                  hasNext={Boolean(systemLogs.data?.meta.page?.next_cursor)}
+                  isFetching={systemLogs.isFetching}
+                  summary={<>page {systemPageIndex}</>}
+                  onFirst={resetSystemPage}
+                  onNext={nextSystemPage}
+                />
               </div>
               <DataTable
                 columns={systemColumns}
@@ -556,23 +548,14 @@ export function LogsClient({
                     resetApiPage();
                   }}
                 />
-                <Badge variant="outline">page {apiPageIndex}</Badge>
-                <Button
-                  disabled={apiPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetApiPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!apiLogs.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextApiPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="api log"
+                  hasNext={Boolean(apiLogs.data?.meta.page?.next_cursor)}
+                  isFetching={apiLogs.isFetching}
+                  summary={<>page {apiPageIndex}</>}
+                  onFirst={resetApiPage}
+                  onNext={nextApiPage}
+                />
               </div>
               <DataTable
                 columns={apiColumns}
@@ -631,23 +614,14 @@ export function LogsClient({
                     resetEventPage();
                   }}
                 />
-                <Badge variant="outline">page {eventPageIndex}</Badge>
-                <Button
-                  disabled={eventPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetEventPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!jobEvents.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextEventPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="job event"
+                  hasNext={Boolean(jobEvents.data?.meta.page?.next_cursor)}
+                  isFetching={jobEvents.isFetching}
+                  summary={<>page {eventPageIndex}</>}
+                  onFirst={resetEventPage}
+                  onNext={nextEventPage}
+                />
               </div>
               <DataTable
                 columns={eventColumns}

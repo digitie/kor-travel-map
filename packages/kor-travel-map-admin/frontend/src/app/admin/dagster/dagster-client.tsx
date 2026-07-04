@@ -265,6 +265,7 @@ function parseDailyTimes(value: string) {
   return {
     cron: `${minute} ${hours.join(",")} * * *`,
     text: hours.map((hour) => clockText(hour, minute)).join(", "),
+    clocks: hours.map((hour) => ({ hour, minute })),
   };
 }
 
@@ -379,6 +380,67 @@ function sentenceFromDraft(draft: ScheduleEditDraft) {
     return `매주 ${weekday} ${clock}에 실행`;
   }
   return `매월 ${parseMonthDay(draft.monthDay)}일 ${clock}에 실행`;
+}
+
+/**
+ * 편집 중 draft 기준 "다음 3회 실행" 프리뷰(§4). 브라우저 로컬 시간으로 계산하며
+ * 스케줄 시간대가 다르면 근사치다(다이얼로그에 시간대를 함께 표기).
+ * `now`는 테스트 주입용.
+ */
+function nextRunsFromDraft(
+  draft: ScheduleEditDraft,
+  count = 3,
+  now: Date = new Date(),
+): Date[] {
+  const candidates: Date[] = [];
+  const pushDaily = (hour: number, minute: number, dayOffset: number) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() + dayOffset);
+    date.setHours(hour, minute, 0, 0);
+    candidates.push(date);
+  };
+  if (draft.frequency === "hourly") {
+    const minute = parseMinute(draft.minute);
+    for (let offset = 0; offset < count + 1; offset += 1) {
+      const date = new Date(now);
+      date.setHours(date.getHours() + offset, minute, 0, 0);
+      candidates.push(date);
+    }
+  } else if (draft.frequency === "daily_multi") {
+    const clocks = parseDailyTimes(draft.times).clocks;
+    for (let day = 0; day < count + 1; day += 1) {
+      for (const clock of clocks) pushDaily(clock.hour, clock.minute, day);
+    }
+  } else {
+    const clock = parseClock(draft.time, "실행 시각");
+    if (draft.frequency === "daily") {
+      for (let day = 0; day < count + 1; day += 1) {
+        pushDaily(clock.hour, clock.minute, day);
+      }
+    } else if (draft.frequency === "weekly") {
+      const weekday = Number(draft.weekday);
+      for (let day = 0; day < 7 * (count + 1); day += 1) {
+        const date = new Date(now);
+        date.setDate(date.getDate() + day);
+        if (date.getDay() !== weekday) continue;
+        date.setHours(clock.hour, clock.minute, 0, 0);
+        candidates.push(date);
+      }
+    } else {
+      const monthDay = parseMonthDay(draft.monthDay);
+      for (let month = 0; month < count + 2; month += 1) {
+        const date = new Date(now.getFullYear(), now.getMonth() + month, monthDay);
+        // 31일 등 없는 날짜가 다음 달로 넘어가면 그 달은 건너뛴다.
+        if (date.getDate() !== monthDay) continue;
+        date.setHours(clock.hour, clock.minute, 0, 0);
+        candidates.push(date);
+      }
+    }
+  }
+  return candidates
+    .filter((date) => date.getTime() > now.getTime())
+    .sort((a, b) => a.getTime() - b.getTime())
+    .slice(0, count);
 }
 
 function sentenceFromCron(cron: string | null | undefined, timezone?: string | null) {
@@ -962,6 +1024,23 @@ function ScheduleControls({
                       }
                     })()}
                   </div>
+                  {(() => {
+                    // §4: 다음 3회 실행 프리뷰 — 입력이 유효할 때만 계산한다.
+                    try {
+                      const runs = nextRunsFromDraft(draft);
+                      if (runs.length === 0) return null;
+                      return (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          다음 3회 실행:{" "}
+                          {runs
+                            .map((run) => runTimeFormatter.format(run))
+                            .join(" · ")}
+                        </div>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
                   {editing.execution_timezone ? (
                     <div className="mt-1 text-xs text-muted-foreground">
                       시간대 {editing.execution_timezone}
@@ -1003,6 +1082,18 @@ function ScheduleControls({
                         updateDraft("minute", event.target.value)
                       }
                     />
+                    {(() => {
+                      try {
+                        parseMinute(draft.minute);
+                        return null;
+                      } catch (error) {
+                        return (
+                          <span className="text-xs text-destructive">
+                            {error instanceof Error ? error.message : null}
+                          </span>
+                        );
+                      }
+                    })()}
                   </label>
                 ) : null}
                 {draft.frequency === "daily_multi" ? (
@@ -1017,6 +1108,18 @@ function ScheduleControls({
                         updateDraft("times", event.target.value)
                       }
                     />
+                    {(() => {
+                      try {
+                        parseDailyTimes(draft.times);
+                        return null;
+                      } catch (error) {
+                        return (
+                          <span className="text-xs text-destructive">
+                            {error instanceof Error ? error.message : null}
+                          </span>
+                        );
+                      }
+                    })()}
                   </label>
                 ) : null}
                 {draft.frequency !== "hourly" &&

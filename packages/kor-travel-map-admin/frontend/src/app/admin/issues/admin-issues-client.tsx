@@ -25,6 +25,7 @@ import {
   type AdminIssueStatus,
 } from "@/api/issues";
 import { AdminShell } from "@/components/admin-shell";
+import { CursorPager } from "@/components/pagination-bar";
 import { EntityLink } from "@/components/entity-link";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -355,12 +356,15 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <FormField
               error={manualErrorField === "lon" ? manualError : undefined}
+              inputMode="decimal"
               label="경도"
               ref={manualLonRef}
               value={manualLon}
               onChange={(event) => setManualLon(event.target.value)}
             />
             <FormField
+              error={manualErrorField === "lon" ? manualError : undefined}
+              inputMode="decimal"
               label="위도"
               value={manualLat}
               onChange={(event) => setManualLat(event.target.value)}
@@ -737,15 +741,27 @@ export function AdminIssuesClient({
                 resetCursor();
               }}
             />
-            <Input
-              aria-label="bbox"
-              placeholder="min_lon,min_lat,max_lon,max_lat"
-              value={bbox}
-              onChange={(event) => {
-                setBbox(event.target.value);
-                resetCursor();
-              }}
-            />
+            <div className="grid gap-1">
+              <Input
+                aria-invalid={
+                  bbox.trim().length > 0 &&
+                  Object.keys(parseBbox(bbox)).length === 0
+                }
+                aria-label="bbox"
+                placeholder="min_lon,min_lat,max_lon,max_lat"
+                value={bbox}
+                onChange={(event) => {
+                  setBbox(event.target.value);
+                  resetCursor();
+                }}
+              />
+              {bbox.trim().length > 0 &&
+              Object.keys(parseBbox(bbox)).length === 0 ? (
+                <span className="text-xs text-destructive">
+                  형식: minLon,minLat,maxLon,maxLat
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="outline">
@@ -766,26 +782,12 @@ export function AdminIssuesClient({
                   `/admin/issues` keyset cursor 목록
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={!cursor}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => setCursor(null)}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!nextCursor}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => setCursor(nextCursor)}
-                >
-                  다음
-                </Button>
-              </div>
+              <CursorPager
+                hasNext={Boolean(nextCursor)}
+                isFetching={issues.isFetching}
+                onFirst={() => setCursor(null)}
+                onNext={() => setCursor(nextCursor)}
+              />
             </div>
             <DataTable
               columns={columns}

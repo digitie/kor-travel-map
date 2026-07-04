@@ -50,6 +50,7 @@ import {
 import { useCategories } from "@/api/categories";
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { CursorPager } from "@/components/pagination-bar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -1864,24 +1865,12 @@ export function CuratedFeaturesClient() {
                       {formatCount(pageSize)}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      disabled={pageIndex <= 1}
-                      type="button"
-                      variant="outline"
-                      onClick={goFirstPage}
-                    >
-                      처음
-                    </Button>
-                    <Button
-                      disabled={nextCursor === null}
-                      type="button"
-                      variant="outline"
-                      onClick={goNextPage}
-                    >
-                      다음
-                    </Button>
-                  </div>
+                  <CursorPager
+                    hasNext={nextCursor !== null}
+                    isFetching={features.isFetching}
+                    onFirst={goFirstPage}
+                    onNext={goNextPage}
+                  />
                 </div>
                 <DataTable
                   columns={featureColumns}

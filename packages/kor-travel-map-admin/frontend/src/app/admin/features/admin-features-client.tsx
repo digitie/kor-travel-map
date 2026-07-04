@@ -31,6 +31,7 @@ import {
 } from "@/api/features";
 import { useProviders } from "@/api/etl";
 import { AdminShell } from "@/components/admin-shell";
+import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
@@ -712,26 +713,13 @@ export function AdminFeaturesClient({
                   keyset cursor 기반 admin 목록
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={pageIndex <= 1}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goFirstPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!nextCursor}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goNextPage}
-                >
-                  다음
-                </Button>
-              </div>
+              <CursorPager
+                hasNext={Boolean(nextCursor)}
+                isFetching={features.isFetching}
+                summary={<>page {formatCount(pageIndex)}</>}
+                onFirst={goFirstPage}
+                onNext={goNextPage}
+              />
             </div>
             <DataTable
               columns={columns}
