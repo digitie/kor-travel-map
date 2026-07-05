@@ -23,7 +23,7 @@ instrumentation hook + (b) 주기 reconciliation scan 이중화로 유지한다.
   (api-entrypoint의 기동 시 upgrade에 파일시스템 walk를 결합하지 않는다).
 
 Revision ID: 0041_managed_files
-Revises: 0039_expand_curated_theme_sets
+Revises: 0040_notice_dedup_cleanup
 Create Date: 2026-07-04
 """
 
@@ -100,9 +100,7 @@ def upgrade() -> None:
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("provider", sa.Text(), nullable=True),
         sa.Column("dataset_key", sa.Text(), nullable=True),
-        sa.Column(
-            "status", sa.Text(), nullable=False, server_default=sa.text("'active'")
-        ),
+        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'active'")),
         sa.Column("orphan_reason", sa.Text(), nullable=True),
         sa.Column("registered_by", sa.Text(), nullable=False),
         sa.Column("byte_size", sa.BigInteger(), nullable=True),
@@ -173,8 +171,10 @@ def upgrade() -> None:
             name="uq_managed_files_backend_location_path",
         ),
         schema="ops",
-        postgresql_with={"fillfactor": "90"},
     )
+    # scan마다 도는 last_seen_at/status UPDATE의 HOT 갱신 여지를 위해 fillfactor=90.
+    # (SQLAlchemy Table은 postgresql_with 스토리지 파라미터 kwarg를 받지 않으므로 ALTER로 설정)
+    op.execute("ALTER TABLE ops.managed_files SET (fillfactor = 90)")
     op.create_index(
         "idx_managed_files_status_kind",
         "managed_files",
