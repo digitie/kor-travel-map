@@ -332,6 +332,32 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
         ),
     )
+    file_registry_e2e_backup_ttl_days: int = Field(
+        default=7,
+        description=(
+            "파일 registry scan의 orphan rule: manifest mode가 live-e2e 러너이거나 "
+            "backup_id가 e2e- prefix인 백업 artifact가 이 일수를 넘기면 "
+            "``orphan(e2e_backup_expired)``로 표시(삭제 후보 flag-only). env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS``."
+        ),
+    )
+    file_registry_temp_ttl_days: int = Field(
+        default=14,
+        description=(
+            "파일 registry scan의 orphan rule: kind='temp' 파일이 이 일수를 넘기면 "
+            "``orphan(temp_expired)``. env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS``."
+        ),
+    )
+    file_registry_extra_roots: str | None = Field(
+        default=None,
+        description=(
+            "파일 registry scan 추가 루트 — ``logical=path[,logical=path]``. "
+            "컨테이너에 bind-mount한 호스트 경로를 스캔 대상에 추가하는 운영자 "
+            "탈출구(기본 스캔은 backup_root/mois_source/S3 버킷만). env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_EXTRA_ROOTS``."
+        ),
+    )
     knps_point_dataset_key: str = Field(
         default="knps_visitor_centers",
         description=(

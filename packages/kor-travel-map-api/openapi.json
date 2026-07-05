@@ -9863,6 +9863,491 @@
         "title": "IssueCoordBody",
         "type": "object"
       },
+      "ManagedFileDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileEventModel"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "file": {
+            "$ref": "#/components/schemas/ManagedFileModel"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileLink"
+            },
+            "title": "Links",
+            "type": "array"
+          }
+        },
+        "required": [
+          "file",
+          "links",
+          "events"
+        ],
+        "title": "ManagedFileDetail",
+        "type": "object"
+      },
+      "ManagedFileDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManagedFileDetail"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFileDetailResponse",
+        "type": "object"
+      },
+      "ManagedFileEventModel": {
+        "additionalProperties": false,
+        "description": "파일 생애 이벤트 1건.",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "event_kind": {
+            "title": "Event Kind",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "import_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Id"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "file_id",
+          "event_kind",
+          "occurred_at",
+          "import_job_id",
+          "dagster_run_id",
+          "actor",
+          "detail"
+        ],
+        "title": "ManagedFileEventModel",
+        "type": "object"
+      },
+      "ManagedFileEventsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileEventModel"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFileEventsResponse",
+        "type": "object"
+      },
+      "ManagedFileLink": {
+        "additionalProperties": false,
+        "description": "파일이 연결된 다른 엔티티로의 서버 조립 deep-link.",
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "rel": {
+            "title": "Rel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rel",
+          "label"
+        ],
+        "title": "ManagedFileLink",
+        "type": "object"
+      },
+      "ManagedFileListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedFileModel"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFileListResponse",
+        "type": "object"
+      },
+      "ManagedFileModel": {
+        "additionalProperties": false,
+        "description": "레지스트리 파일 1건 (list/detail 공용).",
+        "properties": {
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "downloaded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded At"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "is_directory": {
+            "title": "Is Directory",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_loaded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Loaded At"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          },
+          "origin_dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Dagster Run Id"
+          },
+          "origin_import_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Import Job Id"
+          },
+          "orphan_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Reason"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "registered_by": {
+            "title": "Registered By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "storage_backend": {
+            "title": "Storage Backend",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "upload_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          }
+        },
+        "required": [
+          "file_id",
+          "storage_backend",
+          "location",
+          "path",
+          "is_directory",
+          "kind",
+          "provider",
+          "dataset_key",
+          "status",
+          "orphan_reason",
+          "registered_by",
+          "byte_size",
+          "checksum_sha256",
+          "upload_id",
+          "origin_import_job_id",
+          "origin_dagster_run_id",
+          "downloaded_at",
+          "last_loaded_at",
+          "last_seen_at",
+          "deleted_at",
+          "meta",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ManagedFileModel",
+        "type": "object"
+      },
+      "ManagedFilePurgeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManagedFileModel"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFilePurgeResponse",
+        "type": "object"
+      },
+      "ManagedFileRescanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RescanData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFileRescanResponse",
+        "type": "object"
+      },
+      "ManagedFileSummaryData": {
+        "additionalProperties": false,
+        "properties": {
+          "by_kind": {
+            "items": {
+              "$ref": "#/components/schemas/SummaryBucket"
+            },
+            "title": "By Kind",
+            "type": "array"
+          },
+          "by_location": {
+            "items": {
+              "$ref": "#/components/schemas/SummaryBucket"
+            },
+            "title": "By Location",
+            "type": "array"
+          },
+          "by_status": {
+            "items": {
+              "$ref": "#/components/schemas/SummaryBucket"
+            },
+            "title": "By Status",
+            "type": "array"
+          }
+        },
+        "required": [
+          "by_kind",
+          "by_status",
+          "by_location"
+        ],
+        "title": "ManagedFileSummaryData",
+        "type": "object"
+      },
+      "ManagedFileSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManagedFileSummaryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManagedFileSummaryResponse",
+        "type": "object"
+      },
       "Meta": {
         "additionalProperties": false,
         "description": "전 REST 표면에서 공유하는 성공 응답 metadata.",
@@ -14114,6 +14599,65 @@
         "title": "PublicVersionResponse",
         "type": "object"
       },
+      "RescanData": {
+        "additionalProperties": false,
+        "properties": {
+          "deferred_locations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deferred Locations",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results",
+          "deferred_locations"
+        ],
+        "title": "RescanData",
+        "type": "object"
+      },
+      "RescanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "재스캔할 location 목록. 생략 시 api-가시 location(backup_root) 동기 스캔 + DB backfill. dagster 소유 location은 deferred_locations로 안내.",
+            "title": "Locations"
+          }
+        },
+        "title": "RescanRequest",
+        "type": "object"
+      },
       "RestoreRunRequest": {
         "additionalProperties": false,
         "description": "Staging restore command request.",
@@ -14697,6 +15241,47 @@
           "radius_km"
         ],
         "title": "SigunguByRadiusScope",
+        "type": "object"
+      },
+      "SummaryBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          }
+        },
+        "required": [
+          "key",
+          "count"
+        ],
+        "title": "SummaryBucket",
         "type": "object"
       },
       "SyncStateSummary": {
@@ -19285,6 +19870,502 @@
         "summary": "Deactivate Feature Route",
         "tags": [
           "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/files": {
+      "get": {
+        "description": "레지스트리 파일 목록 — kind/status/provider/location/기간 필터 + 검색.",
+        "operationId": "list_files_v1_admin_files_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Location"
+            }
+          },
+          {
+            "in": "query",
+            "name": "registered_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Registered By"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_age_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Age Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_age_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Age Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "downloaded_at",
+              "enum": [
+                "downloaded_at",
+                "last_loaded_at",
+                "last_seen_at",
+                "byte_size",
+                "updated_at"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFileListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Files",
+        "tags": [
+          "admin-files"
+        ]
+      }
+    },
+    "/v1/admin/files/rescan": {
+      "post": {
+        "description": "api-가시 location(backup_root) 동기 재스캔 + DB backfill.\n\ndagster 소유 location(mois_source/object_store/offline_uploads 실체)은 여기서\n스캔할 수 없으므로 ``deferred_locations`` 로 안내한다 — 즉시성이 필요하면\nDagster ``managed_file_scan`` job을 수동 실행한다(6시간 스케줄과 동일 로직).",
+        "operationId": "rescan_files_v1_admin_files_rescan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFileRescanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Rescan Files",
+        "tags": [
+          "admin-files"
+        ]
+      }
+    },
+    "/v1/admin/files/summary": {
+      "get": {
+        "description": "요약 카드 집계 — kind/status/location 별 건수·용량.",
+        "operationId": "files_summary_v1_admin_files_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFileSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Files Summary",
+        "tags": [
+          "admin-files"
+        ]
+      }
+    },
+    "/v1/admin/files/{file_id}": {
+      "get": {
+        "description": "파일 상세 — provenance links + 최근 이벤트(50건).",
+        "operationId": "file_detail_v1_admin_files__file_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFileDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "File Detail",
+        "tags": [
+          "admin-files"
+        ]
+      }
+    },
+    "/v1/admin/files/{file_id}/events": {
+      "get": {
+        "description": "파일 이벤트 페이지네이션.",
+        "operationId": "file_events_v1_admin_files__file_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFileEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "File Events",
+        "tags": [
+          "admin-files"
+        ]
+      }
+    },
+    "/v1/admin/files/{file_id}/purge": {
+      "post": {
+        "description": "좁은 gate — 소유 행이 사라진 S3 zombie orphan만 레지스트리에서 purge.\n\n실체 S3 object hard-delete는 S3 자격이 있는 dagster 스캐너가 reconcile한다.\n여기서는 서버가 최신 상태를 재검증한 뒤 레지스트리 행을 ``deleted``(purged)로\n플래그하고 ``purged`` 이벤트를 남긴다.",
+        "operationId": "purge_file_v1_admin_files__file_id__purge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedFilePurgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Purge File",
+        "tags": [
+          "admin-files"
         ]
       }
     },

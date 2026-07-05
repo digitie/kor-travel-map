@@ -334,6 +334,13 @@ def fetch_mois_license_records(
     # PROMOTED_SERVICE_SLUGS는 krtour(본 repo)이므로 top-level import으로 충분.
     from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
 
+    # 파일 registry hook (H9) — Phase B가 소스 DB 소비를 시작했음을 기록.
+    # consumer가 run당 generator를 한 번 생성하는 경로라 memo 불필요, 내부에서
+    # 실패 무해화. 지연 import로 모듈 초기화 순환을 피한다.
+    from .file_registry_hooks import record_mois_source_loaded
+
+    record_mois_source_loaded(settings)
+
     engine = create_engine(f"sqlite:///{db_path}")
     session = Session(engine)
     try:

@@ -14,6 +14,31 @@ curated 표시제목/재사용정책/큐레이션관계·change-requests 중복�
 남은 후속(단일): 커스텀 모달 2건 공용 Dialog 이관(live 검증 동반), 저중복 화면들의
 SectionCard/DetailList/FilterBar 채택 sweep(curated `<dl>`4·gray-box11, enrichment `<dl>`3·gray-box5,
 providers gray-box7 등 — providers cursor `<pre>`는 spec가 직렬화를 단언해 JsonViewer 이관 보류).
+## 2026-07-05 (claude) — 관리 UI 개편 D: 파일 레지스트리 + 추적 UI
+
+관리 UI 개편의 D 단계(PR-B nav 위에 스택). "provider가 다운로드한 파일·자체 백업 등
+시스템 저장 파일을, 단순 리스팅이 아니라 어디에 어떻게 연결됐고 사용 중인지·임시인지·언제
+받고 마지막으로 로드됐는지 추적" 요구.
+
+- **DB(0040)**: `ops.managed_files`(파일 1건 = storage_backend/location/path/kind/status/
+  provenance FK/시각) + `ops.managed_file_events`(생애 이벤트). `down_revision=0039` —
+  notice #633의 0040과 충돌하므로 **최종 통합 시 coordinator가 merge-migration 추가**.
+- **계측·reconcile**: 생산/소비 지점(백업·offline 업로드·MOIS sync·provider fetch·dagster)
+  hook로 등록/touch. hook 실패가 host op를 깨지 않도록 `registry_guard`로 감싼다. 주기 스캔은
+  소유권 분리 — **backup_root=api, mois_source·S3=dagster**(`managed_file_scan` job, 6시간
+  STOPPED 스케줄). orphan rule flag-only, purge는 좁은 zombie만.
+- **API(`/v1/admin/files`)**: 목록(kind/status/provider/location/기간 필터·total_count),
+  요약 집계, 상세(+서버 조립 provenance links·이력 50), 재스캔(backup_root 동기 + offline
+  backfill; dagster location은 deferred 안내), zombie purge(파괴적 스위치 게이트 + 서버 재검증).
+  TTL 노브는 코어 `KorTravelMapSettings` 직접 읽기(ApiSettings에 없음).
+- **UI(`/admin/files`, 시스템 그룹)**: 요약 칩(클릭=필터) + 필터 바 + 목록 + 상세 provenance
+  패널(연결 딥링크·이력 타임라인·메타 JsonViewer·zombie purge). 공용 컴포넌트(SectionCard/
+  DataTable/DetailList/StatusBadge/EmptyState/HelpTip/JsonViewer) 재사용. 한국어·HelpTip.
+- **검증**: ruff/mypy --strict/lint-imports(4 kept) green, dagster defs(41 jobs·37 schedules,
+  scan job+schedule 등록)·21 dagster test green, 신규 router 7 test green, openapi.json/
+  openapi.user.json·types.ts 재생성, 프론트 type-check·eslint(0 error)·vitest 57 green.
+  e2e: nav-mirror 20→21 + scenario-catalog `files` + mocked smoke(`files-page.spec.ts`).
+  **머지 금지** — live UI e2e(n150 docker-playwright)는 coordinator 최종 통합에서.
 
 ## 2026-07-04 (claude) — 관리 UI 개편 B: nav 그룹·크로스링크·헤딩 정본·spec 정합화
 

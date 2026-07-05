@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from kortravelmap.core.managed_file_states import MANAGED_FILE_LOCATION_BACKUP_ROOT
+from kortravelmap.infra import file_registry
 from kortravelmap.infra.backup import (
     BackupArtifact,
     BackupArtifactError,
@@ -25,8 +27,10 @@ from kortravelmap.infra.backup import (
     validate_backup_id,
 )
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_destructive_enabled
+from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -51,6 +55,42 @@ class _CommandResult:
     returncode: int
     stdout: str
     stderr: str
+
+
+def _artifact_meta(artifact: BackupArtifact) -> dict[str, Any]:
+    """registry ``meta``용 manifest 요약."""
+
+    return {
+        "manifest_status": artifact.manifest_status,
+        "mode": artifact.mode,
+        "components": artifact.components,
+        "databases": artifact.databases,
+        "checksum_count": artifact.checksum_count,
+        "physical": {"path": str(artifact.path)},
+    }
+
+
+async def _registry_upsert_backup(
+    session: AsyncSession,
+    artifact: BackupArtifact,
+    *,
+    event_kind: str | None,
+) -> file_registry.ManagedFile:
+    """백업 artifact를 registry에 upsert(백업 hook 공통부)."""
+
+    return await file_registry.register_file(
+        session,
+        storage_backend="filesystem",
+        location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
+        path=artifact.backup_id,
+        kind="backup",
+        is_directory=True,
+        byte_size=artifact.byte_size,
+        downloaded_at=artifact.created_at_utc,
+        actor="api:admin",
+        event_kind=event_kind,
+        meta=_artifact_meta(artifact),
+    )
 
 
 class BackupRecord(BaseModel):
@@ -397,7 +437,11 @@ async def get_backup(request: Request, backup_id: str) -> BackupDetailResponse:
     response_model=BackupDeleteResponse,
     dependencies=[Depends(require_admin_destructive_enabled)],
 )
-async def delete_backup(request: Request, backup_id: str) -> BackupDeleteResponse:
+async def delete_backup(
+    request: Request,
+    backup_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BackupDeleteResponse:
     """Delete one backup artifact directory."""
     started_at = perf_counter()
     settings = _settings(request)
@@ -414,6 +458,15 @@ async def delete_backup(request: Request, backup_id: str) -> BackupDeleteRespons
         shutil.rmtree(artifact.path)
     except OSError as exc:
         raise _delete_failed(exc) from exc
+    # 파일 registry hook (H2) — rmtree 확정 후 deleted 기록, 실패 무해.
+    async with file_registry.registry_guard("backup:delete"):
+        async with session.begin():
+            registered = await _registry_upsert_backup(
+                session, artifact, event_kind=None
+            )
+            await file_registry.mark_deleted(
+                session, file_id=registered.file_id, actor="api:admin"
+            )
     return BackupDeleteResponse(
         data=BackupDeleteData(deleted=True, item=deleted_item),
         meta=make_meta(started_at=started_at),
@@ -423,6 +476,7 @@ async def delete_backup(request: Request, backup_id: str) -> BackupDeleteRespons
 @router.post("", response_model=BackupOperationResponse)
 async def create_backup(
     request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
     body: BackupRunRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run a cold backup command."""
@@ -469,10 +523,19 @@ async def create_backup(
                 "details": {"stderr": result.stderr, "stdout": result.stdout},
             },
         )
+    artifact_raw: BackupArtifact | None = None
     try:
-        artifact = _record(backup_artifact(settings.backup_root, backup_id))
+        artifact_raw = backup_artifact(settings.backup_root, backup_id)
+        artifact = _record(artifact_raw)
     except BackupArtifactError:
         artifact = None
+    # 파일 registry hook (H1) — 백업 성공 + artifact 파싱 성공 시 등록, 실패 무해.
+    if artifact_raw is not None:
+        async with file_registry.registry_guard("backup:create"):
+            async with session.begin():
+                await _registry_upsert_backup(
+                    session, artifact_raw, event_kind="downloaded"
+                )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="backup",
@@ -506,6 +569,7 @@ def _restore_targets_from_values(
 async def restore_backup(
     request: Request,
     backup_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
     body: RestoreRunRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run a staging restore command."""
@@ -573,6 +637,26 @@ async def restore_backup(
                 "details": {"stderr": result.stderr, "stdout": result.stdout},
             },
         )
+    # 파일 registry hook (H3) — 복원 = 소비이므로 last_loaded_at 갱신, 실패 무해.
+    async with file_registry.registry_guard("backup:restore"):
+        async with session.begin():
+            touched = await file_registry.touch_loaded(
+                session,
+                storage_backend="filesystem",
+                location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
+                path=safe_id,
+                event_kind="restored",
+                actor="api:admin",
+                detail={"targets": targets.model_dump()},
+            )
+            if not touched:
+                # 미등록 artifact(수동 생성분) — 등록 후 restored 기록.
+                try:
+                    raw = backup_artifact(settings.backup_root, safe_id)
+                except BackupArtifactError:
+                    raw = None
+                if raw is not None:
+                    await _registry_upsert_backup(session, raw, event_kind="restored")
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="restore",
@@ -593,6 +677,7 @@ async def restore_backup(
 async def plan_restore_swap(
     request: Request,
     backup_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
     body: RestoreSwapRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run the restore hot-swap env switch."""
@@ -660,6 +745,24 @@ async def plan_restore_swap(
                 "details": {"stderr": result.stderr, "stdout": result.stdout},
             },
         )
+    # 파일 registry hook (H10) — swap 스위치 파일(.env.restore-swap)을 temp로 등록.
+    async with file_registry.registry_guard("backup:swap-env-file"):
+        async with session.begin():
+            env_file = payload.env_file or ".env.restore-swap"
+            await file_registry.register_file(
+                session,
+                storage_backend="filesystem",
+                location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
+                path=Path(env_file).name,
+                kind="temp",
+                actor="api:admin",
+                downloaded_at=datetime.now(UTC),
+                meta={
+                    "physical": {"path": env_file},
+                    "backup_id": safe_id,
+                    "purpose": "restore hot-swap env switch",
+                },
+            )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="swap",

@@ -16,6 +16,10 @@ from .curated_features import (
     CURATED_FEATURE_SCHEDULES,
 )
 from .feature_update_runner import feature_update_runner_resource
+from .file_registry_scan import (
+    FILE_REGISTRY_SCAN_JOBS,
+    FILE_REGISTRY_SCAN_SCHEDULES,
+)
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .mcst_features import MCST_FEATURE_ASSETS
@@ -158,6 +162,7 @@ defs = Definitions(
             *MOIS_SOURCE_SYNC_JOBS,
             *OFFLINE_UPLOAD_JOBS,
             *CURATED_FEATURE_JOBS,
+            *FILE_REGISTRY_SCAN_JOBS,
         ],
     ),
     schedules=[
@@ -165,6 +170,7 @@ defs = Definitions(
         *MAINTENANCE_SCHEDULES,
         *MOIS_SOURCE_SYNC_SCHEDULES,
         *CURATED_FEATURE_SCHEDULES,
+        *FILE_REGISTRY_SCAN_SCHEDULES,
     ],
     sensors=FEATURE_UPDATE_SENSORS,
     resources={

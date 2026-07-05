@@ -107,6 +107,57 @@ class S3ObjectStore:
                 f"객체 저장소 삭제 실패: bucket={self.bucket!r}, key={storage_key!r}"
             ) from exc
 
+    async def list_objects(
+        self, *, prefix: str = "", max_keys: int = 5000
+    ) -> list[StoredObject]:
+        """``prefix`` 아래 객체 목록(키/크기/etag)을 반환한다 — registry scan용.
+
+        boto3 ``list_objects_v2`` 페이지네이션을 따라가며 ``max_keys``에서 멈춘다
+        (registry scan 상한 가드 — 폭주 방지).
+        """
+        try:
+            return await asyncio.to_thread(self._list_objects_sync, prefix, max_keys)
+        except FileStoreError:
+            raise
+        except Exception as exc:
+            raise FileStoreError(
+                f"객체 저장소 목록 실패: bucket={self.bucket!r}, prefix={prefix!r}"
+            ) from exc
+
+    def _list_objects_sync(self, prefix: str, max_keys: int) -> list[StoredObject]:
+        objects: list[StoredObject] = []
+        continuation: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self.bucket, "Prefix": prefix}
+            if continuation:
+                kwargs["ContinuationToken"] = continuation
+            response = self.s3_client.list_objects_v2(**kwargs)
+            if not isinstance(response, dict):
+                break
+            for item in response.get("Contents") or []:
+                key = item.get("Key")
+                if not key:
+                    continue
+                etag = item.get("ETag")
+                objects.append(
+                    StoredObject(
+                        bucket=self.bucket,
+                        object_key=str(key),
+                        byte_size=int(item.get("Size") or 0),
+                        checksum_sha256="",
+                        public_url=None,
+                        etag=str(etag) if etag is not None else None,
+                    )
+                )
+                if len(objects) >= max_keys:
+                    return objects
+            if not response.get("IsTruncated"):
+                break
+            continuation = response.get("NextContinuationToken")
+            if not continuation:
+                break
+        return objects
+
     def public_url(self, storage_key: str) -> str | None:
         """공개 base URL이 설정된 경우 객체 접근 URL을 만든다."""
         if not self.public_base_url:

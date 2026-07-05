@@ -5,6 +5,7 @@ import {
   AlertTriangleIcon,
   DatabaseIcon,
   ArchiveIcon,
+  FolderTreeIcon,
   GaugeIcon,
   GitCompareArrowsIcon,
   HomeIcon,
@@ -117,6 +118,7 @@ export const NAV_GROUPS = [
     group: "시스템",
     badge: "시스템",
     items: [
+      { href: "/admin/files", label: "파일 관리", icon: FolderTreeIcon },
       { href: "/admin/backups", label: "백업", icon: ArchiveIcon },
       { href: "/admin/settings", label: "설정", icon: SettingsIcon },
     ],

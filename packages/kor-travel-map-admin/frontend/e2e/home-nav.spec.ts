@@ -308,7 +308,7 @@ async function routeDagster(page: Page, handler: (route: Route) => Promise<void>
 }
 
 // admin-shell.tsx NAV_GROUPS와 정확히 1:1로 거울처럼 박는다 (그룹 순서 그대로 평탄화).
-// nav item이 추가/삭제되면 이 표와 toHaveCount(20)가 함께 깨져 테스트가 drift를 잡는다.
+// nav item이 추가/삭제되면 이 표와 toHaveCount(21)가 함께 깨져 테스트가 drift를 잡는다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
   // [Feature 관리]
@@ -332,6 +332,7 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "운영 로그", href: "/ops/logs" },
   { label: "정합성 점검", href: "/ops/consistency" },
   // [시스템]
+  { label: "파일 관리", href: "/admin/files" },
   { label: "백업", href: "/admin/backups" },
   { label: "설정", href: "/admin/settings" },
 ];
@@ -345,7 +346,7 @@ const NAV_GROUP_HEADERS = [
 ] as const;
 
 test.describe("home page (/) — nav + metric/status depth", () => {
-  test("admin shell: 20개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 21개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
@@ -363,8 +364,8 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 20개 — source NAV_GROUPS 기준.
-    await expect(navigation.getByRole("link")).toHaveCount(20);
+    // nav 링크는 정확히 21개 — source NAV_GROUPS 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(21);
 
     // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
     for (const header of NAV_GROUP_HEADERS) {

@@ -50,6 +50,7 @@ from dagster import (
     op,
 )
 
+from .file_registry_hooks import record_mois_source_download
 from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
 from .schedule_overrides import cron_for_schedule
@@ -134,6 +135,7 @@ def sync_mois_source_db(
     service_slugs: Iterable[str] | None = None,
     org_code: str | None = None,
     batch_size: int = 1000,
+    dagster_run_id: str | None = None,
 ) -> MoisSourceSyncSummary:
     """LOCALDATA 인허가 파일을 받아 MOIS 소스 SQLite DB에 적재한다(Phase A).
 
@@ -239,7 +241,7 @@ def sync_mois_source_db(
             else ",".join(sorted(sync_kinds))
         )
 
-    return MoisSourceSyncSummary(
+    summary = MoisSourceSyncSummary(
         db_path=str(db_path),
         service_slugs=tuple(synced_slugs),
         sync_kind=sync_kind,
@@ -249,6 +251,18 @@ def sync_mois_source_db(
         closed_count=closed_count,
         unknown_status_count=unknown_status_count,
     )
+    # 파일 registry hook (H8) — sync 성공 기록. 내부에서 실패 무해화된다.
+    record_mois_source_download(
+        settings,
+        summary_meta={
+            "sync_kind": summary.sync_kind,
+            "slug_count": len(summary.service_slugs),
+            "scanned_count": summary.scanned_count,
+            "upserted_count": summary.upserted_count,
+        },
+        dagster_run_id=dagster_run_id,
+    )
+    return summary
 
 
 _SYNC_MARKER_SUFFIX: Final = ".synced"
@@ -421,6 +435,7 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
         service_slugs=service_slugs,
         org_code=org_code,
         batch_size=batch_size,
+        dagster_run_id=context.run_id,
     )
     metadata = summary.as_metadata()
     context.add_output_metadata(metadata)

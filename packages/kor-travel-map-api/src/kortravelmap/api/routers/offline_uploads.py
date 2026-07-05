@@ -28,6 +28,9 @@ from fastapi import (
     status,
 )
 from kortravelmap.core.exceptions import FileStoreError
+from kortravelmap.core.managed_file_states import (
+    MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+)
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_LOADABLE_STATES,
     OFFLINE_UPLOAD_TABULAR_FORMATS,
@@ -35,6 +38,7 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_WRITEABLE_FORMATS,
     OfflineUploadState,
 )
+from kortravelmap.infra import file_registry
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     kor_travel_geo_address_resolver,
@@ -845,6 +849,28 @@ async def create_offline_upload_request(
     except Exception:  # noqa: BLE001 - DB 원인 보존 + object 보상 삭제
         await _rollback_uploaded_object(store, stored.object_key)
         raise
+    # 파일 registry 등록 hook (H4) — 본 업로드 성공 후 별도 트랜잭션, 실패 무해.
+    async with file_registry.registry_guard("offline-upload:register"):
+        async with session.begin():
+            await file_registry.register_file(
+                session,
+                storage_backend="s3",
+                location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+                path=stored.object_key,
+                kind="upload",
+                provider=provider,
+                dataset_key=dataset_key,
+                byte_size=stored.byte_size,
+                checksum_sha256=checksum_sha256,
+                upload_id=upload_id,
+                downloaded_at=upload.created_at,
+                actor="api:admin",
+                meta={
+                    "physical": {"bucket": stored.bucket},
+                    "original_filename": filename,
+                    "sync_scope": sync_scope,
+                },
+            )
     return OfflineUploadWriteResponse(
         data=_record_from_upload(upload),
         meta=OfflineUploadWriteMeta(
@@ -954,9 +980,11 @@ async def delete_offline_upload_request(
     # DB row 삭제 확정 후 객체 best-effort 삭제. S3 DeleteObject는 미존재 키에도
     # 성공(멱등)하고, 저장소 오류는 정리 lifecycle을 막지 않도록 기록만 한다.
     store = _offline_upload_store_from_request(request)
+    object_deleted = True
     try:
         await store.delete_object(row.storage_key)
     except FileStoreError:
+        object_deleted = False
         _LOG.warning(
             "offline upload object delete failed (best-effort): "
             "upload_id=%s, storage_key=%s",
@@ -964,6 +992,46 @@ async def delete_offline_upload_request(
             row.storage_key,
             exc_info=True,
         )
+    # 파일 registry hook (H7): 삭제 성공 → deleted, 실패 → delete_failed +
+    # orphan(owner_row_deleted) — #397 zombie object를 발생 즉시 가시화한다.
+    async with file_registry.registry_guard("offline-upload:delete"):
+        async with session.begin():
+            registered = await file_registry.register_file(
+                session,
+                storage_backend="s3",
+                location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+                path=row.storage_key,
+                kind="upload",
+                provider=row.provider,
+                dataset_key=row.dataset_key,
+                byte_size=row.byte_size,
+                checksum_sha256=row.checksum_sha256,
+                upload_id=row.upload_id,
+                event_kind=None,
+                actor="api:admin",
+            )
+            if object_deleted:
+                await file_registry.mark_deleted(
+                    session,
+                    file_id=registered.file_id,
+                    actor="api:admin",
+                    detail={"upload_id": upload_id},
+                )
+            else:
+                await file_registry.record_event(
+                    session,
+                    file_id=registered.file_id,
+                    event_kind="delete_failed",
+                    actor="api:admin",
+                    detail={"upload_id": upload_id},
+                )
+                await file_registry.mark_orphan(
+                    session,
+                    file_id=registered.file_id,
+                    reason="owner_row_deleted",
+                    actor="api:admin",
+                    detail={"upload_id": upload_id},
+                )
     return OfflineUploadDeleteResponse(
         data=_record_from_upload(row),
         meta=make_meta(started_at=started_at),
