@@ -56,7 +56,7 @@ test.describe("/admin/features/update-requests live", () => {
       .filter({ hasText: "요청 처리 완료" });
     await expect(successAlert).toBeVisible(T);
     await expect(successAlert).toContainText("dry-run");
-    await expect(successAlert).toContainText("dry_run");
+    await expect(successAlert).toContainText("모의실행");
   });
 
   test("/features 지도 Update 링크 → feature update requests 화면", async ({
@@ -69,7 +69,7 @@ test.describe("/admin/features/update-requests live", () => {
     ).toBeVisible(T);
     await page.getByRole("link", { name: "Update", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/admin\/feature-update-requests$/, T);
+    await expect(page).toHaveURL(/\/admin\/features\/update-requests$/, T);
     await expectUpdateRequestsReady(page);
   });
 });

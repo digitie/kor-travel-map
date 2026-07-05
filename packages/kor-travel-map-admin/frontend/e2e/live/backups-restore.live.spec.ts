@@ -163,7 +163,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("backup id").fill("invalid/backup-id");
 
     const responsePromise = waitForPost(page, isBackupResponse);
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
     const response = await responsePromise;
     expect(response.status()).toBeGreaterThanOrEqual(400);
 
@@ -183,7 +183,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("backup id").fill(backupId);
 
     const responsePromise = waitForPost(page, isBackupResponse);
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
     const body = await readOperation(await responsePromise);
 
     expect(body.data.operation).toBe("backup");

@@ -691,7 +691,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         // 같은 grid section의 첫 pre가 Scope(둘째가 Matched scope).
         const scopePre = page
           .locator("section")
-          .filter({ hasText: "Matched scope" })
+          .filter({ hasText: "매칭된 스코프" })
           .locator("pre")
           .first();
         await expect(scopePre).toContainText(`"center_radius"`);
@@ -701,7 +701,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         // Policy <pre>: update_policy가 비어 있어 "{}".
         const policyPre = page
           .locator("section")
-          .filter({ hasText: "Policy" })
+          .filter({ hasText: "정책" })
           .locator("pre");
         await expect(policyPre).toContainText("{}");
       });

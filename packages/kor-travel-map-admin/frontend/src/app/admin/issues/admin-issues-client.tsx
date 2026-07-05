@@ -785,6 +785,7 @@ export function AdminIssuesClient({
               <CursorPager
                 hasNext={Boolean(nextCursor)}
                 isFetching={issues.isFetching}
+                isFirst={cursor === null}
                 onFirst={() => setCursor(null)}
                 onNext={() => setCursor(nextCursor)}
               />

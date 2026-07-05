@@ -145,6 +145,8 @@ type CursorPagerProps = {
   /** 현재 위치 요약(예: `page 3 · 이 페이지 20개`). */
   summary?: React.ReactNode;
   isFetching?: boolean;
+  /** 첫 페이지(cursor=null)면 '첫 페이지' 버튼을 비활성. */
+  isFirst?: boolean;
   ariaPrefix?: string;
   placement?: "top" | "bottom";
 };
@@ -156,6 +158,7 @@ function CursorPager({
   onNext,
   summary,
   isFetching = false,
+  isFirst = false,
   ariaPrefix,
   placement,
 }: CursorPagerProps) {
@@ -163,7 +166,7 @@ function CursorPager({
     <PagerShell ariaPrefix={ariaPrefix} placement={placement} summary={summary}>
       <Button
         aria-label={paginationAria(ariaPrefix, "첫 페이지")}
-        disabled={isFetching}
+        disabled={isFirst || isFetching}
         size="sm"
         type="button"
         variant="outline"

@@ -649,7 +649,8 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await gotoAdminFeatures(page);
       await page.getByLabel("feature search").fill(sampleFeatureId);
       const row = rowContaining(page, sampleFeatureId.slice(0, 18));
-      await expect(row).toBeVisible(T);
+      // 100만+ feature id 검색은 2-worker 부하에서 15s를 넘길 수 있어 여유를 준다.
+      await expect(row).toBeVisible({ timeout: 30_000 });
       await row.getByRole("button", { name: "preview" }).click();
       await expect(page.getByText(sampleFeatureId, { exact: true })).toBeVisible(T);
 
