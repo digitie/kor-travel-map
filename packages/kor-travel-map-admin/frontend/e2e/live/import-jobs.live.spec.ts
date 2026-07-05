@@ -63,7 +63,7 @@ async function expectDetailReady(
   page: import("@playwright/test").Page,
 ): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Import job" }),
+    page.getByRole("heading", { level: 1, name: "적재 작업 상세" }),
   ).toBeVisible({ timeout: 15000 });
 }
 

@@ -300,7 +300,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
 
     // import-job-detail-client.tsx: AdminShell title="Import job" (line 297).
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import job" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업 상세" }),
     ).toBeVisible(T);
     await expect(page).toHaveURL(
       new RegExp(`/ops/import-jobs/${jobId}$`),
@@ -379,7 +379,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     expect(before.data.status).toBe("queued");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import job" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업 상세" }),
     ).toBeVisible(T);
 
     // import-job-detail-client.tsx: queued/running이면 canCancel → 버튼·입력 활성(line 392-407).
