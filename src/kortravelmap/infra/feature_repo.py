@@ -2247,29 +2247,22 @@ async def features_in_bbox(
     ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다
     (로테이션 주기 밖 옛 가격이 현재가 마커로 보이지 않게, ``None``이면 끔).
     """
-    rows = (
-        await session.execute(
-            text(
-                _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
-                if include_geometry
-                else _FEATURES_IN_BBOX_SQL
-            ),
-            {
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-                "kinds": kinds,
-                "categories": _normalized_filter(categories),
-                "providers": _normalized_filter(providers),
-                "limit": limit,
-                "cursor_feature_id": _bbox_cursor_feature_id(cursor),
-                "price_stale_hide_days": price_stale_hide_days,
-            },
-        )
-        .mappings()
-        .all()
+    result = await session.execute(
+        text(_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL if include_geometry else _FEATURES_IN_BBOX_SQL),
+        {
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "kinds": kinds,
+            "categories": _normalized_filter(categories),
+            "providers": _normalized_filter(providers),
+            "limit": limit,
+            "cursor_feature_id": _bbox_cursor_feature_id(cursor),
+            "price_stale_hide_days": price_stale_hide_days,
+        },
     )
+    rows = result.mappings().all()
     return [dict(r) for r in rows]
 
 
