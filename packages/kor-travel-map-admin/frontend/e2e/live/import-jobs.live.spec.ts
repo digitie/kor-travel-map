@@ -376,7 +376,7 @@ test.describe("import-jobs live · detail by job id", () => {
       await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // import-job-detail-client.tsx: 목록 back link → /ops/import-jobs.
-      await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
+      await expect(page.getByRole("link", { name: "목록", exact: true })).toHaveAttribute(
         "href",
         "/ops/import-jobs",
         { timeout: 15000 },
@@ -395,7 +395,7 @@ test.describe("import-jobs live · detail by job id", () => {
       // PRESENCE 불확실성에 맞춰 느슨하게 OR 단언.
       const eventsOrError = page
         .getByText("이벤트", { exact: true })
-        .or(page.getByText("import job 조회 실패"));
+        .or(page.getByText("적재 작업 조회 실패"));
       await expect(eventsOrError.first()).toBeVisible({ timeout: 15000 });
     });
   }
@@ -412,7 +412,7 @@ test.describe("import-jobs live · detail event level filter (read-only)", () =>
       // event level select는 jobData가 있을 때만 렌더. 없으면 조회 실패 alert.
       const levelOrError = page
         .getByLabel("이벤트 레벨")
-        .or(page.getByText("import job 조회 실패"));
+        .or(page.getByText("적재 작업 조회 실패"));
       await expect(levelOrError.first()).toBeVisible({ timeout: 15000 });
     });
   }
@@ -439,7 +439,7 @@ test.describe("import-jobs live · detail responsive viewports", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
-      await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
+      await expect(page.getByRole("link", { name: "목록", exact: true })).toHaveAttribute(
         "href",
         "/ops/import-jobs",
         { timeout: 15000 },
@@ -456,7 +456,7 @@ test.describe("import-jobs live · list↔detail nav round-trip (read-only)", ()
       await gotoLive(page, `${LIST_ROUTE}/${encodeURIComponent(jobId)}`);
       await expectDetailReady(page);
       // 내비 링크 클릭은 허용(GET navigation, 비파괴).
-      await page.getByRole("link", { name: "목록" }).click();
+      await page.getByRole("link", { name: "목록", exact: true }).click();
       await expectListReady(page);
       await expect(page).toHaveURL(/\/ops\/import-jobs$/, { timeout: 15000 });
     });

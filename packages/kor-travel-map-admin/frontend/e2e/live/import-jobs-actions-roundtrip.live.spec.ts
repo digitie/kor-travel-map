@@ -330,8 +330,8 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
       await expect(page.getByText("이벤트", { exact: true })).toBeVisible(T);
 
       if (eventItems.length > 0) {
-        // event 컬럼헤더(line 204-244): time/level/stage/code/message/payload.
-        for (const column of ["time", "level", "code", "message"]) {
+        // event 컬럼헤더: 시각/레벨/단계/코드/메시지/세부값.
+        for (const column of ["시각", "레벨", "코드", "메시지"]) {
           await expect(
             page.getByRole("columnheader", { name: column, exact: true }),
           ).toBeVisible(T);
