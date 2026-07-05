@@ -575,13 +575,13 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
       await test.step("admin 폼이 서버 검증(lat 39.5 초과)에서 422를 받으면 오류 Alert가 노출되고 ROW는 생기지 않는다", async () => {
         await gotoPoiTargets(page);
-        await page.getByLabel("external system").fill(externalSystem);
-        await page.getByLabel("target key").fill(targetKey);
-        await page.getByLabel("target name").fill(name);
-        await page.getByLabel("lon", { exact: true }).fill(String(LON));
+        await page.getByLabel("외부 시스템").fill(externalSystem);
+        await page.getByLabel("대상 키").fill(targetKey);
+        await page.getByLabel("이름").fill(name);
+        await page.getByLabel("경도", { exact: true }).fill(String(LON));
         // client 검증(33~43)은 통과하지만 서버 CoordinateBody(lat<=39.5)는 거절한다.
-        await page.getByLabel("lat", { exact: true }).fill("41");
-        await page.getByLabel("radius km").fill("5");
+        await page.getByLabel("위도", { exact: true }).fill("41");
+        await page.getByLabel("반경(km)").fill("5");
 
         const putResponse = waitForApiResponse(
           page,

@@ -167,7 +167,7 @@ async function gotoListReady(page: Page): Promise<void> {
     page.getByRole("heading", { level: 1, name: "적재 작업" }),
   ).toBeVisible(T);
   // DataTable thead는 비어도 렌더 → columnheader "job"은 항상 존재.
-  await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible(T);
+  await expect(page.getByRole("columnheader", { name: "작업" })).toBeVisible(T);
 }
 
 /** 직접 API 읽기(=browserFetch) — backend 정본 baseline. */
@@ -208,7 +208,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
         page,
         (url) => url.searchParams.get("status") === targetStatus,
       );
-      await page.getByLabel("status").selectOption(targetStatus);
+      await page.getByLabel("상태").selectOption(targetStatus);
       const statusResp = await statusRespP;
 
       // (1) API 파라미터 계약: status=X, page_size=100, cursor 없음(UI 미페이징).
@@ -231,14 +231,14 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
       await expect(
         page.getByRole("link", { name: shortId(firstJobId) }).first(),
       ).toBeVisible(T);
-      await expect(page.getByLabel("status")).toHaveValue(targetStatus, T);
+      await expect(page.getByLabel("상태")).toHaveValue(targetStatus, T);
     });
 
     await test.step("kind 필터 → kind 파라미터 + kind=X로 필터된 body + UI 행", async () => {
       const targetKind = items[0].kind;
 
       // status를 all로 되돌려 query를 kind 단독으로 만든다(every(kind) 단언 단순화).
-      await page.getByLabel("status").selectOption("all");
+      await page.getByLabel("상태").selectOption("all");
 
       const kindRespP = waitForListResponse(
         page,
@@ -327,7 +327,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
       const eventItems = events.data.items;
 
       // Events 카드 타이틀(line 341)은 항상 렌더.
-      await expect(page.getByText("Events", { exact: true })).toBeVisible(T);
+      await expect(page.getByText("이벤트", { exact: true })).toBeVisible(T);
 
       if (eventItems.length > 0) {
         // event 컬럼헤더(line 204-244): time/level/stage/code/message/payload.
@@ -342,7 +342,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
         ).toBeVisible(T);
       } else {
         // 빈 events → DataTable emptyMessage(line 376).
-        await expect(page.getByText("event가 없습니다.")).toBeVisible(T);
+        await expect(page.getByText("이벤트가 없습니다.")).toBeVisible(T);
       }
     });
   });
@@ -383,7 +383,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     ).toBeVisible(T);
 
     // import-job-detail-client.tsx: queued/running이면 canCancel → 버튼·입력 활성(line 392-407).
-    const cancelButton = page.getByRole("button", { name: "cancel" });
+    const cancelButton = page.getByRole("button", { name: "중지 요청" });
     await expect(cancelButton).toBeEnabled(T);
 
     // <Input placeholder="reason">(line 396)에 reason 입력 → handleCancel은
@@ -411,7 +411,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     // "취소됨". (API body는 영어 "cancelled" 그대로 — 위 (2)에서 단언.)
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "cancel 요청됨" });
+      .filter({ hasText: "중지 요청됨" });
     await expect(successAlert).toBeVisible(T);
     await expect(successAlert).toContainText("취소됨");
 

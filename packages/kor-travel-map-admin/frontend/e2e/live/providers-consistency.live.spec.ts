@@ -133,7 +133,7 @@ test.describe("live /ops/providers", () => {
     await expectProvidersLoaded(page);
     // When items exist, items[0] auto-selects → "Refresh policy" panel; when
     // empty → "선택된 provider dataset이 없습니다." placeholder. Assert loosely.
-    const policyPanel = page.getByText("Refresh policy");
+    const policyPanel = page.getByText("갱신 정책");
     const placeholder = page.getByText("선택된 provider dataset이 없습니다.");
     await expect(policyPanel.or(placeholder).first()).toBeVisible({
       timeout: T,

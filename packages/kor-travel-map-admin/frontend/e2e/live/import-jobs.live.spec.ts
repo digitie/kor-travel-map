@@ -54,7 +54,7 @@ async function expectListReady(
   ).toBeVisible({ timeout: 15000 });
   // DataTable은 비어도 thead를 렌더하므로 PRESENCE 무관하게 안정적이다.
   await expect(
-    page.getByRole("columnheader", { name: "job" }),
+    page.getByRole("columnheader", { name: "작업" }),
   ).toBeVisible({ timeout: 15000 });
 }
 
@@ -100,7 +100,7 @@ test.describe("import-jobs live · list base", () => {
   }) => {
     await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
-    await expect(page.getByLabel("status")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByLabel("상태")).toBeVisible({ timeout: 15000 });
     await expect(page.getByPlaceholder("kind filter")).toBeVisible({
       timeout: 15000,
     });
@@ -124,7 +124,7 @@ test.describe("import-jobs live · list base", () => {
   test("list page — status select defaults to 'all'", async ({ page }) => {
     await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
-    await expect(page.getByLabel("status")).toHaveValue("all", {
+    await expect(page.getByLabel("상태")).toHaveValue("all", {
       timeout: 15000,
     });
   });
@@ -138,8 +138,8 @@ test.describe("import-jobs live · status filter", () => {
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
       // status select 변경은 GET 조회(queryKey 변경)만 유발 — read-only.
-      await page.getByLabel("status").selectOption(status);
-      await expect(page.getByLabel("status")).toHaveValue(status, {
+      await page.getByLabel("상태").selectOption(status);
+      await expect(page.getByLabel("상태")).toHaveValue(status, {
         timeout: 15000,
       });
       await expectListReady(page);
@@ -153,7 +153,7 @@ test.describe("import-jobs live · status via URL deeplink", () => {
       await gotoLive(page, `${LIST_ROUTE}?status=${status}`);
       await expectListReady(page);
       // 'all' 및 union 멤버는 그대로 시드, union 밖이면 'all' 폴백(여긴 전부 union).
-      await expect(page.getByLabel("status")).toHaveValue(status, {
+      await expect(page.getByLabel("상태")).toHaveValue(status, {
         timeout: 15000,
       });
     });
@@ -162,7 +162,7 @@ test.describe("import-jobs live · status via URL deeplink", () => {
   test("URL ?status=bogus falls back to 'all'", async ({ page }) => {
     await gotoLive(page, `${LIST_ROUTE}?status=bogus`);
     await expectListReady(page);
-    await expect(page.getByLabel("status")).toHaveValue("all", {
+    await expect(page.getByLabel("상태")).toHaveValue("all", {
       timeout: 15000,
     });
   });
@@ -274,7 +274,7 @@ test.describe("import-jobs live · combined URL filters", () => {
         `${LIST_ROUTE}?status=${status}&kind=${encodeURIComponent(kind)}`,
       );
       await expectListReady(page);
-      await expect(page.getByLabel("status")).toHaveValue(status, {
+      await expect(page.getByLabel("상태")).toHaveValue(status, {
         timeout: 15000,
       });
       await expect(page.getByPlaceholder("kind filter")).toHaveValue(kind, {
@@ -295,7 +295,7 @@ test.describe("import-jobs live · combined URL filters", () => {
           `&parent_job_id=${encodeURIComponent(jobId)}`,
       );
       await expectListReady(page);
-      await expect(page.getByLabel("status")).toHaveValue("done", {
+      await expect(page.getByLabel("상태")).toHaveValue("done", {
         timeout: 15000,
       });
       await expect(page.getByPlaceholder("load_batch_id")).toHaveValue(jobId, {
@@ -327,7 +327,7 @@ test.describe("import-jobs live · page_size dimension (URL passthrough)", () =>
     }) => {
       await gotoLive(page, `${LIST_ROUTE}?status=running&page_size=${size}`);
       await expectListReady(page);
-      await expect(page.getByLabel("status")).toHaveValue("running", {
+      await expect(page.getByLabel("상태")).toHaveValue("running", {
         timeout: 15000,
       });
     });
@@ -350,7 +350,7 @@ test.describe("import-jobs live · responsive viewports (list)", () => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
-      await expect(page.getByLabel("status")).toBeVisible({ timeout: 15000 });
+      await expect(page.getByLabel("상태")).toBeVisible({ timeout: 15000 });
     });
   }
 });
@@ -394,7 +394,7 @@ test.describe("import-jobs live · detail by job id", () => {
       // 보이거나, 없으면(빈 DB → isError alert) 조회 실패 alert가 보인다 —
       // PRESENCE 불확실성에 맞춰 느슨하게 OR 단언.
       const eventsOrError = page
-        .getByText("Events", { exact: true })
+        .getByText("이벤트", { exact: true })
         .or(page.getByText("import job 조회 실패"));
       await expect(eventsOrError.first()).toBeVisible({ timeout: 15000 });
     });
@@ -411,7 +411,7 @@ test.describe("import-jobs live · detail event level filter (read-only)", () =>
       await expectDetailReady(page);
       // event level select는 jobData가 있을 때만 렌더. 없으면 조회 실패 alert.
       const levelOrError = page
-        .getByLabel("event level")
+        .getByLabel("이벤트 레벨")
         .or(page.getByText("import job 조회 실패"));
       await expect(levelOrError.first()).toBeVisible({ timeout: 15000 });
     });
@@ -470,7 +470,7 @@ test.describe("import-jobs live · status×viewport cross matrix", () => {
         await page.setViewportSize({ width: vp.width, height: vp.height });
         await gotoLive(page, `${LIST_ROUTE}?status=${status}`);
         await expectListReady(page);
-        await expect(page.getByLabel("status")).toHaveValue(status, {
+        await expect(page.getByLabel("상태")).toHaveValue(status, {
           timeout: 15000,
         });
       });

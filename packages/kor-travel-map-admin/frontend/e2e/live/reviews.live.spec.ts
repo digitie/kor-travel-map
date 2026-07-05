@@ -36,7 +36,7 @@ const PAGES: ReviewPage[] = [
     empty: "issue가 없습니다.",
     statusLabel: "이슈 상태 필터",
     statuses: ["open", "acknowledged", "resolved", "ignored", "all"],
-    sortHeaders: ["severity", "status", "detected"],
+    sortHeaders: ["심각도", "상태", "감지"],
   },
   {
     route: "/admin/features/dedup-reviews",
@@ -45,7 +45,7 @@ const PAGES: ReviewPage[] = [
     empty: "dedup review가 없습니다.",
     statusLabel: "dedup status",
     statuses: ["pending", "accepted", "rejected", "merged", "ignored", "all"],
-    sortHeaders: ["score", "distance", "status", "created"],
+    sortHeaders: ["점수", "거리", "상태", "생성"],
   },
   {
     route: "/admin/features/enrichment-reviews",
@@ -54,7 +54,7 @@ const PAGES: ReviewPage[] = [
     empty: "enrichment review가 없습니다.",
     statusLabel: "enrichment status",
     statuses: ["pending", "accepted", "rejected", "ignored", "all"],
-    sortHeaders: ["score", "distance", "status", "created"],
+    sortHeaders: ["점수", "거리", "상태", "생성"],
   },
   {
     route: "/admin/features/update-requests",
@@ -63,7 +63,7 @@ const PAGES: ReviewPage[] = [
     empty: "요청이 없습니다.",
     statusLabel: "요청 상태 필터",
     statuses: ["queued", "running", "done", "failed", "cancelled", "all"],
-    sortHeaders: ["status", "created"],
+    sortHeaders: ["상태", "생성"],
   },
 ];
 
