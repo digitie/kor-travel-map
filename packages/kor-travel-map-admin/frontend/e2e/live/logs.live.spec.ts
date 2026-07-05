@@ -45,9 +45,9 @@ const TAB_EMPTY: Record<(typeof TAB_NAMES)[number], string> = {
 // First (always-visible, sortable) column header per tab — used as a robust
 // "panel mounted" signal that does not depend on row data.
 const TAB_FIRST_COLUMN: Record<(typeof TAB_NAMES)[number], string> = {
-  "System logs": "created",
-  "API call logs": "created",
-  "Job events": "occurred",
+  "System logs": "생성",
+  "API call logs": "생성",
+  "Job events": "발생",
 };
 
 async function selectTab(
