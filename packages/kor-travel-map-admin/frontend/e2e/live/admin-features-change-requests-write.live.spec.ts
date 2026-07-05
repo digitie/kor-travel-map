@@ -553,7 +553,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
   test("change request edit UI exposes catalog dropdowns, sigungu lookup, map dialog, and admin detail prefill", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    // admin features 목록의 feature_id 검색은 100만+ feature 백엔드 쿼리라
+    // 단독 ~14s, 2-worker 부하에서 더 느려 test 전체 예산을 넉넉히 준다.
+    test.setTimeout(180_000);
 
     await test.step("change request 폼의 dropdown 계약을 확인한다", async () => {
       await gotoChangeRequests(page);
@@ -649,8 +651,8 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await gotoAdminFeatures(page);
       await page.getByLabel("feature search").fill(sampleFeatureId);
       const row = rowContaining(page, sampleFeatureId.slice(0, 18));
-      // 100만+ feature id 검색은 2-worker 부하에서 15s를 넘길 수 있어 여유를 준다.
-      await expect(row).toBeVisible({ timeout: 30_000 });
+      // 100만+ feature id 검색은 단독 ~14s, 2-worker 부하에서 더 느려 넉넉히 준다.
+      await expect(row).toBeVisible({ timeout: 75_000 });
       await row.getByRole("button", { name: "preview" }).click();
       await expect(page.getByText(sampleFeatureId, { exact: true })).toBeVisible(T);
 
