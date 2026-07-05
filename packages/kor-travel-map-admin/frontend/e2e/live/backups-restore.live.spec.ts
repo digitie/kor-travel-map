@@ -194,7 +194,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "backup / planned" });
+      .filter({ hasText: "backup / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText("백업 command plan을 생성했습니다.");
     await expect(result).toContainText(`KOR_TRAVEL_MAP_BACKUP_ID=${backupId}`);
@@ -258,7 +258,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "restore / planned" });
+      .filter({ hasText: "restore / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText(
       "staging restore command plan을 생성했습니다.",
@@ -329,7 +329,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "swap / planned" });
+      .filter({ hasText: "swap / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText(
       "restore hot-swap command plan을 생성했습니다.",

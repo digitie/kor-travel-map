@@ -280,7 +280,7 @@ export function FeatureBasicInfoSection({
           </FormSelect>
         ) : null}
         <FormSelect
-          aria-label={`${idPrefix} status`}
+          aria-label={`${idPrefix} feature status`}
           id={`${idPrefix}-status`}
           label="상태"
           value={status}
@@ -344,18 +344,21 @@ export function FeatureAddressSection({
       <h2 className="mb-4 font-medium">주소</h2>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField
+          aria-label={`${idPrefix} road address`}
           id={`${idPrefix}-address-road`}
           label="도로명 주소"
           value={values.addressRoad}
           onChange={(event) => onChange("addressRoad", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} legal address`}
           id={`${idPrefix}-address-legal`}
           label="법정동 주소"
           value={values.addressLegal}
           onChange={(event) => onChange("addressLegal", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} admin address`}
           id={`${idPrefix}-address-admin`}
           label="행정동 주소"
           value={values.addressAdmin}
@@ -399,6 +402,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <FormField
+          aria-label={`${idPrefix} road name code`}
           error={addressCodeError("roadNameCode", values.roadNameCode)}
           id={`${idPrefix}-road-name-code`}
           inputMode="numeric"
@@ -407,6 +411,7 @@ export function FeatureAddressSection({
           onChange={(event) => onChange("roadNameCode", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} road address management no`}
           className="md:col-span-2"
           error={addressCodeError(
             "roadAddressManagementNo",
@@ -426,6 +431,7 @@ export function FeatureAddressSection({
           고급 추가 정보
         </summary>
         <FormTextArea
+          aria-label={`${idPrefix} address JSON`}
           className="mt-3"
           error={jsonObject<FeatureAddressValues>()(
             values.addressExtraJson,
@@ -474,6 +480,7 @@ export function FeatureDetailSection({
       {kind === "event" ? (
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
+            aria-label={`${idPrefix} event start`}
             error={dateOrdered<FeatureDetailValues>("endDate")(
               values.startDate,
               values,
@@ -485,6 +492,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("startDate", event.target.value)}
           />
           <FormField
+            aria-label={`${idPrefix} event end`}
             id={`${idPrefix}-end-date`}
             label="행사 종료"
             type="datetime-local"
@@ -492,6 +500,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("endDate", event.target.value)}
           />
           <FormSelect
+            aria-label={`${idPrefix} event status`}
             id={`${idPrefix}-event-status`}
             label="행사 상태"
             value={values.eventStatus}
@@ -524,6 +533,7 @@ export function FeatureDetailSection({
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
+            aria-label={`${idPrefix} phone`}
             error={errors?.phone ?? phoneError}
             id={`${idPrefix}-phone`}
             inputMode="tel"
@@ -536,6 +546,7 @@ export function FeatureDetailSection({
       )}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <FormField
+          aria-label={`${idPrefix} homepage url`}
           error={errors?.homepageUrl ?? homepageError}
           id={`${idPrefix}-homepage-url`}
           label="홈페이지"
@@ -545,6 +556,7 @@ export function FeatureDetailSection({
           onChange={(event) => onChange("homepageUrl", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} source url`}
           error={errors?.sourceUrl ?? sourceError}
           id={`${idPrefix}-source-url`}
           label="출처"
@@ -560,6 +572,7 @@ export function FeatureDetailSection({
         </summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <FormTextArea
+            aria-label={`${idPrefix} detail JSON`}
             error={jsonObject<FeatureDetailValues>()(
               values.detailExtraJson,
               values,
@@ -572,6 +585,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("detailExtraJson", event.target.value)}
           />
           <FormTextArea
+            aria-label={`${idPrefix} urls JSON`}
             error={jsonObject<FeatureDetailValues>()(
               values.urlsExtraJson,
               values,
