@@ -101,13 +101,13 @@ test.describe("import-jobs live · list base", () => {
     await gotoLive(page, LIST_ROUTE);
     await expectListReady(page);
     await expect(page.getByLabel("상태")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByPlaceholder("kind filter")).toBeVisible({
+    await expect(page.getByPlaceholder("작업 종류")).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByPlaceholder("load_batch_id")).toBeVisible({
+    await expect(page.getByPlaceholder("배치 ID")).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByPlaceholder("parent_job_id")).toBeVisible({
+    await expect(page.getByPlaceholder("상위 작업 ID")).toBeVisible({
       timeout: 15000,
     });
   });
@@ -174,7 +174,7 @@ test.describe("import-jobs live · kind filter typing (GET only)", () => {
     test(`kind filter typing '${kind}' reflects in input`, async ({ page }) => {
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
-      const input = page.getByPlaceholder("kind filter");
+      const input = page.getByPlaceholder("작업 종류");
       await input.fill(kind);
       await expect(input).toHaveValue(kind, { timeout: 15000 });
       // 타이핑 후에도 목록 landmark 유지.
@@ -186,7 +186,7 @@ test.describe("import-jobs live · kind filter typing (GET only)", () => {
     test(`URL ?kind=${kind} seeds kind filter input`, async ({ page }) => {
       await gotoLive(page, `${LIST_ROUTE}?kind=${encodeURIComponent(kind)}`);
       await expectListReady(page);
-      await expect(page.getByPlaceholder("kind filter")).toHaveValue(kind, {
+      await expect(page.getByPlaceholder("작업 종류")).toHaveValue(kind, {
         timeout: 15000,
       });
     });
@@ -201,7 +201,7 @@ test.describe("import-jobs live · search term typing (GET only)", () => {
     }) => {
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
-      const input = page.getByPlaceholder("kind filter");
+      const input = page.getByPlaceholder("작업 종류");
       await input.fill(term);
       await expect(input).toHaveValue(term, { timeout: 15000 });
       await expectListReady(page);
@@ -217,7 +217,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
         `${LIST_ROUTE}?load_batch_id=${encodeURIComponent(jobId)}`,
       );
       await expectListReady(page);
-      await expect(page.getByPlaceholder("load_batch_id")).toHaveValue(jobId, {
+      await expect(page.getByPlaceholder("배치 ID")).toHaveValue(jobId, {
         timeout: 15000,
       });
     });
@@ -230,7 +230,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
         `${LIST_ROUTE}?parent_job_id=${encodeURIComponent(jobId)}`,
       );
       await expectListReady(page);
-      await expect(page.getByPlaceholder("parent_job_id")).toHaveValue(jobId, {
+      await expect(page.getByPlaceholder("상위 작업 ID")).toHaveValue(jobId, {
         timeout: 15000,
       });
     });
@@ -242,7 +242,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
     }) => {
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
-      const input = page.getByPlaceholder("load_batch_id");
+      const input = page.getByPlaceholder("배치 ID");
       await input.fill(jobId);
       await expect(input).toHaveValue(jobId, { timeout: 15000 });
       await expectListReady(page);
@@ -255,7 +255,7 @@ test.describe("import-jobs live · load_batch_id / parent_job_id deeplinks", () 
     }) => {
       await gotoLive(page, LIST_ROUTE);
       await expectListReady(page);
-      const input = page.getByPlaceholder("parent_job_id");
+      const input = page.getByPlaceholder("상위 작업 ID");
       await input.fill(jobId);
       await expect(input).toHaveValue(jobId, { timeout: 15000 });
       await expectListReady(page);
@@ -277,7 +277,7 @@ test.describe("import-jobs live · combined URL filters", () => {
       await expect(page.getByLabel("상태")).toHaveValue(status, {
         timeout: 15000,
       });
-      await expect(page.getByPlaceholder("kind filter")).toHaveValue(kind, {
+      await expect(page.getByPlaceholder("작업 종류")).toHaveValue(kind, {
         timeout: 15000,
       });
     });
@@ -298,10 +298,10 @@ test.describe("import-jobs live · combined URL filters", () => {
       await expect(page.getByLabel("상태")).toHaveValue("done", {
         timeout: 15000,
       });
-      await expect(page.getByPlaceholder("load_batch_id")).toHaveValue(jobId, {
+      await expect(page.getByPlaceholder("배치 ID")).toHaveValue(jobId, {
         timeout: 15000,
       });
-      await expect(page.getByPlaceholder("parent_job_id")).toHaveValue(jobId, {
+      await expect(page.getByPlaceholder("상위 작업 ID")).toHaveValue(jobId, {
         timeout: 15000,
       });
     });

@@ -247,7 +247,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
           !url.searchParams.has("status"),
       );
       // import-jobs-client.tsx: <Input placeholder="kind filter"> (line 212).
-      await page.getByPlaceholder("kind filter").fill(targetKind);
+      await page.getByPlaceholder("작업 종류").fill(targetKind);
       const kindResp = await kindRespP;
 
       const kindUrl = new URL(kindResp.url());
@@ -264,7 +264,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
       await expect(
         page.getByRole("link", { name: shortId(firstJobId) }).first(),
       ).toBeVisible(T);
-      await expect(page.getByPlaceholder("kind filter")).toHaveValue(
+      await expect(page.getByPlaceholder("작업 종류")).toHaveValue(
         targetKind,
         T,
       );
@@ -388,7 +388,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
 
     // <Input placeholder="reason">(line 396)에 reason 입력 → handleCancel은
     // body { operator:"admin-ui", reason: trim()||undefined }로 POST(line 258-264).
-    await page.getByPlaceholder("reason").fill(cancelReason);
+    await page.getByPlaceholder("중지 사유").fill(cancelReason);
 
     const cancelRespP = waitForApiResponse(page, "POST", cancelApiPath);
     await cancelButton.click();
