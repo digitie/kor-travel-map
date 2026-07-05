@@ -1463,8 +1463,11 @@ async def _traffic_notice_item_to_bundle(
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
     )
+    # bjd_code는 feature_id에 넣지 않는다(#632) — 정체(congestion) head 좌표가
+    # 이동하며 동(洞) 경계를 넘으면 같은 사건이 재키잉돼 중복 feature가 생겼다.
+    # 좌표/주소는 표시 속성으로만 유지하고 id는 자연키 단독으로 결정한다.
     feature_id = make_feature_id(
-        bjd_code=bjd_code,
+        bjd_code=None,
         kind=FeatureKind.NOTICE.value,
         category=TRAFFIC_NOTICE_CATEGORY,
         source_type=f"{KREX_PROVIDER_NAME}:{TRAFFIC_NOTICES_DATASET_KEY}",

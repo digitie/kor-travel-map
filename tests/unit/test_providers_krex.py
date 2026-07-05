@@ -12,6 +12,7 @@ from typing import Any, Literal
 import pytest
 
 from kortravelmap.dto import (
+    Address,
     FeatureBundle,
     FeatureKind,
     ForecastStyle,
@@ -54,9 +55,7 @@ def rest_areas_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBu
     return asyncio.run(_rest_areas_to_bundles_async(items, **kwargs))
 
 
-def traffic_notices_to_bundles(
-    items: Iterable[Any], **kwargs: Any
-) -> list[FeatureBundle]:
+def traffic_notices_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
     """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
     return asyncio.run(_traffic_notices_to_bundles_async(items, **kwargs))
 
@@ -120,8 +119,12 @@ def test_rest_areas_skips_blank_name_record() -> None:
     이상) ValidationError + 파생 자연키도 의미 없음. 이제 방어적으로 거른다.
     """
     blank = _RestArea(
-        name="", route_name=None, direction=None,
-        lat=None, lon=None, phone_number=None,
+        name="",
+        route_name=None,
+        direction=None,
+        lat=None,
+        lon=None,
+        phone_number=None,
     )
     bundles = rest_areas_to_bundles([blank, _RA_SEOSAN], fetched_at=_NOW)
     assert len(bundles) == 1
@@ -165,10 +168,7 @@ def test_rest_areas_identical_payload_same_source_record_key() -> None:
         phone_number="041-1234-5678",
     )
     [b1, b2] = rest_areas_to_bundles([_RA_SEOSAN, dup], fetched_at=_NOW)
-    assert (
-        b1.source_record.source_record_key
-        == b2.source_record.source_record_key
-    )
+    assert b1.source_record.source_record_key == b2.source_record.source_record_key
     assert b1.feature.feature_id == b2.feature.feature_id
 
 
@@ -214,10 +214,7 @@ def test_rest_areas_bundle_fk_consistency() -> None:
     bundles = rest_areas_to_bundles([_RA_SEOSAN, _RA_GYEONGJU], fetched_at=_NOW)
     for bundle in bundles:
         assert bundle.feature.feature_id == bundle.source_link.feature_id
-        assert (
-            bundle.source_record.source_record_key
-            == bundle.source_link.source_record_key
-        )
+        assert bundle.source_record.source_record_key == bundle.source_link.source_record_key
 
 
 # ── rest_area_prices → PriceValue ──────────────────────────────────
@@ -269,9 +266,7 @@ class _FuelPriceRecord:
 
 @pytest.mark.unit
 def test_prices_fuel_kw_per_l() -> None:
-    [v] = rest_area_prices_to_values(
-        [_PRICE_FUEL], feature_id=_FEATURE_ID_RA_SEOSAN
-    )
+    [v] = rest_area_prices_to_values([_PRICE_FUEL], feature_id=_FEATURE_ID_RA_SEOSAN)
     assert v.price_domain == PriceDomain.REST_AREA_FUEL
     assert v.unit == "KRW/L"
     assert v.value_number == Decimal("1820")
@@ -281,9 +276,7 @@ def test_prices_fuel_kw_per_l() -> None:
 
 @pytest.mark.unit
 def test_prices_food_krw() -> None:
-    [v] = rest_area_prices_to_values(
-        [_PRICE_FOOD], feature_id=_FEATURE_ID_RA_SEOSAN
-    )
+    [v] = rest_area_prices_to_values([_PRICE_FOOD], feature_id=_FEATURE_ID_RA_SEOSAN)
     assert v.price_domain == PriceDomain.REST_AREA_FOOD
     assert v.unit == "KRW"
     assert v.value_number == Decimal("5500")
@@ -333,9 +326,7 @@ def test_fuel_price_records_create_price_feature_and_values() -> None:
         raw={"serviceAreaCode": "A0001"},
     )
 
-    bundles, values = rest_area_fuel_price_records_to_features_and_values(
-        [record], fetched_at=_NOW
-    )
+    bundles, values = rest_area_fuel_price_records_to_features_and_values([record], fetched_at=_NOW)
 
     assert len(bundles) == 1
     assert len(values) == 2
@@ -353,9 +344,7 @@ def test_fuel_price_records_create_price_feature_and_values() -> None:
 # ── #547 휴게소 유가 feature 좌표/계층 상속 (렌더 가능성 회귀) ──────────
 
 
-def _fuel_record_for(
-    place: _RestArea, *, service_area_code: str
-) -> _FuelPriceRecord:
+def _fuel_record_for(place: _RestArea, *, service_area_code: str) -> _FuelPriceRecord:
     """place와 동일한 휴게소명/노선/방향을 갖는 유가 record (이름 매칭 대상)."""
     return _FuelPriceRecord(
         service_area_code=service_area_code,
@@ -427,9 +416,7 @@ def test_fuel_price_coordless_when_no_place_match() -> None:
     assert [v.product_key for v in values] == ["gasoline", "diesel"]
 
     # locator 미주입(None)이면 기존 동작과 동일(coordless).
-    bundles_none, _ = rest_area_fuel_price_records_to_features_and_values(
-        [record], fetched_at=_NOW
-    )
+    bundles_none, _ = rest_area_fuel_price_records_to_features_and_values([record], fetched_at=_NOW)
     assert bundles_none[0].feature.coord is None
     assert bundles_none[0].feature.parent_feature_id is None
 
@@ -531,9 +518,7 @@ _W_REH = _Weather(
 
 @pytest.mark.unit
 def test_weather_observed_metadata() -> None:
-    [v] = rest_area_weather_to_values(
-        [_W_T1H], feature_id=_FEATURE_ID_RA_SEOSAN
-    )
+    [v] = rest_area_weather_to_values([_W_T1H], feature_id=_FEATURE_ID_RA_SEOSAN)
     assert v.weather_domain == WeatherDomain.REST_AREA_WEATHER
     assert v.forecast_style == ForecastStyle.OBSERVED
     assert v.timeline_bucket == TimelineBucket.ULTRA_SHORT
@@ -545,9 +530,7 @@ def test_weather_observed_metadata() -> None:
 
 @pytest.mark.unit
 def test_weather_count_per_metric() -> None:
-    values = rest_area_weather_to_values(
-        [_W_T1H, _W_REH], feature_id=_FEATURE_ID_RA_SEOSAN
-    )
+    values = rest_area_weather_to_values([_W_T1H, _W_REH], feature_id=_FEATURE_ID_RA_SEOSAN)
     assert len(values) == 2
     assert {v.metric_key for v in values} == {"T1H", "REH"}
 
@@ -658,12 +641,8 @@ def test_weather_records_dedup_by_unit_code() -> None:
 @pytest.mark.unit
 def test_weather_records_values_melt_and_metadata() -> None:
     """wide → metric별 melt. 결측(rainfall=None)/sentinel(-99) drop, observed/ULTRA_SHORT."""
-    bundles = rest_area_weather_records_to_bundles(
-        [_WR_SEOSAN, _WR_GANGNEUNG], fetched_at=_NOW
-    )
-    feature_ids = {
-        b.source_record.source_entity_id: b.feature.feature_id for b in bundles
-    }
+    bundles = rest_area_weather_records_to_bundles([_WR_SEOSAN, _WR_GANGNEUNG], fetched_at=_NOW)
+    feature_ids = {b.source_record.source_entity_id: b.feature.feature_id for b in bundles}
     values = rest_area_weather_records_to_values(
         [_WR_SEOSAN, _WR_GANGNEUNG], station_feature_ids=feature_ids
     )
@@ -685,9 +664,7 @@ def test_weather_records_temperature_maps_to_t1h() -> None:
     """기온 → metric_key=T1H (build_weather_card nearest-temp 'T1H/TMP' 조회 대상)."""
     bundles = rest_area_weather_records_to_bundles([_WR_SEOSAN], fetched_at=_NOW)
     fid = bundles[0].feature.feature_id
-    values = rest_area_weather_records_to_values(
-        [_WR_SEOSAN], station_feature_ids={"EX-1001": fid}
-    )
+    values = rest_area_weather_records_to_values([_WR_SEOSAN], station_feature_ids={"EX-1001": fid})
     [t1h] = [v for v in values if v.metric_key == "T1H"]
     assert t1h.value_number == Decimal("22.5")
     assert t1h.source_metric_key == "temperature"
@@ -696,9 +673,7 @@ def test_weather_records_temperature_maps_to_t1h() -> None:
 @pytest.mark.unit
 def test_weather_records_skip_unmapped_unit_code() -> None:
     """station_feature_ids에 없는 unit_code 행은 값 생성 안 함."""
-    values = rest_area_weather_records_to_values(
-        [_WR_SEOSAN], station_feature_ids={}
-    )
+    values = rest_area_weather_records_to_values([_WR_SEOSAN], station_feature_ids={})
     assert values == []
 
 
@@ -911,12 +886,9 @@ def test_traffic_notice_natural_key_stable_and_collision() -> None:
         [_N_ROADWORK, twin, _N_ACCIDENT_ALIAS], fetched_at=_NOW
     )
     assert b1.feature.feature_id == b2.feature.feature_id
+    assert b1.source_record.source_entity_id == b2.source_record.source_entity_id
     assert (
-        b1.source_record.source_entity_id == b2.source_record.source_entity_id
-    )
-    assert (
-        b1.source_record.source_entity_id
-        == "2026.05.28::05:00:00::0150::부산방향::서산나들목::3"
+        b1.source_record.source_entity_id == "2026.05.28::05:00:00::0150::부산방향::서산나들목::3"
     )
     # 자연키 구분자는 '|' 미포함(ADR-009), '::' 사용.
     assert "|" not in b1.source_record.source_entity_id
@@ -957,9 +929,54 @@ def test_traffic_notice_no_coord_global_fallback() -> None:
     # coord=None → bjd_code 미상 → feature_id global.
     assert bundle.feature.feature_id.startswith("f_global_n_")
     # coordless 위치 단서(raw_address): 노선명 + 돌발지점명 + 방향.
-    assert (
-        bundle.source_record.raw_address == "서해안고속도로 서산나들목 부산방향"
+    assert bundle.source_record.raw_address == "서해안고속도로 서산나들목 부산방향"
+
+
+@pytest.mark.unit
+def test_traffic_notice_feature_id_stable_across_coordinate_movement() -> None:
+    """이동하는 사건(정체 head가 동 경계를 넘음)도 feature_id가 유지된다(#632).
+
+    feature_id는 bjd_code를 포함하지 않는다 — 좌표/주소는 표시 속성으로만.
+    """
+
+    async def _geocoder(coord: Any) -> Any:
+        # 경도에 따라 다른 법정동 — 과거엔 이 차이가 같은 사건을 재키잉했다.
+        bjd = "4128110300" if float(coord.lon) < 127.0 else "4163034027"
+        return Address(bjd_code=bjd, sigungu_code=bjd[:5], sido_code=bjd[:2])
+
+    base = _Notice(
+        occurred_date="2026.07.03",
+        occurred_time="14:56:11",
+        incident_type="정체",
+        incident_type_code="4",
+        direction="판교-일산방향",
+        route_no="1000",
+        message="정체",
+        latitude=37.5,
+        longitude=126.85,
+        raw={"a": 1},
     )
+    moved = _Notice(
+        occurred_date=base.occurred_date,
+        occurred_time=base.occurred_time,
+        incident_type=base.incident_type,
+        incident_type_code=base.incident_type_code,
+        direction=base.direction,
+        route_no=base.route_no,
+        message=base.message,
+        latitude=37.5,
+        longitude=127.2,  # 동 경계 너머로 이동.
+        raw={"a": 2},
+    )
+    [b1, b2] = traffic_notices_to_bundles(
+        [base, moved], fetched_at=_NOW, reverse_geocoder=_geocoder
+    )
+    assert b1.source_record.source_entity_id == b2.source_record.source_entity_id
+    assert b1.feature.feature_id == b2.feature.feature_id
+    assert b1.feature.feature_id.startswith("f_global_n_")
+    # 좌표/주소는 여전히 표시 속성으로 채워진다.
+    assert b1.feature.address.bjd_code == "4128110300"
+    assert b2.feature.address.bjd_code == "4163034027"
 
 
 @pytest.mark.unit
@@ -1002,9 +1019,7 @@ def test_multi_kind_pipeline_uses_same_feature_id() -> None:
     [station_bundle] = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
     fid = station_bundle.feature.feature_id
 
-    prices = rest_area_prices_to_values(
-        [_PRICE_FUEL, _PRICE_FOOD], feature_id=fid
-    )
+    prices = rest_area_prices_to_values([_PRICE_FUEL, _PRICE_FOOD], feature_id=fid)
     weather = rest_area_weather_to_values([_W_T1H, _W_REH], feature_id=fid)
 
     assert all(p.feature_id == fid for p in prices)
@@ -1014,10 +1029,6 @@ def test_multi_kind_pipeline_uses_same_feature_id() -> None:
 @pytest.mark.unit
 def test_empty_iterables() -> None:
     assert rest_areas_to_bundles([], fetched_at=_NOW) == []
-    assert (
-        rest_area_prices_to_values([], feature_id=_FEATURE_ID_RA_SEOSAN) == []
-    )
-    assert (
-        rest_area_weather_to_values([], feature_id=_FEATURE_ID_RA_SEOSAN) == []
-    )
+    assert rest_area_prices_to_values([], feature_id=_FEATURE_ID_RA_SEOSAN) == []
+    assert rest_area_weather_to_values([], feature_id=_FEATURE_ID_RA_SEOSAN) == []
     assert traffic_notices_to_bundles([], fetched_at=_NOW) == []

@@ -33,6 +33,21 @@
   `/admin/features`·change-requests가 URL 파라미터 진입 지원.
 - H1/헤딩 정본화(Provider 상태·운영 로그·정합성 점검·큐레이션 지도·ETL 미리보기 등) 및
   e2e 스펙 정합화(stale 영문 헤딩 29파일 정정 + 신규 링크 스모크).
+### notice 중복 근본 해결 — 사건 단위 identity + 라이프사이클 (2026-07-03, #632)
+
+- **CHANGED**: KMA 특보 notice의 자연키를 발표 단위(`alert_id::region`)에서 **사건
+  단위**(`{region_code}::{현상 토큰}`)로 재설계 — 재발표/등급 변경이 같은 feature로
+  upsert되고 발표 이력은 source_records에 쌓인다.
+- **ADDED**: 특보 **해제**는 feature를 만들지 않고 열린 notice의 `valid_end_time`을
+  채운다(`weather_alert_lift_closures` + `close_notice_features`, 결합 해제문 fan-out).
+- **FIXED**: KREX 교통 돌발 feature_id에서 reverse-geocoded `bjd_code` 제거 — 이동하는
+  정체가 동 경계를 넘을 때 같은 사건이 중복 생성되던 버그.
+- **ADDED**: 적재 직후 notice reconcile(`reconcile_notice_features`) — 계보 중복
+  soft-delete + feed에서 사라진 사건 `valid_end_time` 종료. 지도/검색 read 경로는
+  계보 latest만 + 종료 notice 숨김.
+- **ADDED**: 만료 notice purge(§9, 종료/발표 +1년)를 maintenance job op로 구현.
+- **MIGRATION**: `0040_notice_dedup_cleanup` — 구세대 identity로 쌓인 중복 notice
+  일회성 soft-delete(원문 이력 보존).
 
 ### 큐레이션 관리 UX 개편 (2026-07-03)
 

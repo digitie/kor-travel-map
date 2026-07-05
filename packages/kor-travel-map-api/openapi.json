@@ -17198,6 +17198,18 @@
             }
           },
           {
+            "description": "종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다.",
+            "in": "query",
+            "name": "include_ended",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다.",
+              "title": "Include Ended",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "page_size",
             "required": false,

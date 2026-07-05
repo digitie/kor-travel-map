@@ -108,6 +108,8 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchPage,
     NearbyFeaturePage,
+    NoticeReconcileResult,
+    close_notice_features,
     features_in_bbox,
     get_feature_row,
     get_feature_rows_by_ids,
@@ -115,6 +117,7 @@ from kortravelmap.infra.feature_repo import (
     inactivate_geometryless_area_features_by_source,
     load_bundles,
     load_source_record_links,
+    supersede_stale_notice_features,
 )
 from kortravelmap.infra.feature_repo import (
     features_nearby as repo_features_nearby,
@@ -127,6 +130,9 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_repo import (
     list_primary_place_locator as repo_list_primary_place_locator,
+)
+from kortravelmap.infra.feature_repo import (
+    purge_expired_notices as repo_purge_expired_notices,
 )
 from kortravelmap.infra.feature_repo import (
     search_features as repo_search_features,
@@ -248,7 +254,7 @@ from kortravelmap.providers.visitkorea import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Collection, Iterable, Mapping, Sequence
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -392,9 +398,7 @@ class AsyncKorTravelMapClient:
 
     # ─── write (transaction 소유) ──────────────────────────────────────────
 
-    async def load_feature_bundles(
-        self, bundles: Iterable[FeatureBundle]
-    ) -> FeatureLoadResult:
+    async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:
         """``FeatureBundle`` 다수를 한 transaction으로 적재 (commit/rollback).
 
         feature → source_record → source_link 순 idempotent upsert
@@ -449,6 +453,48 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
             )
 
+    async def close_notice_features(self, *, closures: Mapping[str, datetime]) -> int:
+        """열린 notice feature를 닫는다 (``valid_end_time`` 채움, #632).
+
+        KMA 특보 **해제** 등 — ``closures``는 ``feature_id → 닫기 시각``.
+        ``infra.feature_repo.close_notice_features`` 위임. 한 transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await close_notice_features(session, closures=closures)
+
+    async def reconcile_notice_features(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        active_lineage_keys: Collection[str] | None = None,
+        closed_at: datetime | None = None,
+    ) -> NoticeReconcileResult:
+        """notice 중복/소멸 정리 — 적재 직후 호출(#632).
+
+        같은 계보의 중복 feature를 soft-delete하고(latest 1개 유지), 현재 feed에
+        없는 계보의 latest에 ``valid_end_time``을 채운다.
+        ``infra.feature_repo.supersede_stale_notice_features`` 위임. 한 transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await supersede_stale_notice_features(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                active_lineage_keys=active_lineage_keys,
+                closed_at=closed_at,
+            )
+
+    async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
+        """보존 기간이 지난 notice를 soft-delete (§9 보관 정책, #632).
+
+        ``infra.feature_repo.purge_expired_notices`` 위임. 한 transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_purge_expired_notices(session, retention=retention)
+
     async def load_enrichment_links(
         self, enrichments: Iterable[FestivalEnrichment]
     ) -> EnrichmentLoadResult:
@@ -497,9 +543,7 @@ class AsyncKorTravelMapClient:
                 ],
                 name_threshold=name_threshold,
             )
-            links = festival_to_enrichment_links(
-                items_list, matcher=matcher, fetched_at=fetched_at
-            )
+            links = festival_to_enrichment_links(items_list, matcher=matcher, fetched_at=fetched_at)
             pairs = [(link.source_record, link.source_link) for link in links]
             return await load_source_record_links(session, pairs)
 
@@ -558,13 +602,9 @@ class AsyncKorTravelMapClient:
                 for candidate in plan.review
             ]
             review_queue = await enqueue_review_candidates(session, review_inputs)
-            return FestivalEnrichmentReviewRefreshResult(
-                auto=auto, review_queue=review_queue
-            )
+            return FestivalEnrichmentReviewRefreshResult(auto=auto, review_queue=review_queue)
 
-    async def list_pending_enrichment_reviews(
-        self, *, limit: int = 100
-    ) -> list[dict[str, object]]:
+    async def list_pending_enrichment_reviews(self, *, limit: int = 100) -> list[dict[str, object]]:
         """검토 대기(``status='pending'``) 축제 enrichment 후보 list (name_score 내림차순).
 
         admin UI/디버깅용 raw row(점수 float 변환). DTO 매핑은 상위 책임.
@@ -918,16 +958,12 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session:
             return await repo_peek_next_update_request(session)
 
-    async def peek_update_requests(
-        self, *, limit: int = 10
-    ) -> tuple[FeatureUpdateRequest, ...]:
+    async def peek_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
         """Dagster sensor가 queued request batch를 상태 변경 없이 확인한다."""
         async with self._session_factory() as session:
             return await repo_peek_update_requests(session, limit=limit)
 
-    async def claim_update_requests(
-        self, *, limit: int = 10
-    ) -> tuple[FeatureUpdateRequest, ...]:
+    async def claim_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
         """Dagster sensor가 실행할 queued request batch를 짧은 transaction으로 claim한다."""
         async with self._session_factory() as session, session.begin():
             return await repo_claim_update_requests(session, limit=limit)
@@ -1009,9 +1045,7 @@ class AsyncKorTravelMapClient:
         include_auto_merge
             ``auto_merge`` 후보 포함 여부 (기본 True). False면 ``manual_review``만.
         """
-        candidates = find_dedup_candidates(
-            left, right, include_auto_merge=include_auto_merge
-        )
+        candidates = find_dedup_candidates(left, right, include_auto_merge=include_auto_merge)
         if not candidates:
             return DedupSyncResult(candidates=[], queue=DedupQueueResult())
         async with self._session_factory() as session, session.begin():
@@ -1038,9 +1072,7 @@ class AsyncKorTravelMapClient:
         include_auto_merge
             ``auto_merge`` 후보 포함 여부 (기본 True). False면 ``manual_review``만.
         """
-        candidates = find_sibling_candidates(
-            features, include_auto_merge=include_auto_merge
-        )
+        candidates = find_sibling_candidates(features, include_auto_merge=include_auto_merge)
         if not candidates:
             return DedupSyncResult(candidates=[], queue=DedupQueueResult())
         async with self._session_factory() as session, session.begin():
@@ -1058,9 +1090,7 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session, session.begin():
             left = await list_dedup_refresh_features(session, left_scope)
             right = await list_dedup_refresh_features(session, right_scope)
-            candidates = find_dedup_candidates(
-                left, right, include_auto_merge=include_auto_merge
-            )
+            candidates = find_dedup_candidates(left, right, include_auto_merge=include_auto_merge)
             queue = (
                 await enqueue_dedup_candidates(session, candidates)
                 if candidates
@@ -1085,9 +1115,7 @@ class AsyncKorTravelMapClient:
         """DB에 적재된 단일 provider/dataset scope 내부 중복 후보를 재계산한다."""
         async with self._session_factory() as session, session.begin():
             features = await list_dedup_refresh_features(session, scope)
-            candidates = find_sibling_candidates(
-                features, include_auto_merge=include_auto_merge
-            )
+            candidates = find_sibling_candidates(features, include_auto_merge=include_auto_merge)
             queue = (
                 await enqueue_dedup_candidates(session, candidates)
                 if candidates
@@ -1224,9 +1252,7 @@ class AsyncKorTravelMapClient:
         ``dedup-merge:{review_id}`` advisory lock으로 감싼다(본 메서드는 lock 미적용).
         """
         async with self._session_factory() as session, session.begin():
-            return await merge_from_review(
-                session, review_id, merged_by=merged_by, reason=reason
-            )
+            return await merge_from_review(session, review_id, merged_by=merged_by, reason=reason)
 
     # ─── read ──────────────────────────────────────────────────────────────
 
@@ -1257,9 +1283,7 @@ class AsyncKorTravelMapClient:
                 limit=limit,
             )
 
-    async def get_features(
-        self, feature_ids: Sequence[str]
-    ) -> dict[str, dict[str, Any]]:
+    async def get_features(self, feature_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         """여러 feature 상세 row를 한 번에 조회 (``feature_id`` → row dict).
 
         ``infra.feature_repo.get_feature_rows_by_ids`` 위임. soft-deleted feature는
@@ -1368,9 +1392,7 @@ class AsyncKorTravelMapClient:
                 cursor=cursor,
             )
 
-    async def pending_dedup_reviews(
-        self, *, limit: int = 100
-    ) -> list[dict[str, Any]]:
+    async def pending_dedup_reviews(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """검토 대기(``status='pending'``) dedup 후보 list — total_score 내림차순."""
         async with self._session_factory() as session:
             return await pending_dedup_reviews(session, limit=limit)
@@ -1559,9 +1581,7 @@ class AsyncKorTravelMapClient:
                 session, feature_id=feature_id, asof=asof, freshness_seconds=fresh
             )
 
-    async def get_update_request(
-        self, request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:
         """Feature update request 단건 조회. 없으면 ``None``."""
         async with self._session_factory() as session:
             return await repo_get_update_request(session, request_id)

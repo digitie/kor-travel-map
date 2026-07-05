@@ -73,6 +73,14 @@ __all__ = [
     "ultra_short_nowcast_to_weather_values",
     "ultra_short_forecast_to_weather_values",
     "weather_alerts_to_notice_bundles",
+    "weather_alert_lift_closures",
+    "KmaAlertLiftClosure",
+    "KMA_ALERT_PHENOMENON_TOKENS",
+    "kma_alert_phenomenon",
+    "kma_alert_phenomena_in_title",
+    "is_kma_alert_lift_title",
+    "kma_alert_natural_key",
+    "kma_alert_notice_feature_id",
     "mid_land_forecast_to_weather_values",
     "mid_temperature_to_weather_values",
     "grid_to_weather_bundle",
@@ -164,12 +172,8 @@ async def grid_to_weather_bundle(
     if reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
     bjd_code = geo.bjd_code if geo is not None else None
-    sigungu_code = (
-        geo.sigungu_code if geo is not None else None
-    ) or extract_sigungu_code(bjd_code)
-    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(
-        bjd_code
-    )
+    sigungu_code = (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
+    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
     region_name = (
         (
             normalize_korean_text(geo.sigungu_name)
@@ -179,11 +183,7 @@ async def grid_to_weather_bundle(
         if geo is not None
         else None
     )
-    name = (
-        f"{name_label} {region_name}"
-        if region_name
-        else f"{name_label} 격자 {nx},{ny}"
-    )
+    name = f"{name_label} {region_name}" if region_name else f"{name_label} 격자 {nx},{ny}"
     address = Address(
         admin=geo.admin if geo is not None else None,
         bjd_code=bjd_code,
@@ -251,9 +251,7 @@ async def grid_to_weather_bundle(
         confidence=100,
         is_primary_source=True,
     )
-    return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
-    )
+    return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
 
 # -- 특보 (weather_alerts) 상수 (PR#46) ---------------------------------
@@ -354,9 +352,7 @@ def parse_weather_extra_points(value: str | None) -> list[tuple[float, float]]:
         except ValueError as exc:
             raise ValueError(f"좌표 숫자 변환 실패: {part!r}") from exc
         if not (124.0 <= lon <= 132.0 and 33.0 <= lat <= 43.0):
-            raise ValueError(
-                f"좌표가 한국 bbox(lon 124~132, lat 33~43) 밖입니다: {part!r}"
-            )
+            raise ValueError(f"좌표가 한국 bbox(lon 124~132, lat 33~43) 밖입니다: {part!r}")
         points.append((lon, lat))
     return points
 
@@ -566,9 +562,7 @@ def _parse_kma_datetime(date_str: str, time_str: str) -> datetime:
         ``Asia/Seoul`` aware. ADR-019.
     """
     if len(date_str) != 8 or len(time_str) != 4:
-        raise ValueError(
-            f"KMA datetime 형식 오류 — date={date_str!r}, time={time_str!r}."
-        )
+        raise ValueError(f"KMA datetime 형식 오류 — date={date_str!r}, time={time_str!r}.")
     naive = datetime.strptime(f"{date_str} {time_str}", _KST_DATETIME_FMT_BASE)
     return naive.replace(tzinfo=_KST)
 
@@ -881,6 +875,114 @@ def ultra_short_forecast_to_weather_values(
 
 # -- 특보 (weather_alerts) → notice FeatureBundle — PR#46 ---------------
 
+# 특보 현상(phenomenon) 토큰 — title에서 스캔한다(긴 토큰 우선). notice_type
+# canonical은 강풍/풍랑/태풍 등을 전부 generic ``weather_alert``로 접기 때문에
+# feature 정체성 키로 쓰면 서로 다른 특보가 한 feature로 붕괴한다 — 정체성은
+# 현상 토큰 단위로 유지한다(#632 notice dedup).
+KMA_ALERT_PHENOMENON_TOKENS: Final[tuple[str, ...]] = (
+    "폭풍해일",
+    "호우",
+    "대설",
+    "폭염",
+    "강풍",
+    "풍랑",
+    "태풍",
+    "건조",
+    "한파",
+    "황사",
+)
+
+_KMA_ALERT_PHENOMENON_FALLBACK: Final[str] = "weather_alert"
+
+_KMA_ALERT_LIFT_TOKEN: Final[str] = "해제"
+
+
+def kma_alert_phenomenon(title: str) -> str:
+    """특보 title → 대표 현상 토큰 1개 (첫 매칭, 미매칭은 generic fallback)."""
+    for token in KMA_ALERT_PHENOMENON_TOKENS:
+        if token in title:
+            return token
+    return _KMA_ALERT_PHENOMENON_FALLBACK
+
+
+def kma_alert_phenomena_in_title(title: str) -> list[str]:
+    """특보 title에 언급된 **모든** 현상 토큰 (순서 보존, 중복 제거).
+
+    결합 title("풍랑주의보·호우주의보 해제")은 세그먼트 파싱 대신 전체 title
+    토큰 스캔으로 처리한다 — 해제문은 한 title이 여러 현상을 나열한다.
+    미매칭이면 generic fallback 1건.
+    """
+    found = [token for token in KMA_ALERT_PHENOMENON_TOKENS if token in title]
+    return found or [_KMA_ALERT_PHENOMENON_FALLBACK]
+
+
+def is_kma_alert_lift_title(title: str) -> bool:
+    """title이 특보 **해제** 공고인지 (해제는 feature를 만들지 않고 닫는다)."""
+    return _KMA_ALERT_LIFT_TOKEN in title
+
+
+def kma_alert_natural_key(region_code: str, phenomenon: str) -> str:
+    """특보 notice의 사건 단위 자연키 — ``{region_code}::{phenomenon}``.
+
+    발표 시각(tm_fc)/발표 번호(seq)/등급은 키에서 제외한다 — 같은 특보의
+    재발표·등급 변경은 같은 feature에 source_record 이력으로 누적된다(#632).
+    """
+    return f"{region_code}::{phenomenon}"
+
+
+def kma_alert_notice_feature_id(region_code: str, phenomenon: str) -> str:
+    """특보 notice의 결정적 feature_id (자연키와 동일 재료, ADR-009)."""
+    return make_feature_id(
+        bjd_code=None,  # KMA region_code는 bjd_code와 다름. global fallback.
+        kind=FeatureKind.NOTICE.value,
+        category=KMA_WEATHER_ALERT_CATEGORY,
+        source_type=f"{KMA_PROVIDER_NAME}:{KMA_WEATHER_ALERT_DATASET_KEY}",
+        source_natural_key=kma_alert_natural_key(region_code, phenomenon),
+    )
+
+
+@dataclass(frozen=True)
+class KmaAlertLiftClosure:
+    """특보 해제 1건 — 열린 notice feature를 닫는 지시.
+
+    ``feature_id``는 발표 bundle과 동일 재료로 계산돼 정확히 그 feature를
+    가리킨다. ``closed_at``은 해제 발표 시각(tm_fc)이다.
+    """
+
+    feature_id: str
+    natural_key: str
+    region_code: str
+    phenomenon: str
+    closed_at: datetime
+
+
+def weather_alert_lift_closures(
+    items: Iterable[KmaWeatherAlertItem],
+) -> list[KmaAlertLiftClosure]:
+    """해제 공고 → ``KmaAlertLiftClosure`` 목록 (발표 item은 무시).
+
+    결합 해제문("풍랑주의보·호우주의보 해제")은 title의 현상 토큰마다 1건씩
+    fan-out한다. region × phenomenon 조합당 최신 issued_at 1건만 남긴다.
+    """
+    latest: dict[tuple[str, str], KmaAlertLiftClosure] = {}
+    for item in items:
+        if not is_kma_alert_lift_title(item.title):
+            continue
+        for phenomenon in kma_alert_phenomena_in_title(item.title):
+            for region in item.regions:
+                key = (region.region_code, phenomenon)
+                closure = KmaAlertLiftClosure(
+                    feature_id=kma_alert_notice_feature_id(region.region_code, phenomenon),
+                    natural_key=kma_alert_natural_key(region.region_code, phenomenon),
+                    region_code=region.region_code,
+                    phenomenon=phenomenon,
+                    closed_at=item.issued_at,
+                )
+                existing = latest.get(key)
+                if existing is None or closure.closed_at > existing.closed_at:
+                    latest[key] = closure
+    return list(latest.values())
+
 
 @runtime_checkable
 class KmaWeatherAlertRegion(Protocol):
@@ -939,29 +1041,27 @@ def _alert_region_to_bundle(
     fetched_at: datetime,
 ) -> FeatureBundle:
     """`(alert, region)` → 한 notice ``FeatureBundle``."""
+    phenomenon = kma_alert_phenomenon(alert.title)
     raw_data: dict[str, Any] = {
         "alert_id": alert.alert_id,
         "alert_type": alert.alert_type,
+        "phenomenon": phenomenon,
         "level": alert.level,
         "title": alert.title,
         "description": alert.description,
         "issued_at": alert.issued_at.isoformat(),
-        "effective_from": (
-            alert.effective_from.isoformat() if alert.effective_from else None
-        ),
-        "effective_until": (
-            alert.effective_until.isoformat()
-            if alert.effective_until
-            else None
-        ),
+        "effective_from": (alert.effective_from.isoformat() if alert.effective_from else None),
+        "effective_until": (alert.effective_until.isoformat() if alert.effective_until else None),
         "source_agency": alert.source_agency,
         "region_code": region.region_code,
         "region_name": region.region_name,
     }
     payload_hash = make_payload_hash(raw_data)
 
-    # source_natural_key는 alert_id × region_code 조합.
-    natural_key = f"{alert.alert_id}::{region.region_code}"
+    # source_natural_key는 **사건 단위** — region_code × 현상 토큰(#632).
+    # 재발표(tm_fc/seq 변경)·등급 변경은 같은 자연키로 upsert되고, 발표 이력은
+    # source_records(payload_hash UNIQUE, ADR-017)에 쌓인다.
+    natural_key = kma_alert_natural_key(region.region_code, phenomenon)
     source_record_key = make_source_record_key(
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
@@ -969,13 +1069,7 @@ def _alert_region_to_bundle(
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
     )
-    feature_id = make_feature_id(
-        bjd_code=None,  # KMA region_code는 bjd_code와 다름. global fallback.
-        kind=FeatureKind.NOTICE.value,
-        category=KMA_WEATHER_ALERT_CATEGORY,
-        source_type=f"{KMA_PROVIDER_NAME}:{KMA_WEATHER_ALERT_DATASET_KEY}",
-        source_natural_key=natural_key,
-    )
+    feature_id = kma_alert_notice_feature_id(region.region_code, phenomenon)
 
     title_normalized = normalize_korean_text(alert.title) or alert.title
 
@@ -1028,9 +1122,7 @@ def _alert_region_to_bundle(
         confidence=100,
         is_primary_source=True,
     )
-    return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
-    )
+    return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
 
 def weather_alerts_to_notice_bundles(
@@ -1060,16 +1152,24 @@ def weather_alerts_to_notice_bundles(
       대표 좌표 매핑이 필요하면 후속 enrichment로 추가.
     - notice_type alias 예: ``"호우주의보"`` → ``"heavy_rain_warning"`` /
       ``"폭염"`` → ``"heat_wave_warning"`` (`normalize_notice_type`).
-    - alert_id의 `feature_id`는 region마다 다름 — `f"{alert_id}::{region_code}"`
-      가 자연키.
+    - 자연키는 **사건 단위** ``{region_code}::{현상 토큰}``(#632) — 재발표·등급
+      변경은 같은 feature로 upsert. 발표 시각/번호는 source_records 이력에만.
+    - **해제 공고는 bundle을 만들지 않는다** — `weather_alert_lift_closures`가
+      닫기 지시로 변환하고, 호출자가 열린 feature의 ``valid_end_time``을 채운다.
+    - 같은 배치에 같은 사건의 발표가 여러 건이면(3일 window 재조회) 최신
+      issued_at 1건만 남긴다 — 오래된 발표가 최신 상태를 덮지 않게.
     """
-    bundles: list[FeatureBundle] = []
+    latest: dict[str, tuple[datetime, FeatureBundle]] = {}
     for item in items:
+        if is_kma_alert_lift_title(item.title):
+            continue  # 해제 — feature 생성 대신 closure(#632).
         for region in item.regions:
-            bundles.append(
-                _alert_region_to_bundle(item, region, fetched_at=fetched_at)
-            )
-    return bundles
+            bundle = _alert_region_to_bundle(item, region, fetched_at=fetched_at)
+            feature_id = bundle.feature.feature_id
+            existing = latest.get(feature_id)
+            if existing is None or item.issued_at > existing[0]:
+                latest[feature_id] = (item.issued_at, bundle)
+    return [bundle for _, bundle in latest.values()]
 
 
 # =========================================================================
@@ -1404,5 +1504,3 @@ def mid_temperature_to_weather_values(
             )
         )
     return values
-
-
