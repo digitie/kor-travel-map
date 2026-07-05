@@ -22,7 +22,7 @@ instrumentation hook + (b) 주기 reconciliation scan 이중화로 유지한다.
   HOT 유지. 데이터 backfill은 migration이 아니라 배포 후 첫 scan이 수행
   (api-entrypoint의 기동 시 upgrade에 파일시스템 walk를 결합하지 않는다).
 
-Revision ID: 0040_managed_files
+Revision ID: 0041_managed_files
 Revises: 0039_expand_curated_theme_sets
 Create Date: 2026-07-04
 """
@@ -36,8 +36,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0040_managed_files"
-down_revision: str | Sequence[str] | None = "0039_expand_curated_theme_sets"
+revision: str = "0041_managed_files"
+down_revision: str | Sequence[str] | None = "0040_notice_dedup_cleanup"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
