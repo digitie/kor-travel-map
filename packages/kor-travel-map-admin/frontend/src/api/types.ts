@@ -8264,6 +8264,8 @@ export interface operations {
                 issue_type?: string[] | null;
                 updated_from?: string | null;
                 updated_to?: string | null;
+                /** @description 종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다. */
+                include_ended?: boolean;
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "name" | "updated_at" | "created_at" | "kind" | "status" | "provider" | "issue_count";
