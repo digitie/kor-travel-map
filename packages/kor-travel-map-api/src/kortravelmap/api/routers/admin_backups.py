@@ -459,14 +459,9 @@ async def delete_backup(
     except OSError as exc:
         raise _delete_failed(exc) from exc
     # 파일 registry hook (H2) — rmtree 확정 후 deleted 기록, 실패 무해.
-    async with file_registry.registry_guard("backup:delete"):
-        async with session.begin():
-            registered = await _registry_upsert_backup(
-                session, artifact, event_kind=None
-            )
-            await file_registry.mark_deleted(
-                session, file_id=registered.file_id, actor="api:admin"
-            )
+    async with file_registry.registry_guard("backup:delete"), session.begin():
+        registered = await _registry_upsert_backup(session, artifact, event_kind=None)
+        await file_registry.mark_deleted(session, file_id=registered.file_id, actor="api:admin")
     return BackupDeleteResponse(
         data=BackupDeleteData(deleted=True, item=deleted_item),
         meta=make_meta(started_at=started_at),
@@ -531,11 +526,8 @@ async def create_backup(
         artifact = None
     # 파일 registry hook (H1) — 백업 성공 + artifact 파싱 성공 시 등록, 실패 무해.
     if artifact_raw is not None:
-        async with file_registry.registry_guard("backup:create"):
-            async with session.begin():
-                await _registry_upsert_backup(
-                    session, artifact_raw, event_kind="downloaded"
-                )
+        async with file_registry.registry_guard("backup:create"), session.begin():
+            await _registry_upsert_backup(session, artifact_raw, event_kind="downloaded")
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="backup",
@@ -638,25 +630,24 @@ async def restore_backup(
             },
         )
     # 파일 registry hook (H3) — 복원 = 소비이므로 last_loaded_at 갱신, 실패 무해.
-    async with file_registry.registry_guard("backup:restore"):
-        async with session.begin():
-            touched = await file_registry.touch_loaded(
-                session,
-                storage_backend="filesystem",
-                location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
-                path=safe_id,
-                event_kind="restored",
-                actor="api:admin",
-                detail={"targets": targets.model_dump()},
-            )
-            if not touched:
-                # 미등록 artifact(수동 생성분) — 등록 후 restored 기록.
-                try:
-                    raw = backup_artifact(settings.backup_root, safe_id)
-                except BackupArtifactError:
-                    raw = None
-                if raw is not None:
-                    await _registry_upsert_backup(session, raw, event_kind="restored")
+    async with file_registry.registry_guard("backup:restore"), session.begin():
+        touched = await file_registry.touch_loaded(
+            session,
+            storage_backend="filesystem",
+            location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
+            path=safe_id,
+            event_kind="restored",
+            actor="api:admin",
+            detail={"targets": targets.model_dump()},
+        )
+        if not touched:
+            # 미등록 artifact(수동 생성분) — 등록 후 restored 기록.
+            try:
+                raw = backup_artifact(settings.backup_root, safe_id)
+            except BackupArtifactError:
+                raw = None
+            if raw is not None:
+                await _registry_upsert_backup(session, raw, event_kind="restored")
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="restore",
@@ -746,23 +737,22 @@ async def plan_restore_swap(
             },
         )
     # 파일 registry hook (H10) — swap 스위치 파일(.env.restore-swap)을 temp로 등록.
-    async with file_registry.registry_guard("backup:swap-env-file"):
-        async with session.begin():
-            env_file = payload.env_file or ".env.restore-swap"
-            await file_registry.register_file(
-                session,
-                storage_backend="filesystem",
-                location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
-                path=Path(env_file).name,
-                kind="temp",
-                actor="api:admin",
-                downloaded_at=datetime.now(UTC),
-                meta={
-                    "physical": {"path": env_file},
-                    "backup_id": safe_id,
-                    "purpose": "restore hot-swap env switch",
-                },
-            )
+    async with file_registry.registry_guard("backup:swap-env-file"), session.begin():
+        env_file = payload.env_file or ".env.restore-swap"
+        await file_registry.register_file(
+            session,
+            storage_backend="filesystem",
+            location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
+            path=Path(env_file).name,
+            kind="temp",
+            actor="api:admin",
+            downloaded_at=datetime.now(UTC),
+            meta={
+                "physical": {"path": env_file},
+                "backup_id": safe_id,
+                "purpose": "restore hot-swap env switch",
+            },
+        )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="swap",

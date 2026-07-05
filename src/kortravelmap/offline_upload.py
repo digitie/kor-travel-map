@@ -27,6 +27,9 @@ from kortravelmap.core.ids import (
     make_payload_hash,
     make_source_record_key,
 )
+from kortravelmap.core.managed_file_states import (
+    MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+)
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_LOADABLE_STATES,
     OFFLINE_UPLOAD_TABULAR_FORMATS,
@@ -46,9 +49,6 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
     SourceRole,
-)
-from kortravelmap.core.managed_file_states import (
-    MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
 )
 from kortravelmap.infra import file_registry
 from kortravelmap.infra.advisory_lock import try_advisory_lock
@@ -111,18 +111,21 @@ async def _touch_file_registry(
     트랜잭션을 aborted 상태로 만들지 않게 한다(설계 §0.3).
     """
 
-    async with file_registry.registry_guard(f"offline-upload:{event_kind}"):
-        async with session.begin_nested():
-            await file_registry.touch_loaded(
-                session,
-                storage_backend="s3",
-                location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
-                path=storage_key,
-                event_kind=event_kind,
-                actor="api:admin",
-                import_job_id=import_job_id,
-                dagster_run_id=dagster_run_id,
-            )
+    async with (
+        file_registry.registry_guard(f"offline-upload:{event_kind}"),
+        session.begin_nested(),
+    ):
+        await file_registry.touch_loaded(
+            session,
+            storage_backend="s3",
+            location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+            path=storage_key,
+            event_kind=event_kind,
+            actor="api:admin",
+            import_job_id=import_job_id,
+            dagster_run_id=dagster_run_id,
+        )
+
 
 _DETAIL_MODELS: Final[dict[str, type[BaseModel]]] = {
     "place": PlaceDetail,
