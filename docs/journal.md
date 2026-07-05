@@ -7,8 +7,13 @@
 관리 UI 개편 C(#636). 인라인 검증(JSON/좌표/정책)·useConfirm 전환·CursorPager 통일·
 Dagster/오프라인 업로드 입력 어시스트를 반영하고, 화면 설명문의 영어 전문용어·제목 반복을
 간결한 한국어로 정리했다(7개 화면 description + 자명 힌트 제거). type-check·eslint·vitest(57) green.
-남은 후속: 상세 힌트→HelpTip 전환, curated region_scope 구조화 미니폼, 커스텀 모달 2건의
-공용 Dialog 이관, 공용 컴포넌트(SectionCard/DetailList/JsonViewer/FilterBar) 채택 sweep.
+C 마무리 pass(추가 커밋): 상세 힌트 6건 `hint→help`(HelpTip 아이콘) 전환(providers 소스종류·
+curated 표시제목/재사용정책/큐레이션관계·change-requests 중복방지키·dagster 코드위치 새로고침
+안내), curated `region_scope`를 시도/시군구 AdminRegionAutoSearch 미니폼으로(원본 JSON은 '고급'
+`<details>`), curated/enrichment `JsonBlock`을 공용 `JsonViewer`로 이관. type-check·eslint·vitest(57) green.
+남은 후속(단일): 커스텀 모달 2건 공용 Dialog 이관(live 검증 동반), 저중복 화면들의
+SectionCard/DetailList/FilterBar 채택 sweep(curated `<dl>`4·gray-box11, enrichment `<dl>`3·gray-box5,
+providers gray-box7 등 — providers cursor `<pre>`는 spec가 직렬화를 단언해 JsonViewer 이관 보류).
 
 ## 2026-07-04 (claude) — 관리 UI 개편 B: nav 그룹·크로스링크·헤딩 정본·spec 정합화
 

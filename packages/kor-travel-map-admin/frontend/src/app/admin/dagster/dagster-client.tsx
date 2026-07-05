@@ -40,6 +40,7 @@ import {
 } from "@/api/dagster";
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { HelpTip } from "@/components/help-tip";
 import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -830,9 +831,12 @@ function ScheduleControls({
                     <span>{sentenceFromCron(lastResult.cron_schedule)}</span>
                   ) : null}
                   {lastResult.reloaded ? (
-                    <span>
-                      코드 위치 새로고침 요청됨 — 스케줄러 daemon은 자체 code
-                      location reload 후 새 cron을 반영합니다(즉시 적용 아님).
+                    <span className="inline-flex items-center gap-1">
+                      코드 위치 새로고침 요청됨
+                      <HelpTip label="코드 위치 새로고침">
+                        스케줄러 daemon은 자체 code location reload 후 새 cron을
+                        반영합니다 — 즉시 적용은 아닙니다.
+                      </HelpTip>
                     </span>
                   ) : null}
                   {lastResult.run_id ? (

@@ -21,6 +21,7 @@ import {
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
+import { JsonViewer } from "@/components/json-viewer";
 import {
   MultiFilterCombobox,
   uniqueSorted,
@@ -134,11 +135,7 @@ function formatMaybe(value: unknown): string {
 }
 
 function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value ?? {}, null, 2)}
-    </pre>
-  );
+  return <JsonViewer value={value ?? {}} maxHeight="md" copyable />;
 }
 
 function DetailMetric({ label, value }: { label: string; value: unknown }) {

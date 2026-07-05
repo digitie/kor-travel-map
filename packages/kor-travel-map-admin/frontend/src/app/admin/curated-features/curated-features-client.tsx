@@ -48,8 +48,10 @@ import {
   type CuratedCurationRelation,
 } from "@/api/curated";
 import { useCategories } from "@/api/categories";
+import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { JsonViewer } from "@/components/json-viewer";
 import { CursorPager } from "@/components/pagination-bar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/components/status-badge";
@@ -139,11 +141,7 @@ type EnabledFilter = "all" | "enabled" | "disabled";
 type ConsoleTab = "review" | "rules";
 
 function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
+  return <JsonViewer value={value} maxHeight="lg" copyable />;
 }
 
 function parseJsonObject(value: string, label: string): Record<string, unknown> {
@@ -157,6 +155,18 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 
 function stringifyJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
+}
+
+/** region_scope 미니폼용 — 유효하지 않은 JSON이면 빈 object로 degrade한다. */
+function safeParseObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function featureStatusVariant(status: string) {
@@ -658,7 +668,7 @@ export function FeatureEditor({
           ))}
         </FormSelect>
         <FormField
-          hint="비우면 원본 feature 이름이 사용됩니다. 규칙 재적용은 관리자가 넣은 제목을 덮어쓰지 않습니다."
+          help="비우면 원본 feature 이름이 사용됩니다. 규칙 재적용은 관리자가 넣은 제목을 덮어쓰지 않습니다."
           label="표시 제목"
           value={title}
           onChange={(event) => setField("title", event.target.value)}
@@ -680,7 +690,7 @@ export function FeatureEditor({
             onChange={(event) => setField("rankScore", event.target.value)}
           />
           <FormSelect
-            hint="다운스트림(PinVi 등)이 이 항목을 복사해 가도 되는지의 계약입니다."
+            help="다운스트림(PinVi 등)이 이 항목을 복사해 가도 되는지의 계약입니다."
             label="재사용 정책"
             value={reusePolicy}
             onChange={(event) =>
@@ -695,7 +705,7 @@ export function FeatureEditor({
           </FormSelect>
         </div>
         <FormSelect
-          hint="테마 안에서 이 장소가 맡는 역할입니다."
+          help="테마 안에서 이 장소가 맡는 역할입니다."
           label="큐레이션 관계"
           value={relation}
           onChange={(event) =>
@@ -883,6 +893,23 @@ function RuleEditor({
     {},
   );
   const metadataError = jsonObject<Record<string, unknown>>()(metadataJson, {});
+  // region_scope 구조화 미니폼 — JSON을 직접 편집하지 않고 시도/시군구 코드로 입력.
+  const regionScopeObj = useMemo(
+    () => safeParseObject(regionScopeJson),
+    [regionScopeJson],
+  );
+  const regionSido =
+    typeof regionScopeObj.sido_code === "string" ? regionScopeObj.sido_code : "";
+  const regionSigungu =
+    typeof regionScopeObj.sigungu_code === "string"
+      ? regionScopeObj.sigungu_code
+      : "";
+  const setRegionCode = (key: "sido_code" | "sigungu_code", next: string) => {
+    const base = { ...regionScopeObj };
+    if (next.trim().length > 0) base[key] = next.trim();
+    else delete base[key];
+    setRegionScopeJson(stringifyJson(base));
+  };
 
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1059,22 +1086,46 @@ function RuleEditor({
             </datalist>
           </label>
         </div>
-        <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">region_scope</span>
-          <Textarea
-            aria-invalid={Boolean(regionScopeError)}
-            className="min-h-28 font-mono text-xs"
-            value={regionScopeJson}
-            onChange={(event) => setRegionScopeJson(event.target.value)}
-          />
-          {regionScopeError ? (
-            <span className="text-xs text-destructive">{regionScopeError}</span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              JSON object — 예: {"{"}&quot;sido_code&quot;: &quot;11&quot;{"}"}
-            </span>
-          )}
-        </label>
+        <div className="grid gap-2 text-sm">
+          <span className="text-muted-foreground">
+            지역 범위 (region_scope) — 비우면 전국
+          </span>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <AdminRegionAutoSearch
+              id={`rule-region-sido-${rule?.rule_id ?? "new"}`}
+              kind="sido"
+              label="시도 코드"
+              value={regionSido}
+              onChange={(next) => setRegionCode("sido_code", next)}
+            />
+            <AdminRegionAutoSearch
+              id={`rule-region-sigungu-${rule?.rule_id ?? "new"}`}
+              kind="sigungu"
+              label="시군구 코드"
+              value={regionSigungu}
+              onChange={(next) => setRegionCode("sigungu_code", next)}
+            />
+          </div>
+          <details>
+            <summary className="cursor-pointer text-xs text-muted-foreground">
+              고급 — region_scope JSON 직접 편집
+            </summary>
+            <Textarea
+              aria-invalid={Boolean(regionScopeError)}
+              aria-label="region_scope"
+              className="mt-1 min-h-28 font-mono text-xs"
+              value={regionScopeJson}
+              onChange={(event) => setRegionScopeJson(event.target.value)}
+            />
+            {regionScopeError ? (
+              <span className="text-xs text-destructive">{regionScopeError}</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                JSON object — 예: {"{"}&quot;sido_code&quot;: &quot;11&quot;{"}"}
+              </span>
+            )}
+          </details>
+        </div>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">metadata</span>
           <Textarea

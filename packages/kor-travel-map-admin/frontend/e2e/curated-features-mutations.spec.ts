@@ -1035,7 +1035,8 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     await page.getByLabel("우선순위").fill("5");
     await page.getByLabel("장소 종류").selectOption("place");
     await page.getByLabel("카테고리").fill("02020101");
-    await page.getByLabel("region_scope").fill('{"sido_code": "11"}');
+    // region_scope는 구조화 미니폼(시도/시군구 코드)으로 입력 — 원본 JSON은 '고급' 아래.
+    await page.getByLabel("시도 코드").fill("11");
     await page.getByLabel("metadata").fill('{"note": "seoul only"}');
 
     await page.getByRole("button", { name: "규칙 저장" }).click();

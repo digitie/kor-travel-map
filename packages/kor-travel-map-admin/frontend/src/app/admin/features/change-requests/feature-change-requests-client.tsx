@@ -1479,7 +1479,7 @@ export function FeatureChangeRequestsClient({
                 aria-label="change idempotency key"
                 id="change-idempotency-key"
                 label="중복 방지 키"
-                hint="같은 요청을 한 번만 만들 때 사용합니다."
+                help="같은 요청을 한 번만 만들 때 사용합니다."
                 value={form.idempotencyKey}
                 onChange={(event) =>
                   updateForm("idempotencyKey", event.target.value)

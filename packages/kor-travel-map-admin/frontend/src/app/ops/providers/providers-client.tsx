@@ -345,7 +345,7 @@ function PolicyEditor({
         <FormField
           readOnly
           label="소스 종류"
-          hint="제공자·데이터셋에 따라 고정되는 값이라 자동 설정됩니다(수정 불가)."
+          help="제공자·데이터셋에 따라 고정되는 값이라 자동 설정됩니다(수정 불가)."
           value={draft.source_kind}
         />
         <FormSelect
