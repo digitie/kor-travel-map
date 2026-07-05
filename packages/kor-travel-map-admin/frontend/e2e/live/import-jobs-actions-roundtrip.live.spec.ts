@@ -428,7 +428,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
 
     // (5) UI 반영: terminal이 되어 cancel 버튼 비활성 + Cancel 카드 desc "terminal"(line 388).
     await expect(cancelButton).toBeDisabled(T);
-    await expect(page.getByText("terminal", { exact: true })).toBeVisible(T);
+    await expect(page.getByText("이미 종료된 작업입니다.")).toBeVisible(T);
 
     // 복구 없음: cancel은 un-cancel API가 없는 단방향 전이다. 그래서 이 테스트는
     // 이중 게이트(write + E2E_IMPORT_JOB_CANCEL)와 queued-전용 대상으로만 실행되며,

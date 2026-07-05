@@ -131,7 +131,7 @@ test.describe("/features live — page load + core controls", () => {
     await page.getByRole("tab", { name: "테이블" }).click();
     const table = page.getByRole("table", { name: "이름순 feature" });
     await expect(table).toBeVisible({ timeout: 15000 });
-    for (const column of ["name", "kind", "status", "coord"]) {
+    for (const column of ["이름", "종류", "상태", "좌표"]) {
       await expect(
         table.getByRole("columnheader", { name: column }),
       ).toBeVisible({ timeout: 15000 });
@@ -280,7 +280,7 @@ test.describe("/features live — responsive viewports", () => {
 
 test.describe("/features live — sort headers (table tab)", () => {
   // Only name/kind/status are sortable (coord enableSorting:false).
-  const SORTABLE = ["name", "kind", "status"] as const;
+  const SORTABLE = ["이름", "종류", "상태"] as const;
   for (const column of SORTABLE) {
     test(`정렬 헤더 클릭 — "${column}" (1회)`, async ({ page }) => {
       await page.goto(ROUTE);
@@ -314,7 +314,7 @@ test.describe("/features live — sort headers (table tab)", () => {
 });
 
 test.describe("/features live — header nav links present", () => {
-  const NAV_LINKS = ["홈", "Jobs", "Update", "Targets", "Dedup", "Dagster"];
+  const NAV_LINKS = ["홈", "Jobs", "Update", "POI 캐시 대상", "중복 검토", "작업 자동화"];
   for (const linkName of NAV_LINKS) {
     test(`헤더 링크 노출 — "${linkName}"`, async ({ page }) => {
       await page.goto(ROUTE);

@@ -222,7 +222,7 @@ async function gotoHome(page: Page): Promise<void> {
   ).toBeVisible(T);
   // metrics 로딩이 끝나면 skeleton → MetricCard("Features") heading으로 교체된다.
   await expect(
-    page.getByRole("heading", { name: "Features", exact: true }),
+    page.getByRole("heading", { name: "Feature", exact: true }),
   ).toBeVisible({ timeout: FLOW_TIMEOUT });
 }
 
@@ -250,10 +250,10 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
     test.setTimeout(FLOW_TIMEOUT);
     await gotoHome(page);
 
-    const featuresCard = cardByTitle(page, "Features");
+    const featuresCard = cardByTitle(page, "Feature");
     const importJobsCard = cardByTitle(page, "적재 작업");
-    const dedupQueueCard = cardByTitle(page, "Dedup queue");
-    const issuesCard = cardByTitle(page, "Issues");
+    const dedupQueueCard = cardByTitle(page, "중복 검수");
+    const issuesCard = cardByTitle(page, "이슈");
 
     await test.step("ops/metrics를 직접 읽어 카드 수치를 교차검증한다", async () => {
       await pollMetricCards(page, async (d) => {
@@ -287,15 +287,15 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
           // Features 서브텍스트: `{active} active / {inactive} inactive`.
           featuresCard
             .getByText(
-              `${formatCount(d.features_active)} active / ${formatCount(
+              `활성 ${formatCount(d.features_active)} / 비활성 ${formatCount(
                 d.features_inactive,
-              )} inactive`,
+              )}`,
             )
             .first()
             .isVisible(),
           // Dedup queue 서브텍스트: `pending review {dedup_fp_stats.pending}건`.
           dedupQueueCard
-            .getByText(`pending review ${formatCount(d.dedup_fp_stats.pending)}건`)
+            .getByText(`대기 ${formatCount(d.dedup_fp_stats.pending)}건`)
             .first()
             .isVisible(),
         ]);
@@ -402,7 +402,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
       (await importJobsResp.json()) as OpsImportJobsListResponse;
 
     await test.step("refetch된 metrics 값이 Features 카드에 반영된다", async () => {
-      const featuresCard = cardByTitle(page, "Features");
+      const featuresCard = cardByTitle(page, "Feature");
       await expect(
         featuresCard
           .getByText(formatCount(metricsBody.data.features_total), {
@@ -414,7 +414,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
 
     await test.step("refetch된 import-jobs 응답이 '최근 import jobs' 테이블에 반영된다", async () => {
       // page도 page_size=8로 같은 목록을 부르므로, 방금 잡은 응답이 곧 테이블 소스다.
-      const card = cardByTitle(page, "최근 import jobs");
+      const card = cardByTitle(page, "최근 적재 작업");
       const items = importJobsBody.data.items;
       if (items.length > 0) {
         const top = items[0];
