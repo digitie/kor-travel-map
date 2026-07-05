@@ -17,6 +17,7 @@ import {
   useUpsertPoiCacheTargetMutation,
 } from "@/api/poiCacheTargets";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -62,6 +63,7 @@ export function PoiCacheTargetsClient() {
   const targets = usePoiCacheTargets({ page_size: 100, cursor: currentCursor });
   const upsert = useUpsertPoiCacheTargetMutation();
   const remove = useDeletePoiCacheTargetMutation();
+  const confirm = useConfirm();
   const nearby = useNearbyFeaturesByTarget(
     selectedTarget
       ? {
@@ -147,10 +149,20 @@ export function PoiCacheTargetsClient() {
               variant="ghost"
               onClick={(event) => {
                 event.stopPropagation();
-                remove.mutate({
-                  externalSystem: target.external_system,
-                  targetKey: target.target_key,
-                });
+                void (async () => {
+                  const ok = await confirm({
+                    title: `'${target.target_key}' 대상을 삭제할까요?`,
+                    description:
+                      "등록된 POI 캐시 대상이 제거되며 이후 갱신 대상에서 빠집니다.",
+                    confirmLabel: "삭제",
+                    destructive: true,
+                  });
+                  if (!ok) return;
+                  remove.mutate({
+                    externalSystem: target.external_system,
+                    targetKey: target.target_key,
+                  });
+                })();
               }}
             >
               <Trash2Icon data-icon="inline-start" />
@@ -160,7 +172,7 @@ export function PoiCacheTargetsClient() {
         },
       },
     ],
-    [remove],
+    [confirm, remove],
   );
 
   const nearbyColumns = useMemo<ColumnDef<NearbyRow, unknown>[]>(

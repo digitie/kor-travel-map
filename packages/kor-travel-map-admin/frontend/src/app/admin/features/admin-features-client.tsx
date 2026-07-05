@@ -31,6 +31,8 @@ import {
 } from "@/api/features";
 import { useProviders } from "@/api/etl";
 import { AdminShell } from "@/components/admin-shell";
+import { CursorPager } from "@/components/pagination-bar";
+import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
@@ -272,6 +274,7 @@ export function AdminFeaturesClient({
   );
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
+  const confirm = useConfirm();
   const providersQuery = useProviders();
   const providerOptions = providersQuery.data?.data.providers ?? [];
   const datasetOptions = useMemo(
@@ -301,9 +304,14 @@ export function AdminFeaturesClient({
     void features.refetch();
   };
 
-  const deactivateFeature = (feature: AdminFeatureRecord) => {
+  const deactivateFeature = async (feature: AdminFeatureRecord) => {
     if (feature.status === "deleted") return;
-    const ok = window.confirm(`${feature.name} feature를 비활성화할까요?`);
+    const ok = await confirm({
+      title: `${feature.name} feature를 비활성화할까요?`,
+      description: "provider 재적재로 다시 활성화되지 않도록 잠급니다.",
+      confirmLabel: "비활성화",
+      destructive: true,
+    });
     if (!ok) return;
     deactivate.mutate({
       featureId: feature.feature_id,
@@ -489,7 +497,7 @@ export function AdminFeaturesClient({
                 variant="ghost"
                 onClick={(event) => {
                   event.stopPropagation();
-                  deactivateFeature(feature);
+                  void deactivateFeature(feature);
                 }}
               >
                 <XCircleIcon data-icon="inline-start" />
@@ -526,7 +534,7 @@ export function AdminFeaturesClient({
           </Button>
         </>
       }
-      description="운영자용 Feature 목록, 상세, weather, 단건 비활성화 표면입니다."
+      description="Feature를 조회하고 단건 비활성화합니다."
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
@@ -705,26 +713,13 @@ export function AdminFeaturesClient({
                   keyset cursor 기반 admin 목록
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={pageIndex <= 1}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goFirstPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!nextCursor}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goNextPage}
-                >
-                  다음
-                </Button>
-              </div>
+              <CursorPager
+                hasNext={Boolean(nextCursor)}
+                isFetching={features.isFetching}
+                summary={<>page {formatCount(pageIndex)}</>}
+                onFirst={goFirstPage}
+                onNext={goNextPage}
+              />
             </div>
             <DataTable
               columns={columns}

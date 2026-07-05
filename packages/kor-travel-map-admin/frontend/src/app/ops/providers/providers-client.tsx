@@ -34,6 +34,13 @@ import { FormField, FormSelect, FormTextArea } from "@/components/ui/form-field"
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import {
+  integerString,
+  jsonObject,
+  ordered,
+  parseJsonObjectField,
+  validateForm,
+} from "@/lib/form-validation";
 
 const STALE_AFTER_HOURS = 48;
 
@@ -184,19 +191,15 @@ function optionalPositiveInt(value: string, label: string): number | undefined {
 }
 
 function buildPolicyBody(draft: PolicyDraft): ProviderRefreshPolicyUpsertRequest {
-  let rateLimitSource: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(draft.rate_limit_source || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("rate_limit_source 값은 JSON object여야 합니다.");
-    }
-    rateLimitSource = parsed as Record<string, unknown>;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error("rate_limit_source JSON을 읽을 수 없습니다.");
+  // §4: raw SyntaxError 누출 방지 — 한국어 메시지로 통일.
+  const parsedSource = parseJsonObjectField(
+    draft.rate_limit_source || "{}",
+    "rate limit 출처",
+  );
+  if (parsedSource.error) {
+    throw new Error(`rate limit 출처(JSON): ${parsedSource.error}`);
   }
+  const rateLimitSource: Record<string, unknown> = parsedSource.value ?? {};
   return {
     source_kind: draft.source_kind,
     targeted_policy: draft.targeted_policy,
@@ -232,6 +235,33 @@ function buildPolicyBody(draft: PolicyDraft): ProviderRefreshPolicyUpsertRequest
   };
 }
 
+/** "86400" → "86400초 = 24시간" 같은 사람 친화 표기(§4). 해석 불가면 null. */
+function humanizeSeconds(value: string): string | null {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  if (parsed >= 86_400 && parsed % 86_400 === 0) {
+    return `${parsed}초 = ${parsed / 86_400}일`;
+  }
+  if (parsed >= 3_600 && parsed % 3_600 === 0) {
+    return `${parsed}초 = ${parsed / 3_600}시간`;
+  }
+  if (parsed >= 60 && parsed % 60 === 0) {
+    return `${parsed}초 = ${parsed / 60}분`;
+  }
+  return `${parsed}초`;
+}
+
+const POLICY_INT_FIELDS = [
+  "system_interval_seconds",
+  "optimal_interval_seconds",
+  "min_interval_seconds",
+  "max_requests_per_minute",
+  "max_requests_per_hour",
+  "max_requests_per_day",
+  "max_concurrent",
+  "burst_size",
+] as const;
+
 function PolicyEditor({
   provider,
   datasetKey,
@@ -243,14 +273,47 @@ function PolicyEditor({
 }) {
   const [draft, setDraft] = useState<PolicyDraft>(() => policyToDraft(policy));
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<string, string>>
+  >({});
   const upsertPolicy = useUpsertProviderRefreshPolicyMutation();
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
     setDraft((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
   };
+
+  const jsonError = jsonObject<PolicyDraft>()(draft.rate_limit_source, draft);
 
   const submit = () => {
     setError(null);
+    // §4: throw→배너 대신 필드 규칙 일괄 검증 → 인라인 에러(참조 구현: poi-cache-targets).
+    const result = validateForm(draft, [
+      ...POLICY_INT_FIELDS.map((field) => ({
+        field: field as keyof PolicyDraft & string,
+        validate: integerString<PolicyDraft>({
+          min: 1,
+          message: "양의 정수를 입력하세요.",
+        }),
+      })),
+      {
+        field: "min_interval_seconds",
+        validate: ordered<PolicyDraft>(
+          [
+            "min_interval_seconds",
+            "optimal_interval_seconds",
+            "system_interval_seconds",
+          ],
+          "최소 ≤ 최적 ≤ 시스템 주기 순서를 지켜야 합니다.",
+        ),
+      },
+      { field: "rate_limit_source", validate: jsonObject<PolicyDraft>() },
+    ]);
+    if (!result.isValid) {
+      setFieldErrors(result.errors);
+      return;
+    }
+    setFieldErrors({});
     let body: ProviderRefreshPolicyUpsertRequest;
     try {
       body = buildPolicyBody(draft);
@@ -282,12 +345,12 @@ function PolicyEditor({
         <FormField
           readOnly
           label="소스 종류"
-          hint="제공자·데이터셋에 따라 고정되는 값이라 자동 설정됩니다(수정 불가)."
+          help="제공자·데이터셋에 따라 고정되는 값이라 자동 설정됩니다(수정 불가)."
           value={draft.source_kind}
         />
         <FormSelect
           label="타깃 갱신 정책"
-          hint="개별 지점 타깃 갱신을 허용/차단하거나 시스템 정책을 따를지 정합니다."
+          help="개별 지점 타깃 갱신을 허용/차단하거나 시스템 정책을 따를지 정합니다."
           value={draft.targeted_policy}
           onChange={(event) =>
             setField(
@@ -303,74 +366,81 @@ function PolicyEditor({
           ))}
         </FormSelect>
         <FormField
+          error={fieldErrors.system_interval_seconds}
+          hint={humanizeSeconds(draft.system_interval_seconds) ?? undefined}
           inputMode="numeric"
           label="시스템 주기(초)"
-          hint="시스템 자동 갱신이 도는 기본 간격(초)입니다."
+          help="시스템 자동 갱신이 도는 기본 간격(초)입니다."
           value={draft.system_interval_seconds}
           onChange={(event) =>
             setField("system_interval_seconds", event.target.value)
           }
         />
         <FormField
+          error={fieldErrors.optimal_interval_seconds}
+          hint={humanizeSeconds(draft.optimal_interval_seconds) ?? undefined}
           inputMode="numeric"
           label="최적 주기(초)"
-          hint="데이터 신선도상 권장되는 갱신 간격(초)입니다."
+          help="데이터 신선도상 권장되는 갱신 간격(초)입니다."
           value={draft.optimal_interval_seconds}
           onChange={(event) =>
             setField("optimal_interval_seconds", event.target.value)
           }
         />
         <FormField
+          error={fieldErrors.min_interval_seconds}
+          hint={humanizeSeconds(draft.min_interval_seconds) ?? undefined}
           inputMode="numeric"
           label="최소 주기(초)"
-          hint="이 간격보다 더 자주는 갱신하지 않습니다(과도 호출 방지)."
+          help="이 간격보다 더 자주는 갱신하지 않습니다(과도 호출 방지)."
           value={draft.min_interval_seconds}
           onChange={(event) => setField("min_interval_seconds", event.target.value)}
         />
         <FormField
+          error={fieldErrors.max_requests_per_minute}
           inputMode="numeric"
           label="분당 요청 수"
-          hint="provider API에 1분 동안 보낼 수 있는 최대 요청 수입니다."
           value={draft.max_requests_per_minute}
           onChange={(event) =>
             setField("max_requests_per_minute", event.target.value)
           }
         />
         <FormField
+          error={fieldErrors.max_requests_per_hour}
           inputMode="numeric"
           label="시간당 요청 수"
-          hint="1시간 동안 보낼 수 있는 최대 요청 수입니다."
           value={draft.max_requests_per_hour}
           onChange={(event) =>
             setField("max_requests_per_hour", event.target.value)
           }
         />
         <FormField
+          error={fieldErrors.max_requests_per_day}
           inputMode="numeric"
           label="일일 요청 수"
-          hint="하루 동안 보낼 수 있는 최대 요청 수(무료키 일일 쿼터 보호)입니다."
+          help="무료키 일일 쿼터 보호 한도 — 초과 시 이후 요청이 차단됩니다."
           value={draft.max_requests_per_day}
           onChange={(event) =>
             setField("max_requests_per_day", event.target.value)
           }
         />
         <FormField
+          error={fieldErrors.max_concurrent}
           inputMode="numeric"
           label="최대 동시 실행"
-          hint="동시에 실행할 수 있는 최대 요청 수입니다."
           value={draft.max_concurrent}
           onChange={(event) => setField("max_concurrent", event.target.value)}
         />
         <FormField
+          error={fieldErrors.burst_size}
           inputMode="numeric"
           label="버스트 크기"
-          hint="순간적으로 허용되는 추가 요청 수(토큰 버킷 버스트)입니다."
+          help="순간적으로 허용되는 추가 요청 수(토큰 버킷 버스트)입니다."
           value={draft.burst_size}
           onChange={(event) => setField("burst_size", event.target.value)}
         />
         <FormField
           label="설정 출처"
-          hint="이 정책 값의 출처 식별자입니다(기본 db)."
           value={draft.config_source}
           onChange={(event) => setField("config_source", event.target.value)}
         />
@@ -384,8 +454,10 @@ function PolicyEditor({
         </label>
         <FormTextArea
           className="lg:col-span-2"
+          error={fieldErrors.rate_limit_source ?? jsonError ?? undefined}
           label="rate limit 출처(JSON)"
-          hint="provider가 내려준 원본 rate-limit 정보를 JSON으로 보관합니다."
+          help="provider가 내려준 원본 rate-limit 정보를 JSON으로 보관합니다."
+          placeholder='예: {"daily_quota": 1500}'
           value={draft.rate_limit_source}
           onChange={(event) => setField("rate_limit_source", event.target.value)}
         />

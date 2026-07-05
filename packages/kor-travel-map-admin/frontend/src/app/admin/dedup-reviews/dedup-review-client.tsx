@@ -727,7 +727,7 @@ export function DedupReviewClient() {
           새로고침
         </Button>
       }
-      description="중복 후보를 운영자가 검토합니다. accept/reject/ignore 또는 merge(master 수동 선택 또는 자동 선정)로 처리합니다."
+      description="중복 후보를 검토해 채택·거절·무시하거나 병합합니다."
       title="중복 검토"
     >
       <div className="flex flex-col gap-4">

@@ -185,7 +185,7 @@ test.describe("curated-features live: page load + controls", () => {
 
   test("pagination next/prev controls render", async ({ page }) => {
     await page.goto(ROUTE);
-    await expect(page.getByRole("button", { name: "처음" })).toBeVisible(
+    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeVisible(
       TIMEOUT,
     );
     await expect(page.getByRole("button", { name: "다음" })).toBeVisible(

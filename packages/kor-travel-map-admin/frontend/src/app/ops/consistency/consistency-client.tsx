@@ -155,7 +155,7 @@ export function ConsistencyClient() {
           새로고침
         </Button>
       }
-      description="consistency report와 data integrity issue queue를 조회합니다."
+      description="정합성 리포트와 이슈 큐를 조회합니다."
       title="정합성 점검"
     >
       <div className="flex flex-col gap-4">

@@ -76,6 +76,7 @@ import {
   KOREA_COORD_MESSAGE,
   httpUrl,
   isKoreaCoordinate,
+  parseJsonObjectField,
   phoneNumber,
 } from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
@@ -447,18 +448,12 @@ function parseOptionalJsonObject(
   label: string,
   value: string,
 ): Record<string, unknown> | undefined {
-  if (value.trim().length === 0) {
-    return undefined;
+  // §4: raw SyntaxError를 사용자에게 흘리지 않는다 — 한국어 메시지로 통일.
+  const parsed = parseJsonObjectField(value, label);
+  if (parsed.error) {
+    throw new Error(`${label}: ${parsed.error}`);
   }
-  const parsed = JSON.parse(value) as unknown;
-  if (
-    parsed === null ||
-    Array.isArray(parsed) ||
-    typeof parsed !== "object"
-  ) {
-    throw new Error(`${label}는 JSON object여야 합니다.`);
-  }
-  return parsed as Record<string, unknown>;
+  return parsed.value ?? undefined;
 }
 
 function parseOptionalCoord(
@@ -1484,7 +1479,7 @@ export function FeatureChangeRequestsClient({
                 aria-label="change idempotency key"
                 id="change-idempotency-key"
                 label="중복 방지 키"
-                hint="같은 요청을 한 번만 만들 때 사용합니다."
+                help="같은 요청을 한 번만 만들 때 사용합니다."
                 value={form.idempotencyKey}
                 onChange={(event) =>
                   updateForm("idempotencyKey", event.target.value)

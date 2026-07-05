@@ -28,7 +28,7 @@ export type ValidationResult<T> = {
  * `firstErrorField`는 규칙 순서 기준 첫 실패 필드라, 폼 레이아웃 순서대로 규칙을 선언하면
  * 화면 최상단 에러 필드로 포커스를 옮길 수 있다.
  */
-export function validateForm<T extends Record<string, unknown>>(
+export function validateForm<T extends object>(
   values: T,
   rules: Array<FieldRule<T>>,
 ): ValidationResult<T> {

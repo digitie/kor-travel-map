@@ -18,7 +18,12 @@ import {
   PLACE_KIND_OPTIONS,
   withCurrentOption,
 } from "@/lib/feature-form-options";
-import { httpUrl, phoneNumber } from "@/lib/form-validation";
+import {
+  dateOrdered,
+  httpUrl,
+  jsonObject,
+  phoneNumber,
+} from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT } from "@/state/map";
@@ -413,9 +418,14 @@ export function FeatureAddressSection({
         </summary>
         <FormTextArea
           className="mt-3"
+          error={jsonObject<FeatureAddressValues>()(
+            values.addressExtraJson,
+            values,
+          )}
           id={`${idPrefix}-address-extra-json`}
           label="주소 추가 정보"
-          hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+          hint="정해진 입력칸에 없는 값만 JSON object로 입력합니다."
+          placeholder='예: {"zipcode": "03187"}'
           value={values.addressExtraJson}
           onChange={(event) => onChange("addressExtraJson", event.target.value)}
         />
@@ -455,6 +465,10 @@ export function FeatureDetailSection({
       {kind === "event" ? (
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
+            error={dateOrdered<FeatureDetailValues>("endDate")(
+              values.startDate,
+              values,
+            )}
             id={`${idPrefix}-start-date`}
             label="행사 시작"
             type="datetime-local"
@@ -537,16 +551,26 @@ export function FeatureDetailSection({
         </summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <FormTextArea
+            error={jsonObject<FeatureDetailValues>()(
+              values.detailExtraJson,
+              values,
+            )}
             id={`${idPrefix}-detail-extra-json`}
             label="상세 추가 정보"
-            hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+            hint="정해진 입력칸에 없는 값만 JSON object로 입력합니다."
+            placeholder='예: {"capacity": 120}'
             value={values.detailExtraJson}
             onChange={(event) => onChange("detailExtraJson", event.target.value)}
           />
           <FormTextArea
+            error={jsonObject<FeatureDetailValues>()(
+              values.urlsExtraJson,
+              values,
+            )}
             id={`${idPrefix}-urls-extra-json`}
             label="URL 추가 정보"
-            hint="홈페이지/출처 외 추가 URL만 JSON으로 입력합니다."
+            hint="홈페이지/출처 외 추가 URL만 JSON object로 입력합니다."
+            placeholder='예: {"instagram": "https://…"}'
             value={values.urlsExtraJson}
             onChange={(event) => onChange("urlsExtraJson", event.target.value)}
           />

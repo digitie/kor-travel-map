@@ -21,6 +21,7 @@ import {
   useUnselectCuratedFeatureMutation,
 } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +62,7 @@ export function CuratedFeatureDetailClient({
   const selectFeature = useSelectCuratedFeatureMutation();
   const unselectFeature = useUnselectCuratedFeatureMutation();
   const archiveFeature = useArchiveCuratedFeatureMutation();
+  const confirm = useConfirm();
   const item = feature.data?.data ?? null;
   const anyStatusPending =
     selectFeature.isPending ||
@@ -104,11 +106,15 @@ export function CuratedFeatureDetailClient({
     );
   };
 
-  const archiveCurated = () => {
+  const archiveCurated = async () => {
     if (!item) return;
-    const ok = window.confirm(
-      `"${item.feature_name}"을(를) 보관할까요? 보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.`,
-    );
+    const ok = await confirm({
+      title: `"${item.feature_name}"을(를) 보관할까요?`,
+      description:
+        "보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.",
+      confirmLabel: "보관",
+      destructive: true,
+    });
     if (!ok) return;
     archiveFeature.mutate(
       {
@@ -183,7 +189,7 @@ export function CuratedFeatureDetailClient({
               title="소프트 삭제"
               type="button"
               variant="destructive"
-              onClick={archiveCurated}
+              onClick={() => void archiveCurated()}
             >
               <ArchiveIcon data-icon="inline-start" />
               보관

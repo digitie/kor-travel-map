@@ -39,6 +39,8 @@ import {
   useDagsterSummary,
 } from "@/api/dagster";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
+import { HelpTip } from "@/components/help-tip";
 import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -264,6 +266,7 @@ function parseDailyTimes(value: string) {
   return {
     cron: `${minute} ${hours.join(",")} * * *`,
     text: hours.map((hour) => clockText(hour, minute)).join(", "),
+    clocks: hours.map((hour) => ({ hour, minute })),
   };
 }
 
@@ -378,6 +381,67 @@ function sentenceFromDraft(draft: ScheduleEditDraft) {
     return `매주 ${weekday} ${clock}에 실행`;
   }
   return `매월 ${parseMonthDay(draft.monthDay)}일 ${clock}에 실행`;
+}
+
+/**
+ * 편집 중 draft 기준 "다음 3회 실행" 프리뷰(§4). 브라우저 로컬 시간으로 계산하며
+ * 스케줄 시간대가 다르면 근사치다(다이얼로그에 시간대를 함께 표기).
+ * `now`는 테스트 주입용.
+ */
+function nextRunsFromDraft(
+  draft: ScheduleEditDraft,
+  count = 3,
+  now: Date = new Date(),
+): Date[] {
+  const candidates: Date[] = [];
+  const pushDaily = (hour: number, minute: number, dayOffset: number) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() + dayOffset);
+    date.setHours(hour, minute, 0, 0);
+    candidates.push(date);
+  };
+  if (draft.frequency === "hourly") {
+    const minute = parseMinute(draft.minute);
+    for (let offset = 0; offset < count + 1; offset += 1) {
+      const date = new Date(now);
+      date.setHours(date.getHours() + offset, minute, 0, 0);
+      candidates.push(date);
+    }
+  } else if (draft.frequency === "daily_multi") {
+    const clocks = parseDailyTimes(draft.times).clocks;
+    for (let day = 0; day < count + 1; day += 1) {
+      for (const clock of clocks) pushDaily(clock.hour, clock.minute, day);
+    }
+  } else {
+    const clock = parseClock(draft.time, "실행 시각");
+    if (draft.frequency === "daily") {
+      for (let day = 0; day < count + 1; day += 1) {
+        pushDaily(clock.hour, clock.minute, day);
+      }
+    } else if (draft.frequency === "weekly") {
+      const weekday = Number(draft.weekday);
+      for (let day = 0; day < 7 * (count + 1); day += 1) {
+        const date = new Date(now);
+        date.setDate(date.getDate() + day);
+        if (date.getDay() !== weekday) continue;
+        date.setHours(clock.hour, clock.minute, 0, 0);
+        candidates.push(date);
+      }
+    } else {
+      const monthDay = parseMonthDay(draft.monthDay);
+      for (let month = 0; month < count + 2; month += 1) {
+        const date = new Date(now.getFullYear(), now.getMonth() + month, monthDay);
+        // 31일 등 없는 날짜가 다음 달로 넘어가면 그 달은 건너뛴다.
+        if (date.getDate() !== monthDay) continue;
+        date.setHours(clock.hour, clock.minute, 0, 0);
+        candidates.push(date);
+      }
+    }
+  }
+  return candidates
+    .filter((date) => date.getTime() > now.getTime())
+    .sort((a, b) => a.getTime() - b.getTime())
+    .slice(0, count);
 }
 
 function sentenceFromCron(cron: string | null | undefined, timezone?: string | null) {
@@ -636,6 +700,7 @@ function ScheduleControls({
 }) {
   const command = useDagsterScheduleCommand();
   const patchSchedule = usePatchDagsterSchedule();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<DagsterSchedule | null>(null);
   const [draft, setDraft] = useState<ScheduleEditDraft>(() =>
     draftFromCron(null),
@@ -673,7 +738,7 @@ function ScheduleControls({
     key: K,
     value: ScheduleEditDraft[K],
   ) => setDraft((current) => ({ ...current, [key]: value }));
-  const submitEdit = () => {
+  const submitEdit = async () => {
     if (!editing) return;
     let cronSchedule: string;
     try {
@@ -683,15 +748,12 @@ function ScheduleControls({
       return;
     }
     // 주기 변경은 대용량/월간 작업을 고빈도로 올려 provider 한도를 초과시킬 수 있어 확인을 받는다(#613).
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `'${editing.name}' 스케줄 주기를 '${cronSchedule}'(으)로 변경하시겠습니까? ` +
-          "대용량/월간 작업의 주기를 올리면 provider 호출 한도를 초과할 수 있습니다.",
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "스케줄 주기를 변경할까요?",
+      description: `'${editing.name}' 주기를 '${cronSchedule}'(으)로 변경합니다. 대용량/월간 작업의 주기를 올리면 provider 호출 한도를 초과할 수 있습니다.`,
+      confirmLabel: "주기 변경",
+    });
+    if (!ok) return;
     setLastResult(null);
     setEditError(null);
     patchSchedule.mutate({
@@ -705,19 +767,18 @@ function ScheduleControls({
       },
     });
   };
-  const runCommand = (
+  const runCommand = async (
     scheduleName: string,
     nextCommand: "default" | "reset" | "run" | "start" | "stop",
   ) => {
     // 즉시 실행/스케줄 시작은 즉시 부하를 유발하므로 확인을 받는다(#613 — runaway 작업 방지).
-    if (
-      (nextCommand === "run" || nextCommand === "start") &&
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `'${scheduleName}' ${scheduleCommandLabel(nextCommand)}을(를) 실행하시겠습니까?`,
-      )
-    ) {
-      return;
+    if (nextCommand === "run" || nextCommand === "start") {
+      const ok = await confirm({
+        title: `${scheduleCommandLabel(nextCommand)}을(를) 실행할까요?`,
+        description: `'${scheduleName}' 스케줄에 즉시 부하가 발생합니다.`,
+        confirmLabel: scheduleCommandLabel(nextCommand),
+      });
+      if (!ok) return;
     }
     setLastResult(null);
     command.mutate({
@@ -770,9 +831,12 @@ function ScheduleControls({
                     <span>{sentenceFromCron(lastResult.cron_schedule)}</span>
                   ) : null}
                   {lastResult.reloaded ? (
-                    <span>
-                      코드 위치 새로고침 요청됨 — 스케줄러 daemon은 자체 code
-                      location reload 후 새 cron을 반영합니다(즉시 적용 아님).
+                    <span className="inline-flex items-center gap-1">
+                      코드 위치 새로고침 요청됨
+                      <HelpTip label="코드 위치 새로고침">
+                        스케줄러 daemon은 자체 code location reload 후 새 cron을
+                        반영합니다 — 즉시 적용은 아닙니다.
+                      </HelpTip>
                     </span>
                   ) : null}
                   {lastResult.run_id ? (
@@ -868,7 +932,7 @@ function ScheduleControls({
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={() => runCommand(schedule.name, "run")}
+                    onClick={() => void runCommand(schedule.name, "run")}
                   >
                     <PlayIcon data-icon="inline-start" />
                     즉시 실행
@@ -879,7 +943,7 @@ function ScheduleControls({
                     type="button"
                     variant={isRunning ? "destructive" : "default"}
                     onClick={() =>
-                      runCommand(schedule.name, toggleCommand)
+                      void runCommand(schedule.name, toggleCommand)
                     }
                   >
                     {pending ? (
@@ -906,7 +970,7 @@ function ScheduleControls({
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={() => runCommand(schedule.name, "default")}
+                    onClick={() => void runCommand(schedule.name, "default")}
                   >
                     <RotateCcwIcon data-icon="inline-start" />
                     기본값으로 되돌리기
@@ -964,6 +1028,23 @@ function ScheduleControls({
                       }
                     })()}
                   </div>
+                  {(() => {
+                    // §4: 다음 3회 실행 프리뷰 — 입력이 유효할 때만 계산한다.
+                    try {
+                      const runs = nextRunsFromDraft(draft);
+                      if (runs.length === 0) return null;
+                      return (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          다음 3회 실행:{" "}
+                          {runs
+                            .map((run) => runTimeFormatter.format(run))
+                            .join(" · ")}
+                        </div>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
                   {editing.execution_timezone ? (
                     <div className="mt-1 text-xs text-muted-foreground">
                       시간대 {editing.execution_timezone}
@@ -1005,6 +1086,18 @@ function ScheduleControls({
                         updateDraft("minute", event.target.value)
                       }
                     />
+                    {(() => {
+                      try {
+                        parseMinute(draft.minute);
+                        return null;
+                      } catch (error) {
+                        return (
+                          <span className="text-xs text-destructive">
+                            {error instanceof Error ? error.message : null}
+                          </span>
+                        );
+                      }
+                    })()}
                   </label>
                 ) : null}
                 {draft.frequency === "daily_multi" ? (
@@ -1019,6 +1112,18 @@ function ScheduleControls({
                         updateDraft("times", event.target.value)
                       }
                     />
+                    {(() => {
+                      try {
+                        parseDailyTimes(draft.times);
+                        return null;
+                      } catch (error) {
+                        return (
+                          <span className="text-xs text-destructive">
+                            {error instanceof Error ? error.message : null}
+                          </span>
+                        );
+                      }
+                    })()}
                   </label>
                 ) : null}
                 {draft.frequency !== "hourly" &&
@@ -1092,7 +1197,7 @@ function ScheduleControls({
                 <XIcon data-icon="inline-start" />
                 취소
               </Button>
-              <Button disabled={pending} type="button" onClick={submitEdit}>
+              <Button disabled={pending} type="button" onClick={() => void submitEdit()}>
                 <CheckIcon data-icon="inline-start" />
                 저장
               </Button>
