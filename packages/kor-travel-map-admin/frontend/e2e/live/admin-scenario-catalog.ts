@@ -386,6 +386,22 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/ops/logs", "/"],
   },
   {
+    id: "files",
+    route: "/admin/files",
+    readyHeading: "파일 관리",
+    readApis: [
+      "/v1/admin/files",
+      "/v1/admin/files/summary",
+      "/v1/admin/files/{file_id}",
+      "/v1/admin/files/{file_id}/events",
+    ],
+    writeApis: [
+      writeApi("POST", "/v1/admin/files/rescan"),
+      writeApi("POST", "/v1/admin/files/{file_id}/purge", "destructive"),
+    ],
+    reflectedSurfaces: ["/ops/import-jobs", "/admin/offline-uploads"],
+  },
+  {
     id: "dagster",
     route: "/admin/dagster",
     readyHeading: "작업 자동화",

@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 관리 UI 개편 D — 파일 레지스트리·추적 UI (2026-07-05)
+
+- **ADDED**: 시스템에 적재되는 파일(Provider 다운로드·백업·오프라인 업로드·MOIS 원본)을
+  추적하는 파일 레지스트리(`ops.managed_files` + `ops.managed_file_events`, 0040 마이그레이션).
+  단순 리스팅이 아니라 각 파일이 어디에(location/backend) 어떻게 연결됐는지(provenance links),
+  사용 중인지 임시인지(status/kind), 언제 받고 마지막으로 로드됐는지(downloaded_at/last_loaded_at)를
+  본다. 생산/소비 지점 hook 계측(host op 실패 없이 best-effort) + 주기 스캔 reconcile.
+- **ADDED**: `/v1/admin/files` 관리 라우터 — 목록(kind/status/provider/location/기간 필터),
+  요약 집계, 상세(+provenance links·이력), 재스캔(backup_root 동기 + offline-uploads backfill),
+  좁은 zombie purge(파괴적 스위치 게이트). Dagster `managed_file_scan` job(6시간 스케줄).
+- **ADDED**: 관리 UI `/admin/files`(시스템 그룹) — 요약 칩(클릭=필터), 필터 바, 목록,
+  상세 provenance 패널(연결 항목 딥링크·이력 타임라인·메타). 한국어 + HelpTip.
+
 ### 관리 UI 개편 B — nav 그룹·크로스링크 (2026-07-04)
 
 - 사이드바를 작업 지향 4그룹(Feature 관리/수집 파이프라인/모니터링/시스템)으로 재편하고

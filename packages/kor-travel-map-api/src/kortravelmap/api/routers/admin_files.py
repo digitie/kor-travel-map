@@ -340,7 +340,7 @@ def _validate_enum(
     unknown = [v for v in values if v not in allowed]
     if unknown:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"알 수 없는 {field} 값: {', '.join(unknown)}",
         )
     return values
@@ -372,7 +372,7 @@ async def list_files(
     statuses = _validate_enum(file_status, MANAGED_FILE_STATUS_VALUES, "status")
     if location is not None and location not in MANAGED_FILE_LOCATION_VALUES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"알 수 없는 location 값: {location}",
         )
     if (
@@ -380,7 +380,7 @@ async def list_files(
         and registered_by not in MANAGED_FILE_REGISTERED_BY_VALUES
     ):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"알 수 없는 registered_by 값: {registered_by}",
         )
 
@@ -518,7 +518,7 @@ async def rescan_files(
         unknown = [v for v in requested if v not in MANAGED_FILE_LOCATION_VALUES]
         if unknown:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"알 수 없는 location 값: {', '.join(unknown)}",
             )
 
