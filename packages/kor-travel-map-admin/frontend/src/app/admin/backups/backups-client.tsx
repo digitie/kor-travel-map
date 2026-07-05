@@ -179,7 +179,7 @@ export function BackupsClient() {
     () => [
       {
         accessorKey: "backup_id",
-        header: "백업",
+        header: "백업 ID",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
             {shortId(row.original.backup_id, 20)}

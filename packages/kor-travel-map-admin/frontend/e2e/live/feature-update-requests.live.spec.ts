@@ -8,9 +8,9 @@ async function expectUpdateRequestsReady(
   await expect(
     page.getByRole("heading", { level: 1, name: "갱신 요청" }),
   ).toBeVisible(T);
-  await expect(page.getByLabel("lon")).toBeVisible(T);
-  await expect(page.getByLabel("lat")).toBeVisible(T);
-  await expect(page.getByLabel("radius km")).toBeVisible(T);
+  await expect(page.getByLabel("경도")).toBeVisible(T);
+  await expect(page.getByLabel("위도")).toBeVisible(T);
+  await expect(page.getByLabel("반경(km)")).toBeVisible(T);
   await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible(T);
 }
 
@@ -19,9 +19,9 @@ test.describe("/admin/features/update-requests live", () => {
     await page.goto("/admin/features/update-requests");
 
     await expectUpdateRequestsReady(page);
-    await expect(page.getByLabel("request status")).toBeVisible(T);
+    await expect(page.getByLabel("요청 상태 필터")).toBeVisible(T);
     await expect(page.getByLabel("dry-run")).toBeChecked();
-    await expect(page.getByLabel("run mode")).toHaveValue("queued");
+    await expect(page.getByLabel("실행 모드")).toHaveValue("queued");
   });
 
   test("validation errors — lon required + lat range + radius min", async ({
@@ -30,13 +30,15 @@ test.describe("/admin/features/update-requests live", () => {
     await page.goto("/admin/features/update-requests");
     await expectUpdateRequestsReady(page);
 
-    await page.getByLabel("lon").fill("");
-    await page.getByLabel("lat").fill("44");
-    await page.getByLabel("radius km").fill("0.01");
+    await page.getByLabel("경도").fill("");
+    await page.getByLabel("위도").fill("44");
+    await page.getByLabel("반경(km)").fill("0.01");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
-    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible(T);
-    await expect(page.getByText("위도는 33~43 범위여야 합니다.")).toBeVisible(T);
+    await expect(page.getByText("경도를 입력하세요.")).toBeVisible(T);
+    await expect(
+      page.getByText("좌표는 대한민국 범위 안의 숫자로 입력하세요."),
+    ).toBeVisible(T);
     await expect(page.getByText("반경은 0.1 이상이어야 합니다.")).toBeVisible(T);
   });
 

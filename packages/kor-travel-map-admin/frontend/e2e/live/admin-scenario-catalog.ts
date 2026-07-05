@@ -131,7 +131,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     id: "feature-change-requests",
     route: "/admin/features/change-requests",
     readyHeading: "변경 요청 작성",
-    readApis: [],
+    readApis: [
+      "/v1/categories",
+      "/v1/admin/features/change-requests",
+      "/v1/admin/features/{feature_id}",
+    ],
     writeApis: [
       writeApi("POST", "/v1/admin/features/change-requests"),
       writeApi("POST", "/v1/admin/features"),

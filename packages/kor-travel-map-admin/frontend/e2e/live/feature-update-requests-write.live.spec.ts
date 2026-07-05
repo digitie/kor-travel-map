@@ -350,7 +350,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         await expect(
           page.getByRole("heading", {
             level: 1,
-            name: "Feature update request",
+            name: "갱신 요청 상세",
             exact: true,
           }),
         ).toBeVisible(T);

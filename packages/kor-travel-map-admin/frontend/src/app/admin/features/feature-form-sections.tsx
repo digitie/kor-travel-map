@@ -248,6 +248,7 @@ export function FeatureBasicInfoSection({
       </div>
       <div className="grid gap-3 lg:grid-cols-4">
         <FormSelect
+          aria-label={`${idPrefix} kind`}
           id={`${idPrefix}-kind`}
           label="Feature 종류"
           value={kind}
@@ -261,6 +262,7 @@ export function FeatureBasicInfoSection({
         </FormSelect>
         {kind === "place" ? (
           <FormSelect
+            aria-label={`${idPrefix} place kind`}
             id={`${idPrefix}-place-kind`}
             label="장소 종류"
             value={placeKind}
@@ -278,6 +280,7 @@ export function FeatureBasicInfoSection({
           </FormSelect>
         ) : null}
         <FormSelect
+          aria-label={`${idPrefix} status`}
           id={`${idPrefix}-status`}
           label="상태"
           value={status}
@@ -292,6 +295,7 @@ export function FeatureBasicInfoSection({
           ))}
         </FormSelect>
         <FormField
+          aria-label={`${idPrefix} name`}
           error={nameError}
           id={`${idPrefix}-name`}
           label="이름"
@@ -300,6 +304,7 @@ export function FeatureBasicInfoSection({
           onChange={(event) => onNameChange(event.target.value)}
         />
         <FormSelect
+          aria-label={`${idPrefix} category`}
           error={categoryError}
           id={`${idPrefix}-category`}
           label="카테고리"
@@ -357,6 +362,7 @@ export function FeatureAddressSection({
           onChange={(event) => onChange("addressAdmin", event.target.value)}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} sido code`}
           id={`${idPrefix}-sido-code`}
           kind="sido"
           label="시도 코드"
@@ -366,6 +372,7 @@ export function FeatureAddressSection({
           placeholder="시도명 또는 코드 검색"
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} sigungu code`}
           id={`${idPrefix}-sigungu-code`}
           kind="sigungu"
           label="시군구 코드"
@@ -374,6 +381,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} legal dong code`}
           id={`${idPrefix}-legal-dong-code`}
           kind="legal_dong"
           label="법정동 코드"
@@ -382,6 +390,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} admin dong code`}
           id={`${idPrefix}-admin-dong-code`}
           kind="admin_dong"
           label="행정동 코드"

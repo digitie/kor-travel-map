@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 type RegionCodeKind = "sido" | "sigungu" | "legal_dong" | "admin_dong";
 
 interface AdminRegionAutoSearchProps {
+  ariaLabel?: string;
   className?: string;
   id: string;
   kind: RegionCodeKind;
@@ -193,6 +194,7 @@ interface VisibleRegionCandidate {
 }
 
 function AdminRegionAutoSearch({
+  ariaLabel,
   className,
   id,
   kind,
@@ -290,6 +292,7 @@ function AdminRegionAutoSearch({
       <Input
         aria-describedby={`${id}-region-results`}
         aria-invalid={visibleError ? true : undefined}
+        aria-label={ariaLabel}
         id={id}
         placeholder={placeholder}
         value={value}

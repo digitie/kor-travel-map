@@ -213,14 +213,14 @@ test.describe("/admin/issues live read + reversible status write", () => {
 
     await test.step("status 필터 → ?status=resolved", async () => {
       const wait = waitForIssuesQuery(page, { status: "resolved" });
-      await page.getByLabel("issue status").selectOption("resolved");
+      await page.getByLabel("이슈 상태 필터").selectOption("resolved");
       expect((await wait).status()).toBe(200);
       await expectIssuesTableOrEmpty(page);
     });
 
     await test.step("severity 필터 → ?severity=critical", async () => {
       const wait = waitForIssuesQuery(page, { severity: "critical" });
-      await page.getByLabel("issue severity").selectOption("critical");
+      await page.getByLabel("이슈 심각도 필터").selectOption("critical");
       expect((await wait).status()).toBe(200);
       await expectIssuesTableOrEmpty(page);
     });
@@ -255,7 +255,7 @@ test.describe("/admin/issues live read + reversible status write", () => {
     await test.step("search 입력 → ?q= (deferred)", async () => {
       const term = "공원";
       const wait = waitForIssuesQuery(page, { q: term });
-      await page.getByLabel("issue search").fill(term);
+      await page.getByLabel("이슈 검색").fill(term);
       expect((await wait).status()).toBe(200);
       await expectIssuesTableOrEmpty(page);
     });
@@ -326,7 +326,7 @@ test.describe("/admin/issues live read + reversible status write", () => {
 
     if (probed !== "open") {
       const wait = waitForIssuesQuery(page, { status: probed });
-      await page.getByLabel("issue status").selectOption(probed);
+      await page.getByLabel("이슈 상태 필터").selectOption(probed);
       await wait;
     }
 
