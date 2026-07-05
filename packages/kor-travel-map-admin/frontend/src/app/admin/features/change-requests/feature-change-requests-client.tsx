@@ -862,6 +862,7 @@ function LocationEditDialog({
             <div className="grid gap-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                 <FormField
+                  aria-label="lon"
                   error={coordError}
                   inputMode="decimal"
                   label="경도"
@@ -869,6 +870,7 @@ function LocationEditDialog({
                   onChange={(event) => updateDraft("lon", event.target.value)}
                 />
                 <FormField
+                  aria-label="lat"
                   error={coordError}
                   inputMode="decimal"
                   label="위도"
@@ -877,6 +879,7 @@ function LocationEditDialog({
                 />
               </div>
               <FormSelect
+                aria-label="marker_icon"
                 label="마커 아이콘"
                 value={draft.markerIcon}
                 onChange={(event) => updateDraft("markerIcon", event.target.value)}
@@ -888,6 +891,7 @@ function LocationEditDialog({
                 ))}
               </FormSelect>
               <FormSelect
+                aria-label="marker_color"
                 label="마커 색상"
                 style={markerColorStyle}
                 value={draft.markerColor}
@@ -907,6 +911,7 @@ function LocationEditDialog({
                 ))}
               </FormSelect>
               <AdminRegionAutoSearch
+                ariaLabel="sigungu_code"
                 id="change-location-sigungu-code"
                 kind="sigungu"
                 label="시군구 코드"
