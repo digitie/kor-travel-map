@@ -17,6 +17,7 @@ from kortravelmap.api.routers.admin_backups import (
 )
 from kortravelmap.api.routers.admin_backups import router as admin_backups_router
 from kortravelmap.api.routers.admin_features import router as admin_features_router
+from kortravelmap.api.routers.admin_files import router as admin_files_router
 from kortravelmap.api.routers.admin_issues import router as admin_issues_router
 from kortravelmap.api.routers.categories import router as categories_router
 from kortravelmap.api.routers.curated import admin_router as admin_curated_router
@@ -63,6 +64,7 @@ __all__ = [
     "admin_auth_router",
     "admin_restore_router",
     "admin_features_router",
+    "admin_files_router",
     "admin_curated_router",
     "admin_issues_router",
     "dedup_review_router",

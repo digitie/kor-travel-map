@@ -50,6 +50,7 @@ from kortravelmap.api.routers import (
     admin_backups_router,
     admin_curated_router,
     admin_features_router,
+    admin_files_router,
     admin_issues_router,
     admin_restore_router,
     categories_router,
@@ -524,6 +525,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_backups_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_files_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )
