@@ -15,6 +15,7 @@ import {
   useRunFeatureUpdateRequestNowMutation,
 } from "@/api/updateRequests";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -70,8 +71,13 @@ export function FeatureUpdateRequestDetailClient({
           </Button>
         </>
       }
+      breadcrumbs={[
+        { label: "수집 파이프라인" },
+        { label: "갱신 요청", href: "/admin/features/update-requests" },
+        { label: shortId(requestId, 18) },
+      ]}
       description="갱신 요청의 스코프·매칭 스코프·작업·Dagster 실행 상태를 확인합니다."
-      section="관리"
+      section="수집 파이프라인"
       title="갱신 요청 상세"
     >
       <div className="flex flex-col gap-4">
@@ -156,7 +162,15 @@ export function FeatureUpdateRequestDetailClient({
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Dagster 실행</dt>
-                  <dd className="font-mono">{shortId(data.dagster_run_id)}</dd>
+                  <dd className="font-mono">
+                    {data.dagster_run_id ? (
+                      <EntityLink id={data.dagster_run_id} kind="dagsterRun">
+                        {shortId(data.dagster_run_id)}
+                      </EntityLink>
+                    ) : (
+                      "-"
+                    )}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">생성</dt>

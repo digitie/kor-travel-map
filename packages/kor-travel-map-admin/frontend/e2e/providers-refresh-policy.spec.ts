@@ -242,7 +242,7 @@ test.describe("/ops/providers refresh policy depth", () => {
     await page.goto("/ops/providers");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Providers" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
     // 첫 행(kma)이 자동 선택되어 PolicyEditor가 빈 draft로 뜬다.
     await expect(page.getByText("Refresh policy")).toBeVisible();
@@ -437,7 +437,7 @@ test.describe("/ops/providers refresh policy depth", () => {
     await page.goto("/ops/providers");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Providers" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
     await expect(
       page.getByText("provider ops row가 없습니다."),
@@ -470,7 +470,7 @@ test.describe("/ops/providers refresh policy depth", () => {
 
     // AdminShell 헤딩은 error 분기 밖이라 항상 렌더.
     await expect(
-      page.getByRole("heading", { level: 1, name: "Providers" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
     const alert = page
       .getByRole("alert")

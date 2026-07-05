@@ -2,6 +2,163 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-05 (claude) — 관리 UI 개편 C: 검증/어시스트·텍스트 절약
+
+관리 UI 개편 C(#636). 인라인 검증(JSON/좌표/정책)·useConfirm 전환·CursorPager 통일·
+Dagster/오프라인 업로드 입력 어시스트를 반영하고, 화면 설명문의 영어 전문용어·제목 반복을
+간결한 한국어로 정리했다(7개 화면 description + 자명 힌트 제거). type-check·eslint·vitest(57) green.
+C 마무리 pass(추가 커밋): 상세 힌트 6건 `hint→help`(HelpTip 아이콘) 전환(providers 소스종류·
+curated 표시제목/재사용정책/큐레이션관계·change-requests 중복방지키·dagster 코드위치 새로고침
+안내), curated `region_scope`를 시도/시군구 AdminRegionAutoSearch 미니폼으로(원본 JSON은 '고급'
+`<details>`), curated/enrichment `JsonBlock`을 공용 `JsonViewer`로 이관. type-check·eslint·vitest(57) green.
+남은 후속(단일): 커스텀 모달 2건 공용 Dialog 이관(live 검증 동반), 저중복 화면들의
+SectionCard/DetailList/FilterBar 채택 sweep(curated `<dl>`4·gray-box11, enrichment `<dl>`3·gray-box5,
+providers gray-box7 등 — providers cursor `<pre>`는 spec가 직렬화를 단언해 JsonViewer 이관 보류).
+## 2026-07-05 (claude) — 관리 UI 개편 D: 파일 레지스트리 + 추적 UI
+
+관리 UI 개편의 D 단계(PR-B nav 위에 스택). "provider가 다운로드한 파일·자체 백업 등
+시스템 저장 파일을, 단순 리스팅이 아니라 어디에 어떻게 연결됐고 사용 중인지·임시인지·언제
+받고 마지막으로 로드됐는지 추적" 요구.
+
+- **DB(0040)**: `ops.managed_files`(파일 1건 = storage_backend/location/path/kind/status/
+  provenance FK/시각) + `ops.managed_file_events`(생애 이벤트). `down_revision=0039` —
+  notice #633의 0040과 충돌하므로 **최종 통합 시 coordinator가 merge-migration 추가**.
+- **계측·reconcile**: 생산/소비 지점(백업·offline 업로드·MOIS sync·provider fetch·dagster)
+  hook로 등록/touch. hook 실패가 host op를 깨지 않도록 `registry_guard`로 감싼다. 주기 스캔은
+  소유권 분리 — **backup_root=api, mois_source·S3=dagster**(`managed_file_scan` job, 6시간
+  STOPPED 스케줄). orphan rule flag-only, purge는 좁은 zombie만.
+- **API(`/v1/admin/files`)**: 목록(kind/status/provider/location/기간 필터·total_count),
+  요약 집계, 상세(+서버 조립 provenance links·이력 50), 재스캔(backup_root 동기 + offline
+  backfill; dagster location은 deferred 안내), zombie purge(파괴적 스위치 게이트 + 서버 재검증).
+  TTL 노브는 코어 `KorTravelMapSettings` 직접 읽기(ApiSettings에 없음).
+- **UI(`/admin/files`, 시스템 그룹)**: 요약 칩(클릭=필터) + 필터 바 + 목록 + 상세 provenance
+  패널(연결 딥링크·이력 타임라인·메타 JsonViewer·zombie purge). 공용 컴포넌트(SectionCard/
+  DataTable/DetailList/StatusBadge/EmptyState/HelpTip/JsonViewer) 재사용. 한국어·HelpTip.
+- **검증**: ruff/mypy --strict/lint-imports(4 kept) green, dagster defs(41 jobs·37 schedules,
+  scan job+schedule 등록)·21 dagster test green, 신규 router 7 test green, openapi.json/
+  openapi.user.json·types.ts 재생성, 프론트 type-check·eslint(0 error)·vitest 57 green.
+  e2e: nav-mirror 20→21 + scenario-catalog `files` + mocked smoke(`files-page.spec.ts`).
+  **머지 금지** — live UI e2e(n150 docker-playwright)는 coordinator 최종 통합에서.
+
+## 2026-07-04 (claude) — 관리 UI 개편 B: nav 그룹·크로스링크·헤딩 정본·spec 정합화
+
+관리 UI 개편(조사→설계 종합→PR A/B/C)의 B 단계. PR-A(공용 컴포넌트) 위에 스택.
+
+- **nav 재편(`admin-shell.tsx`)**: 평면 20링크 → `NAV_GROUPS`(홈 / Feature 관리 /
+  수집 파이프라인 / 모니터링 / 시스템) 단일 정본. 라벨 3건 정정(중복 검토/보강 검토/갱신 요청 —
+  nav=H1 불변식). 섹션 배지는 NAV_GROUPS longest-prefix로 유도, 클라이언트 `section=` prop
+  21곳 삭제(듀얼라우트 3곳만 오버라이드 유지). `breadcrumbs`/`help` prop 추가.
+- **헤딩 정본**: Provider 상태·운영 로그·정합성 점검·큐레이션 지도·ETL 미리보기(+AdminShell 편입,
+  마지막 셸 밖 페이지 해소)·공개 API 키/로그인 감사(h2)·중복 검수 대기(h2).
+- **크로스링크(§2 전체, EntityLink 단일 URL 테이블)**: 이슈 행/상세→feature 상세, 업로드
+  validation/load job→작업 상세, feature 상세 Sources→Provider 상태·Issues→이슈 필터·History→
+  변경요청 강조, 목록 provider/이슈 셀, 정합성 배치→작업 목록·provider→이슈, 작업 목록 배치/상위,
+  작업 상세 load_batch dead-link 수정+갱신요청 상세 딥링크+운영 로그 버튼, 갱신요청 dagster run
+  외부링크, 홈 메트릭 카드 4종+최근 작업 행, POI nearby, ETL→Provider 상태, Feature 지도↔큐레이션
+  지도 토글, providers 실패 alert→이슈·dataset 패널→생성된 Feature 보기/이벤트 로그, 백업 결과→
+  운영 로그, dagster 실패→운영 로그.
+- **딥링크 plumbing**: `/ops/logs`(tab=system|api|events·job_id·provider·dataset_key·level),
+  `/admin/issues`(feature_id·provider·dataset_key·status + feature_id 필터 입력 신설),
+  `/admin/features`(q·kind·status·provider·dataset_key·has_issue + provider/dataset 셀렉트 —
+  API 클라이언트가 이미 지원), change-requests/change-reviews `?request_id=` 행 강조.
+- **브레드크럼**: feature 상세·큐레이션 상세·갱신 요청 상세·적재 작업 상세 4곳.
+- **spec 정합화**: NAV 미러 3곳(home-nav 20개 정본+그룹 헤더 단언, home-density, misc.live) 재작성,
+  기존 stale 영문 h1/카드 제목(Providers/Logs/Consistency/Admin issues/Backups/Import jobs/
+  Dedup review/Enrichment review/ETL preview/Features/Dedup queue/Issues/POI cache targets/
+  Offline uploads/Feature update requests/이슈 상세 등) 29파일 일괄 정정, 신규 링크 스모크 4종
+  (홈 카드 href·logs 딥링크 초기화·정합성 배치 링크·이슈 Feature 상세 href) 추가.
+- **검증**: tsc(src+e2e) clean · eslint 변경 69파일 0 errors · vitest 57 passed. 라우트 이동/
+  리다이렉트/API 변경 없음. Playwright 실행은 최종 게이트(n150 live)에서.
+## 2026-07-05 (claude) — 종료 notice를 모든 read 경로에서 기본 제외 + 빈-feed 안전장치 (#633)
+
+사용자 요구: "notice는 수집 시 notice가 없으면 과거 자료를 보여주는 게 아니라
+API에 노출하지 않음." #632(2026-07-03)에서 bbox·이름 검색까지만 걸었던 종료 notice
+숨김을 **나머지 read 경로 전부**로 확장했다. 종료 판정은 오직 `valid_end_time`이
+채워졌는지로만 하므로(last_seen 최신성 무의존) 이후 poll이 실패해도 이미 닫힌
+notice는 계속 숨는다.
+
+- **read 술어 확장**(`feature_repo`): 클러스터(`_cluster_bbox_sql`), 주변
+  (`features_nearby` 좌표·POI target CTE ×2), 영역 포함
+  (`_FEATURES_CONTAINED_IN_AREA_SQL`), 카테고리 카운트
+  (`_CATEGORY_FEATURE_COUNTS_SQL`)에 `kind<>'notice' OR valid_end_time IS NULL
+  OR valid_end_time>now()` 추가. bbox·이름 검색은 #632에서 이미 적용.
+- **admin 목록 방침 전환**: #632에서 "감사 목적 show-everything이라 의도적 미적용"
+  했던 `list_admin_features`를 **기본 제외로 전환**하되, 종료분 감사가 필요하면
+  `include_ended=true`(API query param) opt-in. router·repo·OpenAPI(admin
+  프로필만; user 프로필엔 admin 엔드포인트 없음) 갱신.
+- **단건 예외 유지**: `get_feature_row`/by-id 상세는 직접 참조라 종료 notice도
+  그대로 200 반환(그 상태를 그대로 노출).
+- **빈/실패 feed 안전장치(guard #1)**: KREX notice asset이 fetch 0건이면
+  `reconcile_notice_features(active_lineage_keys=None, closed_at=None)`로 넘겨
+  feed-소멸 닫기를 **건너뛴다** — 빈 집합(`set()`)을 넘기면 모든 active notice가
+  "feed에 없음"으로 판정돼 통째로 종료·비노출되는 사고를 막는다. 진짜 0건이면
+  다음 비어있지 않은 run이 닫는다.
+- 검증: `test_notice_lifecycle`에 read-경로 기본 제외/`include_ended` opt-in/
+  단건 유지 + 빈-feed close-nothing 통합 테스트 2건 추가. t212d EXPLAIN 테스트에
+  신규 `:include_ended` bind 반영. ruff·mypy --strict·lint-imports·unit(1131)·
+  api(320)·dagster(216)·integration(263, live 5 deselect) 로컬 green.
+
+## 2026-07-03 (claude) — notice 중복 근본 해결: 사건 단위 identity + 라이프사이클 (#632)
+
+notice feature가 "로직을 보강해도 계속" 중복되던 문제의 근본 원인을 잡았다 —
+정체성이 발표/스냅샷 단위였다(prod: KREX 6,164건 중 계보 1,317개 ≈ 4.7×,
+KMA 특보 43건 전부 발표 단위, valid_end 100% NULL·purge 없음 → 영구 누적).
+
+- **KMA 특보(사건 단위 재키잉)**: 자연키 `{alert_id(tm_fc/seq)}::{region}` →
+  `{region_code}::{현상 토큰}`(`kma_alert_natural_key`). 현상 토큰(호우/풍랑/…)
+  기준이라 notice_type이 generic으로 접는 특보끼리도 안 붕괴. 재발표·등급
+  변경은 같은 feature upsert(발표 이력은 source_records). **해제는 feature를
+  만들지 않고** `weather_alert_lift_closures`가 열린 feature의
+  `valid_end_time`을 채운다(결합 해제문 현상별 fan-out, 배치 내 최신만).
+- **KREX 교통 돌발**: feature_id에서 reverse-geocoded bjd_code 제거 — 이동하는
+  정체가 동 경계를 넘을 때 같은 사건이 재키잉되던 잔존 버그(4680f17 이후에도
+  1–2건/일 누적). 적재 직후 `reconcile_notice_features`가 ① 같은 계보 중복
+  soft-delete(latest 유지) ② 이번 feed에 없는 계보 `valid_end=fetched_at` 종료.
+- **일회성 정리**: `0040_notice_dedup_cleanup` — KMA 구세대 전부 + KREX 계보별
+  latest 아닌 것 soft-delete(ADR-017, 원문 source_records 보존). 예상 ~4.8k건.
+- **read 필터**: `_notice_lineage_sql`에 KMA 분기 추가(구세대 raw_data로도 계보
+  합류), bbox 필터에 종료 notice 숨김 추가, 이름 검색도 종료 notice 제외.
+  admin 목록은 감사 목적 show-everything이라 의도적으로 미적용.
+- **§9 보존 구현**: `purge_expired_notices`(종료/발표 +1년, 기본)를
+  maintenance job op로 추가.
+- 검증: kma_alerts/krex 단위 테스트(재발표 안정성·해제 closure·결합 해제·배치
+  dedupe·좌표 이동 안정성) + `test_notice_lifecycle` 통합(supersede/close/
+  bbox 숨김/purge, testcontainers).
+- 배포 후: alembic 0040 자동 적용 → KMA/KREX notice asset 재실행 → 중복 계보
+  카운트 재확인(오케스트레이터가 prod 검증 예정).
+## 2026-07-03 (claude) — OpiNet price staleness 근본 수정: 시군 윈도 로테이션 + 현재가 신선도 지평선
+
+가격 스케줄이 매일 돌아도 price feature 37%(1,066/2,883)가 3–7일 stale로 단조
+누적되던 문제의 근본 원인을 찾고 수정했다.
+
+- **원인 (prod 실측)**: `low_top_area` fetcher의 `lowTop10` 호출 상한(180 = 시군
+  60개 윈도)이 전국 ~230 시군을 못 덮는데 시군 목록에 로테이션이 없어 **매일 같은
+  ~60개 시군의 top-20 저가 주유소만 갱신**(일간 동일 주유소 겹침 93%). top-20/윈도
+  밖으로 밀린 주유소는 영구 stale. 쿼터 소진 아님(사용 ~198/1,500), cursor 문제
+  아님, UI 타임스탬프 문제 아님.
+- **수정 1 — 로테이션**: run 날짜(KST) 기반 결정적 offset(`_opinet_rotation_offset`,
+  `toordinal() × 윈도 크기`)으로 시군 목록 회전 → 매일 윈도만큼 전진, 전국 1주기
+  ≈ 4일, 호출량 불변. 목록이 한 윈도에 다 들어가면 no-op. round-robin 시도 공정성
+  유지.
+- **수정 2 — 운영 노브**: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180),
+  `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`(기본 600)를 settings 필드로 노출 — 코드
+  변경 없이 커버리지 상향 가능. 쿼터 수학은 `docs/etl/opinet-place-price-etl.md`
+  §8.2 (매월 1일 place job 겹침 주의 포함).
+- **수정 3 — 신선도 지평선**: `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`(기본 4 =
+  로테이션 1주기)보다 오래된 관측은 지도 `price_summary` 마커와 price card
+  `current`에서 제외(이력·값은 보존, `asof` 과거 시점 질의에는 미적용) — 로테이션
+  주기 밖 옛 가격이 현재가처럼 보이지 않게.
+- **수정 4 — `is_stale` 임계 정합**: price card `is_stale` 기본 임계(과거 18h)를
+  지평선에서 파생(4일 = `DEFAULT_PRICE_STALE_HIDE_DAYS × 86400`)하도록 변경.
+  18h 기준이면 로테이션 아래에서 정상 갱신 중인 주유소 대부분이 상세 패널에
+  항상 stale 배지로 표시된다(사용자 가시 증상). 이제 `is_stale` ⟺ "지평선 안
+  관측 없음" ⟺ `current` 비어 있음 — 단일 노브, 신호 일치. weather card의
+  `DEFAULT_WEATHER_FRESHNESS_SECONDS`는 별도 상수라 영향 없음. 지도 마커는
+  `is_stale`을 쓰지 않으며(라벨은 `price_summary`) 수정 3의 지평선으로 이미
+  정합. 호출별 `freshness_seconds` override는 유지.
+- 배포 후 확인: 신선도 분포가 ~4일에 걸쳐 <1d ~25% / 1-4d ~75% 형태로 수렴하는지,
+  3–7d 버킷이 0으로 떨어지는지 (`max(observed_at)` 버킷 쿼리).
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 (라이프사이클 스트립·한국어 액션·워크플로 가이드)
 
 curated feature 관리 화면(UI/UX·워크플로)을 처음 온 운영자도 흐름을 읽을 수 있게 개편했다.

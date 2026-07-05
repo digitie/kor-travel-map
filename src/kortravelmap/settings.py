@@ -223,6 +223,27 @@ class KorTravelMapSettings(BaseSettings):
             "env ``OPINET_SCOPE_RADIUS_M``."
         ),
     )
+    opinet_low_top_max_calls: int = Field(
+        default=180,
+        ge=1,
+        description=(
+            "``low_top_area`` 모드의 ``lowTop10`` area×product 호출 상한. 기본 180 = "
+            "제품 3종 기준 시군 60개 윈도/run. 시군 로테이션과 결합해 전국(~230 시군) "
+            "1주기 ≈ 4일. 상향 시 무료키 일일 한도(1,500회) 대비 여유를 계산할 것 — "
+            "매월 1일 place job이 같은 lowTop10 경로를 한 번 더 돈다. "
+            "env ``OPINET_LOW_TOP_MAX_CALLS``."
+        ),
+    )
+    opinet_run_call_budget: int = Field(
+        default=600,
+        ge=1,
+        description=(
+            "``low_top_area`` run당 OpiNet 총 호출 hard cap(#545 — get_area_codes + "
+            "lowTop10 + aroundAll 합산). 기본 600이면 월간 place job과 같은 날 "
+            "겹쳐도(2×600=1,200) 무료키 1,500회/일 아래. "
+            "env ``OPINET_RUN_CALL_BUDGET``."
+        ),
+    )
     kma_weather_extra_points: str | None = Field(
         default=None,
         description=(
@@ -330,6 +351,32 @@ class KorTravelMapSettings(BaseSettings):
             "시간 내 sync됐으면 read 경로에서 전국 Phase A sync를 생략한다(#617 리뷰 — "
             "RUNNING 센서를 통한 무조건 전국 재sync 방지). env "
             "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
+        ),
+    )
+    file_registry_e2e_backup_ttl_days: int = Field(
+        default=7,
+        description=(
+            "파일 registry scan의 orphan rule: manifest mode가 live-e2e 러너이거나 "
+            "backup_id가 e2e- prefix인 백업 artifact가 이 일수를 넘기면 "
+            "``orphan(e2e_backup_expired)``로 표시(삭제 후보 flag-only). env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS``."
+        ),
+    )
+    file_registry_temp_ttl_days: int = Field(
+        default=14,
+        description=(
+            "파일 registry scan의 orphan rule: kind='temp' 파일이 이 일수를 넘기면 "
+            "``orphan(temp_expired)``. env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS``."
+        ),
+    )
+    file_registry_extra_roots: str | None = Field(
+        default=None,
+        description=(
+            "파일 registry scan 추가 루트 — ``logical=path[,logical=path]``. "
+            "컨테이너에 bind-mount한 호스트 경로를 스캔 대상에 추가하는 운영자 "
+            "탈출구(기본 스캔은 backup_root/mois_source/S3 버킷만). env "
+            "``KOR_TRAVEL_MAP_FILE_REGISTRY_EXTRA_ROOTS``."
         ),
     )
     knps_point_dataset_key: str = Field(

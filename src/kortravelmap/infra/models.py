@@ -41,6 +41,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     MetaData,
@@ -54,6 +55,14 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from kortravelmap.core.managed_file_states import (
+    MANAGED_FILE_EVENT_KIND_VALUES,
+    MANAGED_FILE_KIND_VALUES,
+    MANAGED_FILE_ORPHAN_REASON_VALUES,
+    MANAGED_FILE_REGISTERED_BY_VALUES,
+    MANAGED_FILE_STATUS_VALUES,
+    MANAGED_FILE_STORAGE_BACKEND_VALUES,
+)
 from kortravelmap.core.offline_upload_states import OFFLINE_UPLOAD_STATE_VALUES
 
 __all__ = [
@@ -83,6 +92,8 @@ __all__ = [
     "ProviderRefreshPolicyRow",
     "DagsterScheduleOverrideRow",
     "FeatureMergeHistoryRow",
+    "ManagedFileRow",
+    "ManagedFileEventRow",
 ]
 
 
@@ -1950,4 +1961,193 @@ class FeatureMergeHistoryRow(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     merged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.managed_files / ops.managed_file_events  (파일 관리 registry, PR-D)
+# =============================================================================
+
+
+class ManagedFileRow(Base):
+    """``ops.managed_files`` row mapping — 시스템 저장 파일 현재 상태.
+
+    파일 1개(백업 artifact는 디렉터리 1개) = 1행. ``location``은 논리 루트
+    키(``backup_root``/``mois_source``/``object_store``/``offline_uploads``),
+    ``path``는 루트 상대 경로/object key — 물리 경로는 배포마다 달라서
+    ``meta.physical``에만 스냅샷한다. 이력은 ``ManagedFileEventRow``.
+    """
+
+    __tablename__ = "managed_files"
+    __table_args__ = (
+        CheckConstraint(
+            "storage_backend IN "
+            f"({_sql_text_literals(MANAGED_FILE_STORAGE_BACKEND_VALUES)})",
+            name="ck_managed_files_storage_backend",
+        ),
+        CheckConstraint(
+            f"kind IN ({_sql_text_literals(MANAGED_FILE_KIND_VALUES)})",
+            name="ck_managed_files_kind",
+        ),
+        CheckConstraint(
+            f"status IN ({_sql_text_literals(MANAGED_FILE_STATUS_VALUES)})",
+            name="ck_managed_files_status",
+        ),
+        CheckConstraint(
+            "orphan_reason IS NULL OR orphan_reason IN "
+            f"({_sql_text_literals(MANAGED_FILE_ORPHAN_REASON_VALUES)})",
+            name="ck_managed_files_orphan_reason",
+        ),
+        CheckConstraint(
+            "registered_by IN "
+            f"({_sql_text_literals(MANAGED_FILE_REGISTERED_BY_VALUES)})",
+            name="ck_managed_files_registered_by",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_managed_files_byte_size"),
+        CheckConstraint(
+            "checksum_sha256 IS NULL OR checksum_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_managed_files_checksum_sha256",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(meta) = 'object'",
+            name="ck_managed_files_meta_object",
+        ),
+        UniqueConstraint(
+            "storage_backend",
+            "location",
+            "path",
+            name="uq_managed_files_backend_location_path",
+        ),
+        Index(
+            "idx_managed_files_status_kind",
+            "status",
+            "kind",
+            text("updated_at DESC"),
+        ),
+        Index(
+            "idx_managed_files_kind_downloaded",
+            "kind",
+            text("downloaded_at DESC"),
+        ),
+        Index(
+            "idx_managed_files_provider",
+            "provider",
+            postgresql_where=text("provider IS NOT NULL"),
+        ),
+        Index(
+            "idx_managed_files_origin_job",
+            "origin_import_job_id",
+            postgresql_where=text("origin_import_job_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_managed_files_upload",
+            "upload_id",
+            postgresql_where=text("upload_id IS NOT NULL"),
+        ),
+        # fillfactor=90은 마이그레이션 DDL이 소유한다(ORM 물리 스토리지 파라미터 불필요).
+        {"schema": "ops"},
+    )
+
+    file_id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True,
+    )
+    storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    is_directory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(Text)
+    dataset_key: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'active'"),
+    )
+    orphan_reason: Mapped[str | None] = mapped_column(Text)
+    registered_by: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int | None] = mapped_column(BigInteger)
+    checksum_sha256: Mapped[str | None] = mapped_column(Text)
+    # soft ref (FK 없음): offline-uploads DELETE가 row를 hard-delete하므로
+    # FK면 provenance가 지워지거나(SET NULL) 기존 삭제 API가 깨진다(RESTRICT).
+    upload_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    origin_import_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    origin_dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 비인덱스 유지 — scan마다 도는 UPDATE의 HOT 경로(fillfactor=90과 세트).
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    meta: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class ManagedFileEventRow(Base):
+    """``ops.managed_file_events`` row mapping — registry append-only 이력.
+
+    상태 전이 시에만 기록한다(스캔 no-op은 부모 ``last_seen_at``으로 충분).
+    ``uq_managed_file_events_run_dedupe``가 run당 ``loaded`` 이벤트를 1개로
+    dedupe한다(MOIS fetch가 한 run에서 slug 42회 반복 호출되는 경로).
+    """
+
+    __tablename__ = "managed_file_events"
+    __table_args__ = (
+        CheckConstraint(
+            f"event_kind IN ({_sql_text_literals(MANAGED_FILE_EVENT_KIND_VALUES)})",
+            name="ck_managed_file_events_event_kind",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(detail) = 'object'",
+            name="ck_managed_file_events_detail_object",
+        ),
+        Index(
+            "idx_managed_file_events_file",
+            "file_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "idx_managed_file_events_job",
+            "import_job_id",
+            postgresql_where=text("import_job_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_managed_file_events_run_dedupe",
+            "file_id",
+            "event_kind",
+            "dagster_run_id",
+            unique=True,
+            postgresql_where=text("dagster_run_id IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True,
+    )
+    file_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.managed_files.file_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    import_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    actor: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )

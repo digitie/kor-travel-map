@@ -216,12 +216,10 @@ async def run_feature_price_opinet_stations(
     fetched_at = await _fetched_at(context)
     reverse_geocoder = _reverse_geocoder(context)
     if any(hasattr(record, "prices") for record in records):
-        station_bundles, bundles, values = (
-            await station_details_to_price_features_and_values(
-                records,
-                fetched_at=fetched_at,
-                reverse_geocoder=reverse_geocoder,
-            )
+        station_bundles, bundles, values = await station_details_to_price_features_and_values(
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=reverse_geocoder,
         )
     else:
         station_bundles, bundles, values = await stations_to_price_features_and_values(
@@ -365,7 +363,13 @@ async def feature_price_krex_rest_areas(
 async def run_feature_notice_krex_traffic_notices(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """KREX 교통 공지 record를 notice Feature로 적재한다."""
+    """KREX 교통 공지 record를 notice Feature로 적재한다.
+
+    적재 직후 reconcile(#632): 같은 계보의 중복 feature(identity 스킴 변경으로
+    재키잉된 구세대 등)를 soft-delete하고, 이번 feed에 없는 계보의 latest
+    feature는 ``valid_end_time=fetched_at``으로 닫는다 — 실시간 돌발 feed에서
+    사라진 사건이 영구 active로 남지 않게.
+    """
     records = await _record_list(context, "krex_traffic_notices")
     fetched_at = await _fetched_at(context)
     bundles = await traffic_notices_to_bundles(
@@ -373,12 +377,37 @@ async def run_feature_notice_krex_traffic_notices(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    return await _load(
+    result = await _load(
         context,
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         bundles=bundles,
     )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    # 빈/실패 feed 안전장치: fetch가 0건(장애·쿼터·상류 중단)이면 feed-소멸 닫기를
+    # 건너뛴다 — active_lineage_keys=∅로 넘기면 모든 active notice가 "feed에 없음"으로
+    # 판정돼 전부 valid_end_time이 채워지고 API에서 통째로 사라진다. bundle이 있을 때만
+    # 닫기를 켠다(중복 정리 superseded는 무해하므로 항상 수행). 진짜 0건이면 다음
+    # 비어있지 않은 run이 닫는다.
+    has_feed = bool(bundles)
+    reconciled = await client.reconcile_notice_features(
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        source_entity_type="traffic_notice",
+        active_lineage_keys=(
+            {bundle.source_record.source_entity_id for bundle in bundles}
+            if has_feed
+            else None
+        ),
+        closed_at=fetched_at if has_feed else None,
+    )
+    if reconciled.superseded or reconciled.closed:
+        context.log.info(
+            "KREX notice reconcile — 중복 soft-delete %d건, feed 소멸 닫음 %d건.",
+            reconciled.superseded,
+            reconciled.closed,
+        )
+    return result
 
 
 @asset(
@@ -409,9 +438,7 @@ async def run_feature_place_krheritage_items(
         dataset_key=KRHERITAGE_DATASET_KEY,
         bundles=bundles,
     )
-    client = cast(
-        "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
-    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     inactivated = await client.inactivate_geometryless_area_features_by_source(
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_DATASET_KEY,
@@ -471,9 +498,7 @@ async def run_feature_place_mois_licenses(
 ) -> DagsterFeatureLoadResult:
     """MOIS 인허가 record를 place Feature로 적재한다."""
     fetched_at = await _fetched_at(context)
-    dataset_key = await _resource_value(
-        context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY
-    )
+    dataset_key = await _resource_value(context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY)
     result: DagsterFeatureLoadResult | None = None
     async for records in _record_batches(
         context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
@@ -494,9 +519,7 @@ async def run_feature_place_mois_licenses(
         result = batch_result if result is None else result.merge(batch_result)
 
     if result is not None:
-        client = cast(
-            "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
-        )
+        client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
         await _record_feature_sync_success(
             context,
             client,
@@ -515,8 +538,7 @@ async def run_feature_place_mois_licenses(
 
 @asset(
     group_name="features_place",
-    required_resource_keys=_COMMON_RESOURCE_KEYS
-    | {"mois_license_records", "mois_dataset_key"},
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"mois_license_records", "mois_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_mois_licenses(
@@ -532,9 +554,7 @@ async def run_feature_place_knps_points(
     records = await _record_list(context, "knps_point_records")
     fetched_at = await _fetched_at(context)
     dataset_key = str(
-        await _resource_value(
-            context, "knps_point_dataset_key", default="knps_visitor_centers"
-        )
+        await _resource_value(context, "knps_point_dataset_key", default="knps_visitor_centers")
     )
     if dataset_key not in KNPS_PLACE_DATASETS:
         raise KeyError(f"KNPS point dataset_key가 아님: {dataset_key!r}")
@@ -554,8 +574,7 @@ async def run_feature_place_knps_points(
 
 @asset(
     group_name="features_place",
-    required_resource_keys=_COMMON_RESOURCE_KEYS
-    | {"knps_point_records", "knps_point_dataset_key"},
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"knps_point_records", "knps_point_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_knps_points(
@@ -897,9 +916,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
     )
     inactive_ids = kor_travel_concierge_inactive_entity_ids(records)
     if inactive_ids:
-        client = cast(
-            "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
-        )
+        client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
         inactivated = await client.inactivate_features_by_source(
             provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
             dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
@@ -981,12 +998,9 @@ async def run_feature_weather_airkorea_air_quality(
         reverse_geocoder=_reverse_geocoder(context),
     )
     station_feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id
-        for bundle in bundles
+        bundle.source_record.source_entity_id: bundle.feature.feature_id for bundle in bundles
     }
-    values = air_quality_to_weather_values(
-        measurements, station_feature_ids=station_feature_ids
-    )
+    values = air_quality_to_weather_values(measurements, station_feature_ids=station_feature_ids)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     result = await client.load_air_quality(bundles, values)
     _add_output_metadata(
@@ -1009,9 +1023,7 @@ async def run_feature_weather_airkorea_air_quality(
 
 @asset(
     group_name="features_weather",
-    required_resource_keys=(
-        _COMMON_RESOURCE_KEYS | {"airkorea_stations", "airkorea_air_quality"}
-    ),
+    required_resource_keys=(_COMMON_RESOURCE_KEYS | {"airkorea_stations", "airkorea_air_quality"}),
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_weather_airkorea_air_quality(
@@ -1041,12 +1053,9 @@ async def run_feature_weather_krex_rest_areas(
         reverse_geocoder=_reverse_geocoder(context),
     )
     station_feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id
-        for bundle in bundles
+        bundle.source_record.source_entity_id: bundle.feature.feature_id for bundle in bundles
     }
-    values = rest_area_weather_records_to_values(
-        records, station_feature_ids=station_feature_ids
-    )
+    values = rest_area_weather_records_to_values(records, station_feature_ids=station_feature_ids)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     result = await client.load_air_quality(bundles, values)
     _add_output_metadata(

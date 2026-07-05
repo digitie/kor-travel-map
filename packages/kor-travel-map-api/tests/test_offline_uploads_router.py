@@ -215,7 +215,9 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
     assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
-    assert session.begin_count == 1
+    # 1: upload 생성 tx, 2: best-effort managed-file registry 등록 hook의 별도 tx
+    # (registry_guard가 hook 실패를 무해화하므로 위 201 응답/store 동작은 불변).
+    assert session.begin_count == 2
 
 
 @pytest.mark.unit
@@ -963,7 +965,9 @@ def test_delete_offline_upload_removes_row_and_object(
     assert "duration_ms" in body["meta"]
     assert store.deleted == [upload.storage_key]
     assert store.objects == {}
-    assert session.begin_count == 1
+    # 1: 삭제 tx, 2: best-effort managed-file registry 반영 hook의 별도 tx
+    # (registry_guard가 hook 실패를 무해화하므로 위 200 응답/store 동작은 불변).
+    assert session.begin_count == 2
 
 
 @pytest.mark.unit

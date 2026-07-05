@@ -28,7 +28,7 @@ export type ValidationResult<T> = {
  * `firstErrorField`는 규칙 순서 기준 첫 실패 필드라, 폼 레이아웃 순서대로 규칙을 선언하면
  * 화면 최상단 에러 필드로 포커스를 옮길 수 있다.
  */
-export function validateForm<T extends Record<string, unknown>>(
+export function validateForm<T extends object>(
   values: T,
   rules: Array<FieldRule<T>>,
 ): ValidationResult<T> {
@@ -205,4 +205,114 @@ export function combine<T>(
     }
     return null;
   };
+}
+
+/**
+ * 두 필드는 함께 입력되어야 한다(경도/위도 같은 쌍). 자기 필드가 비었는데
+ * 상대 필드가 채워져 있으면 에러.
+ */
+export function pairRequired<T>(
+  otherField: keyof T & string,
+  message = "두 값을 함께 입력하세요.",
+): FieldValidator<T> {
+  const isEmpty = (value: unknown) =>
+    value === null || value === undefined || String(value).trim() === "";
+  return (value, values) => {
+    if (isEmpty(value) && !isEmpty(values[otherField])) {
+      return message;
+    }
+    return null;
+  };
+}
+
+/**
+ * 숫자 필드들이 선언 순서대로 오름차순(≤)인지 검사한다(예: min ≤ optimal ≤ system).
+ * 비어 있거나 숫자가 아닌 값은 건너뛴다(개별 필드 검증은 별도 규칙으로).
+ */
+export function ordered<T>(
+  fields: Array<keyof T & string>,
+  message = "값이 순서를 지켜야 합니다(작은 값 → 큰 값).",
+): FieldValidator<T> {
+  return (_value, values) => {
+    let previous: number | null = null;
+    for (const field of fields) {
+      const raw = values[field];
+      if (raw === null || raw === undefined || raw === "") continue;
+      const parsed = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(parsed)) continue;
+      if (previous !== null && parsed < previous) {
+        return message;
+      }
+      previous = parsed;
+    }
+    return null;
+  };
+}
+
+/** 시작일 ≤ 종료일. 자기 필드=시작, `endField`=종료. 둘 다 있어야 비교한다. */
+export function dateOrdered<T>(
+  endField: keyof T & string,
+  message = "시작일은 종료일보다 늦을 수 없습니다.",
+): FieldValidator<T> {
+  return (value, values) => {
+    const start = typeof value === "string" ? value.trim() : "";
+    const endRaw = values[endField];
+    const end = typeof endRaw === "string" ? endRaw.trim() : "";
+    if (!start || !end) return null;
+    const startTime = Date.parse(start);
+    const endTime = Date.parse(end);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+    return startTime <= endTime ? null : message;
+  };
+}
+
+/** 정수 문자열(+선택 범위). 빈 값은 통과 — `required`와 조합한다. */
+export function integerString<T>(
+  options: { min?: number; max?: number; message?: string } = {},
+): FieldValidator<T> {
+  const { min, max } = options;
+  return (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const raw = typeof value === "number" ? String(value) : value;
+    if (typeof raw !== "string" || !/^-?\d+$/.test(raw.trim())) {
+      return options.message ?? "정수를 입력하세요.";
+    }
+    const parsed = Number(raw);
+    if (min !== undefined && parsed < min) {
+      return options.message ?? `${min} 이상이어야 합니다.`;
+    }
+    if (max !== undefined && parsed > max) {
+      return options.message ?? `${max} 이하여야 합니다.`;
+    }
+    return null;
+  };
+}
+
+export type ParsedJsonObjectField =
+  | { value: Record<string, unknown> | null; error?: undefined }
+  | { value?: undefined; error: string };
+
+/**
+ * 제출 시 JSON object 필드 파싱 (§4). 빈 문자열 → `{value: null}`(미지정),
+ * JSON이 아니면/object가 아니면 한국어 에러. `jsonObject()`는 inline 검증,
+ * 이 함수는 제출 payload 변환용으로 짝을 이룬다.
+ */
+export function parseJsonObjectField(
+  raw: string,
+  label = "값",
+): ParsedJsonObjectField {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return { value: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { error: "올바른 JSON 형식이 아닙니다." };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: `${label}은(는) JSON object여야 합니다.` };
+  }
+  return { value: parsed as Record<string, unknown> };
 }

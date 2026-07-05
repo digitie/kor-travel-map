@@ -167,7 +167,7 @@ interface Surface {
 const DEDUP: Surface = {
   key: "dedup",
   route: "/admin/features/dedup-reviews",
-  heading: "Dedup review",
+  heading: "중복 검토",
   listPath: "/v1/admin/features/dedup-reviews",
   searchLabel: "dedup search",
   statusLabel: "dedup status",
@@ -177,13 +177,13 @@ const DEDUP: Surface = {
   prevLabel: "dedup 이전 페이지",
   emptyMessage: "dedup review가 없습니다.",
   dialogName: "dedup review detail",
-  dialogTitle: "Dedup 상세 비교",
+  dialogTitle: "중복 상세 비교",
 };
 
 const ENRICHMENT: Surface = {
   key: "enrichment",
   route: "/admin/features/enrichment-reviews",
-  heading: "Enrichment review",
+  heading: "보강 검토",
   listPath: "/v1/admin/features/enrichment-reviews",
   searchLabel: "enrichment search",
   statusLabel: "enrichment status",

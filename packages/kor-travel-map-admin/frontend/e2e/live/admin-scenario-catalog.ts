@@ -131,7 +131,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     id: "feature-change-requests",
     route: "/admin/features/change-requests",
     readyHeading: "변경 요청 작성",
-    readApis: [],
+    readApis: [
+      "/v1/categories",
+      "/v1/admin/features/change-requests",
+      "/v1/admin/features/{feature_id}",
+    ],
     writeApis: [
       writeApi("POST", "/v1/admin/features/change-requests"),
       writeApi("POST", "/v1/admin/features"),
@@ -239,7 +243,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "providers",
     route: "/ops/providers",
-    readyHeading: "제공자",
+    readyHeading: "Provider 상태",
     readApis: [
       "/v1/ops/providers",
       "/v1/ops/providers/{provider}",
@@ -257,7 +261,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "consistency",
     route: "/ops/consistency",
-    readyHeading: "Consistency",
+    readyHeading: "정합성 점검",
     readApis: [
       "/v1/ops/metrics",
       "/v1/ops/consistency/reports",
@@ -269,7 +273,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "logs",
     route: "/ops/logs",
-    readyHeading: "Logs",
+    readyHeading: "운영 로그",
     readApis: [
       "/v1/ops/system-logs",
       "/v1/ops/api-call-logs",
@@ -386,6 +390,22 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/ops/logs", "/"],
   },
   {
+    id: "files",
+    route: "/admin/files",
+    readyHeading: "파일 관리",
+    readApis: [
+      "/v1/admin/files",
+      "/v1/admin/files/summary",
+      "/v1/admin/files/{file_id}",
+      "/v1/admin/files/{file_id}/events",
+    ],
+    writeApis: [
+      writeApi("POST", "/v1/admin/files/rescan"),
+      writeApi("POST", "/v1/admin/files/{file_id}/purge", "destructive"),
+    ],
+    reflectedSurfaces: ["/ops/import-jobs", "/admin/offline-uploads"],
+  },
+  {
     id: "dagster",
     route: "/admin/dagster",
     readyHeading: "작업 자동화",
@@ -418,7 +438,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "etl-preview",
     route: "/etl",
-    readyHeading: "ETL preview",
+    readyHeading: "ETL 미리보기",
     readApis: ["/v1/debug/etl/providers", "/v1/debug/etl/preview"],
     writeApis: [],
     reflectedSurfaces: ["/ops/providers", "/admin/features"],

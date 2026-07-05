@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -157,25 +158,35 @@ export function ImportJobsClient({
         id: "batch",
         header: "배치",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.load_batch_id
-              ? shortId(row.original.load_batch_id)
-              : "-"}
-          </span>
-        ),
+        cell: ({ row }) =>
+          row.original.load_batch_id ? (
+            <EntityLink
+              className="text-xs"
+              id={row.original.load_batch_id}
+              kind="loadBatch"
+            >
+              {shortId(row.original.load_batch_id)}
+            </EntityLink>
+          ) : (
+            <span className="font-mono text-xs">-</span>
+          ),
       },
       {
         id: "parent",
         header: "상위 작업",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.parent_job_id
-              ? shortId(row.original.parent_job_id)
-              : "-"}
-          </span>
-        ),
+        cell: ({ row }) =>
+          row.original.parent_job_id ? (
+            <EntityLink
+              className="text-xs"
+              id={row.original.parent_job_id}
+              kind="importJob"
+            >
+              {shortId(row.original.parent_job_id)}
+            </EntityLink>
+          ) : (
+            <span className="font-mono text-xs">-</span>
+          ),
       },
       { accessorKey: "kind", header: "종류" },
       {
@@ -235,7 +246,6 @@ export function ImportJobsClient({
         </>
       }
       description="적재 작업의 진행 상태와 배치/상위 작업 연결을 확인합니다."
-      section="운영"
       title="적재 작업"
     >
       <div className="flex flex-col gap-4">

@@ -862,7 +862,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/ops/import-jobs");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import jobs" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     await expect(page.getByLabel("status")).toBeVisible();
     await expect(page.getByPlaceholder("kind filter")).toBeVisible();
@@ -901,7 +901,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features/change-requests");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature 변경" }),
+      page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
     ).toBeVisible();
     await expect(page.getByText("Feature 변경 요청")).toBeVisible();
     for (const label of [
@@ -1093,7 +1093,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/issues");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Admin issues" }),
+      page.getByRole("heading", { level: 1, name: "이슈" }),
     ).toBeVisible();
     await expect(page.getByLabel("issue search")).toBeVisible();
     await expect(page.getByLabel("issue status")).toBeVisible();
@@ -1153,7 +1153,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/ops/consistency");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Consistency" }),
+      page.getByRole("heading", { level: 1, name: "정합성 점검" }),
     ).toBeVisible();
     await expect(page.getByText("Open issues")).toBeVisible();
     await expect(page.getByText("Reports")).toBeVisible();
@@ -1164,7 +1164,7 @@ test.describe("admin/ops pages", () => {
   test("/v1/ops/logs", async ({ page }) => {
     await page.goto("/ops/logs");
 
-    await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "운영 로그" })).toBeVisible();
     await expect(page.getByLabel("log page size")).toBeVisible();
     await expect(page.getByRole("tab", { name: "System logs" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "API call logs" })).toBeVisible();
@@ -1202,7 +1202,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features/dedup-reviews");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Dedup review" }),
+      page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
     await expect(page.getByLabel("dedup status")).toBeVisible();
     for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
@@ -1214,7 +1214,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features/enrichment-reviews");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Enrichment review" }),
+      page.getByRole("heading", { level: 1, name: "보강 검토" }),
     ).toBeVisible();
     await expect(page.getByLabel("enrichment status")).toBeVisible();
     for (const column of [
@@ -1236,7 +1236,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/features/update-requests");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update requests" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청" }),
     ).toBeVisible();
     await expect(page.getByText("새 요청")).toBeVisible();
     for (const label of ["lon", "lat", "radius km", "providers", "dataset keys"]) {
@@ -1259,7 +1259,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/poi-cache-targets");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "POI cache targets" }),
+      page.getByRole("heading", { level: 1, name: "POI 캐시 대상" }),
     ).toBeVisible();
     await expect(page.getByText("Target upsert")).toBeVisible();
     for (const label of [
@@ -1324,7 +1324,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/offline-uploads");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Offline uploads" }),
+      page.getByRole("heading", { level: 1, name: "오프라인 업로드" }),
     ).toBeVisible();
     await expect(page.getByText("파일 업로드")).toBeVisible();
     await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
@@ -1419,7 +1419,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/admin/backups");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Backups" }),
+      page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
     for (const column of ["backup", "created", "status", "size", "action"]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
@@ -1483,7 +1483,7 @@ test.describe("admin/ops pages", () => {
     await page.goto("/ops/providers");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Providers" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
     // T-221d 상세 패널의 sync state/update request 테이블이 같은 헤더(last
     // success 등)를 쓰므로, freshness 테이블에만 있는 `policy` 헤더로 테이블을

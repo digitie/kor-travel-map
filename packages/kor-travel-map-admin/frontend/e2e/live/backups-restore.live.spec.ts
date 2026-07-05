@@ -87,7 +87,7 @@ function isRestoreSwapResponse(response: Response): boolean {
 
 async function expectBackupsReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Backups" }),
+    page.getByRole("heading", { level: 1, name: "백업" }),
   ).toBeVisible(T);
   await expect(page.getByText("백업 목록")).toBeVisible(T);
   await expect(
@@ -163,7 +163,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("backup id").fill("invalid/backup-id");
 
     const responsePromise = waitForPost(page, isBackupResponse);
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
     const response = await responsePromise;
     expect(response.status()).toBeGreaterThanOrEqual(400);
 
@@ -183,7 +183,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
     await page.getByLabel("backup id").fill(backupId);
 
     const responsePromise = waitForPost(page, isBackupResponse);
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
     const body = await readOperation(await responsePromise);
 
     expect(body.data.operation).toBe("backup");
@@ -194,7 +194,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "backup / planned" });
+      .filter({ hasText: "backup / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText("백업 command plan을 생성했습니다.");
     await expect(result).toContainText(`KOR_TRAVEL_MAP_BACKUP_ID=${backupId}`);
@@ -258,7 +258,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "restore / planned" });
+      .filter({ hasText: "restore / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText(
       "staging restore command plan을 생성했습니다.",
@@ -329,7 +329,7 @@ test.describe("/admin/backups live backup/restore operations", () => {
 
     const result = page
       .getByRole("status")
-      .filter({ hasText: "swap / planned" });
+      .filter({ hasText: "swap / 예정됨" });
     await expect(result).toBeVisible(T);
     await expect(result).toContainText(
       "restore hot-swap command plan을 생성했습니다.",

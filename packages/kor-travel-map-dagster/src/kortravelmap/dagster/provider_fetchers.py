@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import httpx
+from kortravelmap.dto._time import kst_now
 from kortravelmap.providers.opinet import (
     OPINET_PROVIDER_NAME,
     OPINET_STATION_DATASET_KEY,
@@ -333,6 +334,13 @@ def fetch_mois_license_records(
     mois_db = cast(Any, importlib.import_module("mois.db"))
     # PROMOTED_SERVICE_SLUGS는 krtour(본 repo)이므로 top-level import으로 충분.
     from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
+
+    # 파일 registry hook (H9) — Phase B가 소스 DB 소비를 시작했음을 기록.
+    # consumer가 run당 generator를 한 번 생성하는 경로라 memo 불필요, 내부에서
+    # 실패 무해화. 지연 import로 모듈 초기화 순환을 피한다.
+    from .file_registry_hooks import record_mois_source_loaded
+
+    record_mois_source_loaded(settings)
 
     engine = create_engine(f"sqlite:///{db_path}")
     session = Session(engine)
@@ -1024,17 +1032,21 @@ _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS: Final[int] = 500
 """``lowTop10`` 부분 성공을 전국 분포로 보기 위한 최소 station 수."""
 
 _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS: Final[int] = 180
-"""``lowTop10`` area×product 호출 상한. 이후 sample grid fallback으로 보강한다."""
+"""``lowTop10`` area×product 호출 상한 기본값. 이후 sample grid fallback으로 보강한다.
+
+``settings.opinet_low_top_max_calls`` (env ``KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS``)로
+run별 override 가능 — 기본 180 = 제품 3종 기준 시군 60개 윈도/run."""
 
 _OPINET_RUN_CALL_BUDGET: Final[int] = 600
-"""``low_top_area`` 한 run이 쓸 수 있는 OpiNet 호출 hard cap(#545).
+"""``low_top_area`` 한 run이 쓸 수 있는 OpiNet 호출 hard cap 기본값(#545).
 
 ``get_area_codes`` + ``lowTop10`` + ``aroundAll``(``search_stations_around``)을
 모두 합산해 이 값을 넘으면 enumeration을 즉시 중단한다. OpiNet 무료키 일일 한도는
 1,500회/일이고 가격 asset은 하루 1회 적재이므로 600/run이면 월간 place job과 같은
 경로가 같은 날 한 번 더 돌아도(=1,200) 한도 아래로 유지된다. ``lowTop10`` 상한
 (180) + ``get_area_codes``(~19)을 제외하면 grid fallback에 ~400회가 남아 빈 운영
-상태의 분포 보강도 가능하다."""
+상태의 분포 보강도 가능하다. ``settings.opinet_run_call_budget``
+(env ``KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET``)로 override 가능."""
 
 _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
     124.8,
@@ -1262,8 +1274,30 @@ def _opinet_rate_limit_error_type() -> type[Exception]:
     return _UnreachableOpinetRateLimit
 
 
+def _opinet_rotation_offset(
+    *, window_areas: int, on_date: date | None = None
+) -> int:
+    """시군 윈도 로테이션 offset (일 단위 결정적, KST 날짜 기준).
+
+    호출 상한 때문에 한 run은 시군 목록의 앞쪽 윈도(기본 60개)만 소비한다 —
+    offset 없이는 매일 같은 시군만 갱신되고 나머지는 영구 stale이 된다(37%가
+    3–7일 stale이던 prod 근본 원인). run 날짜의 ``toordinal() × 윈도 크기``를
+    offset으로 쓰면 매일 윈도 크기만큼 전진해 전국(~230 시군)을 ≈4일에 1주기로
+    순회한다. 실제 나머지 연산(``% len(areas)``)은 area 목록을 아는 사용처에서
+    수행한다. ``on_date``를 고정하면 테스트가 결정적이다.
+    """
+    if on_date is None:
+        on_date = kst_now().date()
+    return on_date.toordinal() * max(window_areas, 1)
+
+
 def _opinet_low_top_area_stations(
-    client: Any, *, dedupe_by_product: bool
+    client: Any,
+    *,
+    dedupe_by_product: bool,
+    max_low_top_calls: int = _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS,
+    run_call_budget: int = _OPINET_RUN_CALL_BUDGET,
+    rotation_offset: int | None = None,
 ) -> Iterator[Any]:
     """시군구별 저가 주유소를 stream한다.
 
@@ -1274,18 +1308,25 @@ def _opinet_low_top_area_stations(
 
     호출량 가드(#545):
 
-    - run당 hard budget(``_OPINET_RUN_CALL_BUDGET``)으로 ``get_area_codes`` +
+    - run당 hard budget(``run_call_budget``)으로 ``get_area_codes`` +
       ``lowTop10`` + ``aroundAll`` 호출을 합산해 초과 시 즉시 중단한다.
     - ``lowTop10``이 충분히(``_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS``) 산출되면
       grid fallback을 **건너뛴다**(부분 성공 후 전체 grid를 도는 케이스 차단).
     - 서버가 먼저 ``OpinetRateLimitError``를 던지면 enumeration을 조기 종료한다.
+
+    시군 윈도 로테이션: ``rotation_offset``(기본 = 오늘 KST 날짜 기반
+    ``_opinet_rotation_offset``)만큼 area 목록을 회전시켜 매 run이 다른 시군
+    윈도를 소비한다 — 전체 목록이 한 윈도에 다 들어가면 회전은 no-op이다.
     """
     seen: set[str | tuple[str, str | None]] = set()
     yielded = 0
     low_top_calls = 0
     no_data_error = _opinet_no_data_error_type()
     rate_limit_error = _opinet_rate_limit_error_type()
-    budget = _OpinetCallBudget(_OPINET_RUN_CALL_BUDGET)
+    budget = _OpinetCallBudget(run_call_budget)
+    window_areas = max(max_low_top_calls // max(len(_OPINET_LOW_TOP_PRODUCTS), 1), 1)
+    if rotation_offset is None:
+        rotation_offset = _opinet_rotation_offset(window_areas=window_areas)
 
     def _dedupe_key(station: Any) -> str | tuple[str, str | None] | None:
         uni_id = getattr(station, "uni_id", None)
@@ -1311,12 +1352,20 @@ def _opinet_low_top_area_stations(
             yielded += 1
             yield station
 
+    areas = _opinet_sigungu_area_codes(client, budget=budget)
+    if len(areas) > window_areas:
+        # 윈도보다 목록이 크면 run 날짜 기반 offset으로 회전 — 매일 윈도 크기만큼
+        # 전진해 전국을 ≈ ceil(len/윈도)일에 1주기로 순회한다. round-robin 인접
+        # area는 서로 다른 시도라 윈도 안 지리 분포 공정성은 유지된다.
+        shift = rotation_offset % len(areas)
+        areas = areas[shift:] + areas[:shift]
+
     rate_limited = False
-    for area in _opinet_sigungu_area_codes(client, budget=budget):
+    for area in areas:
         if budget.exhausted:
             break
         for product_code in _OPINET_LOW_TOP_PRODUCTS:
-            if low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS:
+            if low_top_calls >= max_low_top_calls:
                 break
             if not budget.spend():
                 break
@@ -1336,7 +1385,7 @@ def _opinet_low_top_area_stations(
         if (
             rate_limited
             or budget.exhausted
-            or low_top_calls >= _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS
+            or low_top_calls >= max_low_top_calls
         ):
             break
 
@@ -1367,6 +1416,8 @@ def _opinet_low_top_area_stations(
 
 def fetch_opinet_stations(
     settings: KorTravelMapSettings,
+    *,
+    rotation_offset: int | None = None,
 ) -> Iterator[Any]:
     """OpiNet 주유소 record를 scope(bbox/POI-타깃)별로 stream한다(T-RV-04b).
 
@@ -1396,7 +1447,13 @@ def fetch_opinet_stations(
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         if settings.opinet_scope_mode == "low_top_area":
-            yield from _opinet_low_top_area_stations(client, dedupe_by_product=False)
+            yield from _opinet_low_top_area_stations(
+                client,
+                dedupe_by_product=False,
+                max_low_top_calls=settings.opinet_low_top_max_calls,
+                run_call_budget=settings.opinet_run_call_budget,
+                rotation_offset=rotation_offset,
+            )
             return
         assert bboxes is not None
         yield from _enumerate_opinet_stations(
@@ -1410,6 +1467,8 @@ def fetch_opinet_stations(
 
 def fetch_opinet_station_price_details(
     settings: KorTravelMapSettings,
+    *,
+    rotation_offset: int | None = None,
 ) -> Iterator[Any]:
     """현재 OpiNet scope의 가격 record를 stream한다.
 
@@ -1431,7 +1490,13 @@ def fetch_opinet_station_price_details(
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         if settings.opinet_scope_mode == "low_top_area":
-            yield from _opinet_low_top_area_stations(client, dedupe_by_product=True)
+            yield from _opinet_low_top_area_stations(
+                client,
+                dedupe_by_product=True,
+                max_low_top_calls=settings.opinet_low_top_max_calls,
+                run_call_budget=settings.opinet_run_call_budget,
+                rotation_offset=rotation_offset,
+            )
             return
         assert bboxes is not None
         for station in _enumerate_opinet_stations(

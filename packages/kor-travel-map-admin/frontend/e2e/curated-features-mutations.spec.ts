@@ -980,21 +980,22 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     const archiveButton = row.getByRole("button", { name: "보관", exact: true });
     await expect(archiveButton).toBeVisible();
 
-    // 1) confirm dismiss → DELETE 미발생 + 결과를 설명하는 메시지 검증.
-    let dialogMessage = "";
-    page.once("dialog", (dialog) => {
-      dialogMessage = dialog.message();
-      void dialog.dismiss();
-    });
+    // 1) confirm 취소 → DELETE 미발생 + 결과를 설명하는 메시지 검증(AlertDialog).
     await archiveButton.click();
-    await expect.poll(() => dialogMessage).toContain("보관할까요");
-    expect(dialogMessage).toContain("규칙 재적용으로 되살아나지 않으며");
+    const archiveDialog = page.getByRole("alertdialog");
+    await expect(archiveDialog).toBeVisible();
+    await expect(archiveDialog).toContainText("보관할까요");
+    await expect(archiveDialog).toContainText("규칙 재적용으로 되살아나지 않으며");
+    await archiveDialog.getByRole("button", { name: "취소" }).click();
     // 잠깐 기다려도 DELETE가 발생하지 않음을 보장.
     await expect.poll(() => requests.delete).toBe(0);
 
-    // 2) confirm accept → DELETE 1회 + body 검증(deleteJson은 body를 함께 전송).
-    page.once("dialog", (dialog) => void dialog.accept());
+    // 2) confirm 확인 → DELETE 1회 + body 검증(deleteJson은 body를 함께 전송).
     await archiveButton.click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "보관" })
+      .click();
     await expect.poll(() => requests.delete).toBe(1);
     expect(requests.deleteBodies[0]).toMatchObject({
       actor: "admin-ui",
@@ -1034,7 +1035,8 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
     await page.getByLabel("우선순위").fill("5");
     await page.getByLabel("장소 종류").selectOption("place");
     await page.getByLabel("카테고리").fill("02020101");
-    await page.getByLabel("region_scope").fill('{"sido_code": "11"}');
+    // region_scope는 구조화 미니폼(시도/시군구 코드)으로 입력 — 원본 JSON은 '고급' 아래.
+    await page.getByLabel("시도 코드").fill("11");
     await page.getByLabel("metadata").fill('{"note": "seoul only"}');
 
     await page.getByRole("button", { name: "규칙 저장" }).click();
@@ -1091,20 +1093,23 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
       name: "규칙 적용 (후보 생성)",
     });
 
-    // 1) confirm dismiss → apply 미발생. 메시지에 동작·비되살림 규칙 설명.
-    let dialogMessage = "";
-    page.once("dialog", (dialog) => {
-      dialogMessage = dialog.message();
-      void dialog.dismiss();
-    });
+    // 1) confirm 취소 → apply 미발생. 메시지에 동작·비되살림 규칙 설명(AlertDialog).
     await applyButton.click();
-    await expect.poll(() => dialogMessage).toContain("후보 등록");
-    expect(dialogMessage).toContain("거절·보관된 항목은 되살아나지 않습니다");
+    const applyDialog = page.getByRole("alertdialog");
+    await expect(applyDialog).toBeVisible();
+    await expect(applyDialog).toContainText("후보 등록");
+    await expect(applyDialog).toContainText(
+      "거절·보관된 항목은 되살아나지 않습니다",
+    );
+    await applyDialog.getByRole("button", { name: "취소" }).click();
     await expect.poll(() => requests.ruleApply).toBe(0);
 
-    // 2) confirm accept → apply 1회 + 건수 토스트.
-    page.once("dialog", (dialog) => void dialog.accept());
+    // 2) confirm 확인 → apply 1회 + 건수 토스트.
     await applyButton.click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "규칙 적용" })
+      .click();
     await expect.poll(() => requests.ruleApply).toBe(1);
     await expect(page.getByText("규칙 적용 완료")).toBeVisible();
     await expect(
@@ -1162,7 +1167,7 @@ test.describe("/admin/features/curated mutations (route-mocked)", () => {
 
     await page.goto("/admin/features/curated");
 
-    const firstButton = page.getByRole("button", { name: "처음" });
+    const firstButton = page.getByRole("button", { name: "첫 페이지" });
     const nextButton = page.getByRole("button", { name: "다음" });
     // 초기: 처음 disabled(cursor===null), 다음 enabled(next_cursor!=null).
     await expect(firstButton).toBeDisabled();

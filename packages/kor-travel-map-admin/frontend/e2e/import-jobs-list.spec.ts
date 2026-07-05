@@ -163,7 +163,7 @@ test.describe("/ops/import-jobs list", () => {
     await page.goto("/ops/import-jobs");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import jobs" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     // 행이 그려진 뒤(테이블 준비) 행 수를 단언한다.
     await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible();
@@ -192,7 +192,7 @@ test.describe("/ops/import-jobs list", () => {
     await page.goto("/ops/import-jobs");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import jobs" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     // import-jobs-client.tsx의 emptyMessage prop 문자열 그대로.
     await expect(page.getByText("import job이 없습니다.")).toBeVisible();
@@ -211,7 +211,7 @@ test.describe("/ops/import-jobs list", () => {
     await page.goto("/ops/import-jobs");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import jobs" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     // variant="destructive" Alert만 role=alert (default는 role=status — Wave 1).
     // 다른 alert와 충돌하지 않도록 AlertTitle 텍스트로 한정한다.

@@ -10,7 +10,7 @@ import {
   Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   type OfflineUploadColumnMapping,
@@ -25,7 +25,9 @@ import {
   useOfflineUploadValidation,
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
+import { useOpsProviders } from "@/api/providers";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -150,7 +152,7 @@ function mappingComplete(mapping: OfflineUploadColumnMapping): boolean {
   });
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]">
       <dt className="text-muted-foreground">{label}</dt>
@@ -188,8 +190,26 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
         <DetailRow label="size" value={formatBytes(upload.byte_size)} />
         <DetailRow label="sha256" value={upload.checksum_sha256} />
         <DetailRow label="형식" value={upload.detected_format ?? "-"} />
-        <DetailRow label="validation job" value={upload.validation_job_id ?? "-"} />
-        <DetailRow label="load job" value={upload.load_job_id ?? "-"} />
+        <DetailRow
+          label="validation job"
+          value={
+            upload.validation_job_id ? (
+              <EntityLink id={upload.validation_job_id} kind="importJob" />
+            ) : (
+              "-"
+            )
+          }
+        />
+        <DetailRow
+          label="load job"
+          value={
+            upload.load_job_id ? (
+              <EntityLink id={upload.load_job_id} kind="importJob" />
+            ) : (
+              "-"
+            )
+          }
+        />
         <DetailRow label="updated" value={formatDateTime(upload.updated_at)} />
       </dl>
     </div>
@@ -201,19 +221,45 @@ function MappingInput({
   mapping,
   field,
   setMapping,
+  headers,
 }: {
   label: string;
   mapping: OfflineUploadColumnMapping;
   field: keyof OfflineUploadColumnMapping;
   setMapping: (mapping: OfflineUploadColumnMapping) => void;
+  /** CSV 컬럼 매핑 필드용 — preview meta.headers가 있으면 select 어시스트(§4). */
+  headers?: string[];
 }) {
+  const value = (mapping[field] as string | null | undefined) ?? "";
+  if (headers && headers.length > 0) {
+    return (
+      <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+        {label}
+        <NativeSelect
+          aria-label={`mapping ${label}`}
+          className="font-mono text-xs"
+          value={headers.includes(value) ? value : ""}
+          onChange={(event) =>
+            setMapping({ ...mapping, [field]: event.target.value })
+          }
+        >
+          <NativeSelectOption value="">컬럼 선택</NativeSelectOption>
+          {headers.map((header) => (
+            <NativeSelectOption key={header} value={header}>
+              {header}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+    );
+  }
   return (
     <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
       {label}
       <Input
         aria-label={`mapping ${label}`}
         className="font-mono text-xs"
-        value={(mapping[field] as string | null | undefined) ?? ""}
+        value={value}
         onChange={(event) =>
           setMapping({ ...mapping, [field]: event.target.value })
         }
@@ -395,6 +441,7 @@ function ValidationPanel({
         {requiredMappingFields.map((field) => (
           <MappingInput
             field={field}
+            headers={preview.data?.meta.headers ?? []}
             key={field}
             label={field}
             mapping={mapping}
@@ -432,7 +479,11 @@ function ValidationPanel({
           검증 실행
         </Button>
         {selected.validation_job_id ? (
-          <Badge variant="outline">job {shortId(selected.validation_job_id)}</Badge>
+          <EntityLink id={selected.validation_job_id} kind="importJob">
+            <Badge variant="outline">
+              job {shortId(selected.validation_job_id)}
+            </Badge>
+          </EntityLink>
         ) : null}
       </div>
 
@@ -514,6 +565,37 @@ export function OfflineUploadsClient() {
   const uploads = useOfflineUploads(uploadsParams);
   const selectedUpload = useOfflineUpload(selectedUploadId);
   const createUpload = useCreateOfflineUploadMutation();
+  // §4: provider/dataset 입력 어시스트 — 등록된 provider×dataset에서 후보 제공.
+  const opsProviders = useOpsProviders();
+  const providerOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (opsProviders.data?.data.items ?? []).map((item) => item.provider),
+        ),
+      ).sort(),
+    [opsProviders.data],
+  );
+  const datasetOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (opsProviders.data?.data.items ?? [])
+            .filter(
+              (item) => !provider.trim() || item.provider === provider.trim(),
+            )
+            .map((item) => item.dataset_key),
+        ),
+      ).sort(),
+    [opsProviders.data, provider],
+  );
+  // §4: disabled 제출 버튼의 이유를 표시한다.
+  const uploadMissingFields = [
+    file === null ? "파일" : null,
+    provider.trim().length === 0 ? "provider" : null,
+    datasetKey.trim().length === 0 ? "dataset key" : null,
+    syncScope.trim().length === 0 ? "sync scope" : null,
+  ].filter((item): item is string => item !== null);
   const launchLoad = useLaunchOfflineUploadLoadMutation();
   const deleteUpload = useDeleteOfflineUploadMutation();
 
@@ -687,8 +769,7 @@ export function OfflineUploadsClient() {
           새로고침
         </Button>
       }
-      description="RustFS에 보존한 JSON/JSONL FeatureBundle 또는 CSV/TSV 원본을 검증하고 Dagster offline_upload_load job으로 적재합니다."
-      section="관리"
+      description="저장된 FeatureBundle·CSV 원본을 검증하고 적재합니다."
       title="오프라인 업로드"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
@@ -703,35 +784,42 @@ export function OfflineUploadsClient() {
             <div className="flex flex-col gap-3">
               <FormField
                 data-testid="offline-upload-file-input"
-                hint="업로드할 오프라인 데이터 파일(JSON/JSONL/CSV/TSV)입니다."
                 label="파일"
                 type="file"
                 accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
               <FormField
-                hint="이 업로드 데이터의 provider 식별자입니다."
                 label="provider"
+                list="offline-upload-provider-options"
                 placeholder="provider"
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
               />
+              <datalist id="offline-upload-provider-options">
+                {providerOptions.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
               <FormField
-                hint="업로드 데이터의 dataset_key입니다."
                 label="dataset key"
+                list="offline-upload-dataset-options"
                 placeholder="dataset_key"
                 value={datasetKey}
                 onChange={(event) => setDatasetKey(event.target.value)}
               />
+              <datalist id="offline-upload-dataset-options">
+                {datasetOptions.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
               <FormField
-                hint="이 업로드가 적용될 동기화 스코프입니다."
                 label="sync scope"
                 placeholder="sync_scope"
                 value={syncScope}
                 onChange={(event) => setSyncScope(event.target.value)}
               />
               <FormField
-                hint="업로드를 생성한 사용자 식별자입니다(선택)."
                 label="created by"
                 placeholder="created_by"
                 value={createdBy}
@@ -752,6 +840,11 @@ export function OfflineUploadsClient() {
                 <UploadCloudIcon data-icon="inline-start" />
                 업로드
               </Button>
+              {uploadMissingFields.length > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  입력 필요: {uploadMissingFields.join(", ")}
+                </span>
+              ) : null}
               {createUpload.data ? (
                 <Alert>
                   <AlertTitle>업로드 완료</AlertTitle>

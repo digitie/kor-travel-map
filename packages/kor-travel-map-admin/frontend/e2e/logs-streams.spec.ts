@@ -137,7 +137,7 @@ test.describe("admin/ops logs streams (Job events depth)", () => {
     await page.goto("/ops/logs");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Logs" }),
+      page.getByRole("heading", { level: 1, name: "운영 로그" }),
     ).toBeVisible();
 
     // 기본 탭은 system(defaultValue="system"); events 패널은 탭 클릭 전까지 unmount.
@@ -264,6 +264,48 @@ test.describe("admin/ops logs streams (Job events depth)", () => {
     );
   });
 
+  test("/ops/logs?tab=events&job_id= 딥링크가 탭·필터를 초기화한다", async ({
+    page,
+  }) => {
+    await abortLiveSocket(page);
+
+    await page.route("**/v1/ops/import-job-events**", async (route) => {
+      await fulfillJson(
+        route,
+        jobEventsResponse(
+          [
+            makeJobEvent({
+              event_id: "event-qs-deeplink",
+              job_id: "job-qs-deeplink-1",
+              message: "query deeplink event",
+            }),
+          ],
+          null,
+        ),
+      );
+    });
+    await page.route("**/v1/ops/system-logs**", async (route) => {
+      await fulfillJson(route, systemLogsResponse([], null));
+    });
+    await page.route("**/v1/ops/api-call-logs**", async (route) => {
+      await fulfillJson(route, apiLogsResponse([], null));
+    });
+
+    // 개편 B: job 상세/Provider 패널에서 들어오는 URL 딥링크 — 탭 전환 클릭 없이
+    // events 탭이 활성화되고 job_id 필터가 채워진 상태로 초기화된다.
+    await page.goto("/ops/logs?tab=events&job_id=job-qs-deeplink-1");
+
+    await expect(
+      page.getByRole("tab", { name: "Job events", selected: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("job event job id")).toHaveValue(
+      "job-qs-deeplink-1",
+    );
+    await expect(
+      page.getByRole("row", { name: /query deeplink event/ }),
+    ).toBeVisible();
+  });
+
   test("/v1/ops/logs empty state across all three tabs", async ({ page }) => {
     await abortLiveSocket(page);
 
@@ -342,7 +384,7 @@ test.describe("admin/ops logs streams (Job events depth)", () => {
     // 페이지가 crash하지 않고 heading은 계속 렌더. (isFetching 의존 새로고침 버튼
     // disabled 상태는 타이밍 의존이라 단언하지 않는다.)
     await expect(
-      page.getByRole("heading", { level: 1, name: "Logs" }),
+      page.getByRole("heading", { level: 1, name: "운영 로그" }),
     ).toBeVisible();
   });
 });

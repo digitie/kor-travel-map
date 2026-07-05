@@ -24,6 +24,7 @@ export default async function FeatureChangeRequestsPage({
   const action = firstParam(params.action);
   const featureId = firstParam(params.feature_id);
   const reason = firstParam(params.reason);
+  const requestId = firstParam(params.request_id) ?? null;
   const hasPrefill = action || featureId || reason;
   const prefill: FeatureChangeRequestPrefill | undefined = hasPrefill
     ? {
@@ -33,5 +34,11 @@ export default async function FeatureChangeRequestsPage({
         reason,
       }
     : undefined;
-  return <FeatureChangeRequestsClient prefill={prefill} view="request" />;
+  return (
+    <FeatureChangeRequestsClient
+      highlightRequestId={requestId}
+      prefill={prefill}
+      view="request"
+    />
+  );
 }

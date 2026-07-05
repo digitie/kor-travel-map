@@ -17,6 +17,8 @@ import {
   useUpsertPoiCacheTargetMutation,
 } from "@/api/poiCacheTargets";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -61,6 +63,7 @@ export function PoiCacheTargetsClient() {
   const targets = usePoiCacheTargets({ page_size: 100, cursor: currentCursor });
   const upsert = useUpsertPoiCacheTargetMutation();
   const remove = useDeletePoiCacheTargetMutation();
+  const confirm = useConfirm();
   const nearby = useNearbyFeaturesByTarget(
     selectedTarget
       ? {
@@ -146,10 +149,20 @@ export function PoiCacheTargetsClient() {
               variant="ghost"
               onClick={(event) => {
                 event.stopPropagation();
-                remove.mutate({
-                  externalSystem: target.external_system,
-                  targetKey: target.target_key,
-                });
+                void (async () => {
+                  const ok = await confirm({
+                    title: `'${target.target_key}' 대상을 삭제할까요?`,
+                    description:
+                      "등록된 POI 캐시 대상이 제거되며 이후 갱신 대상에서 빠집니다.",
+                    confirmLabel: "삭제",
+                    destructive: true,
+                  });
+                  if (!ok) return;
+                  remove.mutate({
+                    externalSystem: target.external_system,
+                    targetKey: target.target_key,
+                  });
+                })();
               }}
             >
               <Trash2Icon data-icon="inline-start" />
@@ -159,7 +172,7 @@ export function PoiCacheTargetsClient() {
         },
       },
     ],
-    [remove],
+    [confirm, remove],
   );
 
   const nearbyColumns = useMemo<ColumnDef<NearbyRow, unknown>[]>(
@@ -171,9 +184,13 @@ export function PoiCacheTargetsClient() {
         cell: ({ row }) => (
           <>
             <div className="font-medium">{row.original.name}</div>
-            <div className="font-mono text-xs text-muted-foreground">
+            <EntityLink
+              className="text-xs"
+              id={row.original.feature_id}
+              kind="feature"
+            >
               {shortId(row.original.feature_id)}
-            </div>
+            </EntityLink>
           </>
         ),
       },
@@ -277,7 +294,6 @@ export function PoiCacheTargetsClient() {
         </Button>
       }
       description="외부 시스템 POI/cache target을 등록하고 target key 기준 주변 feature를 확인합니다."
-      section="관리"
       title="POI 캐시 대상"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">

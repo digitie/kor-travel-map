@@ -5,6 +5,64 @@
 
 ## [Unreleased]
 
+### 관리 UI 개편 C — 검증/어시스트·텍스트 절약 (2026-07-05)
+
+- JSON·좌표·정책 입력 인라인 검증, `window.confirm`→AlertDialog(useConfirm) 일괄 전환,
+  페이저를 공용 CursorPager로 통일. Dagster 스케줄 편집에 "다음 3회 실행" 미리보기·분 필드
+  인라인 검증, 오프라인 업로드에 provider/dataset·CSV 컬럼 어시스트·미입력 사유 표시.
+- 화면 설명문의 영어 전문용어·제목 반복을 간결한 한국어로 정리(7개 화면)하고 자명한 힌트 제거.
+### 관리 UI 개편 D — 파일 레지스트리·추적 UI (2026-07-05)
+
+- **ADDED**: 시스템에 적재되는 파일(Provider 다운로드·백업·오프라인 업로드·MOIS 원본)을
+  추적하는 파일 레지스트리(`ops.managed_files` + `ops.managed_file_events`, 0040 마이그레이션).
+  단순 리스팅이 아니라 각 파일이 어디에(location/backend) 어떻게 연결됐는지(provenance links),
+  사용 중인지 임시인지(status/kind), 언제 받고 마지막으로 로드됐는지(downloaded_at/last_loaded_at)를
+  본다. 생산/소비 지점 hook 계측(host op 실패 없이 best-effort) + 주기 스캔 reconcile.
+- **ADDED**: `/v1/admin/files` 관리 라우터 — 목록(kind/status/provider/location/기간 필터),
+  요약 집계, 상세(+provenance links·이력), 재스캔(backup_root 동기 + offline-uploads backfill),
+  좁은 zombie purge(파괴적 스위치 게이트). Dagster `managed_file_scan` job(6시간 스케줄).
+- **ADDED**: 관리 UI `/admin/files`(시스템 그룹) — 요약 칩(클릭=필터), 필터 바, 목록,
+  상세 provenance 패널(연결 항목 딥링크·이력 타임라인·메타). 한국어 + HelpTip.
+
+### 관리 UI 개편 B — nav 그룹·크로스링크 (2026-07-04)
+
+- 사이드바를 작업 지향 4그룹(Feature 관리/수집 파이프라인/모니터링/시스템)으로 재편하고
+  섹션 배지·브레드크럼을 nav 정본에서 유도.
+- 화면 간 크로스링크/딥링크 전면 연결: 이슈↔feature, 소스↔Provider 상태, 작업↔로그/배치,
+  홈 카드↔관리 화면, providers↔이슈/Feature 목록 등. `/ops/logs`·`/admin/issues`·
+  `/admin/features`·change-requests가 URL 파라미터 진입 지원.
+- H1/헤딩 정본화(Provider 상태·운영 로그·정합성 점검·큐레이션 지도·ETL 미리보기 등) 및
+  e2e 스펙 정합화(stale 영문 헤딩 29파일 정정 + 신규 링크 스모크).
+### notice 중복 근본 해결 — 사건 단위 identity + 라이프사이클 (2026-07-03, #632)
+
+- **CHANGED**: KMA 특보 notice의 자연키를 발표 단위(`alert_id::region`)에서 **사건
+  단위**(`{region_code}::{현상 토큰}`)로 재설계 — 재발표/등급 변경이 같은 feature로
+  upsert되고 발표 이력은 source_records에 쌓인다.
+- **ADDED**: 특보 **해제**는 feature를 만들지 않고 열린 notice의 `valid_end_time`을
+  채운다(`weather_alert_lift_closures` + `close_notice_features`, 결합 해제문 fan-out).
+- **FIXED**: KREX 교통 돌발 feature_id에서 reverse-geocoded `bjd_code` 제거 — 이동하는
+  정체가 동 경계를 넘을 때 같은 사건이 중복 생성되던 버그.
+- **ADDED**: 적재 직후 notice reconcile(`reconcile_notice_features`) — 계보 중복
+  soft-delete + feed에서 사라진 사건 `valid_end_time` 종료. 지도/검색 read 경로는
+  계보 latest만 + 종료 notice 숨김.
+- **ADDED**: 만료 notice purge(§9, 종료/발표 +1년)를 maintenance job op로 구현.
+- **MIGRATION**: `0040_notice_dedup_cleanup` — 구세대 identity로 쌓인 중복 notice
+  일회성 soft-delete(원문 이력 보존).
+### OpiNet price staleness 근본 수정 (2026-07-03)
+
+- **FIXED**: `low_top_area` 가격 수집이 매일 같은 ~60개 시군(top-20)만 갱신해 price
+  feature 37%가 3–7일 stale로 누적되던 문제 — run 날짜 기반 **시군 윈도 로테이션**으로
+  전국(~230 시군)을 ≈4일 1주기로 순회한다(호출량 불변, ~198/1,500).
+- **ADDED**: 수집 커버리지 운영 노브 `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180),
+  `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`(기본 600).
+- **CHANGED**: `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`(기본 4일)보다 오래된 price 관측은
+  지도 마커 `price_summary`와 price card `current`에서 제외한다(이력 보존) — 로테이션
+  주기 밖 옛 가격이 현재가로 표시되지 않는다.
+- **CHANGED**: price card `is_stale` 기본 임계를 18h → 현재가 지평선(기본 4일)에서
+  파생하도록 정합 — 로테이션 아래에서 정상 갱신 중인 주유소가 상세 패널에 항상
+  stale로 표시되던 증상 해소. `is_stale`은 이제 `current`가 비는 조건과 일치한다
+  (weather card 임계는 별도 상수, 영향 없음).
+
 ### 큐레이션 관리 UX 개편 (2026-07-03)
 
 - **CHANGED**: 큐레이션 관리 화면을 '후보 검토'/'소스 규칙' 탭과 라이프사이클 스트립(상태 칩=필터,

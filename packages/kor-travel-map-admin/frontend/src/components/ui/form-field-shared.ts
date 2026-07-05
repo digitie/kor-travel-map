@@ -4,6 +4,11 @@ type FieldShellProps = {
   label: React.ReactNode;
   /** 보조 설명(에러와 별개, 항상 표시). */
   hint?: React.ReactNode;
+  /**
+   * 라벨 옆 도움말 팝오버 내용 (§5-6 텍스트 절약 — 상세 설명은 inline hint 대신
+   * 도움말 아이콘 버튼으로). 지정하면 라벨 끝에 HelpTip이 붙는다.
+   */
+  help?: React.ReactNode;
   /** 검증 에러 메시지. 있으면 aria-invalid + role=alert 연결. */
   error?: string | null;
   required?: boolean;
@@ -41,8 +46,13 @@ function describedBy(
 function requiredFieldAriaLabel(
   label: React.ReactNode,
   required: boolean | undefined,
+  help?: React.ReactNode,
 ): string | undefined {
-  return required && typeof label === "string" ? label : undefined;
+  // help 버튼(aria-label="도움말: …")도 라벨의 accessible name에 섞이므로(별표와
+  // 동일한 Chromium 계산 문제) help가 있을 때도 명시 aria-label로 고정한다.
+  return (required || help !== undefined) && typeof label === "string"
+    ? label
+    : undefined;
 }
 
 export { describedBy, requiredFieldAriaLabel, useFieldIds };

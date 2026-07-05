@@ -18,7 +18,12 @@ import {
   PLACE_KIND_OPTIONS,
   withCurrentOption,
 } from "@/lib/feature-form-options";
-import { httpUrl, phoneNumber } from "@/lib/form-validation";
+import {
+  dateOrdered,
+  httpUrl,
+  jsonObject,
+  phoneNumber,
+} from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT } from "@/state/map";
@@ -243,6 +248,7 @@ export function FeatureBasicInfoSection({
       </div>
       <div className="grid gap-3 lg:grid-cols-4">
         <FormSelect
+          aria-label={`${idPrefix} kind`}
           id={`${idPrefix}-kind`}
           label="Feature 종류"
           value={kind}
@@ -256,6 +262,7 @@ export function FeatureBasicInfoSection({
         </FormSelect>
         {kind === "place" ? (
           <FormSelect
+            aria-label={`${idPrefix} place kind`}
             id={`${idPrefix}-place-kind`}
             label="장소 종류"
             value={placeKind}
@@ -273,6 +280,7 @@ export function FeatureBasicInfoSection({
           </FormSelect>
         ) : null}
         <FormSelect
+          aria-label={`${idPrefix} feature status`}
           id={`${idPrefix}-status`}
           label="상태"
           value={status}
@@ -287,6 +295,7 @@ export function FeatureBasicInfoSection({
           ))}
         </FormSelect>
         <FormField
+          aria-label={`${idPrefix} name`}
           error={nameError}
           id={`${idPrefix}-name`}
           label="이름"
@@ -295,6 +304,7 @@ export function FeatureBasicInfoSection({
           onChange={(event) => onNameChange(event.target.value)}
         />
         <FormSelect
+          aria-label={`${idPrefix} category`}
           error={categoryError}
           id={`${idPrefix}-category`}
           label="카테고리"
@@ -334,24 +344,28 @@ export function FeatureAddressSection({
       <h2 className="mb-4 font-medium">주소</h2>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField
+          aria-label={`${idPrefix} road address`}
           id={`${idPrefix}-address-road`}
           label="도로명 주소"
           value={values.addressRoad}
           onChange={(event) => onChange("addressRoad", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} legal address`}
           id={`${idPrefix}-address-legal`}
           label="법정동 주소"
           value={values.addressLegal}
           onChange={(event) => onChange("addressLegal", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} admin address`}
           id={`${idPrefix}-address-admin`}
           label="행정동 주소"
           value={values.addressAdmin}
           onChange={(event) => onChange("addressAdmin", event.target.value)}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} sido code`}
           id={`${idPrefix}-sido-code`}
           kind="sido"
           label="시도 코드"
@@ -361,6 +375,7 @@ export function FeatureAddressSection({
           placeholder="시도명 또는 코드 검색"
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} sigungu code`}
           id={`${idPrefix}-sigungu-code`}
           kind="sigungu"
           label="시군구 코드"
@@ -369,6 +384,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} legal dong code`}
           id={`${idPrefix}-legal-dong-code`}
           kind="legal_dong"
           label="법정동 코드"
@@ -377,6 +393,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <AdminRegionAutoSearch
+          ariaLabel={`${idPrefix} admin dong code`}
           id={`${idPrefix}-admin-dong-code`}
           kind="admin_dong"
           label="행정동 코드"
@@ -385,6 +402,7 @@ export function FeatureAddressSection({
           onSelectCandidate={onSelectRegionCandidate}
         />
         <FormField
+          aria-label={`${idPrefix} road name code`}
           error={addressCodeError("roadNameCode", values.roadNameCode)}
           id={`${idPrefix}-road-name-code`}
           inputMode="numeric"
@@ -393,6 +411,7 @@ export function FeatureAddressSection({
           onChange={(event) => onChange("roadNameCode", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} road address management no`}
           className="md:col-span-2"
           error={addressCodeError(
             "roadAddressManagementNo",
@@ -412,10 +431,16 @@ export function FeatureAddressSection({
           고급 추가 정보
         </summary>
         <FormTextArea
+          aria-label={`${idPrefix} address JSON`}
           className="mt-3"
+          error={jsonObject<FeatureAddressValues>()(
+            values.addressExtraJson,
+            values,
+          )}
           id={`${idPrefix}-address-extra-json`}
           label="주소 추가 정보"
-          hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+          hint="정해진 입력칸에 없는 값만 JSON object로 입력합니다."
+          placeholder='예: {"zipcode": "03187"}'
           value={values.addressExtraJson}
           onChange={(event) => onChange("addressExtraJson", event.target.value)}
         />
@@ -455,6 +480,11 @@ export function FeatureDetailSection({
       {kind === "event" ? (
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
+            aria-label={`${idPrefix} event start`}
+            error={dateOrdered<FeatureDetailValues>("endDate")(
+              values.startDate,
+              values,
+            )}
             id={`${idPrefix}-start-date`}
             label="행사 시작"
             type="datetime-local"
@@ -462,6 +492,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("startDate", event.target.value)}
           />
           <FormField
+            aria-label={`${idPrefix} event end`}
             id={`${idPrefix}-end-date`}
             label="행사 종료"
             type="datetime-local"
@@ -469,6 +500,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("endDate", event.target.value)}
           />
           <FormSelect
+            aria-label={`${idPrefix} event status`}
             id={`${idPrefix}-event-status`}
             label="행사 상태"
             value={values.eventStatus}
@@ -501,6 +533,7 @@ export function FeatureDetailSection({
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
+            aria-label={`${idPrefix} phone`}
             error={errors?.phone ?? phoneError}
             id={`${idPrefix}-phone`}
             inputMode="tel"
@@ -513,6 +546,7 @@ export function FeatureDetailSection({
       )}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <FormField
+          aria-label={`${idPrefix} homepage url`}
           error={errors?.homepageUrl ?? homepageError}
           id={`${idPrefix}-homepage-url`}
           label="홈페이지"
@@ -522,6 +556,7 @@ export function FeatureDetailSection({
           onChange={(event) => onChange("homepageUrl", event.target.value)}
         />
         <FormField
+          aria-label={`${idPrefix} source url`}
           error={errors?.sourceUrl ?? sourceError}
           id={`${idPrefix}-source-url`}
           label="출처"
@@ -537,16 +572,28 @@ export function FeatureDetailSection({
         </summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <FormTextArea
+            aria-label={`${idPrefix} detail JSON`}
+            error={jsonObject<FeatureDetailValues>()(
+              values.detailExtraJson,
+              values,
+            )}
             id={`${idPrefix}-detail-extra-json`}
             label="상세 추가 정보"
-            hint="정해진 입력칸에 없는 값만 JSON으로 입력합니다."
+            hint="정해진 입력칸에 없는 값만 JSON object로 입력합니다."
+            placeholder='예: {"capacity": 120}'
             value={values.detailExtraJson}
             onChange={(event) => onChange("detailExtraJson", event.target.value)}
           />
           <FormTextArea
+            aria-label={`${idPrefix} urls JSON`}
+            error={jsonObject<FeatureDetailValues>()(
+              values.urlsExtraJson,
+              values,
+            )}
             id={`${idPrefix}-urls-extra-json`}
             label="URL 추가 정보"
-            hint="홈페이지/출처 외 추가 URL만 JSON으로 입력합니다."
+            hint="홈페이지/출처 외 추가 URL만 JSON object로 입력합니다."
+            placeholder='예: {"instagram": "https://…"}'
             value={values.urlsExtraJson}
             onChange={(event) => onChange("urlsExtraJson", event.target.value)}
           />

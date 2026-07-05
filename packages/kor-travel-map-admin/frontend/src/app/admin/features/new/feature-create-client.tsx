@@ -60,9 +60,16 @@ import {
 import { formatDateTime, shortId } from "@/lib/format";
 import {
   KOREA_COORD_MESSAGE,
+  dateOrdered,
   httpUrl,
   isKoreaCoordinate,
+  jsonObject,
+  koreaLatitude,
+  koreaLongitude,
+  parseJsonObjectField,
   phoneNumber,
+  required,
+  validateForm,
 } from "@/lib/form-validation";
 import { cn } from "@/lib/utils";
 
@@ -171,18 +178,12 @@ function parseJsonObject(
   label: string,
   value: string,
 ): Record<string, unknown> {
-  if (value.trim().length === 0) {
-    return {};
+  // §4: 제출 payload 변환은 parseJsonObjectField로 통일(인라인 jsonObject()와 짝).
+  const parsed = parseJsonObjectField(value, label);
+  if (parsed.error) {
+    throw new Error(`${label}: ${parsed.error}`);
   }
-  const parsed = JSON.parse(value) as unknown;
-  if (
-    parsed === null ||
-    Array.isArray(parsed) ||
-    typeof parsed !== "object"
-  ) {
-    throw new Error(`${label}는 JSON object여야 합니다.`);
-  }
-  return parsed as Record<string, unknown>;
+  return parsed.value ?? {};
 }
 
 function compactObject(
@@ -573,6 +574,28 @@ export function FeatureCreateClient() {
     event.preventDefault();
     setFormError(null);
     setFieldErrors({});
+    // §4: 필드 규칙을 제출 전에 일괄 검증해 인라인 에러로 보여준다 —
+    // 서버/예외 메시지 keyword 라우팅(구 message.includes 분기)은 제거.
+    const result = validateForm(form, [
+      { field: "name", validate: required("name은 필수입니다.") },
+      { field: "category", validate: required("category는 필수입니다.") },
+      { field: "reason", validate: required("reason은 필수입니다.") },
+      { field: "lon", validate: required(KOREA_COORD_MESSAGE) },
+      { field: "lat", validate: required(KOREA_COORD_MESSAGE) },
+      { field: "lon", validate: koreaLongitude() },
+      { field: "lat", validate: koreaLatitude() },
+      { field: "phone", validate: phoneNumber() },
+      { field: "homepageUrl", validate: httpUrl("홈페이지") },
+      { field: "sourceUrl", validate: httpUrl("출처") },
+      { field: "startDate", validate: dateOrdered("endDate") },
+      { field: "addressExtraJson", validate: jsonObject() },
+      { field: "detailExtraJson", validate: jsonObject() },
+      { field: "urlsExtraJson", validate: jsonObject() },
+    ]);
+    if (!result.isValid) {
+      setFieldErrors(result.errors);
+      return;
+    }
     try {
       validateCreateTextFields(form, categoryItems);
       const payload = buildCreatePayload(form);
@@ -581,21 +604,6 @@ export function FeatureCreateClient() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFormError(message);
-      if (message.includes("name")) {
-        setFieldErrors({ name: message });
-      } else if (message.includes("category")) {
-        setFieldErrors({ category: message });
-      } else if (message.includes("reason")) {
-        setFieldErrors({ reason: message });
-      } else if (message.includes("lon") || message.includes("좌표")) {
-        setFieldErrors({ lon: message, lat: message });
-      } else if (message.includes("전화번호")) {
-        setFieldErrors({ phone: message });
-      } else if (message.includes("홈페이지")) {
-        setFieldErrors({ homepageUrl: message });
-      } else if (message.includes("출처")) {
-        setFieldErrors({ sourceUrl: message });
-      }
     }
   };
 
@@ -619,7 +627,6 @@ export function FeatureCreateClient() {
         </>
       }
       description="새 Feature를 등록합니다."
-      section="관리"
       title="새 Feature"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>

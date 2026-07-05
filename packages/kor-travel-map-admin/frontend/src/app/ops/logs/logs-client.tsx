@@ -19,6 +19,7 @@ import {
   type SystemLogLevel,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -49,11 +50,33 @@ const EVENT_LEVELS: Array<ImportJobEventLevel | "all"> = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 type LogTab = "system" | "api" | "events";
 
-export function LogsClient() {
-  const [activeLogTab, setActiveLogTab] = useState<LogTab>("system");
+export function LogsClient({
+  initialTab,
+  initialJobId,
+  initialProvider,
+  initialDatasetKey,
+  initialLevel,
+}: {
+  initialTab?: string;
+  initialJobId?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialLevel?: string;
+} = {}) {
+  const [activeLogTab, setActiveLogTab] = useState<LogTab>(() =>
+    initialTab === "system" || initialTab === "api" || initialTab === "events"
+      ? initialTab
+      : "system",
+  );
   const [systemQ, setSystemQ] = useState("");
   const deferredSystemQ = useDeferredValue(systemQ.trim());
-  const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">("all");
+  const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">(() =>
+    initialTab !== "events" &&
+    initialLevel &&
+    (LEVELS as readonly string[]).includes(initialLevel)
+      ? (initialLevel as SystemLogLevel)
+      : "all",
+  );
   const [systemSource, setSystemSource] = useState("");
   const [systemCursor, setSystemCursor] = useState<string | null>(null);
   const [systemPageIndex, setSystemPageIndex] = useState(1);
@@ -64,10 +87,18 @@ export function LogsClient() {
   const [apiCursor, setApiCursor] = useState<string | null>(null);
   const [apiPageIndex, setApiPageIndex] = useState(1);
 
-  const [eventJobId, setEventJobId] = useState("");
-  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">("all");
-  const [eventProvider, setEventProvider] = useState("");
-  const [eventDatasetKey, setEventDatasetKey] = useState("");
+  const [eventJobId, setEventJobId] = useState(initialJobId ?? "");
+  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">(() =>
+    initialTab === "events" &&
+    initialLevel &&
+    (EVENT_LEVELS as readonly string[]).includes(initialLevel)
+      ? (initialLevel as ImportJobEventLevel)
+      : "all",
+  );
+  const [eventProvider, setEventProvider] = useState(initialProvider ?? "");
+  const [eventDatasetKey, setEventDatasetKey] = useState(
+    initialDatasetKey ?? "",
+  );
   const [eventCursor, setEventCursor] = useState<string | null>(null);
   const [eventPageIndex, setEventPageIndex] = useState(1);
 
@@ -366,9 +397,8 @@ export function LogsClient() {
           새로고침
         </Button>
       }
-      description="system log와 opt-in API call log를 같은 운영 화면에서 조회합니다."
-      section="Ops"
-      title="Logs"
+      description="시스템 로그와 API 호출 로그를 조회합니다."
+      title="운영 로그"
     >
       <div className="flex flex-col gap-4">
         {(systemLogs.isError || apiLogs.isError || jobEvents.isError) && (
@@ -468,23 +498,14 @@ export function LogsClient() {
                     resetSystemPage();
                   }}
                 />
-                <Badge variant="outline">page {systemPageIndex}</Badge>
-                <Button
-                  disabled={systemPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetSystemPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!systemLogs.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextSystemPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="system log"
+                  hasNext={Boolean(systemLogs.data?.meta.page?.next_cursor)}
+                  isFetching={systemLogs.isFetching}
+                  summary={<>page {systemPageIndex}</>}
+                  onFirst={resetSystemPage}
+                  onNext={nextSystemPage}
+                />
               </div>
               <DataTable
                 columns={systemColumns}
@@ -527,23 +548,14 @@ export function LogsClient() {
                     resetApiPage();
                   }}
                 />
-                <Badge variant="outline">page {apiPageIndex}</Badge>
-                <Button
-                  disabled={apiPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetApiPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!apiLogs.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextApiPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="api log"
+                  hasNext={Boolean(apiLogs.data?.meta.page?.next_cursor)}
+                  isFetching={apiLogs.isFetching}
+                  summary={<>page {apiPageIndex}</>}
+                  onFirst={resetApiPage}
+                  onNext={nextApiPage}
+                />
               </div>
               <DataTable
                 columns={apiColumns}
@@ -602,23 +614,14 @@ export function LogsClient() {
                     resetEventPage();
                   }}
                 />
-                <Badge variant="outline">page {eventPageIndex}</Badge>
-                <Button
-                  disabled={eventPageIndex <= 1}
-                  type="button"
-                  variant="outline"
-                  onClick={resetEventPage}
-                >
-                  첫 페이지
-                </Button>
-                <Button
-                  disabled={!jobEvents.data?.meta.page?.next_cursor}
-                  type="button"
-                  variant="outline"
-                  onClick={nextEventPage}
-                >
-                  다음
-                </Button>
+                <CursorPager
+                  ariaPrefix="job event"
+                  hasNext={Boolean(jobEvents.data?.meta.page?.next_cursor)}
+                  isFetching={jobEvents.isFetching}
+                  summary={<>page {eventPageIndex}</>}
+                  onFirst={resetEventPage}
+                  onNext={nextEventPage}
+                />
               </div>
               <DataTable
                 columns={eventColumns}

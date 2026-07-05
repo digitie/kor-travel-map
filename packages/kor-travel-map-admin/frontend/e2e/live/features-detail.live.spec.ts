@@ -24,7 +24,9 @@ import * as F from "./_fixtures";
  * NOTE: Playwright는 Windows 호스트에서만 실행된다(라이브 검증은 Windows 런 필요).
  */
 
-const TIMEOUT = { timeout: 15000 } as const;
+// weather feature 상세는 대용량 raw 페이로드를 JsonBlock으로 렌더해 첫 페인트가
+// 느릴 수 있어(대상 몇 건 15s 초과) 여유 타임아웃을 준다.
+const TIMEOUT = { timeout: 30000 } as const;
 
 // 상한 — fixture가 비거나 과다해도 안전하게.
 const FEATURE_IDS = F.FEATURE_IDS.slice(0, 150);

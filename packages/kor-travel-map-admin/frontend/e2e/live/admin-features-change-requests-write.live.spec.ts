@@ -345,9 +345,8 @@ async function expectFeaturePrefillLoaded(
 
 async function expectChangeRequestsReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Feature 변경" }),
+    page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
   ).toBeVisible(T);
-  await expect(page.getByText("Feature 변경 요청")).toBeVisible(T);
 }
 
 async function expectChangeReviewsReady(page: Page): Promise<void> {
@@ -554,7 +553,10 @@ test.describe("/admin/features + feature change requests live write workflow", (
   test("change request edit UI exposes catalog dropdowns, sigungu lookup, map dialog, and admin detail prefill", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    // admin features 목록의 feature_id 검색은 100만+ feature ILIKE + source_records
+    // 상관 EXISTS라 단독 ~14s, full-suite 2-worker 부하에서 ~60s(스파이크 더).
+    // 후속 과제: 백엔드 검색 최적화(full feature_id면 PK index exact-match fast-path).
+    test.setTimeout(300_000);
 
     await test.step("change request 폼의 dropdown 계약을 확인한다", async () => {
       await gotoChangeRequests(page);
@@ -650,7 +652,8 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await gotoAdminFeatures(page);
       await page.getByLabel("feature search").fill(sampleFeatureId);
       const row = rowContaining(page, sampleFeatureId.slice(0, 18));
-      await expect(row).toBeVisible(T);
+      // full feature_id 목록 검색은 부하에서 ~60s+(위 후속 과제 참조) — 넉넉히 준다.
+      await expect(row).toBeVisible({ timeout: 150_000 });
       await row.getByRole("button", { name: "preview" }).click();
       await expect(page.getByText(sampleFeatureId, { exact: true })).toBeVisible(T);
 
@@ -1007,13 +1010,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
         const row = rowContaining(page, UPDATED_NAME);
         await expect(row).toBeVisible(T);
 
-        page.once("dialog", (dialog) => void dialog.accept());
         const responsePromise = waitForApiResponse(
           page,
           "POST",
           `${decodeURIComponent(adminFeaturePath(FEATURE_ID))}/deactivate`,
         );
         await row.getByRole("button", { name: "deactivate" }).click();
+        // deactivate 확인 AlertDialog의 '비활성화' 버튼 클릭.
+        await page
+          .getByRole("alertdialog")
+          .getByRole("button", { name: "비활성화" })
+          .click();
         const response = await responsePromise;
         expect(response.status()).toBe(200);
         const body = (await response.json()) as AdminFeatureDeactivateResponse;

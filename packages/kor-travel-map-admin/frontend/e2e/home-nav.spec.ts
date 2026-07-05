@@ -307,33 +307,46 @@ async function routeDagster(page: Page, handler: (route: Route) => Promise<void>
   });
 }
 
-// admin-shell.tsx navItems와 정확히 1:1로 거울처럼 박는다. nav item이
-// 추가/삭제되면 이 표와 toHaveCount(19)가 함께 깨져 테스트가 drift를 잡는다.
+// admin-shell.tsx NAV_GROUPS와 정확히 1:1로 거울처럼 박는다 (그룹 순서 그대로 평탄화).
+// nav item이 추가/삭제되면 이 표와 toHaveCount(21)가 함께 깨져 테스트가 drift를 잡는다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
+  // [Feature 관리]
   { label: "Feature 지도", href: "/features" },
   { label: "Feature 목록", href: "/admin/features" },
-  { label: "Feature 변경", href: "/admin/features/change-requests" },
   { label: "Feature 검수", href: "/admin/features/change-reviews" },
-  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "중복 검토", href: "/admin/features/dedup-reviews" },
+  { label: "보강 검토", href: "/admin/features/enrichment-reviews" },
   { label: "이슈", href: "/admin/issues" },
-  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "큐레이션 지도", href: "/curated-features" },
+  // [수집 파이프라인]
   { label: "Provider 상태", href: "/ops/providers" },
-  { label: "정합성 점검", href: "/ops/consistency" },
-  { label: "운영 로그", href: "/ops/logs" },
-  { label: "Feature 중복 검토", href: "/admin/features/dedup-reviews" },
-  { label: "Feature 보강 검토", href: "/admin/features/enrichment-reviews" },
-  { label: "Feature 갱신", href: "/admin/features/update-requests" },
-  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "적재 작업", href: "/ops/import-jobs" },
+  { label: "갱신 요청", href: "/admin/features/update-requests" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
-  { label: "백업", href: "/admin/backups" },
   { label: "작업 자동화", href: "/admin/dagster" },
-  { label: "설정", href: "/admin/settings" },
   { label: "ETL 미리보기", href: "/etl" },
+  { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  // [모니터링]
+  { label: "운영 로그", href: "/ops/logs" },
+  { label: "정합성 점검", href: "/ops/consistency" },
+  // [시스템]
+  { label: "파일 관리", href: "/admin/files" },
+  { label: "백업", href: "/admin/backups" },
+  { label: "설정", href: "/admin/settings" },
 ];
 
+// nav 그룹 헤더(비링크) — NAV_GROUPS의 그룹명.
+const NAV_GROUP_HEADERS = [
+  "Feature 관리",
+  "수집 파이프라인",
+  "모니터링",
+  "시스템",
+] as const;
+
 test.describe("home page (/) — nav + metric/status depth", () => {
-  test("admin shell: 19개 nav 링크가 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 21개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
@@ -351,8 +364,15 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 19개 — source navItems 기준.
-    await expect(navigation.getByRole("link")).toHaveCount(19);
+    // nav 링크는 정확히 21개 — source NAV_GROUPS 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(21);
+
+    // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
+    for (const header of NAV_GROUP_HEADERS) {
+      await expect(
+        navigation.getByText(header, { exact: true }),
+      ).toBeVisible();
+    }
   });
 
   test("metric/status 카드가 happy-path payload에서 렌더", async ({ page }) => {
@@ -377,21 +397,21 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     // ── metric 카드 (CardTitle = heading) ──
     const cards = page.locator('[data-slot="card"]');
     const featuresCard = cards.filter({
-      has: page.getByRole("heading", { name: "Features", exact: true }),
+      has: page.getByRole("heading", { name: "Feature", exact: true }),
     });
     await expect(
-      featuresCard.getByRole("heading", { name: "Features", exact: true }),
+      featuresCard.getByRole("heading", { name: "Feature", exact: true }),
     ).toBeVisible();
     // features_total=42 → value cell "42"
     await expect(featuresCard.getByText("42", { exact: true })).toBeVisible();
     // description: 30 active / 12 inactive
     await expect(
-      featuresCard.getByText("30 active / 12 inactive"),
+      featuresCard.getByText("활성 30 / 비활성 12"),
     ).toBeVisible();
 
     // Import jobs MetricCard: import_jobs_by_status 합(1+2=3)을 reduce한다.
     const importJobsCard = cards.filter({
-      has: page.getByRole("heading", { name: "Import jobs", exact: true }),
+      has: page.getByRole("heading", { name: "적재 작업", exact: true }),
     });
     await expect(
       importJobsCard.getByText("3", { exact: true }),
@@ -399,22 +419,36 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // Dedup queue MetricCard: dedup_queue_by_status 합(6+3=9) + pending desc.
     const dedupQueueCard = cards.filter({
-      has: page.getByRole("heading", { name: "Dedup queue", exact: true }),
+      has: page.getByRole("heading", { name: "중복 검수", exact: true }),
     });
     await expect(dedupQueueCard.getByText("9", { exact: true })).toBeVisible();
     await expect(
-      dedupQueueCard.getByText("pending review 6건"),
+      dedupQueueCard.getByText("대기 6건"),
     ).toBeVisible();
 
     // Issues MetricCard: data_integrity_issues.open_total = 7.
     const issuesCard = cards.filter({
-      has: page.getByRole("heading", { name: "Issues", exact: true }),
+      has: page.getByRole("heading", { name: "이슈", exact: true }),
     });
     await expect(issuesCard.getByText("7", { exact: true })).toBeVisible();
 
+    // metric 카드 제목은 해당 관리 화면으로 딥링크된다(개편 B 크로스링크).
+    await expect(
+      featuresCard.getByRole("link", { name: "Feature", exact: true }),
+    ).toHaveAttribute("href", "/admin/features");
+    await expect(
+      importJobsCard.getByRole("link", { name: "적재 작업", exact: true }),
+    ).toHaveAttribute("href", "/ops/import-jobs");
+    await expect(
+      dedupQueueCard.getByRole("link", { name: "중복 검수", exact: true }),
+    ).toHaveAttribute("href", "/admin/features/dedup-reviews");
+    await expect(
+      issuesCard.getByRole("link", { name: "이슈", exact: true }),
+    ).toHaveAttribute("href", "/admin/issues");
+
     // ── 최근 import jobs 테이블 ──
     await expect(
-      page.getByRole("heading", { name: "최근 import jobs" }),
+      page.getByRole("heading", { name: "최근 적재 작업" }),
     ).toBeVisible();
     for (const column of ["job", "kind", "status", "progress", "updated"]) {
       await expect(
@@ -443,7 +477,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // ── Dedup pending 카드 ──
     const dedupPendingCard = cards.filter({
-      has: page.getByRole("heading", { name: "Dedup pending", exact: true }),
+      has: page.getByRole("heading", { name: "중복 검수 대기", exact: true }),
     });
     const dedupLink = dedupPendingCard.getByRole("link", {
       name: /Feature A \/ Feature B/,
@@ -490,7 +524,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // metric value cells → formatCount(undefined)="0". Features 카드로 scope.
     const featuresCard = cards.filter({
-      has: page.getByRole("heading", { name: "Features", exact: true }),
+      has: page.getByRole("heading", { name: "Feature", exact: true }),
     });
     await expect(featuresCard.getByText("0", { exact: true })).toBeVisible();
 
@@ -507,7 +541,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // 최근 import jobs: error.message <p>(text-destructive) + 빈 테이블 emptyMessage.
     const importCard = cards.filter({
-      has: page.getByRole("heading", { name: "최근 import jobs", exact: true }),
+      has: page.getByRole("heading", { name: "최근 적재 작업", exact: true }),
     });
     await expect(
       importCard.getByText(/실패 \(HTTP 500\)/),
@@ -548,13 +582,13 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(metricSkeletons).toHaveCount(4);
     // gate 동안 Features metric heading은 아직 없다.
     await expect(
-      page.getByRole("heading", { name: "Features", exact: true }),
+      page.getByRole("heading", { name: "Feature", exact: true }),
     ).toHaveCount(0);
 
     release();
 
     await expect(
-      page.getByRole("heading", { name: "Features", exact: true }),
+      page.getByRole("heading", { name: "Feature", exact: true }),
     ).toBeVisible();
     await expect(metricSkeletons).toHaveCount(0);
   });
@@ -581,35 +615,36 @@ test.describe("home page (/) — nav + metric/status depth", () => {
         h1: "Feature 목록",
       },
       {
-        label: "Feature 변경",
+        // nav 항목은 아니지만 딥링크 작업 화면 — H1은 요청 작성 모드 기본값.
+        label: "변경 요청 작성",
         href: "/admin/features/change-requests",
-        h1: "Feature 변경",
+        h1: "변경 요청 작성",
       },
-      { label: "이슈", href: "/admin/issues", h1: "Admin issues" },
-      { label: "Provider 상태", href: "/ops/providers", h1: "Providers" },
-      { label: "정합성 점검", href: "/ops/consistency", h1: "Consistency" },
-      { label: "운영 로그", href: "/ops/logs", h1: "Logs" },
+      { label: "이슈", href: "/admin/issues", h1: "이슈" },
+      { label: "Provider 상태", href: "/ops/providers", h1: "Provider 상태" },
+      { label: "정합성 점검", href: "/ops/consistency", h1: "정합성 점검" },
+      { label: "운영 로그", href: "/ops/logs", h1: "운영 로그" },
       {
-        label: "Feature 중복 검토",
+        label: "중복 검토",
         href: "/admin/features/dedup-reviews",
-        h1: "Dedup review",
+        h1: "중복 검토",
       },
       {
-        label: "Feature 보강 검토",
+        label: "보강 검토",
         href: "/admin/features/enrichment-reviews",
-        h1: "Enrichment review",
+        h1: "보강 검토",
       },
       {
         label: "POI 캐시 대상",
         href: "/admin/poi-cache-targets",
-        h1: "POI cache targets",
+        h1: "POI 캐시 대상",
       },
       {
         label: "오프라인 업로드",
         href: "/admin/offline-uploads",
-        h1: "Offline uploads",
+        h1: "오프라인 업로드",
       },
-      { label: "백업", href: "/admin/backups", h1: "Backups" },
+      { label: "백업", href: "/admin/backups", h1: "백업" },
     ];
 
     for (const { href, h1 } of targetsWithH1) {

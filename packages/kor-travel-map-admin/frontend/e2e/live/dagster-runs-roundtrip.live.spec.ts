@@ -199,6 +199,18 @@ async function clickScheduleButton(
     .click();
 }
 
+// 주기 변경/스케줄 시작/즉시 실행은 confirm AlertDialog로 재확인을 받는다(#613 runaway 방지).
+// AlertDialog scope로 좁혀 동명의 행 버튼과 충돌하지 않게 confirm 버튼을 누른다.
+async function confirmScheduleAction(
+  page: Page,
+  confirmLabel: string,
+): Promise<void> {
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: confirmLabel, exact: true })
+    .click();
+}
+
 // dagster-client.tsx renders every section as a shadcn Card (`div[data-slot="card"]`)
 // with a CardTitle that resolves to role=heading (proven by the passing mock specs).
 function card(page: Page, headingName: string): Locator {
@@ -509,7 +521,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
     await providerLink.click();
     await expect(page).toHaveURL(/\/ops\/providers\?provider=/, T);
     await expect(
-      page.getByRole("heading", { level: 1, name: "제공자" }),
+      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible(T);
     await expect(page.getByText(expectedProvider ?? "").first()).toBeVisible(T);
   });
@@ -569,6 +581,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
           .getByLabel(`${target!.name} reason`)
           .fill("live e2e 스케줄 변경");
         await dialog.getByRole("button", { name: "저장" }).click();
+        await confirmScheduleAction(page, "주기 변경");
 
         const response = await patchResponse;
         expect(response.status()).toBe(200);
@@ -605,6 +618,9 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
           schedulePath(target!.name, firstCommand),
         );
         await clickScheduleButton(page, target!.name, firstButton);
+        if (firstCommand === "start") {
+          await confirmScheduleAction(page, "스케줄 시작");
+        }
         expect((await firstResponse).status()).toBe(200);
         await expect(
           page.getByText(`${originalRunning ? "스케줄 중지" : "스케줄 시작"} ·`),
@@ -622,6 +638,9 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
           schedulePath(target!.name, restoreCommand),
         );
         await clickScheduleButton(page, target!.name, restoreButton);
+        if (restoreCommand === "start") {
+          await confirmScheduleAction(page, "스케줄 시작");
+        }
         expect((await restoreResponse).status()).toBe(200);
         await expect(
           page.getByText(`${originalRunning ? "스케줄 시작" : "스케줄 중지"} ·`),
@@ -635,6 +654,7 @@ test.describe("/admin/dagster live ops 읽기 + 실행 round-trip", () => {
           schedulePath(target!.name, "run"),
         );
         await clickScheduleButton(page, target!.name, "즉시 실행");
+        await confirmScheduleAction(page, "즉시 실행");
         const response = await runResponse;
         expect(response.status()).toBe(200);
         const body =

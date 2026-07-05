@@ -20,6 +20,7 @@ import {
   type AdminFeatureDetailData,
   type NearbyFeatureSummary,
 } from "@/api/features";
+import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -100,7 +101,14 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
           const source = row.original;
           return (
             <>
-              <div className="font-medium">{source.provider}</div>
+              <EntityLink
+                className="font-medium"
+                id={source.provider}
+                kind="provider"
+                params={{ dataset_key: source.dataset_key }}
+              >
+                {source.provider}
+              </EntityLink>
               <div className="font-mono text-xs text-muted-foreground">
                 {source.dataset_key}
               </div>
@@ -329,7 +337,14 @@ function IssuesTable({ data }: { data: AdminFeatureDetailData }) {
         accessorKey: "violation_type",
         header: "type",
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.violation_type}</span>
+          <EntityLink
+            className="font-mono text-xs"
+            id=""
+            kind="issue"
+            params={{ feature_id: data.feature.feature_id }}
+          >
+            {row.original.violation_type}
+          </EntityLink>
         ),
       },
       {
@@ -363,7 +378,7 @@ function IssuesTable({ data }: { data: AdminFeatureDetailData }) {
         ),
       },
     ],
-    [],
+    [data.feature.feature_id],
   );
 
   return (
@@ -563,9 +578,13 @@ function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
         header: "request",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
+          <EntityLink
+            className="font-mono text-xs"
+            id={row.original.request_id}
+            kind="changeRequest"
+          >
             {shortId(row.original.request_id, 12)}
-          </span>
+          </EntityLink>
         ),
       },
       { accessorKey: "action", header: "action" },

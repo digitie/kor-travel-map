@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // 영어 enum 상태값 → 간결한 한글. 키는 toLowerCase 후 하이픈을 언더스코어로
@@ -129,20 +130,26 @@ function statusTone(status: string | null | undefined) {
   return "muted" as const;
 }
 
+// tone → ui/badge variant. muted는 ghost 배경과 동일 톤을 로컬 클래스로 유지한다.
+const TONE_VARIANT = {
+  success: "success",
+  destructive: "destructive",
+  warning: "warning",
+  muted: "ghost",
+} as const;
+
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   const tone = statusTone(status);
   return (
-    <span
+    <Badge
       className={cn(
-        "inline-flex h-6 w-fit shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-bold tracking-[0.05em] uppercase",
-        tone === "success" && "bg-success/10 text-success",
-        tone === "destructive" && "bg-destructive/10 text-destructive",
-        tone === "warning" && "bg-warning/10 text-warning",
+        "gap-1.5 text-[11px]",
         tone === "muted" && "bg-surface-subtle text-text-secondary",
       )}
+      variant={TONE_VARIANT[tone]}
     >
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
       {status == null ? "-" : statusLabel(status)}
-    </span>
+    </Badge>
   );
 }

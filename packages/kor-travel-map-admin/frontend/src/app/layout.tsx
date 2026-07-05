@@ -10,6 +10,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import type { ReactNode } from "react";
 
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import { AppQueryClientProvider } from "@/providers/query-client-provider";
@@ -33,7 +34,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="ko" className={cn("font-sans", geist.variable)}>
       <body>
         <AppQueryClientProvider>
-          {children}
+          <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
           <Toaster position="top-right" richColors />
         </AppQueryClientProvider>
       </body>

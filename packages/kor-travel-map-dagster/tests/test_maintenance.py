@@ -28,6 +28,11 @@ class _Client:
         self.pairs: list[tuple[DedupRefreshScope, DedupRefreshScope, bool]] = []
         self.siblings: list[tuple[DedupRefreshScope, bool]] = []
         self.consistency_calls: list[dict[str, Any]] = []
+        self.purge_calls: list[str] = []
+
+    async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
+        self.purge_calls.append(retention)
+        return 7
 
     async def refresh_dedup_candidates_for_scope_pair(
         self,
@@ -201,6 +206,11 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     assert dedup_output["pair_scope_count"] == len(DEFAULT_DEDUP_SCOPE_PAIRS)
     assert dedup_output["sibling_scope_count"] == 0
 
+    # notice purge op(#632)도 같은 job에서 기본 보존 기간으로 실행된다.
+    assert client.purge_calls == ["1 year"]
+    purge_output = result.output_for_node("purge_expired_notices")
+    assert purge_output == {"purged": 7, "retention": "1 year"}
+
 
 def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
     retry_by_name = {
@@ -210,6 +220,7 @@ def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
 
     assert retry_by_name["refresh_dedup_candidates"] == MAINTENANCE_RETRY_POLICY
     assert retry_by_name["run_consistency_check"] == MAINTENANCE_RETRY_POLICY
+    assert retry_by_name["purge_expired_notices"] == MAINTENANCE_RETRY_POLICY
 
 
 def _refresh_result(

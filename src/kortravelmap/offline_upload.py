@@ -27,6 +27,9 @@ from kortravelmap.core.ids import (
     make_payload_hash,
     make_source_record_key,
 )
+from kortravelmap.core.managed_file_states import (
+    MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+)
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_LOADABLE_STATES,
     OFFLINE_UPLOAD_TABULAR_FORMATS,
@@ -47,6 +50,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
+from kortravelmap.infra import file_registry
 from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.feature_repo import FeatureLoadResult, load_bundles
 from kortravelmap.infra.jobs_repo import (
@@ -91,6 +95,37 @@ __all__ = [
 
 OFFLINE_UPLOAD_LOAD_JOB_KIND: Final[str] = "offline_upload_load"
 OFFLINE_UPLOAD_VALIDATE_JOB_KIND: Final[str] = "offline_upload_validate"
+
+
+async def _touch_file_registry(
+    session: AsyncSession,
+    *,
+    storage_key: str,
+    event_kind: str,
+    import_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+) -> None:
+    """파일 registry 소비 기록 hook — 본 job을 절대 실패시키지 않는다.
+
+    SAVEPOINT(``begin_nested``)로 감싸 registry 쿼리 실패가 호출자의 진행 중
+    트랜잭션을 aborted 상태로 만들지 않게 한다(설계 §0.3).
+    """
+
+    async with (
+        file_registry.registry_guard(f"offline-upload:{event_kind}"),
+        session.begin_nested(),
+    ):
+        await file_registry.touch_loaded(
+            session,
+            storage_backend="s3",
+            location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
+            path=storage_key,
+            event_kind=event_kind,
+            actor="api:admin",
+            import_job_id=import_job_id,
+            dagster_run_id=dagster_run_id,
+        )
+
 
 _DETAIL_MODELS: Final[dict[str, type[BaseModel]]] = {
     "place": PlaceDetail,
@@ -372,6 +407,12 @@ async def run_offline_upload_validation_job(
             if validated_upload is None:
                 raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
             upload = validated_upload
+            await _touch_file_registry(
+                session,
+                storage_key=upload.storage_key,
+                event_kind="validated",
+                import_job_id=finished.job_id,
+            )
         final_result = OfflineUploadValidationResult(
             upload=upload,
             job=finished,
@@ -581,6 +622,13 @@ async def run_offline_upload_load_job(
         if loaded_upload is None:
             raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
         upload = loaded_upload
+        await _touch_file_registry(
+            session,
+            storage_key=upload.storage_key,
+            event_kind="loaded",
+            import_job_id=finished.job_id,
+            dagster_run_id=dagster_run_id,
+        )
         return OfflineUploadLoadResult(
             acquired=True,
             upload=upload,

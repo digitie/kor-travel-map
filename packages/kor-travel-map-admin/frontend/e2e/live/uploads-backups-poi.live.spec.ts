@@ -17,7 +17,7 @@ import * as F from "./_fixtures";
 
 const HEADINGS = {
   uploads: "Offline uploads",
-  backups: "Backups",
+  backups: "백업",
   poi: "POI cache targets",
 } as const;
 
@@ -803,7 +803,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
     await page.getByRole("link", { name: "백업", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("nav /admin/backups click POI targets to /admin/poi-cache-targets", async ({ page }) => {
@@ -835,7 +835,7 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
     await page.getByRole("link", { name: "백업", exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
 });
@@ -879,37 +879,37 @@ test.describe("live/uploads-backups-poi kind deep-links (read-only)", () => {
 
   test("backups deep-link ?kind=place loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[0]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=event loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[1]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=notice loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[2]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=price loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[3]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=weather loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[4]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[5]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("backups deep-link ?kind=area loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[6]}`);
-    await expectHeading(page, "Backups");
+    await expectHeading(page, "백업");
   });
 
   test("poi deep-link ?kind=place loads heading", async ({ page }) => {

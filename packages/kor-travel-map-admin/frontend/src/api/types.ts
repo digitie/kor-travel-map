@@ -567,6 +567,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Files
+         * @description 레지스트리 파일 목록 — kind/status/provider/location/기간 필터 + 검색.
+         */
+        get: operations["list_files_v1_admin_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/files/rescan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescan Files
+         * @description api-가시 location(backup_root) 동기 재스캔 + DB backfill.
+         *
+         *     dagster 소유 location(mois_source/object_store/offline_uploads 실체)은 여기서
+         *     스캔할 수 없으므로 ``deferred_locations`` 로 안내한다 — 즉시성이 필요하면
+         *     Dagster ``managed_file_scan`` job을 수동 실행한다(6시간 스케줄과 동일 로직).
+         */
+        post: operations["rescan_files_v1_admin_files_rescan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/files/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files Summary
+         * @description 요약 카드 집계 — kind/status/location 별 건수·용량.
+         */
+        get: operations["files_summary_v1_admin_files_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Detail
+         * @description 파일 상세 — provenance links + 최근 이벤트(50건).
+         */
+        get: operations["file_detail_v1_admin_files__file_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/files/{file_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Events
+         * @description 파일 이벤트 페이지네이션.
+         */
+        get: operations["file_events_v1_admin_files__file_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/files/{file_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge File
+         * @description 좁은 gate — 소유 행이 사라진 S3 zombie orphan만 레지스트리에서 purge.
+         *
+         *     실체 S3 object hard-delete는 S3 자격이 있는 dagster 스캐너가 reconcile한다.
+         *     여기서는 서버가 최신 상태를 재검증한 뒤 레지스트리 행을 ``deleted``(purged)로
+         *     플래그하고 ``purged`` 이벤트를 남긴다.
+         */
+        post: operations["purge_file_v1_admin_files__file_id__purge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/issues": {
         parameters: {
             query?: never;
@@ -5152,6 +5280,145 @@ export interface components {
             /** Lon */
             lon: number;
         };
+        /** ManagedFileDetail */
+        ManagedFileDetail: {
+            /** Events */
+            events: components["schemas"]["ManagedFileEventModel"][];
+            file: components["schemas"]["ManagedFileModel"];
+            /** Links */
+            links: components["schemas"]["ManagedFileLink"][];
+        };
+        /** ManagedFileDetailResponse */
+        ManagedFileDetailResponse: {
+            data: components["schemas"]["ManagedFileDetail"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ManagedFileEventModel
+         * @description 파일 생애 이벤트 1건.
+         */
+        ManagedFileEventModel: {
+            /** Actor */
+            actor: string | null;
+            /** Dagster Run Id */
+            dagster_run_id: string | null;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Event Id */
+            event_id: number;
+            /** Event Kind */
+            event_kind: string;
+            /** File Id */
+            file_id: number;
+            /** Import Job Id */
+            import_job_id: string | null;
+            /** Occurred At */
+            occurred_at: string;
+        };
+        /** ManagedFileEventsResponse */
+        ManagedFileEventsResponse: {
+            /** Data */
+            data: components["schemas"]["ManagedFileEventModel"][];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ManagedFileLink
+         * @description 파일이 연결된 다른 엔티티로의 서버 조립 deep-link.
+         */
+        ManagedFileLink: {
+            /** Href */
+            href?: string | null;
+            /** Label */
+            label: string;
+            /** Rel */
+            rel: string;
+        };
+        /** ManagedFileListResponse */
+        ManagedFileListResponse: {
+            /** Data */
+            data: components["schemas"]["ManagedFileModel"][];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ManagedFileModel
+         * @description 레지스트리 파일 1건 (list/detail 공용).
+         */
+        ManagedFileModel: {
+            /** Byte Size */
+            byte_size: number | null;
+            /** Checksum Sha256 */
+            checksum_sha256: string | null;
+            /** Created At */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Downloaded At */
+            downloaded_at: string | null;
+            /** File Id */
+            file_id: number;
+            /** Is Directory */
+            is_directory: boolean;
+            /** Kind */
+            kind: string;
+            /** Last Loaded At */
+            last_loaded_at: string | null;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /** Location */
+            location: string;
+            /** Meta */
+            meta: {
+                [key: string]: unknown;
+            };
+            /** Origin Dagster Run Id */
+            origin_dagster_run_id: string | null;
+            /** Origin Import Job Id */
+            origin_import_job_id: string | null;
+            /** Orphan Reason */
+            orphan_reason: string | null;
+            /** Path */
+            path: string;
+            /** Provider */
+            provider: string | null;
+            /** Registered By */
+            registered_by: string;
+            /** Status */
+            status: string;
+            /** Storage Backend */
+            storage_backend: string;
+            /** Updated At */
+            updated_at: string;
+            /** Upload Id */
+            upload_id: string | null;
+        };
+        /** ManagedFilePurgeResponse */
+        ManagedFilePurgeResponse: {
+            data: components["schemas"]["ManagedFileModel"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ManagedFileRescanResponse */
+        ManagedFileRescanResponse: {
+            data: components["schemas"]["RescanData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ManagedFileSummaryData */
+        ManagedFileSummaryData: {
+            /** By Kind */
+            by_kind: components["schemas"]["SummaryBucket"][];
+            /** By Location */
+            by_location: components["schemas"]["SummaryBucket"][];
+            /** By Status */
+            by_status: components["schemas"]["SummaryBucket"][];
+        };
+        /** ManagedFileSummaryResponse */
+        ManagedFileSummaryResponse: {
+            data: components["schemas"]["ManagedFileSummaryData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * Meta
          * @description 전 REST 표면에서 공유하는 성공 응답 metadata.
@@ -6836,6 +7103,25 @@ export interface components {
             data: components["schemas"]["VersionData"];
             meta: components["schemas"]["Meta"];
         };
+        /** RescanData */
+        RescanData: {
+            /** Deferred Locations */
+            deferred_locations: string[];
+            /** Note */
+            note?: string | null;
+            /** Results */
+            results: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** RescanRequest */
+        RescanRequest: {
+            /**
+             * Locations
+             * @description 재스캔할 location 목록. 생략 시 api-가시 location(backup_root) 동기 스캔 + DB backfill. dagster 소유 location은 deferred_locations로 안내.
+             */
+            locations?: string[] | null;
+        };
         /**
          * RestoreRunRequest
          * @description Staging restore command request.
@@ -7048,6 +7334,17 @@ export interface components {
              * @enum {string}
              */
             type: "sigungu_by_radius";
+        };
+        /** SummaryBucket */
+        SummaryBucket: {
+            /** Byte Size */
+            byte_size?: number | null;
+            /** Count */
+            count: number;
+            /** Key */
+            key: string;
+            /** Last Seen At */
+            last_seen_at?: string | null;
         };
         /**
          * SyncStateSummary
@@ -7967,6 +8264,8 @@ export interface operations {
                 issue_type?: string[] | null;
                 updated_from?: string | null;
                 updated_to?: string | null;
+                /** @description 종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다. */
+                include_ended?: boolean;
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "name" | "updated_at" | "created_at" | "kind" | "status" | "provider" | "issue_count";
@@ -9404,6 +9703,259 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_files_v1_admin_files_get: {
+        parameters: {
+            query?: {
+                kind?: string[] | null;
+                status?: string[] | null;
+                provider?: string | null;
+                location?: string | null;
+                registered_by?: string | null;
+                q?: string | null;
+                min_age_days?: number | null;
+                max_age_days?: number | null;
+                sort?: "downloaded_at" | "last_loaded_at" | "last_seen_at" | "byte_size" | "updated_at";
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFileListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    rescan_files_v1_admin_files_rescan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RescanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFileRescanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    files_summary_v1_admin_files_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFileSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    file_detail_v1_admin_files__file_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFileDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    file_events_v1_admin_files__file_id__events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFileEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    purge_file_v1_admin_files__file_id__purge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedFilePurgeResponse"];
                 };
             };
             /** @description Validation Error */

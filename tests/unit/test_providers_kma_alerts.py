@@ -13,6 +13,11 @@ from kortravelmap.providers.kma import (
     KMA_WEATHER_ALERT_CATEGORY,
     KMA_WEATHER_ALERT_DATASET_KEY,
     KMA_WEATHER_ALERT_MARKER_ICON,
+    is_kma_alert_lift_title,
+    kma_alert_natural_key,
+    kma_alert_phenomena_in_title,
+    kma_alert_phenomenon,
+    weather_alert_lift_closures,
     weather_alerts_to_notice_bundles,
 )
 
@@ -79,9 +84,10 @@ def test_one_alert_two_regions_yields_two_bundles() -> None:
     bundles = weather_alerts_to_notice_bundles([_HEAVY_RAIN], fetched_at=_NOW)
     assert len(bundles) == 2
     keys = [b.source_record.source_entity_id for b in bundles]
+    # 사건 단위 자연키(#632) — region × 현상 토큰. 발표 시각/번호는 키에 없다.
     assert keys == [
-        "ALERT-2026-05-28-001::11B10101",
-        "ALERT-2026-05-28-001::11B20201",
+        "11B10101::호우",
+        "11B20201::호우",
     ]
 
 
@@ -214,3 +220,143 @@ def test_alert_no_regions_skipped() -> None:
         regions=[],
     )
     assert weather_alerts_to_notice_bundles([bare], fetched_at=_NOW) == []
+
+
+# ── 사건 단위 identity + 해제 라이프사이클 (#632) ─────────────────────────
+
+
+def _announce(
+    alert_id: str,
+    title: str,
+    issued_at: datetime,
+    *,
+    level: str | None = "주의보",
+    regions: list[_Region] | None = None,
+) -> _Alert:
+    # 실제 dagster 경로처럼 alert_type은 title에서 뽑은 현상 토큰(정규화 가능 값).
+    return _Alert(
+        alert_id=alert_id,
+        alert_type=kma_alert_phenomenon(title),
+        level=level,
+        title=title,
+        description=None,
+        issued_at=issued_at,
+        effective_from=None,
+        effective_until=None,
+        source_agency="기상청",
+        regions=regions if regions is not None else [_SEOUL],
+    )
+
+
+@pytest.mark.unit
+def test_reannouncement_keeps_same_feature_id() -> None:
+    """같은 특보의 재발표(tm_fc/seq 변경)는 같은 feature로 upsert된다."""
+    first = _announce("108:202607030600:20", "폭염주의보 발표", _NOW)
+    again = _announce("108:202607031200:23", "폭염주의보 발표", _NOW + timedelta(hours=6))
+    a = weather_alerts_to_notice_bundles([first], fetched_at=_NOW)[0]
+    b = weather_alerts_to_notice_bundles([again], fetched_at=_NOW)[0]
+    assert a.feature.feature_id == b.feature.feature_id
+    assert a.source_record.source_entity_id == b.source_record.source_entity_id
+    # 발표 원문은 payload_hash가 달라 source_record 이력으로는 구분된다.
+    assert a.source_record.source_record_key != b.source_record.source_record_key
+
+
+@pytest.mark.unit
+def test_level_escalation_keeps_same_feature_id() -> None:
+    """주의보 → 경보 승격도 같은 사건 — 같은 feature로 upsert."""
+    watch = _announce("108:202607030600:20", "폭염주의보 발표", _NOW, level="주의보")
+    warning = _announce(
+        "108:202607031200:23",
+        "폭염경보 발표",
+        _NOW + timedelta(hours=6),
+        level="경보",
+    )
+    a = weather_alerts_to_notice_bundles([watch], fetched_at=_NOW)[0]
+    b = weather_alerts_to_notice_bundles([warning], fetched_at=_NOW)[0]
+    assert a.feature.feature_id == b.feature.feature_id
+
+
+@pytest.mark.unit
+def test_distinct_phenomena_stay_distinct_features() -> None:
+    """풍랑/강풍은 notice_type이 둘 다 generic weather_alert지만 별개 사건이다."""
+    wind = _announce("108:202607030600:20", "강풍주의보 발표", _NOW)
+    waves = _announce("108:202607030600:21", "풍랑주의보 발표", _NOW)
+    a = weather_alerts_to_notice_bundles([wind], fetched_at=_NOW)[0]
+    b = weather_alerts_to_notice_bundles([waves], fetched_at=_NOW)[0]
+    assert a.feature.feature_id != b.feature.feature_id
+
+
+@pytest.mark.unit
+def test_lift_title_creates_no_bundle() -> None:
+    """해제 공고는 feature를 만들지 않는다."""
+    lift = _announce("108:202607031800:25", "폭염주의보 해제", _NOW)
+    assert weather_alerts_to_notice_bundles([lift], fetched_at=_NOW) == []
+
+
+@pytest.mark.unit
+def test_lift_closure_targets_announced_feature() -> None:
+    """해제 closure의 feature_id는 발표 bundle의 feature_id와 일치한다."""
+    announced = weather_alerts_to_notice_bundles(
+        [_announce("108:202607030600:20", "폭염주의보 발표", _NOW)],
+        fetched_at=_NOW,
+    )[0]
+    lifted_at = _NOW + timedelta(hours=12)
+    closures = weather_alert_lift_closures(
+        [_announce("108:202607031800:25", "폭염주의보 해제", lifted_at)]
+    )
+    assert len(closures) == 1
+    assert closures[0].feature_id == announced.feature.feature_id
+    assert closures[0].closed_at == lifted_at
+    assert closures[0].phenomenon == "폭염"
+
+
+@pytest.mark.unit
+def test_combined_lift_title_closes_each_phenomenon() -> None:
+    """결합 해제문은 현상 토큰마다 closure 1건씩 fan-out."""
+    lifted_at = _NOW + timedelta(hours=12)
+    closures = weather_alert_lift_closures(
+        [_announce("108:202607031800:26", "풍랑주의보·호우주의보 해제", lifted_at)]
+    )
+    phenomena = {c.phenomenon for c in closures}
+    assert phenomena == {"풍랑", "호우"}
+    ids = {c.feature_id for c in closures}
+    assert len(ids) == 2
+
+
+@pytest.mark.unit
+def test_lift_closures_dedupe_latest_per_region_phenomenon() -> None:
+    """같은 region×현상의 해제가 여러 건이면 최신 issued_at 1건만 남는다."""
+    older = _announce("108:202607031200:24", "폭염주의보 해제", _NOW)
+    newer = _announce("108:202607031800:26", "폭염주의보 해제", _NOW + timedelta(hours=6))
+    closures = weather_alert_lift_closures([older, newer])
+    assert len(closures) == 1
+    assert closures[0].closed_at == _NOW + timedelta(hours=6)
+
+
+@pytest.mark.unit
+def test_batch_dedupe_keeps_latest_announcement() -> None:
+    """3일 window 재조회로 같은 사건 발표가 여러 건이면 최신 1건만 남는다."""
+    first = _announce("108:202607030600:20", "폭염주의보 발표", _NOW, level="주의보")
+    newer = _announce(
+        "108:202607031200:23",
+        "폭염경보 발표",
+        _NOW + timedelta(hours=6),
+        level="경보",
+    )
+    bundles = weather_alerts_to_notice_bundles([first, newer], fetched_at=_NOW)
+    assert len(bundles) == 1
+    detail = bundles[0].feature.detail
+    assert detail is not None
+    assert detail.severity == 2  # type: ignore[union-attr] — 경보(최신)가 남는다.
+
+
+@pytest.mark.unit
+def test_phenomenon_helpers() -> None:
+    assert kma_alert_phenomenon("수도권 호우주의보") == "호우"
+    assert kma_alert_phenomenon("특이사항 없음") == "weather_alert"
+    # 토큰 tuple 순서(폭풍해일→호우→…)로 스캔 — title 등장 순서가 아니다.
+    assert kma_alert_phenomena_in_title("풍랑주의보·호우주의보 해제") == ["호우", "풍랑"]
+    assert kma_alert_phenomena_in_title("특이사항 없음") == ["weather_alert"]
+    assert is_kma_alert_lift_title("폭염주의보 해제") is True
+    assert is_kma_alert_lift_title("폭염주의보 발표") is False
+    assert kma_alert_natural_key("stn:108", "폭염") == "stn:108::폭염"

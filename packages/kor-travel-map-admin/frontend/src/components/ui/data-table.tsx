@@ -372,6 +372,7 @@ function VirtualizedTable<TData>({
         role="table"
         aria-label={ariaLabel}
         aria-rowcount={rows.length + headerRowCount}
+        aria-colcount={colCount}
         className="grid w-full caption-bottom text-sm"
       >
         <thead

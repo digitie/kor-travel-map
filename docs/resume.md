@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-05 (claude) — 관리 UI 개편 D: 파일 레지스트리·추적 UI 로컬 완료 (PR-B 위 스택)
+
+- **완료**: 파일 레지스트리(`ops.managed_files`+events, 0040) + hook 계측 + 소유권 분리 스캐너
+  (api=backup_root, dagster=mois/S3 `managed_file_scan` job) + `/v1/admin/files` API + `/admin/files`
+  추적 UI(요약 칩·필터·목록·provenance 상세) + nav(시스템 그룹) + e2e(nav 21·scenario·mocked smoke) + docs.
+- **검증**: Python ruff/mypy --strict/lint-imports(4 kept)·dagster defs+21 test·router 7 test green;
+  openapi/user·types.ts 재생성; 프론트 type-check·eslint 0 error·vitest 57 green. Playwright 미실행(Windows/n150 런).
+- **주의**: 0040이 notice #633의 0040과 충돌 → **최종 통합 시 coordinator가 merge-migration 추가**.
+- **다음 한 작업**: PR(base=`feat/admin-overhaul-b-nav`) CI green → A→B→C→D 스택 + notice(#633)·opinet(#632)
+  순차 머지 → n150 배포 → docker-playwright live UI e2e 전체 green 확인 후 최종 머지.
+
+## 2026-07-04 (claude) — 관리 UI 개편 A+B 로컬 완료 (PR 스택)
+
+- **완료**: PR-A(공용 컴포넌트 16종+검증 헬퍼+파일럿, #634) 위에 PR-B(nav 4그룹·헤딩 정본·
+  크로스링크/딥링크 전체·브레드크럼 4곳·spec 정합화 29파일) 스택 구현.
+- **검증**: tsc clean · eslint 0 errors · vitest 57 passed.
+- **다음 한 작업**: PR-C(페이지 이관+validation/assist+텍스트 절약) → 통합 브랜치 n150 배포 →
+  docker-playwright live e2e 전체 green 확인 → A/B/C + notice(#633) + opinet(#632) 순차 머지.
+
 ## 2026-07-03 (claude) — 큐레이션 관리 UX 개편 로컬 구현 완료
 
 - **완료**: 큐레이션 관리 화면을 라이프사이클 스트립(상태 칩=필터)+후보 검토/소스 규칙 탭으로
