@@ -434,6 +434,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "providers": None,
             "cursor_feature_id": None,
             "limit": 200,
+            "price_stale_hide_days": 4,
         },
     )
     _assert_uses_index(in_bbox, *_COORD_SPATIAL_INDEXES)
@@ -549,6 +550,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "providers": None,
             "cursor_feature_id": None,
             "limit": 200,
+            "price_stale_hide_days": 4,
         },
         force_index=False,
     )

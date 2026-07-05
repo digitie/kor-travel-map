@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from datetime import date
 from types import ModuleType
 from typing import Any, cast
 
@@ -1645,18 +1646,21 @@ def test_opinet_stations_low_top_area_call_budget_uses_fallback(
         },
         around={(127.0, 37.5, "B027"): [_FakeStation("A1", "B027")]},
     )
-    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS", 2)
     monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 2)
     monkeypatch.setattr(
         provider_fetchers,
         "_opinet_sample_grid_centers",
         lambda: iter([(127.0, 37.5)]),
     )
+    # lowTop10 상한은 settings 노브(env KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS)로
+    # 조절한다 — 모듈 상수는 기본값일 뿐이다. 회전은 0으로 고정해 결정적으로.
     settings = KorTravelMapSettings(
-        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+        opinet_api_key=SecretStr("certkey"),
+        opinet_scope_mode="low_top_area",
+        opinet_low_top_max_calls=2,
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = list(fetch_opinet_stations(settings, rotation_offset=0))
 
     assert [r.uni_id for r in records] == ["A1"]
     client = fake.instances[0]
@@ -1670,6 +1674,101 @@ def test_opinet_stations_low_top_area_call_budget_uses_fallback(
         (127.0, 37.5, 5000, "B034"),
     ]
     assert client.closed is True
+
+
+def test_opinet_rotation_offset_advances_daily() -> None:
+    """로테이션 offset은 날짜당 윈도 크기만큼 결정적으로 전진한다."""
+    window = 60
+    d0 = provider_fetchers._opinet_rotation_offset(
+        window_areas=window, on_date=date(2026, 7, 3)
+    )
+    d1 = provider_fetchers._opinet_rotation_offset(
+        window_areas=window, on_date=date(2026, 7, 4)
+    )
+    assert d1 - d0 == window
+    # 같은 날짜는 항상 같은 offset (결정적).
+    assert d0 == provider_fetchers._opinet_rotation_offset(
+        window_areas=window, on_date=date(2026, 7, 3)
+    )
+    # 230개 시군 기준 4일 연속 윈도가 전체를 커버한다(≈4일 1주기).
+    areas_total = 230
+    covered: set[int] = set()
+    for day in range(4):
+        shift = (d0 + day * window) % areas_total
+        covered.update((shift + i) % areas_total for i in range(window))
+    assert len(covered) == areas_total
+
+
+def test_opinet_stations_low_top_area_rotates_window_by_offset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """offset이 윈도 크기만큼 다르면 다른 시군 윈도를 소비한다(로테이션 핵심)."""
+    child = {
+        "01": [
+            _FakeOpinetArea("0101"),
+            _FakeOpinetArea("0102"),
+            _FakeOpinetArea("0103"),
+        ]
+    }
+    low_top = {
+        ("0101", "B027"): [_FakeStation("A1", "B027")],
+        ("0102", "B027"): [_FakeStation("A2", "B027")],
+        ("0103", "B027"): [_FakeStation("A3", "B027")],
+    }
+    # max_calls=3 → 윈도 = 시군 1개/run. grid fallback은 차단.
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"),
+        opinet_scope_mode="low_top_area",
+        opinet_low_top_max_calls=3,
+    )
+    monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 0)
+
+    hit_areas: list[str] = []
+    for offset in (0, 1, 2, 3):
+        fake = _install_fake_opinet(
+            monkeypatch,
+            stations=[],
+            root_areas=[_FakeOpinetArea("01")],
+            child_areas=child,
+            low_top=dict(low_top),
+        )
+        list(fetch_opinet_stations(settings, rotation_offset=offset))
+        client = fake.instances[0]
+        areas_this_run = {call[2] for call in client.low_top_calls}
+        assert len(areas_this_run) == 1
+        hit_areas.append(next(iter(areas_this_run)))
+
+    # offset 0/1/2가 서로 다른 시군을 소비하고, 3은 처음으로 wrap한다.
+    assert hit_areas[:3] == ["0101", "0102", "0103"]
+    assert hit_areas[3] == "0101"
+
+
+def test_opinet_stations_low_top_area_rotation_noop_when_window_covers_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """시군 목록이 한 윈도에 다 들어가면 회전은 no-op — 기존 동작 보존."""
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[_FakeOpinetArea("01")],
+        child_areas={"01": [_FakeOpinetArea("0101"), _FakeOpinetArea("0102")]},
+        low_top={
+            ("0101", "B027"): [_FakeStation("A1", "B027")],
+            ("0102", "B027"): [_FakeStation("A2", "B027")],
+        },
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    # 기본 상한(180) 윈도(60) > 시군 2개 → 아무 offset이어도 순서 불변.
+    records = list(fetch_opinet_stations(settings, rotation_offset=987_654))
+
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert [call[2] for call in client.low_top_calls] == [
+        "0101", "0101", "0101", "0102", "0102", "0102",
+    ]
 
 
 def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
@@ -1688,7 +1787,7 @@ def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
         around={(127.0, 37.5, "B027"): [_FakeStation("Z9", "B027")]},
     )
     # budget=4: get_area_codes(root)=1, get_area_codes("01")=1, lowTop10 2건 → 소진.
-    monkeypatch.setattr(provider_fetchers, "_OPINET_RUN_CALL_BUDGET", 4)
+    # run budget은 settings 노브(env KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET)로 조절.
     monkeypatch.setattr(provider_fetchers, "_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS", 99)
     grid_called = False
 
@@ -1699,10 +1798,12 @@ def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
 
     monkeypatch.setattr(provider_fetchers, "_opinet_sample_grid_centers", _grid)
     settings = KorTravelMapSettings(
-        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+        opinet_api_key=SecretStr("certkey"),
+        opinet_scope_mode="low_top_area",
+        opinet_run_call_budget=4,
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = list(fetch_opinet_stations(settings, rotation_offset=0))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]

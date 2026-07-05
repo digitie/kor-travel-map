@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AirQualityLoadResult",
+    "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
     "FeatureSearchPage",
@@ -79,6 +81,28 @@ __all__ = [
     "search_features",
     "features_nearby_poi_cache_target",
 ]
+
+
+def _price_stale_hide_days_default() -> int:
+    """현재가 표시 제외 지평선(일) 기본값 — env 우선, 최소 1일.
+
+    repo 계층은 primitive 인자만 받는 설계라 pydantic settings를 만들지 않고
+    (필수 env 없이도 import 가능해야 함) env를 import 시 한 번 읽는다. 기본 4일
+    = OpiNet 시군 윈도 로테이션 전체 주기 — 이보다 오래된 관측은 "현재 가격"이
+    아니라 이력으로만 취급한다(값 보존, 표시만 제외).
+    """
+    raw = os.environ.get("KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS", "")
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return 4
+    return max(parsed, 1)
+
+
+DEFAULT_PRICE_STALE_HIDE_DAYS: Final[int] = _price_stale_hide_days_default()
+"""현재가(카드 current + 지도 price_summary) 표시 제외 지평선(일).
+
+env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1주기)."""
 
 
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
@@ -526,6 +550,12 @@ LEFT JOIN LATERAL (
             value_number, unit, observed_at
         FROM feature.feature_price_values AS pv
         WHERE pv.feature_id = f.feature_id
+          -- 신선도 지평선: 로테이션 주기 밖 관측은 현재가 마커에서 제외(이력 보존).
+          AND (
+            CAST(:price_stale_hide_days AS integer) IS NULL
+            OR pv.observed_at >= now()
+                 - make_interval(days => CAST(:price_stale_hide_days AS integer))
+          )
         ORDER BY product_key, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
@@ -647,6 +677,12 @@ LEFT JOIN LATERAL (
             value_number, unit, observed_at
         FROM feature.feature_price_values AS pv
         WHERE pv.feature_id = f.feature_id
+          -- 신선도 지평선: 로테이션 주기 밖 관측은 현재가 마커에서 제외(이력 보존).
+          AND (
+            CAST(:price_stale_hide_days AS integer) IS NULL
+            OR pv.observed_at >= now()
+                 - make_interval(days => CAST(:price_stale_hide_days AS integer))
+          )
         ORDER BY product_key, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
@@ -2197,6 +2233,7 @@ async def features_in_bbox(
     limit: int = 1000,
     cursor: str | None = None,
     include_geometry: bool = False,
+    price_stale_hide_days: int | None = DEFAULT_PRICE_STALE_HIDE_DAYS,
 ) -> list[dict[str, Any]]:
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
@@ -2207,27 +2244,28 @@ async def features_in_bbox(
     지도 표시용 GeoJSON/면적을 반환한다. ``providers``가 주어지면 primary source
     provider 기준(``provider_sync.source_links.is_primary_source``)으로 추가 필터한다
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
+    ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다
+    (로테이션 주기 밖 옛 가격이 현재가 마커로 보이지 않게, ``None``이면 끔).
     """
     rows = (
-        (
-            await session.execute(
-                text(
-                    _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
-                    if include_geometry
-                    else _FEATURES_IN_BBOX_SQL
-                ),
-                {
-                    "min_lon": min_lon,
-                    "min_lat": min_lat,
-                    "max_lon": max_lon,
-                    "max_lat": max_lat,
-                    "kinds": kinds,
-                    "categories": _normalized_filter(categories),
-                    "providers": _normalized_filter(providers),
-                    "limit": limit,
-                    "cursor_feature_id": _bbox_cursor_feature_id(cursor),
-                },
-            )
+        await session.execute(
+            text(
+                _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
+                if include_geometry
+                else _FEATURES_IN_BBOX_SQL
+            ),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": kinds,
+                "categories": _normalized_filter(categories),
+                "providers": _normalized_filter(providers),
+                "limit": limit,
+                "cursor_feature_id": _bbox_cursor_feature_id(cursor),
+                "price_stale_hide_days": price_stale_hide_days,
+            },
         )
         .mappings()
         .all()

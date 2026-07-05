@@ -48,6 +48,20 @@
 - **ADDED**: 만료 notice purge(§9, 종료/발표 +1년)를 maintenance job op로 구현.
 - **MIGRATION**: `0040_notice_dedup_cleanup` — 구세대 identity로 쌓인 중복 notice
   일회성 soft-delete(원문 이력 보존).
+### OpiNet price staleness 근본 수정 (2026-07-03)
+
+- **FIXED**: `low_top_area` 가격 수집이 매일 같은 ~60개 시군(top-20)만 갱신해 price
+  feature 37%가 3–7일 stale로 누적되던 문제 — run 날짜 기반 **시군 윈도 로테이션**으로
+  전국(~230 시군)을 ≈4일 1주기로 순회한다(호출량 불변, ~198/1,500).
+- **ADDED**: 수집 커버리지 운영 노브 `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180),
+  `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`(기본 600).
+- **CHANGED**: `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`(기본 4일)보다 오래된 price 관측은
+  지도 마커 `price_summary`와 price card `current`에서 제외한다(이력 보존) — 로테이션
+  주기 밖 옛 가격이 현재가로 표시되지 않는다.
+- **CHANGED**: price card `is_stale` 기본 임계를 18h → 현재가 지평선(기본 4일)에서
+  파생하도록 정합 — 로테이션 아래에서 정상 갱신 중인 주유소가 상세 패널에 항상
+  stale로 표시되던 증상 해소. `is_stale`은 이제 `current`가 비는 조건과 일치한다
+  (weather card 임계는 별도 상수, 영향 없음).
 
 ### 큐레이션 관리 UX 개편 (2026-07-03)
 

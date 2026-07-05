@@ -223,6 +223,27 @@ class KorTravelMapSettings(BaseSettings):
             "env ``OPINET_SCOPE_RADIUS_M``."
         ),
     )
+    opinet_low_top_max_calls: int = Field(
+        default=180,
+        ge=1,
+        description=(
+            "``low_top_area`` 모드의 ``lowTop10`` area×product 호출 상한. 기본 180 = "
+            "제품 3종 기준 시군 60개 윈도/run. 시군 로테이션과 결합해 전국(~230 시군) "
+            "1주기 ≈ 4일. 상향 시 무료키 일일 한도(1,500회) 대비 여유를 계산할 것 — "
+            "매월 1일 place job이 같은 lowTop10 경로를 한 번 더 돈다. "
+            "env ``OPINET_LOW_TOP_MAX_CALLS``."
+        ),
+    )
+    opinet_run_call_budget: int = Field(
+        default=600,
+        ge=1,
+        description=(
+            "``low_top_area`` run당 OpiNet 총 호출 hard cap(#545 — get_area_codes + "
+            "lowTop10 + aroundAll 합산). 기본 600이면 월간 place job과 같은 날 "
+            "겹쳐도(2×600=1,200) 무료키 1,500회/일 아래. "
+            "env ``OPINET_RUN_CALL_BUDGET``."
+        ),
+    )
     kma_weather_extra_points: str | None = Field(
         default=None,
         description=(

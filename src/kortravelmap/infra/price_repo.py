@@ -17,7 +17,10 @@ from sqlalchemy import text
 
 from kortravelmap.core.ids import make_price_value_key
 from kortravelmap.dto._time import kst_now
-from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.feature_repo import (
+    DEFAULT_PRICE_STALE_HIDE_DAYS,
+    FeatureLoadResult,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -27,6 +30,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_PRICE_FRESHNESS_SECONDS",
+    "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "PriceCard",
     "PriceFeatureLoadResult",
     "PricePoint",
@@ -34,8 +38,17 @@ __all__ = [
     "load_price_values",
 ]
 
-DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = 18 * 60 * 60
-"""하루 2회 price ETL 기준 freshness 여유값(12h 주기 + 지연)."""
+DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = (
+    DEFAULT_PRICE_STALE_HIDE_DAYS * 24 * 60 * 60
+)
+"""price card ``is_stale`` 기본 임계 — 현재가 표시 지평선과 동일 값에서 파생.
+
+과거엔 18h(일 1회 ETL 가정)였지만, OpiNet 시군 윈도 로테이션(전국 ≈4일 1주기)
+아래에서는 정상 갱신 중인 주유소도 최장 ~4일 관측 공백이 생긴다 — 18h 기준이면
+대부분이 항상 stale로 표시된다(사용자 가시 증상). 이제 ``is_stale``은 "현재가
+지평선(``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS``, 기본 4일) 안에 관측이 없다"를
+뜻하며, 지평선이 ``current``를 비우는 조건과 일치한다(단일 노브, drift 없음).
+호출별 ``freshness_seconds`` override는 그대로 유지."""
 
 
 @dataclass(frozen=True)
@@ -127,6 +140,11 @@ WITH latest AS (
       AND (
         CAST(:asof AS timestamptz) IS NULL
         OR observed_at <= CAST(:asof AS timestamptz)
+      )
+      AND (
+        CAST(:asof AS timestamptz) IS NOT NULL
+        OR CAST(:stale_hide_days AS integer) IS NULL
+        OR observed_at >= now() - make_interval(days => CAST(:stale_hide_days AS integer))
       )
     ORDER BY product_key, observed_at DESC
 )
@@ -236,21 +254,34 @@ async def build_price_card(
     asof: datetime | None = None,
     history_limit: int = 100,
     freshness_seconds: int = DEFAULT_PRICE_FRESHNESS_SECONDS,
+    stale_hide_days: int | None = DEFAULT_PRICE_STALE_HIDE_DAYS,
 ) -> PriceCard:
     """feature의 price card — 제품별 최신값과 최근 이력.
 
     각 ``product_key``에서 ``observed_at`` 최신 1건을 현재 가격으로 고르고,
     history는 최신 관측순으로 제한한다. card 자체는 feature 존재 여부를 판정하지
     않는다. 호출 라우터가 필요하면 feature 상세 조회와 조합한다.
+
+    ``stale_hide_days``보다 오래된 관측은 **current에서 제외**한다(이력은 유지) —
+    로테이션 주기 밖으로 밀린 주유소가 옛 가격을 현재가처럼 보이지 않게 한다.
+    ``asof`` 조회(과거 시점 질의)에는 지평선을 적용하지 않고, ``None``이면
+    지평선을 끈다.
     """
 
     limit = min(max(history_limit, 1), 500)
-    params = {"feature_id": feature_id, "asof": asof}
+    params: dict[str, Any] = {
+        "feature_id": feature_id,
+        "asof": asof,
+        "stale_hide_days": stale_hide_days,
+    }
     current_rows = (
         await session.execute(text(_CURRENT_SQL), params)
     ).mappings().all()
     history_rows = (
-        await session.execute(text(_HISTORY_SQL), {**params, "limit": limit})
+        await session.execute(
+            text(_HISTORY_SQL),
+            {"feature_id": feature_id, "asof": asof, "limit": limit},
+        )
     ).mappings().all()
 
     current = _sort_current([_price_point(row) for row in current_rows])
