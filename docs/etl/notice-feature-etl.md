@@ -192,11 +192,29 @@ identity 재설계로 해소했다:
 | `kma_weather_alerts` | `{region_code}::{현상 토큰}` (`kma_alert_natural_key`) — tm_fc/seq/등급 제외. 현상 토큰(호우/풍랑/…)은 `notice_type`이 generic으로 접는 특보를 구분한다 | **해제** title은 feature를 만들지 않고 `weather_alert_lift_closures` → `close_notice_features`가 열린 feature의 `valid_end_time`을 채운다(결합 해제문은 현상별 fan-out). 재발표·등급 변경은 같은 feature upsert + source_records 이력 |
 | `krex_traffic_notices` | 사건 단서 `occurred_date::…::incident_type_code` (기존) — **feature_id에서 bjd_code 제거**(이동하는 정체가 동 경계를 넘으면 재키잉되던 버그) | 적재 직후 `reconcile_notice_features`: 같은 계보 중복 soft-delete(latest 1개 유지) + 이번 feed에 없는 계보는 `valid_end_time=fetched_at`으로 종료 |
 
-read 경로: 지도 bbox는 계보별 latest만 + `valid_end_time` 지난 notice 숨김
-(`_LATEST_NOTICE_BBOX_FILTER_SQL`), 이름 검색도 종료 notice를 숨긴다. admin
-feature 목록은 감사 목적의 show-everything 표면이라 필터하지 않는다(중복은
-write-시점 reconcile이 soft-delete). 구세대 identity 잔존분은 마이그레이션
-`0040_notice_dedup_cleanup`이 일회성 정리했다.
+read 경로 — **수집 feed에 없는(종료된) notice는 모든 API read에서 기본 제외**한다
+(사용자 요구: "수집 시 notice가 없으면 과거 자료로 보여주지 말고 노출하지 않음").
+종료 판정은 `valid_end_time`이 채워졌는지로만 하며(last_seen 최신성에 의존하지 않으므로
+이후 poll이 실패해도 이미 닫힌 notice는 계속 숨는다), KREX feed 소멸 reconcile·KMA 해제가
+이 컬럼을 채운다:
+
+- 지도 bbox·클러스터: 계보별 latest만 + `valid_end_time` 지난 notice 숨김
+  (`_LATEST_NOTICE_BBOX_FILTER_SQL`).
+- 이름 검색(`search_features`), 주변(`features_nearby`/POI target), 영역 포함
+  (`features_contained_in_area`), 카테고리 카운트(`category_feature_counts`):
+  종료 notice 제외(각 SQL에 `valid_end_time` 술어 추가).
+- admin feature 목록(`list_admin_features`)도 **기본 제외**로 전환 —
+  감사가 필요하면 `include_ended=true`(API query param) / `종료 포함`으로 조회.
+- **예외**: 단건 조회(`get_feature_row`/by-ids, feature 상세)는 직접 참조라
+  종료 notice도 그대로 반환한다(그 상태를 그대로 노출).
+
+중복 자체는 write-시점 reconcile이 soft-delete하고, 구세대 identity 잔존분은
+마이그레이션 `0040_notice_dedup_cleanup`이 일회성 정리했다.
+
+**빈/실패 feed 안전장치**: KREX notice asset은 fetch가 0건이면 feed-소멸 닫기를
+건너뛴다(`active_lineage_keys=None`) — 빈 집합을 넘기면 모든 active notice가
+"feed에 없음"으로 판정돼 통째로 종료·비노출되므로. 진짜 0건이면 다음 비어있지
+않은 run이 닫는다.
 
 ## 6. 핵심 함수
 

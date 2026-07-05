@@ -384,12 +384,22 @@ async def run_feature_notice_krex_traffic_notices(
         bundles=bundles,
     )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    # 빈/실패 feed 안전장치: fetch가 0건(장애·쿼터·상류 중단)이면 feed-소멸 닫기를
+    # 건너뛴다 — active_lineage_keys=∅로 넘기면 모든 active notice가 "feed에 없음"으로
+    # 판정돼 전부 valid_end_time이 채워지고 API에서 통째로 사라진다. bundle이 있을 때만
+    # 닫기를 켠다(중복 정리 superseded는 무해하므로 항상 수행). 진짜 0건이면 다음
+    # 비어있지 않은 run이 닫는다.
+    has_feed = bool(bundles)
     reconciled = await client.reconcile_notice_features(
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         source_entity_type="traffic_notice",
-        active_lineage_keys={bundle.source_record.source_entity_id for bundle in bundles},
-        closed_at=fetched_at,
+        active_lineage_keys=(
+            {bundle.source_record.source_entity_id for bundle in bundles}
+            if has_feed
+            else None
+        ),
+        closed_at=fetched_at if has_feed else None,
     )
     if reconciled.superseded or reconciled.closed:
         context.log.info(

@@ -32,7 +32,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra import feature_repo
+from kortravelmap.infra import admin_feature_repo, feature_repo
 from kortravelmap.providers.kma import (
     kma_alert_notice_feature_id,
     weather_alert_lift_closures,
@@ -361,3 +361,100 @@ async def test_purge_expired_notices(migrated_session: AsyncSession) -> None:
     assert deleted_at is not None
     _, deleted_at, _ = await _feature_state(migrated_session, fresh.feature.feature_id)
     assert deleted_at is None
+
+
+async def test_read_paths_exclude_ended_notice_by_default(
+    migrated_session: AsyncSession,
+) -> None:
+    """수집 feed에서 사라져 종료된(valid_end_time) notice는 목록·카운트 등 read에서
+    기본 제외되고(사용자 요구: 수집에 없는 notice는 과거 자료로 노출하지 않음),
+    by-id 직접 조회로만 노출된다. admin 목록은 include_ended=True면 감사용으로 포함.
+
+    (bbox/search/nearby/area/cluster/counts/admin이 모두 동일 ``valid_end_time``
+    술어를 공유하므로 counts·admin·by-id로 대표 검증한다 — bbox는 별도 테스트.)
+    """
+    active = _krex_notice_bundle(
+        source_entity_id="read::active",
+        raw_data={"occurred_date": "2026.07.03", "route_no": "0010", "point_name": "가"},
+    )
+    ended = _krex_notice_bundle(
+        source_entity_id="read::ended",
+        raw_data={"occurred_date": "2026.07.03", "route_no": "0020", "point_name": "나"},
+    )
+    await feature_repo.load_bundles(migrated_session, [active, ended])
+    active_id = active.feature.feature_id
+    ended_id = ended.feature.feature_id
+    category = active.feature.category
+
+    counts_before = dict(await feature_repo.category_feature_counts(migrated_session))
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET detail = jsonb_set("
+            " detail, '{valid_end_time}', to_jsonb(CAST(:t AS text)), true)"
+            " WHERE feature_id = :fid"
+        ),
+        {"t": (_NOW - timedelta(hours=1)).isoformat(), "fid": ended_id},
+    )
+
+    # category_feature_counts: 종료 notice는 카운트에서 빠진다.
+    counts_after = dict(await feature_repo.category_feature_counts(migrated_session))
+    assert counts_after.get(category, 0) == counts_before.get(category, 0) - 1
+
+    # admin 목록: 기본 제외.
+    default_page = await admin_feature_repo.list_admin_features(
+        migrated_session, kinds=["notice"], statuses=None, page_size=100
+    )
+    default_ids = {item.feature_id for item in default_page.items}
+    assert active_id in default_ids
+    assert ended_id not in default_ids
+
+    # admin 목록: include_ended=True면 감사용으로 다시 포함.
+    audit_page = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        kinds=["notice"],
+        statuses=None,
+        include_ended=True,
+        page_size=100,
+    )
+    assert ended_id in {item.feature_id for item in audit_page.items}
+
+    # by-id 직접 조회는 종료돼도 반환한다(직접 참조·상세).
+    row = await feature_repo.get_feature_row(migrated_session, ended_id)
+    assert row is not None
+    assert row["feature_id"] == ended_id
+
+
+async def test_reconcile_empty_feed_closes_nothing(
+    migrated_session: AsyncSession,
+) -> None:
+    """빈/실패 feed 안전장치: asset은 fetch가 0건이면 ``active_lineage_keys=None``을
+    넘긴다. 이 경우 reconcile은 어떤 notice의 ``valid_end_time``도 채우지 않는다 —
+    장애 poll에서 전체 notice가 통째로 API에서 사라지는 사고를 방지한다.
+    """
+    a = _krex_notice_bundle(
+        source_entity_id="empty::a",
+        raw_data={"occurred_date": "2026.07.03", "route_no": "0030"},
+    )
+    b = _krex_notice_bundle(
+        source_entity_id="empty::b",
+        raw_data={"occurred_date": "2026.07.02", "route_no": "0040"},
+    )
+    await feature_repo.load_bundles(migrated_session, [a, b])
+
+    result = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys=None,  # 빈 feed → asset이 None을 넘김
+        closed_at=None,
+    )
+
+    assert result.closed == 0
+    for bundle in (a, b):
+        status, deleted_at, valid_end = await _feature_state(
+            migrated_session, bundle.feature.feature_id
+        )
+        assert valid_end is None, "빈 feed에서 notice가 닫히면 안 된다"
+        assert deleted_at is None
+        assert status == "active"

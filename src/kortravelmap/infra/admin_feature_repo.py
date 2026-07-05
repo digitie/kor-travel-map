@@ -702,6 +702,12 @@ WITH base AS (
     ) AS issue ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
+        CAST(:include_ended AS boolean)
+        OR f.kind <> 'notice'
+        OR (f.detail ->> 'valid_end_time') IS NULL
+        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+      )
+      AND (
         CAST(:categories AS text[]) IS NULL
         OR f.category = ANY(CAST(:categories AS text[]))
       )
@@ -1268,12 +1274,18 @@ async def list_admin_features(
     issue_types: Sequence[str] | None = None,
     updated_from: datetime | None = None,
     updated_to: datetime | None = None,
+    include_ended: bool = False,
     page_size: int = 50,
     cursor: str | None = None,
     sort: AdminFeatureSort = "name",
     order: SortOrder = "asc",
 ) -> AdminFeaturePage:
-    """Admin feature 목록을 keyset cursor로 조회한다."""
+    """Admin feature 목록을 keyset cursor로 조회한다.
+
+    ``include_ended``: 기본 ``False`` — 수집 feed에서 사라져 종료된(valid_end_time
+    채워진) notice는 감사 목록에서도 기본 제외한다(#632, 사용자 요구: 수집에 없는
+    notice는 과거 자료로 노출하지 않음). 감사가 필요하면 ``True``로 명시 조회.
+    """
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
     effective_limit = min(page_size, 500)
@@ -1290,6 +1302,7 @@ async def list_admin_features(
         "issue_types": _normalize_values(issue_types),
         "updated_from": updated_from,
         "updated_to": updated_to,
+        "include_ended": include_ended,
         "limit_plus_one": effective_limit + 1,
         **_cursor_params(cursor, sort=sort, order=order),
     }

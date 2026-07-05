@@ -728,6 +728,13 @@ async def list_features(
     issue_type: Annotated[list[str] | None, Query()] = None,
     updated_from: Annotated[datetime | None, Query()] = None,
     updated_to: Annotated[datetime | None, Query()] = None,
+    include_ended: Annotated[
+        bool,
+        Query(
+            description="종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. "
+            "기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다.",
+        ),
+    ] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 50,
     cursor: Annotated[str | None, Query()] = None,
     sort: Annotated[AdminFeatureSort, Query()] = "name",
@@ -751,6 +758,7 @@ async def list_features(
             issue_types=issue_type,
             updated_from=updated_from,
             updated_to=updated_to,
+            include_ended=include_ended,
             page_size=page_size,
             cursor=cursor,
             sort=sort,

@@ -760,6 +760,11 @@ WHERE deleted_at IS NULL
         AND pr.provider = ANY(CAST(:providers AS text[]))
     )
   )
+  AND (
+    kind <> 'notice'
+    OR (detail ->> 'valid_end_time') IS NULL
+    OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
+  )
 GROUP BY {code_col}
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
@@ -1035,6 +1040,11 @@ candidates AS (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
+      AND (
+        f.kind <> 'notice'
+        OR (f.detail ->> 'valid_end_time') IS NULL
+        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+      )
 )
 """
 
@@ -1149,6 +1159,11 @@ candidates AS (
       AND (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
+      )
+      AND (
+        f.kind <> 'notice'
+        OR (f.detail ->> 'valid_end_time') IS NULL
+        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
       )
 )
 """
@@ -2247,6 +2262,11 @@ JOIN feature.features AS f
  AND a.geom OPERATOR(x_extension.&&) f.coord
  AND x_extension.ST_Covers(a.geom, f.coord)
 WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    f.kind <> 'notice'
+    OR (f.detail ->> 'valid_end_time') IS NULL
+    OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+  )
 ORDER BY f.kind ASC, f.name ASC, f.feature_id ASC
 LIMIT :limit
 """
@@ -2670,6 +2690,11 @@ SELECT category, count(*) AS n
 FROM feature.features
 WHERE deleted_at IS NULL
   AND (NOT CAST(:active_only AS boolean) OR status = 'active')
+  AND (
+    kind <> 'notice'
+    OR (detail ->> 'valid_end_time') IS NULL
+    OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
+  )
 GROUP BY category
 """
 

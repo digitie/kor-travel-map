@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-05 (claude) — 종료 notice를 모든 read 경로에서 기본 제외 + 빈-feed 안전장치 (#633)
+
+사용자 요구: "notice는 수집 시 notice가 없으면 과거 자료를 보여주는 게 아니라
+API에 노출하지 않음." #632(2026-07-03)에서 bbox·이름 검색까지만 걸었던 종료 notice
+숨김을 **나머지 read 경로 전부**로 확장했다. 종료 판정은 오직 `valid_end_time`이
+채워졌는지로만 하므로(last_seen 최신성 무의존) 이후 poll이 실패해도 이미 닫힌
+notice는 계속 숨는다.
+
+- **read 술어 확장**(`feature_repo`): 클러스터(`_cluster_bbox_sql`), 주변
+  (`features_nearby` 좌표·POI target CTE ×2), 영역 포함
+  (`_FEATURES_CONTAINED_IN_AREA_SQL`), 카테고리 카운트
+  (`_CATEGORY_FEATURE_COUNTS_SQL`)에 `kind<>'notice' OR valid_end_time IS NULL
+  OR valid_end_time>now()` 추가. bbox·이름 검색은 #632에서 이미 적용.
+- **admin 목록 방침 전환**: #632에서 "감사 목적 show-everything이라 의도적 미적용"
+  했던 `list_admin_features`를 **기본 제외로 전환**하되, 종료분 감사가 필요하면
+  `include_ended=true`(API query param) opt-in. router·repo·OpenAPI(admin
+  프로필만; user 프로필엔 admin 엔드포인트 없음) 갱신.
+- **단건 예외 유지**: `get_feature_row`/by-id 상세는 직접 참조라 종료 notice도
+  그대로 200 반환(그 상태를 그대로 노출).
+- **빈/실패 feed 안전장치(guard #1)**: KREX notice asset이 fetch 0건이면
+  `reconcile_notice_features(active_lineage_keys=None, closed_at=None)`로 넘겨
+  feed-소멸 닫기를 **건너뛴다** — 빈 집합(`set()`)을 넘기면 모든 active notice가
+  "feed에 없음"으로 판정돼 통째로 종료·비노출되는 사고를 막는다. 진짜 0건이면
+  다음 비어있지 않은 run이 닫는다.
+- 검증: `test_notice_lifecycle`에 read-경로 기본 제외/`include_ended` opt-in/
+  단건 유지 + 빈-feed close-nothing 통합 테스트 2건 추가. t212d EXPLAIN 테스트에
+  신규 `:include_ended` bind 반영. ruff·mypy --strict·lint-imports·unit(1131)·
+  api(320)·dagster(216)·integration(263, live 5 deselect) 로컬 green.
+
 ## 2026-07-03 (claude) — notice 중복 근본 해결: 사건 단위 identity + 라이프사이클 (#632)
 
 notice feature가 "로직을 보강해도 계속" 중복되던 문제의 근본 원인을 잡았다 —
