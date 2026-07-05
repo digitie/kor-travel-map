@@ -54,7 +54,7 @@ async function expectListReady(
   ).toBeVisible({ timeout: 15000 });
   // DataTable은 비어도 thead를 렌더하므로 PRESENCE 무관하게 안정적이다.
   await expect(
-    page.getByRole("columnheader", { name: "작업" }),
+    page.getByRole("columnheader", { name: "작업", exact: true }),
   ).toBeVisible({ timeout: 15000 });
 }
 

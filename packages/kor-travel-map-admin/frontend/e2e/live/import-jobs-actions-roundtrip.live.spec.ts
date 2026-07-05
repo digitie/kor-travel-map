@@ -167,7 +167,7 @@ async function gotoListReady(page: Page): Promise<void> {
     page.getByRole("heading", { level: 1, name: "적재 작업" }),
   ).toBeVisible(T);
   // DataTable thead는 비어도 렌더 → columnheader "job"은 항상 존재.
-  await expect(page.getByRole("columnheader", { name: "작업" })).toBeVisible(T);
+  await expect(page.getByRole("columnheader", { name: "작업", exact: true })).toBeVisible(T);
 }
 
 /** 직접 API 읽기(=browserFetch) — backend 정본 baseline. */
