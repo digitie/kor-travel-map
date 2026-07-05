@@ -192,7 +192,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     await page.goto("/admin/poi-cache-targets");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "POI cache targets" }),
+      page.getByRole("heading", { level: 1, name: "POI 캐시 대상" }),
     ).toBeVisible();
 
     // 로드: 1페이지 행 + 'page 1 ·' 지시자.
@@ -241,7 +241,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     await page.goto("/admin/poi-cache-targets");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "POI cache targets" }),
+      page.getByRole("heading", { level: 1, name: "POI 캐시 대상" }),
     ).toBeVisible();
 
     // Targets와 Nearby 두 DataTable이 동일 emptyMessage를 쓴다(line 399 & 428) →
@@ -272,7 +272,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     await page.goto("/admin/poi-cache-targets");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "POI cache targets" }),
+      page.getByRole("heading", { level: 1, name: "POI 캐시 대상" }),
     ).toBeVisible();
 
     // variant='destructive' → role='alert' (alert.tsx). 제목 'target 처리 실패'로 scope.

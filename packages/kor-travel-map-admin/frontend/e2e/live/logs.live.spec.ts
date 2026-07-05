@@ -9,7 +9,7 @@ import * as F from "./_fixtures";
 //
 // Selectors are reused verbatim from e2e/logs-streams.spec.ts and verified
 // against src/app/ops/logs/logs-client.tsx — none are invented:
-//   - main heading: getByRole("heading", { level: 1, name: "Logs" })
+//   - main heading: getByRole("heading", { level: 1, name: "운영 로그" })
 //   - tabs (role=tab): "System logs" | "API call logs" | "Job events"
 //   - page size: getByLabel("log page size") -> 25|50|100|200
 //   - level selects: getByLabel("system log level"|"job event level")
@@ -25,10 +25,10 @@ const ROUTE = "/ops/logs";
 const TIMEOUT = { timeout: 15000 };
 
 // Stable, robust visibility check for the page shell. The h1 is rendered by
-// AdminShell(title="Logs"); the live badge / summary row are always mounted.
+// AdminShell(title="운영 로그"); the live badge / summary row are always mounted.
 async function expectLogsPageLoaded(page: import("@playwright/test").Page) {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Logs" }),
+    page.getByRole("heading", { level: 1, name: "운영 로그" }),
   ).toBeVisible(TIMEOUT);
 }
 

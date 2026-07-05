@@ -87,7 +87,7 @@ function isRestoreSwapResponse(response: Response): boolean {
 
 async function expectBackupsReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Backups" }),
+    page.getByRole("heading", { level: 1, name: "백업" }),
   ).toBeVisible(T);
   await expect(page.getByText("백업 목록")).toBeVisible(T);
   await expect(

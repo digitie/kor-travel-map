@@ -154,9 +154,9 @@ function metricsCard(page: Page, heading: string): Locator {
 
 async function gotoConsistency(page: Page): Promise<void> {
   await page.goto(ROUTE);
-  // AdminShell(title="Consistency") h1.
+  // AdminShell(title="정합성 점검") h1.
   await expect(
-    page.getByRole("heading", { level: 1, name: "Consistency" }),
+    page.getByRole("heading", { level: 1, name: "정합성 점검" }),
   ).toBeVisible(T);
   // issue status NativeSelect (aria-label="issue status").
   await expect(page.getByLabel("issue status")).toBeVisible(T);

@@ -152,7 +152,7 @@ async function fetchOfflineUpload(
 
 async function expectOfflineUploadsReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Offline uploads" }),
+    page.getByRole("heading", { level: 1, name: "오프라인 업로드" }),
   ).toBeVisible(T);
   await expect(page.getByTestId("offline-upload-file-input")).toBeVisible(T);
   await expect(page.getByLabel("offline upload status")).toBeVisible(T);

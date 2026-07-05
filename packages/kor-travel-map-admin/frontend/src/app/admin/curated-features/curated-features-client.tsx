@@ -1629,7 +1629,6 @@ export function CuratedFeaturesClient() {
         </Button>
       }
       description="소스 규칙이 만든 후보를 검토해 공개(큐레이션)하고, 배포 스냅샷을 확인합니다."
-      section="관리"
       title="큐레이션 관리"
     >
       <div className="flex flex-col gap-4">

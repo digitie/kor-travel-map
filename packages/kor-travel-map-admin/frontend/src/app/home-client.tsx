@@ -21,6 +21,7 @@ import { useImportJobs } from "@/api/importJobs";
 import { useOpsMetrics } from "@/api/ops";
 import { useHealth, useVersion } from "@/api/queries";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -44,19 +45,30 @@ function MetricCard({
   value,
   unit,
   icon: Icon,
+  href,
   children,
 }: {
   title: string;
   value: string;
   unit: string;
   icon: typeof ActivityIcon;
+  href?: string;
   children: ReactNode;
 }) {
   return (
     <Card className="min-h-40">
       <CardHeader>
         <CardTitle className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
-          {title}
+          {href ? (
+            <Link
+              className="underline-offset-4 hover:underline"
+              href={href}
+            >
+              {title}
+            </Link>
+          ) : (
+            title
+          )}
         </CardTitle>
         <CardAction>
           <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
@@ -151,7 +163,13 @@ export function HomePageClient() {
         header: "job",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{shortId(row.original.job_id)}</span>
+          <EntityLink
+            className="text-xs"
+            id={row.original.job_id}
+            kind="importJob"
+          >
+            {shortId(row.original.job_id)}
+          </EntityLink>
         ),
       },
       { accessorKey: "kind", header: "kind", enableSorting: true },
@@ -218,7 +236,6 @@ export function HomePageClient() {
         </>
       }
       description="운영 상태를 한 화면에서 확인합니다."
-      section="개요"
       title="운영 홈"
     >
       <div className="space-y-6">
@@ -243,6 +260,7 @@ export function HomePageClient() {
           ) : (
             <>
               <MetricCard
+                href="/admin/features"
                 icon={MapIcon}
                 title="Feature"
                 unit="개"
@@ -262,6 +280,7 @@ export function HomePageClient() {
                 </div>
               </MetricCard>
               <MetricCard
+                href="/ops/import-jobs"
                 icon={ListChecksIcon}
                 title="적재 작업"
                 unit="건"
@@ -274,6 +293,7 @@ export function HomePageClient() {
                 </StatusLine>
               </MetricCard>
               <MetricCard
+                href="/admin/features/dedup-reviews"
                 icon={GitCompareArrowsIcon}
                 title="중복 검수"
                 unit="건"
@@ -284,6 +304,7 @@ export function HomePageClient() {
                 </p>
               </MetricCard>
               <MetricCard
+                href="/admin/issues"
                 icon={AlertTriangleIcon}
                 title="이슈"
                 unit="건"
@@ -394,7 +415,7 @@ export function HomePageClient() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Dedup pending</CardTitle>
+                <CardTitle>중복 검수 대기</CardTitle>
                 <CardDescription>검토 대기 후보</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">

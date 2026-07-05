@@ -251,7 +251,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
     await gotoHome(page);
 
     const featuresCard = cardByTitle(page, "Features");
-    const importJobsCard = cardByTitle(page, "Import jobs");
+    const importJobsCard = cardByTitle(page, "적재 작업");
     const dedupQueueCard = cardByTitle(page, "Dedup queue");
     const issuesCard = cardByTitle(page, "Issues");
 
@@ -444,7 +444,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
         .click();
       await expect(page).toHaveURL(/\/ops\/import-jobs$/, T);
       await expect(
-        page.getByRole("heading", { level: 1, name: "Import jobs" }),
+        page.getByRole("heading", { level: 1, name: "적재 작업" }),
       ).toBeVisible(T);
     });
 
@@ -456,7 +456,7 @@ test.describe("운영 홈(/) 라이브 data↔UI round-trip", () => {
         .click();
       await expect(page).toHaveURL(/\/ops\/consistency$/, T);
       await expect(
-        page.getByRole("heading", { level: 1, name: "Consistency" }),
+        page.getByRole("heading", { level: 1, name: "정합성 점검" }),
       ).toBeVisible(T);
     });
 

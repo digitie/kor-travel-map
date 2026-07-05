@@ -45,7 +45,11 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
           </Link>
         </>
       }
-      section="Feature"
+      breadcrumbs={[
+        { label: "Feature 관리" },
+        { label: "Feature 목록", href: "/admin/features" },
+        { label: featureId },
+      ]}
       title="Feature 상세"
     >
       <FeatureDetailView featureId={featureId} />

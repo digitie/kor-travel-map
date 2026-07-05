@@ -17,6 +17,7 @@ import {
   useUpsertPoiCacheTargetMutation,
 } from "@/api/poiCacheTargets";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -171,9 +172,13 @@ export function PoiCacheTargetsClient() {
         cell: ({ row }) => (
           <>
             <div className="font-medium">{row.original.name}</div>
-            <div className="font-mono text-xs text-muted-foreground">
+            <EntityLink
+              className="text-xs"
+              id={row.original.feature_id}
+              kind="feature"
+            >
               {shortId(row.original.feature_id)}
-            </div>
+            </EntityLink>
           </>
         ),
       },
@@ -277,7 +282,6 @@ export function PoiCacheTargetsClient() {
         </Button>
       }
       description="외부 시스템 POI/cache target을 등록하고 target key 기준 주변 feature를 확인합니다."
-      section="관리"
       title="POI 캐시 대상"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">

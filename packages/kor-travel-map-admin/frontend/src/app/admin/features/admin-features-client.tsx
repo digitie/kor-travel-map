@@ -29,7 +29,9 @@ import {
   type FeatureKind,
   type SortOrder,
 } from "@/api/features";
+import { useProviders } from "@/api/etl";
 import { AdminShell } from "@/components/admin-shell";
+import { EntityLink } from "@/components/entity-link";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -197,12 +199,41 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   );
 }
 
-export function AdminFeaturesClient() {
-  const [q, setQ] = useState("");
+export function AdminFeaturesClient({
+  initialQ,
+  initialKind,
+  initialStatus,
+  initialProvider,
+  initialDatasetKey,
+  initialHasIssue,
+}: {
+  initialQ?: string;
+  initialKind?: string;
+  initialStatus?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialHasIssue?: string;
+} = {}) {
+  const [q, setQ] = useState(initialQ ?? "");
   const deferredQ = useDeferredValue(q.trim());
-  const [kind, setKind] = useState<FeatureKind | "all">("all");
-  const [status, setStatus] = useState<FeatureStatusFilter>("active");
-  const [hasIssue, setHasIssue] = useState<HasIssueFilter>("all");
+  const [kind, setKind] = useState<FeatureKind | "all">(() =>
+    initialKind && (FEATURE_KINDS as readonly string[]).includes(initialKind)
+      ? (initialKind as FeatureKind)
+      : "all",
+  );
+  const [status, setStatus] = useState<FeatureStatusFilter>(() =>
+    initialStatus &&
+    ([...FEATURE_STATUSES, "all"] as string[]).includes(initialStatus)
+      ? (initialStatus as FeatureStatusFilter)
+      : "active",
+  );
+  const [hasIssue, setHasIssue] = useState<HasIssueFilter>(() =>
+    initialHasIssue === "yes" || initialHasIssue === "no"
+      ? initialHasIssue
+      : "all",
+  );
+  const [provider, setProvider] = useState(initialProvider ?? "");
+  const [datasetKey, setDatasetKey] = useState(initialDatasetKey ?? "");
   const [sort, setSort] = useState<AdminFeatureSort>("name");
   const [order, setOrder] = useState<SortOrder>("asc");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
@@ -218,15 +249,38 @@ export function AdminFeaturesClient() {
         status === "all" ? Array.from(FEATURE_STATUSES) : [status],
       has_issue:
         hasIssue === "all" ? undefined : hasIssue === "yes",
+      provider: provider.trim().length > 0 ? [provider.trim()] : undefined,
+      dataset_key:
+        datasetKey.trim().length > 0 ? [datasetKey.trim()] : undefined,
       page_size: pageSize,
       cursor: cursor ?? undefined,
       sort,
       order,
     }),
-    [cursor, deferredQ, hasIssue, kind, order, pageSize, sort, status],
+    [
+      cursor,
+      datasetKey,
+      deferredQ,
+      hasIssue,
+      kind,
+      order,
+      pageSize,
+      provider,
+      sort,
+      status,
+    ],
   );
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
+  const providersQuery = useProviders();
+  const providerOptions = providersQuery.data?.data.providers ?? [];
+  const datasetOptions = useMemo(
+    () =>
+      providerOptions
+        .find((item) => item.provider === provider)
+        ?.datasets.map((entry) => entry.dataset) ?? [],
+    [provider, providerOptions],
+  );
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
 
@@ -319,7 +373,19 @@ export function AdminFeaturesClient() {
           const feature = row.original;
           return (
             <>
-              <div>{feature.primary_provider ?? "-"}</div>
+              {feature.primary_provider ? (
+                <EntityLink
+                  id={feature.primary_provider}
+                  kind="provider"
+                  params={{
+                    dataset_key: feature.primary_dataset_key ?? undefined,
+                  }}
+                >
+                  {feature.primary_provider}
+                </EntityLink>
+              ) : (
+                <div>-</div>
+              )}
               <div className="text-xs text-muted-foreground">
                 {feature.primary_dataset_key ?? "-"}
               </div>
@@ -334,11 +400,17 @@ export function AdminFeaturesClient() {
           const feature = row.original;
           return (
             <>
-              <Badge
-                variant={feature.issue_count > 0 ? "destructive" : "outline"}
-              >
-                {feature.issue_count}
-              </Badge>
+              {feature.issue_count > 0 ? (
+                <EntityLink
+                  id=""
+                  kind="issue"
+                  params={{ feature_id: feature.feature_id }}
+                >
+                  <Badge variant="destructive">{feature.issue_count}</Badge>
+                </EntityLink>
+              ) : (
+                <Badge variant="outline">{feature.issue_count}</Badge>
+              )}
               {feature.issues.slice(0, 2).map((issue) => (
                 <div
                   className="mt-1 max-w-48 truncate text-xs text-muted-foreground"
@@ -455,7 +527,6 @@ export function AdminFeaturesClient() {
         </>
       }
       description="운영자용 Feature 목록, 상세, weather, 단건 비활성화 표면입니다."
-      section="Feature"
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
@@ -525,6 +596,38 @@ export function AdminFeaturesClient() {
               <NativeSelectOption value="all">issue all</NativeSelectOption>
               <NativeSelectOption value="yes">issue only</NativeSelectOption>
               <NativeSelectOption value="no">no issue</NativeSelectOption>
+            </NativeSelect>
+            <NativeSelect
+              aria-label="feature provider"
+              value={provider}
+              onChange={(event) => {
+                setProvider(event.target.value);
+                setDatasetKey("");
+                resetCursor();
+              }}
+            >
+              <NativeSelectOption value="">provider 전체</NativeSelectOption>
+              {providerOptions.map((item) => (
+                <NativeSelectOption key={item.provider} value={item.provider}>
+                  {item.provider}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="feature dataset"
+              disabled={provider.length === 0}
+              value={datasetKey}
+              onChange={(event) => {
+                setDatasetKey(event.target.value);
+                resetCursor();
+              }}
+            >
+              <NativeSelectOption value="">dataset 전체</NativeSelectOption>
+              {datasetOptions.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
             </NativeSelect>
             <NativeSelect
               aria-label="feature sort"

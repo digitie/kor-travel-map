@@ -81,10 +81,10 @@ async function expectSettingsReady(page: Page): Promise<void> {
     page.getByRole("heading", { level: 1, name: "Settings" }),
   ).toBeVisible(T);
   await expect(
-    page.getByRole("heading", { level: 2, name: "Public API keys" }),
+    page.getByRole("heading", { level: 2, name: "공개 API 키" }),
   ).toBeVisible(T);
   await expect(
-    page.getByRole("heading", { level: 2, name: "Login audit" }),
+    page.getByRole("heading", { level: 2, name: "로그인 감사" }),
   ).toBeVisible(T);
 }
 

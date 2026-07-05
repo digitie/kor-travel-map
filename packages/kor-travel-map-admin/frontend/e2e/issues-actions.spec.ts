@@ -175,7 +175,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
     // DETAIL actions — row 클릭 → detail 쿼리가 끝나 'Issue detail'이 뜬 뒤
     // detail-only 버튼(reopen/retry geocode/retry reverse/apply kraddr)만 사용한다.
     await row.click();
-    await expect(page.getByText("Issue detail")).toBeVisible();
+    await expect(page.getByText("이슈 상세")).toBeVisible();
 
     const detailActions: Array<[string, AdminIssuePatchRequest["action"]]> = [
       ["reopen", "reopen"],
@@ -307,7 +307,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
 
     // detail card chrome('Issue detail')는 에러여도 렌더된다. in-panel alert는
     // AlertTitle 'issue 상세 조회 실패'로 top alert와 구분한다.
-    await expect(page.getByText("Issue detail")).toBeVisible();
+    await expect(page.getByText("이슈 상세")).toBeVisible();
     await expect(page.getByText("issue 상세 조회 실패")).toBeVisible();
   });
 
@@ -366,18 +366,24 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await expect(criticalRow.getByText("critical", { exact: true })).toBeVisible();
     await expect(infoRow.getByText("info", { exact: true })).toBeVisible();
 
-    // feature_id 있는 이슈: 지도 link 노출 + feature snapshot, 좌표 null → '없음'.
+    // feature_id 있는 이슈: Feature 상세 link 노출 + snapshot, 좌표 null → '없음'.
     await criticalRow.click();
-    await expect(page.getByText("Issue detail")).toBeVisible();
-    await expect(page.getByRole("link", { name: "지도" })).toBeVisible();
-    await expect(page.getByText("feature snapshot")).toBeVisible();
+    await expect(page.getByText("이슈 상세")).toBeVisible();
+    const featureDetailLink = page.getByRole("link", { name: "Feature 상세" });
+    await expect(featureDetailLink).toBeVisible();
+    // 개편 B 크로스링크: parameterless /features 지도가 아니라 해당 feature 상세로.
+    await expect(featureDetailLink).toHaveAttribute(
+      "href",
+      `/features/${encodeURIComponent(FEATURE_ID)}`,
+    );
+    await expect(page.getByText("Feature 스냅샷")).toBeVisible();
     await expect(page.getByText("없음")).toBeVisible();
 
     // feature_id 없는 이슈: 지도 link 없음 + snapshot 블록 없음.
     await infoRow.click();
-    await expect(page.getByText("Issue detail")).toBeVisible();
-    await expect(page.getByRole("link", { name: "지도" })).toHaveCount(0);
-    await expect(page.getByText("feature snapshot")).toHaveCount(0);
+    await expect(page.getByText("이슈 상세")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Feature 상세" })).toHaveCount(0);
+    await expect(page.getByText("Feature 스냅샷")).toHaveCount(0);
   });
 
   test("feature snapshot renders coordinate when lon/lat are numbers", async ({
@@ -411,8 +417,8 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await expect(row).toBeVisible();
     await row.click();
 
-    await expect(page.getByText("Issue detail")).toBeVisible();
-    await expect(page.getByRole("link", { name: "지도" })).toBeVisible();
+    await expect(page.getByText("이슈 상세")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Feature 상세" })).toBeVisible();
     // coord는 toFixed(5)로 표시(line 303).
     await expect(page.getByText("126.97800, 37.56650")).toBeVisible();
   });

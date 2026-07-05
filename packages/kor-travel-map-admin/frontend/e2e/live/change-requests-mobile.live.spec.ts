@@ -60,7 +60,7 @@ test.describe("/admin/features/change-requests mobile LIVE", () => {
 
     await page.goto("/admin/features/change-requests");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature 변경" }),
+      page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
     ).toBeVisible(T);
 
     await page.getByLabel("change name", { exact: true }).fill("mobile layout");

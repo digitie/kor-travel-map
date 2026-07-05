@@ -9,6 +9,7 @@ import {
   RotateCcwIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 
 import {
   type BackupOperationResponse,
@@ -138,6 +139,12 @@ function OperationResult({ result }: { result: BackupOperationResponse | null })
             {commandLine(result.data.command)}
           </code>
         ) : null}
+        <Link
+          className="w-fit text-xs underline underline-offset-2"
+          href="/ops/logs?tab=system"
+        >
+          운영 로그에서 실행 확인
+        </Link>
       </AlertDescription>
     </Alert>
   );
@@ -316,7 +323,6 @@ export function BackupsClient() {
         </>
       }
       description="cold backup artifact와 staging restore command를 확인합니다."
-      section="관리"
       title="백업"
     >
       <div className="flex flex-col gap-5">

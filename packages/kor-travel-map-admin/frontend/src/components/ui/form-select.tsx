@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpTip } from "@/components/help-tip";
 import {
   Field,
   FieldDescription,
@@ -23,6 +24,7 @@ type FormSelectProps = Omit<NativeSelectProps, "id" | "aria-invalid"> &
 function FormSelect({
   label,
   hint,
+  help,
   error,
   required,
   className,
@@ -43,6 +45,11 @@ function FormSelect({
       <FieldLabel className={labelClassName} htmlFor={fieldId}>
         {label}
         {required ? <span aria-hidden="true"> *</span> : null}
+        {help !== undefined ? (
+          <HelpTip label={typeof label === "string" ? label : "이 필드"}>
+            {help}
+          </HelpTip>
+        ) : null}
       </FieldLabel>
       <NativeSelect
         aria-describedby={describedBy(
@@ -51,7 +58,7 @@ function FormSelect({
           error ? errorId : undefined,
         )}
         aria-invalid={error ? true : undefined}
-        aria-label={requiredFieldAriaLabel(label, required)}
+        aria-label={requiredFieldAriaLabel(label, required, help)}
         aria-required={required || undefined}
         className="w-full"
         id={fieldId}

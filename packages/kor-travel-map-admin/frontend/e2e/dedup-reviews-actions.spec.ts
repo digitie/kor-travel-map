@@ -437,7 +437,7 @@ test.describe("admin/dedup-reviews actions", () => {
 
     await page.goto("/admin/features/dedup-reviews");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Dedup review" }),
+      page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
 
     await expect(
@@ -801,7 +801,7 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.goto("/admin/features/dedup-reviews");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Dedup review" }),
+      page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
     await expect(page.getByText("dedup review가 없습니다.")).toBeVisible();
     await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2);
@@ -847,7 +847,7 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(page.getByText(/실패 \(HTTP 500\)/)).toBeVisible();
     // 헤딩 + AdminShell 새로고침 버튼은 그대로 남는다.
     await expect(
-      page.getByRole("heading", { level: 1, name: "Dedup review" }),
+      page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "새로고침" }),

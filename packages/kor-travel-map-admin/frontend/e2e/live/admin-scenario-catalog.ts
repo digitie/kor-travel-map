@@ -239,7 +239,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "providers",
     route: "/ops/providers",
-    readyHeading: "제공자",
+    readyHeading: "Provider 상태",
     readApis: [
       "/v1/ops/providers",
       "/v1/ops/providers/{provider}",
@@ -257,7 +257,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "consistency",
     route: "/ops/consistency",
-    readyHeading: "Consistency",
+    readyHeading: "정합성 점검",
     readApis: [
       "/v1/ops/metrics",
       "/v1/ops/consistency/reports",
@@ -269,7 +269,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "logs",
     route: "/ops/logs",
-    readyHeading: "Logs",
+    readyHeading: "운영 로그",
     readApis: [
       "/v1/ops/system-logs",
       "/v1/ops/api-call-logs",
@@ -418,7 +418,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
   {
     id: "etl-preview",
     route: "/etl",
-    readyHeading: "ETL preview",
+    readyHeading: "ETL 미리보기",
     readApis: ["/v1/debug/etl/providers", "/v1/debug/etl/preview"],
     writeApis: [],
     reflectedSurfaces: ["/ops/providers", "/admin/features"],

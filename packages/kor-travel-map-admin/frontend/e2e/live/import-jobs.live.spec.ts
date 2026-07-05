@@ -50,7 +50,7 @@ async function expectListReady(
   page: import("@playwright/test").Page,
 ): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Import jobs" }),
+    page.getByRole("heading", { level: 1, name: "적재 작업" }),
   ).toBeVisible({ timeout: 15000 });
   // DataTable은 비어도 thead를 렌더하므로 PRESENCE 무관하게 안정적이다.
   await expect(

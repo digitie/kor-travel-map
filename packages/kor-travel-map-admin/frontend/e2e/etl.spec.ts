@@ -15,7 +15,7 @@ test.describe("/etl preview", () => {
   }) => {
     await page.goto("/etl");
     await expect(
-      page.getByRole("heading", { level: 1, name: "ETL preview" }),
+      page.getByRole("heading", { level: 1, name: "ETL 미리보기" }),
     ).toBeVisible();
 
     const selects = page.locator("main select");

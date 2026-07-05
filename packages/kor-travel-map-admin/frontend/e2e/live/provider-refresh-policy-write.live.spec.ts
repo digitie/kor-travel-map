@@ -209,7 +209,7 @@ async function findPolicyCandidate(
 
 async function expectProvidersReady(page: Page): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Providers" }),
+    page.getByRole("heading", { level: 1, name: "Provider 상태" }),
   ).toBeVisible(T);
   await expect(page.getByRole("table").first()).toBeVisible(T);
 }

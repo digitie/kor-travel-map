@@ -170,7 +170,7 @@ test.describe("/curated-features", () => {
     await page.goto("/curated-features");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Curated Feature 지도" }),
+      page.getByRole("heading", { level: 1, name: "큐레이션 지도" }),
     ).toBeVisible();
     await expect(page.getByLabel("POI명 필터")).toBeVisible();
     await expect(page.getByLabel("테마 필터")).toBeVisible();

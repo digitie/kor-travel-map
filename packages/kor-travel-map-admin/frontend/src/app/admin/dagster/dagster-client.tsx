@@ -1453,6 +1453,12 @@ function RunDetailCard({ runId }: { runId: string | null }) {
                 {data.failure_reason ? (
                   <div className="break-words">{data.failure_reason}</div>
                 ) : null}
+                <Link
+                  className="w-fit text-xs underline underline-offset-2"
+                  href="/ops/logs?tab=events&level=error"
+                >
+                  운영 로그(작업 이벤트)에서 자세히 보기
+                </Link>
                 {data.failure_events.map((event, index) => {
                   const stack = graphqlErrorStack(event.error);
                   return (
@@ -1617,7 +1623,6 @@ export function DagsterAdminClient() {
         </Button>
       }
       description={`마지막 확인 ${formatCheckedAt(data?.checked_at)} · 스케줄과 실행 상태를 관리합니다.`}
-      section="운영"
       title="작업 자동화"
     >
       <div className="flex flex-col gap-5">

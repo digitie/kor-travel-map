@@ -274,7 +274,7 @@ export function FeatureUpdateRequestsClient() {
         </Button>
       }
       description="좌표·반경·provider 기준 타깃 갱신 요청을 생성하고 상태를 추적합니다."
-      section="관리"
+      section="수집 파이프라인"
       title="갱신 요청"
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">

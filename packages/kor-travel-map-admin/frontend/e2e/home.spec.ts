@@ -18,8 +18,8 @@ test.describe("home page (/)", () => {
       "적재 작업",
       "Provider 상태",
       "정합성 점검",
-      "Feature 중복 검토",
-      "Feature 갱신",
+      "중복 검토",
+      "갱신 요청",
       "POI 캐시 대상",
       "작업 자동화",
       "ETL 미리보기",
@@ -34,12 +34,12 @@ test.describe("home page (/)", () => {
     await page.goto("/");
 
     for (const heading of [
-      "Features",
-      "Import jobs",
-      "Dedup queue",
-      "Issues",
+      "Feature",
+      "적재 작업",
+      "중복 검수",
+      "이슈",
       "서비스 상태",
-      "Dedup pending",
+      "중복 검수 대기",
     ]) {
       await expect(
         page.getByRole("heading", { name: heading, exact: true }),
@@ -49,7 +49,7 @@ test.describe("home page (/)", () => {
     await expect(page.getByTestId("service-backend")).toBeVisible();
     await expect(page.getByTestId("service-dagster")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "최근 import jobs" }),
+      page.getByRole("heading", { name: "최근 적재 작업" }),
     ).toBeVisible();
   });
 
@@ -58,13 +58,13 @@ test.describe("home page (/)", () => {
     await page.getByRole("link", { name: "적재 작업" }).click();
     await expect(page).toHaveURL(/\/ops\/import-jobs$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import jobs" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Feature 갱신" }).click();
+    await page.getByRole("link", { name: "갱신 요청" }).click();
     await expect(page).toHaveURL(/\/admin\/feature-update-requests$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update requests" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청" }),
     ).toBeVisible();
   });
 });

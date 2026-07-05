@@ -6,7 +6,7 @@ async function expectUpdateRequestsReady(
   page: import("@playwright/test").Page,
 ) {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Feature update requests" }),
+    page.getByRole("heading", { level: 1, name: "갱신 요청" }),
   ).toBeVisible(T);
   await expect(page.getByLabel("lon")).toBeVisible(T);
   await expect(page.getByLabel("lat")).toBeVisible(T);

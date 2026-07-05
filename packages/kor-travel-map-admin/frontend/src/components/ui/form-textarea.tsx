@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { HelpTip } from "@/components/help-tip";
 import {
   Field,
   FieldDescription,
@@ -25,6 +26,7 @@ type FormTextAreaProps = Omit<
 function FormTextArea({
   label,
   hint,
+  help,
   error,
   required,
   className,
@@ -45,6 +47,11 @@ function FormTextArea({
       <FieldLabel className={labelClassName} htmlFor={fieldId}>
         {label}
         {required ? <span aria-hidden="true"> *</span> : null}
+        {help !== undefined ? (
+          <HelpTip label={typeof label === "string" ? label : "이 필드"}>
+            {help}
+          </HelpTip>
+        ) : null}
       </FieldLabel>
       <Textarea
         aria-describedby={describedBy(
@@ -53,7 +60,7 @@ function FormTextArea({
           error ? errorId : undefined,
         )}
         aria-invalid={error ? true : undefined}
-        aria-label={requiredFieldAriaLabel(label, required)}
+        aria-label={requiredFieldAriaLabel(label, required, help)}
         aria-required={required || undefined}
         id={fieldId}
         ref={ref}

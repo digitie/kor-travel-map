@@ -21,6 +21,7 @@ import {
 import { DAGSTER_UI_URL } from "@/api/dagster";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList } from "@/components/detail-list";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -198,10 +199,11 @@ function relationHref(link: OpsImportJobLink) {
     return `/ops/import-jobs/${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "load_batch") {
-    return link.href.replace(/^\/v1/, "");
+    // API href(/v1/...)를 그대로 노출하던 dead link — 배치 필터 목록으로 연결.
+    return `/ops/import-jobs?load_batch_id=${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "feature_update_request") {
-    return "/admin/features/update-requests";
+    return `/admin/features/update-requests/${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "offline_upload") {
     return "/admin/offline-uploads";
@@ -263,21 +265,6 @@ function RelationLink({ link }: { link: OpsImportJobLink }) {
   );
 }
 
-function FieldRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number | null | undefined;
-}) {
-  return (
-    <div className="grid gap-1">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-h-5 break-all font-mono text-xs">{value ?? "-"}</dd>
-    </div>
-  );
-}
-
 function JobSummary({ job }: { job: OpsImportJobRecord }) {
   return (
     <Card>
@@ -294,16 +281,20 @@ function JobSummary({ job }: { job: OpsImportJobRecord }) {
           <Badge variant="outline">{job.current_stage ?? "단계 없음"}</Badge>
         </div>
         <JobProgress value={job.progress} />
-        <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <FieldRow label="작업 ID" value={job.job_id} />
-          <FieldRow label="배치 ID" value={job.load_batch_id} />
-          <FieldRow label="상위 작업 ID" value={job.parent_job_id} />
-          <FieldRow label="소스 체크섬" value={job.source_checksum} />
-          <FieldRow label="생성" value={formatDateTime(job.created_at)} />
-          <FieldRow label="시작" value={formatDateTime(job.started_at)} />
-          <FieldRow label="heartbeat" value={formatDateTime(job.heartbeat_at)} />
-          <FieldRow label="완료" value={formatDateTime(job.finished_at)} />
-        </dl>
+        <DetailList
+          className="sm:grid-cols-2 xl:grid-cols-4"
+          columns="auto"
+          items={[
+            { label: "작업 ID", value: job.job_id, mono: true, copyable: true },
+            { label: "배치 ID", value: job.load_batch_id, mono: true, copyable: true },
+            { label: "상위 작업 ID", value: job.parent_job_id, mono: true },
+            { label: "소스 체크섬", value: job.source_checksum, mono: true },
+            { label: "생성", value: formatDateTime(job.created_at) },
+            { label: "시작", value: formatDateTime(job.started_at) },
+            { label: "heartbeat", value: formatDateTime(job.heartbeat_at) },
+            { label: "완료", value: formatDateTime(job.finished_at) },
+          ]}
+        />
       </CardContent>
     </Card>
   );
@@ -453,6 +444,12 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
             <ArrowLeftIcon data-icon="inline-start" />
             목록
           </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={`/ops/logs?tab=events&job_id=${encodeURIComponent(jobId)}`}
+          >
+            운영 로그
+          </Link>
           <Badge variant={live.state === "live" ? "default" : "outline"}>
             {live.state === "live" ? "실시간" : live.state}
           </Badge>
@@ -470,8 +467,12 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
           </Button>
         </>
       }
+      breadcrumbs={[
+        { label: "수집 파이프라인" },
+        { label: "적재 작업", href: "/ops/import-jobs" },
+        { label: shortId(jobId, 18) },
+      ]}
       description={jobData ? `${jobData.kind} · ${shortId(jobData.job_id, 18)}` : jobId}
-      section="운영"
       title="적재 작업 상세"
     >
       <div className="flex flex-col gap-4">

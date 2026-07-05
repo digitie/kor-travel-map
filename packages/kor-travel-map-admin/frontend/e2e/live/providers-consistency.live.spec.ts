@@ -9,8 +9,8 @@ import * as F from "./_fixtures";
 // Selectors/headings are reused verbatim from the route-mocked depth specs
 // (providers-refresh-policy.spec.ts, consistency-drilldown.spec.ts) and the
 // page source (providers-client.tsx, consistency-client.tsx, admin-shell.tsx):
-//   - /ops/providers   h1 "Providers"; section badges; sort headers; empty text.
-//   - /ops/consistency h1 "Consistency"; metric cards; issue status filter;
+//   - /ops/providers   h1 "Provider 상태"; section badges; sort headers; empty text.
+//   - /ops/consistency h1 "정합성 점검"; metric cards; issue status filter;
 //     sort headers; DataTable emptyMessage.
 // PROVIDERS fixture may be empty (prod has no provider ops rows surfaced) — in
 // that case the page renders the empty table + no-selection placeholder, which
@@ -89,7 +89,7 @@ async function expectProvidersLoaded(
   page: import("@playwright/test").Page,
 ): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Providers" }),
+    page.getByRole("heading", { level: 1, name: "Provider 상태" }),
   ).toBeVisible({ timeout: T });
 }
 
@@ -97,7 +97,7 @@ async function expectConsistencyLoaded(
   page: import("@playwright/test").Page,
 ): Promise<void> {
   await expect(
-    page.getByRole("heading", { level: 1, name: "Consistency" }),
+    page.getByRole("heading", { level: 1, name: "정합성 점검" }),
   ).toBeVisible({ timeout: T });
 }
 

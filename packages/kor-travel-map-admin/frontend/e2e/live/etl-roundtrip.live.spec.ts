@@ -19,7 +19,7 @@ import type { components } from "../../src/api/types";
 //
 // Surface + selectors are read VERBATIM from src/app/etl/etl-client.tsx:
 //   route                /etl
-//   h1 heading           "ETL preview"
+//   h1 heading           "ETL 미리보기"
 //     <h1 ...>ETL preview</h1>                                                  (line 118)
 //   provider select      getByLabel("provider")
 //     <FieldLabel htmlFor="provider">provider</FieldLabel>                      (line 160)
@@ -66,7 +66,7 @@ type FixtureTarget = {
 };
 
 const ROUTE = "/etl";
-const HEADING = "ETL preview";
+const HEADING = "ETL 미리보기";
 const PROVIDERS_PATH = "/v1/debug/etl/providers";
 
 const UI_TIMEOUT = 15_000;
