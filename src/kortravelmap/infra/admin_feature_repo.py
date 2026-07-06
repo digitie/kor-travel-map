@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import unicodedata
 from contextlib import suppress
 from dataclasses import dataclass
@@ -498,6 +499,19 @@ def _normalize_query(q: str | None) -> str | None:
     return normalized or None
 
 
+# 완전한 ``feature_id``(``f_{bjd}_{kind}_{sha1[:16]}``, core.ids.make_feature_id)
+# 형태의 검색어를 감지한다. 이 경우 PK 등가 fast-path로 ILIKE 전체 스캔 +
+# source_records 상관 서브쿼리(1M feature 대상 14~60s)를 건너뛴다.
+_FEATURE_ID_QUERY_RE: Final = re.compile(r"^f_[^_]+_[a-z]_[0-9a-f]{16}$")
+
+
+def _feature_id_exact_query(normalized_q: str | None) -> str | None:
+    """정규화된 검색어가 완전한 ``feature_id`` 형태면 그대로, 아니면 ``None``."""
+    if normalized_q is None:
+        return None
+    return normalized_q if _FEATURE_ID_QUERY_RE.match(normalized_q) else None
+
+
 def _json_array(value: Any) -> tuple[dict[str, Any], ...]:
     if value is None:
         return ()
@@ -641,9 +655,37 @@ def _keyset_condition(*, sort: str, order: str) -> str:
     )
 
 
-def _admin_features_sql(*, sort: str, order: str) -> str:
+# 완전한 feature_id fast-path: PK 등가로 ILIKE 전체 스캔 + source_records EXISTS를 건너뛴다.
+_ADMIN_FEATURES_Q_EXACT_CLAUSE: Final = "AND f.feature_id = CAST(:q_exact AS text)"
+
+# 부분 검색: feature_id/name/address + source_records 상관 서브쿼리 ILIKE.
+_ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
+        CAST(:q_like AS text) IS NULL
+        OR f.feature_id ILIKE CAST(:q_like AS text)
+        OR f.name ILIKE CAST(:q_like AS text)
+        OR f.address::text ILIKE CAST(:q_like AS text)
+        OR EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS qsl
+            JOIN provider_sync.source_records AS qsr
+              ON qsr.source_record_key = qsl.source_record_key
+            WHERE qsl.feature_id = f.feature_id
+              AND (
+                qsr.source_record_key ILIKE CAST(:q_like AS text)
+                OR qsr.source_entity_id ILIKE CAST(:q_like AS text)
+                OR qsr.raw_name ILIKE CAST(:q_like AS text)
+                OR qsr.raw_address ILIKE CAST(:q_like AS text)
+              )
+        )
+      )"""
+
+
+def _admin_features_sql(*, sort: str, order: str, exact_id: bool = False) -> str:
     column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
     order_sql = "ASC" if order == "asc" else "DESC"
+    q_clause = (
+        _ADMIN_FEATURES_Q_EXACT_CLAUSE if exact_id else _ADMIN_FEATURES_Q_LIKE_CLAUSE
+    )
     return f"""
 WITH base AS (
     SELECT
@@ -736,25 +778,7 @@ WITH base AS (
         CAST(:updated_to AS timestamptz) IS NULL
         OR f.updated_at <= CAST(:updated_to AS timestamptz)
       )
-      AND (
-        CAST(:q_like AS text) IS NULL
-        OR f.feature_id ILIKE CAST(:q_like AS text)
-        OR f.name ILIKE CAST(:q_like AS text)
-        OR f.address::text ILIKE CAST(:q_like AS text)
-        OR EXISTS (
-            SELECT 1
-            FROM provider_sync.source_links AS qsl
-            JOIN provider_sync.source_records AS qsr
-              ON qsr.source_record_key = qsl.source_record_key
-            WHERE qsl.feature_id = f.feature_id
-              AND (
-                qsr.source_record_key ILIKE CAST(:q_like AS text)
-                OR qsr.source_entity_id ILIKE CAST(:q_like AS text)
-                OR qsr.raw_name ILIKE CAST(:q_like AS text)
-                OR qsr.raw_address ILIKE CAST(:q_like AS text)
-              )
-        )
-      )
+      {q_clause}
 )
 SELECT *
 FROM base
@@ -1290,8 +1314,14 @@ async def list_admin_features(
         raise ValueError("page_size must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
+    q_exact = _feature_id_exact_query(normalized_q)
     params = {
-        "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+        "q_like": (
+            None
+            if q_exact is not None
+            else (f"%{normalized_q}%" if normalized_q is not None else None)
+        ),
+        "q_exact": q_exact,
         "kinds": _normalize_values(kinds),
         "categories": _normalize_values(categories),
         "statuses": _normalize_values(statuses),
@@ -1307,7 +1337,10 @@ async def list_admin_features(
         **_cursor_params(cursor, sort=sort, order=order),
     }
     rows = (
-        await session.execute(text(_admin_features_sql(sort=sort, order=order)), params)
+        await session.execute(
+            text(_admin_features_sql(sort=sort, order=order, exact_id=q_exact is not None)),
+            params,
+        )
     ).mappings().all()
     items = tuple(_admin_feature_row(row) for row in rows[:effective_limit])
     next_cursor = (

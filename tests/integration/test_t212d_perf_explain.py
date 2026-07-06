@@ -619,6 +619,37 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
         "idx_features_updated_keyset",
     )
 
+    # 완전한 feature_id 검색은 PK 등가 fast-path로 features PK 인덱스를 탄다.
+    # (ILIKE 전체 스캔 + source_records 상관 서브쿼리를 건너뜀.) 런타임처럼
+    # q_like/q_exact를 모두 넘겨 여분 파라미터가 실행을 깨지 않음도 함께 검증.
+    admin_features_by_id = await _explain_json(
+        migrated_session,
+        admin_feature_repo._admin_features_sql(
+            sort="updated_at", order="desc", exact_id=True
+        ),
+        {
+            "kinds": None,
+            "categories": None,
+            "statuses": None,
+            "providers": None,
+            "dataset_keys": None,
+            "issue_types": None,
+            "has_coord": None,
+            "updated_from": None,
+            "updated_to": None,
+            "q_like": None,
+            "q_exact": "f_1168010100_p_a1b2c3d4e5f6a7b8",
+            "has_issue": None,
+            "include_ended": True,
+            "cursor_feature_id": None,
+            "cursor_text": None,
+            "cursor_dt": None,
+            "cursor_int": None,
+            "limit_plus_one": 51,
+        },
+    )
+    _assert_uses_index(admin_features_by_id, "features_pkey", "pk_features")
+
     jobs = await _explain_json(
         migrated_session,
         ops_repo._LIST_IMPORT_JOBS_SQL,

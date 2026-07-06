@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-06 (claude) — 관리 feature 검색 fast-path 로컬 완료
+
+- **완료**: 완전한 feature_id 검색을 `f.feature_id = :q_exact`(PK index) fast-path로 처리
+  (14~60s → 즉시). `_feature_id_exact_query` 정규식 감지 + `_admin_features_sql(exact_id=True)`
+  조건부 q-절. backend 한정, API 계약 불변. 부분 검색어는 기존 ILIKE 유지.
+- **검증**: unit 3건 + t212d EXPLAIN 통합 추가. 로컬 CI-parity(ruff/mypy --strict/lint-imports/
+  pytest unit+lint 1168 green). 통합(testcontainers PostGIS)은 CI에서 실행.
+- **다음 한 작업**: PR(base=main) CI green → 머지 → n150 api 컨테이너 재빌드 배포
+  (`kor-travel-docker-manager` compose) → `/v1/admin/features?q=<full id>` 즉시 응답 확인.
+
 ## 2026-07-05 (claude) — 관리 UI 개편 D: 파일 레지스트리·추적 UI 로컬 완료 (PR-B 위 스택)
 
 - **완료**: 파일 레지스트리(`ops.managed_files`+events, 0040) + hook 계측 + 소유권 분리 스캐너
