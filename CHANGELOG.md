@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 관리 feature 검색 fast-path — 완전한 feature_id는 PK 등가 (2026-07-06)
+
+- **FIXED**: `/v1/admin/features?q=<완전한 feature_id>` 검색이 1M feature 대상 ILIKE 전체 스캔 +
+  `source_records` 상관 서브쿼리로 14~60s 걸리던 것을, 검색어가 완전한 feature_id 형태
+  (`f_{bjd}_{kind}_{sha1[:16]}`)면 PK 등가(`f.feature_id = :q_exact`)로 즉시 조회하도록 fast-path 추가.
+  부분 검색어는 기존 ILIKE 경로를 그대로 유지한다. API 계약·응답 형태 변경 없음(속도만).
+
 ### 관리 UI 개편 C — 검증/어시스트·텍스트 절약 (2026-07-05)
 
 - JSON·좌표·정책 입력 인라인 검증, `window.confirm`→AlertDialog(useConfirm) 일괄 전환,

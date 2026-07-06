@@ -173,8 +173,52 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
     assert page.next_cursor is not None
     params = session.calls[0]["params"]
     assert params["q_like"] == "%광화문%"
+    assert params["q_exact"] is None
     assert params["providers"] == ["python-mois-api"]
     assert params["has_issue"] is True
+    # 일반 검색어는 q-필터 상관 서브쿼리(source_records AS qsr, ILIKE 경로)를 그대로 탄다.
+    assert "AS qsr" in session.calls[0]["statement"]
+
+
+def test_feature_id_exact_query_detects_full_feature_ids() -> None:
+    # 완전한 feature_id(f_{bjd}_{kind}_{sha1[:16]})는 그대로 반환 → PK fast-path.
+    assert (
+        repo._feature_id_exact_query("f_1168010100_p_a1b2c3d4e5f6a7b8")
+        == "f_1168010100_p_a1b2c3d4e5f6a7b8"
+    )
+    assert (
+        repo._feature_id_exact_query("f_global_e_0123456789abcdef") == "f_global_e_0123456789abcdef"
+    )
+    # 부분 검색어·비-feature_id는 None → 기존 ILIKE 경로 유지.
+    assert repo._feature_id_exact_query("광화문") is None
+    assert repo._feature_id_exact_query("f_1168010100_p_a1b2c3") is None
+    assert repo._feature_id_exact_query("a1b2c3d4e5f6a7b8") is None
+    assert repo._feature_id_exact_query("f_1168010100_p_a1b2c3d4e5f6a7b8x") is None
+    assert repo._feature_id_exact_query(None) is None
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_full_id_uses_pk_fast_path() -> None:
+    feature_id = "f_1168010100_p_a1b2c3d4e5f6a7b8"
+    session = _Session([_Result([_feature_row(feature_id)])])
+
+    await repo.list_admin_features(
+        session,  # type: ignore[arg-type]
+        q=f"  {feature_id}  ",
+        page_size=20,
+        sort="updated_at",
+        order="desc",
+    )
+
+    call = session.calls[0]
+    # PK 등가 파라미터만 바인딩, ILIKE substring은 비활성.
+    assert call["params"]["q_exact"] == feature_id
+    assert call["params"]["q_like"] is None
+    # SQL은 PK 등가절만 쓰고, q-필터 상관 서브쿼리(source_records AS qsr)·:q_like는 타지 않는다.
+    # (기본 소스 조회용 source_records AS sr projection은 두 경로 모두 남아 있으므로 qsr로 구분.)
+    assert "f.feature_id = CAST(:q_exact AS text)" in call["statement"]
+    assert "AS qsr" not in call["statement"]
+    assert ":q_like" not in call["statement"]
 
 
 @pytest.mark.asyncio

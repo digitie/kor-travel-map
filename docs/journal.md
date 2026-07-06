@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-06 (claude) — 관리 feature 검색 fast-path: 완전한 feature_id → PK 등가
+
+- **문제**: `/v1/admin/features?q=<id>`에 완전한 feature_id를 붙여넣어도 `q_like`(`%id%`)로 처리돼
+  1M feature ILIKE 전체 스캔 + `source_records` 상관 서브쿼리(EXISTS)를 타서 14~60s 소요.
+- **수정**: `_feature_id_exact_query`가 정규식 `^f_[^_]+_[a-z]_[0-9a-f]{16}$`
+  (core.ids `make_feature_id`의 `f_{bjd}_{kind}_{sha1[:16]}`)로 완전한 feature_id를 감지하면
+  `:q_exact` 파라미터 + `_admin_features_sql(exact_id=True)`로 q-절을
+  `f.feature_id = CAST(:q_exact AS text)`(PK index)로 스왑, ILIKE 체인·EXISTS를 건너뛴다.
+  부분 검색어·비-feature_id는 기존 `q_like` ILIKE 경로 유지.
+- **범위**: `_admin_features_sql` 한 곳만. 다른 q_like 사이트(feature change-request/dedup/enrichment
+  review)는 소형 테이블·EXISTS 없음이라 손대지 않음.
+- **검증**: unit 3건(exact-query 감지, fast-path SQL/params 스왑, 일반 검색어 qsr 유지) +
+  t212d EXPLAIN 통합(exact_id=True가 features PK 인덱스 사용) 추가. 로컬 CI-parity 컨테이너에서
+  ruff check·mypy --strict(99)·lint-imports(4 kept)·pytest tests/unit+lint(1168 passed) green.
+  API 계약·OpenAPI·스키마 변경 없음(동일 응답, 속도만). alembic 없음(PK 인덱스 기존).
+
 ## 2026-07-05 (claude) — 관리 UI 개편 C: 검증/어시스트·텍스트 절약
 
 관리 UI 개편 C(#636). 인라인 검증(JSON/좌표/정책)·useConfirm 전환·CursorPager 통일·
