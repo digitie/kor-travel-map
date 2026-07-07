@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-07 (claude) — 사용자 버그/기능 배치(10건) 진행 중
+
+- **완료**: 파일 관리 목록 500(asyncpg AmbiguousParameterError) root-cause+수정+통합 테스트
+  (PR 예정). 라이브 prod 재현·검증.
+- **조사 완료(미착수)**: Feature/Curated 지도 중복(fetch dedup은 있음 → 렌더 계층 or curated
+  dedup 부재), 지도 응답성(map move/filter debounce 없음), weather 좌표(KMA 격자중심+마커),
+  concierge google/naver/kakao 키 복사(필드 존재, 값만 n150 override 필요), 큐레이션 정합성(스코프
+  큼 — 사용자 확인 필요), 큐레이션 title 멀티콤보 필터, 운영 log enable
+  (`KOR_TRAVEL_MAP_API_API_CALL_LOG_ENABLED=false`→override).
+- **다음 한 작업**: 파일-500 PR CI green → 머지 → n150 api 재빌드 배포 → 나머지 배치 항목을
+  우선순위대로(퀵윈: curated dedup·debounce·log enable·키 복사; 조사필요: 지도 중복 라이브 디버깅;
+  스코프확인: 큐레이션 정합성).
+
 ## 2026-07-06 (claude) — 관리 feature 검색 fast-path 로컬 완료
 
 - **완료**: 완전한 feature_id 검색을 `f.feature_id = :q_exact`(PK index) fast-path로 처리
