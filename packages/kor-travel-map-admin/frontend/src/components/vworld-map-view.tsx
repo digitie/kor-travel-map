@@ -890,13 +890,25 @@ export function VWorldFeatureClusters({
   const popupRef = useRef<MapLibrePopup | null>(null);
   const clusterMaxZoomRef = useRef(clusterMaxZoom);
   const schedulePointMarkerUpdateRef = useRef<(() => void) | null>(null);
+  // 같은 feature_id가 중복 유입돼도(tile 경계 중복, keepPreviousData 전환 등) 마커/
+  // 도형이 겹쳐 중복으로 보이지 않도록 렌더 입력을 feature_id로 dedup한다(첫 항목
+  // 유지). Feature/Curated 지도 공통 방어선. 중복이 없으면 원본 배열을 그대로 반환해
+  // 불필요한 재렌더를 피한다.
+  const dedupedFeatures = useMemo(() => {
+    const byId = new Map<string, ClusterFeatureInput>();
+    for (const f of features) {
+      if (!byId.has(f.feature_id)) byId.set(f.feature_id, f);
+    }
+    return byId.size === features.length ? features : Array.from(byId.values());
+  }, [features]);
+
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
     selectedFeatureIdRef.current = selectedFeatureId;
     clusterMaxZoomRef.current = clusterMaxZoom;
     const summaries = new Map<string, readonly ClusterPriceSummaryPoint[]>();
     const weatherSummaries = new Map<string, ClusterWeatherSummaryPoint>();
-    for (const feature of features) {
+    for (const feature of dedupedFeatures) {
       if (feature.price_summary && feature.price_summary.length > 0) {
         summaries.set(feature.feature_id, feature.price_summary);
       }
@@ -911,7 +923,7 @@ export function VWorldFeatureClusters({
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
       type: "FeatureCollection",
-      features: features.flatMap((f) =>
+      features: dedupedFeatures.flatMap((f) =>
         typeof f.lon === "number" &&
         typeof f.lat === "number" &&
         (!hasRenderableGeometry(f) || shouldClusterAsPoint(f))
@@ -934,14 +946,14 @@ export function VWorldFeatureClusters({
           : [],
       ),
     }),
-    [features],
+    [dedupedFeatures],
   );
   const geometryData = useMemo<
     GeoJSON.FeatureCollection<FeatureMapGeometry, FeatureGeometryProperties>
   >(
     () => ({
       type: "FeatureCollection",
-      features: features.flatMap((feature) => {
+      features: dedupedFeatures.flatMap((feature) => {
         const item = geometryFeature(feature, {
           selectedFeatureId,
           showAreaGeometry,
@@ -949,7 +961,7 @@ export function VWorldFeatureClusters({
         return item ? [item] : [];
       }),
     }),
-    [features, selectedFeatureId, showAreaGeometry],
+    [dedupedFeatures, selectedFeatureId, showAreaGeometry],
   );
 
   // source data 갱신 (features prop 변경 시).

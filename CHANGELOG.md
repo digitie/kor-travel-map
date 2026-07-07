@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Feature/Curated 지도 렌더 입력 feature_id dedup 보강 (2026-07-08)
+
+- **FIXED**: Feature 지도에서 같은 `feature_id` feature가 마커/도형으로 중복 렌더될 수 있던
+  경로를 막았다. 공용 `VWorldFeatureClusters`가 렌더 입력(`features`)을 `feature_id`로 dedup
+  (첫 항목 유지, 중복 없으면 원본 배열 그대로)해 point/geometry GeoJSON·마커 풀이 feature당
+  1개만 그리도록 보강. tile 경계 중복·`keepPreviousData` 전환 등에서의 시각적 중복 방어선이며,
+  Curated 지도(#7 상단)와도 공통 적용된다.
+
 ### 큐레이션 지도 물리 feature 중복 제거 (2026-07-07)
 
 - **FIXED**: 큐레이션 지도에서 같은 물리 feature가 여러 큐레이션 엔트리(테마·소스 등)로 잡히면
