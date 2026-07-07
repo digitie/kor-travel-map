@@ -607,14 +607,16 @@ async def list_managed_files(
                 WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
                   AND (CAST(:statuses AS text[]) IS NULL
                        OR status = ANY(CAST(:statuses AS text[])))
-                  AND (:provider IS NULL OR provider = :provider)
-                  AND (:location IS NULL OR location = :location)
-                  AND (:registered_by IS NULL OR registered_by = :registered_by)
-                  AND (:q IS NULL OR path ILIKE '%' || :q || '%')
-                  AND (:min_age_days IS NULL OR downloaded_at
-                       <= now() - make_interval(days => :min_age_days))
-                  AND (:max_age_days IS NULL OR downloaded_at
-                       >= now() - make_interval(days => :max_age_days))
+                  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
+                  AND (CAST(:location AS text) IS NULL OR location = CAST(:location AS text))
+                  AND (CAST(:registered_by AS text) IS NULL
+                       OR registered_by = CAST(:registered_by AS text))
+                  AND (CAST(:q AS text) IS NULL
+                       OR path ILIKE '%' || CAST(:q AS text) || '%')
+                  AND (CAST(:min_age_days AS int) IS NULL OR downloaded_at
+                       <= now() - make_interval(days => CAST(:min_age_days AS int)))
+                  AND (CAST(:max_age_days AS int) IS NULL OR downloaded_at
+                       >= now() - make_interval(days => CAST(:max_age_days AS int)))
                 ORDER BY {sort_column} DESC NULLS LAST, file_id DESC
                 LIMIT :limit OFFSET :offset
                 """

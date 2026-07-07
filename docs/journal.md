@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-07 (claude) — 파일 관리 목록 500 수정 (asyncpg AmbiguousParameterError)
+
+- **증상**: `/v1/admin/files?sort=downloaded_at&limit=50&offset=0`(파일 관리 기본 뷰)가 항상
+  HTTP 500 INTERNAL_ERROR. 라이브 api 컨테이너에서 재현 → `asyncpg.exceptions.
+  AmbiguousParameterError: could not determine data type of parameter $3`.
+- **원인**: `file_registry.list_managed_files`의 WHERE가 nullable scalar 필터를
+  `(:provider IS NULL OR provider = :provider)`처럼 **CAST 없이** 썼다. 값이 None이면 asyncpg가
+  bare `$3 IS NULL`의 타입을 못 정해 prepare 단계에서 실패. array 필터(`CAST(:kinds AS text[])`)만
+  CAST돼 있었다. 필터가 전부 None인 기본 뷰에서 결정적 500.
+- **수정**: 6개 scalar 필터(provider/location/registered_by/q → `CAST(:x AS text)`,
+  min_age_days/max_age_days → `CAST(:x AS int)`)를 감쌌다. admin_feature_repo가 이미 쓰는 패턴.
+  라이브 prod DB로 수정 쿼리 검증(14행 정상 반환).
+- **회귀 가드**: file_registry는 **통합 테스트가 없어**(단위는 가짜 세션이라 SQL prepare 오류를 못
+  잡음) 이 asyncpg-전용 버그가 CI를 통과했다. `tests/integration/test_file_registry_list.py`
+  추가 — 실 PostGIS로 기본 뷰(all-None) + 각 필터 경로 검증.
+- **PR**: (번호) base=main. 배포 시 api 재빌드.
+
 ## 2026-07-06 (claude) — 관리 feature 검색 fast-path: 완전한 feature_id → PK 등가
 
 - **문제**: `/v1/admin/features?q=<id>`에 완전한 feature_id를 붙여넣어도 `q_like`(`%id%`)로 처리돼

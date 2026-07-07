@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 파일 관리 목록 500 수정 — asyncpg 파라미터 타입 (2026-07-07)
+
+- **FIXED**: `/v1/admin/files` 목록이 필터 없는 기본 뷰에서 항상 HTTP 500(파일 관리 페이지
+  진입 불가). `list_managed_files`의 nullable scalar 필터(provider/location/registered_by/q/
+  min_age_days/max_age_days)를 `CAST` 없이 `:x IS NULL OR col = :x`로 써서 asyncpg가
+  `AmbiguousParameterError`(could not determine data type)를 던졌다. array 필터처럼 각 파라미터를
+  `CAST(:x AS text|int)`로 감싸 해결. 실 PostGIS 통합 테스트(기본 뷰 + 각 필터 경로) 추가.
+
 ### 관리 feature 검색 fast-path — 완전한 feature_id는 PK 등가 (2026-07-06)
 
 - **FIXED**: `/v1/admin/features?q=<완전한 feature_id>` 검색이 1M feature 대상 ILIKE 전체 스캔 +
