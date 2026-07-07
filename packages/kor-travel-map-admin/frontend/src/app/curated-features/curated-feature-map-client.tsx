@@ -258,10 +258,18 @@ export function CuratedFeatureMapClient() {
     () => featuresQuery.data?.data.items ?? [],
     [featuresQuery.data],
   );
-  const clusterItems = useMemo(
-    () => curatedItems.map(toClusterFeature),
-    [curatedItems],
-  );
+  const clusterItems = useMemo(() => {
+    // 같은 물리 feature가 여러 큐레이션 엔트리(테마·소스 등)로 잡히면 좌표가 같아
+    // 지도에 마커가 겹쳐 중복으로 보인다("고불개 해변" 사례). 지도에서는 물리 feature당
+    // 한 번만 그린다(가장 최근 큐레이션 엔트리 유지 — 목록은 cf.updated_at DESC 정렬).
+    const byFeature = new Map<string, ClusterFeatureInput>();
+    for (const item of curatedItems) {
+      if (!byFeature.has(item.feature_id)) {
+        byFeature.set(item.feature_id, toClusterFeature(item));
+      }
+    }
+    return Array.from(byFeature.values());
+  }, [curatedItems]);
   const selectedFeature =
     curatedItems.find((item) => item.curated_feature_id === selectedCuratedId) ??
     null;
