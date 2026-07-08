@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### weather/price 마커 좌표 어긋남 수정 (2026-07-08)
+
+- **FIXED**: Feature 지도에서 날씨·유가 마커가 좌표에서 왼쪽으로 어긋나 보이던 문제. 라벨이 붙은
+  마커(`createFeatureMarkerElement`)를 `flex [아이콘][라벨]` wrapper로 만들어 maplibre 기본 center
+  앵커가 wrapper 중앙(아이콘과 라벨 사이)을 좌표에 놓으면서 아이콘이 라벨 폭 절반만큼 어긋났다.
+  라벨을 `absolute`로 아이콘 오른쪽에 띄우고 wrapper 박스를 아이콘 크기로 고정 → 아이콘 중심이
+  좌표에 정확히 앵커링된다. 라벨 없는 마커는 원래 정상.
+
 ### 큐레이션 관리 title 멀티 필터 (2026-07-08)
 
 - **ADDED**: 큐레이션 관리 검색 필터의 제목(display_title) 필터를 단일 select에서 **멀티 콤보박스**

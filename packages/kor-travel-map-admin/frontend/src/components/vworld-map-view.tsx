@@ -720,16 +720,30 @@ function createFeatureMarkerElement({
   }
 
   const color = resolveMarkerColor(markerColor ?? null);
+  // 아이콘(24px 원)이 좌표에 정확히 앵커링되도록 wrapper 박스를 아이콘 크기로 유지하고,
+  // 라벨(가격/날씨)은 absolute로 아이콘 오른쪽에 띄운다. flex로 [icon][label]을 나열하면
+  // maplibre 기본 center 앵커가 wrapper 중앙(=아이콘과 라벨 사이)을 좌표에 놓아, 아이콘이
+  // 라벨 폭 절반만큼 왼쪽으로 어긋난다(weather/price 마커가 좌표에서 어긋나 보이던 원인).
   const wrapper = document.createElement("div");
   wrapper.title = `${title} ${markerLabel.replace(/\n/g, " ")}`;
+  wrapper.style.position = "relative";
+  wrapper.style.width = "24px";
+  wrapper.style.height = "24px";
+  // 아이콘을 wrapper(=앵커 박스) 중앙에 정렬(테두리 포함 28px여도 중심 일치). 라벨은
+  // absolute라 flex 흐름 밖 → wrapper 24px 박스 중앙이 곧 아이콘 중심 = 좌표.
   wrapper.style.display = "flex";
   wrapper.style.alignItems = "center";
-  wrapper.style.gap = "4px";
+  wrapper.style.justifyContent = "center";
   wrapper.style.cursor = onClick ? "pointer" : "default";
   wrapper.style.userSelect = "none";
 
   const label = document.createElement("div");
   label.textContent = markerLabel;
+  // 아이콘 오른쪽에 세로 중앙 정렬로 띄운다(레이아웃 흐름 밖 → wrapper 박스 크기에 영향 X).
+  label.style.position = "absolute";
+  label.style.left = "calc(100% + 4px)";
+  label.style.top = "50%";
+  label.style.transform = "translateY(-50%)";
   label.style.minWidth = priceLabel ? "58px" : "38px";
   label.style.padding = "3px 6px";
   label.style.borderRadius = "6px";
