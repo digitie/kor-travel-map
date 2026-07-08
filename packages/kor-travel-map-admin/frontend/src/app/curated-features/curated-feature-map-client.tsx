@@ -246,6 +246,10 @@ export function CuratedFeatureMapClient() {
     source_id: sourceId || undefined,
     include_archived: false,
     page_size: 200,
+    // 지도는 물리 feature당 마커 1개 — REST API가 rank_score 최고 큐레이션 1건만
+    // 반환하도록 dedup을 위임한다(cross-theme 중복 제거). 아래 clusterItems의
+    // 클라이언트 dedup은 방어선으로 유지.
+    distinct_by_feature: true,
   });
 
   const updateViewportFromMap = useCallback((map: MapLibreMap) => {

@@ -984,7 +984,11 @@ FROM candidates
 WHERE (
     CAST(:cursor_score AS text) IS NULL
     OR (-score, feature_id) > (
-        -CAST(:cursor_score AS double precision),
+        -- score 컬럼은 x_extension.similarity(...) = real(float4). cursor_score는
+        -- score::text 왕복값이므로 real로 캐스팅해야 경계값이 정확히 일치하고, 동점 시
+        -- feature_id tiebreak로 넘어가 커서 행 자신이 다음 페이지에 재등장(같은 feature_id
+        -- 중복)하는 float8 정밀도 버그를 막는다.
+        -CAST(:cursor_score AS real),
         CAST(:cursor_feature_id AS text)
     )
 )

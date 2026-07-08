@@ -438,9 +438,8 @@ ORDER BY t.theme_slug, s.provider, r.dataset_key, r.priority DESC, r.rule_id
 LIMIT :limit
 """
 
-_LIST_FEATURES_SQL: Final[str] = f"""
-SELECT {_FEATURE_COLUMNS}
-{_FEATURE_FROM_SQL}
+# 필터(커서 제외) — 일반/dedup 두 변형이 공유한다.
+_FEATURE_FILTERS_SQL: Final[str] = """
 WHERE (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
   AND (
     CAST(:curation_status AS text) IS NULL
@@ -495,6 +494,10 @@ WHERE (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
     CAST(:display_title AS text) IS NULL
     OR COALESCE(cf.display_title, '') = CAST(:display_title AS text)
   )
+"""
+
+# keyset 커서 — 일반 변형(원본 cf 컬럼, uuid 비교).
+_FEATURE_CURSOR_SQL: Final[str] = """
   AND (
     CAST(:cursor_updated_at AS timestamptz) IS NULL
     OR (
@@ -505,7 +508,44 @@ WHERE (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
       CAST(:cursor_curated_feature_id AS uuid)
     )
   )
+"""
+
+_LIST_FEATURES_SQL: Final[str] = f"""
+SELECT {_FEATURE_COLUMNS}
+{_FEATURE_FROM_SQL}
+{_FEATURE_FILTERS_SQL}
+{_FEATURE_CURSOR_SQL}
 ORDER BY cf.updated_at DESC, cf.curated_feature_id DESC
+LIMIT :limit
+"""
+
+# 물리 feature당 1행 dedup 변형(지도 경로). 같은 feature가 여러 테마로 큐레이션되면
+# `/v1/admin/features/curated`가 같은 feature_id를 테마 수만큼 반환한다(부분 UNIQUE 인덱스가
+# (theme_id, feature_id)만 강제 → cross-theme 중복 허용). 지도는 물리 feature당 마커 1개여야
+# 하므로, feature_id별로 rank_score 최고(동점 시 최신 updated_at) 큐레이션 1건만 남긴다.
+# DISTINCT ON은 서브쿼리 안에서 (feature_id, rank_score DESC …)로 수행하고, 바깥에서 keyset
+# 커서 정렬을 적용해 페이지네이션 정합성을 유지한다(curated_feature_id는 서브쿼리에서 text로
+# alias돼 있어 커서 비교도 text — 표준 uuid는 text 정렬이 uuid 정렬과 일치).
+# 관리자 per-curation 목록은 이 변형을 쓰지 않아 모든 큐레이션을 그대로 본다.
+_LIST_FEATURES_DISTINCT_SQL: Final[str] = f"""
+SELECT * FROM (
+    SELECT DISTINCT ON (cf.feature_id) {_FEATURE_COLUMNS}
+    {_FEATURE_FROM_SQL}
+    {_FEATURE_FILTERS_SQL}
+    ORDER BY cf.feature_id, cf.rank_score DESC NULLS LAST,
+             cf.updated_at DESC, cf.curated_feature_id DESC
+) AS d
+WHERE (
+    CAST(:cursor_updated_at AS timestamptz) IS NULL
+    OR (
+      d.updated_at,
+      d.curated_feature_id
+    ) < (
+      CAST(:cursor_updated_at AS timestamptz),
+      CAST(:cursor_curated_feature_id AS text)
+    )
+)
+ORDER BY d.updated_at DESC, d.curated_feature_id DESC
 LIMIT :limit
 """
 
@@ -1266,15 +1306,22 @@ async def list_curated_features(
     include_archived: bool = False,
     page_size: int = 50,
     cursor: str | None = None,
+    distinct_by_feature: bool = False,
 ) -> CuratedFeaturePage:
-    """curated feature 목록을 keyset으로 조회한다."""
+    """curated feature 목록을 keyset으로 조회한다.
+
+    ``distinct_by_feature=True``면 물리 feature당 rank_score 최고 큐레이션 1건만
+    반환한다(지도 경로 — cross-theme 중복 제거). 관리자 per-curation 목록은 기본값
+    False로 모든 큐레이션을 그대로 본다.
+    """
 
     if curation_status is not None:
         _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     safe_page_size = _safe_limit(page_size, _MAX_PAGE_SIZE)
+    list_sql = _LIST_FEATURES_DISTINCT_SQL if distinct_by_feature else _LIST_FEATURES_SQL
     rows = (
         await session.execute(
-            text(_LIST_FEATURES_SQL),
+            text(list_sql),
             {
                 "theme_id": theme_id,
                 "theme_slug": theme_slug,

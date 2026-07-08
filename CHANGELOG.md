@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### REST API feature_id dedup — 큐레이션 cross-theme + 검색 페이지 경계 (2026-07-08)
+
+- **FIXED (curated)**: `/v1/admin/features/curated`에 `distinct_by_feature` 쿼리 파라미터 추가.
+  같은 물리 feature가 여러 테마로 큐레이션되면((theme_id, feature_id) 부분 UNIQUE가 cross-theme
+  중복 허용) 같은 `feature_id`가 테마 수만큼 반환됐다. `distinct_by_feature=true`(지도 경로)면
+  `DISTINCT ON (feature_id)`로 rank_score 최고 큐레이션 1건만 반환한다(keyset 페이지네이션 유지).
+  관리자 per-curation 목록(기본값)은 모든 큐레이션을 그대로 본다. 큐레이션 지도가 이 파라미터를
+  사용 — 지도 중복을 클라이언트가 아니라 API에서 근본 제거(클라이언트 dedup은 방어선 유지).
+- **FIXED (search)**: `/v1/features/search` score 커서가 `double precision`으로 캐스팅돼 float4
+  `score`와 페이지 경계에서 정밀도 불일치 → 커서 행이 다음 페이지에 재등장(같은 feature_id 중복).
+  커서를 `real`로 캐스팅해 경계값을 정확히 일치시켜 해결.
+- 근거: 지도/feature 목록 REST 쿼리 6종 적대적 감사(bbox·geometry·cluster·by-ids는 fan-out 불가 확인).
+
 ### Feature/Curated 지도 렌더 입력 feature_id dedup 보강 (2026-07-08)
 
 - **FIXED**: Feature 지도에서 같은 `feature_id` feature가 마커/도형으로 중복 렌더될 수 있던

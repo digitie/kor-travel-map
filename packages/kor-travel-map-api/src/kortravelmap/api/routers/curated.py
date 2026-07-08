@@ -913,6 +913,7 @@ async def list_admin_curated_features_route(
     include_archived: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
+    distinct_by_feature: Annotated[bool, Query()] = False,
 ) -> CuratedFeaturesResponse:
     started_at = perf_counter()
     try:
@@ -937,6 +938,7 @@ async def list_admin_curated_features_route(
             include_archived=include_archived,
             page_size=page_size,
             cursor=cursor,
+            distinct_by_feature=distinct_by_feature,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -112,6 +112,7 @@ async function fetchAdminCuratedFeatures(
       include_archived: params.include_archived,
       page_size: params.page_size,
       cursor: params.cursor,
+      distinct_by_feature: params.distinct_by_feature,
     }),
     { signal },
   );

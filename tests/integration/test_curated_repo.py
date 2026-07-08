@@ -364,6 +364,60 @@ async def test_manual_create_patch_and_archive_curated_feature(
     assert archived.archived_at is not None
 
 
+async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 물리 feature가 여러 테마로 큐레이션되면 기본 목록엔 테마 수만큼 행이 나오지만,
+    distinct_by_feature=True(지도 경로)면 rank_score 최고 큐레이션 1건만 반환한다."""
+    feature_id = await _load_seoul_bookstore(migrated_session)
+    themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
+    theme_a = themes[0]
+    theme_b = next(item for item in themes if item.theme_id != theme_a.theme_id)
+    [source] = await curated_repo.list_curated_sources(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+        limit=1,
+    )
+    await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=theme_a.theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="curated",
+        selected_by="pytest",
+        rank_score=10.0,
+    )
+    best = await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=theme_b.theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="curated",
+        selected_by="pytest",
+        rank_score=90.0,
+    )
+
+    # 기본(per-curation): 같은 feature_id가 테마 수(2)만큼 반환된다 — 지도 중복의 근원.
+    full = await curated_repo.list_curated_features(
+        migrated_session, curation_status="curated", page_size=100
+    )
+    assert [item.feature_id for item in full.items].count(feature_id) == 2
+
+    # distinct_by_feature: 물리 feature당 1행, rank_score 최고(best) 유지.
+    deduped = await curated_repo.list_curated_features(
+        migrated_session,
+        curation_status="curated",
+        page_size=100,
+        distinct_by_feature=True,
+    )
+    kept = [item for item in deduped.items if item.feature_id == feature_id]
+    assert len(kept) == 1
+    assert kept[0].curated_feature_id == best.curated_feature_id
+    dedup_feature_ids = [item.feature_id for item in deduped.items]
+    assert len(dedup_feature_ids) == len(set(dedup_feature_ids))
+
+
 async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     migrated_session: AsyncSession,
 ) -> None:

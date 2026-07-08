@@ -8528,6 +8528,7 @@ export interface operations {
                 include_archived?: boolean;
                 page_size?: number;
                 cursor?: string | null;
+                distinct_by_feature?: boolean;
             };
             header?: never;
             path?: never;
