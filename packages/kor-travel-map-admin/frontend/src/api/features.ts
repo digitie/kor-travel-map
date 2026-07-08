@@ -19,6 +19,8 @@ type FeatureSchemas = components["schemas"];
 
 export type FeatureSummary = FeatureSchemas["FeatureSummary"];
 export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
+export type FeatureCluster = FeatureSchemas["ClusterSummary"];
+type FeaturesInBoundsResponse = FeatureSchemas["FeaturesInBoundsResponse"];
 
 /**
  * tiled fetch가 merged 응답에 덧붙이는 비계약 메타. 생성된 OpenAPI 타입(`Meta`)에는
@@ -67,6 +69,11 @@ const MIN_FEATURE_TILE_ZOOM = 5;
 const MAX_FEATURE_TILE_ZOOM = 12;
 const MERCATOR_LAT_LIMIT = 85.05112878;
 const GEOMETRY_LIGHT_KINDS = new Set(["area", "route"]);
+
+// 서버 `_resolve_cluster_unit`: zoom ≤7=sido / ≤10=sigungu / ≤13=eupmyeondong /
+// ≥14=개별 feature. 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하는 대신
+// `/v1/features/in-bounds`의 서버측 region 집계(count+평균좌표 몇 행)를 쓴다(#649).
+export const FEATURE_CLUSTER_MAX_ZOOM = 13;
 
 function isGeometryLightOnly(kinds: readonly string[] | undefined): boolean {
   return (
@@ -382,6 +389,72 @@ export function useFeaturesInBbox(
     placeholderData: keepPreviousData,
     // tile fetchQuery staleTime(30s)과 맞춘다 — outer(5s)만 먼저 만료되면 tile이 아직
     // fresh한데도 refocus/재렌더에서 outer query가 불필요하게 refetch됐다.
+    staleTime: 30_000,
+  });
+}
+
+// ── 저zoom region 클러스터 (`GET /v1/features/in-bounds`, zoom 유도) ─────────────
+//
+// zoom ≤13에선 개별 feature를 tile로 대량 조회(4코어 박스 포화)하지 않고, 서버가
+// 행정구역 단위로 rollup한 클러스터(region code별 count + 평균 좌표) 몇 행만 받는다.
+// bbox GIST 인덱스만 쓰는 집계라 전국 뷰가 1M feature fetch 없이 즉시 로드된다(#649).
+// include_geometry는 클러스터 응답에서 무시되므로 보내지 않는다.
+export interface FeatureClustersParams {
+  min_lon: number;
+  min_lat: number;
+  max_lon: number;
+  max_lat: number;
+  kinds?: string[];
+  provider?: string[];
+  zoom: number;
+}
+
+async function fetchFeaturesInBounds(
+  params: FeatureClustersParams,
+  zoomInt: number,
+  signal?: AbortSignal,
+): Promise<FeaturesInBoundsResponse> {
+  return getJson<FeaturesInBoundsResponse>(
+    pathWithQuery("/v1/features/in-bounds", {
+      min_lon: params.min_lon,
+      min_lat: params.min_lat,
+      max_lon: params.max_lon,
+      max_lat: params.max_lat,
+      kind: params.kinds,
+      provider: params.provider,
+      zoom: zoomInt,
+      max_items: 2000,
+    }),
+    { signal },
+  );
+}
+
+/**
+ * react-query hook — 저zoom viewport의 서버측 region 클러스터. `zoom`은 정수로 내려
+ * 서버 밴드(≤7/≤10/≤13)를 유도하고, 같은 정수 zoom·같은 대략 bbox면 캐시를 재사용한다.
+ * 개별 feature tile fetch와 달리 tiling 없이 viewport 1회 요청.
+ */
+export function useFeatureClustersInBbox(
+  params: FeatureClustersParams,
+  options?: { enabled?: boolean },
+) {
+  const zoomInt = Math.floor(params.zoom);
+  const key = [
+    "features",
+    "clusters",
+    params.min_lon.toFixed(2),
+    params.min_lat.toFixed(2),
+    params.max_lon.toFixed(2),
+    params.max_lat.toFixed(2),
+    zoomInt,
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+  ] as const;
+  return useQuery<FeaturesInBoundsResponse, Error>({
+    queryKey: key,
+    queryFn: ({ signal }) => fetchFeaturesInBounds(params, zoomInt, signal),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }
