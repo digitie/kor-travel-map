@@ -140,6 +140,7 @@ async def test_stale_only_feature_is_stale_and_current_empty(
 
     card = await price_repo.build_price_card(migrated_session, feature_id=feature_id)
     assert card.current == []
+    assert card.latest_at == now - timedelta(days=10)
     assert card.is_stale is True
     # 이력은 보존된다.
     assert [p.product_key for p in card.history] == ["gasoline"]
