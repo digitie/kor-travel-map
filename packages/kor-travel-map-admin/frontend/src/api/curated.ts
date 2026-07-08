@@ -109,6 +109,7 @@ async function fetchAdminCuratedFeatures(
       q: params.q,
       feature_name: params.feature_name,
       display_title: params.display_title,
+      display_titles: params.display_titles,
       include_archived: params.include_archived,
       page_size: params.page_size,
       cursor: params.cursor,

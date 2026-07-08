@@ -17905,6 +17905,25 @@
           },
           {
             "in": "query",
+            "name": "display_titles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Display Titles"
+            }
+          },
+          {
+            "in": "query",
             "name": "include_archived",
             "required": false,
             "schema": {

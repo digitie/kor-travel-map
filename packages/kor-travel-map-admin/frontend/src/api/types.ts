@@ -8525,6 +8525,7 @@ export interface operations {
                 q?: string | null;
                 feature_name?: string | null;
                 display_title?: string | null;
+                display_titles?: string[] | null;
                 include_archived?: boolean;
                 page_size?: number;
                 cursor?: string | null;
