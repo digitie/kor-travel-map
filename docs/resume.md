@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-09 (codex) — Claude Code PR 사후 리뷰 후속 수정 로컬 완료
+
+- **완료**: #632~#638(닫힌 #635~#637 포함) current main 사후 리뷰 후 남은 작은 회귀 2건
+  (#650, #651)을 수정했다. price card는 stale-only feature에서도 `latest_at`을 history 기준으로
+  보존하고, managed file registry는 `orphan→active` 복귀를 `reappeared` 이벤트로 기록한다.
+- **검증**: 관련 통합 6 passed, 파일 레지스트리 단위 28 passed, 변경 파일 ruff clean,
+  변경 source mypy --strict clean.
+- **다음 한 작업**: 리뷰 코멘트/이슈 생성 → PR 생성 → CI green 확인 → 머지.
+
 ## 2026-07-09 (claude) — 사용자 버그/기능 배치(10건) 완결
 
 - **완료(9건 코드+배포)**: #10 파일-500(#640) · #18 log enable · #14 키 복사 · #17 curated dedup(#641)

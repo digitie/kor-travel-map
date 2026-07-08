@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (codex) — Claude Code PR #632~#638 사후 리뷰 후속 수정
+
+- **리뷰 범위**: Claude Code 생성 PR #632(opinet stale) · #633(notice lifecycle) ·
+  #634~#637(관리 UI 개편 스택, #635~#637 closed/superseded) · #638(통합 머지)을 current
+  main(#648) 기준으로 재검토했다. #639~#648에서 이미 보강된 회귀(파일 목록 CAST,
+  feature 검색 fast-path, 지도 dedup/성능 등)는 중복 수정하지 않았다.
+- **수정 1 — price card `latest_at`(#650)**: stale 지평선 때문에 `current`가 비는 feature도
+  history에는 마지막 관측이 남는데, 기존 `latest_at` 계산이 `current`만 보면서 `null`을
+  반환했다. `history` 기준으로 마지막 관측 시각을 보존하도록 수정하고 stale-only 통합 테스트를
+  보강했다.
+- **수정 2 — managed file reappeared 감사 이력(#651)**: `register_file()`이 `deleted/missing`
+  복귀만 `reappeared`로 남기고 `orphan→active` 복귀는 이력 없이 지나갔다. orphan 복귀도
+  `reappeared` 이벤트를 기록하도록 보강하고 실제 DB 이벤트 통합 테스트를 추가했다.
+- **검증**: `pytest -s tests/integration/test_price_freshness_horizon.py
+  tests/integration/test_file_registry_list.py -q` → 6 passed, `pytest -s
+  tests/unit/test_file_registry.py tests/unit/test_file_registry_scan.py -q` → 28 passed,
+  `ruff check` 변경 파일 clean, `mypy --strict` 변경 source 2파일 clean.
+
 ## 2026-07-09 (claude) — 사용자 버그/기능 배치(10건) 완결
 
 - **배치 10건 전량 처리** (2026-07-07~09). 9건 코드+배포, 1건(#12 지도 성능)은 클라이언트

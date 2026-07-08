@@ -269,7 +269,7 @@ async def register_file(
     """파일을 upsert 등록한다.
 
     - 신규 행: ``registered`` 이벤트(또는 ``event_kind`` 인자, 예: ``downloaded``).
-    - 기존 행: last_seen_at/메타 갱신. 이전 status가 deleted/missing이면
+    - 기존 행: last_seen_at/메타 갱신. 이전 status가 deleted/missing/orphan이면
       active 부활 + ``reappeared`` 이벤트를 추가로 남긴다.
     """
 
@@ -312,7 +312,7 @@ async def register_file(
                 detail=event_detail or {},
             )
     else:
-        if prior_status in ("deleted", "missing"):
+        if prior_status in ("deleted", "missing", "orphan"):
             await record_event(
                 session,
                 file_id=managed.file_id,

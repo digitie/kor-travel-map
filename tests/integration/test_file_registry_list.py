@@ -91,3 +91,44 @@ async def test_list_managed_files_scalar_filters_all_cast(
     # max_age_days=5 → downloaded_at >= now()-5d → 2일 된 것만.
     newer = await file_registry.list_managed_files(migrated_session, max_age_days=5)
     assert [f.path for f in newer.items] == ["backups/a.dump"]
+
+
+@pytest.mark.asyncio
+async def test_register_file_records_reappeared_from_orphan(
+    migrated_session: AsyncSession,
+) -> None:
+    """orphan 파일이 다시 정상 파일로 확인되면 감사 이력에 복귀 이벤트를 남긴다."""
+    registered = await file_registry.register_file(
+        migrated_session,
+        storage_backend="filesystem",
+        location="backup_root",
+        path="backups/orphan-then-active.dump",
+        kind="backup",
+        registered_by="scan",
+    )
+    changed = await file_registry.mark_orphan(
+        migrated_session,
+        file_id=registered.file_id,
+        reason="scan_unregistered",
+        actor="scan:test",
+    )
+    assert changed is True
+
+    revived = await file_registry.register_file(
+        migrated_session,
+        storage_backend="filesystem",
+        location="backup_root",
+        path="backups/orphan-then-active.dump",
+        kind="backup",
+        registered_by="scan",
+        actor="scan:test",
+    )
+
+    assert revived.status == "active"
+    assert revived.orphan_reason is None
+    events = await file_registry.list_managed_file_events(
+        migrated_session, file_id=registered.file_id, limit=10
+    )
+    event_by_kind = {event.event_kind: event for event in events}
+    assert "reappeared" in event_by_kind
+    assert event_by_kind["reappeared"].detail == {"prior_status": "orphan"}

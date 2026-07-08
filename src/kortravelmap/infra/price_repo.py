@@ -286,7 +286,7 @@ async def build_price_card(
 
     current = _sort_current([_price_point(row) for row in current_rows])
     history = [_price_point(row) for row in history_rows]
-    latest_at = max((point.observed_at for point in current), default=None)
+    latest_at = max((point.observed_at for point in history), default=None)
     reference = asof if asof is not None else kst_now()
     is_stale = (
         latest_at is None
