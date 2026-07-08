@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### concierge YouTube 그룹핑을 curated 테마 source로 (2026-07-08)
+
+- **ADDED**: concierge YouTube 채널/재생목록 그룹핑을 curated 테마로 자동 동기화하는
+  `sync_concierge_themes`(ADR-061). 이미 적재된 concierge 후보 feature의 detail youtube 값에서
+  그룹핑을 유도해(별도 API 호출 없음), 그룹핑마다 public `media` 테마(slug `concierge-yt-<channel>`/
+  `concierge-pl-<playlist>`) + detail_selector rule(auto-publish)을 upsert하고 후보를 즉시 채운다.
+  멱등. on-demand 트리거: Dagster `concierge_theme_sync` asset(수동 materialize). #15 완결.
+
 ### 큐레이션 rule detail_selector — 단일 source를 detail 값으로 분할 (2026-07-08)
 
 - **ADDED**: `feature.curated_source_rules`에 `detail_selector`(nullable jsonb) 추가(0042). rule이

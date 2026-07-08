@@ -86,6 +86,7 @@ async def test_curated_feature_asset_runners_call_client_methods() -> None:
 def test_curated_feature_assets_have_retry_policy_and_group() -> None:
     assert {asset.key.to_user_string() for asset in CURATED_FEATURE_ASSETS} == {
         "curated_source_metadata",
+        "concierge_theme_sync",
         "curated_feature_candidates",
         "curated_feature_status_sweep",
         "curated_feature_detail_snapshots",

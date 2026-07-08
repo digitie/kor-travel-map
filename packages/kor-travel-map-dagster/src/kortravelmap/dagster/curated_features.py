@@ -31,11 +31,13 @@ __all__ = [
     "CURATED_FEATURE_JOB_TAGS",
     "CURATED_FEATURE_JOBS",
     "CURATED_FEATURE_SCHEDULES",
+    "concierge_theme_sync",
     "curated_feature_candidates",
     "curated_feature_status_sweep",
     "curated_features_refresh_job",
     "curated_source_metadata",
     "curated_feature_detail_snapshots",
+    "run_concierge_theme_sync",
     "run_curated_feature_candidates",
     "run_curated_feature_status_sweep",
     "run_curated_source_metadata",
@@ -98,6 +100,28 @@ async def curated_feature_candidates(
     return await run_curated_feature_candidates(context)
 
 
+async def run_concierge_theme_sync(
+    context: AssetExecutionContext,
+) -> dict[str, object]:
+    """concierge youtube channel/playlist 그룹핑을 curated 테마+rule로 동기화(#15)."""
+
+    result = await _client(context).sync_concierge_themes()
+    metadata = result.as_metadata()
+    _add_output_metadata(context, metadata)
+    return metadata
+
+
+@asset(
+    group_name=_GROUP_NAME,
+    required_resource_keys=_RESOURCE_KEYS,
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def concierge_theme_sync(
+    context: AssetExecutionContext,
+) -> dict[str, object]:
+    return await run_concierge_theme_sync(context)
+
+
 async def run_curated_feature_status_sweep(
     context: AssetExecutionContext,
 ) -> dict[str, object]:
@@ -146,6 +170,7 @@ async def curated_feature_detail_snapshots(
 
 CURATED_FEATURE_ASSETS: Final = [
     curated_source_metadata,
+    concierge_theme_sync,
     curated_feature_candidates,
     curated_feature_status_sweep,
     curated_feature_detail_snapshots,
