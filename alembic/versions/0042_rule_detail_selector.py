@@ -10,7 +10,7 @@ apply 술어(``f.detail #>> path = value``)를 지원하는 부분 표현식 인
 concierge youtube channel/playlist 경로만 인덱싱(해당 feature만 대상 → 작고 빌드
 빠름) — 1M feature 전체를 인덱싱하지 않는다.
 
-Revision ID: 0042_curated_rule_detail_selector
+Revision ID: 0042_rule_detail_selector
 Revises: 0041_managed_files
 Create Date: 2026-07-08
 """
@@ -21,7 +21,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0042_curated_rule_detail_selector"
+revision: str = "0042_rule_detail_selector"
 down_revision: str | Sequence[str] | None = "0041_managed_files"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
