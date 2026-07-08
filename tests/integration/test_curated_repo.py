@@ -556,6 +556,46 @@ async def test_apply_rule_detail_selector_partitions_by_youtube_channel(
     assert fid_b not in curated_fids
 
 
+async def test_sync_concierge_themes_creates_themes_and_candidates(
+    migrated_session: AsyncSession,
+) -> None:
+    """concierge youtube channel 그룹핑 → public 테마 + detail_selector rule +
+    후보 feature 자동 채움. 멱등(재실행 시 rule 추가 생성 없음). #15 근간."""
+    fid_a1 = await _load_concierge_place_channel(
+        migrated_session, candidate_id="syn-a1", channel_id="chan-A", name="A1"
+    )
+    fid_a2 = await _load_concierge_place_channel(
+        migrated_session, candidate_id="syn-a2", channel_id="chan-A", name="A2"
+    )
+    fid_b1 = await _load_concierge_place_channel(
+        migrated_session, candidate_id="syn-b1", channel_id="chan-B", name="B1"
+    )
+
+    result = await curated_repo.sync_concierge_themes(migrated_session, min_features=1)
+    assert result.groupings >= 2
+    assert result.rules_created >= 2
+
+    themes = await curated_repo.list_curated_themes(migrated_session, limit=200)
+    slugs = {theme.theme_slug for theme in themes}
+    assert "concierge-yt-chan-A" in slugs
+    assert "concierge-yt-chan-B" in slugs
+    theme_a = next(t for t in themes if t.theme_slug == "concierge-yt-chan-A")
+    assert theme_a.theme_group == "media"
+    assert theme_a.visibility == "public"
+
+    curated_a = await curated_repo.list_curated_features(
+        migrated_session, theme_id=theme_a.theme_id, curation_status="curated"
+    )
+    a_fids = {item.feature_id for item in curated_a.items}
+    assert fid_a1 in a_fids
+    assert fid_a2 in a_fids
+    assert fid_b1 not in a_fids
+
+    # 멱등: 재실행 시 rule 추가 생성 없음.
+    again = await curated_repo.sync_concierge_themes(migrated_session, min_features=1)
+    assert again.rules_created == 0
+
+
 async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     migrated_session: AsyncSession,
 ) -> None:

@@ -63,6 +63,7 @@ from kortravelmap.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
 from kortravelmap.infra.curated_repo import (
+    ConciergeThemeSyncResult,
     CuratedFeatureCandidatesResult,
     CuratedFeatureDetailSnapshotMaterializeResult,
     CuratedFeatureStatusSweepResult,
@@ -79,6 +80,9 @@ from kortravelmap.infra.curated_repo import (
 )
 from kortravelmap.infra.curated_repo import (
     sweep_curated_feature_status as repo_sweep_curated_feature_status,
+)
+from kortravelmap.infra.curated_repo import (
+    sync_concierge_themes as repo_sync_concierge_themes,
 )
 from kortravelmap.infra.db import make_async_session_factory
 from kortravelmap.infra.dedup_refresh_repo import (
@@ -273,6 +277,7 @@ __all__ = [
     "AirQualityLoadResult",
     "AsyncKorTravelMapClient",
     "BatchDagRunResult",
+    "ConciergeThemeSyncResult",
     "CuratedFeatureCandidatesResult",
     "CuratedFeatureStatusSweepResult",
     "CuratedSourceMetadataRefreshResult",
@@ -1179,6 +1184,22 @@ class AsyncKorTravelMapClient:
             return await repo_apply_enabled_curated_source_rules(
                 session,
                 limit=limit,
+            )
+
+    async def sync_concierge_themes(
+        self,
+        *,
+        min_features: int = 1,
+    ) -> ConciergeThemeSyncResult:
+        """concierge youtube channel/playlist 그룹핑을 curated 테마+rule로 동기화한다.
+
+        이미 적재된 concierge 후보 feature의 그룹핑 값에서 유도해 그룹핑당 public
+        테마 1개 + detail_selector rule 1개를 upsert하고 즉시 후보를 채운다(#15).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_sync_concierge_themes(
+                session,
+                min_features=min_features,
             )
 
     async def sweep_curated_feature_status(

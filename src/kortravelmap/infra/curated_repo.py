@@ -1691,6 +1691,177 @@ async def apply_enabled_curated_source_rules(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ConciergeThemeSyncResult:
+    """concierge youtube 그룹핑 → 테마/rule 동기화 결과."""
+
+    themes_upserted: int
+    rules_created: int
+    groupings: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "themes_upserted": self.themes_upserted,
+            "rules_created": self.rules_created,
+            "groupings": self.groupings,
+        }
+
+
+# concierge youtube 그룹핑 → curated_theme/rule 동기화 설정.
+# (kind, detail id 필드, detail title 필드, theme_slug 접두).
+_CONCIERGE_THEME_KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
+    ("channel", "channel_id", "channel_title", "concierge-yt-"),
+    ("playlist", "playlist_id", "playlist_title", "concierge-pl-"),
+)
+
+
+async def _upsert_concierge_theme(
+    session: AsyncSession, *, slug: str, name: str, metadata: Mapping[str, Any]
+) -> str:
+    """concierge 그룹핑 테마를 slug 기준 upsert하고 theme_id 반환."""
+    row = (
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_themes (
+                    theme_slug, theme_name, theme_description, theme_group,
+                    default_curated, visibility, metadata, updated_at
+                ) VALUES (
+                    :slug, :name, '', 'media', true, 'public',
+                    CAST(:metadata_json AS jsonb), now()
+                )
+                ON CONFLICT (theme_slug) DO UPDATE SET
+                    theme_name = EXCLUDED.theme_name,
+                    metadata = feature.curated_themes.metadata || EXCLUDED.metadata,
+                    updated_at = now()
+                RETURNING theme_id::text AS theme_id
+                """
+            ),
+            {"slug": slug, "name": name, "metadata_json": _json_dumps(dict(metadata))},
+        )
+    ).mappings().one()
+    return str(row["theme_id"])
+
+
+async def sync_concierge_themes(
+    session: AsyncSession, *, min_features: int = 1
+) -> ConciergeThemeSyncResult:
+    """이미 적재된 concierge youtube 후보 feature의 channel/playlist 그룹핑을
+    curated_theme + detail_selector rule로 동기화한다(멱등).
+
+    새 concierge API 호출 없이 ``features.detail`` 의 youtube 그룹핑 값(id+title)에서
+    직접 유도한다. 그룹핑마다 public ``media`` 테마 1개 + 그 grouping만 고르는
+    detail_selector rule(``default_action='curated'`` — auto-publish) 1개를 upsert하고,
+    apply로 후보 feature를 즉시 채운다.
+    """
+
+    sources = await list_curated_sources(
+        session,
+        provider=_CONCIERGE_PROVIDER,
+        dataset_key=_CONCIERGE_DATASET_KEY,
+        limit=1,
+    )
+    if not sources:
+        return ConciergeThemeSyncResult(
+            themes_upserted=0, rules_created=0, groupings=0
+        )
+    source_id = sources[0].source_id
+    base = ["payload", "kor_travel_concierge", "youtube"]
+
+    themes_upserted = 0
+    rules_created = 0
+    groupings = 0
+    for _kind, id_field, title_field, slug_prefix in _CONCIERGE_THEME_KINDS:
+        id_path = [*base, id_field]
+        title_path = [*base, title_field]
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        f.detail #>> CAST(:id_path AS text[]) AS gid,
+                        max(f.detail #>> CAST(:title_path AS text[])) AS gtitle,
+                        count(*) AS cnt
+                    FROM feature.features AS f
+                    JOIN provider_sync.source_links AS sl
+                      ON sl.feature_id = f.feature_id
+                    JOIN provider_sync.source_records AS sr
+                      ON sr.source_record_key = sl.source_record_key
+                    WHERE sr.provider = :provider
+                      AND sr.dataset_key = :dataset_key
+                      AND f.deleted_at IS NULL
+                      AND f.status = 'active'
+                      AND f.detail #>> CAST(:id_path AS text[]) IS NOT NULL
+                    GROUP BY f.detail #>> CAST(:id_path AS text[])
+                    HAVING count(*) >= :min_features
+                    """
+                ),
+                {
+                    "id_path": id_path,
+                    "title_path": title_path,
+                    "provider": _CONCIERGE_PROVIDER,
+                    "dataset_key": _CONCIERGE_DATASET_KEY,
+                    "min_features": min_features,
+                },
+            )
+        ).mappings().all()
+        for row in rows:
+            gid = str(row["gid"])
+            gtitle = str(row["gtitle"]) if row["gtitle"] else f"{slug_prefix}{gid}"
+            cnt = int(row["cnt"])
+            theme_id = await _upsert_concierge_theme(
+                session,
+                slug=f"{slug_prefix}{gid}",
+                name=gtitle,
+                metadata={
+                    "concierge_kind": _kind,
+                    "concierge_value": gid,
+                    "poi_count": cnt,
+                    "seed": "sync_concierge_themes",
+                },
+            )
+            themes_upserted += 1
+            groupings += 1
+            existing = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT rule_id::text AS rule_id
+                        FROM feature.curated_source_rules
+                        WHERE theme_id = CAST(:theme_id AS uuid)
+                          AND source_id = CAST(:source_id AS uuid)
+                        LIMIT 1
+                        """
+                    ),
+                    {"theme_id": theme_id, "source_id": source_id},
+                )
+            ).mappings().first()
+            if existing is None:
+                rule = await create_curated_source_rule(
+                    session,
+                    theme_id=theme_id,
+                    source_id=source_id,
+                    dataset_key=_CONCIERGE_DATASET_KEY,
+                    place_kind="youtube_place_candidate",
+                    detail_selector={"path": id_path, "value": gid},
+                    default_action="curated",
+                    priority=cnt,
+                    metadata={"curation_relation": "theme_area_anchor"},
+                )
+                rule_id = rule.rule_id
+                rules_created += 1
+            else:
+                rule_id = str(existing["rule_id"])
+            await apply_curated_source_rule(session, rule_id=rule_id)
+
+    return ConciergeThemeSyncResult(
+        themes_upserted=themes_upserted,
+        rules_created=rules_created,
+        groupings=groupings,
+    )
+
+
 async def sweep_curated_feature_status(
     session: AsyncSession,
 ) -> CuratedFeatureStatusSweepResult:
