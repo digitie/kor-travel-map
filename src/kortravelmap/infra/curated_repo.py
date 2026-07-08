@@ -173,6 +173,7 @@ class CuratedSourceRule:
     place_kind: str | None
     category: str | None
     region_scope: dict[str, Any]
+    detail_selector: dict[str, Any] | None
     default_action: str
     priority: int
     enabled: bool
@@ -341,8 +342,8 @@ _SOURCE_COLUMNS: Final[str] = (
 _RULE_COLUMNS: Final[str] = (
     "r.rule_id::text AS rule_id, r.theme_id::text AS theme_id, t.theme_slug, "
     "r.source_id::text AS source_id, s.provider, r.dataset_key, r.place_kind, "
-    "r.category, r.region_scope, r.default_action, r.priority, r.enabled, "
-    "r.metadata, r.created_at, r.updated_at"
+    "r.category, r.region_scope, r.detail_selector, r.default_action, "
+    "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at"
 )
 _FEATURE_COLUMNS: Final[str] = """
     cf.curated_feature_id::text AS curated_feature_id,
@@ -597,6 +598,7 @@ WITH rule AS (
         r.place_kind,
         r.category,
         r.region_scope,
+        r.detail_selector,
         r.default_action,
         r.priority,
         COALESCE(
@@ -704,6 +706,14 @@ upserted AS (
           AND (NOT rule.region_scope ? 'sigungu_code'
            OR f.sigungu_code = rule.region_scope ->> 'sigungu_code')
         )
+      )
+      -- detail_selector: 단일 source를 detail JSON 값으로 분할(예: concierge youtube
+      -- channel/playlist 그룹핑). path(jsonb 배열)로 지정한 detail 값이 value와 일치.
+      AND (
+        rule.detail_selector IS NULL
+        OR f.detail #>> ARRAY(
+             SELECT jsonb_array_elements_text(rule.detail_selector -> 'path')
+           ) = rule.detail_selector ->> 'value'
       )
       AND NOT EXISTS (
         SELECT 1
@@ -990,6 +1000,11 @@ def _rule(row: Any) -> CuratedSourceRule:
         place_kind=row["place_kind"],
         category=row["category"],
         region_scope=_json_object(row["region_scope"]),
+        detail_selector=(
+            _json_object(row["detail_selector"])
+            if row["detail_selector"] is not None
+            else None
+        ),
         default_action=str(row["default_action"]),
         priority=int(row["priority"]),
         enabled=bool(row["enabled"]),
@@ -1923,6 +1938,7 @@ async def create_curated_source_rule(
     place_kind: str | None = None,
     category: str | None = None,
     region_scope: Mapping[str, Any] | None = None,
+    detail_selector: Mapping[str, Any] | None = None,
     default_action: str = "candidate",
     priority: int = 0,
     enabled: bool = True,
@@ -1937,11 +1953,12 @@ async def create_curated_source_rule(
                 """
                 INSERT INTO feature.curated_source_rules (
                     theme_id, source_id, dataset_key, place_kind, category,
-                    region_scope, default_action, priority, enabled, metadata,
-                    updated_at
+                    region_scope, detail_selector, default_action, priority,
+                    enabled, metadata, updated_at
                 ) VALUES (
                     CAST(:theme_id AS uuid), CAST(:source_id AS uuid), :dataset_key,
                     :place_kind, :category, CAST(:region_scope_json AS jsonb),
+                    CAST(:detail_selector_json AS jsonb),
                     :default_action, :priority, :enabled,
                     CAST(:metadata_json AS jsonb), now()
                 )
@@ -1955,6 +1972,9 @@ async def create_curated_source_rule(
                 "place_kind": place_kind,
                 "category": category,
                 "region_scope_json": _json_dumps(region_scope),
+                "detail_selector_json": (
+                    _json_dumps(detail_selector) if detail_selector else None
+                ),
                 "default_action": default_action,
                 "priority": priority,
                 "enabled": enabled,

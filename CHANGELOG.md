@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 큐레이션 rule detail_selector — 단일 source를 detail 값으로 분할 (2026-07-08)
+
+- **ADDED**: `feature.curated_source_rules`에 `detail_selector`(nullable jsonb) 추가(0042). rule이
+  "feature.detail의 특정 path 값이 value와 일치하는 feature만"을 지정할 수 있게 해, 하나의 source를
+  detail 값별로 여러 테마에 팬아웃한다. `_APPLY_RULE_SQL`에 `f.detail #>> path = value` 술어 추가.
+  concierge youtube 후보를 channel/playlist 그룹핑별 테마로 자동 후보화하기 위한 근간(#15 PR1).
+  apply 술어를 지원하는 concierge youtube channel_id/playlist_id 부분 표현식 인덱스도 추가.
+
 ### weather/price 마커 좌표 어긋남 수정 (2026-07-08)
 
 - **FIXED**: Feature 지도에서 날씨·유가 마커가 좌표에서 왼쪽으로 어긋나 보이던 문제. 라벨이 붙은
