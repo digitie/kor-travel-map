@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (claude) — Feature 지도 저zoom 서버측 region 클러스터 (#649, #12 잔여) — 라이브 검증 완료
+
+- **배경**: 배치 #12(지도 응답성)의 잔여 인프라. 저zoom에서 개별 feature를 tile로 대량
+  조회해 4코어 박스를 포화시키던 것을 서버측 행정구역 rollup으로 대체.
+- **핵심 발견**: 백엔드 클러스터링은 이미 완비돼 있었다. `/v1/features/in-bounds`가
+  `_resolve_cluster_unit`(zoom ≤7 sido/≤10 sigungu/≤13 읍면동/≥14 개별)로 유도해 `clusters[]`를
+  반환하는데, 프론트가 `zoom`을 서버로 안 보내 항상 개별 feature를 받았다. → 엔드포인트 **소비**만.
+- **구현(#653, 프론트 3파일)**: `useFeatureClustersInBbox`(정수 zoom, tiling 없이 viewport 1회) +
+  `VWorldServerClusters`(서버 `{cluster_key,feature_count,lon,lat}`를 DOM count 버블로 렌더,
+  maplibre cluster:true 재군집 미사용, 클릭 시 다음 밴드로 확대) + `clusterMode`(zoom≤13) 분기
+  (개별/클러스터 fetch 상호 배타, 상태 배지·목록 안내 문구·지도 오버레이 힌트). 개별 경로
+  unmount cleanup(source/layer/marker/listener) 검증.
+- **라이브 검증(n150, Playwright)**: z6.5 → **17개 sido 클러스터**(206k~84, "17개 지역 · 968,624건
+  집계"), z10 → 27 sigungu, z12.2 → 70 읍면동으로 밴드 refine. z13.7 초과 → 개별 모드 전환("264건
+  표시", category 아이콘 마커, 오버레이 사라짐). 네트워크: z≤13은 `/in-bounds?zoom=` 1회, z>13은
+  `/v1/features` tiled. 저zoom 968,624건 → 17행 fetch로 즉시 로드.
+- **UX(사용자 승인)**: 근접-군집 → 행정구역-군집 / 저zoom 테이블 안내 문구.
+
 ## 2026-07-09 (codex) — Claude Code PR #632~#638 사후 리뷰 후속 수정
 
 - **리뷰 범위**: Claude Code 생성 PR #632(opinet stale) · #633(notice lifecycle) ·

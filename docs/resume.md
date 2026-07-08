@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-09 (claude) — Feature 지도 저zoom 서버측 region 클러스터 완결 (#649, #12 잔여)
+
+- **완료(#653, 배포+라이브 검증)**: 저zoom(≤13) Feature 지도가 기존 `/v1/features/in-bounds`의
+  서버측 행정구역 rollup 클러스터를 소비. 백엔드는 이미 완비(zoom 유도), 프론트가 `zoom` 미전송이
+  원인이었음 → `useFeatureClustersInBbox` + `VWorldServerClusters` + `clusterMode` 분기 추가.
+- **라이브 검증(n150 Playwright)**: z6.5 17 sido("968,624건 집계") → z10 sigungu → z12 읍면동 밴드
+  refine, z13.7 초과 시 개별 모드("264건 표시")로 전환. z≤13 `/in-bounds` 1회 vs z>13 tiled `/features`.
+  저zoom 968,624건 → 17행 fetch(즉시 로드). #12 잔여 인프라 해소.
+- **다음 한 작업**: 사용자 배치(10건) + #12 잔여까지 전량 종료. 새 지시 대기.
+
 ## 2026-07-09 (codex) — Claude Code PR 사후 리뷰 후속 수정 로컬 완료
 
 - **완료**: #632~#638(닫힌 #635~#637 포함) current main 사후 리뷰 후 남은 작은 회귀 2건
