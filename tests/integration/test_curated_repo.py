@@ -418,6 +418,50 @@ async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
     assert len(dedup_feature_ids) == len(set(dedup_feature_ids))
 
 
+async def test_list_curated_features_display_titles_multi_filter(
+    migrated_session: AsyncSession,
+) -> None:
+    """display_titles(멀티) 필터는 지정한 제목 집합만 반환한다(큐레이션 관리 title 필터)."""
+    feature_id = await _load_seoul_bookstore(migrated_session)
+    themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
+    [source] = await curated_repo.list_curated_sources(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+        limit=1,
+    )
+    await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=themes[0].theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="curated",
+        display_title="가을 책방",
+        selected_by="pytest",
+    )
+    await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=themes[1].theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="curated",
+        display_title="겨울 책방",
+        selected_by="pytest",
+    )
+
+    only_fall = await curated_repo.list_curated_features(
+        migrated_session, curation_status="curated", display_titles=["가을 책방"]
+    )
+    assert {item.display_title for item in only_fall.items} == {"가을 책방"}
+
+    both = await curated_repo.list_curated_features(
+        migrated_session,
+        curation_status="curated",
+        display_titles=["가을 책방", "겨울 책방"],
+    )
+    assert {item.display_title for item in both.items} == {"가을 책방", "겨울 책방"}
+
+
 async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     migrated_session: AsyncSession,
 ) -> None:

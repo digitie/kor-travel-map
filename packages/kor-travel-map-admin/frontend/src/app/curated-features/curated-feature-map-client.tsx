@@ -40,6 +40,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  ComboboxMultiple,
+  type ComboboxMultipleOption,
+} from "@/components/ui/combobox-multiple";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -226,7 +230,7 @@ export function CuratedFeatureMapClient() {
   const [selectedCuratedId, setSelectedCuratedId] = useState<string | null>(null);
   const [poiName, setPoiName] = useState("");
   const [themeId, setThemeId] = useState("");
-  const [displayTitle, setDisplayTitle] = useState("");
+  const [displayTitles, setDisplayTitles] = useState<string[]>([]);
   const [sourceId, setSourceId] = useState("");
   const deferredPoiName = useDeferredValue(poiName);
 
@@ -242,7 +246,7 @@ export function CuratedFeatureMapClient() {
     curation_status: "curated",
     feature_name: deferredPoiName.trim() || undefined,
     theme_id: themeId || undefined,
-    display_title: displayTitle || undefined,
+    display_titles: displayTitles.length > 0 ? displayTitles : undefined,
     source_id: sourceId || undefined,
     include_archived: false,
     page_size: 200,
@@ -278,15 +282,17 @@ export function CuratedFeatureMapClient() {
     curatedItems.find((item) => item.curated_feature_id === selectedCuratedId) ??
     null;
 
-  const titleOptions = useMemo(() => {
+  const titleOptions = useMemo<ComboboxMultipleOption[]>(() => {
     const titles = new Set(
       (titleOptionsQuery.data?.data.items ?? [])
         .map((item) => item.display_title)
         .filter((value): value is string => Boolean(value)),
     );
-    if (displayTitle) titles.add(displayTitle);
-    return Array.from(titles).sort((a, b) => a.localeCompare(b, "ko"));
-  }, [displayTitle, titleOptionsQuery.data]);
+    for (const title of displayTitles) titles.add(title);
+    return Array.from(titles)
+      .sort((a, b) => a.localeCompare(b, "ko"))
+      .map((title) => ({ value: title, label: title }));
+  }, [displayTitles, titleOptionsQuery.data]);
 
   const sourceOptions = sources.data?.data.items ?? [];
   const themeOptions = themes.data?.data.items ?? [];
@@ -412,20 +418,18 @@ export function CuratedFeatureMapClient() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <NativeSelect
-              aria-label="제목 필터"
-              value={displayTitle}
-              onChange={(event) =>
-                clearSelectionAnd(() => setDisplayTitle(event.target.value))
+            <ComboboxMultiple
+              className="min-w-[13rem]"
+              label="제목"
+              value={displayTitles}
+              options={titleOptions}
+              placeholder="제목 전체"
+              searchPlaceholder="제목 검색"
+              emptyMessage="선택할 제목이 없습니다."
+              onChange={(next) =>
+                clearSelectionAnd(() => setDisplayTitles(next))
               }
-            >
-              <NativeSelectOption value="">제목 전체</NativeSelectOption>
-              {titleOptions.map((title) => (
-                <NativeSelectOption key={title} value={title}>
-                  {title}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+            />
             <NativeSelect
               aria-label="데이터소스 필터"
               value={sourceId}

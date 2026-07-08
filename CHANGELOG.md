@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 큐레이션 관리 title 멀티 필터 (2026-07-08)
+
+- **ADDED**: 큐레이션 관리 검색 필터의 제목(display_title) 필터를 단일 select에서 **멀티 콤보박스**
+  (`ComboboxMultiple`, 검색+배지 다중 선택)로 교체. 여러 제목을 동시에 선택해 필터링한다. 백엔드
+  `/v1/admin/features/curated`에 `display_titles`(배열) 쿼리 파라미터 추가 → `cf.display_title =
+  ANY(...)`. 기존 단일 `display_title`도 호환 유지.
+
 ### REST API feature_id dedup — 큐레이션 cross-theme + 검색 페이지 경계 (2026-07-08)
 
 - **FIXED (curated)**: `/v1/admin/features/curated`에 `distinct_by_feature` 쿼리 파라미터 추가.
