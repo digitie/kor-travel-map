@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Feature 지도 pan 반응성 — 중복 outer refetch 제거 (2026-07-09)
+
+- **CHANGED**: `useFeaturesInBbox` outer query key의 viewport 서명을 `.toFixed(4)`(~11m)에서
+  `.toFixed(2)`(~1.1km)로 낮추고 zoom 성분을 제거. tile 최소 폭이 ~9.7km(zoom 12)라 sub-tile pan은
+  이미 같은 tile 집합=같은 데이터인데도 과도하게 정밀한 서명이 pan마다 새 outer key를 만들어 tile
+  cache가 전부 hit인데도 outer query를 재실행(재merge·재렌더)시켰다. 이제 tile 내부 작은 pan은 순수
+  cache hit이 된다. outer `staleTime`도 tile fetchQuery와 같은 30s로 정렬(기존 5s → 조기 만료로
+  불필요한 refetch). 순수 클라이언트 캐시 튜닝 — 데이터·계약 불변. 필터 적용·대형 pan의 잔여 지연은
+  서버(휴게소 4코어 박스에서 밀집 bbox tile 조회) 병목으로 별도 인프라 과제(저zoom 서버측 region
+  clustering). #12 클라이언트 개선분.
+
 ### concierge YouTube 그룹핑을 curated 테마 source로 (2026-07-08)
 
 - **ADDED**: concierge YouTube 채널/재생목록 그룹핑을 curated 테마로 자동 동기화하는
