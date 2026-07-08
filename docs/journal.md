@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (claude) — 사용자 버그/기능 배치(10건) 완결
+
+- **배치 10건 전량 처리** (2026-07-07~09). 9건 코드+배포, 1건(#12 지도 성능)은 클라이언트
+  개선분 배포 + 잔여는 인프라 과제로 스코핑:
+  - #10 파일 관리 500 (asyncpg CAST, PR #640) — 라이브 `LIST_OK`.
+  - #18 운영 log enable (`API_CALL_LOG_ENABLED` override) — `ops.api_call_log` 적재 확인.
+  - #14 concierge google/naver/kakao 키 복사 (n150 override).
+  - #17 curated 지도 dedup (PR #641).
+  - #11 feature 지도 dedup — 렌더 입력 dedup (PR #642).
+  - #19 REST API feature_id dedup — curated cross-theme + search float cursor 경계 (PR #643) — 라이브 `all_unique=True`.
+  - #16 큐레이션 title 멀티콤보 필터 (PR #644).
+  - #13 weather/price 마커 좌표 어긋남 — 라벨 absolute 앵커 (PR #645).
+  - #15 concierge YouTube 그룹핑 → curated 테마 source (PR #646 detail_selector + PR #647 sync, ADR-061).
+    prod sync 1회 실행: **31 테마(채널 20 + 재생목록 11) · 31 detail_selector rule · 1944 curated feature**
+    자동 게시. 멱등(2회차 rules_created=0). on-demand 트리거는 Dagster `concierge_theme_sync` asset.
+  - #12 지도 응답성 — `useFeaturesInBbox` outer key viewport 서명 `.toFixed(4)→.toFixed(2)` +
+    zoom 성분 제거 + outer staleTime 5s→30s. tile(≥9.7km) 내부 작은 pan이 순수 cache hit이 됨.
+- **잔여 인프라 과제(#12)**: 필터 적용·대형 pan 지연은 서버 병목(휴게소 4코어 박스 밀집 bbox tile
+  조회, 1M feature). 근본 해법은 **저zoom 서버측 region clustering**(기존 `/v1/features` `cluster_unit`
+  엔드포인트 활용 — 저zoom에서 개별 feature 대신 sido/sigungu 집계 렌더) 또는 MV/박스 증설 — UX(군집
+  방식) 변경이라 별도 스코프. 클라이언트 파이프라인(per-tile 캐시·keepPreviousData·abort)은 이미 최적.
+- **작업 방식**: 로컬 디스크 포화(타 프로젝트 geo 데이터)로 프론트는 n150 빌드/검증, push는 로컬에서.
+  prod 설정(#14 키·sync 트리거)은 git 밖 — 배포 런북+메모리에 기록.
+
 ## 2026-07-07 (claude) — 파일 관리 목록 500 수정 (asyncpg AmbiguousParameterError)
 
 - **증상**: `/v1/admin/files?sort=downloaded_at&limit=50&offset=0`(파일 관리 기본 뷰)가 항상

@@ -353,12 +353,16 @@ export function useFeaturesInBbox(
   // tile 분할은 한 번만 계산해 queryKey와 fetch에 함께 쓴다(이전엔 hook과 fetcher가
   // 각각 buildFeatureTiles를 호출해 동일 계산을 두 번 했다).
   const tiles = buildFeatureTiles(queryParams);
+  // normal path에선 tile key 집합이 fetch 결과를 완전히 결정한다(같은 tile 집합 =
+  // 같은 데이터). 따라서 outer key의 viewport는 tiles=[] fallback(single-bbox) 경우만
+  // 구분하면 된다. 과거 `.toFixed(4)`(~11m)는 tile이 최소 ~9.7km인데도 sub-tile pan마다
+  // 새 outer key를 만들어 tile cache가 다 hit인데도 outer query를 재실행(재merge/재렌더)
+  // 시켰다. ~1.1km(`.toFixed(2)`)로 낮춰 tile 내부 pan은 순수 cache hit이 되게 한다.
   const viewportSignature = [
-    params.min_lon.toFixed(4),
-    params.min_lat.toFixed(4),
-    params.max_lon.toFixed(4),
-    params.max_lat.toFixed(4),
-    (params.zoom ?? 0).toFixed(1),
+    params.min_lon.toFixed(2),
+    params.min_lat.toFixed(2),
+    params.max_lon.toFixed(2),
+    params.max_lat.toFixed(2),
   ].join(",");
   const key = [
     "features",
@@ -376,7 +380,9 @@ export function useFeaturesInBbox(
       fetchFeaturesInTiles(queryClient, queryParams, tiles, signal),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
-    staleTime: 5_000,
+    // tile fetchQuery staleTime(30s)과 맞춘다 — outer(5s)만 먼저 만료되면 tile이 아직
+    // fresh한데도 refocus/재렌더에서 outer query가 불필요하게 refetch됐다.
+    staleTime: 30_000,
   });
 }
 

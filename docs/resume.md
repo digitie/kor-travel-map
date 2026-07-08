@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-09 (claude) — 사용자 버그/기능 배치(10건) 완결
+
+- **완료(9건 코드+배포)**: #10 파일-500(#640) · #18 log enable · #14 키 복사 · #17 curated dedup(#641)
+  · #11 feature 지도 dedup(#642) · #19 REST dedup(#643) · #16 title 멀티필터(#644) · #13 마커 좌표(#645)
+  · #15 concierge 테마 source(#646/#647, ADR-061). #15는 prod sync 1회 실행 완료 → 31 테마·31 rule·
+  1944 curated feature 자동 게시(멱등).
+- **완료(#12 클라이언트 개선분)**: `useFeaturesInBbox` outer key viewport 서명 coarsen + staleTime
+  정렬로 tile 내부 작은 pan을 순수 cache hit화 (PR 진행 중, base=main).
+- **잔여 인프라 과제(#12)**: 필터 적용·대형 pan 지연 = 서버 병목(휴게소 4코어 밀집 bbox tile 조회).
+  근본 해법 = 저zoom 서버측 region clustering(`/v1/features` `cluster_unit` 활용) 또는 MV/박스 증설.
+  UX(군집 방식) 변경이라 사용자 확인 후 별도 스코프 권장.
+- **다음 한 작업**: #12 클라이언트 PR CI green → 머지 → n150 ui 재빌드 배포. 이후 저zoom 서버측
+  clustering을 별도 태스크로 착수 여부 결정.
+
 ## 2026-07-07 (claude) — 사용자 버그/기능 배치(10건) 진행 중
 
 - **완료**: 파일 관리 목록 500(asyncpg AmbiguousParameterError) root-cause+수정+통합 테스트
