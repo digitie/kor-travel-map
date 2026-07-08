@@ -17940,6 +17940,16 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "query",
+            "name": "distinct_by_feature",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Distinct By Feature",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
