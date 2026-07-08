@@ -863,6 +863,103 @@ function createGeometryLabelElement(
   return element;
 }
 
+export interface ServerClusterInput {
+  cluster_key: string;
+  feature_count: number;
+  lon: number;
+  lat: number;
+}
+
+function abbreviateCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+/**
+ * 저zoom 서버측 region 클러스터 렌더(#649). 서버가 행정구역 단위로 rollup한
+ * `{cluster_key, feature_count, lon, lat}`를 그대로 DOM 마커(원+카운트)로 그린다.
+ * maplibre `cluster:true`(개별 feature 재군집)를 쓰지 않으므로 count가 서버 집계 그대로다.
+ * 클릭하면 centroid로 확대해 다음 밴드(sido→sigungu→읍면동→개별)로 내려간다.
+ * `VWorldFeatureClusters`(개별 feature)와 zoom에 따라 상호 배타적으로 택일 렌더된다.
+ */
+export function VWorldServerClusters({
+  clusters,
+  zoomStep = 3,
+}: {
+  clusters: ReadonlyArray<ServerClusterInput>;
+  zoomStep?: number;
+}) {
+  const map = useContext(VWorldMapContext);
+  const markersRef = useRef(new Map<string, MapLibreMarker>());
+
+  useEffect(() => {
+    if (map === null) return;
+    const pool = markersRef.current;
+    const next = new Set<string>();
+    for (const cluster of clusters) {
+      if (typeof cluster.lon !== "number" || typeof cluster.lat !== "number") {
+        continue;
+      }
+      next.add(cluster.cluster_key);
+      const label = abbreviateCount(cluster.feature_count);
+      const coords: [number, number] = [cluster.lon, cluster.lat];
+      let marker = pool.get(cluster.cluster_key);
+      if (marker === undefined) {
+        const element = createClusterElement(cluster.feature_count, label);
+        // 클릭 시 stale closure 회피: 현재 좌표를 dataset에서 읽는다(풀 재사용 대비).
+        element.dataset.lon = String(cluster.lon);
+        element.dataset.lat = String(cluster.lat);
+        element.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const target: [number, number] = [
+            Number(element.dataset.lon),
+            Number(element.dataset.lat),
+          ];
+          map.easeTo({
+            center: target,
+            zoom: Math.min(map.getMaxZoom(), map.getZoom() + zoomStep),
+          });
+        });
+        marker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat(
+          coords,
+        );
+        marker.addTo(map);
+        pool.set(cluster.cluster_key, marker);
+      } else {
+        marker.setLngLat(coords);
+        const element = marker.getElement();
+        element.dataset.lon = String(cluster.lon);
+        element.dataset.lat = String(cluster.lat);
+        if (element.textContent !== label) element.textContent = label;
+        const aria = `feature 클러스터 ${cluster.feature_count}건`;
+        if (element.getAttribute("aria-label") !== aria) {
+          element.setAttribute("aria-label", aria);
+        }
+      }
+    }
+    for (const [key, marker] of pool) {
+      if (!next.has(key)) {
+        marker.remove();
+        pool.delete(key);
+      }
+    }
+  }, [map, clusters, zoomStep]);
+
+  // 언마운트(고zoom 전환 등) 시 남은 마커 전부 제거.
+  useEffect(() => {
+    const pool = markersRef.current;
+    return () => {
+      for (const marker of pool.values()) marker.remove();
+      pool.clear();
+    };
+  }, []);
+
+  return null;
+}
+
 /**
  * maplibre 네이티브 클러스터링(GeoJSON source `cluster:true`)으로 feature 점을
  * 그루핑하고, 클러스터(원+카운트)·개별(category 아이콘)을 **DOM 마커**로 렌더한다

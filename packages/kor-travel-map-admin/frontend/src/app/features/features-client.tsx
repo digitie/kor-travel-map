@@ -21,8 +21,10 @@ import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
 import { useProviders } from "@/api/etl";
 import {
+  FEATURE_CLUSTER_MAX_ZOOM,
   FEATURE_KINDS,
   useAdminFeatureDetail,
+  useFeatureClustersInBbox,
   useFeatureDetail,
   useFeaturesInBbox,
   type FeatureKind,
@@ -51,6 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   VWorldFeatureClusters,
   VWorldMapView,
+  VWorldServerClusters,
 } from "@/components/vworld-map-view";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
@@ -249,6 +252,9 @@ export function FeaturesClient() {
     kindFilter.includes("route") || viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
   const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
 
+  // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를
+  // 쓴다(#649). 개별 fetch와 클러스터 fetch는 zoom에 따라 상호 배타적으로 enable된다.
+  const clusterMode = viewport.zoom <= FEATURE_CLUSTER_MAX_ZOOM;
   const featuresQuery = useFeaturesInBbox(
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
@@ -260,8 +266,18 @@ export function FeaturesClient() {
       page_size: 500,
       zoom: viewport.zoom,
     },
-    { enabled: bbox !== null },
+    { enabled: bbox !== null && !clusterMode },
   );
+  const clustersQuery = useFeatureClustersInBbox(
+    {
+      ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
+      kinds: kindFilter.length > 0 ? kindFilter : undefined,
+      provider: effectiveProvider ? [effectiveProvider] : undefined,
+      zoom: viewport.zoom,
+    },
+    { enabled: bbox !== null && clusterMode },
+  );
+  const clusterItems = clustersQuery.data?.data.clusters ?? [];
 
   const updateViewportFromMap = useCallback(
     (map: MapLibreMap) => {
@@ -328,17 +344,29 @@ export function FeaturesClient() {
 
   const status = useMemo(() => {
     if (!bbox) return "지도 로딩 중";
+    if (clusterMode) {
+      if (clustersQuery.isLoading) return "클러스터 로딩 중";
+      if (clustersQuery.isError) return "클러스터 호출 실패";
+      const regions = clustersQuery.data?.data.clusters.length ?? 0;
+      const total = (clustersQuery.data?.data.clusters ?? []).reduce(
+        (sum, cluster) => sum + cluster.feature_count,
+        0,
+      );
+      const label = `${regions}개 지역 · ${total.toLocaleString("ko")}건 집계`;
+      return clustersQuery.isFetching ? `${label} · 갱신 중` : label;
+    }
     if (featuresQuery.isLoading) return "feature 로딩 중";
     if (featuresQuery.isError) return "feature 호출 실패";
     const count = featuresQuery.data?.data.items.length ?? 0;
     return featuresQuery.isFetching ? `${count}건 표시 · 갱신 중` : `${count}건 표시`;
-  }, [bbox, featuresQuery]);
+  }, [bbox, clusterMode, clustersQuery, featuresQuery]);
 
   // tiled fetch가 일부 tile 잘림/실패를 보고하면(부분 결과) 조용히 누락되지 않도록
-  // 작은 affordance를 띄운다(#502 M2).
-  const partialMeta = featuresQuery.data?.meta.partial
-    ? featuresQuery.data.meta
-    : null;
+  // 작은 affordance를 띄운다(#502 M2). 클러스터 모드는 tiling이 없어 해당 없음.
+  const partialMeta =
+    !clusterMode && featuresQuery.data?.meta.partial
+      ? featuresQuery.data.meta
+      : null;
 
   return (
     <AdminShell
@@ -396,7 +424,13 @@ export function FeaturesClient() {
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Feature 지도</Badge>
-            <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
+            <Badge
+              variant={
+                (clusterMode ? clustersQuery.isError : featuresQuery.isError)
+                  ? "destructive"
+                  : "outline"
+              }
+            >
               {status}
             </Badge>
             {partialMeta ? (
@@ -464,10 +498,16 @@ export function FeaturesClient() {
         </div>
         </div>
 
-      {featuresQuery.isError ? (
+      {!clusterMode && featuresQuery.isError ? (
         <Alert className="m-4" variant="destructive">
           <AlertTitle>feature 호출 실패</AlertTitle>
           <AlertDescription>{featuresQuery.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      {clusterMode && clustersQuery.isError ? (
+        <Alert className="m-4" variant="destructive">
+          <AlertTitle>클러스터 호출 실패</AlertTitle>
+          <AlertDescription>{clustersQuery.error.message}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -513,13 +553,22 @@ export function FeaturesClient() {
                 onLoad={updateViewportFromMap}
                 onMoveEnd={updateViewportFromMap}
               >
-                <VWorldFeatureClusters
-                  features={featureItems}
-                  selectedFeatureId={selectedFeatureId}
-                  showAreaGeometry={showAreaGeometry}
-                  onSelectFeature={setSelectedFeatureId}
-                />
+                {clusterMode ? (
+                  <VWorldServerClusters clusters={clusterItems} />
+                ) : (
+                  <VWorldFeatureClusters
+                    features={featureItems}
+                    selectedFeatureId={selectedFeatureId}
+                    showAreaGeometry={showAreaGeometry}
+                    onSelectFeature={setSelectedFeatureId}
+                  />
+                )}
               </VWorldMapView>
+              {clusterMode ? (
+                <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+                  지역 클러스터 뷰 · 확대하면 개별 feature가 표시됩니다
+                </div>
+              ) : null}
             </div>
             {selectedFeatureId ? (
               <FeatureDetailPanel
@@ -539,22 +588,32 @@ export function FeaturesClient() {
               </CardDescription>
             </CardHeader>
             <CardContent className="min-h-0">
-              <DataTable
-                columns={featureColumns}
-                data={featureItems}
-                getRowId={(feature) => feature.feature_id}
-                isLoading={featuresQuery.isLoading}
-                emptyMessage="표시할 feature가 없습니다."
-                onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
-                isRowActive={(feature) => feature.feature_id === selectedFeatureId}
-                sorting={tableSorting}
-                onSortingChange={setTableSorting}
-                manualSorting={false}
-                virtualized
-                estimateRowSize={41}
-                containerClassName="h-[calc(100vh-28rem)] min-h-80"
-                ariaLabel="이름순 feature"
-              />
+              {clusterMode ? (
+                <div className="flex h-[calc(100vh-28rem)] min-h-80 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                  저zoom에서는 개별 feature 대신 지역 클러스터로 집계됩니다. 지도를
+                  확대(zoom {FEATURE_CLUSTER_MAX_ZOOM + 1}+)하면 개별 feature 목록이
+                  표시됩니다.
+                </div>
+              ) : (
+                <DataTable
+                  columns={featureColumns}
+                  data={featureItems}
+                  getRowId={(feature) => feature.feature_id}
+                  isLoading={featuresQuery.isLoading}
+                  emptyMessage="표시할 feature가 없습니다."
+                  onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
+                  isRowActive={(feature) =>
+                    feature.feature_id === selectedFeatureId
+                  }
+                  sorting={tableSorting}
+                  onSortingChange={setTableSorting}
+                  manualSorting={false}
+                  virtualized
+                  estimateRowSize={41}
+                  containerClassName="h-[calc(100vh-28rem)] min-h-80"
+                  ariaLabel="이름순 feature"
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>

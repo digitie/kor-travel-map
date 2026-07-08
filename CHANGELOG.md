@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Feature 지도 저zoom 서버측 region 클러스터 (2026-07-09)
+
+- **ADDED**: 관리 Feature 지도가 저zoom(≤13)에서 개별 feature를 tile로 대량 조회하지 않고
+  기존 `/v1/features/in-bounds`의 **서버측 행정구역 rollup 클러스터**(zoom 유도: ≤7 sido /
+  ≤10 sigungu / ≤13 읍면동)를 소비한다(#649, #12 잔여 인프라). 백엔드 클러스터링은 이미 완비돼
+  있었고 프론트가 `zoom`을 안 보내 항상 개별 feature를 받던 것 → `useFeatureClustersInBbox`
+  hook + `VWorldServerClusters`(count 버블, 클릭 시 다음 밴드로 확대) 추가. 저zoom 전국 뷰가
+  1M feature fetch 없이 즉시 로드된다. 클러스터 모드에선 목록 테이블은 안내 문구, 상태 배지는
+  "N개 지역 · M건 집계"로 표시. 고zoom(≥14) 개별 feature tiled 경로는 그대로. 군집 방식이
+  maplibre 근접-군집 → 행정구역-군집으로 바뀐다(UX 변경).
+
 ### Feature 지도 pan 반응성 — 중복 outer refetch 제거 (2026-07-09)
 
 - **CHANGED**: `useFeaturesInBbox` outer query key의 viewport 서명을 `.toFixed(4)`(~11m)에서
