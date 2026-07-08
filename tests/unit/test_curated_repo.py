@@ -102,6 +102,7 @@ def _rule_row(**overrides: Any) -> dict[str, Any]:
         "place_kind": "seoul_bookstore",
         "category": None,
         "region_scope": {},
+        "detail_selector": None,
         "default_action": "candidate",
         "priority": 70,
         "enabled": True,

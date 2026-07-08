@@ -611,6 +611,10 @@ class CuratedSourceRuleRow(Base):
             "jsonb_typeof(region_scope) = 'object'",
             name="ck_curated_source_rules_region_scope",
         ),
+        CheckConstraint(
+            "detail_selector IS NULL OR jsonb_typeof(detail_selector) = 'object'",
+            name="ck_curated_source_rules_detail_selector",
+        ),
         Index(
             "idx_curated_source_rules_enabled",
             "enabled",
@@ -647,6 +651,10 @@ class CuratedSourceRuleRow(Base):
     region_scope: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )
+    # 단일 source를 detail JSON 값으로 분할하는 선택 필터(예: concierge youtube
+    # channel/playlist 그룹핑). {"path": ["payload","kor_travel_concierge",...],
+    # "value": "<grouping-value>"}. NULL이면 미적용.
+    detail_selector: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     default_action: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'candidate'"),
     )

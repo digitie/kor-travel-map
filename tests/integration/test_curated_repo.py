@@ -462,6 +462,100 @@ async def test_list_curated_features_display_titles_multi_filter(
     assert {item.display_title for item in both.items} == {"가을 책방", "겨울 책방"}
 
 
+async def _load_concierge_place_channel(
+    session: AsyncSession, *, candidate_id: str, channel_id: str, name: str
+) -> str:
+    """channel_id를 지정한 concierge youtube 후보 place를 적재하고 feature_id 반환."""
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [
+            {
+                "export_id": f"ytpc_{candidate_id}",
+                "candidate_id": candidate_id,
+                "operation": "upsert",
+                "place": {
+                    "name": name,
+                    "category_label": "해변",
+                    "category_code_suggestion": "01050100",
+                    "longitude": 126.79,
+                    "latitude": 33.55,
+                    "address": {
+                        "official_address": "제주특별자치도 제주시 구좌읍",
+                        "road_address": "제주특별자치도 제주시 구좌읍 해맞이해안로",
+                        "legal_dong_code": None,
+                        "sido_code": None,
+                        "sigungu_code": None,
+                    },
+                },
+                "youtube": {
+                    "source_title": name,
+                    "video_id": f"video-{candidate_id}",
+                    "channel_id": channel_id,
+                    "channel_title": f"채널 {channel_id}",
+                },
+                "evidence": {"confidence_score": 0.9},
+                "source_record": {
+                    "provider": KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+                    "dataset_key": DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+                    "source_entity_type": "extracted_place_candidate",
+                    "source_entity_id": candidate_id,
+                    "raw_payload_hash": f"sha256:{candidate_id}",
+                },
+            }
+        ],
+        fetched_at=_FETCHED,
+    )
+    await feature_repo.load_bundle(session, bundle)
+    await session.flush()
+    return bundle.feature.feature_id
+
+
+async def test_apply_rule_detail_selector_partitions_by_youtube_channel(
+    migrated_session: AsyncSession,
+) -> None:
+    """detail_selector로 단일 concierge source를 youtube channel_id별로 분할한다.
+
+    channel-A 후보만 detail_selector에 맞아 후보화되고 channel-B는 제외된다 —
+    concierge 그룹핑을 테마 멤버십으로 만드는 apply 술어 검증(#15 근간).
+    """
+    fid_a = await _load_concierge_place_channel(
+        migrated_session, candidate_id="sel-a", channel_id="channel-A", name="A 해변"
+    )
+    fid_b = await _load_concierge_place_channel(
+        migrated_session, candidate_id="sel-b", channel_id="channel-B", name="B 해변"
+    )
+    [source] = await curated_repo.list_curated_sources(
+        migrated_session,
+        provider="kor-travel-concierge-youtube",
+        dataset_key="youtube_place_candidates",
+        limit=1,
+    )
+    theme = (await curated_repo.list_curated_themes(migrated_session, limit=50))[0]
+    rule = await curated_repo.create_curated_source_rule(
+        migrated_session,
+        theme_id=theme.theme_id,
+        source_id=source.source_id,
+        dataset_key="youtube_place_candidates",
+        place_kind="youtube_place_candidate",
+        detail_selector={
+            "path": ["payload", "kor_travel_concierge", "youtube", "channel_id"],
+            "value": "channel-A",
+        },
+        default_action="curated",
+    )
+    assert rule.detail_selector == {
+        "path": ["payload", "kor_travel_concierge", "youtube", "channel_id"],
+        "value": "channel-A",
+    }
+
+    await curated_repo.apply_curated_source_rule(migrated_session, rule_id=rule.rule_id)
+    curated = await curated_repo.list_curated_features(
+        migrated_session, theme_id=theme.theme_id, curation_status="curated"
+    )
+    curated_fids = {item.feature_id for item in curated.items}
+    assert fid_a in curated_fids
+    assert fid_b not in curated_fids
+
+
 async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     migrated_session: AsyncSession,
 ) -> None:
