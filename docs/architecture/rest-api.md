@@ -191,15 +191,16 @@ GET /v1/public/festivals/{feature_id}
   값 projection은 후속 marine/weather 확정 후 채운다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.
 
-### 2.4.2 `/v1/weather/*` — 공개 weather forecast/history API (ADR-062)
+### 2.4.2 `/v1/features/*/weather*` — 공개 weather forecast/history API (ADR-062)
 
 `/v1/features/{feature_id}/weather`는 feature 상세 카드용 최신 요약으로 유지한다.
-외부 시스템이 예보 timeline과 과거 발표 snapshot을 비교할 때는 `/v1/weather/*`를 쓴다.
+외부 시스템이 예보 timeline과 과거 발표 snapshot을 비교할 때도 별도 weather API가 아니라
+feature API의 weather subresource를 쓴다.
 
 ```
-GET /v1/weather/forecast                        # lon/lat 기준 nearest weather anchor forecast
-GET /v1/weather/features/{feature_id}/forecast  # feature 좌표 기준 nearest weather anchor forecast
-GET /v1/weather/alerts                          # KMA 기상특보 source_record 이력
+GET /v1/features/weather/forecast                # lon/lat 기준 nearest weather anchor forecast
+GET /v1/features/{feature_id}/weather/forecast   # feature 좌표 기준 nearest weather anchor forecast
+GET /v1/features/weather/alerts                  # KMA 기상특보 source_record 이력
 ```
 
 핵심 계약:

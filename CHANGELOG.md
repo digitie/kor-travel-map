@@ -7,9 +7,10 @@
 
 ### 공개 Weather API와 3년 이력 보존 (2026-07-09)
 
-- **ADDED**: 외부 시스템용 `/v1/weather/forecast`,
-  `/v1/weather/features/{feature_id}/forecast`, `/v1/weather/alerts` API를 추가했다.
-  좌표/feature 기준 nearest weather anchor의 예보 timeline과 KMA 기상특보 이력을 REST로 조회한다.
+- **ADDED**: 외부 시스템용 feature weather API
+  `/v1/features/weather/forecast`, `/v1/features/{feature_id}/weather/forecast`,
+  `/v1/features/weather/alerts`를 추가했다. 좌표/feature 기준 nearest weather anchor의 예보
+  timeline과 KMA 기상특보 이력을 REST로 조회한다.
 - **CHANGED**: `weather_values` 보존 정책을 30일에서 기본 3년으로 변경했다(ADR-062). 같은
   `valid_at`에 대한 과거 `issued_at` 예보를 보존해 3시간 전/1일 전 발표 예보와 현재 발표 예보를
   비교할 수 있다.
