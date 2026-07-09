@@ -575,19 +575,37 @@ LEFT JOIN LATERAL (
     ) AS weather_summary
     FROM feature.feature_weather_values AS w
     WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN ('T1H', 'TMP')
+      AND w.metric_key IN ('T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP')
     ORDER BY
         CASE w.metric_key
           WHEN 'T1H' THEN 10
           WHEN 'TMP' THEN 20
+          WHEN 'TMN' THEN 30
+          WHEN 'TMX' THEN 40
+          WHEN 'POP' THEN 50
+          WHEN 'SKY' THEN 60
+          WHEN 'REH' THEN 70
+          WHEN 'PTY' THEN 80
+          WHEN 'PCP' THEN 90
           ELSE 100
         END,
         CASE w.forecast_style
           WHEN 'observed' THEN 10
           WHEN 'nowcast' THEN 20
           WHEN 'ultra_short' THEN 30
+          WHEN 'short' THEN 40
+          WHEN 'mid' THEN 50
           ELSE 100
         END,
+        CASE
+          WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
+          ELSE 1
+        END,
+        abs(
+          extract(
+            epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
+          )
+        ) ASC NULLS LAST,
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
@@ -702,19 +720,37 @@ LEFT JOIN LATERAL (
     ) AS weather_summary
     FROM feature.feature_weather_values AS w
     WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN ('T1H', 'TMP')
+      AND w.metric_key IN ('T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP')
     ORDER BY
         CASE w.metric_key
           WHEN 'T1H' THEN 10
           WHEN 'TMP' THEN 20
+          WHEN 'TMN' THEN 30
+          WHEN 'TMX' THEN 40
+          WHEN 'POP' THEN 50
+          WHEN 'SKY' THEN 60
+          WHEN 'REH' THEN 70
+          WHEN 'PTY' THEN 80
+          WHEN 'PCP' THEN 90
           ELSE 100
         END,
         CASE w.forecast_style
           WHEN 'observed' THEN 10
           WHEN 'nowcast' THEN 20
           WHEN 'ultra_short' THEN 30
+          WHEN 'short' THEN 40
+          WHEN 'mid' THEN 50
           ELSE 100
         END,
+        CASE
+          WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
+          ELSE 1
+        END,
+        abs(
+          extract(
+            epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
+          )
+        ) ASC NULLS LAST,
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'

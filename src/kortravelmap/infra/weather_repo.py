@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
@@ -29,13 +29,24 @@ if TYPE_CHECKING:
 __all__ = [
     "WeatherMetric",
     "WeatherCard",
+    "WeatherAnchor",
+    "WeatherValueTimelineRow",
+    "WeatherAlertHistoryRow",
     "DEFAULT_WEATHER_FRESHNESS_SECONDS",
+    "DEFAULT_WEATHER_HISTORY_RETENTION_DAYS",
     "load_weather_values",
     "build_weather_card",
+    "list_weather_values",
+    "weather_history_floor",
+    "nearest_weather_feature_for_coordinate",
+    "nearest_weather_feature_for_feature",
+    "list_kma_weather_alert_history",
 ]
 
 # 최신 weather가 이 시간보다 오래되면 card.is_stale=True (nowcast/단기예보 갱신 주기 고려).
 DEFAULT_WEATHER_FRESHNESS_SECONDS: Final[int] = 6 * 60 * 60
+DEFAULT_WEATHER_HISTORY_RETENTION_DAYS: Final[int] = 365 * 3
+"""REST weather history 기본 보존/조회 지평선(3년)."""
 
 
 @dataclass(frozen=True)
@@ -67,6 +78,67 @@ class WeatherCard:
     metrics: list[WeatherMetric]
     latest_at: datetime | None
     is_stale: bool
+
+
+@dataclass(frozen=True)
+class WeatherAnchor:
+    """좌표/feature 기준으로 선택된 weather anchor feature."""
+
+    feature_id: str
+    name: str
+    lon: float | None
+    lat: float | None
+    distance_m: float | None = None
+
+
+@dataclass(frozen=True)
+class WeatherValueTimelineRow:
+    """외부 REST timeline API용 weather value row."""
+
+    weather_value_key: str
+    feature_id: str
+    provider: str
+    weather_domain: str
+    forecast_style: str
+    timeline_bucket: str | None
+    metric_key: str
+    metric_name: str | None
+    value_number: Decimal | None
+    value_text: str | None
+    unit: str | None
+    severity: str | None
+    issued_at: datetime | None
+    valid_at: datetime | None
+    valid_from: datetime | None
+    valid_until: datetime | None
+    observed_at: datetime | None
+    collected_at: datetime
+    source_record_key: str | None
+
+
+@dataclass(frozen=True)
+class WeatherAlertHistoryRow:
+    """KMA weather alert source history row."""
+
+    source_record_key: str
+    feature_id: str | None
+    feature_name: str | None
+    feature_status: str | None
+    region_code: str | None
+    region_name: str | None
+    phenomenon: str | None
+    alert_type: str | None
+    level: str | None
+    title: str | None
+    description: str | None
+    issued_at: datetime | None
+    effective_from: datetime | None
+    effective_until: datetime | None
+    source_agency: str | None
+    fetched_at: datetime | None
+    imported_at: datetime | None
+    last_seen_at: datetime | None
+    payload: dict[str, Any]
 
 
 _INSERT_SQL: Final[str] = """
@@ -189,6 +261,199 @@ _NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
     f"AND {_OBSERVED_TEMP_PREDICATE}"
 )
 
+_LIST_WEATHER_VALUES_SQL: Final[str] = """
+SELECT
+    weather_value_key, feature_id, provider, weather_domain, forecast_style,
+    timeline_bucket, metric_key, metric_name, value_number, value_text, unit,
+    severity, issued_at, valid_at, valid_from, valid_until, observed_at,
+    collected_at, source_record_key
+FROM feature.feature_weather_values
+WHERE feature_id = :feature_id
+  AND (
+    CAST(:forecast_styles AS text[]) IS NULL
+    OR forecast_style = ANY(CAST(:forecast_styles AS text[]))
+  )
+  AND (
+    CAST(:weather_domains AS text[]) IS NULL
+    OR weather_domain = ANY(CAST(:weather_domains AS text[]))
+  )
+  AND (
+    CAST(:metric_keys AS text[]) IS NULL
+    OR metric_key = ANY(CAST(:metric_keys AS text[]))
+  )
+  AND (
+    CAST(:history_from AS timestamptz) IS NULL
+    OR COALESCE(issued_at, observed_at, valid_at, collected_at)
+       >= CAST(:history_from AS timestamptz)
+  )
+  AND (
+    CAST(:issued_from AS timestamptz) IS NULL
+    OR issued_at >= CAST(:issued_from AS timestamptz)
+  )
+  AND (
+    CAST(:issued_to AS timestamptz) IS NULL
+    OR issued_at <= CAST(:issued_to AS timestamptz)
+  )
+  AND (
+    CAST(:valid_from_filter AS timestamptz) IS NULL
+    OR COALESCE(valid_until, valid_at, observed_at, issued_at)
+       >= CAST(:valid_from_filter AS timestamptz)
+  )
+  AND (
+    CAST(:valid_to_filter AS timestamptz) IS NULL
+    OR COALESCE(valid_at, valid_from, observed_at, issued_at)
+       <= CAST(:valid_to_filter AS timestamptz)
+  )
+ORDER BY
+    issued_at DESC NULLS LAST,
+    observed_at DESC NULLS LAST,
+    valid_at ASC NULLS LAST,
+    valid_from ASC NULLS LAST,
+    forecast_style,
+    metric_key,
+    weather_value_key
+LIMIT :limit
+"""
+
+_NEAREST_WEATHER_BY_COORDINATE_SQL: Final[str] = f"""
+WITH input AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS geom_5179
+)
+SELECT
+    f.feature_id,
+    f.name,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    x_extension.ST_Distance(f.coord_5179, input.geom_5179) AS distance_m
+FROM feature.features AS f, input
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, input.geom_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = f.feature_id
+          AND {_KMA_FORECAST_PREDICATE}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) input.geom_5179, f.feature_id
+LIMIT 1
+"""
+
+_NEAREST_WEATHER_BY_FEATURE_SQL: Final[str] = f"""
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND coord_5179 IS NOT NULL
+)
+SELECT
+    f.feature_id,
+    f.name,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    x_extension.ST_Distance(f.coord_5179, target.coord_5179) AS distance_m
+FROM feature.features AS f, target
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, target.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = f.feature_id
+          AND {_KMA_FORECAST_PREDICATE}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) target.coord_5179, f.feature_id
+LIMIT 1
+"""
+
+_KMA_WEATHER_ALERT_HISTORY_SQL: Final[str] = """
+WITH alert_records AS (
+    SELECT
+        sr.source_record_key,
+        sl.feature_id,
+        f.name AS feature_name,
+        f.status AS feature_status,
+        sr.raw_data,
+        sr.raw_data->>'region_code' AS region_code,
+        sr.raw_data->>'region_name' AS region_name,
+        sr.raw_data->>'phenomenon' AS phenomenon,
+        sr.raw_data->>'alert_type' AS alert_type,
+        sr.raw_data->>'level' AS level,
+        sr.raw_data->>'title' AS title,
+        sr.raw_data->>'description' AS description,
+        CASE
+          WHEN NULLIF(sr.raw_data->>'issued_at', '') IS NULL THEN sr.fetched_at
+          ELSE CAST(sr.raw_data->>'issued_at' AS timestamptz)
+        END AS issued_at,
+        CASE
+          WHEN NULLIF(sr.raw_data->>'effective_from', '') IS NULL THEN NULL
+          ELSE CAST(sr.raw_data->>'effective_from' AS timestamptz)
+        END AS effective_from,
+        CASE
+          WHEN NULLIF(sr.raw_data->>'effective_until', '') IS NULL THEN NULL
+          ELSE CAST(sr.raw_data->>'effective_until' AS timestamptz)
+        END AS effective_until,
+        sr.raw_data->>'source_agency' AS source_agency,
+        sr.fetched_at,
+        sr.imported_at,
+        sr.last_seen_at
+    FROM provider_sync.source_records AS sr
+    LEFT JOIN provider_sync.source_links AS sl
+      ON sl.source_record_key = sr.source_record_key
+     AND sl.is_primary_source
+    LEFT JOIN feature.features AS f
+      ON f.feature_id = sl.feature_id
+    WHERE sr.provider = 'python-kma-api'
+      AND sr.dataset_key = 'kma_weather_alerts'
+      AND sr.source_entity_type = 'weather_alert'
+)
+SELECT *
+FROM alert_records
+WHERE (
+    CAST(:region_code AS text) IS NULL
+    OR region_code = CAST(:region_code AS text)
+  )
+  AND (
+    CAST(:phenomenon AS text) IS NULL
+    OR phenomenon = CAST(:phenomenon AS text)
+  )
+  AND (
+    CAST(:level AS text) IS NULL
+    OR level = CAST(:level AS text)
+  )
+  AND (
+    CAST(:history_from AS timestamptz) IS NULL
+    OR COALESCE(issued_at, fetched_at, imported_at)
+       >= CAST(:history_from AS timestamptz)
+  )
+  AND (
+    CAST(:issued_from AS timestamptz) IS NULL
+    OR issued_at >= CAST(:issued_from AS timestamptz)
+  )
+  AND (
+    CAST(:issued_to AS timestamptz) IS NULL
+    OR issued_at <= CAST(:issued_to AS timestamptz)
+  )
+ORDER BY issued_at DESC NULLS LAST, source_record_key DESC
+LIMIT :limit
+"""
+
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
@@ -249,6 +514,212 @@ async def load_weather_values(
         return 0
     await session.execute(text(_INSERT_SQL), params)
     return len(params)
+
+
+def weather_history_floor(
+    *,
+    now: datetime | None = None,
+    retention_days: int = DEFAULT_WEATHER_HISTORY_RETENTION_DAYS,
+) -> datetime:
+    """REST weather history 기본 lower bound를 계산한다."""
+    return (now or kst_now()) - timedelta(days=max(retention_days, 1))
+
+
+def _filter_values(values: Iterable[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    normalized = [value for value in values if value]
+    return normalized or None
+
+
+def _timeline_row(row: RowMapping) -> WeatherValueTimelineRow:
+    return WeatherValueTimelineRow(
+        weather_value_key=str(row["weather_value_key"]),
+        feature_id=str(row["feature_id"]),
+        provider=str(row["provider"]),
+        weather_domain=str(row["weather_domain"]),
+        forecast_style=str(row["forecast_style"]),
+        timeline_bucket=row["timeline_bucket"],
+        metric_key=str(row["metric_key"]),
+        metric_name=row["metric_name"],
+        value_number=row["value_number"],
+        value_text=row["value_text"],
+        unit=row["unit"],
+        severity=row["severity"],
+        issued_at=row["issued_at"],
+        valid_at=row["valid_at"],
+        valid_from=row["valid_from"],
+        valid_until=row["valid_until"],
+        observed_at=row["observed_at"],
+        collected_at=row["collected_at"],
+        source_record_key=row["source_record_key"],
+    )
+
+
+async def list_weather_values(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    forecast_styles: Iterable[str] | None = None,
+    weather_domains: Iterable[str] | None = None,
+    metric_keys: Iterable[str] | None = None,
+    history_from: datetime | None = None,
+    issued_from: datetime | None = None,
+    issued_to: datetime | None = None,
+    valid_from: datetime | None = None,
+    valid_to: datetime | None = None,
+    limit: int = 500,
+) -> list[WeatherValueTimelineRow]:
+    """feature weather values timeline을 반환한다.
+
+    같은 ``valid_at``이라도 ``issued_at``이 다르면 별도 row로 반환하므로, 호출자는
+    현재 발표와 3시간/1일 전 발표를 같은 유효시각 기준으로 비교할 수 있다.
+    """
+    rows = (
+        (
+            await session.execute(
+                text(_LIST_WEATHER_VALUES_SQL),
+                {
+                    "feature_id": feature_id,
+                    "forecast_styles": _filter_values(forecast_styles),
+                    "weather_domains": _filter_values(weather_domains),
+                    "metric_keys": _filter_values(metric_keys),
+                    "history_from": history_from,
+                    "issued_from": issued_from,
+                    "issued_to": issued_to,
+                    "valid_from_filter": valid_from,
+                    "valid_to_filter": valid_to,
+                    "limit": max(1, limit),
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [_timeline_row(row) for row in rows]
+
+
+def _anchor_from_row(row: RowMapping | None) -> WeatherAnchor | None:
+    if row is None:
+        return None
+    lon = row["lon"]
+    lat = row["lat"]
+    distance_m = row["distance_m"]
+    return WeatherAnchor(
+        feature_id=str(row["feature_id"]),
+        name=str(row["name"]),
+        lon=float(lon) if lon is not None else None,
+        lat=float(lat) if lat is not None else None,
+        distance_m=float(distance_m) if distance_m is not None else None,
+    )
+
+
+async def nearest_weather_feature_for_coordinate(
+    session: AsyncSession,
+    *,
+    lon: float,
+    lat: float,
+    radius_m: float = _NEAREST_WEATHER_RADIUS_M,
+) -> WeatherAnchor | None:
+    """좌표 주변 가장 가까운 KMA forecast weather anchor를 찾는다."""
+    row = (
+        (
+            await session.execute(
+                text(_NEAREST_WEATHER_BY_COORDINATE_SQL),
+                {"lon": lon, "lat": lat, "radius_m": radius_m},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return _anchor_from_row(row)
+
+
+async def nearest_weather_feature_for_feature(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    radius_m: float = _NEAREST_WEATHER_RADIUS_M,
+) -> WeatherAnchor | None:
+    """feature 좌표 주변 가장 가까운 KMA forecast weather anchor를 찾는다."""
+    row = (
+        (
+            await session.execute(
+                text(_NEAREST_WEATHER_BY_FEATURE_SQL),
+                {"feature_id": feature_id, "radius_m": radius_m},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return _anchor_from_row(row)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
+    return WeatherAlertHistoryRow(
+        source_record_key=str(row["source_record_key"]),
+        feature_id=row["feature_id"],
+        feature_name=row["feature_name"],
+        feature_status=row["feature_status"],
+        region_code=row["region_code"],
+        region_name=row["region_name"],
+        phenomenon=row["phenomenon"],
+        alert_type=row["alert_type"],
+        level=row["level"],
+        title=row["title"],
+        description=row["description"],
+        issued_at=row["issued_at"],
+        effective_from=row["effective_from"],
+        effective_until=row["effective_until"],
+        source_agency=row["source_agency"],
+        fetched_at=row["fetched_at"],
+        imported_at=row["imported_at"],
+        last_seen_at=row["last_seen_at"],
+        payload=_json_object(row["raw_data"]),
+    )
+
+
+async def list_kma_weather_alert_history(
+    session: AsyncSession,
+    *,
+    region_code: str | None = None,
+    phenomenon: str | None = None,
+    level: str | None = None,
+    history_from: datetime | None = None,
+    issued_from: datetime | None = None,
+    issued_to: datetime | None = None,
+    limit: int = 200,
+) -> list[WeatherAlertHistoryRow]:
+    """KMA 기상특보 source_record 이력을 반환한다."""
+    rows = (
+        (
+            await session.execute(
+                text(_KMA_WEATHER_ALERT_HISTORY_SQL),
+                {
+                    "region_code": region_code,
+                    "phenomenon": phenomenon,
+                    "level": level,
+                    "history_from": history_from,
+                    "issued_from": issued_from,
+                    "issued_to": issued_to,
+                    "limit": max(1, limit),
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [_alert_history_row(row) for row in rows]
 
 
 async def build_weather_card(

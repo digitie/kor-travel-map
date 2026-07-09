@@ -191,7 +191,30 @@ GET /v1/public/festivals/{feature_id}
   값 projection은 후속 marine/weather 확정 후 채운다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.
 
-### 2.4.2 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
+### 2.4.2 `/v1/weather/*` — 공개 weather forecast/history API (ADR-062)
+
+`/v1/features/{feature_id}/weather`는 feature 상세 카드용 최신 요약으로 유지한다.
+외부 시스템이 예보 timeline과 과거 발표 snapshot을 비교할 때는 `/v1/weather/*`를 쓴다.
+
+```
+GET /v1/weather/forecast                        # lon/lat 기준 nearest weather anchor forecast
+GET /v1/weather/features/{feature_id}/forecast  # feature 좌표 기준 nearest weather anchor forecast
+GET /v1/weather/alerts                          # KMA 기상특보 source_record 이력
+```
+
+핵심 계약:
+
+- 기본 조회 보존 지평선은 3년(`history_days<=1095`)이다.
+- forecast 응답 row는 `issued_at`, `valid_at`, `valid_from`, `valid_until`,
+  `observed_at`을 함께 내려 3시간 전/1일 전 발표 예보와 현재 발표 예보를 같은
+  유효시각 기준으로 비교할 수 있게 한다.
+- 좌표 기반 forecast는 반경 내 가장 가까운 KMA 예보 anchor를 사용한다. anchor가 없으면
+  200 + 빈 `items`로 반환한다.
+- 중기예보는 `forecast_style=mid`, `weather_domain=kma_mid_forecast`로 포함한다.
+- 기상특보 이력은 `provider_sync.source_records`의 KMA weather alert payload를 공개 projection으로
+  반환한다. 별도 alert history table은 만들지 않는다.
+
+### 2.4.3 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
 
 세계음식점, 독립서점, 카페가 있는 서점, 도서관, 무장애 관광지 같은 테마형 source는
 [`docs/curated-features.md`](../curated-features.md)의 `feature.curated_*` overlay 계약을

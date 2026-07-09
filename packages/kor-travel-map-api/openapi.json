@@ -8846,7 +8846,7 @@
                 "type": "null"
               }
             ],
-            "description": "kind=weather일 때 현재기온(T1H/TMP) marker 요약."
+            "description": "kind=weather일 때 현재/예보 marker 요약."
           }
         },
         "required": [
@@ -15469,6 +15469,315 @@
         "title": "VersionData",
         "type": "object"
       },
+      "WeatherAlertHistoryData": {
+        "additionalProperties": false,
+        "description": "``GET /weather/alerts`` data payload.",
+        "properties": {
+          "history_from": {
+            "format": "date-time",
+            "title": "History From",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherAlertHistoryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "history_from",
+          "items"
+        ],
+        "title": "WeatherAlertHistoryData",
+        "type": "object"
+      },
+      "WeatherAlertHistoryItem": {
+        "additionalProperties": false,
+        "description": "KMA 기상특보 이력 row 1건.",
+        "properties": {
+          "alert_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Until"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "feature_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Name"
+          },
+          "feature_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Status"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "phenomenon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phenomenon"
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code"
+          },
+          "region_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Name"
+          },
+          "source_agency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Agency"
+          },
+          "source_record_key": {
+            "title": "Source Record Key",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "source_record_key",
+          "payload"
+        ],
+        "title": "WeatherAlertHistoryItem",
+        "type": "object"
+      },
+      "WeatherAlertHistoryResponse": {
+        "additionalProperties": false,
+        "description": "KMA 기상특보 이력 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherAlertHistoryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherAlertHistoryResponse",
+        "type": "object"
+      },
+      "WeatherAnchorOut": {
+        "additionalProperties": false,
+        "description": "예보/관측값을 제공한 weather anchor feature.",
+        "properties": {
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name"
+        ],
+        "title": "WeatherAnchorOut",
+        "type": "object"
+      },
       "WeatherCardData": {
         "additionalProperties": false,
         "description": "``GET /features/{feature_id}/weather`` data payload.",
@@ -15527,6 +15836,96 @@
           "is_stale"
         ],
         "title": "WeatherCardData",
+        "type": "object"
+      },
+      "WeatherForecastData": {
+        "additionalProperties": false,
+        "description": "``GET /weather/.../forecast`` data payload.",
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherAnchorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_from": {
+            "format": "date-time",
+            "title": "History From",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherValueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "radius_m": {
+            "title": "Radius M",
+            "type": "number"
+          },
+          "target_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Feature Id"
+          },
+          "target_lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lat"
+          },
+          "target_lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lon"
+          }
+        },
+        "required": [
+          "radius_m",
+          "history_from",
+          "items"
+        ],
+        "title": "WeatherForecastData",
+        "type": "object"
+      },
+      "WeatherForecastResponse": {
+        "additionalProperties": false,
+        "description": "공개 weather forecast timeline 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherForecastData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherForecastResponse",
         "type": "object"
       },
       "WeatherMetricOut": {
@@ -15653,7 +16052,7 @@
       },
       "WeatherSummaryOut": {
         "additionalProperties": false,
-        "description": "지도 marker용 최신 현재기온 요약.",
+        "description": "지도 marker용 weather 값 요약.",
         "properties": {
           "forecast_style": {
             "anyOf": [
@@ -15777,6 +16176,189 @@
           "metric_key"
         ],
         "title": "WeatherSummaryOut",
+        "type": "object"
+      },
+      "WeatherValueItem": {
+        "additionalProperties": false,
+        "description": "weather timeline row 1건.",
+        "properties": {
+          "collected_at": {
+            "format": "date-time",
+            "title": "Collected At",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "forecast_style": {
+            "title": "Forecast Style",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "timeline_bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeline Bucket"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          },
+          "weather_domain": {
+            "title": "Weather Domain",
+            "type": "string"
+          },
+          "weather_value_key": {
+            "title": "Weather Value Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weather_value_key",
+          "feature_id",
+          "provider",
+          "weather_domain",
+          "forecast_style",
+          "metric_key",
+          "collected_at"
+        ],
+        "title": "WeatherValueItem",
         "type": "object"
       },
       "_DatasetEntry": {
@@ -27863,6 +28445,700 @@
         "summary": "Get Public Festival",
         "tags": [
           "public"
+        ]
+      }
+    },
+    "/v1/weather/alerts": {
+      "get": {
+        "operationId": "list_weather_alert_history_v1_weather_alerts_get",
+        "parameters": [
+          {
+            "description": "KMA 특보 구역 코드 필터.",
+            "in": "query",
+            "name": "region_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "KMA 특보 구역 코드 필터.",
+              "title": "Region Code"
+            }
+          },
+          {
+            "description": "현상 토큰 필터(예: 호우, 폭염, weather_alert).",
+            "in": "query",
+            "name": "phenomenon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "현상 토큰 필터(예: 호우, 폭염, weather_alert).",
+              "title": "Phenomenon"
+            }
+          },
+          {
+            "description": "특보 등급 필터(예: 주의보, 경보).",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "특보 등급 필터(예: 주의보, 경보).",
+              "title": "Level"
+            }
+          },
+          {
+            "description": "발표시각 시작.",
+            "in": "query",
+            "name": "issued_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 시작.",
+              "title": "Issued From"
+            }
+          },
+          {
+            "description": "발표시각 종료.",
+            "in": "query",
+            "name": "issued_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 종료.",
+              "title": "Issued To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_days",
+            "required": false,
+            "schema": {
+              "default": 1095,
+              "maximum": 1095,
+              "minimum": 1,
+              "title": "History Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherAlertHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "KMA 기상특보 이력",
+        "tags": [
+          "weather"
+        ]
+      }
+    },
+    "/v1/weather/features/{feature_id}/forecast": {
+      "get": {
+        "operationId": "get_weather_forecast_by_feature_v1_weather_features__feature_id__forecast_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "nearest weather anchor 탐색 반경(m).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "default": 50000,
+              "description": "nearest weather anchor 탐색 반경(m).",
+              "maximum": 100000,
+              "minimum": 100,
+              "title": "Radius M",
+              "type": "number"
+            }
+          },
+          {
+            "description": "forecast_style 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "forecast_style",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "forecast_style 필터. 반복 지정 가능.",
+              "title": "Forecast Style"
+            }
+          },
+          {
+            "description": "weather_domain 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "weather_domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "weather_domain 필터. 반복 지정 가능.",
+              "title": "Weather Domain"
+            }
+          },
+          {
+            "description": "metric_key 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "metric_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "metric_key 필터. 반복 지정 가능.",
+              "title": "Metric Key"
+            }
+          },
+          {
+            "description": "발표시각 시작.",
+            "in": "query",
+            "name": "issued_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 시작.",
+              "title": "Issued From"
+            }
+          },
+          {
+            "description": "발표시각 종료.",
+            "in": "query",
+            "name": "issued_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 종료.",
+              "title": "Issued To"
+            }
+          },
+          {
+            "description": "예보 유효시각 시작.",
+            "in": "query",
+            "name": "valid_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 유효시각 시작.",
+              "title": "Valid From"
+            }
+          },
+          {
+            "description": "예보 유효시각 종료.",
+            "in": "query",
+            "name": "valid_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 유효시각 종료.",
+              "title": "Valid To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_days",
+            "required": false,
+            "schema": {
+              "default": 1095,
+              "maximum": 1095,
+              "minimum": 1,
+              "title": "History Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherForecastResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature 기준 nearest weather forecast timeline",
+        "tags": [
+          "weather"
+        ]
+      }
+    },
+    "/v1/weather/forecast": {
+      "get": {
+        "operationId": "get_weather_forecast_by_coordinate_v1_weather_forecast_get",
+        "parameters": [
+          {
+            "description": "경도(WGS84).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "경도(WGS84).",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "위도(WGS84).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "위도(WGS84).",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "nearest weather anchor 탐색 반경(m).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "default": 50000,
+              "description": "nearest weather anchor 탐색 반경(m).",
+              "maximum": 100000,
+              "minimum": 100,
+              "title": "Radius M",
+              "type": "number"
+            }
+          },
+          {
+            "description": "forecast_style 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "forecast_style",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "forecast_style 필터. 반복 지정 가능.",
+              "title": "Forecast Style"
+            }
+          },
+          {
+            "description": "weather_domain 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "weather_domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "weather_domain 필터. 반복 지정 가능.",
+              "title": "Weather Domain"
+            }
+          },
+          {
+            "description": "metric_key 필터. 반복 지정 가능.",
+            "in": "query",
+            "name": "metric_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "metric_key 필터. 반복 지정 가능.",
+              "title": "Metric Key"
+            }
+          },
+          {
+            "description": "발표시각 시작.",
+            "in": "query",
+            "name": "issued_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 시작.",
+              "title": "Issued From"
+            }
+          },
+          {
+            "description": "발표시각 종료.",
+            "in": "query",
+            "name": "issued_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "발표시각 종료.",
+              "title": "Issued To"
+            }
+          },
+          {
+            "description": "예보 유효시각 시작.",
+            "in": "query",
+            "name": "valid_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 유효시각 시작.",
+              "title": "Valid From"
+            }
+          },
+          {
+            "description": "예보 유효시각 종료.",
+            "in": "query",
+            "name": "valid_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 유효시각 종료.",
+              "title": "Valid To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_days",
+            "required": false,
+            "schema": {
+              "default": 1095,
+              "maximum": 1095,
+              "minimum": 1,
+              "title": "History Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherForecastResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "좌표 기반 weather forecast timeline",
+        "tags": [
+          "weather"
         ]
       }
     },

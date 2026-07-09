@@ -35,7 +35,8 @@
                                                         ▼
                           [PinVi api :9021] ◀──(read: in-bounds/search/nearby/
                             trip·POI·공유·협업          {id}/weather/batch/categories
-                                  ▲                     /providers + curated-features)
+                                  ▲                     /providers + curated-features
+                                  │                     + /weather/* forecast/history)
                                   │                  ◀──(admin: /v1/admin/features*
                           [PinVi web :9022]          — 사용자 제안 승인 반영, ADR-051)
 

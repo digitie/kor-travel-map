@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (codex) — 공개 Weather API와 3년 이력 보존
+
+- **결정(ADR-062)**: weather value 보존 정책을 30일에서 기본 3년으로 변경. 같은
+  `valid_at`에 대해 `issued_at`이 다른 예보 snapshot을 보존해 3시간 전/1일 전 발표 예보와 현재
+  발표 예보를 비교할 수 있게 한다.
+- **API**: 외부 시스템용 `/v1/weather/forecast`(좌표 기준 nearest anchor),
+  `/v1/weather/features/{feature_id}/forecast`(feature 기준 nearest anchor),
+  `/v1/weather/alerts`(KMA 기상특보 source_record 이력)를 추가했다. 기존
+  `/v1/features/{feature_id}/weather` card API는 호환 유지.
+- **DB/지도**: 새 테이블 없이 `feature_weather_values`와 KMA alert `source_records`를 재사용하고,
+  3년 timeline 조회용 보조 인덱스를 추가했다(0043). Feature 지도 weather marker는 zoom 14 이상
+  개별 marker에서 현재기온이 없으면 중기/단기 예보 지표도 라벨로 표시한다.
+- **검증**: API unit/OpenAPI 8 passed, weather_repo integration 9 passed, ruff 변경 파일 clean,
+  mypy --strict 135 source clean, import-linter 4 kept, OpenAPI `--profile all --check` 통과,
+  frontend/user-client generated type check 및 type-check 통과, frontend lint 0 errors(기존 warning 4).
+
 ## 2026-07-09 (codex) — Claude Code PR #638 2차 사후 리뷰: 파일 검색 정합성
 
 - **리뷰 범위**: Claude Code 관리 UI 개편 스택 #634~#638을 closed/superseded PR(#635~#637)

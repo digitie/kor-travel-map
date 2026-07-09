@@ -371,6 +371,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/weather/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KMA 기상특보 이력 */
+        get: operations["list_weather_alert_history_v1_weather_alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/weather/features/{feature_id}/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature 기준 nearest weather forecast timeline */
+        get: operations["get_weather_forecast_by_feature_v1_weather_features__feature_id__forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/weather/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표 기반 weather forecast timeline */
+        get: operations["get_weather_forecast_by_coordinate_v1_weather_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -811,7 +862,7 @@ export interface components {
             price_summary?: components["schemas"]["PricePointOut"][] | null;
             /** Status */
             status: string;
-            /** @description kind=weather일 때 현재기온(T1H/TMP) marker 요약. */
+            /** @description kind=weather일 때 현재/예보 marker 요약. */
             weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
         /**
@@ -1343,6 +1394,89 @@ export interface components {
             version: string;
         };
         /**
+         * WeatherAlertHistoryData
+         * @description ``GET /weather/alerts`` data payload.
+         */
+        WeatherAlertHistoryData: {
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["WeatherAlertHistoryItem"][];
+        };
+        /**
+         * WeatherAlertHistoryItem
+         * @description KMA 기상특보 이력 row 1건.
+         */
+        WeatherAlertHistoryItem: {
+            /** Alert Type */
+            alert_type?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective Until */
+            effective_until?: string | null;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Feature Name */
+            feature_name?: string | null;
+            /** Feature Status */
+            feature_status?: string | null;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Imported At */
+            imported_at?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Phenomenon */
+            phenomenon?: string | null;
+            /** Region Code */
+            region_code?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Source Record Key */
+            source_record_key: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * WeatherAlertHistoryResponse
+         * @description KMA 기상특보 이력 응답.
+         */
+        WeatherAlertHistoryResponse: {
+            data: components["schemas"]["WeatherAlertHistoryData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * WeatherAnchorOut
+         * @description 예보/관측값을 제공한 weather anchor feature.
+         */
+        WeatherAnchorOut: {
+            /** Distance M */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Lat */
+            lat?: number | null;
+            /** Lon */
+            lon?: number | null;
+            /** Name */
+            name: string;
+        };
+        /**
          * WeatherCardData
          * @description ``GET /features/{feature_id}/weather`` data payload.
          */
@@ -1359,6 +1493,36 @@ export interface components {
             metrics: components["schemas"]["WeatherMetricOut"][];
             /** Source Styles */
             source_styles: string[];
+        };
+        /**
+         * WeatherForecastData
+         * @description ``GET /weather/.../forecast`` data payload.
+         */
+        WeatherForecastData: {
+            anchor?: components["schemas"]["WeatherAnchorOut"] | null;
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["WeatherValueItem"][];
+            /** Radius M */
+            radius_m: number;
+            /** Target Feature Id */
+            target_feature_id?: string | null;
+            /** Target Lat */
+            target_lat?: number | null;
+            /** Target Lon */
+            target_lon?: number | null;
+        };
+        /**
+         * WeatherForecastResponse
+         * @description 공개 weather forecast timeline 응답.
+         */
+        WeatherForecastResponse: {
+            data: components["schemas"]["WeatherForecastData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * WeatherMetricOut
@@ -1390,7 +1554,7 @@ export interface components {
         };
         /**
          * WeatherSummaryOut
-         * @description 지도 marker용 최신 현재기온 요약.
+         * @description 지도 marker용 weather 값 요약.
          */
         WeatherSummaryOut: {
             /** Forecast Style */
@@ -1415,6 +1579,53 @@ export interface components {
             value_text?: string | null;
             /** Weather Domain */
             weather_domain?: string | null;
+        };
+        /**
+         * WeatherValueItem
+         * @description weather timeline row 1건.
+         */
+        WeatherValueItem: {
+            /**
+             * Collected At
+             * Format: date-time
+             */
+            collected_at: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Forecast Style */
+            forecast_style: string;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Severity */
+            severity?: string | null;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Timeline Bucket */
+            timeline_bucket?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Valid From */
+            valid_from?: string | null;
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Weather Domain */
+            weather_domain: string;
+            /** Weather Value Key */
+            weather_value_key: string;
         };
     };
     responses: never;
@@ -2385,6 +2596,183 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicFestivalDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_weather_alert_history_v1_weather_alerts_get: {
+        parameters: {
+            query?: {
+                /** @description KMA 특보 구역 코드 필터. */
+                region_code?: string | null;
+                /** @description 현상 토큰 필터(예: 호우, 폭염, weather_alert). */
+                phenomenon?: string | null;
+                /** @description 특보 등급 필터(예: 주의보, 경보). */
+                level?: string | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherAlertHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_forecast_by_feature_v1_weather_features__feature_id__forecast_get: {
+        parameters: {
+            query?: {
+                /** @description nearest weather anchor 탐색 반경(m). */
+                radius_m?: number;
+                /** @description forecast_style 필터. 반복 지정 가능. */
+                forecast_style?: string[] | null;
+                /** @description weather_domain 필터. 반복 지정 가능. */
+                weather_domain?: string[] | null;
+                /** @description metric_key 필터. 반복 지정 가능. */
+                metric_key?: string[] | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                /** @description 예보 유효시각 시작. */
+                valid_from?: string | null;
+                /** @description 예보 유효시각 종료. */
+                valid_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_forecast_by_coordinate_v1_weather_forecast_get: {
+        parameters: {
+            query: {
+                /** @description 경도(WGS84). */
+                lon: number;
+                /** @description 위도(WGS84). */
+                lat: number;
+                /** @description nearest weather anchor 탐색 반경(m). */
+                radius_m?: number;
+                /** @description forecast_style 필터. 반복 지정 가능. */
+                forecast_style?: string[] | null;
+                /** @description weather_domain 필터. 반복 지정 가능. */
+                weather_domain?: string[] | null;
+                /** @description metric_key 필터. 반복 지정 가능. */
+                metric_key?: string[] | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                /** @description 예보 유효시각 시작. */
+                valid_from?: string | null;
+                /** @description 예보 유효시각 종료. */
+                valid_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */

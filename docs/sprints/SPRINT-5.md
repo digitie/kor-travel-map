@@ -163,7 +163,7 @@
 | 항목 | 상태 (진입 시) | DoD (Sprint 5 종료 = 운영 진입) |
 |------|---------------|-------------------------------|
 | ADR-033 (정합성 단계 도입) | accepted (Sprint 1) | Phase 2 (F4~F8 + Dagster 게이트) 적용 + swap 차단 동작 |
-| ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
+| ADR-017/062 (보관 정책) | accepted | place 무기한, event +20y, notice +1y, weather 기본 3년 보존 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
 | T-201b (Phase 2) | done (2026-06-06) | F4/F5/F6/F7/F8 구현 + dry-run report CLI/첨부 |
 | T-202~204 | done | T-202 pre-commit hook + T-203 CI full matrix + T-204 branch protection 매뉴얼 완료 |

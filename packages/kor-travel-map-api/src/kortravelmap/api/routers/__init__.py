@@ -57,6 +57,7 @@ from kortravelmap.api.routers.provider_refresh_policies import (
 from kortravelmap.api.routers.providers import router as providers_router
 from kortravelmap.api.routers.public_status import router as public_status_router
 from kortravelmap.api.routers.public_views import router as public_views_router
+from kortravelmap.api.routers.weather import router as weather_router
 
 __all__ = [
     "etl_router",
@@ -86,5 +87,6 @@ __all__ = [
     "public_status_router",
     "providers_router",
     "public_views_router",
+    "weather_router",
     "curated_router",
 ]
