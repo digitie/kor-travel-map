@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (codex) — Claude Code PR #638 2차 사후 리뷰: 파일 검색 정합성
+
+- **리뷰 범위**: Claude Code 관리 UI 개편 스택 #634~#638을 closed/superseded PR(#635~#637)
+  포함해 current main(#653 이후) 기준으로 재검토했다. 이전 Codex 후속 #652의 #650/#651 수정은
+  반영된 상태로 확인.
+- **발견(#655)**: `/admin/files` 검색 placeholder가 `경로 · provider · dataset`을 안내하지만,
+  backend `file_registry.list_managed_files(q=...)`는 `path ILIKE`만 검사했다. provider 이름이나
+  dataset key 검색이 UI 기대와 다르게 0건이 될 수 있었다.
+- **수정**: `q` predicate를 `path/provider/dataset_key` 검색으로 확장하고, 실 PostGIS 통합 테스트에
+  provider/dataset 검색 회귀 케이스를 추가했다.
+
 ## 2026-07-09 (claude) — Feature 지도 저zoom 서버측 region 클러스터 (#649, #12 잔여) — 라이브 검증 완료
 
 - **배경**: 배치 #12(지도 응답성)의 잔여 인프라. 저zoom에서 개별 feature를 tile로 대량

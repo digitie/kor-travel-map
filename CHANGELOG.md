@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### 관리 파일 검색 provider/dataset 포함 (2026-07-09)
+
+- **FIXED**: `/admin/files` 검색 입력이 안내하는 `경로 · provider · dataset` 범위와 맞게
+  `/v1/admin/files?q=...` backend 검색을 `path`뿐 아니라 `provider`, `dataset_key`까지 확장했다.
+  Claude Code 관리 UI 통합 PR #638 2차 사후 리뷰에서 발견한 불일치(#655) 후속.
+
 ### Feature 지도 저zoom 서버측 region 클러스터 (2026-07-09)
 
 - **ADDED**: 관리 Feature 지도가 저zoom(≤13)에서 개별 feature를 tile로 대량 조회하지 않고

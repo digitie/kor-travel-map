@@ -84,6 +84,14 @@ async def test_list_managed_files_scalar_filters_all_cast(
     by_q = await file_registry.list_managed_files(migrated_session, q="a.dump")
     assert [f.path for f in by_q.items] == ["backups/a.dump"]
 
+    by_q_provider = await file_registry.list_managed_files(
+        migrated_session, q="python-mois"
+    )
+    assert [f.path for f in by_q_provider.items] == ["uploads/b.csv"]
+
+    by_q_dataset = await file_registry.list_managed_files(migrated_session, q="mois_x")
+    assert [f.path for f in by_q_dataset.items] == ["uploads/b.csv"]
+
     # min_age_days=5 → downloaded_at <= now()-5d → 10일 된 것만.
     older = await file_registry.list_managed_files(migrated_session, min_age_days=5)
     assert [f.path for f in older.items] == ["uploads/b.csv"]
