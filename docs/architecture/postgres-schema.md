@@ -262,8 +262,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 ## 7. 보관 정책 (ADR-017) → purge SQL
 
 ```sql
--- weather_values: +30일 (참조 trip 0건은 PinVi trip_pois 조인으로 별도 검증)
-DELETE FROM feature.feature_weather_values WHERE valid_at < now() - interval '30 days';
+-- weather_values: 기본 3년 보존(ADR-062). 예보 발표 이력 비교용이므로
+-- 별도 승인된 purge 작업 전에는 삭제하지 않는다.
 
 -- notice: 종료일/발표일 +1년
 DELETE FROM feature.feature_notice_details d USING feature.features f

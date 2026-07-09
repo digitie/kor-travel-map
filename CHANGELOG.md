@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 공개 Weather API와 3년 이력 보존 (2026-07-09)
+
+- **ADDED**: 외부 시스템용 `/v1/weather/forecast`,
+  `/v1/weather/features/{feature_id}/forecast`, `/v1/weather/alerts` API를 추가했다.
+  좌표/feature 기준 nearest weather anchor의 예보 timeline과 KMA 기상특보 이력을 REST로 조회한다.
+- **CHANGED**: `weather_values` 보존 정책을 30일에서 기본 3년으로 변경했다(ADR-062). 같은
+  `valid_at`에 대한 과거 `issued_at` 예보를 보존해 3시간 전/1일 전 발표 예보와 현재 발표 예보를
+  비교할 수 있다.
+- **CHANGED**: Feature 지도 weather marker가 zoom 14 이상 개별 marker에서 현재기온뿐 아니라
+  중기/단기 예보값(`TMN`/`TMX`/`POP`/`SKY` 등)도 라벨로 표시한다.
+
 ### 관리 파일 검색 provider/dataset 포함 (2026-07-09)
 
 - **FIXED**: `/admin/files` 검색 입력이 안내하는 `경로 · provider · dataset` 범위와 맞게

@@ -463,6 +463,7 @@ interface ClusterPriceSummaryPoint {
 }
 
 interface ClusterWeatherSummaryPoint {
+  forecast_style?: string | null;
   metric_key: string;
   metric_name?: string | null;
   value_number?: number | null;
@@ -568,6 +569,16 @@ function weatherMarkerLabel(
   summary: ClusterWeatherSummaryPoint | null | undefined,
 ): string | null {
   if (!summary) return null;
+  const metricLabel =
+    summary.metric_key === "TMN"
+      ? "최저 "
+      : summary.metric_key === "TMX"
+        ? "최고 "
+        : summary.metric_key === "POP"
+          ? "강수 "
+          : summary.metric_key === "REH"
+            ? "습도 "
+            : "";
   if (typeof summary.value_number === "number") {
     const unit = summary.unit ?? "";
     const normalizedUnit = unit.toLowerCase();
@@ -577,14 +588,17 @@ function weatherMarkerLabel(
       unit.includes("C") ||
       unit.includes("℃")
     ) {
-      return `${temperatureFormatter.format(summary.value_number)}℃`;
+      return `${metricLabel}${temperatureFormatter.format(summary.value_number)}℃`;
     }
     if (unit.length > 0) {
-      return `${temperatureFormatter.format(summary.value_number)} ${unit}`;
+      return `${metricLabel}${temperatureFormatter.format(summary.value_number)}${unit}`;
     }
-    return `${temperatureFormatter.format(summary.value_number)}°`;
+    return `${metricLabel}${temperatureFormatter.format(summary.value_number)}°`;
   }
-  return summary.value_text ?? null;
+  if (summary.value_text) {
+    return summary.metric_key === "SKY" ? `예보 ${summary.value_text}` : summary.value_text;
+  }
+  return null;
 }
 
 type CoincidentEntry = {

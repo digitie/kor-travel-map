@@ -75,7 +75,7 @@ class PricePointOut(BaseModel):
 
 
 class WeatherSummaryOut(BaseModel):
-    """지도 marker용 최신 현재기온 요약."""
+    """지도 marker용 weather 값 요약."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -120,7 +120,7 @@ class FeatureSummary(BaseModel):
     )
     weather_summary: WeatherSummaryOut | None = Field(
         default=None,
-        description="kind=weather일 때 현재기온(T1H/TMP) marker 요약.",
+        description="kind=weather일 때 현재/예보 marker 요약.",
     )
 
 

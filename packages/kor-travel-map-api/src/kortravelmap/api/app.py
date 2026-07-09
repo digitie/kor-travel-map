@@ -74,6 +74,7 @@ from kortravelmap.api.routers import (
     providers_router,
     public_status_router,
     public_views_router,
+    weather_router,
 )
 from kortravelmap.api.settings import ApiSettings
 
@@ -498,6 +499,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             public_views_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
+        application.include_router(
+            weather_router,
             prefix="/v1",
             dependencies=public_dependencies,
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -104,6 +105,130 @@ async def test_weather_card_empty(migrated_session: AsyncSession) -> None:
     assert card.source_styles == []
     assert card.latest_at is None
     assert card.is_stale is True
+
+
+async def test_weather_timeline_preserves_forecast_issue_history(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "kma_anchor",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    previous_issue = _T1 - timedelta(hours=3)
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "kma_anchor", "TMP", issued_at=previous_issue, valid_at=_T2,
+                value_number=Decimal("22.0"), unit="deg_c",
+            ),
+            _kma_short(
+                "kma_anchor", "TMP", issued_at=_T1, valid_at=_T2,
+                value_number=Decimal("24.0"), unit="deg_c",
+            ),
+        ],
+    )
+
+    anchor = await weather_repo.nearest_weather_feature_for_coordinate(
+        migrated_session,
+        lon=_BASE_LON + 0.001,
+        lat=_BASE_LAT,
+    )
+    assert anchor is not None
+    assert anchor.feature_id == "kma_anchor"
+
+    rows = await weather_repo.list_weather_values(
+        migrated_session,
+        feature_id=anchor.feature_id,
+        metric_keys=["TMP"],
+        valid_from=_T2,
+        valid_to=_T2,
+        history_from=previous_issue - timedelta(days=1),
+    )
+    by_issue = {row.issued_at: row for row in rows}
+    assert by_issue[previous_issue].value_number == Decimal("22.0000")
+    assert by_issue[_T1].value_number == Decimal("24.0000")
+
+
+async def test_kma_weather_alert_history_reads_source_records(
+    migrated_session: AsyncSession,
+) -> None:
+    raw_data = {
+        "alert_id": "A-1",
+        "alert_type": "heavy_rain_warning",
+        "phenomenon": "호우",
+        "level": "주의보",
+        "title": "호우주의보",
+        "description": "강한 비",
+        "issued_at": _T1.isoformat(),
+        "effective_from": _T1.isoformat(),
+        "effective_until": None,
+        "source_agency": "기상청",
+        "region_code": "11B10101",
+        "region_name": "서울특별시",
+    }
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, status, detail, updated_at
+            )
+            VALUES (
+                'f_notice_weather', 'notice', '호우주의보', '99000000',
+                'active', '{}'::jsonb, now()
+            )
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, provider, dataset_key, source_entity_type,
+                source_entity_id, raw_name, raw_address, raw_data,
+                raw_payload_hash, fetched_at
+            )
+            VALUES (
+                'sr_kma_alert_1', 'python-kma-api', 'kma_weather_alerts',
+                'weather_alert', '11B10101::호우', '호우주의보', '서울특별시',
+                CAST(:raw_data AS jsonb), 'hash-alert-1', :fetched_at
+            )
+            """
+        ),
+        {"raw_data": json.dumps(raw_data), "fetched_at": _T1},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_record_key, source_role, match_method,
+                confidence, is_primary_source
+            )
+            VALUES (
+                'f_notice_weather', 'sr_kma_alert_1', 'primary',
+                'natural_key', 100, true
+            )
+            """
+        )
+    )
+
+    rows = await weather_repo.list_kma_weather_alert_history(
+        migrated_session,
+        region_code="11B10101",
+        phenomenon="호우",
+        history_from=_T1 - timedelta(days=1),
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.source_record_key == "sr_kma_alert_1"
+    assert row.feature_id == "f_notice_weather"
+    assert row.region_name == "서울특별시"
+    assert row.issued_at == _T1
+    assert row.payload["alert_id"] == "A-1"
 
 
 # ── #498/#499 tiered source merge + candidate-first nearest ────────────────

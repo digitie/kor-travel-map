@@ -1055,8 +1055,8 @@ Dagster resource/provider runner가 수행한다.
 ## 10. 보관 정책 (ADR-017) → purge 작업
 
 ```sql
--- weather_values: +30일 + 참조 trip 0건 (참조 검사는 PinVi trip_pois 조인)
-DELETE FROM feature.feature_weather_values WHERE valid_at < now() - interval '30 days';
+-- weather_values: 기본 3년 보존(ADR-062). 예보 발표 이력 비교용이므로
+-- 별도 승인된 purge 작업 전에는 삭제하지 않는다.
 
 -- notice: 종료일 또는 발표일 +1년 (kind='notice' AND valid_end_time < now() - 1y)
 DELETE FROM feature.feature_notice_details d USING feature.features f
@@ -1153,7 +1153,7 @@ purge는 Dagster asset에 위임한다(purge SQL 표준 예시는 §10, `infra/p
 | `event` | 종료일(`ends_on`) +20년 |
 | `notice` | 종료일 또는 발표일 +1년 |
 | `feature_price_values` | 가격 domain별 기본값(초기 유가 10년 권장, purge asset에서 관리) |
-| `weather_values` | 계획 기준일 +30일, 참조 trip 0건 시 즉시 삭제 |
+| `weather_values` | 기본 3년(예보 발표 이력 비교용, ADR-062) |
 | `source_records` | 대응 feature 보존 기간 이상, orphan만 별도 purge |
 
 ### feature 정합성 리포트 단계적 도입 (구 ADR-033)

@@ -360,9 +360,11 @@ bulk insert는 ADR-013 (`psycopg.copy_*` 안전 마진 30k).
 
 ## 10. 보관 정책 (ADR-017)
 
-- `weather_values`: +30일 (참조 trip 0건은 즉시 삭제 — PinVi trip_pois join
-  으로 별도 검증).
-- purge SQL: `docs/architecture/data-model.md` §7 또는 `docs/architecture/postgres-schema.md` §7.
+- `weather_values`: 기본 3년 보존(ADR-062). 같은 `valid_at`에 대한 과거
+  `issued_at` 예보 비교와 과거 기준 현재값 비교를 위해 임의 삭제하지 않는다.
+- purge SQL: 기본 제공하지 않는다. 별도 보존 정책 변경이 승인되면
+  `docs/architecture/data-model.md` §7과 `docs/architecture/postgres-schema.md` §7을
+  함께 갱신한다.
 
 ## 11. provider sync state cursor 예시
 

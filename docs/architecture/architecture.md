@@ -289,7 +289,7 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 | ADR-014 | 테스트 4단계 (unit/integration/e2e/fixture) + Coverage 목표 |
 | ADR-015 | 객체 저장소는 S3 호환만 가정, RustFS 1차, MinIO/Ceph/R2 swap |
 | ADR-016 | Record Linkage: blocking(`ST_DWithin 100m + bjd_code + kind`) → scoring(0.45/0.35/0.20) → 임계값 0.85/0.65 |
-| ADR-017 | 보관 정책: place 무기한, event +20y, notice +1y, weather +30d, price 카테고리별 |
+| ADR-017/062 | 보관 정책: place 무기한, event +20y, notice +1y, weather 기본 3년, price 카테고리별 |
 | ADR-018 | `Feature.detail`은 자유 dict 금지 (`DETAIL_MODELS` 분기 강제) |
 | ADR-019 | KST aware datetime만 허용 (`kst_now()`) |
 | ADR-020 | 메인 라이브러리에서 FastAPI/Uvicorn 의존 분리 (ADR-005 위치 부분 supersede) |

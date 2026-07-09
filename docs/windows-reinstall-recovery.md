@@ -148,12 +148,12 @@ docker exec -it tripmate-postgres psql -U tripmate -d tripmate \
 
 ## 8. 데이터 보존 정책 점검 (인수 시)
 
-ADR-017의 보관 정책이 cron/Dagster purge job으로 동작하는지 확인:
+ADR-017/062의 보관 정책이 cron/Dagster purge job으로 동작하는지 확인:
 
 ```sql
--- weather_values: 30일 이상 누적된 row가 있는가?
+-- weather_values: 3년 초과 row가 있는가? (3년 이하는 정상 보존)
 SELECT count(*), min(valid_at), max(valid_at)
-FROM feature.feature_weather_values WHERE valid_at < now() - interval '30 days';
+FROM feature.feature_weather_values WHERE valid_at < now() - interval '3 years';
 
 -- notice: 1년 이상 만료된 row가 있는가?
 SELECT count(*) FROM feature.feature_notice_details d
