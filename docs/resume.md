@@ -1,12 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-09 (codex) — Claude Code PR #638 2차 사후 리뷰 수정 진행 중
+## 2026-07-09 (codex) — Claude Code PR #638 2차 사후 리뷰 후속 완료
 
-- **완료**: closed/superseded PR(#635~#637) 포함 Claude Code 관리 UI 통합 PR #638을 2차로
-  재검토해 `/admin/files` 검색 안내와 backend `q` 검색 범위 불일치를 확인하고 #655로 이슈화했다.
-  `file_registry.list_managed_files(q=...)`가 `path/provider/dataset_key`를 함께 검색하도록 수정하고
-  통합 테스트 케이스를 추가했다.
-- **다음 한 작업**: 대상 테스트/ruff/mypy/보안 스캔 → PR 생성 → CI green 확인 → 머지.
+- **완료(#656, #655 closed)**: closed/superseded PR(#635~#637) 포함 Claude Code 관리 UI 통합
+  PR #638을 2차로 재검토해 `/admin/files` 검색 안내와 backend `q` 검색 범위 불일치를 확인하고
+  #655로 이슈화했다. `file_registry.list_managed_files(q=...)`가 `path/provider/dataset_key`를
+  함께 검색하도록 수정하고 통합 테스트 케이스를 추가했다. #638에는 2차 리뷰 코멘트를 남겼고
+  #656은 CI green 후 squash merge했다.
+- **다음 한 작업**: 새 지시 대기.
 
 ## 2026-07-09 (claude) — Feature 지도 저zoom 서버측 region 클러스터 완결 (#649, #12 잔여)
 
