@@ -1,8 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-09 (codex) — feature weather API 경로 정리 로컬 구현 완료
+
+- **완료(로컬)**: 직전 weather history API를 별도 `/v1/weather/*`가 아니라 feature API 하위
+  `/v1/features/weather/forecast`, `/v1/features/{feature_id}/weather/forecast`,
+  `/v1/features/weather/alerts`로 노출하도록 후속 수정했다. 기존
+  `/v1/features/{feature_id}/weather` card API는 유지.
+- **검증**: API/OpenAPI unit 7 passed, ruff 변경 Python 파일 clean, mypy --strict API package
+  36 source clean, import-linter 4 kept, OpenAPI drift check 통과, admin/user-client
+  gen:types:check/type-check 통과, frontend lint 0 errors(기존 warning 4), `git diff --check` 통과.
+- **다음 한 작업**: 보안 스캔 → PR 생성 → CI green 확인 → 머지.
+
 ## 2026-07-09 (codex) — 공개 Weather API와 3년 이력 보존 로컬 구현 완료
 
-- **완료(로컬)**: 3번안 기준으로 외부 시스템용 `/v1/weather/*` 공개 API를 추가했다. 좌표/feature
+- **완료(로컬)**: 3번안 기준으로 외부 시스템용 weather forecast/history API를 추가했다. 좌표/feature
   기준 nearest weather anchor forecast timeline, KMA 기상특보 이력 조회, weather value 3년 보존
   정책(ADR-062), 0043 조회 인덱스, Feature 지도 weather marker 예보 라벨을 반영했다. 기존
   `/v1/features/{feature_id}/weather` card API는 유지.

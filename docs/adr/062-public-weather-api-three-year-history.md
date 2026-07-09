@@ -17,7 +17,10 @@
 
 1. `feature.feature_weather_values`는 기본 3년 보존으로 운영한다.
 2. 예보/관측값은 `issued_at`, `valid_at`, `observed_at`을 보존한 timeline row로 공개한다.
-3. 외부 시스템용 공개 API는 `/v1/weather/*` 아래에 둔다.
+3. 외부 시스템용 공개 API는 별도 `/v1/weather/*`가 아니라 feature API 하위에 둔다.
+   - 좌표 기준 forecast: `GET /v1/features/weather/forecast`
+   - feature 기준 forecast: `GET /v1/features/{feature_id}/weather/forecast`
+   - KMA 기상특보 이력: `GET /v1/features/weather/alerts`
 4. KMA 중기예보(`forecast_style=mid`)는 weather forecast timeline의 1차 공개 대상에 포함한다.
 5. KMA 기상특보 이력은 별도 alert table을 만들지 않고 `provider_sync.source_records`
    이력을 공개 projection으로 조회한다.
@@ -36,4 +39,6 @@
 - `weather_values` 30일 purge 문서 정책은 폐기한다.
 - 3년 범위 조회를 위한 보조 인덱스를 추가한다.
 - 기존 `/v1/features/{feature_id}/weather` 카드 API는 호환성을 위해 유지한다.
+- weather는 독립 리소스가 아니라 feature의 공용 속성/시계열로 다루므로, 공개 REST 표면도
+  `/v1/features` 아래에서 관리한다.
 - 3년을 넘는 장기 기후 분석은 본 API의 1차 범위가 아니다.

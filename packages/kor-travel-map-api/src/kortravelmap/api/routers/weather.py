@@ -1,4 +1,4 @@
-"""``/v1/weather/*`` — 외부 시스템용 공개 weather API."""
+"""``/v1/features/*`` — feature 하위 weather forecast/history API."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ __all__ = [
     "router",
 ]
 
-router = APIRouter(prefix="/weather", tags=["weather"])
+router = APIRouter(prefix="/features", tags=["features"])
 
 
 class WeatherAnchorOut(BaseModel):
@@ -65,7 +65,7 @@ class WeatherValueItem(BaseModel):
 
 
 class WeatherForecastData(BaseModel):
-    """``GET /weather/.../forecast`` data payload."""
+    """``GET /features/.../weather/forecast`` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -114,7 +114,7 @@ class WeatherAlertHistoryItem(BaseModel):
 
 
 class WeatherAlertHistoryData(BaseModel):
-    """``GET /weather/alerts`` data payload."""
+    """``GET /features/weather/alerts`` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -246,7 +246,7 @@ async def _forecast_response(
 
 
 @router.get(
-    "/forecast",
+    "/weather/forecast",
     response_model=WeatherForecastResponse,
     summary="좌표 기반 weather forecast timeline",
 )
@@ -311,7 +311,7 @@ async def get_weather_forecast_by_coordinate(
 
 
 @router.get(
-    "/features/{feature_id}/forecast",
+    "/{feature_id}/weather/forecast",
     response_model=WeatherForecastResponse,
     summary="feature 기준 nearest weather forecast timeline",
 )
@@ -374,7 +374,7 @@ async def get_weather_forecast_by_feature(
 
 
 @router.get(
-    "/alerts",
+    "/weather/alerts",
     response_model=WeatherAlertHistoryResponse,
     summary="KMA 기상특보 이력",
 )

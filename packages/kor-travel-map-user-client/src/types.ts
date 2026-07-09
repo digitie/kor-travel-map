@@ -160,6 +160,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/weather/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KMA 기상특보 이력 */
+        get: operations["list_weather_alert_history_v1_features_weather_alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/weather/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표 기반 weather forecast timeline */
+        get: operations["get_weather_forecast_by_coordinate_v1_features_weather_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/{feature_id}": {
         parameters: {
             query?: never;
@@ -203,6 +237,23 @@ export interface paths {
         };
         /** feature weather card (forecast_style별 최신값 + freshness) */
         get: operations["get_feature_weather_v1_features__feature_id__weather_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/weather/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature 기준 nearest weather forecast timeline */
+        get: operations["get_weather_forecast_by_feature_v1_features__feature_id__weather_forecast_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -363,57 +414,6 @@ export interface paths {
          * @description 축제 공개 상세 view.
          */
         get: operations["get_public_festival_v1_public_festivals__feature_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/weather/alerts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** KMA 기상특보 이력 */
-        get: operations["list_weather_alert_history_v1_weather_alerts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/weather/features/{feature_id}/forecast": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature 기준 nearest weather forecast timeline */
-        get: operations["get_weather_forecast_by_feature_v1_weather_features__feature_id__forecast_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/weather/forecast": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 좌표 기반 weather forecast timeline */
-        get: operations["get_weather_forecast_by_coordinate_v1_weather_forecast_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1395,7 +1395,7 @@ export interface components {
         };
         /**
          * WeatherAlertHistoryData
-         * @description ``GET /weather/alerts`` data payload.
+         * @description ``GET /features/weather/alerts`` data payload.
          */
         WeatherAlertHistoryData: {
             /**
@@ -1496,7 +1496,7 @@ export interface components {
         };
         /**
          * WeatherForecastData
-         * @description ``GET /weather/.../forecast`` data payload.
+         * @description ``GET /features/.../weather/forecast`` data payload.
          */
         WeatherForecastData: {
             anchor?: components["schemas"]["WeatherAnchorOut"] | null;
@@ -2097,6 +2097,122 @@ export interface operations {
             };
         };
     };
+    list_weather_alert_history_v1_features_weather_alerts_get: {
+        parameters: {
+            query?: {
+                /** @description KMA 특보 구역 코드 필터. */
+                region_code?: string | null;
+                /** @description 현상 토큰 필터(예: 호우, 폭염, weather_alert). */
+                phenomenon?: string | null;
+                /** @description 특보 등급 필터(예: 주의보, 경보). */
+                level?: string | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherAlertHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_forecast_by_coordinate_v1_features_weather_forecast_get: {
+        parameters: {
+            query: {
+                /** @description 경도(WGS84). */
+                lon: number;
+                /** @description 위도(WGS84). */
+                lat: number;
+                /** @description nearest weather anchor 탐색 반경(m). */
+                radius_m?: number;
+                /** @description forecast_style 필터. 반복 지정 가능. */
+                forecast_style?: string[] | null;
+                /** @description weather_domain 필터. 반복 지정 가능. */
+                weather_domain?: string[] | null;
+                /** @description metric_key 필터. 반복 지정 가능. */
+                metric_key?: string[] | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                /** @description 예보 유효시각 시작. */
+                valid_from?: string | null;
+                /** @description 예보 유효시각 종료. */
+                valid_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_feature_v1_features__feature_id__get: {
         parameters: {
             query?: {
@@ -2219,6 +2335,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_forecast_by_feature_v1_features__feature_id__weather_forecast_get: {
+        parameters: {
+            query?: {
+                /** @description nearest weather anchor 탐색 반경(m). */
+                radius_m?: number;
+                /** @description forecast_style 필터. 반복 지정 가능. */
+                forecast_style?: string[] | null;
+                /** @description weather_domain 필터. 반복 지정 가능. */
+                weather_domain?: string[] | null;
+                /** @description metric_key 필터. 반복 지정 가능. */
+                metric_key?: string[] | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                /** @description 예보 유효시각 시작. */
+                valid_from?: string | null;
+                /** @description 예보 유효시각 종료. */
+                valid_to?: string | null;
+                history_days?: number;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2596,183 +2773,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicFestivalDetailResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    list_weather_alert_history_v1_weather_alerts_get: {
-        parameters: {
-            query?: {
-                /** @description KMA 특보 구역 코드 필터. */
-                region_code?: string | null;
-                /** @description 현상 토큰 필터(예: 호우, 폭염, weather_alert). */
-                phenomenon?: string | null;
-                /** @description 특보 등급 필터(예: 주의보, 경보). */
-                level?: string | null;
-                /** @description 발표시각 시작. */
-                issued_from?: string | null;
-                /** @description 발표시각 종료. */
-                issued_to?: string | null;
-                history_days?: number;
-                limit?: number;
-                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
-                key?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WeatherAlertHistoryResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    get_weather_forecast_by_feature_v1_weather_features__feature_id__forecast_get: {
-        parameters: {
-            query?: {
-                /** @description nearest weather anchor 탐색 반경(m). */
-                radius_m?: number;
-                /** @description forecast_style 필터. 반복 지정 가능. */
-                forecast_style?: string[] | null;
-                /** @description weather_domain 필터. 반복 지정 가능. */
-                weather_domain?: string[] | null;
-                /** @description metric_key 필터. 반복 지정 가능. */
-                metric_key?: string[] | null;
-                /** @description 발표시각 시작. */
-                issued_from?: string | null;
-                /** @description 발표시각 종료. */
-                issued_to?: string | null;
-                /** @description 예보 유효시각 시작. */
-                valid_from?: string | null;
-                /** @description 예보 유효시각 종료. */
-                valid_to?: string | null;
-                history_days?: number;
-                limit?: number;
-                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
-                key?: string | null;
-            };
-            header?: never;
-            path: {
-                feature_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    get_weather_forecast_by_coordinate_v1_weather_forecast_get: {
-        parameters: {
-            query: {
-                /** @description 경도(WGS84). */
-                lon: number;
-                /** @description 위도(WGS84). */
-                lat: number;
-                /** @description nearest weather anchor 탐색 반경(m). */
-                radius_m?: number;
-                /** @description forecast_style 필터. 반복 지정 가능. */
-                forecast_style?: string[] | null;
-                /** @description weather_domain 필터. 반복 지정 가능. */
-                weather_domain?: string[] | null;
-                /** @description metric_key 필터. 반복 지정 가능. */
-                metric_key?: string[] | null;
-                /** @description 발표시각 시작. */
-                issued_from?: string | null;
-                /** @description 발표시각 종료. */
-                issued_to?: string | null;
-                /** @description 예보 유효시각 시작. */
-                valid_from?: string | null;
-                /** @description 예보 유효시각 종료. */
-                valid_to?: string | null;
-                history_days?: number;
-                limit?: number;
-                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
-                key?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */

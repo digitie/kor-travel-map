@@ -2,14 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-09 (codex) — feature weather API 경로 정리
+
+- **결정 보정(ADR-062)**: weather는 독립 리소스보다 feature의 공용 속성/시계열에 가깝기 때문에,
+  직전 `/v1/weather/*` 공개 경로를 feature API 하위로 옮긴다.
+- **API**: forecast timeline은 `/v1/features/weather/forecast`(좌표 기준)와
+  `/v1/features/{feature_id}/weather/forecast`(feature 기준), 기상특보 이력은
+  `/v1/features/weather/alerts`로 노출한다. 기존 `/v1/features/{feature_id}/weather` card API는 유지.
+
 ## 2026-07-09 (codex) — 공개 Weather API와 3년 이력 보존
 
 - **결정(ADR-062)**: weather value 보존 정책을 30일에서 기본 3년으로 변경. 같은
   `valid_at`에 대해 `issued_at`이 다른 예보 snapshot을 보존해 3시간 전/1일 전 발표 예보와 현재
   발표 예보를 비교할 수 있게 한다.
-- **API**: 외부 시스템용 `/v1/weather/forecast`(좌표 기준 nearest anchor),
-  `/v1/weather/features/{feature_id}/forecast`(feature 기준 nearest anchor),
-  `/v1/weather/alerts`(KMA 기상특보 source_record 이력)를 추가했다. 기존
+- **API**: 외부 시스템용 weather forecast/history API를 추가했다. 기존
   `/v1/features/{feature_id}/weather` card API는 호환 유지.
 - **DB/지도**: 새 테이블 없이 `feature_weather_values`와 KMA alert `source_records`를 재사용하고,
   3년 timeline 조회용 보조 인덱스를 추가했다(0043). Feature 지도 weather marker는 zoom 14 이상
