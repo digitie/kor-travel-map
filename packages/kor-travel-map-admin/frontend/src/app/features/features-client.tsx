@@ -57,7 +57,11 @@ import {
 } from "@/components/vworld-map-view";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
-import { useMapStore, type FeatureViewMode } from "@/state/map";
+import {
+  DEFAULT_FEATURE_MAP_KINDS,
+  useMapStore,
+  type FeatureViewMode,
+} from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const AREA_GEOMETRY_MIN_ZOOM = 14;
@@ -218,7 +222,7 @@ export function FeaturesClient() {
   const setSelectedFeatureId = useMapStore((state) => state.setSelectedFeatureId);
   const activeFeatureKinds = useMapStore((state) => state.activeFeatureKinds);
   const toggleFeatureKind = useMapStore((state) => state.toggleFeatureKind);
-  const clearFeatureKinds = useMapStore((state) => state.clearFeatureKinds);
+  const resetFeatureKinds = useMapStore((state) => state.resetFeatureKinds);
 
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [providerFilter, setProviderFilter] = useState<string>("");
@@ -226,6 +230,9 @@ export function FeaturesClient() {
     () => Array.from(activeFeatureKinds) as FeatureKind[],
     [activeFeatureKinds],
   );
+  const isDefaultKindFilter =
+    activeFeatureKinds.size === DEFAULT_FEATURE_MAP_KINDS.length &&
+    DEFAULT_FEATURE_MAP_KINDS.every((kind) => activeFeatureKinds.has(kind));
 
   // 소스(provider) 필터 옵션: feature 선택 시 그 feature가 묶인 provider만, 아니면
   // 전체 provider 목록. 선택이 바뀌어 현재 값이 옵션에 없으면 "모두 보기"로 되돌린다.
@@ -470,17 +477,16 @@ export function FeaturesClient() {
                 </Button>
               );
             })}
-            {activeFeatureKinds.size > 0 ? (
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={clearFeatureKinds}
-              >
-                <XIcon data-icon="inline-start" />
-                초기화
-              </Button>
-            ) : null}
+            <Button
+              disabled={isDefaultKindFilter}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={resetFeatureKinds}
+            >
+              <XIcon data-icon="inline-start" />
+              초기화
+            </Button>
           </div>
           <NativeSelect
             aria-label="소스 필터"

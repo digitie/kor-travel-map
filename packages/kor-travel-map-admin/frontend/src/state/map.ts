@@ -21,7 +21,7 @@ interface MapStoreState {
   viewport: MapViewport;
   featureViewMode: FeatureViewMode;
   selectedFeatureId: string | null;
-  /** 활성 feature kind. 빈 set이면 전체 표시. */
+  /** 활성 feature kind. 빈 set이면 전체 표시, 기본값은 weather/notice. */
   activeFeatureKinds: ReadonlySet<string>;
   /** 활성 카테고리 8자리 코드 (PlaceCategoryCode). 빈 set이면 전체 표시. */
   activeCategoryCodes: ReadonlySet<string>;
@@ -33,6 +33,7 @@ interface MapStoreActions {
   setFeatureViewMode: (mode: FeatureViewMode) => void;
   setSelectedFeatureId: (id: string | null) => void;
   toggleFeatureKind: (kind: string) => void;
+  resetFeatureKinds: () => void;
   clearFeatureKinds: () => void;
   toggleCategory: (code: string) => void;
   clearCategories: () => void;
@@ -46,11 +47,17 @@ const DEFAULT_VIEWPORT: MapViewport = {
   zoom: 6.5,
 };
 
+export const DEFAULT_FEATURE_MAP_KINDS = ["weather", "notice"] as const;
+
+function defaultFeatureKinds(): Set<string> {
+  return new Set<string>(DEFAULT_FEATURE_MAP_KINDS);
+}
+
 export const useMapStore = create<MapStoreState & MapStoreActions>((set) => ({
   viewport: DEFAULT_VIEWPORT,
   featureViewMode: "map",
   selectedFeatureId: null,
-  activeFeatureKinds: new Set<string>(),
+  activeFeatureKinds: defaultFeatureKinds(),
   activeCategoryCodes: new Set<string>(),
 
   setViewport: (next) =>
@@ -74,6 +81,8 @@ export const useMapStore = create<MapStoreState & MapStoreActions>((set) => ({
       }
       return { activeFeatureKinds: next };
     }),
+
+  resetFeatureKinds: () => set({ activeFeatureKinds: defaultFeatureKinds() }),
 
   clearFeatureKinds: () => set({ activeFeatureKinds: new Set<string>() }),
 

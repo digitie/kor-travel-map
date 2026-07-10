@@ -20,7 +20,7 @@ test.describe("/features", () => {
     // 로딩→데이터 또는 에러 어느 쪽이든 상태 텍스트가 렌더돼야 함.
     await expect(
       page.locator(
-        "text=/지도 로딩 중|feature 로딩 중|건 표시|feature 호출 실패/",
+        "text=/지도 로딩 중|클러스터 로딩 중|feature 로딩 중|개 지역|건 표시|클러스터 호출 실패|feature 호출 실패/",
       ),
     ).toBeVisible();
   });
@@ -43,22 +43,35 @@ test.describe("/features", () => {
     await expect(filter).toBeVisible();
     await expect(
       page.locator(
-        "text=/지도 로딩 중|feature 로딩 중|건 표시|feature 호출 실패/",
+        "text=/지도 로딩 중|클러스터 로딩 중|feature 로딩 중|개 지역|건 표시|클러스터 호출 실패|feature 호출 실패/",
       ),
     ).toBeVisible();
     for (const k of ["place", "event", "notice", "price", "weather", "route", "area"]) {
       await expect(filter.getByRole("button", { name: k, exact: true })).toBeVisible();
     }
+    const weatherBtn = filter.getByRole("button", {
+      name: "weather",
+      exact: true,
+    });
+    const noticeBtn = filter.getByRole("button", {
+      name: "notice",
+      exact: true,
+    });
     const placeBtn = filter.getByRole("button", { name: "place", exact: true });
+    const reset = filter.getByRole("button", { name: "초기화" });
+    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(reset).toBeVisible();
+    await expect(reset).toBeDisabled();
     await placeBtn.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "true");
-    // 활성화되면 "초기화" 버튼 노출.
-    const reset = filter.getByRole("button", { name: "초기화" });
-    await expect(reset).toBeVisible();
+    await expect(reset).toBeEnabled();
     await reset.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(reset).toBeHidden();
+    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(reset).toBeDisabled();
   });
 
   test("선택 안 했을 때 상세 패널은 안 보임", async ({ page }) => {

@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-10 (codex) — Feature 지도 기본 weather/notice 필터와 초기화 버튼 복원
+
+- **수정**: `/features` 지도 kind 필터 기본값을 `weather`, `notice` 선택 상태로 변경하고,
+  `초기화` 버튼을 항상 표시하되 기본값과 같을 때는 비활성화되도록 했다. 버튼 동작은 전체 해제가
+  아니라 기본 `weather`/`notice` 선택 복원으로 정리했다.
+- **저zoom 확인 보강**: 기본 zoom의 `/v1/features/in-bounds` 클러스터 요청이 선택된 kind를 반복
+  `kind=` 파라미터로 보내는지 mocked/live e2e를 보강했다.
+- **검증(로컬)**: frontend `type-check`, e2e type-check, 변경 파일 ESLint 통과. 로컬 WSL
+  Playwright는 브라우저 다운로드가 `ubuntu26.04-x64` 미지원이라 mocked browser 실행은 n150 live
+  e2e에서 대체 검증 예정.
+
 ## 2026-07-09 (codex) — feature weather API 경로 정리
 
 - **결정 보정(ADR-062)**: weather는 독립 리소스보다 feature의 공용 속성/시계열에 가깝기 때문에,
