@@ -13,6 +13,8 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 //   - 초기 bbox fetch 1회 + kind 필터 토글 시 kind= 파라미터로 결정적 refetch
 type FeatureSummary = components["schemas"]["FeatureSummary"];
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type FeaturesInBoundsResponse =
+  components["schemas"]["FeaturesInBoundsResponse"];
 type Meta = components["schemas"]["Meta"];
 type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -55,6 +57,28 @@ function makeFeaturesInBboxResponse(
   items: FeatureSummary[],
 ): FeaturesInBboxResponse {
   return { data: { items }, meta: makeMeta() };
+}
+
+function makeFeaturesInBoundsResponse(
+  items: FeatureSummary[],
+): FeaturesInBoundsResponse {
+  return {
+    data: {
+      clusters:
+        items.length > 0
+          ? [
+              {
+                cluster_key: "1100000000",
+                feature_count: items.length,
+                lat: items[0]?.lat ?? 37.5665,
+                lon: items[0]?.lon ?? 126.978,
+              },
+            ]
+          : [],
+      items: [],
+    },
+    meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
+  };
 }
 
 async function setMapZoom(page: Page, zoom: number) {
@@ -161,11 +185,14 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
   const items = options.items ?? [makeFeatureSummary()];
   const requests = {
     list: 0,
+    cluster: 0,
     detail: 0,
     price: 0,
     weather: 0,
     /** list 쿼리마다 url.searchParams.getAll("kind") 기록 — 마지막 요청 shape 검증용. */
     listKinds: [] as string[][],
+    /** cluster 쿼리마다 url.searchParams.getAll("kind") 기록 — 저zoom shape 검증용. */
+    clusterKinds: [] as string[][],
     /** route/area geometry 요청 여부 기록. */
     listIncludeGeometry: [] as string[],
   };
@@ -218,6 +245,17 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       return;
     }
 
+    // cluster: `/v1/features/in-bounds` 또는 BFF `/api/proxy/v1/features/in-bounds`
+    if (
+      url.pathname === "/v1/features/in-bounds" ||
+      url.pathname === "/api/proxy/v1/features/in-bounds"
+    ) {
+      requests.cluster += 1;
+      requests.clusterKinds.push(url.searchParams.getAll("kind"));
+      await fulfillJson(route, makeFeaturesInBoundsResponse(items));
+      return;
+    }
+
     // detail: `/v1/features/{id}`
     if (
       url.pathname.startsWith("/v1/features/") ||
@@ -243,12 +281,15 @@ test.describe("/features map interactions", () => {
   });
 
   test("map<->table 탭 토글 — 두 뷰가 같은 bbox 데이터를 공유", async ({ page }) => {
-    await mockFeatureRoutes(page);
+    const requests = await mockFeatureRoutes(page);
 
     await page.goto("/features");
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature 지도" }),
     ).toBeVisible();
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     const mapTab = page.getByRole("tab", { name: "지도" });
     const tableTab = page.getByRole("tab", { name: "테이블" });
@@ -322,8 +363,6 @@ test.describe("/features map interactions", () => {
 
     await page.goto("/features");
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
-    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
-    expect(requests.listIncludeGeometry[0]).toBe("false");
 
     await setMapZoom(page, 14);
     await expect.poll(() => requests.listIncludeGeometry).toContain("true");
@@ -399,8 +438,7 @@ test.describe("/features map interactions", () => {
 
     await page.goto("/features");
 
-    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
-    expect(requests.listIncludeGeometry[0]).toBe("false");
+    await expect.poll(() => requests.cluster).toBeGreaterThanOrEqual(1);
     await expect(
       page.getByRole("button", { name: /feature 클러스터 4건/ }),
     ).toBeVisible();
@@ -413,6 +451,9 @@ test.describe("/features map interactions", () => {
     const requests = await mockFeatureRoutes(page);
 
     await page.goto("/features");
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     // FeatureDetailPanel은 TabsContent value='map' 안에서만 렌더된다 → 테이블에서 선택한 뒤
     // '지도' 탭으로 전환해야 패널이 보인다(이 순서를 그대로 따른다).
@@ -501,6 +542,9 @@ test.describe("/features map interactions", () => {
     });
 
     await page.goto("/features");
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     await expect(page.getByText("휘 1,820")).toBeVisible();
     await expect(page.getByText("경 1,650")).toBeVisible();
@@ -524,6 +568,8 @@ test.describe("/features map interactions", () => {
     });
 
     await page.goto("/features");
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 14);
 
     // list 500 → featuresQuery.isError → 헤더 위 variant='destructive' Alert(role=alert).
     // (KNOWN GOTCHA: destructive만 role=alert; default Alert는 role=status.)
@@ -538,15 +584,18 @@ test.describe("/features map interactions", () => {
     // 헤더 status 영역에도 동일 문구가 표기됨을 상태 텍스트 locator로 확인(스모크 idiom).
     await expect(
       page.locator(
-        "text=/건 표시|feature 로딩 중|지도 로딩 중|feature 호출 실패/",
+        "text=/건 표시|feature 로딩 중|지도 로딩 중|feature 호출 실패|클러스터 로딩 중|개 지역/",
       ).first(),
     ).toBeVisible();
   });
 
   test("count=0 — 헤더 '0건 표시' + 테이블 빈 메시지", async ({ page }) => {
-    await mockFeatureRoutes(page, { items: [] });
+    const requests = await mockFeatureRoutes(page, { items: [] });
 
     await page.goto("/features");
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     // list가 items=[]로 200 → 헤더 status Badge가 '0건 표시'(items.length ?? 0).
     await expect(page.getByText("0건 표시")).toBeVisible();
@@ -559,35 +608,48 @@ test.describe("/features map interactions", () => {
     await expect(page.getByText("표시할 feature가 없습니다.")).toBeVisible();
   });
 
-  test("초기 bbox fetch 1회 + kind 필터 토글 시 kind= 파라미터로 refetch", async ({
+  test("초기 저zoom bbox fetch 1회 + 기본 kind 필터가 cluster 요청에 적용", async ({
     page,
   }) => {
     const requests = await mockFeatureRoutes(page);
 
     await page.goto("/features");
 
-    // map 'load' 이벤트가 bbox를 세팅 → /v1/features 요청이 최소 1회 발생.
-    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
-    // 첫 요청에는 bbox 좌표가 있고 kind 파라미터는 없음.
-    expect(requests.listKinds[0]).toEqual([]);
+    // 기본 zoom 6.5는 clusterMode → /v1/features/in-bounds 요청이 최소 1회 발생.
+    await expect.poll(() => requests.cluster).toBeGreaterThanOrEqual(1);
+    // 기본 kind 필터는 weather + notice.
+    expect(requests.clusterKinds[0]).toEqual(["weather", "notice"]);
 
     const filter = page.getByTestId("kind-filter");
+    const weatherBtn = filter.getByRole("button", {
+      name: "weather",
+      exact: true,
+    });
+    const noticeBtn = filter.getByRole("button", {
+      name: "notice",
+      exact: true,
+    });
     const placeBtn = filter.getByRole("button", { name: "place", exact: true });
+    const reset = filter.getByRole("button", { name: "초기화" });
+    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(reset).toBeDisabled();
 
-    // 'place' 토글 → activeFeatureKinds 변경 → queryKey 변경 → 새 요청에 kind=place 포함.
+    // 'place' 토글 → activeFeatureKinds 변경 → cluster queryKey 변경.
     await placeBtn.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "true");
     await expect
-      .poll(() => requests.listKinds.at(-1))
-      .toEqual(["place"]);
+      .poll(() => requests.clusterKinds.at(-1))
+      .toEqual(["weather", "notice", "place"]);
+    await expect(reset).toBeEnabled();
 
-    // '초기화' → clearFeatureKinds. KNOWN GOTCHA: 동일 byte 쿼리("")는 react-query
-    // staleTime(30s) 캐시로 새 네트워크 호출이 없을 수 있으므로 refetch count가 아니라
-    // aria-pressed='false' + 초기화 버튼 hidden(UI 상태)으로 단언한다.
-    const reset = filter.getByRole("button", { name: "초기화" });
+    // '초기화' → 기본 kind(weather/notice) 복원. 동일 byte 쿼리는 react-query 캐시로
+    // 새 네트워크 호출이 없을 수 있으므로 UI 상태로 단언한다.
     await reset.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(reset).toBeHidden();
+    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(reset).toBeDisabled();
   });
 });

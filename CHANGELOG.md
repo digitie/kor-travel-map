@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Feature 지도 기본 weather/notice 필터와 초기화 버튼 복원 (2026-07-10)
+
+- **CHANGED**: Feature 지도 kind 필터의 기본 선택을 `weather`, `notice`로 변경했다. 저zoom
+  클러스터 요청(`/v1/features/in-bounds`)에도 기본/추가 선택 kind가 반복 `kind=` 파라미터로
+  전달되는지 live e2e를 보강했다.
+- **FIXED**: kind 선택이 기본 상태일 때 숨겨지던 `초기화` 버튼을 항상 렌더하고, 기본
+  `weather`/`notice` 선택 상태로 되돌리는 동작으로 정리했다.
+
 ### 공개 Weather API와 3년 이력 보존 (2026-07-09)
 
 - **ADDED**: 외부 시스템용 feature weather API

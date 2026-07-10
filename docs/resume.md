@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-10 (codex) — Feature 지도 필터 기본값/초기화 UX 로컬 구현 완료
+
+- **완료(로컬)**: `/features` 지도 kind 필터 기본 선택을 `weather`, `notice`로 바꾸고, `초기화`
+  버튼을 상시 표시 + 기본 선택 복원으로 수정했다. 저zoom 클러스터 요청도 선택 kind를
+  `/v1/features/in-bounds?kind=...`로 보내는지 mocked/live e2e 단언을 보강했다.
+- **검증**: frontend `type-check`, e2e type-check, 변경 파일 ESLint 통과. 로컬 WSL Playwright는
+  `ubuntu26.04-x64` 브라우저 다운로드 미지원으로 browser 실행이 막힘.
+- **다음 한 작업**: 보안 스캔 → PR/CI → 머지 → n150 배포 → live UI e2e와 스크린샷 검증.
+
 ## 2026-07-09 (codex) — feature weather API 경로 정리 로컬 구현 완료
 
 - **완료(로컬)**: 직전 weather history API를 별도 `/v1/weather/*`가 아니라 feature API 하위

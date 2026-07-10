@@ -19,6 +19,8 @@ import * as F from "./_fixtures";
 const ROUTE = "/features";
 const HEADING = "Feature 지도";
 const KINDS = F.KINDS.length > 0 ? F.KINDS : ["place"];
+const DEFAULT_KINDS = new Set(["weather", "notice"]);
+const NON_DEFAULT_KINDS = KINDS.filter((kind) => !DEFAULT_KINDS.has(kind));
 const MAP_VIEWS = F.MAP_VIEWS;
 const VIEWPORTS = [
   { name: "desktop-1280", width: 1280, height: 800 },
@@ -27,7 +29,7 @@ const VIEWPORTS = [
 ] as const;
 
 const STATUS_TEXT =
-  /지도 로딩 중|feature 로딩 중|건 표시|feature 호출 실패/;
+  /지도 로딩 중|클러스터 로딩 중|feature 로딩 중|개 지역|건 표시|클러스터 호출 실패|feature 호출 실패/;
 
 /** Stable page-ready assertion shared by every scenario. */
 async function expectFeaturesPageReady(
@@ -164,18 +166,27 @@ test.describe("/features live — kind filter chips", () => {
   }
 
   for (const kind of KINDS) {
-    test(`kind 칩 토글 ON — "${kind}"`, async ({ page }) => {
+    test(`kind 칩 토글 — "${kind}"`, async ({ page }) => {
       await page.goto(ROUTE);
       await expectFeaturesPageReady(page);
       const filter = page.getByTestId("kind-filter");
       const chip = filter.getByRole("button", { name: kind, exact: true });
-      await expect(chip).toHaveAttribute("aria-pressed", "false", {
-        timeout: 15000,
-      });
+      const initiallyActive = DEFAULT_KINDS.has(kind);
+      await expect(chip).toHaveAttribute(
+        "aria-pressed",
+        String(initiallyActive),
+        {
+          timeout: 15000,
+        },
+      );
       await chip.click();
-      await expect(chip).toHaveAttribute("aria-pressed", "true", {
-        timeout: 15000,
-      });
+      await expect(chip).toHaveAttribute(
+        "aria-pressed",
+        String(!initiallyActive),
+        {
+          timeout: 15000,
+        },
+      );
       await expect(
         filter.getByRole("button", { name: "초기화" }),
       ).toBeVisible({ timeout: 15000 });
@@ -188,16 +199,21 @@ test.describe("/features live — kind filter chips", () => {
       await expectFeaturesPageReady(page);
       const filter = page.getByTestId("kind-filter");
       const chip = filter.getByRole("button", { name: kind, exact: true });
+      const defaultPressed = String(DEFAULT_KINDS.has(kind));
       await chip.click();
-      await expect(chip).toHaveAttribute("aria-pressed", "true", {
-        timeout: 15000,
-      });
+      await expect(chip).toHaveAttribute(
+        "aria-pressed",
+        String(!DEFAULT_KINDS.has(kind)),
+        {
+          timeout: 15000,
+        },
+      );
       const reset = filter.getByRole("button", { name: "초기화" });
       await reset.click();
-      await expect(chip).toHaveAttribute("aria-pressed", "false", {
+      await expect(chip).toHaveAttribute("aria-pressed", defaultPressed, {
         timeout: 15000,
       });
-      await expect(reset).toBeHidden({ timeout: 15000 });
+      await expect(reset).toBeDisabled({ timeout: 15000 });
     });
   }
 });
@@ -267,7 +283,7 @@ test.describe("/features live — responsive viewports", () => {
       await expectFeaturesPageReady(page);
       const filter = page.getByTestId("kind-filter");
       const chip = filter.getByRole("button", {
-        name: KINDS[0],
+        name: NON_DEFAULT_KINDS[0] ?? KINDS[0],
         exact: true,
       });
       await chip.click();
@@ -328,7 +344,7 @@ test.describe("/features live — header nav links present", () => {
 
 test.describe("/features live — kind chip + view combinations", () => {
   // Cross kinds × tabs to exercise filtered refetch under both views.
-  const KIND_SUBSET = KINDS.slice(0, 4);
+  const KIND_SUBSET = NON_DEFAULT_KINDS.slice(0, 4);
   for (const kind of KIND_SUBSET) {
     test(`kind "${kind}" 토글 후 테이블 뷰 유지`, async ({ page }) => {
       await page.goto(ROUTE);

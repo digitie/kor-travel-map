@@ -24,6 +24,8 @@ import { MAP_VIEWS } from "./_fixtures";
  */
 
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type FeaturesInBoundsResponse =
+  components["schemas"]["FeaturesInBoundsResponse"];
 type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 
@@ -38,6 +40,7 @@ const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
 
 const FEATURES_LIST_PATH = "/v1/features";
+const FEATURES_IN_BOUNDS_PATH = "/v1/features/in-bounds";
 const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
 // 멀리 떨어진 사전 점프 기준점(제주). 초기 뷰가 우연히 타깃과 같아 moveend가 안 떠
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
@@ -132,10 +135,27 @@ interface ListBbox {
   kinds: string[];
 }
 
+interface InBoundsBbox {
+  maxItems: number | null;
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+  kinds: string[];
+  zoom: number | null;
+}
+
 function isFeaturesList(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
     apiPath(response) === FEATURES_LIST_PATH
+  );
+}
+
+function isFeaturesInBounds(response: Response): boolean {
+  return (
+    response.request().method() === "GET" &&
+    apiPath(response) === FEATURES_IN_BOUNDS_PATH
   );
 }
 
@@ -149,6 +169,21 @@ function listBbox(response: Response): ListBbox {
     maxLat: Number(sp.get("max_lat")),
     pageSize: pageSizeRaw === null ? null : Number(pageSizeRaw),
     kinds: sp.getAll("kind"),
+  };
+}
+
+function inBoundsBbox(response: Response): InBoundsBbox {
+  const sp = new URL(response.url()).searchParams;
+  const maxItemsRaw = sp.get("max_items");
+  const zoomRaw = sp.get("zoom");
+  return {
+    maxItems: maxItemsRaw === null ? null : Number(maxItemsRaw),
+    minLon: Number(sp.get("min_lon")),
+    minLat: Number(sp.get("min_lat")),
+    maxLon: Number(sp.get("max_lon")),
+    maxLat: Number(sp.get("max_lat")),
+    kinds: sp.getAll("kind"),
+    zoom: zoomRaw === null ? null : Number(zoomRaw),
   };
 }
 
@@ -252,14 +287,79 @@ async function gotoFeaturesReady(page: Page): Promise<void> {
 
 const EPS = 0.0005;
 
-// MAP_VIEWS에서 dense city + 광역(전국)을 골라 카운트/마커 단언이 의미를 갖게 한다.
+// MAP_VIEWS에서 dense city를 골라 고배율 개별 feature fetch 라운드트립을 검증한다.
 const A_VIEWS = MAP_VIEWS.filter(([name]) =>
-  ["서울", "부산", "전국"].includes(name as string),
-);
+  ["서울", "부산"].includes(name as string),
+).map(([name, lon, lat]) => [name, lon, lat, 15] as const);
 
 test.describe("/features live — map input round-trip (read-only)", () => {
   // 라이브 지도 + 타일 fetch는 타이밍 의존 → flaky 제한용 retries=1.
   test.describe.configure({ retries: 1 });
+
+  test("초기 저zoom 클러스터 요청은 기본 kind=weather,notice를 사용하고 토글 선택을 반영", async ({
+    page,
+  }) => {
+    test.setTimeout(FLOW_TIMEOUT);
+    const initialCluster = page.waitForResponse(
+      (response) =>
+        isFeaturesInBounds(response) &&
+        inBoundsBbox(response).kinds.join(",") === "weather,notice",
+      { timeout: FLOW_TIMEOUT },
+    );
+
+    await page.goto("/features");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Feature 지도" }),
+    ).toBeVisible(T);
+    await expect(page.getByTestId("map-canvas-container")).toBeAttached(T);
+
+    const initialResponse = await initialCluster;
+    expect(initialResponse.status()).toBe(200);
+    const initialRequest = inBoundsBbox(initialResponse);
+    expect(initialRequest.zoom).not.toBeNull();
+    expect(initialRequest.zoom as number).toBeLessThanOrEqual(13);
+    expect(initialRequest.maxItems).not.toBeNull();
+    expect(initialRequest.maxItems as number).toBeGreaterThan(0);
+
+    const initialBody =
+      (await initialResponse.json()) as FeaturesInBoundsResponse;
+    expect(Array.isArray(initialBody.data.clusters)).toBe(true);
+    expect(initialBody.data.clusters.length).toBeGreaterThan(0);
+
+    const filter = page.getByTestId("kind-filter");
+    const weatherChip = filter.getByRole("button", {
+      name: "weather",
+      exact: true,
+    });
+    const noticeChip = filter.getByRole("button", {
+      name: "notice",
+      exact: true,
+    });
+    const placeChip = filter.getByRole("button", { name: "place", exact: true });
+    const reset = filter.getByRole("button", { name: "초기화" });
+    await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+    await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+    await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+    await expect(reset).toBeDisabled(T);
+
+    const placeCluster = page.waitForResponse(
+      (response) =>
+        isFeaturesInBounds(response) &&
+        inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
+      { timeout: FLOW_TIMEOUT },
+    );
+    await placeChip.click();
+    await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
+    const placeResponse = await placeCluster;
+    expect(placeResponse.status()).toBe(200);
+    await expect(reset).toBeEnabled(T);
+
+    await reset.click();
+    await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+    await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+    await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+    await expect(reset).toBeDisabled(T);
+  });
 
   for (const [name, lon, lat, zoom] of A_VIEWS) {
     test(`뷰포트를 ${name}로 이동 → bbox API가 새 좌표 파라미터로 호출되고 카운트/마커가 반영`, async ({
@@ -355,10 +455,18 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
-    const SEOUL = { lon: 126.978, lat: 37.566, zoom: 12 } as const;
+    const SEOUL = { lon: 126.978, lat: 37.566, zoom: 15 } as const;
 
     await gotoFeaturesReady(page);
     const filter = page.getByTestId("kind-filter");
+    const weatherChip = filter.getByRole("button", {
+      name: "weather",
+      exact: true,
+    });
+    const noticeChip = filter.getByRole("button", {
+      name: "notice",
+      exact: true,
+    });
     const placeChip = filter.getByRole("button", { name: "place", exact: true });
 
     try {
@@ -372,6 +480,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await seoulLoad;
 
       await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+      await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+      await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
 
       // kind=place가 실린 GET /v1/features를 기다린다(토글 → queryKey 변경 → refetch).
       const kindResponsePromise = page.waitForResponse(
@@ -383,12 +493,12 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
       const response = await kindResponsePromise;
 
-      // (1) API 파라미터: 요청에 kind=place. 본문: 반환 feature는 모두 kind=place(서버 필터).
+      // (1) API 파라미터: 요청에 기본 weather/notice + 추가 place.
       expect(response.status()).toBe(200);
-      expect(listBbox(response).kinds).toContain("place");
+      expect(listBbox(response).kinds).toEqual(["weather", "notice", "place"]);
       const body = (await response.json()) as FeaturesInBboxResponse;
       for (const item of body.data.items) {
-        expect(item.kind).toBe("place");
+        expect(["weather", "notice", "place"]).toContain(item.kind);
       }
 
       // (2) 백엔드 라운드트립: 같은 bounds에 kind=place 직접 조회 → place만, 1건 이상.
@@ -416,9 +526,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         placeOnly.body!.data.items.length,
       );
 
-      // (3) UI 반영: 초기화 버튼 활성화(kind 선택 시) + 카운트 배지(>0) + 마커 존재.
-      // 초기화 버튼은 항상 렌더되고 `disabled={kind 0건}`이라, kind 선택 시 enabled가
-      // 의미 있는 단언이다(과거의 노출/숨김 토글은 #600에서 disabled 토글로 바뀜).
+      // (3) UI 반영: 초기화 버튼 활성화(기본값과 다를 때) + 카운트 배지(>0) + 마커 존재.
       await expect(filter.getByRole("button", { name: "초기화" })).toBeEnabled(T);
       await expect.poll(async () => readFeatureCount(page), T).toBeGreaterThan(0);
       await expect(page.locator(".maplibregl-marker").first()).toBeVisible({
@@ -434,10 +542,11 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       }
     }
 
-    // 초기화 후 chip 비활성 + 초기화 버튼 disabled(동일 byte 쿼리는 staleTime 캐시로
-    // 네트워크 호출이 없을 수 있어 refetch가 아니라 UI 상태로 단언 — interactions.spec과
-    // 동일 idiom). 버튼은 항상 렌더되고 kind 0건이면 `disabled`다(#600).
+    // 초기화 후 기본 weather/notice만 활성 + 초기화 버튼 disabled(동일 byte 쿼리는
+    // staleTime 캐시로 네트워크 호출이 없을 수 있어 UI 상태로 단언).
     await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+    await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+    await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
     await expect(filter.getByRole("button", { name: "초기화" })).toBeDisabled(T);
   });
 
@@ -449,10 +558,10 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     const panel = page.getByTestId("feature-detail-panel");
 
     try {
-      // 서울 도심 작은 bbox를 직접 조회해 좌표가 있는 실제 feature를 확인(데이터 존재 시드).
+      // 기본 필터(weather/notice)에 포함되는 feature를 직접 조회해 좌표 있는 실제 feature를 확인.
       const seed = await browserFetch<FeaturesInBboxResponse>(
         page,
-        "/v1/features?min_lon=126.96&min_lat=37.55&max_lon=127.02&max_lat=37.59&page_size=100",
+        "/v1/features?min_lon=126.96&min_lat=37.55&max_lon=127.02&max_lat=37.59&page_size=100&kind=weather&kind=notice",
       );
       expect(seed.status).toBe(200);
       expect(seed.body).not.toBeNull();
