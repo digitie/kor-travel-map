@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-12 (codex) — curated source rule `detail_selector` 500 로컬 수정 완료
+
+- **완료(로컬)**: 운영 요청 ID 기준으로 `/v1/admin/curated-source-rules?limit=200` 500의 원인이
+  `CuratedSourceRule.detail_selector`와 API `CuratedSourceRuleView` 계약 drift임을 확인했다.
+  API view/create/patch schema와 repo update JSONB 처리, generated admin OpenAPI/types를 정렬했다.
+- **검증**: curated routes/repo unit 10 passed, ruff 변경 파일 clean, mypy --strict 변경 source
+  2개 clean, OpenAPI drift check 통과.
+- **다음 한 작업**: 보안 스캔 → PR/CI → 머지 → n150 api/ui 재빌드 배포 후 같은 endpoint 200 확인.
+
 ## 2026-07-10 (codex) — Feature 지도 필터 기본값/초기화 UX 로컬 구현 완료
 
 - **완료(로컬)**: `/features` 지도 kind 필터 기본 선택을 `weather`, `notice`로 바꾸고, `초기화`

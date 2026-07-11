@@ -3763,6 +3763,10 @@ export interface components {
              * @enum {string}
              */
             default_action: "candidate" | "curated" | "ignore";
+            /** Detail Selector */
+            detail_selector?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Enabled
              * @default true
@@ -3796,6 +3800,10 @@ export interface components {
             dataset_key?: string | null;
             /** Default Action */
             default_action?: ("candidate" | "curated" | "ignore") | null;
+            /** Detail Selector */
+            detail_selector?: {
+                [key: string]: unknown;
+            } | null;
             /** Enabled */
             enabled?: boolean | null;
             /** Metadata */
@@ -3832,6 +3840,10 @@ export interface components {
             dataset_key: string;
             /** Default Action */
             default_action: string;
+            /** Detail Selector */
+            detail_selector?: {
+                [key: string]: unknown;
+            } | null;
             /** Enabled */
             enabled: boolean;
             /** Metadata */

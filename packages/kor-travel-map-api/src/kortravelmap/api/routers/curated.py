@@ -127,6 +127,7 @@ class CuratedSourceRuleView(BaseModel):
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any]
+    detail_selector: dict[str, Any] | None = None
     default_action: str
     priority: int
     enabled: bool
@@ -412,6 +413,7 @@ class CuratedSourceRuleCreateRequest(BaseModel):
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any] = Field(default_factory=dict)
+    detail_selector: dict[str, Any] | None = None
     default_action: RuleAction = "candidate"
     priority: int = 0
     enabled: bool = True
@@ -425,6 +427,7 @@ class CuratedSourceRulePatchRequest(BaseModel):
     place_kind: str | None = None
     category: str | None = None
     region_scope: dict[str, Any] | None = None
+    detail_selector: dict[str, Any] | None = None
     default_action: RuleAction | None = None
     priority: int | None = None
     enabled: bool | None = None
@@ -481,7 +484,7 @@ def _source_view(row: curated_repo.CuratedSource) -> CuratedSourceView:
 
 
 def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
-    return CuratedSourceRuleView(**row.__dict__)
+    return CuratedSourceRuleView.model_validate(row, from_attributes=True)
 
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:

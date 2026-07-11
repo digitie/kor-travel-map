@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -28,6 +29,37 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/curated-features" not in paths
     assert "/v1/admin/curated-features/{curated_feature_id}/select" not in paths
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
+
+
+def test_curated_source_rule_view_accepts_detail_selector() -> None:
+    from kortravelmap.infra.curated_repo import CuratedSourceRule
+
+    now = datetime(2026, 7, 12, tzinfo=UTC)
+    row = CuratedSourceRule(
+        rule_id="11111111-1111-1111-1111-111111111111",
+        theme_id="22222222-2222-2222-2222-222222222222",
+        theme_slug="youtube-food",
+        source_id="33333333-3333-3333-3333-333333333333",
+        provider="kor-travel-concierge-youtube",
+        dataset_key="youtube_place_candidates",
+        place_kind="youtube_place_candidate",
+        category=None,
+        region_scope={},
+        detail_selector={"path": ["payload", "channel_id"], "value": "channel-A"},
+        default_action="curated",
+        priority=10,
+        enabled=True,
+        metadata={},
+        created_at=now,
+        updated_at=now,
+    )
+
+    view = curated._rule_view(row)
+
+    assert view.detail_selector == {
+        "path": ["payload", "channel_id"],
+        "value": "channel-A",
+    }
 
 
 class _FakePlaceSearchClient:
