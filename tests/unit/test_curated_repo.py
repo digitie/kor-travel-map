@@ -264,7 +264,15 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         [{"rule_id": _RULE_ID}],
         [_rule_row()],
         [{"rule_id": _RULE_ID}],
-        [_rule_row(priority=99)],
+        [
+            _rule_row(
+                priority=99,
+                detail_selector={
+                    "path": ["payload", "channel_id"],
+                    "value": "channel-A",
+                },
+            )
+        ],
     )
 
     created = await curated_repo.create_curated_feature(
@@ -374,10 +382,25 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
     updated_rule = await curated_repo.update_curated_source_rule(
         session,
         rule_id=_RULE_ID,
-        updates={"priority": 99, "region_scope": {"sigungu_code": "11140"}},
+        updates={
+            "priority": 99,
+            "region_scope": {"sigungu_code": "11140"},
+            "detail_selector": {
+                "path": ["payload", "channel_id"],
+                "value": "channel-A",
+            },
+        },
     )
     assert updated_rule is not None
     assert updated_rule.priority == 99
+    assert updated_rule.detail_selector == {
+        "path": ["payload", "channel_id"],
+        "value": "channel-A",
+    }
+    assert (
+        session.calls[-2][1]["detail_selector_json"]
+        == '{"path":["payload","channel_id"],"value":"channel-A"}'
+    )
 
 
 @pytest.mark.asyncio

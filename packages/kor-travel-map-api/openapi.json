@@ -5274,6 +5274,18 @@
             "title": "Default Action",
             "type": "string"
           },
+          "detail_selector": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Selector"
+          },
           "enabled": {
             "default": true,
             "title": "Enabled",
@@ -5364,6 +5376,18 @@
               }
             ],
             "title": "Default Action"
+          },
+          "detail_selector": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Selector"
           },
           "enabled": {
             "anyOf": [
@@ -5470,6 +5494,18 @@
           "default_action": {
             "title": "Default Action",
             "type": "string"
+          },
+          "detail_selector": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Selector"
           },
           "enabled": {
             "title": "Enabled",

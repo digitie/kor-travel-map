@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-12 (codex) — curated source rule `detail_selector` 응답 500 수정
+
+- **원인**: 운영 `/v1/admin/curated-source-rules?limit=200` 500은
+  `CuratedSourceRule` dataclass에 0042의 `detail_selector`가 추가됐지만,
+  API `CuratedSourceRuleView`가 해당 필드를 허용하지 않아 Pydantic `extra_forbidden`으로
+  실패한 것이었다.
+- **수정**: rule view/create/patch 계약에 `detail_selector`를 추가하고, rule view 변환은
+  attribute 기반 검증으로 변경했다. `update_curated_source_rule()`도 `detail_selector` JSONB
+  patch/clear를 허용하도록 정렬했다.
+- **검증(로컬)**: curated routes/repo unit 10 passed, ruff 변경 파일 clean,
+  mypy --strict 변경 source 2개 clean, OpenAPI `--profile all --check` 통과.
+
 ## 2026-07-10 (codex) — Feature 지도 기본 weather/notice 필터와 초기화 버튼 복원
 
 - **수정**: `/features` 지도 kind 필터 기본값을 `weather`, `notice` 선택 상태로 변경하고,

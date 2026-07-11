@@ -2179,6 +2179,7 @@ async def update_curated_source_rule(
         "place_kind",
         "category",
         "region_scope",
+        "detail_selector",
         "default_action",
         "priority",
         "enabled",
@@ -2235,10 +2236,14 @@ async def _update_simple(
             raise ValueError(f"unsupported update field: {key}")
         if key in choice_fields:
             _validate_choice(str(value), choice_fields[key], key)
-        if key in {"metadata", "region_scope"}:
+        if key in {"metadata", "region_scope", "detail_selector"}:
             param_name = f"{key}_json"
             set_parts.append(f"{key} = CAST(:{param_name} AS jsonb)")
-            params[param_name] = _json_dumps(value)
+            params[param_name] = (
+                None
+                if key == "detail_selector" and value is None
+                else _json_dumps(value)
+            )
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
