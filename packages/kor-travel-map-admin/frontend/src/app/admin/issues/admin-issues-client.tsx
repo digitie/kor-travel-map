@@ -628,9 +628,9 @@ export function AdminIssuesClient({
           </Alert>
         )}
 
-        <section className="rounded-lg border bg-background p-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto]">
-            <div className="relative">
+        <section className="rounded-lg border bg-background p-3">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="relative w-80 shrink-0">
               <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 aria-label="이슈 검색"
@@ -645,6 +645,7 @@ export function AdminIssuesClient({
             </div>
             <NativeSelect
               aria-label="이슈 상태 필터"
+              className="w-36 shrink-0"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as AdminIssueStatus | "all");
@@ -659,6 +660,7 @@ export function AdminIssuesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="이슈 심각도 필터"
+              className="w-36 shrink-0"
               value={severity}
               onChange={(event) => {
                 setSeverity(event.target.value as AdminIssueSeverity | "all");
@@ -673,6 +675,7 @@ export function AdminIssuesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="issue page size"
+              className="w-24 shrink-0"
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
@@ -685,7 +688,66 @@ export function AdminIssuesClient({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+            <Input
+              aria-label="issue type"
+              className="w-40 shrink-0"
+              placeholder="issue_type"
+              value={issueType}
+              onChange={(event) => {
+                setIssueType(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="issue provider"
+              className="w-40 shrink-0"
+              placeholder="provider"
+              value={provider}
+              onChange={(event) => {
+                setProvider(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="issue dataset"
+              className="w-40 shrink-0"
+              placeholder="dataset_key"
+              value={datasetKey}
+              onChange={(event) => {
+                setDatasetKey(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-label="issue feature id"
+              className="w-56 shrink-0 font-mono"
+              placeholder="feature_id"
+              value={featureId}
+              onChange={(event) => {
+                setFeatureId(event.target.value);
+                resetCursor();
+              }}
+            />
+            <Input
+              aria-invalid={
+                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+              }
+              aria-label="bbox"
+              className="w-72 shrink-0"
+              placeholder="min_lon,min_lat,max_lon,max_lat"
+              title={
+                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+                  ? "형식: minLon,minLat,maxLon,maxLat"
+                  : undefined
+              }
+              value={bbox}
+              onChange={(event) => {
+                setBbox(event.target.value);
+                resetCursor();
+              }}
+            />
             <Button
+              className="shrink-0"
               type="button"
               variant="outline"
               onClick={() => {
@@ -702,72 +764,10 @@ export function AdminIssuesClient({
             >
               초기화
             </Button>
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
-            <Input
-              aria-label="issue type"
-              placeholder="issue_type"
-              value={issueType}
-              onChange={(event) => {
-                setIssueType(event.target.value);
-                resetCursor();
-              }}
-            />
-            <Input
-              aria-label="issue provider"
-              placeholder="provider"
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                resetCursor();
-              }}
-            />
-            <Input
-              aria-label="issue dataset"
-              placeholder="dataset_key"
-              value={datasetKey}
-              onChange={(event) => {
-                setDatasetKey(event.target.value);
-                resetCursor();
-              }}
-            />
-            <Input
-              aria-label="issue feature id"
-              className="font-mono"
-              placeholder="feature_id"
-              value={featureId}
-              onChange={(event) => {
-                setFeatureId(event.target.value);
-                resetCursor();
-              }}
-            />
-            <div className="grid gap-1">
-              <Input
-                aria-invalid={
-                  bbox.trim().length > 0 &&
-                  Object.keys(parseBbox(bbox)).length === 0
-                }
-                aria-label="bbox"
-                placeholder="min_lon,min_lat,max_lon,max_lat"
-                value={bbox}
-                onChange={(event) => {
-                  setBbox(event.target.value);
-                  resetCursor();
-                }}
-              />
-              {bbox.trim().length > 0 &&
-              Object.keys(parseBbox(bbox)).length === 0 ? (
-                <span className="text-xs text-destructive">
-                  형식: minLon,minLat,maxLon,maxLat
-                </span>
-              ) : null}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               {formatCount(items.length)} rows
             </Badge>
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               {issues.data?.meta.duration_ms ?? 0}ms
             </Badge>
           </div>

@@ -534,7 +534,6 @@ export function AdminFeaturesClient({
           </Button>
         </>
       }
-      description="Feature를 조회하고 단건 비활성화합니다."
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
@@ -548,9 +547,9 @@ export function AdminFeaturesClient({
           </Alert>
         )}
 
-        <section className="rounded-lg border bg-background p-4">
-          <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto_auto]">
-            <div className="relative">
+        <section className="rounded-lg border bg-background p-3">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="relative w-72 shrink-0">
               <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 aria-label="feature search"
@@ -565,6 +564,7 @@ export function AdminFeaturesClient({
             </div>
             <NativeSelect
               aria-label="feature kind"
+              className="w-36 shrink-0"
               value={kind}
               onChange={(event) => {
                 setKind(event.target.value as FeatureKind | "all");
@@ -580,6 +580,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="feature status"
+              className="w-36 shrink-0"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as FeatureStatusFilter);
@@ -595,6 +596,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="has issue"
+              className="w-36 shrink-0"
               value={hasIssue}
               onChange={(event) => {
                 setHasIssue(event.target.value as HasIssueFilter);
@@ -607,6 +609,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="feature provider"
+              className="w-44 shrink-0"
               value={provider}
               onChange={(event) => {
                 setProvider(event.target.value);
@@ -623,6 +626,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="feature dataset"
+              className="w-44 shrink-0"
               disabled={provider.length === 0}
               value={datasetKey}
               onChange={(event) => {
@@ -639,6 +643,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="feature sort"
+              className="w-48 shrink-0"
               value={sort}
               onChange={(event) => {
                 setSort(event.target.value as AdminFeatureSort);
@@ -653,6 +658,7 @@ export function AdminFeaturesClient({
             </NativeSelect>
             <NativeSelect
               aria-label="feature page size"
+              className="w-24 shrink-0"
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
@@ -665,9 +671,8 @@ export function AdminFeaturesClient({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
+              className="shrink-0"
               size="sm"
               type="button"
               variant={order === "asc" ? "default" : "outline"}
@@ -679,6 +684,7 @@ export function AdminFeaturesClient({
               asc
             </Button>
             <Button
+              className="shrink-0"
               size="sm"
               type="button"
               variant={order === "desc" ? "default" : "outline"}
@@ -689,16 +695,16 @@ export function AdminFeaturesClient({
             >
               desc
             </Button>
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               {formatCount(items.length)} rows
             </Badge>
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               page {formatCount(pageIndex)}
             </Badge>
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               page size {formatCount(pageSize)}
             </Badge>
-            <Badge variant="outline">
+            <Badge className="shrink-0" variant="outline">
               {features.data?.meta.duration_ms ?? 0}ms
             </Badge>
           </div>
@@ -709,9 +715,6 @@ export function AdminFeaturesClient({
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
               <div>
                 <div className="font-medium">Feature 목록</div>
-                <div className="text-sm text-muted-foreground">
-                  keyset cursor 기반 admin 목록
-                </div>
               </div>
               <CursorPager
                 hasNext={Boolean(nextCursor)}

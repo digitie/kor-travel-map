@@ -44,14 +44,6 @@ function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
-function uiLabel(value: string | null | undefined): string {
-  if (!value) return "-";
-  return value
-    .replace(/kor-travel-concierge/gi, "place-candidate")
-    .replace(/concierge/gi, "place-candidate")
-    .replace(/컨시어지/g, "장소 후보");
-}
-
 export function CuratedFeatureDetailClient({
   curatedFeatureId,
 }: {
@@ -64,6 +56,9 @@ export function CuratedFeatureDetailClient({
   const archiveFeature = useArchiveCuratedFeatureMutation();
   const confirm = useConfirm();
   const item = feature.data?.data ?? null;
+  const pageTitle = item
+    ? `${item.display_title ?? item.feature_name} · ${statusLabel(item.curation_status)}`
+    : "큐레이션";
   const anyStatusPending =
     selectFeature.isPending ||
     unselectFeature.isPending ||
@@ -211,9 +206,8 @@ export function CuratedFeatureDetailClient({
         { label: "큐레이션 관리", href: "/admin/features/curated" },
         { label: curatedFeatureId },
       ]}
-      description="curated 후보의 위치, 장소 검색 결과, 노출 정보, 배포 스냅샷을 한 화면에서 검토합니다."
       section="Feature 관리"
-      title="큐레이션 상세"
+      title={pageTitle}
     >
       <div className="flex flex-col gap-4">
         {feature.isLoading ? <Skeleton className="h-[34rem] w-full" /> : null}
@@ -226,7 +220,7 @@ export function CuratedFeatureDetailClient({
         ) : null}
         {item ? (
           <>
-            <section className="rounded-lg border bg-background p-4">
+            <section className="rounded-lg border bg-background px-4 py-3">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex flex-wrap gap-2">
@@ -236,11 +230,11 @@ export function CuratedFeatureDetailClient({
                       {statusLabel(item.curation_status)}
                     </Badge>
                   </div>
-                  <h2 className="mt-3 break-keep text-xl font-semibold">
+                  <h2 className="mt-2 truncate text-base font-semibold">
                     {item.feature_name}
                   </h2>
                   {item.display_title ? (
-                    <div className="mt-1 text-sm text-muted-foreground">
+                    <div className="truncate text-sm text-muted-foreground">
                       {item.display_title}
                     </div>
                   ) : null}
@@ -267,11 +261,9 @@ export function CuratedFeatureDetailClient({
                   <dd>{formatDateTime(item.updated_at)}</dd>
                   <dt className="text-muted-foreground">순위</dt>
                   <dd>{item.rank_score.toFixed(2)}</dd>
-                  <dt className="text-muted-foreground">소스</dt>
-                  <dd>{uiLabel(item.source_name)}</dd>
                 </dl>
               </div>
-              <div className="mt-3">
+              <div className="mt-2">
                 <CuratedLifecycleStrip
                   activeStatus={item.curation_status}
                   compact
