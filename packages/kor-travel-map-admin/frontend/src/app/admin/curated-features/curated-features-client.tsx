@@ -182,10 +182,19 @@ function reusePolicyVariant(policy: string) {
 }
 
 function coordLabel(feature: CuratedFeature): string {
-  if (typeof feature.lon === "number" && typeof feature.lat === "number") {
-    return `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`;
+  const coord = featureCoord(feature);
+  if (coord) {
+    const [lon, lat] = coord;
+    return `${lon.toFixed(5)}, ${lat.toFixed(5)}`;
   }
   return "-";
+}
+
+function featureCoord(feature: CuratedFeature): [number, number] | null {
+  if (feature.lon == null || feature.lat == null) return null;
+  const lon = Number(feature.lon);
+  const lat = Number(feature.lat);
+  return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : null;
 }
 
 function featureHref(featureId: string): string {
@@ -262,23 +271,19 @@ export function CuratedFeatureLocationPanel({
   feature: CuratedFeature | null;
 }) {
   if (!feature) return null;
-  const hasCoord =
-    typeof feature.lon === "number" && typeof feature.lat === "number";
+  const coord = featureCoord(feature);
 
   return (
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
         <div className="font-medium">위치 확인</div>
-        <div className="text-xs text-muted-foreground">
-          위치, 주소, 카테고리 확인
-        </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
-        {hasCoord ? (
-          <div className="relative h-56 overflow-hidden rounded-md border">
+        {coord ? (
+          <div className="relative h-80 overflow-hidden rounded-md border 2xl:h-96">
             <VWorldMapView
               apiKey={VWORLD_KEY}
-              center={[feature.lon as number, feature.lat as number]}
+              center={coord}
               className="absolute inset-0 h-full w-full"
               key={feature.curated_feature_id}
               navigation
@@ -286,9 +291,10 @@ export function CuratedFeatureLocationPanel({
               zoom={14}
             >
               <VWorldMarker
-                lngLat={[feature.lon as number, feature.lat as number]}
+                lngLat={coord}
                 markerColor="#2563eb"
                 selected
+                size={30}
                 title={feature.feature_name}
               />
             </VWorldMapView>
@@ -396,9 +402,6 @@ export function CuratedPlaceSearchPanel({
     <section className="rounded-lg border bg-background">
       <div className="border-b px-4 py-3">
         <div className="font-medium">장소 대조 검색</div>
-        <div className="text-xs text-muted-foreground">
-          Google·Kakao·Naver 결과와 이름·주소를 대조합니다
-        </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
         <form
@@ -427,10 +430,6 @@ export function CuratedPlaceSearchPanel({
           />
           <span>적용 시 재사용 정책을 &lsquo;재사용 허용&rsquo;으로 변경</span>
         </label>
-        <div className="text-xs text-muted-foreground">
-          좌표·주소는 검토 기록(metadata)에만 저장되며 지도 마커는 바뀌지
-          않습니다.
-        </div>
         {search.isError ? (
           <Alert variant="destructive">
             <AlertTitle>장소 검색 실패</AlertTitle>
@@ -1706,7 +1705,7 @@ export function CuratedFeaturesClient() {
       ? "채택된 항목이 없습니다. '후보' 상태에서 채택하면 여기에 표시됩니다."
       : status === "rejected" || status === "archived"
         ? "이 상태의 항목이 없습니다. 거절·보관된 항목은 자동으로 되살아나지 않습니다."
-        : "조건에 맞는 후보가 없습니다. 후보는 '소스 규칙' 적용 또는 새로고침 job 실행으로 만들어집니다.";
+        : "조건에 맞는 후보가 없습니다.";
 
   return (
     <AdminShell
@@ -1727,7 +1726,6 @@ export function CuratedFeaturesClient() {
           새로고침
         </Button>
       }
-      description="소스 규칙이 만든 후보를 검토해 공개(큐레이션)하고, 배포 스냅샷을 확인합니다."
       title="큐레이션 관리"
     >
       <div className="flex flex-col gap-4">
@@ -2004,16 +2002,16 @@ export function CuratedFeaturesClient() {
               </section>
 
               <div className="flex flex-col gap-4">
-                <section className="rounded-lg border bg-background p-4">
+                <section className="rounded-lg border bg-background p-3">
                   {selectedFeature ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-lg font-semibold">
+                          <div className="truncate text-sm font-semibold">
                             {selectedFeature.feature_name}
                           </div>
                           {selectedFeature.display_title ? (
-                            <div className="text-sm text-muted-foreground">
+                            <div className="truncate text-xs text-muted-foreground">
                               {selectedFeature.display_title}
                             </div>
                           ) : null}
@@ -2051,17 +2049,13 @@ export function CuratedFeaturesClient() {
                           feature
                         </Link>
                       </div>
-                      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+                      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                         <dt className="text-muted-foreground">채택 시각</dt>
                         <dd>{formatDateTime(selectedFeature.selected_at)}</dd>
                         <dt className="text-muted-foreground">콘텐츠 버전</dt>
                         <dd>{selectedFeature.content_version}</dd>
                         <dt className="text-muted-foreground">순위</dt>
                         <dd>{selectedFeature.rank_score.toFixed(2)}</dd>
-                        <dt className="text-muted-foreground">소스 레코드</dt>
-                        <dd className="break-all font-mono text-xs">
-                          {selectedFeature.source_record_key ?? "-"}
-                        </dd>
                       </dl>
                       <details>
                         <summary className="cursor-pointer text-sm font-medium">

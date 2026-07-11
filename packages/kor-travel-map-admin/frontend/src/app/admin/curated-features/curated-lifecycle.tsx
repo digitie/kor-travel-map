@@ -1,6 +1,22 @@
 "use client";
 
+import { CircleHelpIcon } from "lucide-react";
+import { useState } from "react";
+
 import { statusLabel } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { STATUS_CONSEQUENCES } from "@/lib/curated-labels";
 import { cn } from "@/lib/utils";
 
@@ -24,12 +40,6 @@ const LIFECYCLE_STATUSES: readonly CuratedLifecycleStatus[] = [
   "rejected",
   "archived",
 ];
-
-/** 상태에서 나가는 전환 동사 — 칩 옆에 작은 라벨로 노출. */
-const TRANSITION_VERBS: Partial<Record<CuratedLifecycleStatus, string>> = {
-  candidate: "채택 →",
-  curated: "채택 해제 →",
-};
 
 function chipTone(status: CuratedLifecycleStatus, active: boolean): string {
   if (status === "curated") {
@@ -56,89 +66,87 @@ export function CuratedLifecycleStrip({
   onSelectStatus?: (status: CuratedLifecycleStatus) => void;
   compact?: boolean;
 }) {
+  const [helpOpen, setHelpOpen] = useState(false);
   const statuses = compact
     ? LIFECYCLE_STATUSES.filter((status) => status === activeStatus)
     : LIFECYCLE_STATUSES;
 
   return (
     <div
-      className="rounded-lg border bg-muted/40 p-3 text-sm"
+      className="rounded-lg border bg-muted/40 px-3 py-2 text-sm"
       data-testid="curated-lifecycle-strip"
     >
       {!compact ? (
-        <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <div className="mb-2 flex items-center gap-1.5">
           <span className="font-medium">큐레이션 흐름</span>
-          <span className="text-xs text-muted-foreground">
-            후보는 &lsquo;소스 규칙&rsquo; 적용 또는 새로고침 job으로
-            만들어집니다 · 수동 등록은 아직 API 전용입니다
-          </span>
+          <Button
+            aria-label="이 화면의 동작 방식"
+            size="icon-sm"
+            title="이 화면의 동작 방식"
+            type="button"
+            variant="ghost"
+            onClick={() => setHelpOpen(true)}
+          >
+            <CircleHelpIcon />
+          </Button>
         </div>
       ) : null}
-      <div
-        className={cn(
-          "grid gap-3",
-          compact ? "grid-cols-1" : "sm:grid-cols-2 xl:grid-cols-4",
-        )}
-      >
-        {statuses.map((status) => {
-          const active = activeStatus === status;
-          const chip = (
-            <span
-              className={cn(
-                "inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium",
-                chipTone(status, active),
-              )}
-            >
-              {statusLabel(status)}
-            </span>
-          );
-          return (
-            <div className="flex flex-col gap-1" key={status}>
-              <div className="flex items-center gap-2">
-                {onSelectStatus ? (
-                  <button
-                    aria-pressed={active}
-                    className="rounded-full outline-offset-2 focus-visible:outline-2"
-                    type="button"
-                    onClick={() => onSelectStatus(status)}
-                  >
-                    {chip}
-                  </button>
-                ) : (
-                  chip
+      <TooltipProvider>
+        <div className={cn("flex flex-wrap gap-2", compact && "gap-1")}>
+          {statuses.map((status) => {
+            const active = activeStatus === status;
+            const chip = (
+              <span
+                className={cn(
+                  "inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium",
+                  chipTone(status, active),
                 )}
-                {!compact && TRANSITION_VERBS[status] ? (
-                  <span className="text-xs text-muted-foreground">
-                    {TRANSITION_VERBS[status]}
-                  </span>
-                ) : null}
-              </div>
-              <span className="text-xs leading-relaxed text-muted-foreground">
-                {STATUS_CONSEQUENCES[status]}
+              >
+                {statusLabel(status)}
               </span>
-            </div>
-          );
-        })}
-      </div>
+            );
+            const trigger = onSelectStatus ? (
+              <button
+                aria-pressed={active}
+                className="rounded-full outline-offset-2 focus-visible:outline-2"
+                type="button"
+                onClick={() => onSelectStatus(status)}
+              >
+                {chip}
+              </button>
+            ) : (
+              <span className="inline-flex rounded-full">{chip}</span>
+            );
+            return (
+              <Tooltip key={status}>
+                <TooltipTrigger render={trigger} />
+                <TooltipContent>{STATUS_CONSEQUENCES[status]}</TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </TooltipProvider>
       {!compact ? (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-            이 화면의 동작 방식
-          </summary>
-          <ul className="mt-2 grid list-disc gap-1 pl-5 text-xs text-muted-foreground">
-            <li>
-              큐레이션 항목은 원본 feature 위의 overlay입니다 — 원본은 수정되지
-              않습니다.
-            </li>
-            <li>
-              &lsquo;채택&rsquo;하면 공개 API 기본 목록에 노출되고 배포 스냅샷이
-              생성됩니다.
-            </li>
-            <li>
-              거절·보관된 항목은 규칙 재적용·재적재로 되살아나지 않습니다.
-            </li>
-          </ul>
-        </details>
+        <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+          <DialogContent aria-label="큐레이션 흐름 도움말">
+            <DialogHeader>
+              <DialogTitle>이 화면의 동작 방식</DialogTitle>
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => setHelpOpen(false)}
+              >
+                닫기
+              </Button>
+            </DialogHeader>
+            <ul className="grid list-disc gap-2 p-4 pl-8 text-sm text-muted-foreground">
+              <li>큐레이션 항목은 원본 feature 위의 overlay입니다.</li>
+              <li>채택하면 공개 API 목록에 포함되고 스냅샷이 갱신됩니다.</li>
+              <li>거절·보관된 항목은 규칙 재적용으로 되살아나지 않습니다.</li>
+            </ul>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </div>
   );

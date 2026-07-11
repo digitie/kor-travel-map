@@ -39,8 +39,7 @@ export const RULE_ACTION_LABELS: Record<string, string> = {
 /** 상태별 결과(consequence) 한 줄 — 라이프사이클 스트립·detail에서 공유. */
 export const STATUS_CONSEQUENCES: Record<string, string> = {
   candidate: "검토 대기 — 채택하면 공개됩니다",
-  curated:
-    "공개 목록·배포 스냅샷 노출, 다운스트림(PinVi)이 복사해 갈 수 있습니다",
+  curated: "공개 상태입니다",
   rejected: "규칙 재적용·자동 파이프라인이 되살리지 않습니다",
   archived: "소프트 삭제 — 원본 feature 삭제 시 자동 보관 포함",
 };
@@ -73,7 +72,7 @@ export function notifyStatusTransition(
 ): void {
   if (kind === "select") {
     toast.success("채택 완료 — 후보 → 큐레이션됨", {
-      description: `"${featureName}" — 공개 목록·배포 스냅샷·PinVi 복사 대상에 포함됩니다.`,
+      description: `"${featureName}" — 큐레이션됨 상태로 이동했습니다.`,
       action: onJumpFilter
         ? { label: "큐레이션됨 보기", onClick: onJumpFilter }
         : undefined,

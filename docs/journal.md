@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-12 (codex) — admin 큐레이션/Feature/이슈 화면 밀도 정리
+
+- **큐레이션 UI**: 큐레이션 상세·관리의 위치 지도 높이를 키우고 동일 좌표 정규화 경로로 마커를 표시하도록
+  정리했다. 위치/장소 대조/큐레이션 상세의 반복 설명 문구와 선택 후보 요약의 중복 메타를 제거하고,
+  상세 화면 상단 제목은 고정 "큐레이션 상세" 대신 항목 이름과 상태를 표시하도록 바꿨다.
+- **큐레이션 흐름**: 상태별 긴 설명은 본문에서 제거해 상태 칩 tooltip으로 옮기고, "이 화면의 동작 방식"은
+  도움말 아이콘 다이얼로그로 분리했다.
+- **관리 화면 밀도**: admin Feature 목록과 이슈 목록 필터를 한 줄 가로 스크롤 필터 바로 압축하고,
+  Feature 목록의 반복 설명 문구를 제거했다.
+- **검증(로컬)**: admin frontend `lint` 0 error(기존 warning 4), `type-check` 통과,
+  `NEXT_PUBLIC_*` 로컬값 주입 production build 통과.
+
 ## 2026-07-12 (codex) — curated source rule `detail_selector` 응답 500 수정
 
 - **원인**: 운영 `/v1/admin/curated-source-rules?limit=200` 500은

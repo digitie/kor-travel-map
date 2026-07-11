@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-12 (codex) — admin 큐레이션/Feature/이슈 화면 밀도 정리 로컬 완료
+
+- **완료(로컬)**: 큐레이션 상세·관리 위치 지도 높이를 키우고 후보 선택 패널에서도 동일 마커가 보이도록
+  좌표 정규화/마커 렌더를 정리했다. 큐레이션 화면의 반복 설명 문구를 제거하고, 큐레이션 흐름은
+  tooltip + 도움말 다이얼로그로 압축했다. admin Feature 목록/이슈 목록 필터도 한 줄 가로 스크롤 바로
+  정리했다.
+- **검증**: admin frontend `lint` 0 error(기존 warning 4), `type-check` 통과,
+  `NEXT_PUBLIC_*` 로컬값 주입 production build 통과.
+- **다음 한 작업**: 필요 시 PR 생성 → CI 확인 → n150 UI 재배포.
+
 ## 2026-07-12 (codex) — curated source rule `detail_selector` 500 로컬 수정 완료
 
 - **완료(로컬)**: 운영 요청 ID 기준으로 `/v1/admin/curated-source-rules?limit=200` 500의 원인이
