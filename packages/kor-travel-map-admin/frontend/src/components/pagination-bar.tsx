@@ -20,7 +20,8 @@ type PagerShellProps = {
   /** nav 자체의 aria-label 접두어가 버튼 접두어와 다른 화면용(예: enrichment는 nav만 접두어). */
   navAriaPrefix?: string;
   placement?: "top" | "bottom";
-  summary: React.ReactNode;
+  summary?: React.ReactNode;
+  framed?: boolean;
   children: React.ReactNode;
 };
 
@@ -29,15 +30,20 @@ function PagerShell({
   navAriaPrefix,
   placement,
   summary,
+  framed = true,
   children,
 }: PagerShellProps) {
   const navPrefix = navAriaPrefix ?? ariaPrefix;
   return (
     <nav
       aria-label={`${navPrefix ? `${navPrefix} ` : ""}pagination${placement ? ` ${placement}` : ""}`}
-      className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+      className={`flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
+        framed ? "rounded-lg border bg-background px-3 py-2" : ""
+      }`}
     >
-      <span className="text-sm text-muted-foreground">{summary}</span>
+      {summary ? (
+        <span className="text-sm text-muted-foreground">{summary}</span>
+      ) : null}
       <div className="flex flex-wrap gap-1">{children}</div>
     </nav>
   );
@@ -149,6 +155,7 @@ type CursorPagerProps = {
   isFirst?: boolean;
   ariaPrefix?: string;
   placement?: "top" | "bottom";
+  framed?: boolean;
 };
 
 /** keyset cursor 페이지네이션(이전으로 못 돌아가는 목록)용 — 처음/다음만 제공. */
@@ -161,9 +168,15 @@ function CursorPager({
   isFirst = false,
   ariaPrefix,
   placement,
+  framed,
 }: CursorPagerProps) {
   return (
-    <PagerShell ariaPrefix={ariaPrefix} placement={placement} summary={summary}>
+    <PagerShell
+      ariaPrefix={ariaPrefix}
+      framed={framed}
+      placement={placement}
+      summary={summary}
+    >
       <Button
         aria-label={paginationAria(ariaPrefix, "첫 페이지")}
         disabled={isFirst || isFetching}

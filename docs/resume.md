@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-12 (codex) — Feature 목록/상세 polish 로컬 완료
+
+- **완료(로컬)**: Feature 목록 요약 배지를 표 헤더로 옮기고 pagination 테두리를 한 겹 줄였다.
+  Feature preview 상세 패널은 별도 "Feature 상세" row 없이 이름/feature_id/편집 버튼을 한 행에
+  배치했다. 큐레이션 지도 필터는 PC에서 한 줄 가로 컨트롤바로 유지되도록 보정했다.
+- **검수 500 확인**: n150 API 직접 호출과 live 검수 화면에서
+  `/v1/admin/features/change-requests?status=pending&page_size=100` 500은 재현되지 않고 200으로 확인됐다.
+- **검증**: admin frontend `type-check` 통과, `lint` 0 error(기존 warning 3),
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_*` 로컬값 주입 production build 통과. 배포 전 before 스크린샷
+  4장을 `artifacts/ui-e2e-20260712/`에 보관했다.
+- **다음 한 작업**: 보안 감사 → PR 생성/CI 확인 → 머지 → n150 UI 배포 → live UI e2e after 스크린샷
+  비교.
+
 ## 2026-07-12 (codex) — admin 큐레이션/Feature/이슈 화면 밀도 정리 로컬 완료
 
 - **완료(로컬)**: 큐레이션 상세·관리 위치 지도 높이를 키우고 후보 선택 패널에서도 동일 마커가 보이도록
