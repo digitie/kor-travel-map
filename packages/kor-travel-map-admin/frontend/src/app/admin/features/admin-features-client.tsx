@@ -137,21 +137,6 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border bg-background">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-          <div className="min-w-0">
-            <div className="font-medium">Feature 상세</div>
-            <div className="break-all font-mono text-xs text-muted-foreground">
-              {featureId}
-            </div>
-          </div>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
-          >
-            <PencilIcon data-icon="inline-start" />
-            편집
-          </Link>
-        </div>
         {detail.isLoading ? <Skeleton className="m-4 h-48" /> : null}
         {detail.isError ? (
           <Alert className="m-4" variant="destructive">
@@ -161,13 +146,25 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
         ) : null}
         {detail.data ? (
           <div className="flex flex-col gap-4 p-4">
-            <div>
-              <div className="text-lg font-semibold">{detail.data.name}</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <StatusBadge status={detail.data.status} />
-                <Badge variant="outline">{detail.data.kind}</Badge>
-                <Badge variant="outline">{detail.data.category}</Badge>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold">{detail.data.name}</div>
+                <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                  {featureId}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <StatusBadge status={detail.data.status} />
+                  <Badge variant="outline">{detail.data.kind}</Badge>
+                  <Badge variant="outline">{detail.data.category}</Badge>
+                </div>
               </div>
+              <Link
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                href={`/admin/features/change-requests?action=update&feature_id=${encodeURIComponent(featureId)}`}
+              >
+                <PencilIcon data-icon="inline-start" />
+                편집
+              </Link>
             </div>
             <FeatureLocationMap feature={detail.data} />
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
@@ -276,7 +273,10 @@ export function AdminFeaturesClient({
   const deactivate = useDeactivateAdminFeatureMutation();
   const confirm = useConfirm();
   const providersQuery = useProviders();
-  const providerOptions = providersQuery.data?.data.providers ?? [];
+  const providerOptions = useMemo(
+    () => providersQuery.data?.data.providers ?? [],
+    [providersQuery.data?.data.providers],
+  );
   const datasetOptions = useMemo(
     () =>
       providerOptions
@@ -286,6 +286,7 @@ export function AdminFeaturesClient({
   );
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
+  const durationMs = features.data?.meta.duration_ms ?? 0;
 
   const resetCursor = () => {
     setCursor(null);
@@ -695,31 +696,24 @@ export function AdminFeaturesClient({
             >
               desc
             </Button>
-            <Badge className="shrink-0" variant="outline">
-              {formatCount(items.length)} rows
-            </Badge>
-            <Badge className="shrink-0" variant="outline">
-              page {formatCount(pageIndex)}
-            </Badge>
-            <Badge className="shrink-0" variant="outline">
-              page size {formatCount(pageSize)}
-            </Badge>
-            <Badge className="shrink-0" variant="outline">
-              {features.data?.meta.duration_ms ?? 0}ms
-            </Badge>
           </div>
         </section>
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 rounded-lg border bg-background">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-              <div>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <div className="font-medium">Feature 목록</div>
+                <Badge variant="outline">{formatCount(items.length)} rows</Badge>
+                <Badge variant="outline">page {formatCount(pageIndex)}</Badge>
+                <Badge variant="outline">page size {formatCount(pageSize)}</Badge>
+                <Badge variant="outline">{durationMs}ms</Badge>
               </div>
               <CursorPager
+                framed={false}
                 hasNext={Boolean(nextCursor)}
+                isFirst={cursor === null}
                 isFetching={features.isFetching}
-                summary={<>page {formatCount(pageIndex)}</>}
                 onFirst={goFirstPage}
                 onNext={goNextPage}
               />

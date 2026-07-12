@@ -388,16 +388,17 @@ export function CuratedFeatureMapClient() {
       title="큐레이션 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
-        <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 xl:flex-row xl:items-center">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Badge variant="secondary">Curated 지도</Badge>
             <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
               {status}
             </Badge>
           </div>
-          <div className="grid gap-2 md:grid-cols-[minmax(12rem,1.2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(12rem,1fr)]">
+          <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:justify-end">
             <Input
               aria-label="POI명 필터"
+              className="w-60 shrink-0"
               placeholder="POI명"
               value={poiName}
               onChange={(event) =>
@@ -406,6 +407,7 @@ export function CuratedFeatureMapClient() {
             />
             <NativeSelect
               aria-label="테마 필터"
+              className="w-52 shrink-0"
               value={themeId}
               onChange={(event) =>
                 clearSelectionAnd(() => setThemeId(event.target.value))
@@ -419,8 +421,9 @@ export function CuratedFeatureMapClient() {
               ))}
             </NativeSelect>
             <ComboboxMultiple
-              className="min-w-[13rem]"
+              className="w-52 shrink-0"
               label="제목"
+              labelClassName="sr-only"
               value={displayTitles}
               options={titleOptions}
               placeholder="제목 전체"
@@ -432,6 +435,7 @@ export function CuratedFeatureMapClient() {
             />
             <NativeSelect
               aria-label="데이터소스 필터"
+              className="w-52 shrink-0"
               value={sourceId}
               onChange={(event) =>
                 clearSelectionAnd(() => setSourceId(event.target.value))
