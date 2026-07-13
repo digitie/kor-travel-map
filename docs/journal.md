@@ -12,6 +12,11 @@
 - **수정**: ``make_async_engine``에 후방 호환 optional ``server_settings``를
   추가하고 FastAPI engine에만 asyncpg ``server_settings={"jit": "off"}``를
   적용했다. Dagster/CLI는 배치 특성을 고려해 기본 JIT 설정을 유지한다.
+- **live marker 회귀**: 첫 n150 E2E에서 API 목록은 1~2건인데 DOM marker가
+  0개인 상태를 재현했다. GeoJSON ``setData`` 직후 예약한 조회가 worker tile
+  교체보다 먼저 실행된 뒤, ``idle`` 재동기화가 제거되어 다시 조회하지 않는
+  것이 원인이었다. 자체 source 완료 이벤트는 유지하고 ``idle`` fallback을
+  복구했으며, mock E2E도 실제 Feature 좌표로 viewport를 이동한 뒤 검증한다.
 - **영향도·검증**: codegraph ``impact make_async_engine --depth 2``로 127개
   영향 symbol을 확인했다. 기존 caller는 optional 기본값으로 동작을
   유지하고 API caller 하나만 설정을 넘긴다. engine 전달·API 정책 unit

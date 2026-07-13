@@ -439,7 +439,7 @@ test.describe("/features map interactions", () => {
       page.getByRole("heading", { level: 1, name: "Feature 지도" }),
     ).toBeVisible();
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
-    await setMapZoom(page, 14);
+    await setMapZoom(page, 14, [126.978, 37.5665]);
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     const mapTab = page.getByRole("tab", { name: "지도" });
@@ -512,6 +512,23 @@ test.describe("/features map interactions", () => {
         }, sourceId),
       )
       .toBe(true);
+    // isSourceLoaded는 빈 이전 source에도 true일 수 있다. 실제 worker tile에 현재
+    // feature가 반영되고 idle fallback이 DOM marker까지 만든 뒤 이벤트 계측을 시작한다.
+    await expect
+      .poll(() =>
+        page.evaluate((id) => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & {
+            _maplibreMap?: import("maplibre-gl").Map;
+          }) | null;
+          return container?._maplibreMap?.querySourceFeatures(id).length ?? 0;
+        }, sourceId),
+      )
+      .toBeGreaterThan(0);
+    await expect(
+      page.getByRole("button", { name: new RegExp(MOCK_NAME) }),
+    ).toBeVisible();
 
     const calls = await page.evaluate(async (id) => {
       const container = document.querySelector(
@@ -864,7 +881,7 @@ test.describe("/features map interactions", () => {
       .getByTestId("kind-filter")
       .getByRole("button", { name: "price", exact: true })
       .click();
-    await setMapZoom(page, 14);
+    await setMapZoom(page, 14, [126.978, 37.5665]);
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     await expect(page.getByText("휘 1,820")).toBeVisible();

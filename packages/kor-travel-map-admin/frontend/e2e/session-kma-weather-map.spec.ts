@@ -140,7 +140,10 @@ async function setMapZoom(page: Page, zoom: number) {
     const container = document.querySelector(
       '[data-testid="map-canvas-container"]',
     ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
-    container?._maplibreMap?.jumpTo({ zoom: nextZoom });
+    container?._maplibreMap?.jumpTo({
+      center: [SEOUL_LON, SEOUL_LAT],
+      zoom: nextZoom,
+    });
   }, zoom);
 }
 
@@ -235,6 +238,9 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
     await mockFeatureRoutes(page, items);
     await page.goto("/features");
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    // 기본 viewport는 대전·저zoom cluster다. 개별 feature/table 계약을 검증하기 전에
+    // mock 좌표가 있는 서울로 이동해 cluster 해제 상태를 만든다.
+    await setMapZoom(page, 15);
 
     // 테이블 뷰: KMA 초단기·단기가 각각 독립 weather feature로 존재(#603).
     await page.getByRole("tab", { name: "테이블" }).click();
@@ -251,7 +257,6 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
 
     // 지도 뷰: 분리된 좌표에서 KMA 마커가 개별 렌더(aria-label = 이름).
     await page.getByRole("tab", { name: "지도" }).click();
-    await setMapZoom(page, 15);
     const kmaMarker = page.getByRole("button", { name: /기상청 초단기 서울/ });
     const airKoreaMarker = page.getByRole("button", {
       name: /서울 대기질 측정소/,

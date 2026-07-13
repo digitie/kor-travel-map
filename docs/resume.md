@@ -7,7 +7,8 @@
   전용 A/B에서 동일 query가 JIT on 1,844.8ms, off 20.2ms였다.
 - **수정·범위**: API asyncpg 연결에만 ``jit=off``를 적용했다.
   ``make_async_engine`` 인자는 optional이므로 Dagster/CLI/기존 사용자 동작은
-  변하지 않는다.
+  변하지 않는다. GeoJSON source 갱신과 marker 조회의 경합으로 개별 marker가
+  0개에 머물던 live 회귀는 map ``idle`` 시점 재동기화로 보완했다.
 - **검증**: codegraph 영향 127 symbol을 확인했고 관련 unit 13건,
   Ruff, 변경 source strict mypy를 통과했다.
 - **다음 한 작업**: 적대적 리뷰 2회와 전체 게이트·CI green 후 머지하고,
