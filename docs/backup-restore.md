@@ -122,9 +122,11 @@ KOR_TRAVEL_MAP_RESTORE_BACKUP_ID=<backup_id> npm run docker:restore
 
 스크립트는 먼저 `meta/SHA256SUMS`를 검증한 뒤 `pg_restore --clean --if-exists
 --no-owner --no-privileges`로 두 DB를 복원하고, `rustfs/rustfs-data.tar.gz`를 staging
-Docker volume에 푼다. 복원이 끝나면 기본적으로 `scripts/docker-restore-verify.sh`를
-호출해 staging DB/volume smoke/count를 확인한다. 기존 staging 대상이 있으면
-기본적으로 중단한다. 의도적으로 새로 만들 때만 다음 opt-in을 사용한다.
+Docker volume에 푼다. `pg_restore`는 planner 통계를 보존하지 않으므로 각 DB 복원 직후
+`vacuumdb --analyze-in-stages`를 완료해야 다음 단계로 진행한다. 복원이 끝나면 기본적으로
+`scripts/docker-restore-verify.sh`를 호출해 staging DB/volume smoke/count와
+`feature.features` 통계 생성을 확인한다. 기존 staging 대상이 있으면 기본적으로 중단한다.
+의도적으로 새로 만들 때만 다음 opt-in을 사용한다.
 
 ```bash
 KOR_TRAVEL_MAP_RESTORE_BACKUP_ID=<backup_id> \
@@ -148,9 +150,10 @@ npm run docker:restore
 
 ## 6. staging restore 검증
 
-`scripts/docker-restore-verify.sh`는 staging app DB의 `feature.features` row count,
-staging Dagster DB의 사용자 table count, staging RustFS volume file count를 출력한다.
-restore script가 기본 호출하므로 별도 재검증이나 수동 restore 후 확인에만 직접 실행한다.
+`scripts/docker-restore-verify.sh`는 staging app DB의 `feature.features` row count와 planner
+통계 존재 여부, staging Dagster DB의 사용자 table count, staging RustFS volume file count를
+확인한다. 통계가 없으면 swap 전에 실패한다. restore script가 기본 호출하므로 별도 재검증이나
+수동 restore 후 확인에만 직접 실행한다.
 
 ```bash
 KOR_TRAVEL_MAP_RESTORE_APP_DB=kor_travel_map_restore \

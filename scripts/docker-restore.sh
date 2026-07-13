@@ -202,6 +202,15 @@ restore_database() {
     --no-owner \
     --no-privileges \
     < "$dump_path"
+
+  # pg_dump/pg_restore는 planner 통계를 보존하지 않는다. 복원 직후의 API나
+  # notice reconcile이 빈 통계로 실행되지 않도록 큰 table부터 단계적으로
+  # 통계를 만든 뒤에만 staging DB를 검증·swap 대상으로 내보낸다.
+  echo "analyzing restored PostgreSQL database: $database_name"
+  "${compose[@]}" exec -T postgres vacuumdb \
+    -U "$KOR_TRAVEL_MAP_POSTGRES_USER" \
+    -d "$database_name" \
+    --analyze-in-stages
 }
 
 prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"

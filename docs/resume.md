@@ -8,9 +8,18 @@
 - **수정·보호**: 동일 scope winner는 set 기반 `ranked` 결과를 재사용하고, 다른
   provider/dataset/type 계보를 공유한 Feature만 cross-scope 보호 비교를 수행한다. 다중 lineage와
   cross-provider 생존 통합 테스트는 그대로 통과한다.
+- **planner 통계 원인**: 최적화 배포 뒤에도 lifecycle UPDATE가 5분을 넘겨 조사한 결과,
+  `feature.features` 실제 1,029,113행을 약 970행으로 오인했고 `last_analyze`가 없었다. 운영
+  rollback A/B에서 `ANALYZE` 전 120초 timeout, 후 1.4초를 확인해 Alembic 0047에 관련 join
+  table 통계 갱신을 고정했다. `pg_restore`가 통계를 보존하지 않으면서 Alembic revision은
+  유지되는 재발 경로는 6월 28일 n150 restore/swap 이력과 일치했다. 일반 restore와 n150
+  runner 직후 staged analyze, swap 전 통계 검증으로 같은 전환의 재발을 차단했다.
 - **검증**: repository unit 14건, notice lifecycle PostGIS integration 23건, Ruff·strict mypy 통과.
 - **적대적 리뷰**: 1차 `S1 0 / S2 0 / S3 1`의 scope `OR`/차원별 검증 지적을 반영했고,
   2차 독립 리뷰는 `S1/S2/S3 0`으로 종료했다.
+- **통계 보강 리뷰**: 별도 적대적 리뷰 2회에서 권한 warning-only skip, 일반/n150 restore
+  경로 누락, 빈 DB test의 거짓 양성을 찾아 수정했다. 최종 판정은 두 리뷰 모두
+  `S1/S2/S3 0`이며, restore unit 10건과 전용 PG16 migration integration 1건을 통과했다.
 - **다음 한 작업**: 적대적 리뷰 2회와 CI green 후 n150에 재배포하고, KREX 2회 실행 시간·
   중복 0·동일 snapshot no-op을 확인한 뒤 KMA/OpiNet 및 live UI E2E를 완료한다.
 

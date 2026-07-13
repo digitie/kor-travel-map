@@ -11,11 +11,28 @@
 - **근본 수정**: 동일 provider/dataset/type winner는 기존 `ranked` CTE 결과를 재사용한다.
   전역 lateral 비교는 호출 scope 밖의 primary lineage를 공유한 Feature 보호에만 남겨,
   cross-provider 생존 의미는 보존하면서 동일 scope의 제곱 탐색을 제거했다.
+- **2차 운영 원인**: 최적화 배포 뒤 out-of-scope link 0건·lateral loop 제거를 확인했지만
+  lifecycle UPDATE가 다시 5분을 넘었다. `feature.features`는 실제 1,029,113행인데 planner
+  통계는 약 970행이고 `last_analyze`도 없었다. blocker/JIT가 아니라 잘못된 join plan이
+  남은 병목이었다.
+- **통계 복구**: 운영 read/rollback A/B에서 관련 table `ANALYZE` 전에는 `jit=off`도 120초
+  timeout, 이후에는 동일 reconcile이 JIT on 1.4초·off 2.2초였다. Alembic 0047에 reconcile
+  join table 통계 갱신을 추가해 수동 운영 조치로 남기지 않았다.
+- **재발 경로 차단**: 2차 적대적 리뷰에서 6월 28일 n150 backup→staging restore→swap으로
+  전환된 DB는 planner 통계가 복원되지 않았고 Alembic revision은 그대로라 migration도
+  재실행되지 않는 직접 경로를 찾았다. 일반 restore와 n150 runner 모두 직후
+  `vacuumdb --analyze-in-stages`를 필수화하고, 일반 swap 전 검증에서 `feature.features` 통계가
+  없으면 실패하도록 수정했다.
 - **검증**: SQL 구조 회귀 unit 2건을 추가하고 feature repository unit 14건, notice lifecycle
   PostGIS integration 23건, 변경 파일 Ruff와 strict mypy를 통과했다.
 - **적대적 리뷰 2회**: 1차 `S1 0 / S2 0 / S3 1`에서 scope 세 차원의 정확한 `OR`와
   provider/dataset/entity type 단독 차이 회귀 검증이 부족하다는 지적을 반영했다. 차원별
   PostGIS 통합 3건을 추가한 뒤 2차 독립 리뷰는 `S1/S2/S3 0`으로 종료했다.
+- **통계 보강 적대적 리뷰 2회**: 권한 부족 `ANALYZE`의 warning-only skip, 일반 restore와
+  실제 n150 runner의 통계 미생성, session DB의 빈 table만 보던 migration test를 순서대로
+  발견했다. table/database owner 권한 preflight, 두 restore 경로의 staged analyze, 0046 전용
+  DB 256행의 0047 전후 `reltuples` 검증으로 수정한 뒤 두 독립 리뷰 모두
+  `S1/S2/S3 0`으로 종료했다.
 
 ## 2026-07-14 (codex) — notice 반복 중복·오종료의 계보 상태 원천 수정
 

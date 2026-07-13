@@ -6,6 +6,8 @@
 - 비밀값은 담지 않는다. DB 접속 정보는 API/Dagster 컨테이너의 기존 환경변수를 사용한다.
 - n150 docker-manager 배포 topology에 맞춰 host-network PostgreSQL client 컨테이너와
   기존 RustFS 컨테이너 volume을 사용한다.
+- `pg_restore` 직후 `vacuumdb --analyze-in-stages`를 완료한 DB만 staging 대상으로 내보내
+  planner 통계가 없는 DB를 검증·swap하지 않는다.
 - 운영 hot-swap apply는 자동 실행하지 않는다. `swap.sh`는 plan/검증용 출력만 제공하고
   `KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY=1`이면 실패한다.
 
