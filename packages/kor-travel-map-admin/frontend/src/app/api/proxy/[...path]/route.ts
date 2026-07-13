@@ -31,11 +31,16 @@ async function proxy(
         request.signal,
       ),
     });
+    const responseHeaders = new Headers({
+      "content-type": response.headers.get("content-type") ?? "application/json",
+    });
+    const contentDisposition = response.headers.get("content-disposition");
+    if (contentDisposition !== null) {
+      responseHeaders.set("content-disposition", contentDisposition);
+    }
     return new Response(response.body, {
       status: response.status,
-      headers: {
-        "content-type": response.headers.get("content-type") ?? "application/json",
-      },
+      headers: responseHeaders,
     });
   } catch (error) {
     if (request.signal.aborted) {

@@ -13,8 +13,9 @@ import type { Page } from "@playwright/test";
  * `page.routeWebSocket`은 WS가 12705(페이지 origin)가 아닌 12701(BASE_URL)로 나가
  * cross-origin glob이 필요하고 Windows 호스트 런에서만 실증 가능했다(기존 spec NOTE).
  * 대신 **origin-agnostic**하게, page document보다 먼저 도는 `addInitScript`로
- * `window.WebSocket`을 no-op 스텁으로 갈아끼운다 — 실제 소켓을 절대 열지 않고
- * snapshot/update를 절대 emit하지 않으므로 라이브 invalidation 경로가 완전히 inert다.
+ * `/v1/ops/live` 생성만 no-op 소켓으로 바꾼다 — snapshot/update를 절대 emit하지
+ * 않으므로 라이브 invalidation 경로가 완전히 inert다. 그 외 WebSocket(특히 Next.js
+ * dev HMR)은 native 생성자로 전달해 hydration을 막지 않는다.
  *
  * 스텁은 `WebSocket` 인터페이스(상수·이벤트 핸들러·EventTarget 메서드·close)를
  * 형태만 맞춰 흉내내 `useOpsLiveInvalidation`의 `new WebSocket(...)` / `socket.close(1000)`
@@ -58,7 +59,7 @@ export async function installInertOpsLiveWebSocket(page: Page): Promise<void> {
       onerror: ((this: WebSocket, ev: Event) => unknown) | null = null;
       onclose: ((this: WebSocket, ev: CloseEvent) => unknown) | null = null;
 
-      constructor(url: string | URL, _protocols?: string | string[]) {
+      constructor(url: string | URL) {
         super();
         this.url = String(url);
         // 실 소켓을 열지 않는다. open/message 이벤트를 절대 발사하지 않으므로
@@ -76,10 +77,21 @@ export async function installInertOpsLiveWebSocket(page: Page): Promise<void> {
       }
     }
 
-    // 원래 생성자 참조를 보존해 다른 코드가 필요 시 접근할 수 있게 둔다(미사용 대비).
+    const SelectiveWebSocket = new Proxy(NativeWebSocket, {
+      construct(target, args) {
+        const [url] = args as [string | URL, string | string[] | undefined];
+        const pathname = new URL(String(url), window.location.href).pathname;
+        if (pathname === "/v1/ops/live") {
+          return new InertWebSocket(url);
+        }
+        return Reflect.construct(target, args) as WebSocket;
+      },
+    });
+
+    // 원래 생성자 참조를 보존해 다른 코드가 필요 시 접근할 수 있게 둔다.
     (
       window as unknown as { __nativeWebSocket?: typeof WebSocket }
     ).__nativeWebSocket = NativeWebSocket;
-    window.WebSocket = InertWebSocket as unknown as typeof WebSocket;
+    window.WebSocket = SelectiveWebSocket;
   });
 }

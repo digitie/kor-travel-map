@@ -59,6 +59,7 @@ function makeDetailResponse(
   return {
     data: {
       change_requests: [],
+      curations: [],
       feature,
       files: [],
       issues: [],
@@ -92,7 +93,10 @@ async function mockFeatureDetail(
   await page.route("**/v1/admin/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "GET" && url.pathname === DETAIL_PATH) {
+    if (
+      request.method() === "GET" &&
+      (url.pathname === DETAIL_PATH || url.pathname === `/api/proxy${DETAIL_PATH}`)
+    ) {
       if (options.detailStatus && options.detailStatus >= 400) {
         await fulfillJson(route, { detail: "feature 없음" }, options.detailStatus);
         return;
@@ -106,7 +110,10 @@ async function mockFeatureDetail(
   await page.route("**/v1/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/v1/features/nearby") {
+    if (
+      url.pathname === "/v1/features/nearby" ||
+      url.pathname === "/api/proxy/v1/features/nearby"
+    ) {
       const body: FeaturesNearbyResponse = {
         data: { items: nearby, origin: { lat: 37.5263, lon: 126.9239, radius_m: 3000 } },
         meta,
@@ -158,7 +165,6 @@ test.describe("/features/[featureId]", () => {
     }
     // Raw <details> disclosure.
     await expect(page.getByText("raw_refs", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("feature-weather-panel")).toBeVisible();
   });
 
   test("nearby 항목 render", async ({ page }) => {
@@ -185,7 +191,7 @@ test.describe("/features/[featureId]", () => {
   });
 
   test("weather metric 없음 — empty state", async ({ page }) => {
-    await mockFeatureDetail(page);
+    await mockFeatureDetail(page, { feature: makeFeature({ kind: "weather" }) });
     await page.goto(`/features/${FEATURE_ID}`);
 
     await expect(page.getByText("weather metric이 없습니다.")).toBeVisible();

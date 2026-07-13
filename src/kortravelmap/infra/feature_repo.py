@@ -31,6 +31,7 @@ ADR 참조
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -271,16 +272,46 @@ ON CONFLICT (feature_id, version) DO UPDATE SET
     created_at = now()
 """
 
+# provider entity는 payload version과 독립적으로 한 행을 유지한다(ADR-063).
+_UPSERT_SOURCE_ENTITY_SQL: Final[str] = """
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider, dataset_key,
+    source_entity_type, source_entity_id,
+    first_seen_at, last_seen_at
+) VALUES (
+    :source_entity_key, :provider, :dataset_key,
+    :source_entity_type, :source_entity_id,
+    LEAST(
+        CAST(:fetched_at AS timestamptz),
+        CAST(:imported_at AS timestamptz)
+    ),
+    GREATEST(
+        CAST(:fetched_at AS timestamptz),
+        CAST(:imported_at AS timestamptz)
+    )
+)
+ON CONFLICT (source_entity_key) DO UPDATE SET
+    first_seen_at = LEAST(
+        provider_sync.source_entities.first_seen_at,
+        EXCLUDED.first_seen_at
+    ),
+    last_seen_at = GREATEST(
+        provider_sync.source_entities.last_seen_at,
+        EXCLUDED.last_seen_at
+    )
+RETURNING current_source_record_key
+"""
+
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
 # 같은 source_record_key 재적재는 원문을 건드리지 않고 마지막 확인 시각만 갱신한다.
 _UPSERT_SOURCE_RECORD_SQL: Final[str] = """
 INSERT INTO provider_sync.source_records (
-    source_record_key, provider, dataset_key,
+    source_record_key, source_entity_key, provider, dataset_key,
     source_entity_type, source_entity_id, source_version,
     raw_name, raw_address, raw_longitude, raw_latitude,
     raw_data, raw_payload_hash, fetched_at, imported_at, expires_at
 ) VALUES (
-    :source_record_key, :provider, :dataset_key,
+    :source_record_key, :source_entity_key, :provider, :dataset_key,
     :source_entity_type, :source_entity_id, :source_version,
     :raw_name, :raw_address, :raw_longitude, :raw_latitude,
     CAST(:raw_data AS jsonb), :raw_payload_hash, :fetched_at, :imported_at,
@@ -294,15 +325,46 @@ ON CONFLICT (source_record_key) DO UPDATE SET
 RETURNING (xmax = 0) AS inserted
 """
 
+_REFRESH_SOURCE_ENTITY_CURRENT_SQL: Final[str] = """
+WITH ranked AS (
+    SELECT source_record_key
+    FROM provider_sync.source_records
+    WHERE source_entity_key = :source_entity_key
+    ORDER BY
+        last_seen_at DESC,
+        fetched_at DESC,
+        imported_at DESC,
+        source_record_key DESC
+    LIMIT 1
+), bounds AS (
+    SELECT
+        min(least(fetched_at, last_seen_at, imported_at)) AS first_seen_at,
+        max(greatest(fetched_at, last_seen_at, imported_at)) AS last_seen_at
+    FROM provider_sync.source_records
+    WHERE source_entity_key = :source_entity_key
+)
+UPDATE provider_sync.source_entities AS se
+SET current_source_record_key = ranked.source_record_key,
+    first_seen_at = LEAST(se.first_seen_at, bounds.first_seen_at),
+    last_seen_at = GREATEST(se.last_seen_at, bounds.last_seen_at)
+FROM ranked, bounds
+WHERE se.source_entity_key = :source_entity_key
+RETURNING se.current_source_record_key
+"""
+
 _UPSERT_SOURCE_LINK_SQL: Final[str] = """
 INSERT INTO provider_sync.source_links (
-    feature_id, source_record_key, source_role,
+    feature_id, source_entity_key, source_role,
     match_method, confidence, is_primary_source, created_at
 ) VALUES (
-    :feature_id, :source_record_key, :source_role,
+    :feature_id,
+    (SELECT source_entity_key
+     FROM provider_sync.source_records
+     WHERE source_record_key = :source_record_key),
+    :source_role,
     :match_method, :confidence, :is_primary_source, :created_at
 )
-ON CONFLICT (feature_id, source_record_key) DO UPDATE SET
+ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
     source_role = EXCLUDED.source_role,
     match_method = EXCLUDED.match_method,
     confidence = EXCLUDED.confidence,
@@ -434,8 +496,10 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
             ) AS seen_at,
             max(cur_sr.source_record_key) AS source_record_key
         FROM provider_sync.source_links AS cur_sl
+        JOIN provider_sync.source_entities AS cur_se
+          ON cur_se.source_entity_key = cur_sl.source_entity_key
         JOIN provider_sync.source_records AS cur_sr
-          ON cur_sr.source_record_key = cur_sl.source_record_key
+          ON cur_sr.source_record_key = cur_se.current_source_record_key
         WHERE cur_sl.feature_id = f.feature_id
           AND cur_sl.is_primary_source
         GROUP BY
@@ -444,13 +508,15 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
             cur_sr.source_entity_type,
             {_notice_lineage_sql("cur_sr")}
       ) AS current_notice
+      JOIN provider_sync.source_entities AS other_se
+        ON other_se.provider = current_notice.provider
+       AND other_se.dataset_key = current_notice.dataset_key
+       AND other_se.source_entity_type = current_notice.source_entity_type
       JOIN provider_sync.source_records AS other_sr
-        ON other_sr.provider = current_notice.provider
-       AND other_sr.dataset_key = current_notice.dataset_key
-       AND other_sr.source_entity_type = current_notice.source_entity_type
+        ON other_sr.source_record_key = other_se.current_source_record_key
        AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
       JOIN provider_sync.source_links AS other_sl
-        ON other_sl.source_record_key = other_sr.source_record_key
+        ON other_sl.source_entity_key = other_se.source_entity_key
       JOIN feature.features AS other_f
         ON other_f.feature_id = other_sl.feature_id
       WHERE other_sl.is_primary_source
@@ -494,9 +560,11 @@ SELECT
     sr.source_entity_type, sr.source_entity_id,
     sr.raw_name, sr.raw_address, sr.raw_data,
     sr.fetched_at, sr.imported_at
-FROM provider_sync.source_records AS sr
+FROM provider_sync.source_entities AS se
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = se.current_source_record_key
 JOIN provider_sync.source_links AS sl
-  ON sl.source_record_key = sr.source_record_key
+  ON sl.source_entity_key = se.source_entity_key
 JOIN feature.features AS f
   ON f.feature_id = sl.feature_id
 WHERE sr.provider = :provider
@@ -624,8 +692,8 @@ WHERE f.deleted_at IS NULL
     OR EXISTS (
       SELECT 1
       FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_records AS pr
-        ON pr.source_record_key = pl.source_record_key
+      JOIN provider_sync.source_entities AS pr
+        ON pr.source_entity_key = pl.source_entity_key
       WHERE pl.feature_id = f.feature_id
         AND pl.is_primary_source
         AND pr.provider = ANY(CAST(:providers AS text[]))
@@ -780,8 +848,8 @@ WHERE f.deleted_at IS NULL
     OR EXISTS (
       SELECT 1
       FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_records AS pr
-        ON pr.source_record_key = pl.source_record_key
+      JOIN provider_sync.source_entities AS pr
+        ON pr.source_entity_key = pl.source_entity_key
       WHERE pl.feature_id = f.feature_id
         AND pl.is_primary_source
         AND pr.provider = ANY(CAST(:providers AS text[]))
@@ -825,8 +893,8 @@ WHERE deleted_at IS NULL
     OR EXISTS (
       SELECT 1
       FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_records AS pr
-        ON pr.source_record_key = pl.source_record_key
+      JOIN provider_sync.source_entities AS pr
+        ON pr.source_entity_key = pl.source_entity_key
       WHERE pl.feature_id = features.feature_id
         AND pl.is_primary_source
         AND pr.provider = ANY(CAST(:providers AS text[]))
@@ -1094,10 +1162,12 @@ candidates AS (
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT se.provider, se.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = f.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -1214,10 +1284,12 @@ candidates AS (
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
     LEFT JOIN LATERAL (
-        SELECT sr.provider, sr.dataset_key
+        SELECT se.provider, se.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = f.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -1316,8 +1388,8 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = sl.source_record_key
+    JOIN provider_sync.source_entities AS sr
+      ON sr.source_entity_key = sl.source_entity_key
     WHERE sl.is_primary_source
       AND sr.provider = :provider
       AND sr.dataset_key = :dataset_key
@@ -1340,8 +1412,8 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = sl.source_record_key
+    JOIN provider_sync.source_entities AS sr
+      ON sr.source_entity_key = sl.source_entity_key
     WHERE sl.is_primary_source
       AND sr.provider = :provider
       AND sr.dataset_key = :dataset_key
@@ -1365,8 +1437,8 @@ WHERE f.deleted_at IS NULL
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = sl.source_record_key
+    JOIN provider_sync.source_entities AS sr
+      ON sr.source_entity_key = sl.source_entity_key
     WHERE sl.is_primary_source
       AND sr.provider = :provider
       AND sr.dataset_key = :dataset_key
@@ -1578,6 +1650,12 @@ def _source_record_params(record: SourceRecord) -> dict[str, Any]:
 
     return {
         "source_record_key": record.source_record_key,
+        "source_entity_key": _make_source_entity_key(
+            provider=record.provider,
+            dataset_key=record.dataset_key,
+            source_entity_type=record.source_entity_type,
+            source_entity_id=record.source_entity_id,
+        ),
         "provider": record.provider,
         "dataset_key": record.dataset_key,
         "source_entity_type": record.source_entity_type,
@@ -1593,6 +1671,19 @@ def _source_record_params(record: SourceRecord) -> dict[str, Any]:
         "imported_at": record.imported_at,
         "expires_at": record.expires_at,
     }
+
+
+def _make_source_entity_key(
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_id: str,
+) -> str:
+    """Migration과 동일한 provider entity 결정키(``se_`` + SHA-256)."""
+
+    raw = f"{provider}|{dataset_key}|{source_entity_type}|{source_entity_id}"
+    return "se_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _source_link_params(link: SourceLink) -> dict[str, Any]:
@@ -1621,14 +1712,39 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     return inserted
 
 
+@dataclass(frozen=True)
+class _SourceRecordUpsertState:
+    inserted: bool
+    became_current: bool
+
+
+async def _upsert_source_record_state(
+    session: AsyncSession, record: SourceRecord
+) -> _SourceRecordUpsertState:
+    params = _source_record_params(record)
+    previous_current = (
+        await session.execute(text(_UPSERT_SOURCE_ENTITY_SQL), params)
+    ).scalar_one()
+    result = await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), params)
+    inserted = bool(result.scalar_one())
+    current = (
+        await session.execute(text(_REFRESH_SOURCE_ENTITY_CURRENT_SQL), params)
+    ).scalar_one()
+    return _SourceRecordUpsertState(
+        inserted=inserted,
+        became_current=(
+            current == record.source_record_key and previous_current != current
+        ),
+    )
+
+
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:
     """``provider_sync.source_records`` insert. 신규면 ``True``, 이미 있으면 ``False``.
 
     payload_hash가 UNIQUE 구성요소라 payload 변경은 새 row로 이력을 남긴다.
     동일 key 재적재는 raw payload를 갱신하지 않고 ``last_seen_at``만 갱신한다.
     """
-    result = await session.execute(text(_UPSERT_SOURCE_RECORD_SQL), _source_record_params(record))
-    return bool(result.scalar_one())
+    return (await _upsert_source_record_state(session, record)).inserted
 
 
 async def _feature_exists(session: AsyncSession, feature_id: str) -> bool:
@@ -1653,13 +1769,16 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     단, source_record만 있고 feature가 없는 비정상 상태라면 FK 복구를 위해 feature를
     생성한다. commit은 호출자 책임.
     """
-    record_inserted = await upsert_source_record(session, bundle.source_record)
+    record_state = await _upsert_source_record_state(
+        session, bundle.source_record
+    )
+    record_inserted = record_state.inserted
     feature_inserted = False
     feature_updated = False
     feature_missing = False
     if not record_inserted:
         feature_missing = not await _feature_exists(session, bundle.feature.feature_id)
-    if record_inserted or feature_missing:
+    if record_state.became_current or feature_missing:
         feature_inserted = await upsert_feature(session, bundle.feature)
         feature_updated = not feature_inserted
     link_inserted = await upsert_source_link(session, bundle.source_link)
@@ -1843,8 +1962,10 @@ WITH lineage AS (
     JOIN provider_sync.source_links AS sl
       ON sl.feature_id = f.feature_id
      AND sl.is_primary_source
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = sl.source_record_key
+      ON sr.source_record_key = se.current_source_record_key
     WHERE f.kind = 'notice'
       AND f.deleted_at IS NULL
       AND COALESCE(f.data_origin, 'provider') <> 'user_request'
@@ -2095,8 +2216,8 @@ SELECT
 FROM feature.features f
 JOIN provider_sync.source_links sl
   ON sl.feature_id = f.feature_id AND sl.is_primary_source
-JOIN provider_sync.source_records sr
-  ON sr.source_record_key = sl.source_record_key
+JOIN provider_sync.source_entities sr
+  ON sr.source_entity_key = sl.source_entity_key
 WHERE f.deleted_at IS NULL
   AND f.kind = 'place'
   AND f.coord IS NOT NULL
@@ -2183,8 +2304,8 @@ SELECT f.feature_id, f.name, f.address, sr.source_entity_id
 FROM feature.features f
 JOIN provider_sync.source_links sl
   ON sl.feature_id = f.feature_id AND sl.is_primary_source
-JOIN provider_sync.source_records sr
-  ON sr.source_record_key = sl.source_record_key
+JOIN provider_sync.source_entities sr
+  ON sr.source_entity_key = sl.source_entity_key
 WHERE f.deleted_at IS NULL
   AND f.kind = 'place'
   AND sr.provider = :provider

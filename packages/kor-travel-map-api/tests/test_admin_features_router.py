@@ -136,6 +136,7 @@ def _feature_detail() -> AdminFeatureDetail:
         deleted_at=None,
     )
     source = AdminFeatureDetailSource(
+        source_entity_key="se-feature-1",
         source_record_key="sr-feature-1",
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
@@ -337,7 +338,21 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
         assert feature_id == "feature-1"
         return _feature_detail()
 
+    async def _curations(
+        _session: Any, **kwargs: Any
+    ) -> dict[str, tuple[Any, ...]]:
+        assert kwargs == {
+            "feature_ids": ["feature-1"],
+            "public_only": False,
+        }
+        return {"feature-1": ()}
+
     monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(
+        router_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
 
     response = client.get("/v1/admin/features/feature-1")
 
@@ -345,12 +360,14 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
     body = response.json()
     assert body["data"]["feature"]["feature_id"] == "feature-1"
     assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
+    assert body["data"]["sources"][0]["source_entity_key"] == "se-feature-1"
     assert body["data"]["sources"][0]["raw_data"] == {"id": "sr-feature-1"}
     assert body["data"]["issues"][0]["status"] == "open"
     assert body["data"]["overrides"][0]["field_path"] == "status"
     assert body["data"]["versions"][0]["change_kind"] == "load"
     assert body["data"]["change_requests"][0]["status"] == "applied"
     assert body["data"]["files"][0]["role"] == "primary"
+    assert body["data"]["curations"] == []
 
 
 @pytest.mark.unit

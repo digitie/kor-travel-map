@@ -1,4 +1,4 @@
-"""``GET /categories`` — PlaceCategory 정적 카탈로그(144건) HTTP 표면 (T-213f).
+"""``GET /categories`` — PlaceCategory 정적 카탈로그(145건) HTTP 표면 (T-213f).
 
 ``kortravelmap.category`` 카탈로그(ADR-023/027)를 public/admin frontend가 런타임에
 받을 수 있게 노출한다. 정적 카탈로그는 immutable이라 모듈 로드 시 1회 구성한다
@@ -98,7 +98,7 @@ _STATIC_CATEGORIES: tuple[CategorySummary, ...] = tuple(
 @router.get(
     "/categories",
     response_model=CategoriesResponse,
-    summary="PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포)",
+    summary="PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포)",
 )
 async def list_categories(
     session: Annotated[AsyncSession, Depends(get_session)],

@@ -1,10 +1,10 @@
-"""``kortravelmap.category`` — PlaceCategoryCode 카탈로그 144건 (ADR-023 + 027).
+"""``kortravelmap.category`` — PlaceCategoryCode 카탈로그 145건.
 
 본 모듈은 ``python-kraddr-base/src/kraddr/base/categories.py``에서 이전된
 카테고리 분류 체계를 제공한다. ADR-023에 따라 본 라이브러리로 이전, ADR-027
 에 따라 ``LODGING_MOUNTAIN_SHELTER`` Tier 2 + KNPS/KFS Tier 3 (3행) 추가.
 
-총 144건 (sentinel 1 + Tier 1 7 + Tier 2 34 + Tier 3 73 + Tier 4 29).
+총 145건 (sentinel 1 + Tier 1 7 + Tier 2 34 + Tier 3 74 + Tier 4 29).
 
 ADR 참조
 --------
@@ -65,7 +65,7 @@ __all__ = [
     # tier 표시명
     "PLACE_CATEGORY_TIER1_NAMES",
     "PLACE_CATEGORY_TIER2_NAMES_BY_TIER1",
-    # 카탈로그 (144건)
+    # 카탈로그 (145건)
     "PLACE_CATEGORY_DEFINITIONS",
     "PLACE_CATEGORY_BY_CODE",
     "PLACE_CATEGORY_CODES",

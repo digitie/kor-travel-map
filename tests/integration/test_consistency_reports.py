@@ -1,7 +1,7 @@
 """``test_consistency_reports`` — ADR-033 F1~F8 정합성 검사 (testcontainers).
 
 ``run_consistency_checks``를 실 PostGIS(migrated_session, alembic head)에서 돌려
-F1(orphan source_record)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
+F1(orphan source entity)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
 feature_consistency_reports`` 영속화를 검증한다. F3는 STORED generated column이라
 정상 데이터에서 위반 0건이어야 함을 확인한다. F5는 provider sync last_success SLA,
 F6는 같은 요일 영업시간 period에서 open.time > close.time인 경우만 잡는다. F7은
@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra.consistency import FileObjectRef, run_consistency_checks
-from kortravelmap.infra.models import FeatureRow, SourceRecordRow
+from kortravelmap.infra.models import FeatureRow, SourceEntityRow, SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,46 @@ def _clean_place(feature_id: str) -> FeatureRow:
     )
 
 
+async def _seed_source_entity_record(
+    session: AsyncSession,
+    *,
+    entity_key: str,
+    record_key: str,
+    provider: str,
+    dataset_key: str,
+    entity_type: str,
+    entity_id: str,
+    raw_payload_hash: str,
+) -> None:
+    entity = SourceEntityRow(
+        source_entity_key=entity_key,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=entity_id,
+        current_source_record_key=None,
+        first_seen_at=_FETCHED,
+        last_seen_at=_FETCHED,
+    )
+    session.add(entity)
+    await session.flush()
+    session.add(
+        SourceRecordRow(
+            source_record_key=record_key,
+            source_entity_key=entity_key,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            raw_payload_hash=raw_payload_hash,
+            fetched_at=_FETCHED,
+        )
+    )
+    await session.flush()
+    entity.current_source_record_key = record_key
+    await session.flush()
+
+
 async def test_f1_f2_detected_and_report_persisted(
     migrated_session: AsyncSession,
 ) -> None:
@@ -59,16 +99,17 @@ async def test_f1_f2_detected_and_report_persisted(
         )
     )
 
-    # F1 위반 — source_links 없는 orphan source_record
+    # F1 위반 — source_links 없는 orphan source entity
     migrated_session.add(
-        SourceRecordRow(
-            source_record_key="orphan-sr-1",
+        SourceEntityRow(
+            source_entity_key="orphan-se-1",
             provider="datagokr",
             dataset_key="cultural_festivals",
             source_entity_type="festival",
             source_entity_id="ORPHAN-1",
-            raw_payload_hash="deadbeef",
-            fetched_at=_FETCHED,
+            current_source_record_key=None,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
         )
     )
     await migrated_session.flush()
@@ -79,7 +120,7 @@ async def test_f1_f2_detected_and_report_persisted(
 
     by_code = {c.code: c for c in report.cases}
     assert by_code["F1"].count >= 1
-    assert "orphan-sr-1" in by_code["F1"].sample_ids
+    assert "orphan-se-1" in by_code["F1"].sample_ids
     assert by_code["F2"].count >= 1
     assert "f2-violation" in by_code["F2"].sample_ids
     # F3는 generated column이라 정상 데이터에서 위반 없음.
@@ -103,24 +144,23 @@ async def test_f1_f2_detected_and_report_persisted(
 async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
     # 정상 feature + 그에 연결된 source_record (orphan 아님)
     migrated_session.add(_clean_place("clean-2"))
-    migrated_session.add(
-        SourceRecordRow(
-            source_record_key="linked-sr-1",
-            provider="datagokr",
-            dataset_key="cultural_festivals",
-            source_entity_type="festival",
-            source_entity_id="LINKED-1",
-            raw_payload_hash="cafef00d",
-            fetched_at=_FETCHED,
-        )
+    await _seed_source_entity_record(
+        migrated_session,
+        entity_key="linked-se-1",
+        record_key="linked-sr-1",
+        provider="datagokr",
+        dataset_key="cultural_festivals",
+        entity_type="festival",
+        entity_id="LINKED-1",
+        raw_payload_hash="cafef00d",
     )
     await migrated_session.flush()
     await migrated_session.execute(
         text(
             "INSERT INTO provider_sync.source_links "
-            "(feature_id, source_record_key, source_role, match_method, "
+            "(feature_id, source_entity_key, source_role, match_method, "
             " confidence, is_primary_source) "
-            "VALUES ('clean-2','linked-sr-1','primary','exact',100,true)"
+            "VALUES ('clean-2','linked-se-1','primary','exact',100,true)"
         )
     )
     await migrated_session.flush()
@@ -199,14 +239,15 @@ async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> 
     # F4 WARN + F1 ERROR 공존 → severity_max는 ERROR(F4가 ERROR를 가리지 않음).
     await _seed_pending_dedup(migrated_session, 3)
     migrated_session.add(
-        SourceRecordRow(
-            source_record_key="f4-orphan",
+        SourceEntityRow(
+            source_entity_key="f4-orphan",
             provider="datagokr",
             dataset_key="d",
             source_entity_type="t",
             source_entity_id="o1",
-            raw_payload_hash="h",
-            fetched_at=_FETCHED,
+            current_source_record_key=None,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
         )
     )
     await migrated_session.flush()
@@ -342,26 +383,26 @@ async def _seed_feature_with_primary_source(
         )
     )
     source_record_key = f"sr-{feature_id}"
-    session.add(
-        SourceRecordRow(
-            source_record_key=source_record_key,
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type="place",
-            source_entity_id=feature_id,
-            raw_payload_hash=f"hash-{feature_id}",
-            fetched_at=_FETCHED,
-        )
+    source_entity_key = f"se-{feature_id}"
+    await _seed_source_entity_record(
+        session,
+        entity_key=source_entity_key,
+        record_key=source_record_key,
+        provider=provider,
+        dataset_key=dataset_key,
+        entity_type="place",
+        entity_id=feature_id,
+        raw_payload_hash=f"hash-{feature_id}",
     )
     await session.flush()
     await session.execute(
         text(
             "INSERT INTO provider_sync.source_links "
-            "(feature_id, source_record_key, source_role, match_method, "
+            "(feature_id, source_entity_key, source_role, match_method, "
             " confidence, is_primary_source) "
-            "VALUES (:feature_id, :source_record_key, 'primary', 'exact', 100, true)"
+            "VALUES (:feature_id, :source_entity_key, 'primary', 'exact', 100, true)"
         ),
-        {"feature_id": feature_id, "source_record_key": source_record_key},
+        {"feature_id": feature_id, "source_entity_key": source_entity_key},
     )
     await session.flush()
 

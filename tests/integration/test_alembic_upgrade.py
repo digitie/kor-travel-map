@@ -185,7 +185,7 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
 async def test_alembic_creates_source_tables(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """0002 revision이 source_records / source_links / provider_sync_state 생성."""
+    """provider sync의 entity / observation / link / cursor 테이블을 생성한다."""
     async with pg_engine_with_migrations.connect() as conn:
         result = await conn.execute(
             text(
@@ -195,7 +195,12 @@ async def test_alembic_creates_source_tables(
             )
         )
         tables = [row[0] for row in result]
-    assert tables == ["provider_sync_state", "source_links", "source_records"]
+    assert tables == [
+        "provider_sync_state",
+        "source_entities",
+        "source_links",
+        "source_records",
+    ]
 
 
 async def test_alembic_features_indexes_exist(

@@ -186,13 +186,30 @@ async def test_kma_weather_alert_history_reads_source_records(
     await migrated_session.execute(
         text(
             """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider, dataset_key, source_entity_type,
+                source_entity_id, first_seen_at, last_seen_at
+            )
+            VALUES (
+                'se_kma_alert_1', 'python-kma-api', 'kma_weather_alerts',
+                'weather_alert', '11B10101::호우', :fetched_at, :fetched_at
+            )
+            """
+        ),
+        {"fetched_at": _T1},
+    )
+    await migrated_session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_records (
-                source_record_key, provider, dataset_key, source_entity_type,
+                source_record_key, source_entity_key,
+                provider, dataset_key, source_entity_type,
                 source_entity_id, raw_name, raw_address, raw_data,
                 raw_payload_hash, fetched_at
             )
             VALUES (
-                'sr_kma_alert_1', 'python-kma-api', 'kma_weather_alerts',
+                'sr_kma_alert_1', 'se_kma_alert_1',
+                'python-kma-api', 'kma_weather_alerts',
                 'weather_alert', '11B10101::호우', '호우주의보', '서울특별시',
                 CAST(:raw_data AS jsonb), 'hash-alert-1', :fetched_at
             )
@@ -203,12 +220,21 @@ async def test_kma_weather_alert_history_reads_source_records(
     await migrated_session.execute(
         text(
             """
+            UPDATE provider_sync.source_entities
+            SET current_source_record_key = 'sr_kma_alert_1'
+            WHERE source_entity_key = 'se_kma_alert_1'
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_links (
-                feature_id, source_record_key, source_role, match_method,
+                feature_id, source_entity_key, source_role, match_method,
                 confidence, is_primary_source
             )
             VALUES (
-                'f_notice_weather', 'sr_kma_alert_1', 'primary',
+                'f_notice_weather', 'se_kma_alert_1', 'primary',
                 'natural_key', 100, true
             )
             """

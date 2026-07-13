@@ -118,6 +118,17 @@ function ariaSort(sorted: false | "asc" | "desc"): "ascending" | "descending" | 
   return "none"
 }
 
+function handleClickableRowKeyDown<TData>(
+  event: React.KeyboardEvent<HTMLTableRowElement>,
+  row: TData,
+  onRowClick: (row: TData) => void,
+) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== "Enter" && event.key !== " ") return
+  event.preventDefault()
+  onRowClick(row)
+}
+
 function selectionColumn<TData>(): ColumnDef<TData, unknown> {
   return {
     id: "__select__",
@@ -263,8 +274,18 @@ export function DataTable<TData>({
                         ? "selected"
                         : undefined
                     }
-                    className={onRowClick ? "cursor-pointer" : undefined}
+                    className={
+                      onRowClick
+                        ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+                        : undefined
+                    }
+                    tabIndex={onRowClick ? 0 : undefined}
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                    onKeyDown={
+                      onRowClick
+                        ? (event) => handleClickableRowKeyDown(event, row.original, onRowClick)
+                        : undefined
+                    }
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
@@ -444,10 +465,17 @@ function VirtualizedTable<TData>({
                   }
                   className={cn(
                     "absolute flex w-full border-b border-surface-muted transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
-                    onRowClick && "cursor-pointer",
+                    onRowClick &&
+                      "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none",
                   )}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (event) => handleClickableRowKeyDown(event, row.original, onRowClick)
+                      : undefined
+                  }
                 >
                   {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
                     <td

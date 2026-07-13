@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "generated_on": "2026-07-13",
+  "encoding": "UTF-8",
+  "delimiter": ",",
+  "csv_columns": [
+    "collection_key",
+    "theme_slug",
+    "theme_name",
+    "theme_group",
+    "title",
+    "edition_key",
+    "subcourse",
+    "provider",
+    "dataset_key",
+    "source_name",
+    "source_url",
+    "source_item_key",
+    "official_ordinal",
+    "place_name",
+    "address_hint",
+    "feature_id",
+    "sort_order",
+    "item_title",
+    "item_summary",
+    "metadata_json"
+  ],
+  "notes": [
+    "manifest.json 자체는 자기참조 해시 문제를 피하기 위해 files 목록에서 제외한다.",
+    "expected_rows는 복합 공식 항목의 기존 Feature 다중 연결을 펼친 membership 행 수다.",
+    "metadata_json.feature_match_confidence/reasons가 운영 DB read-only 매칭 근거를 보존한다.",
+    "feature_id가 빈 행은 공식 항목을 DB에 미연결 상태로 보존한다."
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "kind": "documentation",
+      "expected_rows": null,
+      "source_name": "저장소 큐레이션 데이터 설명",
+      "source_url": null,
+      "sha256": "5e03a88286a00e172818c68f32032b80ac1bacd201740a3381d1c25d9281da97"
+    },
+    {
+      "path": "template.csv",
+      "kind": "upload_template",
+      "expected_rows": 0,
+      "source_name": "큐레이션 CSV 업로드 계약",
+      "source_url": null,
+      "sha256": "388136bf037a5ceaed5ca05841be4a6d5af1bbf03852f9b548e48800b0cde4d6"
+    },
+    {
+      "path": "korean-tourism-100-2023-2024.csv",
+      "kind": "official_seed",
+      "expected_rows": 110,
+      "official_items": 100,
+      "linked_rows": 50,
+      "unresolved_rows": 60,
+      "source_name": "문화체육관광부·한국관광공사 2023~2024 한국관광 100선",
+      "source_url": "https://www.mcst.go.kr/site/s_notice/press/pressView.jsp?pSeq=19905",
+      "source_download_url": "https://mcst.go.kr/servlets/eduport/front/upload/UplDownloadFile?pFileName=%281213%29%EB%AC%B8%EC%B2%B4%EB%B6%80%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C-2023-2024_%ED%95%9C%EA%B5%AD%EA%B4%80%EA%B4%91_100%EC%84%A0_%EB%B0%9C%ED%91%9C.pdf&pPath=0302000000&pRealName=20221213092808809385740974_PRESS20221213092808849370.pdf",
+      "sha256": "f917339c81190a2380f46de751ff31ce4bfec5bd025efe01315162c6df77770d"
+    },
+    {
+      "path": "korean-tourism-100-2025-2026.csv",
+      "kind": "official_seed",
+      "expected_rows": 114,
+      "official_items": 100,
+      "linked_rows": 56,
+      "unresolved_rows": 58,
+      "source_name": "문화체육관광부·한국관광공사 2025~2026 한국관광 100선",
+      "source_url": "https://korean.visitkorea.or.kr/other/other_list.do?otdid=622bcd99-84fa-11e8-8165-020027310001",
+      "source_download_url": "https://www.mcst.go.kr/servlets/eduport/front/upload/UplDownloadFile?pFileName=%280120%29%EB%AC%B8%EC%B2%B4%EB%B6%80%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C-2025-2026_%ED%95%9C%EA%B5%AD%EA%B4%80%EA%B4%91_100%EC%84%A0_%EB%B0%9C%ED%91%9C.pdf&pPath=0302000000&pRealName=20250121091819797522427349_PRESS20250121091819798355.pdf",
+      "sha256": "da133b8dea5b9e5ac4d8927b5c492c1ce43636eecc0b22a498da18e390a66de7"
+    },
+    {
+      "path": "heritage-visit-campaign.csv",
+      "kind": "official_seed",
+      "expected_rows": 85,
+      "official_items": 85,
+      "linked_rows": 67,
+      "unresolved_rows": 18,
+      "source_name": "국가유산진흥원 국가유산 방문 캠페인",
+      "source_url": "https://www.kh.or.kr/visit/kor/html/static/10way.do?key=2407110024",
+      "machine_source_pattern": "https://www.kh.or.kr/visit/kor/road/position/{route_number}/list.do",
+      "sha256": "c18763f3be88e4b762e8394786e2ca123b179c4599e6aa33955559053a05b462"
+    },
+    {
+      "path": "arboretum-garden-stamp-tour-2026.csv",
+      "kind": "official_seed",
+      "expected_rows": 72,
+      "official_items": 72,
+      "linked_rows": 42,
+      "unresolved_rows": 30,
+      "source_name": "한국수목원정원관리원 2026 수목원·정원 스탬프투어 아름다운 동행",
+      "source_url": "https://www.koagi.or.kr/www/user/bbs/BD_selectBbs.do?q_bbsDocNo=A00000000604421koagi&q_bbsSn=1001",
+      "source_download_url": "https://www.koagi.or.kr/component/file/ND_fileDownload.do?q_fileSn=32329&q_fileId=80a900dcedfb41a2b168a164d1e2059c2",
+      "sha256": "4467ea2436a8cb423c8bf4e3f6b18eaadb49fadb6d31733f4f11454dffae57c4"
+    },
+    {
+      "path": "lighthouse-stamp-tour.csv",
+      "kind": "official_seed",
+      "expected_rows": 105,
+      "official_items": 105,
+      "linked_rows": 2,
+      "unresolved_rows": 103,
+      "source_name": "해양수산부·한국항로표지기술원 등대 스탬프투어",
+      "source_url": "https://www.lighthouse-museum.or.kr/sea/passport",
+      "theme_source_urls": [
+        "https://www.lighthouse-museum.or.kr/sea/passport/but/list",
+        "https://www.lighthouse-museum.or.kr/sea/passport/his/list",
+        "https://www.lighthouse-museum.or.kr/sea/passport/fun/list",
+        "https://www.lighthouse-museum.or.kr/sea/passport/rich/list",
+        "https://www.lighthouse-museum.or.kr/sea/passport/heal/list",
+        "https://www.lighthouse-museum.or.kr/sea/passport/sunrise/list"
+      ],
+      "sha256": "9e0b38b74e2fd390d4ba4f92371c83006f6ddf92a6c93c7554ec81bdd6a18938"
+    }
+  ]
+}

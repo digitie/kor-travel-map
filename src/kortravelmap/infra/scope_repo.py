@@ -274,8 +274,11 @@ FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
  AND sl.is_primary_source
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 GROUP BY sr.provider, sr.dataset_key
 ORDER BY sr.provider, sr.dataset_key
 """
@@ -355,8 +358,11 @@ FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
  AND sl.is_primary_source
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 GROUP BY sr.provider, sr.dataset_key
 ORDER BY sr.provider, sr.dataset_key
 """
@@ -414,8 +420,11 @@ FROM matched AS m
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = m.feature_id
  AND sl.is_primary_source
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 GROUP BY sr.provider, sr.dataset_key
 ORDER BY sr.provider, sr.dataset_key
 """
@@ -425,8 +434,11 @@ SELECT DISTINCT f.feature_id, f.sigungu_code
 FROM feature.features AS f
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE f.deleted_at IS NULL
   AND sl.is_primary_source
   AND sr.provider = :provider
@@ -440,8 +452,11 @@ SELECT count(DISTINCT f.feature_id)::int
 FROM feature.features AS f
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE f.deleted_at IS NULL
   AND sl.is_primary_source
   AND sr.provider = :provider
@@ -453,8 +468,11 @@ SELECT DISTINCT f.sigungu_code
 FROM feature.features AS f
 JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE f.deleted_at IS NULL
   AND f.sigungu_code IS NOT NULL
   AND sl.is_primary_source
@@ -469,8 +487,11 @@ FROM provider_sync.source_links AS sl
 JOIN feature.features AS f
   ON f.feature_id = sl.feature_id
  AND f.deleted_at IS NULL
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE sl.is_primary_source
   AND sl.feature_id = ANY(CAST(:feature_ids AS text[]))
 GROUP BY sr.provider, sr.dataset_key
@@ -547,8 +568,11 @@ JOIN feature.features AS f
 LEFT JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
  AND sl.is_primary_source
+LEFT JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 LEFT JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 ORDER BY t.target_id, distance_m NULLS LAST, f.feature_id
 """
 
@@ -571,8 +595,11 @@ JOIN feature.features AS f
 LEFT JOIN provider_sync.source_links AS sl
   ON sl.feature_id = f.feature_id
  AND sl.is_primary_source
+LEFT JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 LEFT JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE t.target_id::text = CAST(:target_id AS text)
 ORDER BY f.feature_id
 """

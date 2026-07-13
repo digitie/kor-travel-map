@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from kortravelmap.infra.batch_dag import run_batch_dag_consistency_gate
 from kortravelmap.infra.jobs_repo import finish_import_job, start_import_job
-from kortravelmap.infra.models import SourceRecordRow
+from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,8 +68,22 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
     child = await start_import_job(migrated_session, kind="feature_event_source_load")
     child = await finish_import_job(migrated_session, child.job_id, status="done") or child
     migrated_session.add(
+        SourceEntityRow(
+            source_entity_key="batch-gate-orphan-entity",
+            provider="pytest",
+            dataset_key="batch_gate",
+            source_entity_type="fixture",
+            source_entity_id="orphan-1",
+            current_source_record_key=None,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
+        )
+    )
+    await migrated_session.flush()
+    migrated_session.add(
         SourceRecordRow(
             source_record_key="batch-gate-orphan",
+            source_entity_key="batch-gate-orphan-entity",
             provider="pytest",
             dataset_key="batch_gate",
             source_entity_type="fixture",
@@ -78,6 +92,10 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
             fetched_at=_FETCHED,
         )
     )
+    await migrated_session.flush()
+    entity = await migrated_session.get(SourceEntityRow, "batch-gate-orphan-entity")
+    assert entity is not None
+    entity.current_source_record_key = "batch-gate-orphan"
     await migrated_session.flush()
 
     result = await run_batch_dag_consistency_gate(

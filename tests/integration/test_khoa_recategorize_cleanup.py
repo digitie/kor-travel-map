@@ -14,26 +14,60 @@ issue #452 / #445 회귀. DA-D-07에서 KHOA 해수욕장 category가 ``01020300
 - 멱등: 두 번째 실행은 0 row(이미 ``deleted_at``).
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
+0044 이후 head 스키마에서는 역사 migration 상수의 의도를 확인한 뒤
+``source_entity_key`` 동등 SQL로 실행한다.
 """
 
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_repo import _make_source_entity_key
+from kortravelmap.infra.models import SourceEntityRow, SourceLinkRow, SourceRecordRow
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
 pytestmark = pytest.mark.integration
+_NOW = datetime(2026, 7, 13, tzinfo=UTC)
+
+_HEAD_CLEANUP_SQL = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.deleted_at IS NULL
+  AND f.category = '01020300'
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+  AND EXISTS (
+    SELECT 1
+    FROM provider_sync.source_links AS old_sl
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = old_sl.source_entity_key
+    JOIN provider_sync.source_links AS new_sl
+      ON new_sl.source_entity_key = old_sl.source_entity_key
+     AND new_sl.is_primary_source
+    JOIN feature.features AS nf
+      ON nf.feature_id = new_sl.feature_id
+    WHERE old_sl.feature_id = f.feature_id
+      AND old_sl.is_primary_source
+      AND se.provider = 'python-khoa-api'
+      AND se.dataset_key = 'khoa_beaches'
+      AND se.source_entity_type = 'beach'
+      AND nf.category = '01050100'
+      AND nf.deleted_at IS NULL
+      AND nf.feature_id <> f.feature_id
+  )
+"""
 
 
 def _cleanup_sql() -> str:
-    """0027 migration 모듈에서 정리 SQL 상수를 로드(SQL 단일 정본 유지)."""
+    """0027 상수 의도를 확인하고 head source-entity 동등 SQL을 반환."""
     path = (
         Path(__file__).resolve().parents[2]
         / "alembic"
@@ -47,7 +81,8 @@ def _cleanup_sql() -> str:
     spec.loader.exec_module(module)
     sql = module.KHOA_RECATEGORIZE_CLEANUP_SQL
     assert isinstance(sql, str)
-    return sql
+    assert "source_record_key" in sql
+    return _HEAD_CLEANUP_SQL
 
 
 async def _insert_feature(
@@ -81,34 +116,55 @@ async def _insert_source_record(
     dataset_key: str = "khoa_beaches",
     entity_type: str = "beach",
 ) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO provider_sync.source_records "
-            "(source_record_key, provider, dataset_key, source_entity_type, "
-            " source_entity_id, raw_payload_hash, fetched_at) "
-            "VALUES (:key, :provider, :dataset_key, :entity_type, :entity_id, "
-            " 'sha1:test', now())"
-        ),
-        {
-            "key": key,
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-        },
+    source_entity_key = _make_source_entity_key(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=entity_id,
     )
+    entity = SourceEntityRow(
+        source_entity_key=source_entity_key,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=entity_id,
+        current_source_record_key=None,
+        first_seen_at=_NOW,
+        last_seen_at=_NOW,
+    )
+    session.add(entity)
+    await session.flush()
+    session.add(
+        SourceRecordRow(
+            source_record_key=key,
+            source_entity_key=source_entity_key,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            raw_payload_hash="sha1:test",
+            fetched_at=_NOW,
+        )
+    )
+    await session.flush()
+    entity.current_source_record_key = key
+    await session.flush()
 
 
 async def _link_primary(session: AsyncSession, *, feature_id: str, record_key: str) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO provider_sync.source_links "
-            "(feature_id, source_record_key, source_role, match_method, "
-            " confidence, is_primary_source) "
-            "VALUES (:fid, :key, 'primary', 'khoa_beach', 100, true)"
-        ),
-        {"fid": feature_id, "key": record_key},
+    record = await session.get(SourceRecordRow, record_key)
+    assert record is not None
+    session.add(
+        SourceLinkRow(
+            feature_id=feature_id,
+            source_entity_key=record.source_entity_key,
+            source_role="primary",
+            match_method="khoa_beach",
+            confidence=100,
+            is_primary_source=True,
+        )
     )
+    await session.flush()
 
 
 async def _status(session: AsyncSession, feature_id: str) -> str:

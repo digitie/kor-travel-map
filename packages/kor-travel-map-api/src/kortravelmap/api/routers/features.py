@@ -25,7 +25,13 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from kortravelmap.infra import feature_repo, price_repo, weather_repo
+from kortravelmap.infra import (
+    curation_repo,
+    feature_repo,
+    observation_repo,
+    price_repo,
+    weather_repo,
+)
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
@@ -36,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.api.auth import require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.routers.curations import CurationItemView
 
 __all__ = [
     "router",
@@ -53,6 +60,7 @@ __all__ = [
 
 router = APIRouter(prefix="/features", tags=["features"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
+_PUBLICLY_HIDDEN_FEATURE_STATUSES = frozenset({"hidden", "deleted"})
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -141,6 +149,39 @@ class FeaturesInBboxResponse(BaseModel):
     meta: Meta
 
 
+class FeatureObservationView(BaseModel):
+    """한 제공기관 entity의 현재 또는 과거 payload 관측값."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    source_entity_key: str
+    provider: str
+    dataset_key: str
+    source_entity_type: str
+    source_entity_id: str
+    first_seen_at: datetime
+    entity_last_seen_at: datetime
+    source_record_key: str
+    source_version: str | None
+    raw_name: str | None
+    raw_address: str | None
+    raw_longitude: float | None
+    raw_latitude: float | None
+    raw_data: dict[str, Any]
+    raw_payload_hash: str
+    fetched_at: datetime
+    imported_at: datetime
+    record_last_seen_at: datetime
+    expires_at: datetime | None
+    source_role: str
+    match_method: str
+    confidence: int
+    is_primary_source: bool
+    linked_at: datetime
+    is_current: bool
+
+
 class FeatureDetailResponse(BaseModel):
     """feature 단건 상세 data payload."""
 
@@ -166,6 +207,31 @@ class FeatureDetailResponse(BaseModel):
     marker_color: str | None = None
     status: str
     updated_at: datetime
+    curations: list[CurationItemView] = Field(
+        default_factory=list,
+        description="이 Feature가 속한 공개 큐레이션 membership 전부.",
+    )
+    observations: list[FeatureObservationView] = Field(
+        default_factory=list,
+        description="이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.",
+    )
+
+
+class FeatureObservationHistoryData(BaseModel):
+    """provider entity별 immutable payload history data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FeatureObservationView]
+
+
+class FeatureObservationHistoryResponse(BaseModel):
+    """관측 payload history cursor 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureObservationHistoryData
+    meta: Meta
 
 
 ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
@@ -378,9 +444,7 @@ def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
     )
 
 
-def _resolve_cluster_unit(
-    cluster_unit: ClusterUnit | None, zoom: int | None
-) -> ClusterUnit | None:
+def _resolve_cluster_unit(cluster_unit: ClusterUnit | None, zoom: int | None) -> ClusterUnit | None:
     """명시 ``cluster_unit``이 우선. 없으면 ``zoom``으로 유도(T-213c).
 
     zoom ≤7=sido / ≤10=sigungu / ≤13=eupmyeondong / ≥14=개별 feature(None).
@@ -418,6 +482,24 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         status=row["status"],
         updated_at=row["updated_at"],
     )
+
+
+def _is_public_feature(row: dict[str, Any] | None) -> bool:
+    return bool(
+        row is not None
+        and row.get("deleted_at") is None
+        and row.get("status") not in _PUBLICLY_HIDDEN_FEATURE_STATUSES
+    )
+
+
+def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
+    return CurationItemView.model_validate(row, from_attributes=True)
+
+
+def _observation_view(
+    row: observation_repo.FeatureObservation,
+) -> FeatureObservationView:
+    return FeatureObservationView.model_validate(row, from_attributes=True)
 
 
 def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
@@ -648,12 +730,7 @@ async def search_public_features(
             detail="bbox는 min_lon/min_lat/max_lon/max_lat 4개를 모두 지정해야 합니다.",
         )
     bbox: tuple[float, float, float, float] | None = None
-    if (
-        min_lon is not None
-        and min_lat is not None
-        and max_lon is not None
-        and max_lat is not None
-    ):
+    if min_lon is not None and min_lat is not None and max_lon is not None and max_lat is not None:
         bbox = (min_lon, min_lat, max_lon, max_lat)
     try:
         page = await feature_repo.search_features(
@@ -875,14 +952,72 @@ async def get_feature(
 ) -> FeatureDetailEnvelopeResponse:
     started_at = perf_counter()
     row = await feature_repo.get_feature_row(session, feature_id)
-    if row is None or row["deleted_at"] is not None:
+    if not _is_public_feature(row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
+    assert row is not None
+    curations = await curation_repo.list_curation_items_by_feature_ids(
+        session, feature_ids=[feature_id], public_only=True
+    )
+    observations = await observation_repo.get_current_observations(session, feature_id)
+    detail = _detail_from_row(row).model_copy(
+        update={
+            "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
+            "observations": [_observation_view(item) for item in observations],
+        }
+    )
     return FeatureDetailEnvelopeResponse(
-        data=_detail_from_row(row),
+        data=detail,
         meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/observations/{source_entity_key}/history",
+    response_model=FeatureObservationHistoryResponse,
+    summary="feature 제공기관 payload 관측 이력",
+    responses={
+        404: {"description": "공개 feature 또는 observation 없음"},
+        422: {"description": "cursor 또는 page_size 오류"},
+    },
+)
+async def get_feature_observation_history(
+    request: Request,
+    feature_id: str,
+    source_entity_key: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> FeatureObservationHistoryResponse:
+    started_at = perf_counter()
+    row = await feature_repo.get_feature_row(session, feature_id)
+    if not _is_public_feature(row):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    try:
+        page = await observation_repo.get_observation_history(
+            session,
+            feature_id=feature_id,
+            source_entity_key=source_entity_key,
+            cursor=cursor,
+            limit=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not page.items and cursor is None:
+        raise HTTPException(status_code=404, detail="feature observation 없음")
+    return FeatureObservationHistoryResponse(
+        data=FeatureObservationHistoryData(items=[_observation_view(item) for item in page.items]),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
+        ),
     )
 
 
@@ -941,9 +1076,7 @@ async def get_feature_weather(
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
-    card = await weather_repo.build_weather_card(
-        session, feature_id=feature_id, asof=asof
-    )
+    card = await weather_repo.build_weather_card(session, feature_id=feature_id, asof=asof)
     metrics = [
         WeatherMetricOut(
             forecast_style=m.forecast_style,
@@ -994,11 +1127,12 @@ async def get_area_contained_features(
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
     area_row = await feature_repo.get_feature_row(session, feature_id)
-    if area_row is None or area_row["deleted_at"] is not None:
+    if not _is_public_feature(area_row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
+    assert area_row is not None
     if area_row["kind"] != "area":
         raise HTTPException(
             status_code=422,
@@ -1073,8 +1207,21 @@ async def get_features_batch(
     started_at = perf_counter()
     feature_ids = list(dict.fromkeys(body.feature_ids))
     rows = await feature_repo.get_feature_rows_by_ids(session, feature_ids)
+    curations = await curation_repo.list_curation_items_by_feature_ids(
+        session, feature_ids=feature_ids, public_only=True
+    )
+    observations = await observation_repo.get_current_observations_by_feature_ids(
+        session, feature_ids
+    )
     items = {
-        feature_id: _detail_from_row(rows[feature_id])
+        feature_id: _detail_from_row(rows[feature_id]).model_copy(
+            update={
+                "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
+                "observations": [
+                    _observation_view(item) for item in observations.get(feature_id, ())
+                ],
+            }
+        )
         for feature_id in feature_ids
         if feature_id in rows
     }

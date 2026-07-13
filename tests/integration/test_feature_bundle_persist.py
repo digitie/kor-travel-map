@@ -2,11 +2,10 @@
 
 provider 변환 결과(`FeatureBundle`)를 `infra/models` ORM(features/source_records/
 source_links)으로 적재한 뒤 재조회해 DB 계약을 검증한다 (사용자 지시 통합 검증
-#116). 실 적재 경로 `feature_repo.py`는 Sprint 3 예정이므로 본 테스트가 DTO→DB
-round-trip을 선행 검증한다.
+#116). 실 적재 경로와 독립적으로 DTO→DB round-trip을 검증한다.
 
 검증: ① JSONB(detail/address) round-trip ② STORED generated ``coord_5179``
-(= ST_Transform(coord,5179), ADR-012) ③ source_link FK(feature/source_record) 정합.
+(= ST_Transform(coord,5179), ADR-012) ③ source_link FK(feature/source_entity) 정합.
 """
 
 from __future__ import annotations
@@ -18,7 +17,13 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import select, text
 
-from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.feature_repo import _make_source_entity_key
+from kortravelmap.infra.models import (
+    FeatureRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
@@ -90,6 +95,12 @@ async def test_feature_bundle_persists_and_roundtrips(
         bundle.source_link,
     )
     assert feature.coord is not None  # 좌표 있는 케이스
+    source_entity_key = _make_source_entity_key(
+        provider=source_record.provider,
+        dataset_key=source_record.dataset_key,
+        source_entity_type=source_record.source_entity_type,
+        source_entity_id=source_record.source_entity_id,
+    )
 
     feature_row = FeatureRow(
         feature_id=feature.feature_id,
@@ -104,8 +115,19 @@ async def test_feature_bundle_persists_and_roundtrips(
         marker_icon=feature.marker_icon,
         marker_color=feature.marker_color,
     )
+    source_entity_row = SourceEntityRow(
+        source_entity_key=source_entity_key,
+        provider=source_record.provider,
+        dataset_key=source_record.dataset_key,
+        source_entity_type=source_record.source_entity_type,
+        source_entity_id=source_record.source_entity_id,
+        current_source_record_key=None,
+        first_seen_at=source_record.fetched_at,
+        last_seen_at=source_record.fetched_at,
+    )
     source_record_row = SourceRecordRow(
         source_record_key=source_record.source_record_key,
+        source_entity_key=source_entity_key,
         provider=source_record.provider,
         dataset_key=source_record.dataset_key,
         source_entity_type=source_record.source_entity_type,
@@ -115,12 +137,16 @@ async def test_feature_bundle_persists_and_roundtrips(
         raw_data=source_record.raw_data,
         fetched_at=source_record.fetched_at,
     )
-    migrated_session.add_all([feature_row, source_record_row])
+    migrated_session.add_all([feature_row, source_entity_row])
+    await migrated_session.flush()
+    migrated_session.add(source_record_row)
     await migrated_session.flush()  # features/source_records INSERT → coord_5179 계산
+    source_entity_row.current_source_record_key = source_record.source_record_key
+    await migrated_session.flush()
 
     source_link_row = SourceLinkRow(
         feature_id=source_link.feature_id,
-        source_record_key=source_link.source_record_key,
+        source_entity_key=source_entity_key,
         source_role=source_link.source_role.value,
         match_method=source_link.match_method,
         confidence=source_link.confidence,
@@ -163,5 +189,8 @@ async def test_feature_bundle_persists_and_roundtrips(
             )
         )
     ).scalar_one()
-    assert link.source_record_key == source_record.source_record_key
+    assert link.source_entity_key == source_entity_key
+    entity = await migrated_session.get(SourceEntityRow, source_entity_key)
+    assert entity is not None
+    assert entity.current_source_record_key == source_record.source_record_key
     assert link.is_primary_source is True

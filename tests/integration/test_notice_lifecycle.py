@@ -150,9 +150,14 @@ _LINEAGE = "2026.07.03::07:25:43::0550::부산방향::남제천(272.5k)::03"
 async def _seed_dup_lineage(
     session: AsyncSession,
 ) -> tuple[FeatureBundle, FeatureBundle]:
-    """같은 계보에 구세대/신세대 feature 2개를 심는다 (신세대가 latest)."""
+    """같은 계보의 서로 다른 entity 2개를 심는다 (신세대가 latest).
+
+    ADR-063 이후 같은 ``source_entity_id``의 payload 이력은 하나의 entity/current
+    관측으로 접힌다. 따라서 legacy identity 중복은 raw 계보 단서는 같되 entity
+    identity가 다른 두 source로 재현해야 한다.
+    """
     old_gen = _krex_notice_bundle(
-        source_entity_id=_LINEAGE,
+        source_entity_id=f"legacy::{_LINEAGE}",
         raw_data={**_CLUES, "gen": "old"},
         feature_suffix="oldgen",
     )
@@ -161,6 +166,7 @@ async def _seed_dup_lineage(
         raw_data={**_CLUES, "gen": "new"},
     )
     assert old_gen.feature.feature_id != new_gen.feature.feature_id
+    assert old_gen.source_record.source_entity_id != new_gen.source_record.source_entity_id
     await feature_repo.load_bundles(session, [old_gen, new_gen])
     await _pin_seen_at(session, old_gen.source_record.source_record_key, _NOW - timedelta(hours=2))
     await _pin_seen_at(session, new_gen.source_record.source_record_key, _NOW)

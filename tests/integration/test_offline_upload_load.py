@@ -51,8 +51,9 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED_AT = datetime(2026, 6, 3, 14, 0, tzinfo=_KST)
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
-    "provider_sync.source_links, ops.import_jobs, ops.offline_uploads "
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_records, provider_sync.source_links, "
+    "ops.import_jobs, ops.offline_uploads "
     "RESTART IDENTITY CASCADE"
 )
 
@@ -218,8 +219,10 @@ async def test_offline_upload_validate_then_load_csv(
                     "FROM feature.features AS f "
                     "JOIN provider_sync.source_links AS sl "
                     "  ON sl.feature_id = f.feature_id "
+                    "JOIN provider_sync.source_entities AS se "
+                    "  ON se.source_entity_key = sl.source_entity_key "
                     "JOIN provider_sync.source_records AS sr "
-                    "  ON sr.source_record_key = sl.source_record_key "
+                    "  ON sr.source_record_key = se.current_source_record_key "
                     "JOIN ops.offline_uploads AS ou ON ou.upload_id = :upload_id "
                     "WHERE sr.source_entity_id = :source_entity_id"
                 ),

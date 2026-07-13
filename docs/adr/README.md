@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-063.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-064.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -76,6 +76,7 @@
 | ADR-060 | Admin 로그인, frontend proxy, public API key | [060-admin-login-frontend-proxy-public-api-keys.md](060-admin-login-frontend-proxy-public-api-keys.md) |
 | ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
 | ADR-062 | 공개 Weather API와 3년 이력 보존 | [062-public-weather-api-three-year-history.md](062-public-weather-api-three-year-history.md) |
+| ADR-063 | Feature 관측과 큐레이션 collection 분리 | [063-feature-observations-curation-collections.md](063-feature-observations-curation-collections.md) |
 
 ## 새 ADR 작성 규약
 

@@ -61,16 +61,36 @@ async def _insert_feature(
 async def _insert_source_record(
     session: AsyncSession, *, key: str, payload_hash: str
 ) -> None:
+    entity_key = "se_khoa_beach_woljeongri"
+    await session.execute(
+        text(
+            "INSERT INTO provider_sync.source_entities "
+            "(source_entity_key, provider, dataset_key, source_entity_type, "
+            " source_entity_id, first_seen_at, last_seen_at) "
+            "VALUES (:entity_key, :provider, :dataset_key, :entity_type, "
+            " :entity_id, now(), now()) "
+            "ON CONFLICT (source_entity_key) DO UPDATE SET last_seen_at = now()"
+        ),
+        {
+            "entity_key": entity_key,
+            "provider": _PROVIDER,
+            "dataset_key": _DATASET,
+            "entity_type": _ENTITY_TYPE,
+            "entity_id": _ENTITY_ID,
+        },
+    )
     await session.execute(
         text(
             "INSERT INTO provider_sync.source_records "
-            "(source_record_key, provider, dataset_key, source_entity_type, "
+            "(source_record_key, source_entity_key, provider, dataset_key, "
+            " source_entity_type, "
             " source_entity_id, raw_payload_hash, raw_data, fetched_at) "
-            "VALUES (:key, :provider, :dataset_key, :entity_type, :entity_id, "
+            "VALUES (:key, :entity_key, :provider, :dataset_key, :entity_type, :entity_id, "
             " :payload_hash, :raw_data, now())"
         ),
         {
             "key": key,
+            "entity_key": entity_key,
             "provider": _PROVIDER,
             "dataset_key": _DATASET,
             "entity_type": _ENTITY_TYPE,
@@ -78,6 +98,14 @@ async def _insert_source_record(
             "payload_hash": payload_hash,
             "raw_data": f'{{"key": "{key}"}}',
         },
+    )
+    await session.execute(
+        text(
+            "UPDATE provider_sync.source_entities "
+            "SET current_source_record_key = :key "
+            "WHERE source_entity_key = :entity_key"
+        ),
+        {"key": key, "entity_key": entity_key},
     )
 
 
@@ -87,9 +115,10 @@ async def _link_primary(
     await session.execute(
         text(
             "INSERT INTO provider_sync.source_links "
-            "(feature_id, source_record_key, source_role, match_method, "
+            "(feature_id, source_entity_key, source_role, match_method, "
             " confidence, is_primary_source) "
-            "VALUES (:fid, :key, 'primary', 'khoa_beach', 100, true)"
+            "SELECT :fid, source_entity_key, 'primary', 'khoa_beach', 100, true "
+            "FROM provider_sync.source_records WHERE source_record_key = :key"
         ),
         {"fid": feature_id, "key": record_key},
     )

@@ -1,6 +1,6 @@
 # kor-travel-map REST API — 전 표면 카탈로그 + 정합성 표준
 
-> **상태**: 2026-06-16. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
+> **상태**: 2026-07-13. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
 > versioning 확장 + envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파
 > T-216a~g)을 얹은 기준선. **T-216a~g는 구현 완료**(런타임 envelope = 공유 `Meta`,
 > `page_size`+`cursor`, RFC7807 problem+json) — 아래 본문의 "🔁 변경"·"현재→목표" 표기는
@@ -59,7 +59,8 @@
 ### 1.3 인증 (ADR-005 / ADR-045 D-1, #314)
 - `POST /v1/features/batch`(service read): `ServiceToken`(`X-Kor-Travel-Map-Service-Token`, 미설정 시
   비강제, 상수시간) route-level gate. 나머지 `/v1/features/*` GET은 공용 read.
-- `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`: 공용 read, 앱 토큰 비강제(인프라 SSO).
+- `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`·`/v1/curations*`: 공용 read,
+  앱 토큰 비강제(인프라 SSO).
 - `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`: 인프라 SSO + IP allowlist. 파괴적 admin은
   `admin_destructive_enabled` kill-switch.
 
@@ -146,9 +147,21 @@ GET /v1/features/in-bounds              # clusters[](cluster_key=행정코드)/i
 GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
 GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
 GET  /v1/features/{feature_id}          # 단건 상세
+GET  /v1/features/{feature_id}/observations/{source_entity_key}/history
 GET  /v1/features/{feature_id}/weather  # 날씨 카드(metric + forecast_style)
 POST /v1/features/batch                 # 배치 조회 {feature_ids[]} cap≤200 → {found{},missing[]} (ServiceToken)
 ```
+- 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
+  `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
+  여러 `is_primary_source=true` 관측도 버리지 않는다. payload의 과거 version은
+  `/{feature_id}/observations/{source_entity_key}/history`에서 `page_size`(기본 50, 최대 200)+
+  `cursor`로 최신순 조회한다.
+- 관측 DTO는 entity/record 식별자, `raw_data`와 hash, 원천 이름·주소·좌표, entity/record
+  관측 시각, Feature link의 role·match method·confidence·primary 여부를 함께 반환한다.
+  history 정렬 키는 `record_last_seen_at DESC`, `fetched_at DESC`, `imported_at DESC`,
+  `source_record_key DESC`이고 cursor는 해당 `feature_id`/`source_entity_key`에 묶인다.
+  잘못되거나 다른 관측에 재사용한 cursor는 422, 첫 page에 해당 link가 없으면 404이며,
+  마지막 cursor 다음은 200과 빈 `items`다.
 - ⚠️ `/tripmate/*` namespace **제거**(kor-travel-map은 PinVi 전용이 아니다). batch는
   `POST /v1/features/batch`(service read, ServiceToken)로 일반화, `/tripmate/
   feature-update-requests*`는 #317로 `/v1/admin/*`에 이미 이전(중복 C2 해소).
@@ -237,6 +250,42 @@ GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
 rule apply endpoint까지 제공하며, Dagster 자동 실행과 Admin UI는 T-223c-2/c-3 후속이다.
 
+### 2.4.4 `/v1/curations*` — collection/item 큐레이션 (ADR-063)
+
+연도별 한국관광 100선, 국가유산 방문 캠페인, 스탬프투어처럼 같은 Feature가 여러
+회차·코스·공식 목록에 포함되는 데이터의 정본 read 표면이다. 하나의 Feature marker/목록
+행에 관련 membership을 `curations[]`로 모두 묶어 반환한다.
+
+```
+GET /v1/curations                            # Feature별 group, page_size+cursor
+GET /v1/curations/collections                # 공개 collection 목록, page_size+cursor
+GET /v1/curations/collections/{collection_id}# collection + included item 전체
+GET /v1/curations/features/{feature_id}      # Feature + 공개 membership 전체
+```
+
+`GET /v1/curations`는 `theme_slug`, `edition_key`, `provider`, `q`, 분리 bbox 4개,
+`page_size`(기본 100, 최대 500), `cursor`를 받는다. 필터는 반환할 Feature group을 고르는
+조건이고, 선택된 group의 `curations[]`는 그 Feature의 관련 공개 active membership을
+모두 보존한다. 응답 item은 `{feature, curations, curation_count}`다. marker 수와
+membership 수를 구분하므로 같은 장소가 2023~2024·2025~2026 회차에 모두 속해도 marker는
+하나이고 상세 정보는 둘 다 보인다.
+
+`GET /v1/curations/collections`는 `theme_slug`, `edition_key`, `provider`, `q`,
+`page_size`(기본 200, 최대 500), `cursor`를 받는다. 정렬과 cursor 경계는
+`updated_at DESC, collection_id DESC`이고 잘못된 cursor는 422다. public 목록·상세는
+`status=published`, `visibility=public`, 미보관 collection만 대상으로 하며 상세 item도
+미보관 `status=included`만 반환한다.
+
+collection 상세의 item은 `feature_id`가 nullable이다. 기존 Feature와 안전하게 연결하지
+못한 공식 항목도 `place_name`, `address_hint`, 원천키와 함께 반환한다. 미연결 항목에는
+Feature 좌표·category가 없으며 임의 인접 위치로 대체하지 않는다. Feature별 group과
+Feature 상세에는 연결된 item만 나타난다. public collection summary의 `item_count`는 실제
+반환 가능한 active `included` item 수만 뜻하며 후보·거절 건수와 `public_item_count`는
+노출하지 않는다. admin summary는 전체 active `item_count`와 공개 가능한
+`public_item_count`를 함께 반환한다. 연결 Feature가 hidden/deleted로 바뀐 public
+collection item은 공식 `place_name`/`address_hint`는 보존하되 Feature ID·본문·좌표·주소·
+source record 연결을 제거한 미연결 item으로 투영한다.
+
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
 GET    /v1/admin/features                              # 목록(page_size+cursor)
@@ -267,11 +316,57 @@ POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
 GET    /v1/admin/features/dedup-reviews   PATCH /v1/admin/features/dedup-reviews/{review_id}        # 🔁 복수+param
 GET    /v1/admin/features/enrichment-reviews   PATCH /v1/admin/features/enrichment-reviews/{review_id} # 🔁
 GET    /v1/admin/issues   GET/PATCH /v1/admin/issues/{issue_id}                  # 🔁 noun 일치
+
+GET    /v1/admin/curations                              # collection 목록/필터
+POST   /v1/admin/curations                              # theme·title·edition 포함 수동 생성
+GET    /v1/admin/curations/{collection_id}              # 미연결 포함 item 전체
+PATCH  /v1/admin/curations/{collection_id}              # 제목/회차/상태/공개범위 수정
+DELETE /v1/admin/curations/{collection_id}              # collection soft archive
+POST   /v1/admin/curations/{collection_id}/items        # Feature 연결 또는 미연결 item 수동 추가
+PATCH  /v1/admin/curations/{collection_id}/items/{curation_item_id} # item 부분 수정/Feature 연결 해소
+DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft archive
+GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
+POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
 - **version 0/1 모델(#317)**: provider 적재=`data_origin='provider', data_version=0`,
   사용자 요청=`'user_request', data_version=1`, `feature.feature_versions` snapshot +
   `ops.feature_change_requests`. `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE=require_review|
   immediate`. provider 재적재는 version 1/ soft delete를 덮거나 되살리지 않는다.
+- **큐레이션 수동 입력**: collection 생성은 기존 `theme_id` 또는 inline
+  `theme_slug`+`theme_name`+`theme_group` 전체 중 하나를 요구하고 `title`, `edition_key`,
+  source/status/visibility/metadata를 받는다. item은 `feature_id` 또는 `place_name` 중 하나가
+  필요하다. DB 식별자인 collection/item/theme/source ID는 OpenAPI `uuid`이며 잘못된 값은
+  DB까지 보내지 않고 422로 거절한다. 생성·`PATCH`는 active 상태만 받고 보관 전환은
+  `DELETE`로 단일화한다. item `POST`는 create-only라 같은 active identity가 있으면 409다.
+  item `PATCH`는 모든 표시·관계·상태 필드와 명시적 `feature_id=null`을 지원한다. 표시·
+  identity·상태·metadata 같은 non-null 필드의 명시적 `null`은 422이며 주소 hint·item 설명·
+  source record와 `feature_id`처럼 계약상 nullable인 필드만 연결 해소할 수 있다.
+  `DELETE`는 `status=archived`와 `archived_at`을 기록한다. 같은 `external_item_id`를 여러
+  Feature에 연결할 수 있지만, 같은 collection과 `external_item_id`의 연결 행과 미연결 행을
+  동시에 두는 것은 422로 거절한다. admin collection 목록도
+  `page_size`(기본 200, 최대 500)+`cursor`를 쓰며 status/visibility/theme/edition/provider/
+  검색어와 `include_archived`를 지원한다. admin collection 상세는 보관 item까지 모두
+  반환하고, admin Feature 상세의 `sources[]`는 entity별 현재 record 전부,
+  `curations[]`는 보관되지 않은 collection/item의 연결 membership을 공개 상태와 무관하게
+  모두 반환한다.
+- **감사 필드 경계**: collection과 item의 `created_by`/`updated_by`는 요청 body/query가
+  아니라 인증된 admin proxy context에서 정한다. admin collection/item DTO와 admin
+  Feature 상세에는 이 두 필드를 노출하고, public collection/item DTO와 public Feature
+  상세에는 노출하지 않는다.
+- **CSV import**: UTF-8/BOM, 최대 2 MiB·2,000행·셀 10,000자. 정확한 20개 header는
+  `resources/curations/template.csv`와 다운로드 endpoint가 정본이다. `dry_run=true`는
+  구조 검증과 Feature 후보뿐 아니라 예상 `inserted`/`updated`/`removed`, 삭제 예정 item
+  전체인 `removals[]`(`AdminCurationItemView`)를 반환한다. 형식 오류(`invalid_rows>0`)는
+  commit 전체를 막고, 0건/복수 Feature 후보(`unmatched`/`ambiguous`)는
+  `unresolved_rows`로 보고하되 공식 item을
+  nullable `feature_id`로 저장한다. 이름 후보는 batch query로 찾는다. commit은 파일에
+  포함된 collection을 원자적으로 replace하고 `inserted`/`updated`/`removed`를 반환하므로
+  삭제·A→B·연결↔미연결 변경을 반영한다. 같은 파일을 다시 올리면 세 변경 수가 모두 0이고
+  collection/theme/source/item의 `updated_at`도 불필요하게 바꾸지 않는다. 동시 import는
+  transaction advisory lock으로 직렬화하고 대상 collection row lock을 UUID 순서로 잡는다.
+  후보 해소 뒤 같은 source item이 연결·미연결로 섞이거나 같은 membership이 중복되면
+  dry-run 행 오류로 표시하고 commit 전체를 422로 막는다. commit의 `removals[]`는 사전
+  preview가 아니라 lock 안의 실제 `DELETE ... RETURNING` 결과이므로 `removed`와 항상 같다.
 
 ### 2.6 `/v1/ops/*` — 옵저버빌리티
 ```
@@ -315,6 +410,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | 주소 | 구조화 `address`+`*_code` | |
 | category | 8자리 코드 + `/v1/categories` label | |
 | 날씨 | metric 목록 + `forecast_style` | |
+| provider 관측 | Feature 상세 `observations[]`; entity별 현재 record, 별도 history cursor | payload version을 Feature link로 중복하지 않음 |
+| 큐레이션 | Feature 상세 `curations[]`; collection 상세는 nullable `feature_id` item 포함 | theme/title/edition/source를 membership마다 완전 보존 |
 | envelope | `{data,meta}`, 목록 `data={items}` + `meta.page{page_size,next_cursor,total}`, batch `data={found,missing}` | §1.4 |
 
 ### 3.1 응답 필드 명명 규약 (🔁 ADR-048 — 의미/본질 기준 전면 적용)
@@ -399,6 +496,9 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
   `docs/architecture/public-views-api.md`와 `openapi.user.json`을 따른다(T-222b).
 - **curated_features**: 테마형 큐레이션 후보는
   `docs/curated-features.md`와 `openapi.user.json`을 따른다(T-223c-1 read 표면).
+- **curation collections**: 신규 공식·수동 목록은 ADR-063의 `/v1/curations*` 계약을
+  사용한다. 구 source-rule 후보 계약은 유지하지만 서로 다른 회차 정보를 대표 1행으로
+  접는 용도로 사용하지 않는다.
 
 ---
 
@@ -458,6 +558,10 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
 ---
 
 ## 9. 변경 이력
+- 2026-07-13: ADR-063에 따라 Feature provider entity/current observation과 immutable
+  history를 분리하고, collection/item 큐레이션 public/admin API·수동 입력·CSV
+  preview/commit 계약을 추가했다. Feature 단건/batch/admin 상세는 모든 현재 관측과
+  연결 큐레이션 membership을 배열로 반환한다.
 - 2026-06-09: #317(T-214/T-215) `/v1` 1차 정리 위에 ADR-048(admin/ops versioning 확장 +
   envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파)을 반영.
 - 2026-06-09(2차, #316 무-호환 재검토): 외부 read 동결 carve-out 제거, envelope

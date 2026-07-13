@@ -21,11 +21,11 @@ import { useDeferredValue, useMemo, useState } from "react";
 import {
   FEATURE_KINDS,
   useAdminFeatures,
+  useAdminFeatureDetail,
   useDeactivateAdminFeatureMutation,
-  useFeatureDetail,
+  type AdminFeatureDetailData,
   type AdminFeatureRecord,
   type AdminFeatureSort,
-  type FeatureDetail,
   type FeatureKind,
   type SortOrder,
 } from "@/api/features";
@@ -34,6 +34,7 @@ import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
+import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -90,7 +91,11 @@ function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
-function FeatureLocationMap({ feature }: { feature: FeatureDetail | null | undefined }) {
+function FeatureLocationMap({
+  feature,
+}: {
+  feature: AdminFeatureDetailData["feature"] | null | undefined;
+}) {
   const hasCoord =
     typeof feature?.lon === "number" && typeof feature?.lat === "number";
   if (!hasCoord) {
@@ -124,7 +129,9 @@ function FeatureLocationMap({ feature }: { feature: FeatureDetail | null | undef
 }
 
 function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
-  const detail = useFeatureDetail(featureId);
+  const detail = useAdminFeatureDetail(featureId);
+  const data = detail.data?.data;
+  const feature = data?.feature;
 
   if (!featureId) {
     return (
@@ -144,18 +151,18 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
             <AlertDescription>{detail.error.message}</AlertDescription>
           </Alert>
         ) : null}
-        {detail.data ? (
+        {data && feature ? (
           <div className="flex flex-col gap-4 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-lg font-semibold">{detail.data.name}</div>
+                <div className="text-lg font-semibold">{feature.name}</div>
                 <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
                   {featureId}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <StatusBadge status={detail.data.status} />
-                  <Badge variant="outline">{detail.data.kind}</Badge>
-                  <Badge variant="outline">{detail.data.category}</Badge>
+                  <StatusBadge status={feature.status} />
+                  <Badge variant="outline">{feature.kind}</Badge>
+                  <Badge variant="outline">{feature.category}</Badge>
                 </div>
               </div>
               <Link
@@ -166,32 +173,36 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
                 편집
               </Link>
             </div>
-            <FeatureLocationMap feature={detail.data} />
+            <FeatureLocationMap feature={feature} />
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
-                {typeof detail.data.lon === "number" &&
-                typeof detail.data.lat === "number"
-                  ? `${detail.data.lon.toFixed(5)}, ${detail.data.lat.toFixed(5)}`
+                {typeof feature.lon === "number" && typeof feature.lat === "number"
+                  ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                   : "없음"}
               </dd>
               <dt className="text-muted-foreground">sigungu</dt>
-              <dd>{detail.data.sigungu_code ?? "없음"}</dd>
+              <dd>{feature.sigungu_code ?? "없음"}</dd>
             </dl>
             <details>
               <summary className="cursor-pointer text-sm font-medium">address</summary>
-              <JsonBlock value={detail.data.address} />
+              <JsonBlock value={feature.address} />
             </details>
             <details>
               <summary className="cursor-pointer text-sm font-medium">detail</summary>
-              <JsonBlock value={detail.data.detail} />
+              <JsonBlock value={feature.detail} />
             </details>
+            <FeatureAssociations
+              compact
+              curations={data.curations}
+              observations={data.sources}
+            />
           </div>
         ) : null}
       </div>
       <FeatureKindDetailPanel
         compact
-        feature={detail.data}
+        feature={feature}
         featureId={featureId}
       />
     </div>

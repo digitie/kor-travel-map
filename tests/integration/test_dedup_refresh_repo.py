@@ -12,7 +12,12 @@ from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
     list_dedup_refresh_features,
 )
-from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    FeatureRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,8 +120,22 @@ async def _seed_feature(
         )
     )
     session.add(
+        SourceEntityRow(
+            source_entity_key=f"se-{feature_id}",
+            provider=_PROVIDER,
+            dataset_key=_DATASET,
+            source_entity_type="place",
+            source_entity_id=feature_id,
+            current_source_record_key=None,
+            first_seen_at=updated_at,
+            last_seen_at=updated_at,
+        )
+    )
+    await session.flush()
+    session.add(
         SourceRecordRow(
             source_record_key=f"sr-{feature_id}",
+            source_entity_key=f"se-{feature_id}",
             provider=_PROVIDER,
             dataset_key=_DATASET,
             source_entity_type="place",
@@ -130,10 +149,14 @@ async def _seed_feature(
         )
     )
     await session.flush()
+    entity = await session.get(SourceEntityRow, f"se-{feature_id}")
+    assert entity is not None
+    entity.current_source_record_key = f"sr-{feature_id}"
+    await session.flush()
     session.add(
         SourceLinkRow(
             feature_id=feature_id,
-            source_record_key=f"sr-{feature_id}",
+            source_entity_key=f"se-{feature_id}",
             source_role="primary",
             match_method="natural_key",
             confidence=100,

@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
-from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    FeatureRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -115,6 +120,7 @@ async def _seed_feature_with_source(
     dataset_key: str,
     name: str,
 ) -> None:
+    source_entity_key = f"se-{source_record_key}"
     async with AsyncSession(engine) as session, session.begin():
         session.add(
             FeatureRow(
@@ -130,8 +136,22 @@ async def _seed_feature_with_source(
             )
         )
         session.add(
+            SourceEntityRow(
+                source_entity_key=source_entity_key,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type="place",
+                source_entity_id=feature_id,
+                current_source_record_key=None,
+                first_seen_at=_NOW,
+                last_seen_at=_NOW,
+            )
+        )
+        await session.flush()
+        session.add(
             SourceRecordRow(
                 source_record_key=source_record_key,
+                source_entity_key=source_entity_key,
                 provider=provider,
                 dataset_key=dataset_key,
                 source_entity_type="place",
@@ -145,10 +165,14 @@ async def _seed_feature_with_source(
             )
         )
         await session.flush()
+        entity = await session.get(SourceEntityRow, source_entity_key)
+        assert entity is not None
+        entity.current_source_record_key = source_record_key
+        await session.flush()
         session.add(
             SourceLinkRow(
                 feature_id=feature_id,
-                source_record_key=source_record_key,
+                source_entity_key=source_entity_key,
                 source_role="primary",
                 match_method="natural_key",
                 confidence=100,

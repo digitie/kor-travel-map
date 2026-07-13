@@ -259,6 +259,7 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "deleted_at": None,
     }
     source_row = {
+        "source_entity_key": "se-feature-1",
         "source_record_key": "sr-feature-1",
         "provider": "python-mois-api",
         "dataset_key": "mois_license_features_bulk",

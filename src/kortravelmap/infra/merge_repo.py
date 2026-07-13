@@ -4,11 +4,13 @@
 
 1. loser의 ``provider_sync.source_links``를 master로 재지정(충돌 키는 master가 이미
    보유하므로 drop).
-2. loser ``feature.features``를 soft-delete(``status='deleted'`` + ``deleted_at``,
+2. loser의 ``feature.curation_items``와 전환기 legacy ``curated_features``를 master로
+   재지정(같은 collection item 충돌은 master membership을 남긴다).
+3. loser ``feature.features``를 soft-delete(``status='deleted'`` + ``deleted_at``,
    ADR-017 — place는 하드 삭제 안 함).
-3. loser에 ``ops.feature_overrides`` status 가드를 남겨 provider 재적재 부활을 차단.
-4. ``ops.feature_merge_history`` 1행 INSERT(ADR-016 이력 보존).
-5. (``review_id`` 주어지면) ``ops.dedup_review_queue`` 행을 ``status='merged'``로
+4. loser에 ``ops.feature_overrides`` status 가드를 남겨 provider 재적재 부활을 차단.
+5. ``ops.feature_merge_history`` 1행 INSERT(ADR-016 이력 보존).
+6. (``review_id`` 주어지면) ``ops.dedup_review_queue`` 행을 ``status='merged'``로
    전이(pending 행만).
 
 master 선정은 ``core.scoring.select_master``(순수, ADR-016 3순위). commit은 호출자
@@ -88,8 +90,11 @@ SELECT
     (
         SELECT sr.provider
         FROM provider_sync.source_links sl
+        JOIN provider_sync.source_entities se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = f.feature_id
         ORDER BY sl.is_primary_source DESC, sl.confidence DESC
         LIMIT 1
@@ -112,18 +117,90 @@ _MOVE_LINKS_SQL: Final[str] = """
 UPDATE provider_sync.source_links
 SET feature_id = :master
 WHERE feature_id = :loser
-  AND source_record_key NOT IN (
-      SELECT source_record_key
+  AND source_entity_key NOT IN (
+      SELECT source_entity_key
       FROM provider_sync.source_links
       WHERE feature_id = :master
   )
-RETURNING source_record_key
+RETURNING source_entity_key
 """
 
 # master가 이미 보유한 충돌 link(재지정 후 loser에 남은 것) drop.
 _DROP_LEFTOVER_LINKS_SQL: Final[str] = """
 DELETE FROM provider_sync.source_links WHERE feature_id = :loser
-RETURNING source_record_key
+RETURNING source_entity_key
+"""
+
+# 한 collection 안에서 동일 official item이 master에도 이미 연결된 경우 먼저
+# loser 중복만 제거한다. 나머지 항목(다른 edition/subcourse)은 전부 master로 이동한다.
+_DROP_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
+DELETE FROM feature.curation_items AS loser_item
+USING feature.curation_items AS master_item
+WHERE loser_item.feature_id = :loser
+  AND master_item.feature_id = :master
+  AND loser_item.collection_id = master_item.collection_id
+  AND loser_item.external_item_id = master_item.external_item_id
+  AND loser_item.archived_at IS NULL
+  AND master_item.archived_at IS NULL
+RETURNING loser_item.curation_item_id
+"""
+
+_MOVE_CURATION_ITEMS_SQL: Final[str] = """
+UPDATE feature.curation_items
+SET feature_id = :master, updated_at = now()
+WHERE feature_id = :loser
+RETURNING curation_item_id
+"""
+
+# 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
+# 만든다. master에도 같은 theme의 active legacy row가 있으면 loser legacy row를
+# active 상태로 옮길 수 없으므로, 먼저 해당 item의 UUID를 분리해 richer membership을
+# 보존한 뒤 legacy row만 archive한다.
+_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL: Final[str] = """
+UPDATE feature.curation_items AS item
+SET curation_item_id = x_extension.gen_random_uuid(), updated_at = now()
+FROM feature.curated_features AS loser_curated
+WHERE loser_curated.curated_feature_id = item.curation_item_id
+  AND loser_curated.feature_id = :loser
+  AND loser_curated.archived_at IS NULL
+  AND item.archived_at IS NULL
+  AND EXISTS (
+      SELECT 1
+      FROM feature.curated_features AS master_curated
+      WHERE master_curated.feature_id = :master
+        AND master_curated.theme_id = loser_curated.theme_id
+        AND master_curated.archived_at IS NULL
+  )
+RETURNING loser_curated.curated_feature_id
+"""
+
+# UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row는
+# partial unique(theme_id, feature_id)를 피하기 위해 archive한다. trigger가 만드는
+# archived mirror와 UUID를 분리한 active item이 함께 남아 richer 계약을 잃지 않는다.
+_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
+UPDATE feature.curated_features AS loser_curated
+SET feature_id = :master,
+    curation_status = 'archived',
+    archived_at = now(),
+    updated_at = now()
+WHERE loser_curated.feature_id = :loser
+  AND loser_curated.archived_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM feature.curation_items AS item
+      WHERE item.curation_item_id = loser_curated.curated_feature_id
+        AND item.archived_at IS NULL
+  )
+RETURNING loser_curated.curated_feature_id
+"""
+
+# 충돌을 정리한 뒤 남은 active/archived legacy row도 master로 옮긴다. 이 UPDATE로
+# 0045 trigger가 다시 실행되어도 NEW.feature_id가 master이므로 병합이 되돌아가지 않는다.
+_MOVE_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
+UPDATE feature.curated_features
+SET feature_id = :master, updated_at = now()
+WHERE feature_id = :loser
+RETURNING curated_feature_id
 """
 
 # loser feature soft-delete (ADR-017).
@@ -187,13 +264,9 @@ RETURNING review_id
 """
 
 
-async def _master_candidate(
-    session: AsyncSession, feature_id: str
-) -> MasterCandidate:
+async def _master_candidate(session: AsyncSession, feature_id: str) -> MasterCandidate:
     row = (
-        await session.execute(
-            text(_SELECT_MASTER_INPUT_SQL), {"feature_id": feature_id}
-        )
+        await session.execute(text(_SELECT_MASTER_INPUT_SQL), {"feature_id": feature_id})
     ).one_or_none()
     if row is None:
         raise MergeConflictError(f"feature 없음 — {feature_id!r}")
@@ -224,21 +297,37 @@ async def apply_feature_merge(
 
     moved = len(
         (
-            await session.execute(
-                text(_MOVE_LINKS_SQL), {"master": master_id, "loser": loser_id}
-            )
+            await session.execute(text(_MOVE_LINKS_SQL), {"master": master_id, "loser": loser_id})
         ).fetchall()
     )
     dropped = len(
-        (
-            await session.execute(
-                text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id}
-            )
-        ).fetchall()
+        (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
+    )
+    await session.execute(
+        text(_DROP_DUPLICATE_CURATION_ITEMS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_MOVE_CURATION_ITEMS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
+        {"master": master_id, "loser": loser_id},
     )
     soft_deleted = (
-        await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id})
-    ).mappings().first()
+        (await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id}))
+        .mappings()
+        .first()
+    )
     if soft_deleted is not None:
         await session.execute(
             text(_UPSERT_LOSER_STATUS_OVERRIDE_SQL),
@@ -292,17 +381,11 @@ async def merge_from_review(
     master는 ``core.scoring.select_master``(좌표 → updated_at → source 우선순위)로
     결정한다. commit은 호출자 책임.
     """
-    row = (
-        await session.execute(
-            text(_SELECT_REVIEW_SQL), {"review_id": review_id}
-        )
-    ).one_or_none()
+    row = (await session.execute(text(_SELECT_REVIEW_SQL), {"review_id": review_id})).one_or_none()
     if row is None:
         raise MergeNotFoundError(f"review_id 없음 — {review_id!r}")
     if row.status != "pending":
-        raise MergeConflictError(
-            f"이미 검토된 후보(status={row.status!r}) — {review_id!r}"
-        )
+        raise MergeConflictError(f"이미 검토된 후보(status={row.status!r}) — {review_id!r}")
 
     cand_a = await _master_candidate(session, row.feature_id_a)
     cand_b = await _master_candidate(session, row.feature_id_b)

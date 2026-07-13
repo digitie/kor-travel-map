@@ -430,7 +430,28 @@ def test_get_feature_detail_maps_row(
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
         return row
 
+    async def _curations(
+        _session: Any, *, feature_ids: list[str], public_only: bool
+    ) -> dict[str, tuple[Any, ...]]:
+        assert feature_ids == ["f1"]
+        assert public_only is True
+        return {}
+
+    async def _observations(_session: Any, feature_id: str) -> tuple[Any, ...]:
+        assert feature_id == "f1"
+        return ()
+
     monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+    monkeypatch.setattr(
+        features_mod.observation_repo,
+        "get_current_observations",
+        _observations,
+    )
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -443,6 +464,8 @@ def test_get_feature_detail_maps_row(
         assert body["data"]["kind"] == "event"
         assert body["data"]["detail"] == {"event_kind": "festival"}
         assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
+        assert body["data"]["curations"] == []
+        assert body["data"]["observations"] == []
         assert "duration_ms" in body["meta"]
         # 공개 응답 schema는 raw/infra/dedup 전용 필드를 노출하지 않는다.
         assert "created_at" not in body["data"]
@@ -573,7 +596,30 @@ def test_features_batch_returns_items_and_missing(
         assert feature_ids == ["f1", "missing"]
         return {"f1": row}
 
+    async def _curations(
+        _session: Any, *, feature_ids: list[str], public_only: bool
+    ) -> dict[str, tuple[Any, ...]]:
+        assert feature_ids == ["f1", "missing"]
+        assert public_only is True
+        return {}
+
+    async def _observations(
+        _session: Any, feature_ids: list[str]
+    ) -> dict[str, tuple[Any, ...]]:
+        assert feature_ids == ["f1", "missing"]
+        return {}
+
     monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(
+        features_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+    monkeypatch.setattr(
+        features_mod.observation_repo,
+        "get_current_observations_by_feature_ids",
+        _observations,
+    )
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -590,6 +636,8 @@ def test_features_batch_returns_items_and_missing(
         assert "coord_5179_srid" not in body["data"]["found"]["f1"]
         assert "parent_feature_id" not in body["data"]["found"]["f1"]
         assert "sibling_group_id" not in body["data"]["found"]["f1"]
+        assert body["data"]["found"]["f1"]["curations"] == []
+        assert body["data"]["found"]["f1"]["observations"] == []
         assert body["data"]["missing"] == ["missing"]
     finally:
         client.app.dependency_overrides.clear()

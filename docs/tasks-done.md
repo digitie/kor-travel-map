@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 큐레이션 CSV·다중 관측 aggregate 계약 (2026-07-13, `T-230`)
+
+- [x] **T-230 — 큐레이션 CSV·다중 source/연도 aggregate 계약 구현** (#665, PR #666).
+  provider entity/current record와 immutable observation 이력, 회차형 collection/item schema를
+  Alembic 0044/0045로 구현했다. admin 수동 입력·CSV 양식·preview·원자적 멱등 import와
+  지도·목록·상세·REST의 다중 관측/다중 membership 표시를 추가하고 등대 category도 등록했다.
+  공식 CSV 5종은 collection 19개·membership 486행이며, n150 기존 Feature에 225행을 연결하고
+  261행은 원천 안정키·장소명·주소 hint를 가진 미연결 item으로 보존했다. 전체 로컬 게이트와
+  적대적 리뷰(HIGH/MEDIUM 잔여 0), n150 Alembic 0045, 로그인, 실제 DB/REST, prod live Playwright
+  4건, 동일 CSV 두 번째 dry-run 변경 0건을 통과했다. 정본 계획·결과는
+  `docs/reports/t-230-curation-multi-observation-plan.md`다.
+
 ## UI live e2e 재실행 (2026-06-21, `T-UI-E2E-LIVE-20260621`)
 
 - [x] **T-UI-E2E-LIVE-20260621 — UI live e2e 재실행 + 하네스 안정화.**

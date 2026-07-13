@@ -19,7 +19,12 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra.feature_repo import get_feature_row
-from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import (
+    FeatureRow,
+    SourceEntityRow,
+    SourceLinkRow,
+    SourceRecordRow,
+)
 from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
 
 if TYPE_CHECKING:
@@ -35,6 +40,8 @@ async def _seed_place(
     session: AsyncSession, feature_id: str, entity_id: str, phones: list[str]
 ) -> None:
     """MOIS bulk place feature 1건 + primary source_link 적재 (phones 지정)."""
+    source_entity_key = f"se-{feature_id}"
+    source_record_key = f"sr-{feature_id}"
     session.add(
         FeatureRow(
             feature_id=feature_id,
@@ -45,8 +52,22 @@ async def _seed_place(
         )
     )
     session.add(
+        SourceEntityRow(
+            source_entity_key=source_entity_key,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_BULK,
+            source_entity_type=_ENTITY,
+            source_entity_id=entity_id,
+            current_source_record_key=None,
+            first_seen_at=_FETCHED,
+            last_seen_at=_FETCHED,
+        )
+    )
+    await session.flush()
+    session.add(
         SourceRecordRow(
-            source_record_key=f"sr-{feature_id}",
+            source_record_key=source_record_key,
+            source_entity_key=source_entity_key,
             provider=PROVIDER_NAME,
             dataset_key=DATASET_KEY_BULK,
             source_entity_type=_ENTITY,
@@ -57,10 +78,14 @@ async def _seed_place(
         )
     )
     await session.flush()
+    entity = await session.get(SourceEntityRow, source_entity_key)
+    assert entity is not None
+    entity.current_source_record_key = source_record_key
+    await session.flush()
     session.add(
         SourceLinkRow(
             feature_id=feature_id,
-            source_record_key=f"sr-{feature_id}",
+            source_entity_key=source_entity_key,
             source_role="primary",
             match_method="natural_key",
             confidence=100,

@@ -1,6 +1,8 @@
 # curated_features — 테마형 feature 계약
 
-> **상태**: 2026-06-12 문서 계약 + provider 변환 보강 완료(T-223b),
+> **상태**: 2026-07-13. source-rule 기반 후보 계약(T-223b/c)과
+> collection/item 공식·수동 큐레이션 계약(ADR-063)을 함께 다룬다.
+> 2026-06-12 문서 계약 + provider 변환 보강 완료(T-223b),
 > DB/API/OpenAPI foundation 구현 완료(T-223c-1), Dagster asset group 구현 완료
 > (T-223c-2), Admin UI 구현 완료(T-223c-3).
 > **정본 범위**: 테마 중심 데이터 소스, `curated_features` 데이터 모델, PinVi
@@ -20,6 +22,13 @@
   필요한 snapshot을 자기 DB에 복사한다. `kor-travel-concierge`는 이 복사 flow에 관여하지 않는다.
 - T-223c-1부터 public read 표면은 `openapi.user.json`과
   `@kor-travel-map/map-user-client` 생성 타입에 포함한다.
+- `feature.curation_collections` / `feature.curation_items`는 공식 목록의 **묶음과
+  membership**을 분리한다. 같은 Feature가 여러 연도·코스·출처에 포함되면 각 사실을
+  모두 저장하며 지도는 Feature marker 하나의 상세에 membership 전부를 표시한다.
+- 신규 공식·수동 큐레이션의 정본은 collection/item이다. 기존 `curated_features`는
+  provider source rule 후보화와 PinVi copy snapshot 계약을 위해 유지한다.
+- 공식 item을 기존 Feature와 안전하게 확정하지 못해도 버리지 않는다. nullable
+  `feature_id`와 공식 `place_name`/`address_hint`로 보존하고, 좌표는 연결된 기존 Feature에서만 쓴다.
 
 ## 2. 테마형 데이터 소스 조사 결과
 
@@ -84,6 +93,28 @@ PinVi 복사용 title은 feature 자체 장소명이 아니라 다음 source tit
 3. `youtube.channel_title`
 4. `youtube.source_search_query` / `youtube.corrected_search_query` / `youtube.search_query`
 5. legacy `facility_info.youtube_playlist_title` / `facility_info.youtube_channel_title`
+
+### 2.4 공식 목록 CSV
+
+관리자 수동 입력·CSV import와 운영 실데이터 검증에 쓰는 공식 목록은
+[`resources/curations/README.md`](../resources/curations/README.md)에 보관한다.
+
+| 파일 | 공식 항목 | membership 행 | 기존 Feature 연결 | 미연결 보존 |
+|------|----------:|----------------:|------------------:|------------:|
+| `korean-tourism-100-2023-2024.csv` | 100 | 110 | 50 | 60 |
+| `korean-tourism-100-2025-2026.csv` | 100 | 114 | 56 | 58 |
+| `heritage-visit-campaign.csv` | 85 | 85 | 67 | 18 |
+| `arboretum-garden-stamp-tour-2026.csv` | 72 | 72 | 42 | 30 |
+| `lighthouse-stamp-tour.csv` | 105 | 105 | 2 | 103 |
+
+공식 462개 항목은 복합 장소의 다중 Feature 연결을 펼쳐 486개 membership 행이다.
+확정 연결 217행과 미연결 269행을 모두 import한다. `feature_id`는 운영 DB 기존 Feature와
+동일 장소임을 안전하게 확정한 경우만 채우며, 근접 좌표라는 이유만으로 항구·식당 등을
+등대로 연결하지 않는다. 원문 출처·행 수·SHA-256은 `manifest.json`이 정본이다.
+
+등대 시설은 place category `01050400`(`관광 > 자연명소 > 등대`,
+`TOURISM_NATURE_LIGHTHOUSE`)을 제안 category로 기록한다. 등대 스탬프 포인트에 포함된
+박물관·전시기관에는 이 category를 적용하지 않는다.
 
 ## 3. 데이터 모델
 
@@ -227,6 +258,40 @@ PinVi는 여전히 REST를 호출해 복사하며, 이 테이블은 kor-travel-m
 - `INDEX (updated_at DESC, curated_feature_id DESC)`
 - `INDEX (etag)`
 
+### 3.7 `feature.curation_collections` / `feature.curation_items`
+
+collection은 테마·공식 제목·회차·출처·공개 상태를, item은 공식 원천 항목과 Feature
+membership을 소유한다.
+
+| 테이블/컬럼 | 의미 |
+|-------------|------|
+| `curation_collections.collection_id` | UUID PK |
+| `collection_key` | 파일 재업로드와 외부 참조에 쓰는 안정 unique key |
+| `theme_id`, `source_id` | 기존 `curated_themes`/`curated_sources` 참조 |
+| `title`, `edition_key` | 한국관광 100선 제목·2023-2024 같은 회차 |
+| `status`, `visibility` | draft/published/archived, admin_only/public |
+| `curation_collections.created_by`, `updated_by` | 신뢰된 admin actor 감사값 |
+| `curation_items.curation_item_id` | UUID PK |
+| `collection_id` | collection FK, 물리 삭제 시 CASCADE |
+| `feature_id` | 기존 Feature 선택 연결. 미확정 공식 항목은 NULL, Feature 삭제 시 SET NULL |
+| `external_item_id` | collection 안 공식 item 안정키. 복합 장소를 여러 Feature로 펼쳐도 공유 |
+| `place_name`, `address_hint` | Feature 미연결 상태에서도 보존하는 공식 장소 정보 |
+| `status`, `sort_order` | candidate/included/rejected/archived, 공식 순서 |
+| `item_title`, `item_summary` | membership 표시 override |
+| `curation_relation`, `reuse_policy` | 역할과 재사용 정책 |
+| `metadata` | 하위 코스·공식 순번·매칭 근거·원문 부가 정보 |
+| `curation_items.created_by`, `updated_by` | 신뢰된 admin actor 감사값 |
+
+active unique identity는 `(collection_id, external_item_id, feature_id) NULLS NOT DISTINCT`다.
+같은 공식 item을 한 collection에 미연결 상태로 중복 저장하지 않되, 한 복합 item을 여러
+Feature에 연결하는 것은 허용한다. 같은 Feature가 서로 다른 collection 또는 서로 다른
+원천 item으로 참여하는 것도 제한하지 않는다. 단, 같은 collection과 `external_item_id`에
+Feature 연결 행과 미연결 행이 동시에 active인 혼합 상태는 repository가 거절한다.
+
+0045 migration의 downgrade는 구 `curated_features`에서 완전히 재구성할 수 있는 legacy
+행에만 허용된다. 신규 collection/item, 수동 변경 또는 구 overlay로 재구성할 수 없는 actor
+감사 정보가 있으면 `P0001`로 transaction을 중단해 표현력이 큰 데이터를 조용히 버리지 않는다.
+
 ## 4. REST API 계약
 
 공용 read는 PinVi 복사와 외부 조회를 위한 표면이고, write는 운영/agent가 호출하는
@@ -275,6 +340,60 @@ POST   /v1/admin/curated-source-rules/{rule_id}/apply
 외부 write가 필요한 경우에도 별도 `/tripmate/*` namespace를 만들지 않는다.
 PinVi admin이나 운영 자동화는 인프라 보호 + service/admin token 정책으로 위 표면을
 호출한다. 사용자용 PinVi public client와 `kor-travel-concierge`는 직접 write하지 않는다.
+
+### 4.3 Collection/item read·write와 CSV import
+
+공식·수동 큐레이션은 다음 표면을 사용한다.
+
+```
+GET /v1/curations
+GET /v1/curations/collections
+GET /v1/curations/collections/{collection_id}
+GET /v1/curations/features/{feature_id}
+
+GET/POST /v1/admin/curations
+GET/PATCH/DELETE /v1/admin/curations/{collection_id}
+POST /v1/admin/curations/{collection_id}/items
+PATCH/DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id}
+GET  /v1/admin/curations/import-template.csv
+POST /v1/admin/curations/import?dry_run=true|false
+```
+
+`GET /v1/curations`는 Feature별로 먼저 page key를 정한 뒤 collection/item을 batch로 붙여
+`{feature, curations, curation_count}`를 반환한다. 따라서 membership fan-out이 cursor
+page 경계를 왜곡하지 않는다. theme/source/edition 필터는 Feature group 선택 조건이며,
+선택된 Feature의 관련 membership은 배열로 모두 유지한다.
+
+Feature group은 `page_size` 기본 100, collection 목록은 기본 200이고 둘 다 최대 500과
+`cursor`를 지원한다. collection cursor는 `updated_at DESC, collection_id DESC` keyset이다.
+public collection 목록·상세와 Feature aggregate는 게시·공개·included인 active 데이터만
+반환하고 `created_by`/`updated_by`를 제외한다. public collection의 `item_count`는 공개
+included 수만 나타내며 내부 후보·거절 수와 `public_item_count`를 노출하지 않는다. admin
+목록은 전체 active `item_count`와 공개 가능한 `public_item_count`, 같은 `page_size`/`cursor`와
+상태·공개범위·테마·회차·provider·검색어 필터를 사용한다. admin collection 상세는
+미연결·비공개·보관 item까지, admin Feature 상세는 공개 상태와 무관한 active 연결 item을
+반환한다. admin collection/item DTO는 각각 actor 감사 필드를 포함하며 admin Feature
+상세의 `curations[]`도 admin item DTO를 사용한다. item `PATCH`는 명시적
+`feature_id=null`로 연결을 해소할 수 있고 `DELETE`는 soft archive다. collection/item/
+theme/source의 DB 식별자는 API에서 UUID로 검증하며 생성·`PATCH`는 active 상태만 받고
+archive 전환은 `DELETE`로 단일화한다. item `POST`는 create-only이며 중복 active
+identity는 409다. PATCH의 non-null 필드에 명시적 `null`을 보내면 422다. public
+collection에 연결된 Feature가 hidden/deleted가 되면 공식 표기는 남기되 Feature 연결·본문·
+좌표·주소·source record는 제거한 미연결 item으로 반환한다.
+
+CSV 양식은 `resources/curations/template.csv`와 다운로드 endpoint가 동일한 20개 header를
+제공한다. preview는 형식 오류, 정확 일치, 0건/복수 후보를 행별로 보여준다. 형식 오류는
+전체 commit을 취소한다. `unmatched`/`ambiguous`는 오류로 오인해 버리지 않고 미연결 item으로
+원자적 저장한다. dry-run은 예상 `inserted`/`updated`/`removed`와 삭제 예정 item 전체인
+`removals[]`를 반환한다. commit은 파일에 등장한 collection을 authoritative replace한다.
+따라서 CSV에서 빠진 item, A→B 연결, 연결↔미연결 변경이 잔존 행 없이 반영되고 같은 파일
+재업로드는 세 변경 수가 모두 0이며 관련 `updated_at`도 바뀌지 않는다. 이름 후보는
+2,000행까지 한 번의 batch query로 찾으며 동일 미연결 안정키나 연결·미연결 혼합 identity는
+preview 단계에서 거절한다. 동시 import는 transaction advisory lock으로 직렬화하고 대상
+collection row lock을 UUID 순서로 획득한다. 수동 item write도 같은 parent row를 먼저 잠근다.
+Feature 후보 해소 뒤의 실제 identity도 다시 검사해 연결·미연결 혼합과 membership 중복을
+행별 오류로 표시하고 commit을 막는다. commit 응답의 `removals[]`는 lock 안에서 실제 삭제된
+row를 `DELETE ... RETURNING`으로 투영하므로 `removed == removals.length`를 보장한다.
 
 ## 5. PinVi 복사 계약
 
@@ -353,6 +472,12 @@ Admin UI는 `/admin/features/curated` 화면에서 기존 feature/admin 흐름 �
 - `rejected`/`archived` row는 "되살리기"를 명시 action으로만 처리한다.
 - PinVi copy preview에서 `curated_trip_plans`와 `curated_plan_pois`로 들어갈 snapshot을
   그대로 확인할 수 있다.
+- collection 관리 탭에서 기존 theme 선택 또는 theme slug/name/group 직접 입력,
+  제목·회차·출처·상태·공개범위를 수동 입력한다.
+- CSV 양식 다운로드, dry-run preview, 형식 오류 0건 확인 뒤 전체 반영을 제공한다.
+  미연결·복수 후보 행은 그대로 표시하지만 반영을 막지 않는다.
+- collection 상세는 연결/미연결 item을 모두 표시한다. Feature 지도·목록·상세는 한
+  Feature에 연결된 여러 회차·출처 membership과 여러 provider 현재 관측을 모두 표시한다.
 
 ## 7. Dagster 묶음
 

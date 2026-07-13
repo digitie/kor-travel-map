@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-13 (codex) — 다중 관측·collection 큐레이션 구현·n150 검증
+
+- **스키마/관측**: Alembic 0044에서 provider 자연 entity와 immutable payload record를
+  분리했다. `source_links`는 Feature↔entity membership이 되고, Feature 단건·batch·admin
+  상세는 entity별 현재 관측을 모두 반환하며 과거 payload는 별도 cursor 이력 API로 조회한다.
+- **큐레이션**: Alembic 0045에서 theme/title/edition/source를 소유하는 collection과
+  공식 membership item을 분리했다. item의 `feature_id`는 nullable이며, 기존 Feature와
+  안전하게 매칭하지 못한 공식 항목도 장소명·주소 hint·원천 안정키를 잃지 않고 저장한다.
+- **API/UI**: Feature별 grouped public API, collection 상세, admin 수동 입력·편집·archive,
+  CSV 양식 다운로드·dry-run·원자적 멱등 import를 구현했다. Feature 지도·목록·상세와 admin
+  상세는 같은 Feature의 여러 회차 큐레이션과 여러 provider 현재 관측을 배열로 모두 표시한다.
+- **공식 데이터**: 한국관광 100선 2개 회차, 국가유산 방문 캠페인, 2026 수목원·정원
+  스탬프투어, 등대 스탬프투어 CSV를 `resources/curations/`에 추가했다. 공식 462개 항목을
+  복합 장소 membership 486행으로 보존한다. repo CSV의 사전 확정 연결은 217행이고,
+  n150 기존 Feature resolver까지 적용한 실제 적재 결과는 연결 225행·미연결 261행이다.
+- **카테고리**: `01050400`(`관광 > 자연명소 > 등대`)과 marker icon을 추가했다. 박물관 등
+  등대가 아닌 stamp point에는 등대 category를 제안하지 않는다.
+- **n150 prod**: 747MB custom-format 사전 dump를 생성·검증한 뒤 Alembic
+  `0043_weather_history_idx`에서 `0045_curation_collections`까지 자동 migration했다. map 서비스
+  4개 기동, API/UI/Dagster health, 공개 로그인 GET/POST 200 + Set-Cookie, 오답 401을 확인했다.
+- **실데이터 검증**: collection 19개·membership 486개, 한국관광 두 회차 중첩 Feature 40개,
+  지정 Feature의 `data.go.kr-standard`/`python-visitkorea-api` 관측 2개를 DB와 REST에서 확인했다.
+  공식 CSV 5종의 두 번째 dry-run은 모두 `inserted=0`, `updated=0`, `removed=0`이었고,
+  prod Playwright는 CSV 반영·등대·admin 상세·지도 marker·목록·Feature 상세·관측 이력 4건을 통과했다.
+- **게이트/리뷰**: 비통합 Python 1,761 passed(1 skipped), PostGIS 286 passed, frontend Vitest
+  62 passed, route-mocked Playwright 35 passed, prod live Playwright 4 passed다. CI 단위 coverage는
+  `curation_repo.py` 99.55%, 전체 80.44%(1,255 passed)로 복구했다. 최종 적대적 리뷰에서 찾은
+  공개 hidden/deleted 관측 이력 노출, CSV `int4` overflow, 0044 손실성 downgrade를 모두
+  차단했다. 파일 전체 CSV 오류의 UI 반영 차단과 ordinal 0 보존까지 보완해 남은 HIGH/MEDIUM/LOW
+  지적은 0건이며 게시 PR은 #666이다.
+
 ## 2026-07-13 (codex) — concierge 소비자 키를 DB read scope 계약으로 전환
 
 - **소비 계약**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`를 concierge static

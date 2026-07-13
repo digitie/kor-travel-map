@@ -49,12 +49,14 @@ from kortravelmap.api.routers import (
     admin_auth_router,
     admin_backups_router,
     admin_curated_router,
+    admin_curations_router,
     admin_features_router,
     admin_files_router,
     admin_issues_router,
     admin_restore_router,
     categories_router,
     curated_router,
+    curations_router,
     dagster_router,
     dedup_review_router,
     enrichment_review_router,
@@ -509,6 +511,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(curated_router, prefix="/v1")
         application.include_router(
+            curations_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
+        application.include_router(
             categories_router,
             prefix="/v1",
             dependencies=public_dependencies,
@@ -552,6 +559,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # 먼저 mount해야 `dedup-reviews` 같은 segment가 feature_id로 잡히지 않는다.
         application.include_router(
             admin_curated_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_curations_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

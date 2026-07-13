@@ -16,6 +16,9 @@ sync)를 **ADR-023**에 따라 본 라이브러리(``kortravelmap.category``)로
 ``"03"`` 하위에도 추가되었다. Maki icon은 ``shelter``로 매핑된다
 (``PLACE_CATEGORY_MAPBOX_MAKI_ICONS``).
 
+등대 스탬프투어의 항로표지 시설을 항구·전망대와 구분하기 위해
+``TOURISM_NATURE_LIGHTHOUSE = "01050400"``를 추가한다.
+
 place category code는 ``AABBCCDD`` 형식이다.
 
 * ``AA``: Tier 1
@@ -40,10 +43,10 @@ from typing import Final, TextIO
 
 PLACE_CATEGORY_SOURCE: Final = (
     "python-kraddr-base/src/kraddr/base/categories.py (ADR-023 이전) + "
-    "ADR-027 LODGING_MOUNTAIN_SHELTER 3건 추가"
+    "ADR-027 LODGING_MOUNTAIN_SHELTER 3건 + LIGHTHOUSE 1건 추가"
 )
 PLACE_CATEGORY_SCHEMA_DOC: Final = "docs/architecture/category.md"
-PLACE_CATEGORY_SYNCED_ON: Final = "2026-05-25"  # ADR-023 + ADR-027 적용 시점
+PLACE_CATEGORY_SYNCED_ON: Final = "2026-07-13"
 
 
 class PlaceCategoryTier1Code(StrEnum):
@@ -98,6 +101,7 @@ class PlaceCategoryCode(StrEnum):
     TOURISM_NATURE_BEACH = "01050100"
     TOURISM_NATURE_PARK = "01050200"
     TOURISM_NATURE_OBSERVATORY = "01050300"
+    TOURISM_NATURE_LIGHTHOUSE = "01050400"
     TOURISM_INFORMATION = "01060000"
     TOURISM_INFORMATION_CENTER = "01060100"
     TOURISM_INFORMATION_CENTER_PUBLIC = "01060101"
@@ -655,6 +659,16 @@ PLACE_CATEGORY_DEFINITIONS: Final[tuple[PlaceCategory, ...]] = tuple(
                 3,
                 PlaceCategoryCode.TOURISM_NATURE,
                 53,
+            ),
+            _category(
+                PlaceCategoryCode.TOURISM_NATURE_LIGHTHOUSE,
+                "관광",
+                "자연명소",
+                "등대",
+                None,
+                3,
+                PlaceCategoryCode.TOURISM_NATURE,
+                54,
             ),
             _category(
                 PlaceCategoryCode.TOURISM_INFORMATION,
@@ -1806,6 +1820,7 @@ PLACE_CATEGORY_MAPBOX_MAKI_ICONS: Final[dict[str, str]] = {
     PlaceCategoryCode.TOURISM_NATURE_BEACH.value: "beach",
     PlaceCategoryCode.TOURISM_NATURE_PARK.value: "park",
     PlaceCategoryCode.TOURISM_NATURE_OBSERVATORY.value: "viewpoint",
+    PlaceCategoryCode.TOURISM_NATURE_LIGHTHOUSE.value: "lighthouse",
     PlaceCategoryCode.TOURISM_INFORMATION.value: "information",
     PlaceCategoryCode.TOURISM_INFORMATION_CENTER.value: "information",
     PlaceCategoryCode.TOURISM_INFORMATION_CENTER_PUBLIC.value: "information",

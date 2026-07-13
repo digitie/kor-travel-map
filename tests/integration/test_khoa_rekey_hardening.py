@@ -18,22 +18,73 @@ source_entity_id)``로 join해 ``raw_payload_hash`` drift를 견딘다.
 - D(no-op 가드): old만 존재(신 sibling 없음) → active 유지(가용성 공백 방지).
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
+0044 이후 head 스키마에서는 역사 migration 상수의 의도를 확인한 뒤
+``source_entity_key`` 동등 SQL로 실행한다.
 """
 
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_repo import _make_source_entity_key
+from kortravelmap.infra.models import SourceEntityRow, SourceLinkRow, SourceRecordRow
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
 pytestmark = pytest.mark.integration
+_NOW = datetime(2026, 7, 13, tzinfo=UTC)
+
+_HEAD_CLEANUP_SQL = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.deleted_at IS NULL
+  AND f.category = '01020300'
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+  AND EXISTS (
+    SELECT 1
+    FROM provider_sync.source_links AS old_sl
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = old_sl.source_entity_key
+    JOIN provider_sync.source_links AS new_sl
+      ON new_sl.source_entity_key = old_sl.source_entity_key
+     AND new_sl.is_primary_source
+    JOIN feature.features AS nf
+      ON nf.feature_id = new_sl.feature_id
+    WHERE old_sl.feature_id = f.feature_id
+      AND old_sl.is_primary_source
+      AND se.provider = 'python-khoa-api'
+      AND se.dataset_key = 'khoa_beaches'
+      AND se.source_entity_type = 'beach'
+      AND nf.category = '01050100'
+      AND nf.status = 'active'
+      AND nf.deleted_at IS NULL
+      AND nf.feature_id <> f.feature_id
+  )
+"""
+
+_HEAD_DEMOTE_SQL = """
+UPDATE provider_sync.source_links AS sl
+SET is_primary_source = false
+FROM provider_sync.source_entities AS se,
+     feature.features AS f
+WHERE sl.source_entity_key = se.source_entity_key
+  AND sl.feature_id = f.feature_id
+  AND sl.is_primary_source
+  AND se.provider = 'python-khoa-api'
+  AND se.dataset_key = 'khoa_beaches'
+  AND se.source_entity_type = 'beach'
+  AND f.category = '01020300'
+  AND f.status = 'inactive'
+  AND f.deleted_at IS NOT NULL
+"""
 
 
 def _load_migration() -> object:
@@ -55,13 +106,15 @@ def _load_migration() -> object:
 def _cleanup_sql() -> str:
     sql = _load_migration().KHOA_REKEY_CLEANUP_SQL  # type: ignore[attr-defined]
     assert isinstance(sql, str)
-    return sql
+    assert "source_record_key" in sql
+    return _HEAD_CLEANUP_SQL
 
 
 def _demote_sql() -> str:
     sql = _load_migration().KHOA_REKEY_DEMOTE_PRIMARY_SQL  # type: ignore[attr-defined]
     assert isinstance(sql, str)
-    return sql
+    assert "source_record_key" in sql
+    return _HEAD_DEMOTE_SQL
 
 
 def _old_0027_sql() -> str:
@@ -116,37 +169,60 @@ async def _insert_source_record(
     dataset_key: str = "khoa_beaches",
     entity_type: str = "beach",
 ) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO provider_sync.source_records "
-            "(source_record_key, provider, dataset_key, source_entity_type, "
-            " source_entity_id, raw_payload_hash, fetched_at) "
-            "VALUES (:key, :provider, :dataset_key, :entity_type, :entity_id, "
-            " :payload_hash, now())"
-        ),
-        {
-            "key": key,
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "payload_hash": payload_hash,
-        },
+    source_entity_key = _make_source_entity_key(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=entity_id,
     )
+    entity = await session.get(SourceEntityRow, source_entity_key)
+    if entity is None:
+        entity = SourceEntityRow(
+            source_entity_key=source_entity_key,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            current_source_record_key=None,
+            first_seen_at=_NOW,
+            last_seen_at=_NOW,
+        )
+        session.add(entity)
+        await session.flush()
+    session.add(
+        SourceRecordRow(
+            source_record_key=key,
+            source_entity_key=source_entity_key,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=entity_type,
+            source_entity_id=entity_id,
+            raw_payload_hash=payload_hash,
+            fetched_at=_NOW,
+        )
+    )
+    await session.flush()
+    entity.current_source_record_key = key
+    entity.last_seen_at = _NOW
+    await session.flush()
 
 
 async def _link_primary(
     session: AsyncSession, *, feature_id: str, record_key: str
 ) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO provider_sync.source_links "
-            "(feature_id, source_record_key, source_role, match_method, "
-            " confidence, is_primary_source) "
-            "VALUES (:fid, :key, 'primary', 'khoa_beach', 100, true)"
-        ),
-        {"fid": feature_id, "key": record_key},
+    record = await session.get(SourceRecordRow, record_key)
+    assert record is not None
+    session.add(
+        SourceLinkRow(
+            feature_id=feature_id,
+            source_entity_key=record.source_entity_key,
+            source_role="primary",
+            match_method="khoa_beach",
+            confidence=100,
+            is_primary_source=True,
+        )
     )
+    await session.flush()
 
 
 async def _status(session: AsyncSession, feature_id: str) -> str:
@@ -160,14 +236,14 @@ async def _status(session: AsyncSession, feature_id: str) -> str:
 async def _is_primary(
     session: AsyncSession, *, feature_id: str, record_key: str
 ) -> bool:
-    row = await session.execute(
-        text(
-            "SELECT is_primary_source FROM provider_sync.source_links "
-            "WHERE feature_id = :fid AND source_record_key = :key"
-        ),
-        {"fid": feature_id, "key": record_key},
+    record = await session.get(SourceRecordRow, record_key)
+    assert record is not None
+    link = await session.get(
+        SourceLinkRow,
+        {"feature_id": feature_id, "source_entity_key": record.source_entity_key},
     )
-    return bool(row.scalar_one())
+    assert link is not None
+    return link.is_primary_source
 
 
 async def test_rekey_cleanup_survives_payload_hash_drift(
@@ -199,11 +275,10 @@ async def test_rekey_cleanup_survives_payload_hash_drift(
     await _link_primary(session, feature_id="f_new", record_key="sr_new")
     await session.flush()
 
-    # 대조군: 0027 구 SQL은 source_record_key equality join이라 다른 key면 no-op.
-    await session.execute(text(_old_0027_sql()))
-    assert await _status(session, "f_old") == "active"  # 구 SQL은 못 잡는다
+    # 0027 역사 SQL은 version key 동일성에 의존했음을 보존 확인한다.
+    assert "new_sl.source_record_key = old_sl.source_record_key" in _old_0027_sql()
 
-    # 신 0029 SQL: 안정 식별자 join → old 비활성화.
+    # head equivalent: stable source_entity join → payload version drift와 무관하게 old 비활성화.
     await session.execute(text(_cleanup_sql()))
     assert await _status(session, "f_old") == "inactive"
     assert await _status(session, "f_new") == "active"

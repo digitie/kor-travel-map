@@ -109,8 +109,11 @@ WITH ranked AS (
   JOIN provider_sync.source_links AS sl
     ON sl.feature_id = f.feature_id
    AND sl.is_primary_source
+  JOIN provider_sync.source_entities AS se
+    ON se.source_entity_key = sl.source_entity_key
   JOIN provider_sync.source_records AS sr
-    ON sr.source_record_key = sl.source_record_key
+    ON sr.source_entity_key = se.source_entity_key
+   AND sr.source_record_key = se.current_source_record_key
   WHERE f.deleted_at IS NULL
     AND f.status = 'active'
     AND f.coord IS NOT NULL
