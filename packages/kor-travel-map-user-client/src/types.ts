@@ -2888,6 +2888,15 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureObservationHistoryResponse"];
                 };
             };
+            /** @description 공개 feature 또는 observation 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description cursor 또는 page_size 오류 */
             422: {
                 headers: {
