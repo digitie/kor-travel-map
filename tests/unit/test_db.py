@@ -13,6 +13,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+import kortravelmap.infra.db as db_module
 from kortravelmap.infra.db import (
     make_async_engine,
     make_async_session_factory,
@@ -104,6 +105,31 @@ def test_make_async_engine_respects_echo_flag() -> None:
     engine_on = make_async_engine("postgresql://u:p@h/d", echo=True)
     assert engine_off.echo is False
     assert engine_on.echo is True
+
+
+def test_make_async_engine_passes_copied_server_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """session setting을 asyncpg connect args로 복사해 전달한다."""
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def fake_create_async_engine(url: str, **kwargs: object) -> object:
+        captured["url"] = url
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(db_module, "create_async_engine", fake_create_async_engine)
+    server_settings = {"jit": "off"}
+
+    engine = make_async_engine(
+        "postgresql://u:p@h/d",
+        server_settings=server_settings,
+    )
+    server_settings["jit"] = "on"
+
+    assert engine is sentinel
+    assert captured["connect_args"] == {"server_settings": {"jit": "off"}}
 
 
 # -- make_async_session_factory -------------------------------------------

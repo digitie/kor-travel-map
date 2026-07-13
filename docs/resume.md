@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-13 (codex) — Feature bbox JIT 지연 로컬 수정 완료
+
+- **근본 원인**: 고zoom 12 tile 병렬 조회의 SQL 실행 자체는 수십 ms이지만,
+  높은 추정 cost가 요청마다 PostgreSQL JIT 컴파일을 유발했다. 운영 읽기
+  전용 A/B에서 동일 query가 JIT on 1,844.8ms, off 20.2ms였다.
+- **수정·범위**: API asyncpg 연결에만 ``jit=off``를 적용했다.
+  ``make_async_engine`` 인자는 optional이므로 Dagster/CLI/기존 사용자 동작은
+  변하지 않는다. GeoJSON source 갱신과 marker 조회의 경합으로 개별 marker가
+  0개에 머물던 live 회귀는 map ``idle`` 시점 재동기화로 보완했다.
+- **검증**: codegraph 영향 127 symbol을 확인했고 관련 unit 13건,
+  Ruff, 변경 source strict mypy를 통과했다.
+- **다음 한 작업**: 적대적 리뷰 2회와 전체 게이트·CI green 후 머지하고,
+  n150 API를 재배포해 실제 12 tile wall time과 live UI cluster 해제를 재검증한다.
+
 ## 2026-07-13 (codex) — notice/OpiNet 반복 장애·지도 고zoom 지연 로컬 수정 완료
 
 - **근본 원인 수정**: Dagster 고착 run의 전역 슬롯 고갈, 불완전·역순 KREX snapshot 수용,

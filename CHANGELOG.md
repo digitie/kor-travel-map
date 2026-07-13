@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Feature 지도 API JIT 지연 제거 (2026-07-13)
+
+- **FIXED**: 고zoom Feature 지도의 병렬 bbox 조회에서 실제 SQL 실행보다
+  PostgreSQL JIT 컴파일이 훨씬 길게 소요되던 문제를 수정했다. API OLTP
+  연결에만 ``jit=off``를 적용하고 Dagster/CLI 배치 연결은 PostgreSQL
+  기본값을 유지한다.
+- **FIXED**: GeoJSON ``setData`` 직후 source tile 교체보다 먼저 marker 조회가
+  실행되면 개별 Feature marker가 계속 0개로 남던 회귀를 ``idle`` 시점
+  재동기화로 수정했다.
+
 ### 지도 신선도·provider 복구와 고zoom 응답성 보강 (2026-07-13)
 
 - **FIXED**: KREX notice를 두 번 연속 조회한 완전 snapshot으로만 반영하고, snapshot에서

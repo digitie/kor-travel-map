@@ -1736,6 +1736,11 @@ export function VWorldFeatureClusters({
     schedulePointMarkerUpdateRef.current = scheduleUpdate;
     map.on("moveend", scheduleUpdate);
     map.on("sourcedata", handleSourceData);
+    // setData 직후의 sourcedata에서는 isSourceLoaded=true여도 worker tile 교체가 아직
+    // querySourceFeatures에 보이지 않을 수 있다. 이때 첫 rAF 조회가 비면 이후 마커가
+    // 영구히 0개로 남으므로, map이 실제 idle에 도달한 시점에 한 번 더 동기화한다.
+    // move/source 이벤트마다 순회하던 과거 방식과 달리 idle만 fallback으로 둔다.
+    map.on("idle", scheduleUpdate);
     map.on("styledata", handleStyleData);
     scheduleUpdate();
 
@@ -1746,6 +1751,7 @@ export function VWorldFeatureClusters({
       if (raf !== 0) cancelAnimationFrame(raf);
       map.off("moveend", scheduleUpdate);
       map.off("sourcedata", handleSourceData);
+      map.off("idle", scheduleUpdate);
       map.off("styledata", handleStyleData);
       popupRef.current?.remove();
       popupRef.current = null;

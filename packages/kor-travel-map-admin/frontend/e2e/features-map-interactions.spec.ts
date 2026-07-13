@@ -439,7 +439,7 @@ test.describe("/features map interactions", () => {
       page.getByRole("heading", { level: 1, name: "Feature 지도" }),
     ).toBeVisible();
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
-    await setMapZoom(page, 14);
+    await setMapZoom(page, 14, [126.978, 37.5665]);
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     const mapTab = page.getByRole("tab", { name: "지도" });
@@ -512,6 +512,23 @@ test.describe("/features map interactions", () => {
         }, sourceId),
       )
       .toBe(true);
+    // isSourceLoaded는 빈 이전 source에도 true일 수 있다. 실제 worker tile에 현재
+    // feature가 반영되고 idle fallback이 DOM marker까지 만든 뒤 이벤트 계측을 시작한다.
+    await expect
+      .poll(() =>
+        page.evaluate((id) => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & {
+            _maplibreMap?: import("maplibre-gl").Map;
+          }) | null;
+          return container?._maplibreMap?.querySourceFeatures(id).length ?? 0;
+        }, sourceId),
+      )
+      .toBeGreaterThan(0);
+    await expect(
+      page.getByRole("button", { name: new RegExp(MOCK_NAME) }),
+    ).toBeVisible();
 
     const calls = await page.evaluate(async (id) => {
       const container = document.querySelector(
@@ -535,11 +552,13 @@ test.describe("/features map interactions", () => {
       const originalQuery = instrumentedMap.querySourceFeatures.bind(map);
       let queryCalls = 0;
       let sourceFeatureCount = 0;
+      let forceEmptyFeatureSource = false;
       instrumentedMap.querySourceFeatures = (nextSourceId: string) => {
         if (nextSourceId === id) queryCalls += 1;
         const features = originalQuery(nextSourceId);
         if (nextSourceId === id) sourceFeatureCount = features.length;
-        return nextSourceId === id ? [...features, ...features] : features;
+        if (nextSourceId !== id) return features;
+        return forceEmptyFeatureSource ? [] : [...features, ...features];
       };
       const fireSourceData = (nextSourceId: string, isSourceLoaded: boolean) => {
         instrumentedMap.fire("sourcedata", {
@@ -564,11 +583,35 @@ test.describe("/features map interactions", () => {
         const duplicateBadgeCount = Array.from(
           container.querySelectorAll('.maplibregl-marker [aria-hidden="true"]'),
         ).filter((element) => element.textContent === "2").length;
+
+        // source worker 교체 중 일시적으로 빈 결과가 보이는 운영 race를 결정적으로
+        // 재현한다. loaded sourcedata의 rAF가 marker를 지운 뒤, 안정된 idle에서 실제
+        // source를 다시 읽어 DOM marker를 복구해야 한다.
+        forceEmptyFeatureSource = true;
+        fireSourceData(id, true);
+        await nextFrame();
+        const afterForcedEmpty = queryCalls;
+        const markerCountAfterForcedEmpty = container.querySelectorAll(
+          '.maplibregl-marker[role="button"]',
+        ).length;
+
+        forceEmptyFeatureSource = false;
+        const beforeIdle = queryCalls;
+        instrumentedMap.fire("idle", {});
+        await nextFrame();
+        const afterIdle = queryCalls;
+        const markerCountAfterIdle = container.querySelectorAll(
+          '.maplibregl-marker[role="button"]',
+        ).length;
         return {
+          afterForcedEmpty,
+          afterIdle,
           afterRaster,
           afterUnloadedFeatureSource,
+          beforeIdle,
           duplicateBadgeCount,
-          final: queryCalls,
+          markerCountAfterForcedEmpty,
+          markerCountAfterIdle,
           sourceFeatureCount,
         };
       } finally {
@@ -578,7 +621,10 @@ test.describe("/features map interactions", () => {
 
     expect(calls.afterRaster).toBe(0);
     expect(calls.afterUnloadedFeatureSource).toBe(0);
-    expect(calls.final).toBe(1);
+    expect(calls.afterForcedEmpty).toBe(2);
+    expect(calls.markerCountAfterForcedEmpty).toBe(0);
+    expect(calls.afterIdle - calls.beforeIdle).toBe(1);
+    expect(calls.markerCountAfterIdle).toBe(1);
     expect(calls.sourceFeatureCount).toBeGreaterThan(0);
     expect(calls.duplicateBadgeCount).toBe(0);
   });
@@ -864,7 +910,7 @@ test.describe("/features map interactions", () => {
       .getByTestId("kind-filter")
       .getByRole("button", { name: "price", exact: true })
       .click();
-    await setMapZoom(page, 14);
+    await setMapZoom(page, 14, [126.978, 37.5665]);
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     await expect(page.getByText("휘 1,820")).toBeVisible();
