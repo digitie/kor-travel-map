@@ -552,11 +552,13 @@ test.describe("/features map interactions", () => {
       const originalQuery = instrumentedMap.querySourceFeatures.bind(map);
       let queryCalls = 0;
       let sourceFeatureCount = 0;
+      let forceEmptyFeatureSource = false;
       instrumentedMap.querySourceFeatures = (nextSourceId: string) => {
         if (nextSourceId === id) queryCalls += 1;
         const features = originalQuery(nextSourceId);
         if (nextSourceId === id) sourceFeatureCount = features.length;
-        return nextSourceId === id ? [...features, ...features] : features;
+        if (nextSourceId !== id) return features;
+        return forceEmptyFeatureSource ? [] : [...features, ...features];
       };
       const fireSourceData = (nextSourceId: string, isSourceLoaded: boolean) => {
         instrumentedMap.fire("sourcedata", {
@@ -581,11 +583,35 @@ test.describe("/features map interactions", () => {
         const duplicateBadgeCount = Array.from(
           container.querySelectorAll('.maplibregl-marker [aria-hidden="true"]'),
         ).filter((element) => element.textContent === "2").length;
+
+        // source worker 교체 중 일시적으로 빈 결과가 보이는 운영 race를 결정적으로
+        // 재현한다. loaded sourcedata의 rAF가 marker를 지운 뒤, 안정된 idle에서 실제
+        // source를 다시 읽어 DOM marker를 복구해야 한다.
+        forceEmptyFeatureSource = true;
+        fireSourceData(id, true);
+        await nextFrame();
+        const afterForcedEmpty = queryCalls;
+        const markerCountAfterForcedEmpty = container.querySelectorAll(
+          '.maplibregl-marker[role="button"]',
+        ).length;
+
+        forceEmptyFeatureSource = false;
+        const beforeIdle = queryCalls;
+        instrumentedMap.fire("idle", {});
+        await nextFrame();
+        const afterIdle = queryCalls;
+        const markerCountAfterIdle = container.querySelectorAll(
+          '.maplibregl-marker[role="button"]',
+        ).length;
         return {
+          afterForcedEmpty,
+          afterIdle,
           afterRaster,
           afterUnloadedFeatureSource,
+          beforeIdle,
           duplicateBadgeCount,
-          final: queryCalls,
+          markerCountAfterForcedEmpty,
+          markerCountAfterIdle,
           sourceFeatureCount,
         };
       } finally {
@@ -595,7 +621,10 @@ test.describe("/features map interactions", () => {
 
     expect(calls.afterRaster).toBe(0);
     expect(calls.afterUnloadedFeatureSource).toBe(0);
-    expect(calls.final).toBe(1);
+    expect(calls.afterForcedEmpty).toBe(2);
+    expect(calls.markerCountAfterForcedEmpty).toBe(0);
+    expect(calls.afterIdle - calls.beforeIdle).toBe(1);
+    expect(calls.markerCountAfterIdle).toBe(1);
     expect(calls.sourceFeatureCount).toBeGreaterThan(0);
     expect(calls.duplicateBadgeCount).toBe(0);
   });
