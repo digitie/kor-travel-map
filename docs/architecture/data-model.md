@@ -458,6 +458,74 @@ CREATE INDEX idx_source_records_expires_at
 - BRIN on `imported_at/fetched_at` — 적재 시계열 누적 패턴에 최적, 디스크 절약.
 - partial on `expires_at IS NOT NULL` — purge job에서만 스캔.
 
+### 2.1 `provider_sync.notice_lifecycle_scopes` / `notice_lineage_states`
+
+짧은 수명의 notice는 source 관측 이력과 별도로 계보의 현재 상태를 영속화한다(Alembic
+0046). scope는 `(provider, dataset_key, source_entity_type)`별 적용 방식과 watermark를,
+member는 사건 계보별 `present` 전이를 저장한다.
+
+```sql
+CREATE TABLE provider_sync.notice_lifecycle_scopes (
+  provider TEXT NOT NULL,
+  dataset_key TEXT NOT NULL,
+  source_entity_type TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  applied_at TIMESTAMPTZ NOT NULL,
+  state_fingerprint TEXT NOT NULL,
+  CONSTRAINT pk_notice_lifecycle_scopes PRIMARY KEY (
+    provider, dataset_key, source_entity_type
+  ),
+  CONSTRAINT ck_notice_lifecycle_scopes_mode
+    CHECK (mode IN ('snapshot', 'event'))
+);
+
+CREATE TABLE provider_sync.notice_lineage_states (
+  provider TEXT NOT NULL,
+  dataset_key TEXT NOT NULL,
+  source_entity_type TEXT NOT NULL,
+  lineage_key TEXT NOT NULL,
+  present BOOLEAN NOT NULL,
+  changed_at TIMESTAMPTZ NOT NULL,
+  valid_until TIMESTAMPTZ,
+  CONSTRAINT pk_notice_lineage_states PRIMARY KEY (
+    provider, dataset_key, source_entity_type, lineage_key
+  ),
+  CONSTRAINT fk_notice_lineage_states_scope FOREIGN KEY (
+    provider, dataset_key, source_entity_type
+  )
+    REFERENCES provider_sync.notice_lifecycle_scopes (
+      provider, dataset_key, source_entity_type
+    ) ON DELETE CASCADE
+);
+```
+
+`snapshot` mode는 KREX처럼 전체 현재 목록을 제공하는 source에 쓴다. 정렬·중복 제거한
+활성 계보 집합의 fingerprint와 `applied_at`을 CAS한다. 더 과거인 snapshot과 같은 시각의
+다른 fingerprint는 거부하고, 같은 시각·같은 fingerprint는 멱등 replay로 허용한다. 빈
+snapshot도 scope header를 남긴다. member의 `changed_at`은 `present`가 실제로 바뀔 때만
+갱신한다.
+
+`event` mode는 KMA처럼 발표·해제 event의 rolling window를 제공하는 source에 쓴다. scope
+`applied_at`은 빈 batch도 포함해 `GREATEST`로 전진시키되, 계보 상태는 각 event의
+`changed_at`을 기준으로 갱신한다. `present=true`의 `valid_until`은 KMA가 명시한 예정
+종료시각이며, open-ended 발표와 명시 해제는 `NULL`이다. 같은 계보의 과거 event는 무시하고
+같은 시각의 `present` 또는 `valid_until` 충돌은 거부하므로, 늦게 도착한 다른 계보 event를
+batch watermark 때문에 버리지 않는다. DB에 저장된 최신 event와 정확히 일치하는
+`present=true` bundle만 Feature/source current에 적재해 늦은 과거 발표가 본문을 되돌리지
+못하게 한다.
+
+0046은 기존 source entity를 backfill하지 않는다. member row가 없는 계보는 `unknown`이며
+소멸 근거로 쓰지 않는다. notice 상태 적용은 전역 transaction advisory lock
+`hashtextextended('kortravelmap:notice-snapshot-reconcile', 0)` 아래에서 bundle 적재, 상태
+전이, 중복 정리, Feature 종료·재개를 한 transaction으로 처리한다. 여러 provider/dataset
+계보가 한 Feature를 공유하면 계보별 구조적 winner를 전역으로 계산한다. open-ended
+`present=true` winner가 하나라도 있으면 열고, finite present만 있으면 가장 늦은
+`valid_until`까지 노출한다. `unknown` winner가 섞이면 이미 열린 종료시각을 줄이지 않으며,
+명시 finite present가 더 오래 유효할 때만 연장한다. `unknown`만으로 닫힌 Feature를 다시
+열지는 않는다. 모든 winner가 `false`일 때만 종료하며 `valid_end_time`은 그 winner들의
+마지막 `changed_at`(최댓값)이다. scope/member 상태가 존재하는 0046 downgrade는 이 상태를
+source row에서 무손실 복원할 수 없으므로 명시적으로 거부한다.
+
 ## 3. `provider_sync.source_links`
 
 ```sql

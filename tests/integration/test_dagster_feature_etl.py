@@ -37,6 +37,8 @@ _FETCHED = datetime(2026, 6, 2, 12, 0, tzinfo=_KST)
 _TRUNCATE_SQL = (
     "TRUNCATE feature.features, provider_sync.source_records, "
     "provider_sync.source_links, provider_sync.provider_sync_state, "
+    "provider_sync.notice_lifecycle_scopes, "
+    "provider_sync.notice_lineage_states, "
     "ops.dedup_review_queue RESTART IDENTITY CASCADE"
 )
 
@@ -560,14 +562,14 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
             raw={"routeNo": route_no, "pointName": point_name},
         )
 
-    async def _valid_end(feature_id: str) -> str | None:
+    async def _valid_end(feature_id: str) -> datetime | None:
         row = await map_client.get_feature(feature_id)
         assert row is not None
         detail = row["detail"]
         assert isinstance(detail, dict)
         value = detail.get("valid_end_time")
         assert value is None or isinstance(value, str)
-        return value
+        return datetime.fromisoformat(value) if value is not None else None
 
     async def _sync_cursor() -> dict[str, Any]:
         state = await map_client.get_sync_state(
@@ -601,7 +603,7 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         fetched_at=partial_at,
     )
     assert await _valid_end(a_id) is None
-    assert await _valid_end(b_id) == partial_at.isoformat()
+    assert await _valid_end(b_id) == partial_at
     assert (await _sync_cursor())["notices_closed"] == 1
 
     await _run_asset(
@@ -610,8 +612,8 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         krex_traffic_notices=[],
         fetched_at=empty_at,
     )
-    assert await _valid_end(a_id) == empty_at.isoformat()
-    assert await _valid_end(b_id) == partial_at.isoformat()
+    assert await _valid_end(a_id) == empty_at
+    assert await _valid_end(b_id) == partial_at
     assert (await _sync_cursor())["notices_closed"] == 1
 
     await _run_asset(
@@ -621,7 +623,7 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         fetched_at=reappeared_at,
     )
     assert await _valid_end(a_id) is None
-    assert await _valid_end(b_id) == partial_at.isoformat()
+    assert await _valid_end(b_id) == partial_at
     cursor = await _sync_cursor()
     assert cursor["notices_reopened"] == 1
     assert cursor["loaded_at"] == reappeared_at.isoformat()

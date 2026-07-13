@@ -136,15 +136,29 @@ function makeFeatureWeatherResponse(featureId: string): FeatureWeatherResponse {
 }
 
 async function setMapZoom(page: Page, zoom: number) {
-  await page.evaluate((nextZoom) => {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & {
+            _maplibreMap?: import("maplibre-gl").Map;
+          }) | null;
+          return Boolean(container?._maplibreMap);
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  await page.evaluate(({ nextZoom, nextCenter }) => {
     const container = document.querySelector(
       '[data-testid="map-canvas-container"]',
     ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
     container?._maplibreMap?.jumpTo({
-      center: [SEOUL_LON, SEOUL_LAT],
+      center: nextCenter,
       zoom: nextZoom,
     });
-  }, zoom);
+  }, { nextCenter: [SEOUL_LON, SEOUL_LAT] as [number, number], nextZoom: zoom });
 }
 
 async function mockFeatureRoutes(
@@ -190,7 +204,7 @@ async function mockFeatureRoutes(
       url.pathname.startsWith("/v1/features/") ||
       url.pathname.startsWith("/api/proxy/v1/features/")
     ) {
-      const id = url.pathname.split("/").pop() ?? "";
+      const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
       const detail = detailById[id] ?? makeFeatureDetail({ feature_id: id });
       await fulfillJson(route, makeFeatureDetailEnvelope(detail));
       return;
@@ -217,7 +231,7 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
       makeWeatherFeature({
         feature_id: "kma::short::seoul",
         name: "기상청 단기 서울",
-        lon: SEOUL_LON + 0.012,
+        lon: SEOUL_LON + 0.004,
         lat: SEOUL_LAT,
       }),
       makeWeatherFeature({
@@ -225,7 +239,7 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
         name: "서울 대기질 측정소",
         marker_color: "P-16",
         lon: SEOUL_LON,
-        lat: SEOUL_LAT + 0.012,
+        lat: SEOUL_LAT + 0.004,
         weather_summary: {
           metric_key: "PM10",
           metric_name: "미세먼지",
@@ -306,7 +320,8 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
 
     const popup = page.locator(".maplibregl-popup");
     await expect(popup).toBeVisible();
-    await expect(popup).toContainText("겹친 지점 2개");
+    await expect(popup.getByText("겹친 지점", { exact: true })).toBeVisible();
+    await expect(popup.getByText("2개", { exact: true })).toBeVisible();
     await expect(popup.getByText("기상청 초단기 서울")).toBeVisible();
     await expect(popup.getByText("기상청 단기 서울")).toBeVisible();
 

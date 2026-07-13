@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from dagster import build_asset_context, build_init_resource_context
 from kortravelmap.dto import ForecastStyle, WeatherDomain
-from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.feature_repo import (
+    FeatureLoadResult,
+    NoticeFeatureLoadResult,
+    NoticeReconcileResult,
+)
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -806,9 +811,42 @@ def test_parse_alert_tm_fc_rejects_bad_length() -> None:
         kma_weather._parse_alert_tm_fc("202606")
 
 
+def test_notice_lineage_event_orders_announcement_by_issued_at() -> None:
+    issued_at = datetime.fromisoformat("2026-07-14T09:00:00+09:00")
+    effective_at = issued_at + timedelta(hours=3)
+    valid_until = issued_at + timedelta(hours=12)
+    bundle = SimpleNamespace(
+        source_record=SimpleNamespace(
+            source_entity_id="stn:108::호우",
+            raw_data={"issued_at": issued_at.isoformat()},
+            fetched_at=issued_at + timedelta(minutes=1),
+        ),
+        feature=SimpleNamespace(
+            detail=SimpleNamespace(
+                valid_start_time=effective_at,
+                valid_end_time=valid_until,
+            ),
+        ),
+    )
+
+    assert kma_weather._latest_notice_lineage_events([bundle], []) == {
+        "stn:108::호우": (True, issued_at, valid_until)
+    }
+
+    lifted_at = issued_at + timedelta(hours=6)
+    closure = SimpleNamespace(
+        natural_key="stn:108::호우",
+        closed_at=lifted_at,
+    )
+    assert kma_weather._latest_notice_lineage_events([bundle], [closure]) == {
+        "stn:108::호우": (False, lifted_at, None)
+    }
+
+
 class _FakeBundleLoadClient:
     def __init__(self) -> None:
         self.loaded_bundles: list[Any] = []
+        self.notice_event_calls: list[dict[str, Any]] = []
 
     async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
         materialized = list(bundles)
@@ -816,6 +854,35 @@ class _FakeBundleLoadClient:
         return FeatureLoadResult(
             bundles_total=len(materialized),
             features_inserted=len(materialized),
+        )
+
+    async def load_notice_event_bundles(
+        self,
+        *,
+        bundles: Any,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        lineage_events: dict[str, tuple[bool, Any, Any]],
+        observed_at: Any,
+    ) -> NoticeFeatureLoadResult:
+        materialized = list(bundles)
+        self.loaded_bundles.extend(materialized)
+        self.notice_event_calls.append(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "lineage_events": lineage_events,
+                "observed_at": observed_at,
+            }
+        )
+        return NoticeFeatureLoadResult(
+            load=FeatureLoadResult(
+                bundles_total=len(materialized),
+                features_inserted=len(materialized),
+            ),
+            reconcile=NoticeReconcileResult(),
         )
 
 
@@ -845,6 +912,17 @@ async def test_weather_alerts_asset_loads_notice_bundles() -> None:
     # region명이 위치 단서(raw_address) — strict 주소 검증 통과의 핵심.
     assert bundle.source_record.raw_address == "전국"
     assert result.address_validation.error_count == 0
+    [event_call] = client.notice_event_calls
+    assert event_call["provider"] == "python-kma-api"
+    assert event_call["dataset_key"] == "kma_weather_alerts"
+    assert event_call["source_entity_type"] == "weather_alert"
+    assert event_call["lineage_events"] == {
+        bundle.source_record.source_entity_id: (
+            True,
+            bundle.feature.detail.valid_start_time,
+            bundle.feature.detail.valid_end_time,
+        )
+    }
 
 
 # -- T-219c: 특보 fetcher / datagokr client resource --------------------------

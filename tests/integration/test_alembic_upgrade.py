@@ -196,6 +196,8 @@ async def test_alembic_creates_source_tables(
         )
         tables = [row[0] for row in result]
     assert tables == [
+        "notice_lifecycle_scopes",
+        "notice_lineage_states",
         "provider_sync_state",
         "source_entities",
         "source_links",

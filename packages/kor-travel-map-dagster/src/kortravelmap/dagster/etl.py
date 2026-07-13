@@ -12,7 +12,7 @@ from kortravelmap.dagster.validation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
 
     from kortravelmap.client import AsyncKorTravelMapClient
     from kortravelmap.dto import FeatureBundle
@@ -91,6 +91,8 @@ async def load_feature_bundles_for_dagster(
     dataset_key: str,
     strict_address: bool | str = True,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
+    load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
+    | None = None,
 ) -> DagsterFeatureLoadResult:
     """주소/좌표 검증 후 ``AsyncKorTravelMapClient``로 PostGIS에 적재한다.
 
@@ -132,13 +134,17 @@ async def load_feature_bundles_for_dagster(
         ]
         dropped_feature_ids = tuple(b.feature.feature_id for b in dropped)
 
-    load: FeatureLoadResult | None = None
-    for start in range(0, len(bundles), chunk_size):
-        chunk = bundles[start : start + chunk_size]
-        chunk_load = await client.load_feature_bundles(chunk)
-        load = chunk_load if load is None else load.merge(chunk_load)
-    if load is None:
-        load = await client.load_feature_bundles(bundles)
+    if load_all is not None:
+        load = await load_all(bundles)
+    else:
+        load = None
+        for start in range(0, len(bundles), chunk_size):
+            chunk = bundles[start : start + chunk_size]
+            chunk_load = await client.load_feature_bundles(chunk)
+            load = chunk_load if load is None else load.merge(chunk_load)
+        if load is None:
+            load = await client.load_feature_bundles(bundles)
+    assert load is not None
 
     result = DagsterFeatureLoadResult(
         provider=provider,

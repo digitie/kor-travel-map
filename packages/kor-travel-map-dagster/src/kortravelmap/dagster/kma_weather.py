@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.dto import kst_now
 from kortravelmap.dto.weather import WeatherValue
+from kortravelmap.infra.feature_repo import FeatureLoadResult, NoticeFeatureLoadResult
 from kortravelmap.providers.kma import (
     KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
@@ -928,6 +929,47 @@ def weather_warning_rows(records: Sequence[Any]) -> list[KmaAlertRow]:
     return rows
 
 
+def _latest_notice_lineage_events(
+    bundles: Sequence[Any],
+    closures: Sequence[Any],
+) -> dict[str, tuple[bool, datetime, datetime | None]]:
+    """rolling window의 발표/해제를 계보별 최신 event 한 건으로 접는다."""
+    events: dict[str, tuple[bool, datetime, datetime | None]] = {}
+
+    def remember(
+        lineage_key: str,
+        present: bool,
+        changed_at: datetime,
+        valid_until: datetime | None,
+    ) -> None:
+        current = events.get(lineage_key)
+        if current is None or changed_at > current[1]:
+            events[lineage_key] = (present, changed_at, valid_until)
+        elif changed_at == current[1] and (
+            present != current[0] or valid_until != current[2]
+        ):
+            raise ValueError("KMA notice 계보의 동일 시각 발표/해제가 충돌한다.")
+
+    for bundle in bundles:
+        raw_issued_at = bundle.source_record.raw_data.get("issued_at")
+        changed_at = (
+            datetime.fromisoformat(raw_issued_at)
+            if isinstance(raw_issued_at, str)
+            else bundle.feature.detail.valid_start_time
+        )
+        if changed_at is None:
+            changed_at = bundle.source_record.fetched_at
+        remember(
+            bundle.source_record.source_entity_id,
+            True,
+            changed_at,
+            bundle.feature.detail.valid_end_time,
+        )
+    for closure in closures:
+        remember(closure.natural_key, False, closure.closed_at, None)
+    return events
+
+
 async def run_feature_notice_kma_weather_alerts(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -949,25 +991,50 @@ async def run_feature_notice_kma_weather_alerts(
     fetched_at = await _fetched_at(context)
     # 발표 → 사건 단위 upsert bundle / 해제 → 열린 feature 닫기 지시(#632).
     bundles = weather_alerts_to_notice_bundles(rows, fetched_at=fetched_at)
+    closures = weather_alert_lift_closures(rows)
+    lineage_events = _latest_notice_lineage_events(bundles, closures)
+    client = cast(
+        "AsyncKorTravelMapClient",
+        _resource_object(context, "kor_travel_map_client"),
+    )
+    reconciled: Any | None = None
+
+    async def load_events_atomically(
+        validated_bundles: Sequence[Any],
+    ) -> FeatureLoadResult:
+        nonlocal reconciled
+        atomic_load = getattr(client, "load_notice_event_bundles", None)
+        if not callable(atomic_load):
+            raise RuntimeError("KMA notice는 atomic event load client가 필요하다.")
+        outcome = cast(
+            "NoticeFeatureLoadResult",
+            await atomic_load(
+                bundles=validated_bundles,
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
+                source_entity_type="weather_alert",
+                lineage_events=lineage_events,
+                observed_at=fetched_at,
+            ),
+        )
+        reconciled = outcome.reconcile
+        return outcome.load
+
     result = await _load(
         context,
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
         bundles=bundles,
+        load_all=load_events_atomically,
     )
-    closures = weather_alert_lift_closures(rows)
-    if closures:
-        client = cast(
-            "AsyncKorTravelMapClient",
-            _resource_object(context, "kor_travel_map_client"),
-        )
-        closed = await client.close_notice_features(
-            closures={c.feature_id: c.closed_at for c in closures}
-        )
+    if reconciled is None:
+        raise RuntimeError("KMA notice atomic load가 reconcile 결과를 반환하지 않았다.")
+    if closures or reconciled.reopened:
         context.log.info(
-            "KMA 특보 해제 %d건 → 열린 notice %d건 닫음(valid_end_time).",
+            "KMA 특보 event — 해제 %d건, 닫음 %d건, 재등장 복구 %d건.",
             len(closures),
-            closed,
+            reconciled.closed,
+            reconciled.reopened,
         )
     return result
 

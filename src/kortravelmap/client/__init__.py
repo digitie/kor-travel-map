@@ -114,6 +114,7 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchPage,
     NearbyFeaturePage,
+    NoticeFeatureLoadResult,
     NoticeReconcileResult,
     close_notice_features,
     features_in_bbox,
@@ -132,10 +133,19 @@ from kortravelmap.infra.feature_repo import (
     features_nearby_poi_cache_target as repo_features_nearby_poi_cache_target,
 )
 from kortravelmap.infra.feature_repo import (
+    get_notice_snapshot_watermark as repo_get_notice_snapshot_watermark,
+)
+from kortravelmap.infra.feature_repo import (
     list_active_place_coords as repo_list_active_place_coords,
 )
 from kortravelmap.infra.feature_repo import (
     list_primary_place_locator as repo_list_primary_place_locator,
+)
+from kortravelmap.infra.feature_repo import (
+    load_authoritative_notice_snapshot as repo_load_authoritative_notice_snapshot,
+)
+from kortravelmap.infra.feature_repo import (
+    load_notice_event_bundles as repo_load_notice_event_bundles,
 )
 from kortravelmap.infra.feature_repo import (
     purge_expired_notices as repo_purge_expired_notices,
@@ -430,6 +440,50 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session, session.begin():
             return await load_bundles(session, bundles)
 
+    async def load_authoritative_notice_snapshot(
+        self,
+        *,
+        bundles: Sequence[FeatureBundle],
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        active_lineage_keys: Collection[str],
+        observed_at: datetime,
+    ) -> NoticeFeatureLoadResult:
+        """full notice snapshot 적재와 lifecycle 반영을 한 transaction으로 수행."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_load_authoritative_notice_snapshot(
+                session,
+                bundles=bundles,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                active_lineage_keys=active_lineage_keys,
+                observed_at=observed_at,
+            )
+
+    async def load_notice_event_bundles(
+        self,
+        *,
+        bundles: Sequence[FeatureBundle],
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        lineage_events: Mapping[str, tuple[bool, datetime, datetime | None]],
+        observed_at: datetime,
+    ) -> NoticeFeatureLoadResult:
+        """event notice 적재와 member lifecycle 반영을 한 transaction으로 수행."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_load_notice_event_bundles(
+                session,
+                bundles=bundles,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                lineage_events=lineage_events,
+                observed_at=observed_at,
+            )
+
     async def inactivate_features_by_source(
         self,
         *,
@@ -476,14 +530,29 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
             )
 
-    async def close_notice_features(self, *, closures: Mapping[str, datetime]) -> int:
-        """열린 notice feature를 닫는다 (``valid_end_time`` 채움, #632).
+    async def close_notice_features(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        closures: Mapping[str, datetime],
+        announcements: Mapping[str, datetime] | None = None,
+    ) -> int:
+        """notice 발표/해제 계보 상태를 반영하고 닫힌 Feature 수를 반환한다.
 
-        KMA 특보 **해제** 등 — ``closures``는 ``feature_id → 닫기 시각``.
+        KMA 특보 등 event feed 경계 — mapping key는 사건 ``lineage_key``다.
         ``infra.feature_repo.close_notice_features`` 위임. 한 transaction.
         """
         async with self._session_factory() as session, session.begin():
-            return await close_notice_features(session, closures=closures)
+            return await close_notice_features(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                closures=closures,
+                announcements=announcements,
+            )
 
     async def reconcile_notice_features(
         self,
@@ -508,6 +577,22 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 active_lineage_keys=active_lineage_keys,
                 closed_at=closed_at,
+            )
+
+    async def get_notice_snapshot_watermark(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+    ) -> datetime | None:
+        """authoritative notice scope에 실제 반영된 최근 watermark를 조회한다."""
+        async with self._session_factory() as session:
+            return await repo_get_notice_snapshot_watermark(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
             )
 
     async def purge_expired_notices(self, *, retention: str = "1 year") -> int:

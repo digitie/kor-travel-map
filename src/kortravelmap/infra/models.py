@@ -72,6 +72,8 @@ __all__ = [
     "FeatureRow",
     "FeatureVersionRow",
     "SourceEntityRow",
+    "NoticeLifecycleScopeRow",
+    "NoticeLineageStateRow",
     "SourceRecordRow",
     "SourceLinkRow",
     "CuratedThemeRow",
@@ -392,6 +394,57 @@ class SourceEntityRow(Base):
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class NoticeLifecycleScopeRow(Base):
+    """notice lifecycle scope의 모드·적용 watermark·state fingerprint."""
+
+    __tablename__ = "notice_lifecycle_scopes"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('snapshot', 'event')",
+            name="ck_notice_lifecycle_scopes_mode",
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
+    source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    state_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class NoticeLineageStateRow(Base):
+    """Authoritative notice snapshot에 알려진 계보의 최근 존재 상태."""
+
+    __tablename__ = "notice_lineage_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider", "dataset_key", "source_entity_type"],
+            [
+                "provider_sync.notice_lifecycle_scopes.provider",
+                "provider_sync.notice_lifecycle_scopes.dataset_key",
+                "provider_sync.notice_lifecycle_scopes.source_entity_type",
+            ],
+            name="fk_notice_lineage_states_scope",
+            ondelete="CASCADE",
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
+    source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
+    lineage_key: Mapped[str] = mapped_column(String, primary_key=True)
+    present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SourceRecordRow(Base):

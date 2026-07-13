@@ -10,8 +10,10 @@ PostGIS로 끝까지 검증한다. 정리 마이그레이션(0040)의 KREX 술�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -41,7 +43,7 @@ from kortravelmap.providers.kma import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -51,6 +53,9 @@ _NOW = datetime(2026, 7, 3, 12, 0, tzinfo=_KST)
 _KREX = "python-krex-api"
 _KREX_DS = "krex_traffic_notices"
 _KREX_ET = "traffic_notice"
+_CROSS_PROVIDER = "python-cross-notice-api"
+_CROSS_DS = "cross_notice_snapshot"
+_CROSS_ET = "notice"
 
 
 def _krex_notice_bundle(
@@ -61,6 +66,9 @@ def _krex_notice_bundle(
     lon: float = 127.1,
     lat: float = 37.4,
     valid_start: datetime | None = None,
+    provider: str = _KREX,
+    dataset_key: str = _KREX_DS,
+    source_entity_type: str = _KREX_ET,
 ) -> FeatureBundle:
     """계보 시뮬레이션용 KREX notice bundle.
 
@@ -73,7 +81,7 @@ def _krex_notice_bundle(
         bjd_code=None,
         kind=FeatureKind.NOTICE.value,
         category="99000000",
-        source_type=f"{_KREX}:{_KREX_DS}",
+        source_type=f"{provider}:{dataset_key}",
         source_natural_key=key_for_id,
     )
     payload_hash = make_payload_hash(raw_data)
@@ -105,9 +113,9 @@ def _krex_notice_bundle(
         ),
     )
     source_record = SourceRecord(
-        provider=_KREX,
-        dataset_key=_KREX_DS,
-        source_entity_type=_KREX_ET,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
         source_entity_id=source_entity_id,
         raw_payload_hash=payload_hash,
         raw_name=feature.name,
@@ -147,6 +155,25 @@ _CLUES = {
 }
 _LINEAGE = "2026.07.03::07:25:43::0550::부산방향::남제천(272.5k)::03"
 
+_MULTI_CLUES_A = {
+    "occurred_date": "2026.07.03",
+    "occurred_time": "10:00:00",
+    "route_no": "0010",
+    "direction": "서울방향",
+    "point_name": "다중계보-A",
+    "incident_type_code": "03",
+}
+_MULTI_CLUES_B = {
+    "occurred_date": "2026.07.03",
+    "occurred_time": "10:05:00",
+    "route_no": "0020",
+    "direction": "부산방향",
+    "point_name": "다중계보-B",
+    "incident_type_code": "01",
+}
+_MULTI_LINEAGE_A = "2026.07.03::10:00:00::0010::서울방향::다중계보-a::03"
+_MULTI_LINEAGE_B = "2026.07.03::10:05:00::0020::부산방향::다중계보-b::01"
+
 
 async def _seed_dup_lineage(
     session: AsyncSession,
@@ -172,6 +199,145 @@ async def _seed_dup_lineage(
     await _pin_seen_at(session, old_gen.source_record.source_record_key, _NOW - timedelta(hours=2))
     await _pin_seen_at(session, new_gen.source_record.source_record_key, _NOW)
     return old_gen, new_gen
+
+
+async def _seed_multi_lineage_feature(
+    session: AsyncSession,
+) -> tuple[FeatureBundle, FeatureBundle, FeatureBundle]:
+    """한 feature가 A 계보 winner이면서 B 계보 loser인 상태를 만든다."""
+    shared = _krex_notice_bundle(
+        source_entity_id="multi::shared::a",
+        raw_data=_MULTI_CLUES_A,
+        feature_suffix="shared",
+    )
+    shared_b_source = _krex_notice_bundle(
+        source_entity_id="multi::shared::b",
+        raw_data=_MULTI_CLUES_B,
+        feature_suffix="shared-b-source",
+    )
+    older_a = _krex_notice_bundle(
+        source_entity_id="multi::older::a",
+        raw_data=_MULTI_CLUES_A,
+        feature_suffix="older-a",
+    )
+    newer_b = _krex_notice_bundle(
+        source_entity_id="multi::newer::b",
+        raw_data=_MULTI_CLUES_B,
+        feature_suffix="newer-b",
+    )
+    await feature_repo.load_bundles(
+        session,
+        [shared, shared_b_source, older_a, newer_b],
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method,
+                confidence, is_primary_source, created_at
+            )
+            SELECT
+                :feature_id, source_entity_key, 'primary',
+                'identity_migration', 100, true, :seen_at
+            FROM provider_sync.source_records
+            WHERE source_record_key = :source_record_key
+            """
+        ),
+        {
+            "feature_id": shared.feature.feature_id,
+            "seen_at": _NOW,
+            "source_record_key": shared_b_source.source_record.source_record_key,
+        },
+    )
+    # B entity의 임시 원 feature는 감사 이력으로만 남기고, 같은 entity를 shared의
+    # 두 번째 primary lineage로 연결한다.
+    await session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = :deleted_at"
+            " WHERE feature_id = :feature_id"
+        ),
+        {
+            "deleted_at": _NOW,
+            "feature_id": shared_b_source.feature.feature_id,
+        },
+    )
+    await _pin_seen_at(
+        session,
+        older_a.source_record.source_record_key,
+        _NOW - timedelta(hours=2),
+    )
+    await _pin_seen_at(session, shared.source_record.source_record_key, _NOW)
+    await _pin_seen_at(
+        session,
+        shared_b_source.source_record.source_record_key,
+        _NOW - timedelta(hours=2),
+    )
+    await _pin_seen_at(session, newer_b.source_record.source_record_key, _NOW)
+    await session.flush()
+    return shared, older_a, newer_b
+
+
+async def _attach_cross_scope_winner(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    source_entity_id: str,
+    provider: str = _CROSS_PROVIDER,
+    dataset_key: str = _CROSS_DS,
+    source_entity_type: str = _CROSS_ET,
+) -> FeatureBundle:
+    """다른 provider/dataset의 유일한 winner 계보를 기존 feature에 연결한다."""
+    cross_scope = _krex_notice_bundle(
+        source_entity_id=source_entity_id,
+        raw_data={"scope": "cross-provider-dataset"},
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    await feature_repo.load_bundles(session, [cross_scope])
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method,
+                confidence, is_primary_source, created_at
+            )
+            SELECT
+                :feature_id, source_entity_key, 'primary',
+                'identity_migration', 100, true, :seen_at
+            FROM provider_sync.source_records
+            WHERE source_record_key = :source_record_key
+            """
+        ),
+        {
+            "feature_id": feature_id,
+            "seen_at": _NOW,
+            "source_record_key": cross_scope.source_record.source_record_key,
+        },
+    )
+    # cross-scope entity의 임시 원 feature는 감사 이력으로만 남기고, 전달받은
+    # feature가 이 계보의 유일한 공개 winner가 되게 한다.
+    await session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = :deleted_at"
+            " WHERE feature_id = :feature_id"
+        ),
+        {
+            "deleted_at": _NOW,
+            "feature_id": cross_scope.feature.feature_id,
+        },
+    )
+    await session.execute(
+        text(
+            "DELETE FROM provider_sync.source_links "
+            "WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": cross_scope.feature.feature_id},
+    )
+    await session.flush()
+    return cross_scope
 
 
 async def _seed_split_max_tuple_lineage(
@@ -255,6 +421,46 @@ async def _feature_state(
         )
     ).one()
     return row.status, row.deleted_at, row.valid_end
+
+
+async def _snapshot_state(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    lineage_key: str,
+) -> tuple[bool | None, datetime | None, datetime | None]:
+    row = (
+        await session.execute(
+            text(
+                "SELECT present, changed_at, valid_until "
+                "FROM provider_sync.notice_lineage_states "
+                "WHERE provider = :provider AND dataset_key = :dataset_key "
+                "AND source_entity_type = :source_entity_type "
+                "AND lineage_key = :lineage_key"
+            ),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "lineage_key": lineage_key,
+            },
+        )
+    ).one()
+    return row.present, row.changed_at, row.valid_until
+
+
+async def _public_notice_ids(session: AsyncSession) -> set[str]:
+    rows = await feature_repo.features_in_bbox(
+        session,
+        min_lon=127.0,
+        min_lat=37.0,
+        max_lon=127.5,
+        max_lat=37.8,
+        kinds=["notice"],
+    )
+    return {str(row["feature_id"]) for row in rows}
 
 
 async def test_supersede_soft_deletes_non_latest_per_lineage(
@@ -511,6 +717,499 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
     ] is not None
 
 
+async def test_multi_lineage_winner_survives_public_read_and_reconcile(
+    migrated_session: AsyncSession,
+) -> None:
+    """한 계보 winner/다른 계보 loser인 feature 전체를 숨기거나 삭제하지 않는다."""
+    shared, older_a, newer_b = await _seed_multi_lineage_feature(migrated_session)
+    expected = {shared.feature.feature_id, newer_b.feature.feature_id}
+
+    # reconcile 전 공개 필터도 "모든 계보에서 loser"인 older_a만 숨긴다.
+    assert await _public_notice_ids(migrated_session) == expected
+
+    result = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+    )
+    assert result == feature_repo.NoticeReconcileResult(superseded=1)
+    assert (await _feature_state(migrated_session, shared.feature.feature_id))[1] is None
+    assert (await _feature_state(migrated_session, older_a.feature.feature_id))[1] is not None
+    assert (await _feature_state(migrated_session, newer_b.feature.feature_id))[1] is None
+    assert await _public_notice_ids(migrated_session) == expected
+
+
+async def test_reconcile_preserves_cross_provider_dataset_winners(
+    migrated_session: AsyncSession,
+) -> None:
+    """호출 scope loser/absent여도 다른 provider winner인 feature는 보존한다."""
+    delete_clues = {
+        "occurred_date": "2026.07.03",
+        "occurred_time": "11:00:00",
+        "route_no": "0030",
+        "direction": "서울방향",
+        "point_name": "교차-provider-delete-guard",
+        "incident_type_code": "03",
+    }
+    delete_lineage = (
+        "2026.07.03::11:00:00::0030::서울방향::"
+        "교차-provider-delete-guard::03"
+    )
+    cross_scope_winner = _krex_notice_bundle(
+        source_entity_id=f"legacy::{delete_lineage}",
+        raw_data=delete_clues,
+        feature_suffix="cross-scope-delete-guard",
+    )
+    scoped_winner = _krex_notice_bundle(
+        source_entity_id=delete_lineage,
+        raw_data=delete_clues,
+    )
+    close_clues = {
+        "occurred_date": "2026.07.03",
+        "occurred_time": "11:10:00",
+        "route_no": "0040",
+        "direction": "부산방향",
+        "point_name": "교차-provider-close-guard",
+        "incident_type_code": "01",
+    }
+    close_guard = _krex_notice_bundle(
+        source_entity_id="cross-scope-close-guard",
+        raw_data=close_clues,
+        feature_suffix="cross-scope-close-guard",
+    )
+    await feature_repo.load_bundles(
+        migrated_session,
+        [cross_scope_winner, scoped_winner, close_guard],
+    )
+    await _pin_seen_at(
+        migrated_session,
+        cross_scope_winner.source_record.source_record_key,
+        _NOW - timedelta(hours=1),
+    )
+    await _pin_seen_at(
+        migrated_session,
+        scoped_winner.source_record.source_record_key,
+        _NOW,
+    )
+    await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=cross_scope_winner.feature.feature_id,
+        source_entity_id="cross-provider-delete-winner",
+    )
+    await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=close_guard.feature.feature_id,
+        source_entity_id="cross-provider-close-winner",
+    )
+    cross_present = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_CROSS_PROVIDER,
+        dataset_key=_CROSS_DS,
+        source_entity_type=_CROSS_ET,
+        active_lineage_keys={
+            "cross-provider-delete-winner",
+            "cross-provider-close-winner",
+        },
+        closed_at=_NOW + timedelta(minutes=5),
+    )
+    assert cross_present == feature_repo.NoticeReconcileResult()
+
+    expected = {
+        cross_scope_winner.feature.feature_id,
+        scoped_winner.feature.feature_id,
+        close_guard.feature.feature_id,
+    }
+    assert await _public_notice_ids(migrated_session) == expected
+
+    # KREX 계보에서는 loser지만 다른 provider/dataset 계보 winner이므로
+    # feature 전체를 soft-delete하지 않는다.
+    dedup = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+    )
+    assert dedup == feature_repo.NoticeReconcileResult()
+    assert (
+        await _feature_state(
+            migrated_session, cross_scope_winner.feature.feature_id
+        )
+    )[1] is None
+
+    # 과거 scope-local close/dedup 잔존을 재현한다. 현재 KREX 계보에서는
+    # loser지만 다른 scope의 explicit true winner이므로 다시 열어야 한다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :ended_at, "
+            "detail = jsonb_set("
+            "detail, '{valid_end_time}', to_jsonb(CAST(:ended_at_iso AS text)), true) "
+            "WHERE feature_id = :feature_id"
+        ),
+        {
+            "ended_at": _NOW + timedelta(minutes=6),
+            "ended_at_iso": (_NOW + timedelta(minutes=6)).isoformat(),
+            "feature_id": cross_scope_winner.feature.feature_id,
+        },
+    )
+
+    # KREX snapshot에서 close_guard 계보가 사라져도 다른 scope의 winner가
+    # 여전히 열려 있으므로 이 호출이 공유 feature를 종료하지 않는다.
+    snapshot = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={delete_lineage},
+        closed_at=_NOW + timedelta(minutes=10),
+    )
+    assert snapshot == feature_repo.NoticeReconcileResult(reopened=1)
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session,
+        cross_scope_winner.feature.feature_id,
+    )
+    assert status == "active"
+    assert deleted_at is None
+    assert valid_end is None
+    _, deleted_at, valid_end = await _feature_state(
+        migrated_session, close_guard.feature.feature_id
+    )
+    assert deleted_at is None
+    assert valid_end is None
+    assert await _public_notice_ids(migrated_session) == expected
+
+
+async def test_cross_scope_snapshot_state_closes_after_last_winner_disappears(
+    migrated_session: AsyncSession,
+) -> None:
+    """A/B의 persisted 존재 상태가 순차 소멸·재등장 lifecycle을 결정한다."""
+    scope_a = _krex_notice_bundle(
+        source_entity_id="cross-snapshot-scope-a",
+        raw_data={"scope": "a"},
+        feature_suffix="cross-snapshot-shared",
+    )
+    await feature_repo.load_bundles(migrated_session, [scope_a])
+    scope_b = await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=scope_a.feature.feature_id,
+        source_entity_id="cross-snapshot-scope-b",
+    )
+    t0 = _NOW + timedelta(minutes=30)
+
+    # 두 authoritative scope가 모두 present인 출발 상태를 영속화한다.
+    for bundle, checked_at in (
+        (scope_a, t0),
+        (scope_b, t0 + timedelta(minutes=1)),
+    ):
+        result = await feature_repo.supersede_stale_notice_features(
+            migrated_session,
+            provider=bundle.source_record.provider,
+            dataset_key=bundle.source_record.dataset_key,
+            source_entity_type=bundle.source_record.source_entity_type,
+            active_lineage_keys={bundle.source_record.source_entity_id},
+            closed_at=checked_at,
+        )
+        assert result == feature_repo.NoticeReconcileResult()
+
+    # A가 먼저 사라져도 B의 persisted present winner가 공유 Feature를 보존한다.
+    a_absent_at = t0 + timedelta(minutes=2)
+    a_absent = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=scope_a.source_record.provider,
+        dataset_key=scope_a.source_record.dataset_key,
+        source_entity_type=scope_a.source_record.source_entity_type,
+        active_lineage_keys=set(),
+        closed_at=a_absent_at,
+    )
+    assert a_absent == feature_repo.NoticeReconcileResult()
+    assert (await _snapshot_state(
+        migrated_session,
+        provider=scope_a.source_record.provider,
+        dataset_key=scope_a.source_record.dataset_key,
+        source_entity_type=scope_a.source_record.source_entity_type,
+        lineage_key=scope_a.source_record.source_entity_id,
+    )) == (False, a_absent_at, None)
+    assert (await _feature_state(migrated_session, scope_a.feature.feature_id))[2] is None
+
+    # 마지막 present winner B까지 사라진 호출만 정확히 한 번 닫는다.
+    b_absent_at = t0 + timedelta(minutes=3)
+    b_absent = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=scope_b.source_record.provider,
+        dataset_key=scope_b.source_record.dataset_key,
+        source_entity_type=scope_b.source_record.source_entity_type,
+        active_lineage_keys=set(),
+        closed_at=b_absent_at,
+    )
+    assert b_absent == feature_repo.NoticeReconcileResult(closed=1)
+    assert await _public_notice_ids(migrated_session) == set()
+
+    # A의 과거 snapshot은 최신 false watermark를 되돌리거나 reopen하지 않는다.
+    with pytest.raises(ValueError, match="stale authoritative"):
+        await feature_repo.supersede_stale_notice_features(
+            migrated_session,
+            provider=scope_a.source_record.provider,
+            dataset_key=scope_a.source_record.dataset_key,
+            source_entity_type=scope_a.source_record.source_entity_type,
+            active_lineage_keys={scope_a.source_record.source_entity_id},
+            closed_at=t0 + timedelta(minutes=1),
+        )
+    assert (await _snapshot_state(
+        migrated_session,
+        provider=scope_a.source_record.provider,
+        dataset_key=scope_a.source_record.dataset_key,
+        source_entity_type=scope_a.source_record.source_entity_type,
+        lineage_key=scope_a.source_record.source_entity_id,
+    )) == (False, a_absent_at, None)
+
+    # 더 최신 A 재등장은 reopen 1회, 같은 snapshot 반복은 no-op이다.
+    reappeared_at = t0 + timedelta(minutes=4)
+    reappeared = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=scope_a.source_record.provider,
+        dataset_key=scope_a.source_record.dataset_key,
+        source_entity_type=scope_a.source_record.source_entity_type,
+        active_lineage_keys={scope_a.source_record.source_entity_id},
+        closed_at=reappeared_at,
+    )
+    assert reappeared == feature_repo.NoticeReconcileResult(reopened=1)
+    assert await _public_notice_ids(migrated_session) == {scope_a.feature.feature_id}
+    repeated = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=scope_a.source_record.provider,
+        dataset_key=scope_a.source_record.dataset_key,
+        source_entity_type=scope_a.source_record.source_entity_type,
+        active_lineage_keys={scope_a.source_record.source_entity_id},
+        closed_at=reappeared_at,
+    )
+    assert repeated == feature_repo.NoticeReconcileResult()
+
+
+async def test_snapshot_reconcile_serializes_cross_scope_closure(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """전역 transaction lock 뒤 최신 A/B 상태를 읽어 마지막 scope가 닫는다."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    suffix = uuid4().hex
+    provider_a = f"snapshot-concurrency-a-{suffix}"
+    provider_b = f"snapshot-concurrency-b-{suffix}"
+    dataset_a = f"dataset-a-{suffix}"
+    dataset_b = f"dataset-b-{suffix}"
+    entity_a = f"entity-a-{suffix}"
+    entity_b = f"entity-b-{suffix}"
+    feature_ids: list[str] = []
+    scope_a: FeatureBundle | None = None
+    scope_b: FeatureBundle | None = None
+    first_session = AsyncSession(migrated_engine, expire_on_commit=False)
+    second_session = AsyncSession(migrated_engine, expire_on_commit=False)
+    second_task: asyncio.Task[feature_repo.NoticeReconcileResult] | None = None
+    try:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as setup:
+            scope_a = _krex_notice_bundle(
+                source_entity_id=entity_a,
+                raw_data={"scope": "concurrency-a"},
+                feature_suffix=f"concurrency-shared-{suffix}",
+                provider=provider_a,
+                dataset_key=dataset_a,
+                source_entity_type="notice",
+            )
+            await feature_repo.load_bundles(setup, [scope_a])
+            scope_b = await _attach_cross_scope_winner(
+                setup,
+                feature_id=scope_a.feature.feature_id,
+                source_entity_id=entity_b,
+                provider=provider_b,
+                dataset_key=dataset_b,
+                source_entity_type="notice",
+            )
+            feature_ids = [
+                scope_a.feature.feature_id,
+                scope_b.feature.feature_id,
+            ]
+            for bundle, checked_at in (
+                (scope_a, _NOW + timedelta(hours=1)),
+                (scope_b, _NOW + timedelta(hours=1, minutes=1)),
+            ):
+                initialized = await feature_repo.supersede_stale_notice_features(
+                    setup,
+                    provider=bundle.source_record.provider,
+                    dataset_key=bundle.source_record.dataset_key,
+                    source_entity_type=bundle.source_record.source_entity_type,
+                    active_lineage_keys={bundle.source_record.source_entity_id},
+                    closed_at=checked_at,
+                )
+                assert initialized == feature_repo.NoticeReconcileResult()
+            await setup.commit()
+
+        await first_session.begin()
+        first = await feature_repo.supersede_stale_notice_features(
+            first_session,
+            provider=provider_a,
+            dataset_key=dataset_a,
+            source_entity_type="notice",
+            active_lineage_keys=set(),
+            closed_at=_NOW + timedelta(hours=1, minutes=2),
+        )
+        assert first == feature_repo.NoticeReconcileResult()
+
+        await second_session.begin()
+        second_task = asyncio.create_task(
+            feature_repo.supersede_stale_notice_features(
+                second_session,
+                provider=provider_b,
+                dataset_key=dataset_b,
+                source_entity_type="notice",
+                active_lineage_keys=set(),
+                closed_at=_NOW + timedelta(hours=1, minutes=3),
+            )
+        )
+        await asyncio.sleep(0.2)
+        assert not second_task.done()  # A transaction의 global snapshot lock 대기.
+
+        await first_session.commit()
+        second = await asyncio.wait_for(second_task, timeout=5)
+        await second_session.commit()
+        assert second == feature_repo.NoticeReconcileResult(closed=1)
+
+        async with AsyncSession(migrated_engine) as verify:
+            _, deleted_at, valid_end = await _feature_state(
+                verify, scope_a.feature.feature_id
+            )
+        assert deleted_at is None
+        assert valid_end is not None
+    finally:
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+            await asyncio.gather(second_task, return_exceptions=True)
+        await first_session.rollback()
+        await second_session.rollback()
+        await first_session.close()
+        await second_session.close()
+        async with migrated_engine.begin() as connection:
+            providers = [provider_a, provider_b]
+            await connection.execute(
+                text(
+                    "DELETE FROM provider_sync.source_links "
+                    "WHERE source_entity_key IN ("
+                    "SELECT source_entity_key FROM provider_sync.source_entities "
+                    "WHERE provider = ANY(CAST(:providers AS text[])))"
+                ),
+                {"providers": providers},
+            )
+            if feature_ids:
+                await connection.execute(
+                    text(
+                        "DELETE FROM feature.feature_versions "
+                        "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+                    ),
+                    {"feature_ids": feature_ids},
+                )
+                await connection.execute(
+                    text(
+                        "DELETE FROM feature.features "
+                        "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+                    ),
+                    {"feature_ids": feature_ids},
+                )
+            await connection.execute(
+                text(
+                    "UPDATE provider_sync.source_entities "
+                    "SET current_source_record_key = NULL "
+                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                ),
+                {"providers": providers},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM provider_sync.source_records "
+                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                ),
+                {"providers": providers},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM provider_sync.source_entities "
+                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                ),
+                {"providers": providers},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM provider_sync.notice_lifecycle_scopes "
+                    "WHERE provider = ANY(CAST(:providers AS text[]))"
+                ),
+                {"providers": providers},
+            )
+
+
+async def test_snapshot_uses_only_active_winning_lineage_per_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    """패배 계보만 active면 닫고, 승리 계보가 active일 때만 reopen한다."""
+    shared, older_a, newer_b = await _seed_multi_lineage_feature(migrated_session)
+    closed_at = _NOW + timedelta(minutes=10)
+
+    # shared는 A winner/B loser다. B만 active이므로 shared의 승리 계보 A는
+    # 사라진 상태다. shared는 soft-delete하지 않고 종료하고, B winner만 표시한다.
+    b_only = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_MULTI_LINEAGE_B},
+        closed_at=closed_at,
+    )
+    assert b_only == feature_repo.NoticeReconcileResult(superseded=1, closed=1)
+    shared_status, shared_deleted_at, shared_end = await _feature_state(
+        migrated_session, shared.feature.feature_id
+    )
+    assert shared_status == "active"
+    assert shared_deleted_at is None
+    assert datetime.fromisoformat(shared_end) == closed_at
+    assert (await _feature_state(migrated_session, older_a.feature.feature_id))[1] is not None
+    _, newer_deleted_at, newer_end = await _feature_state(
+        migrated_session, newer_b.feature.feature_id
+    )
+    assert newer_deleted_at is None
+    assert newer_end is None
+    assert await _public_notice_ids(migrated_session) == {newer_b.feature.feature_id}
+
+    # 반대로 A만 active면 shared를 reopen하고, 사라진 B winner를 닫는다.
+    a_only = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_MULTI_LINEAGE_A},
+        closed_at=closed_at + timedelta(minutes=10),
+    )
+    assert a_only == feature_repo.NoticeReconcileResult(closed=1, reopened=1)
+    _, shared_deleted_at, shared_end = await _feature_state(
+        migrated_session, shared.feature.feature_id
+    )
+    assert shared_deleted_at is None
+    assert shared_end is None
+    _, newer_deleted_at, newer_end = await _feature_state(
+        migrated_session, newer_b.feature.feature_id
+    )
+    assert newer_deleted_at is None
+    assert datetime.fromisoformat(newer_end) == closed_at + timedelta(minutes=10)
+    assert await _public_notice_ids(migrated_session) == {shared.feature.feature_id}
+
+    # 모든 승리 계보가 absent면 열린 shared만 한 번 닫혀 metric도 row 변화와 같다.
+    empty = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys=set(),
+        closed_at=closed_at + timedelta(minutes=20),
+    )
+    assert empty == feature_repo.NoticeReconcileResult(closed=1)
+    assert await _public_notice_ids(migrated_session) == set()
+
+
 async def test_supersede_closes_lineage_missing_from_feed(
     migrated_session: AsyncSession,
 ) -> None:
@@ -563,9 +1262,642 @@ async def test_supersede_closes_lineage_missing_from_feed(
     assert again.reopened == 0
 
 
+async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
+    migrated_session: AsyncSession,
+) -> None:
+    """현재 feed의 canonical winner가 과거 soft-delete돼도 즉시 복구한다."""
+    old_gen, current = await _seed_dup_lineage(migrated_session)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = :deleted_at, updated_at = now()"
+            " WHERE feature_id = :feature_id"
+        ),
+        {
+            "deleted_at": _NOW + timedelta(minutes=1),
+            "feature_id": current.feature.feature_id,
+        },
+    )
+
+    result = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        closed_at=_NOW + timedelta(minutes=10),
+    )
+
+    assert result.reopened == 1
+    assert result.closed == 0
+    assert result.superseded == 1
+    old_status, old_deleted_at, _ = await _feature_state(
+        migrated_session, old_gen.feature.feature_id
+    )
+    assert old_status == "inactive"
+    assert old_deleted_at is not None
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session, current.feature.feature_id
+    )
+    assert status == "active"
+    assert deleted_at is None
+    assert valid_end is None
+
+    # 같은 snapshot은 feature 복구/중복 정리를 반복하지 않는다.
+    again = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        closed_at=_NOW + timedelta(minutes=20),
+    )
+    assert again == feature_repo.NoticeReconcileResult()
+
+
+async def test_atomic_snapshot_load_tracks_new_lineage_and_repairs_exact_replay(
+    migrated_session: AsyncSession,
+) -> None:
+    """신규 lineage는 load 뒤 기록하고 exact replay로 누락 state를 복구한다."""
+    bundle = _krex_notice_bundle(
+        source_entity_id=_LINEAGE,
+        raw_data=_CLUES,
+    )
+    first_at = _NOW + timedelta(hours=1)
+    first = await feature_repo.load_authoritative_notice_snapshot(
+        migrated_session,
+        bundles=[bundle],
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        observed_at=first_at,
+    )
+    assert first.load.bundles_total == 1
+    assert first.reconcile == feature_repo.NoticeReconcileResult()
+    assert await _snapshot_state(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        lineage_key=_LINEAGE,
+    ) == (True, first_at, None)
+
+    # 부분 반영 잔존을 흉내 낸 뒤 같은 watermark/fingerprint를 replay하면
+    # bundle load 이후 known lineage sync가 누락 row를 되살린다.
+    await migrated_session.execute(
+        text(
+            "DELETE FROM provider_sync.notice_lineage_states "
+            "WHERE provider = :provider AND dataset_key = :dataset_key "
+            "AND source_entity_type = :source_entity_type"
+        ),
+        {
+            "provider": _KREX,
+            "dataset_key": _KREX_DS,
+            "source_entity_type": _KREX_ET,
+        },
+    )
+    replay = await feature_repo.load_authoritative_notice_snapshot(
+        migrated_session,
+        bundles=[bundle],
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        observed_at=first_at,
+    )
+    assert replay.reconcile == feature_repo.NoticeReconcileResult()
+    assert await _snapshot_state(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        lineage_key=_LINEAGE,
+    ) == (True, first_at, None)
+
+    unchanged_at = first_at + timedelta(minutes=1)
+    await feature_repo.load_authoritative_notice_snapshot(
+        migrated_session,
+        bundles=[bundle],
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        observed_at=unchanged_at,
+    )
+    # scope watermark만 전진하고 member changed_at은 실제 전이 때만 바뀐다.
+    assert await _snapshot_state(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        lineage_key=_LINEAGE,
+    ) == (True, first_at, None)
+    with pytest.raises(ValueError, match="conflicting authoritative"):
+        await feature_repo.load_authoritative_notice_snapshot(
+            migrated_session,
+            bundles=[],
+            provider=_KREX,
+            dataset_key=_KREX_DS,
+            source_entity_type=_KREX_ET,
+            active_lineage_keys=set(),
+            observed_at=unchanged_at,
+        )
+    with pytest.raises(ValueError, match="stale authoritative"):
+        await feature_repo.load_authoritative_notice_snapshot(
+            migrated_session,
+            bundles=[],
+            provider=_KREX,
+            dataset_key=_KREX_DS,
+            source_entity_type=_KREX_ET,
+            active_lineage_keys=set(),
+            observed_at=first_at,
+        )
+
+
+async def test_atomic_event_load_ignores_stale_announcement_after_lift(
+    migrated_session: AsyncSession,
+) -> None:
+    """최신 lift가 stale의 서로 다른 payload/Feature/current를 모두 차단한다."""
+    provider = "python-test-notice-events"
+    dataset_key = "test_notice_events"
+    source_entity_type = "notice_event"
+    lineage_key = "event-lineage"
+    bundle = _krex_notice_bundle(
+        source_entity_id=lineage_key,
+        raw_data={"event": "announcement"},
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    stale_base = _krex_notice_bundle(
+        source_entity_id=lineage_key,
+        raw_data={"event": "stale-different-payload"},
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    stale_name = "[stale] 과거 발표가 덮으면 안 되는 이름"
+    assert stale_base.feature.detail is not None
+    stale_bundle = stale_base.model_copy(
+        update={
+            "feature": stale_base.feature.model_copy(
+                update={
+                    "name": stale_name,
+                    "detail": stale_base.feature.detail.model_copy(
+                        update={"severity": 5}
+                    ),
+                }
+            ),
+            "source_record": stale_base.source_record.model_copy(
+                update={"raw_name": stale_name}
+            ),
+        }
+    )
+    assert (
+        stale_bundle.source_record.source_record_key
+        != bundle.source_record.source_record_key
+    )
+    announced_at = _NOW
+    with pytest.raises(ValueError, match="multiple bundles for one lineage"):
+        await feature_repo.load_notice_event_bundles(
+            migrated_session,
+            bundles=[bundle, bundle],
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            lineage_events={lineage_key: (True, announced_at, None)},
+            observed_at=announced_at,
+        )
+
+    announced = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[bundle],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (True, announced_at, None)},
+        observed_at=announced_at,
+    )
+    assert announced.load.bundles_total == 1
+    with pytest.raises(ValueError, match="equal event time"):
+        await feature_repo.load_notice_event_bundles(
+            migrated_session,
+            bundles=[],
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            lineage_events={
+                lineage_key: (
+                    True,
+                    announced_at,
+                    announced_at + timedelta(hours=1),
+                )
+            },
+            observed_at=announced_at,
+        )
+
+    lifted_at = announced_at + timedelta(hours=2)
+    lifted = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        # 정상 rolling window는 같은 계보의 과거 발표 bundle과 최신 해제를
+        # 함께 포함할 수 있다. 최신 false가 이 bundle을 오류 없이 제외해야 한다.
+        bundles=[stale_bundle],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (False, lifted_at, None)},
+        observed_at=lifted_at,
+    )
+    assert lifted.load.bundles_total == 0
+    assert lifted.reconcile.closed == 1
+
+    # 같은 Feature의 다른 provider 계보가 explicit present면 공유 Feature는
+    # 다시 열리되, 원 provider의 최신 false state 자체는 유지한다.
+    cross_bundle = await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=bundle.feature.feature_id,
+        source_entity_id="event-lineage-cross-provider",
+        provider="python-test-notice-events-cross",
+        dataset_key="test_notice_events_cross",
+        source_entity_type=source_entity_type,
+    )
+    cross_present = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=cross_bundle.source_record.provider,
+        dataset_key=cross_bundle.source_record.dataset_key,
+        source_entity_type=cross_bundle.source_record.source_entity_type,
+        active_lineage_keys={cross_bundle.source_record.source_entity_id},
+        closed_at=lifted_at + timedelta(minutes=1),
+    )
+    assert cross_present == feature_repo.NoticeReconcileResult(reopened=1)
+
+    before_stale = (
+        await migrated_session.execute(
+            text(
+                "SELECT f.name, f.detail ->> 'severity' AS severity, "
+                "se.current_source_record_key "
+                "FROM feature.features AS f "
+                "JOIN provider_sync.source_links AS sl "
+                "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
+                "JOIN provider_sync.source_entities AS se "
+                "ON se.source_entity_key = sl.source_entity_key "
+                "WHERE f.feature_id = :feature_id AND se.provider = :provider "
+                "AND se.dataset_key = :dataset_key "
+                "AND se.source_entity_type = :source_entity_type"
+            ),
+            {
+                "feature_id": bundle.feature.feature_id,
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+            },
+        )
+    ).one()
+    assert before_stale.current_source_record_key == (
+        bundle.source_record.source_record_key
+    )
+
+    stale = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[stale_bundle],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (True, announced_at + timedelta(hours=1), None)
+        },
+        observed_at=lifted_at + timedelta(minutes=1),
+    )
+    assert stale.load.bundles_total == 0
+    assert stale.reconcile == feature_repo.NoticeReconcileResult()
+    after_stale = (
+        await migrated_session.execute(
+            text(
+                "SELECT f.name, f.detail ->> 'severity' AS severity, "
+                "se.current_source_record_key "
+                "FROM feature.features AS f "
+                "JOIN provider_sync.source_links AS sl "
+                "ON sl.feature_id = f.feature_id AND sl.is_primary_source "
+                "JOIN provider_sync.source_entities AS se "
+                "ON se.source_entity_key = sl.source_entity_key "
+                "WHERE f.feature_id = :feature_id AND se.provider = :provider "
+                "AND se.dataset_key = :dataset_key "
+                "AND se.source_entity_type = :source_entity_type"
+            ),
+            {
+                "feature_id": bundle.feature.feature_id,
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+            },
+        )
+    ).one()
+    assert after_stale == before_stale
+    assert after_stale.name != stale_name
+    assert after_stale.severity != "5"
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session,
+        bundle.feature.feature_id,
+    )
+    assert status == "active"
+    assert deleted_at is None
+    assert valid_end is None
+    assert await _public_notice_ids(migrated_session) == {
+        bundle.feature.feature_id
+    }
+    assert await _snapshot_state(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_key=lineage_key,
+    ) == (False, lifted_at, None)
+
+
+async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
+    migrated_session: AsyncSession,
+) -> None:
+    """unknown 계보와 섞여도 explicit present의 기간·재활성화를 보존한다."""
+    provider = "python-test-notice-truth"
+    dataset_key = "test_notice_truth"
+    source_entity_type = "notice_event"
+    lineage_key = "truth-lineage"
+    bundle = _krex_notice_bundle(
+        source_entity_id=lineage_key,
+        raw_data={"event": "truth-table"},
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    feature_id = bundle.feature.feature_id
+    wall_now = datetime.now(_KST)
+    first_at = wall_now - timedelta(minutes=10)
+    await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[bundle],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (True, first_at, None)},
+        observed_at=first_at,
+    )
+    await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=feature_id,
+        source_entity_id="truth-unknown-lineage",
+        provider="python-test-notice-unknown",
+        dataset_key="test_notice_unknown",
+        source_entity_type=source_entity_type,
+    )
+
+    # 다른 scope는 lifecycle state가 없는 unknown이다. open present exact replay는
+    # 과거 soft-delete 잔존을 복구하고 unknown 때문에 막히지 않는다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :at, "
+            "detail = jsonb_set(detail, '{valid_end_time}', "
+            "to_jsonb(CAST(:at_text AS text)), true) WHERE feature_id = :fid"
+        ),
+        {"at": wall_now, "at_text": wall_now.isoformat(), "fid": feature_id},
+    )
+    replay = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (True, first_at, None)},
+        observed_at=first_at,
+    )
+    assert replay.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
+    assert await _feature_state(migrated_session, feature_id) == (
+        "active",
+        None,
+        None,
+    )
+
+    # unknown + finite는 현재 open/future 기간을 줄이지 않고 더 늦은 끝만 연장한다.
+    shorter_end = wall_now + timedelta(hours=6)
+    finite = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (True, first_at + timedelta(minutes=1), shorter_end)
+        },
+        observed_at=first_at + timedelta(minutes=1),
+    )
+    assert finite.reconcile == feature_repo.NoticeReconcileResult()
+    assert (await _feature_state(migrated_session, feature_id))[2] is None
+
+    old_longer_end = wall_now + timedelta(hours=12)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET detail = jsonb_set("
+            "detail, '{valid_end_time}', to_jsonb(CAST(:end_at AS text)), true) "
+            "WHERE feature_id = :fid"
+        ),
+        {"end_at": old_longer_end.isoformat(), "fid": feature_id},
+    )
+    await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (
+                True,
+                first_at + timedelta(minutes=2),
+                shorter_end,
+            )
+        },
+        observed_at=first_at + timedelta(minutes=2),
+    )
+    assert datetime.fromisoformat(
+        (await _feature_state(migrated_session, feature_id))[2]
+    ) == old_longer_end
+
+    extended_end = wall_now + timedelta(hours=18)
+    await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (
+                True,
+                first_at + timedelta(minutes=3),
+                extended_end,
+            )
+        },
+        observed_at=first_at + timedelta(minutes=3),
+    )
+    assert datetime.fromisoformat(
+        (await _feature_state(migrated_session, feature_id))[2]
+    ) == extended_end
+
+    # deleted_at 없이 inactive인 잔존도 미래 finite present가 되살린다.
+    past_end = wall_now - timedelta(hours=1)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status = 'inactive', deleted_at = NULL, "
+            "detail = jsonb_set(detail, '{valid_end_time}', "
+            "to_jsonb(CAST(:end_at AS text)), true) WHERE feature_id = :fid"
+        ),
+        {"end_at": past_end.isoformat(), "fid": feature_id},
+    )
+    future_end = wall_now + timedelta(hours=2)
+    future = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (
+                True,
+                first_at + timedelta(minutes=4),
+                future_end,
+            )
+        },
+        observed_at=first_at + timedelta(minutes=4),
+    )
+    assert future.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session, feature_id
+    )
+    assert status == "active"
+    assert deleted_at is None
+    assert datetime.fromisoformat(valid_end) == future_end
+
+    # 운영자 비활성화 override는 open present 재활성화를 막는다. 같은 event의
+    # exact replay는 override 해제 뒤 상태를 self-heal한다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
+            "WHERE feature_id = :fid"
+        ),
+        {"at": wall_now, "fid": feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.feature_overrides ("
+            "feature_id, field_path, override_value, "
+            "prevent_provider_reactivation, status) VALUES ("
+            ":fid, 'status', to_jsonb('inactive'::text), true, 'active')"
+        ),
+        {"fid": feature_id},
+    )
+    open_at = first_at + timedelta(minutes=5)
+    blocked = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (True, open_at, None)},
+        observed_at=open_at,
+    )
+    assert blocked.reconcile == feature_repo.NoticeReconcileResult()
+    assert (await _feature_state(migrated_session, feature_id))[0] == "inactive"
+    await migrated_session.execute(
+        text(
+            "DELETE FROM ops.feature_overrides "
+            "WHERE feature_id = :fid AND field_path = 'status'"
+        ),
+        {"fid": feature_id},
+    )
+    healed = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={lineage_key: (True, open_at, None)},
+        observed_at=open_at,
+    )
+    assert healed.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
+
+    # 이미 만료된 finite present는 state/SourceRecord 감사 이력만 남기고 deleted
+    # Feature를 되살리거나 Feature payload를 갱신하지 않는다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
+            "WHERE feature_id = :fid"
+        ),
+        {"at": wall_now, "fid": feature_id},
+    )
+    expired_at = wall_now - timedelta(minutes=1)
+    expired_bundle = _krex_notice_bundle(
+        source_entity_id=lineage_key,
+        raw_data={"event": "expired-audit-record"},
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    assert (
+        expired_bundle.source_record.source_record_key
+        != bundle.source_record.source_record_key
+    )
+    expired = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=[expired_bundle],
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events={
+            lineage_key: (
+                True,
+                first_at + timedelta(minutes=6),
+                expired_at,
+            )
+        },
+        observed_at=first_at + timedelta(minutes=6),
+    )
+    assert expired.load.bundles_total == 1
+    assert expired.load.source_records_inserted == 1
+    assert expired.load.features_inserted == 0
+    assert expired.load.features_updated == 0
+    assert expired.reconcile == feature_repo.NoticeReconcileResult()
+    current_source_record_key = (
+        await migrated_session.execute(
+            text(
+                "SELECT current_source_record_key "
+                "FROM provider_sync.source_entities "
+                "WHERE provider = :provider AND dataset_key = :dataset_key "
+                "AND source_entity_type = :source_entity_type "
+                "AND source_entity_id = :lineage_key"
+            ),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "lineage_key": lineage_key,
+            },
+        )
+    ).scalar_one()
+    assert current_source_record_key == (
+        expired_bundle.source_record.source_record_key
+    )
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session, feature_id
+    )
+    assert status == "inactive"
+    assert deleted_at is not None
+    assert datetime.fromisoformat(valid_end) == expired_at
+
+
 async def test_close_notice_features_kma_lift_roundtrip(
     migrated_session: AsyncSession,
 ) -> None:
+    announced_at = datetime.now(_KST) - timedelta(hours=7)
+    scheduled_end = announced_at + timedelta(hours=12)
+
     class _Region:
         region_code = "stn:108"
         region_name = "전국"
@@ -576,45 +1908,83 @@ async def test_close_notice_features_kma_lift_roundtrip(
         level = "주의보"
         title = "폭염주의보 발표"
         description = None
-        issued_at = _NOW
+        issued_at = announced_at
         effective_from = None
-        effective_until = None
+        effective_until = scheduled_end
         source_agency = "기상청"
         regions = [_Region()]
 
-    bundles = weather_alerts_to_notice_bundles([_Alert()], fetched_at=_NOW)
+    bundles = weather_alerts_to_notice_bundles(
+        [_Alert()], fetched_at=announced_at
+    )
     assert len(bundles) == 1
-    await feature_repo.load_bundles(migrated_session, bundles)
+    lineage_key = bundles[0].source_record.source_entity_id
+    announced = await feature_repo.load_notice_event_bundles(
+        migrated_session,
+        bundles=bundles,
+        provider="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        source_entity_type="weather_alert",
+        lineage_events={
+            lineage_key: (True, announced_at, scheduled_end)
+        },
+        observed_at=announced_at,
+    )
+    assert announced.load.bundles_total == 1
+    assert announced.reconcile == feature_repo.NoticeReconcileResult()
     feature_id = kma_alert_notice_feature_id("stn:108", "폭염")
     assert bundles[0].feature.feature_id == feature_id
+    assert datetime.fromisoformat(
+        (await _feature_state(migrated_session, feature_id))[2]
+    ) == scheduled_end
+    assert await _snapshot_state(
+        migrated_session,
+        provider="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        source_entity_type="weather_alert",
+        lineage_key=lineage_key,
+    ) == (True, announced_at, scheduled_end)
 
     class _Lift(_Alert):
         alert_id = "108:202607031800:25"
         title = "폭염주의보 해제"
-        issued_at = _NOW + timedelta(hours=6)
+        issued_at = announced_at + timedelta(hours=6)
 
     closures = weather_alert_lift_closures([_Lift()])
     closed = await feature_repo.close_notice_features(
         migrated_session,
-        closures={c.feature_id: c.closed_at for c in closures},
+        provider="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        source_entity_type="weather_alert",
+        closures={c.natural_key: c.closed_at for c in closures},
     )
     assert closed == 1
     _, deleted_at, valid_end = await _feature_state(migrated_session, feature_id)
     assert deleted_at is None
     assert valid_end is not None
-    assert datetime.fromisoformat(valid_end) == _NOW + timedelta(hours=6)
+    # 미래 예정 종료보다 이른 explicit lift가 authoritative false 시각이다.
+    assert datetime.fromisoformat(valid_end) == announced_at + timedelta(hours=6)
 
-    # 이미 닫힌 feature 재닫기는 no-op.
+    # 같은 false 상태라도 더 최신 해제 event면 보존/purge 기준 종료 시각을 전진한다.
     assert (
         await feature_repo.close_notice_features(
             migrated_session,
-            closures={feature_id: _NOW + timedelta(hours=7)},
+            provider="python-kma-api",
+            dataset_key="kma_weather_alerts",
+            source_entity_type="weather_alert",
+            closures={
+                closures[0].natural_key: announced_at
+                + timedelta(hours=6, minutes=30)
+            },
         )
         == 0
     )
+    assert datetime.fromisoformat(
+        (await _feature_state(migrated_session, feature_id))[2]
+    ) == announced_at + timedelta(hours=6, minutes=30)
 
 
-async def test_close_skips_reannounced_feature(
+async def test_close_ignores_older_lift_after_reannouncement(
     migrated_session: AsyncSession,
 ) -> None:
     """해제 시각보다 나중에 재발표된 feature는 닫지 않는다 (순서 역전 방어)."""
@@ -626,7 +1996,11 @@ async def test_close_skips_reannounced_feature(
     await feature_repo.load_bundles(migrated_session, [bundle])
     closed = await feature_repo.close_notice_features(
         migrated_session,
-        closures={bundle.feature.feature_id: _NOW - timedelta(hours=1)},
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        closures={bundle.source_record.source_entity_id: _NOW - timedelta(hours=1)},
+        announcements={bundle.source_record.source_entity_id: _NOW},
     )
     assert closed == 0
 

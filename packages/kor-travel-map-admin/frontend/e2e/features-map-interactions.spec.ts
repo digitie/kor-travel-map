@@ -927,7 +927,11 @@ test.describe("/features map interactions", () => {
     await expect(panel).toBeVisible();
     await expect.poll(() => requests.price).toBeGreaterThanOrEqual(1);
     await expect(panel.getByTestId("feature-price-panel")).toBeVisible();
-    await expect(panel.getByText("휘발유 1,820")).toBeVisible();
+    await expect(
+      panel
+        .getByTestId("feature-price-panel")
+        .getByText("휘발유 1,820", { exact: true }),
+    ).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
     const graph = panel.getByRole("img", { name: "price history graph" });
     await expect(graph).toBeVisible();
