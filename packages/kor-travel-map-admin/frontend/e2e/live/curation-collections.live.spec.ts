@@ -157,7 +157,10 @@ test.describe("공식 큐레이션 collection live", () => {
     >(page, "/v1/categories");
     expect(categories.data.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "01050400", label: "등대" }),
+        expect.objectContaining({
+          code: "01050400",
+          label: "관광 > 자연명소 > 등대",
+        }),
       ]),
     );
 

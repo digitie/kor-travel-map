@@ -263,6 +263,15 @@ def _reset_request_metric_labels(token: Token[RequestMetricLabels | None]) -> No
 
 
 def _route_path(request: Request) -> str:
+    # FastAPI 0.139+는 include_router를 지연 해석하며 ``scope['route'].path``에는
+    # 상대 템플릿(`/categories`)을 두고, prefix가 반영된 외부 계약 경로는 effective
+    # context에 둔다. 라우트 전체 scan 없이 이 최종 템플릿을 우선 사용한다.
+    fastapi_scope = request.scope.get("fastapi")
+    if isinstance(fastapi_scope, dict):
+        effective_route = fastapi_scope.get("effective_route_context")
+        effective_path = getattr(effective_route, "path", None)
+        if isinstance(effective_path, str) and effective_path:
+            return effective_path
     route = request.scope.get("route")
     path = getattr(route, "path", None)
     if isinstance(path, str) and path:

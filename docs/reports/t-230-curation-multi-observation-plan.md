@@ -57,3 +57,22 @@ CSV는 원래 collection membership을 보존한다. 같은 거점이 여러 코
   인덱스를 사용한다.
 - n150 live E2E는 mock이나 빈 데이터 skip 없이 실제 seed와 중복 회차 Feature를
   단언한다.
+
+## 결과 (2026-07-13)
+
+- Alembic `0044_source_entities`와 `0045_curation_collections`, REST/OpenAPI/admin UI,
+  CSV parser/template/import, 공식 CSV 5종, 등대 category를 구현했다.
+- 별도 backend/API 적대적 리뷰에서 동시 upsert, A→B→A current pointer, 실제 removal 집계,
+  hidden/deleted 공개 누출, nullable PATCH, UUID·enum·CSV MIME, downgrade guard를 보강했고
+  남은 HIGH/MEDIUM 지적은 0건이다.
+- 로컬 게이트는 비통합 Python 1,761 passed(1 skipped), PostGIS 286 passed,
+  frontend Vitest 62 passed, route-mocked Playwright 35 passed다. CI 단위 coverage는
+  1,255 passed·전체 80.44%이고 `curation_repo.py`는 99.55%다.
+- n150 prod는 검증된 747MB 사전 dump 뒤 Alembic 0045로 올렸다. 공개 로그인 GET/POST 200,
+  Set-Cookie, 오답 401과 map 서비스 기동/health를 확인했다.
+- 실제 적재는 collection 19개·membership 486개다. 기존 Feature 연결 225개, 미연결 261개,
+  한국관광 두 회차 중첩 Feature 40개이며 지정 Feature의 서로 다른 provider 관측 2개와 각 이력
+  API를 확인했다.
+- 같은 공식 CSV를 다시 preview한 결과 5종 모두 `inserted=0`, `updated=0`, `removed=0`이었다.
+  prod live Playwright 4건이 CSV 반영, 등대 category, admin 상세, 지도 marker, 테이블,
+  Feature 상세, REST 다중 관측/회차를 실제 데이터로 통과했다.

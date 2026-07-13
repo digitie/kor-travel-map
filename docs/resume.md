@@ -1,19 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-13 (codex) — T-230 다중 관측·collection 큐레이션 구현 진행
+## 2026-07-13 (codex) — T-230 다중 관측·collection 큐레이션 n150 검증 완료 (#666)
 
-- **완료(로컬 편집)**: source entity/current record와 immutable payload history 분리,
+- **구현 완료**: source entity/current record와 immutable payload history 분리,
   collection/item 큐레이션 스키마·repository·REST, 관리자 수동 입력·CSV 양식/preview/import,
   Feature별 grouped 지도·목록·상세 표시를 구현했다. 한 Feature의 여러 primary provider 관측과
   여러 테마·제목·회차 membership을 배열로 모두 반환한다.
 - **공식 데이터**: 한국관광 100선 2023~2024·2025~2026, 국가유산 방문 캠페인,
   2026 수목원·정원 스탬프투어, 등대 스탬프투어를 486개 membership 행으로 추가했다.
-  기존 Feature 확정 연결 217행, 미연결 보존 269행이다. 등대 category
+  n150 resolver 적용 결과는 기존 Feature 연결 225행·미연결 보존 261행이다. 등대 category
   `01050400`(`TOURISM_NATURE_LIGHTHOUSE`)도 추가했다.
-- **아직 미완료**: 전체 Python/API/frontend gate와 실제 PostgreSQL EXPLAIN, 적대적 리뷰,
-  n150 prod migration·공식 CSV import·live UI E2E, remote 보안 감사, PR/CI/merge/재배포.
-- **다음 한 작업**: route-mocked E2E를 새 grouped 계약으로 정리 → 전체 gate → 적대적 리뷰 수정 →
-  n150 prod 실데이터 검증 → 보안 감사 → PR/CI green·merge → main 재배포 smoke.
+- **검증 완료**: 전체 Python/PostGIS/API/frontend/OpenAPI/import-linter 게이트와 적대적 리뷰를
+  통과했다. n150 prod를 Alembic 0045로 migration하고 공식 collection 19개·membership 486개를
+  적재했다. 두 회차 중첩 Feature 40개, 복수 provider 관측 2개, 동일 CSV 재적재 변경 0건,
+  prod live Playwright 4 passed를 확인했다.
+- **다음 한 작업**: PR #666 CI green과 review를 확인해 merge한 뒤 main을 n150에 재배포하고
+  0045·19/486·로그인·live smoke를 마지막으로 재확인한다.
 
 ## 2026-07-13 (codex) — concierge DB read key 소비 계약 로컬 반영
 
