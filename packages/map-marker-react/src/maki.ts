@@ -42,6 +42,9 @@ const MAKI_GLYPH: Readonly<Record<string, string>> = Object.freeze({
   "alert": "⚠", // ⚠️
   "info": "ℹ", // ℹ️
   "construction": "\u{1F6A7}", // 🚧
+  // 날씨/대기질 (kma, airkorea)
+  "weather": "☀", // ☀️
+  "air-quality": "\u{1F32B}", // 🌫️
   // 기타
   "marker": "\u{1F4CD}", // 📍
   // ── Python category catalog 커버 (T-017 drift gate) ──

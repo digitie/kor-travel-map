@@ -71,6 +71,7 @@ __all__ = [
     "purge_expired_notices",
     "get_feature_row",
     "get_feature_rows_by_ids",
+    "public_active_notice_feature_ids",
     "list_active_place_coords",
     "list_primary_place_locator",
     "get_primary_source_detail",
@@ -101,9 +102,10 @@ def _price_stale_hide_days_default() -> int:
 
 
 DEFAULT_PRICE_STALE_HIDE_DAYS: Final[int] = _price_stale_hide_days_default()
-"""현재가(카드 current + 지도 price_summary) 표시 제외 지평선(일).
+"""repository ``price_summary`` 기본 표시 제외 지평선(일).
 
-env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1주기)."""
+env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1주기).
+지도 API는 오래된 관측도 날짜와 함께 표시하기 위해 이 기본값을 ``None``으로 override한다."""
 
 
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
@@ -469,6 +471,45 @@ def _notice_lineage_sql(alias: str) -> str:
     """
 
 
+def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
+    """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
+
+    KREX/KMA의 현 identity는 모두 ``bjd_code=None``과 고정 category를 사용하고,
+    ``source_natural_key``는 ``_notice_lineage_sql`` 결과와 같다. 따라서 같은
+    source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
+    ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
+    없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
+    """
+    return f"""
+    CASE
+      WHEN (
+        ({source_alias}.provider = 'python-krex-api'
+         AND {source_alias}.dataset_key = 'krex_traffic_notices'
+         AND {source_alias}.source_entity_type = 'traffic_notice')
+        OR
+        ({source_alias}.provider = 'python-kma-api'
+         AND {source_alias}.dataset_key = 'kma_weather_alerts'
+         AND {source_alias}.source_entity_type = 'weather_alert')
+      )
+      THEN {feature_alias}.feature_id = (
+        'f_global_n_' || left(
+          encode(
+            x_extension.digest(
+              'global|notice|99000000|'
+              || {source_alias}.provider || ':' || {source_alias}.dataset_key || '|'
+              || {_notice_lineage_sql(source_alias)} || '|',
+              'sha1'
+            ),
+            'hex'
+          ),
+          16
+        )
+      )
+      ELSE false
+    END
+    """
+
+
 # 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
 # (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
 # valid_end_time이 이 필터로 즉시 반영된다.
@@ -480,21 +521,29 @@ _ENDED_NOTICE_HIDDEN_SQL: Final[str] = """
   )
 """
 
+# 한 feature에 같은 계보의 primary entity가 여러 개 연결될 수 있다. seen_at/key의
+# max를 따로 구하면 존재하지 않는 tuple이 되므로 DISTINCT ON으로 실제 최신 row를 고른다.
 _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
   AND (
     f.kind <> 'notice'
     OR NOT EXISTS (
       SELECT 1
       FROM (
-        SELECT
+        SELECT DISTINCT ON (
+            cur_sr.provider,
+            cur_sr.dataset_key,
+            cur_sr.source_entity_type,
+            {_notice_lineage_sql("cur_sr")}
+        )
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
             {_notice_lineage_sql("cur_sr")} AS lineage_key,
-            max(
-                COALESCE(cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at)
+            COALESCE(
+                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) AS seen_at,
-            max(cur_sr.source_record_key) AS source_record_key
+            cur_sr.source_record_key,
+            {_canonical_notice_feature_sql("f", "cur_sr")} AS canonical_identity
         FROM provider_sync.source_links AS cur_sl
         JOIN provider_sync.source_entities AS cur_se
           ON cur_se.source_entity_key = cur_sl.source_entity_key
@@ -502,11 +551,15 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
           ON cur_sr.source_record_key = cur_se.current_source_record_key
         WHERE cur_sl.feature_id = f.feature_id
           AND cur_sl.is_primary_source
-        GROUP BY
+        ORDER BY
             cur_sr.provider,
             cur_sr.dataset_key,
             cur_sr.source_entity_type,
-            {_notice_lineage_sql("cur_sr")}
+            {_notice_lineage_sql("cur_sr")},
+            COALESCE(
+                cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
+            ) DESC,
+            cur_sr.source_record_key DESC
       ) AS current_notice
       JOIN provider_sync.source_entities AS other_se
         ON other_se.provider = current_notice.provider
@@ -532,13 +585,43 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
             ) = current_notice.seen_at
             AND other_sr.source_record_key > current_notice.source_record_key
           )
+          OR (
+            COALESCE(
+                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+            ) = current_notice.seen_at
+            AND other_sr.source_record_key = current_notice.source_record_key
+            AND (
+              (
+                {_canonical_notice_feature_sql("other_f", "other_sr")}
+                AND NOT current_notice.canonical_identity
+              )
+              OR (
+                {_canonical_notice_feature_sql("other_f", "other_sr")}
+                  = current_notice.canonical_identity
+                AND other_f.feature_id < f.feature_id
+              )
+            )
+          )
         )
     )
   )
 """
 
-# 지도 bbox용 결합 필터 — 계보별 latest만 + 종료 notice 숨김(#632).
-_LATEST_NOTICE_BBOX_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
+# 사용자 활성 조회용 결합 필터 — 계보별 latest만 + 종료 notice 숨김(#632).
+# 지도 bbox뿐 아니라 cluster/search/nearby/area/count에도 같은 술어를 적용해야
+# legacy/current feature가 동시에 남은 기간에 목록·집계별 노출 결과가 어긋나지 않는다.
+# infra raw 단건/다건과 admin 감사 목록만 과거 계보/종료 notice 추적을 위해 제외한다.
+_PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
+
+_PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
+SELECT f.feature_id
+FROM feature.features AS f
+WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND f.kind = 'notice'
+  AND f.deleted_at IS NULL
+  AND f.status NOT IN ('hidden', 'deleted')
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+"""
 
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
@@ -643,7 +726,10 @@ LEFT JOIN LATERAL (
     ) AS weather_summary
     FROM feature.feature_weather_values AS w
     WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN ('T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP')
+      AND w.metric_key IN (
+        'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
+        'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
+      )
     ORDER BY
         CASE w.metric_key
           WHEN 'T1H' THEN 10
@@ -655,6 +741,13 @@ LEFT JOIN LATERAL (
           WHEN 'REH' THEN 70
           WHEN 'PTY' THEN 80
           WHEN 'PCP' THEN 90
+          WHEN 'PM10' THEN 110
+          WHEN 'PM2_5' THEN 120
+          WHEN 'CAI' THEN 130
+          WHEN 'O3' THEN 140
+          WHEN 'NO2' THEN 150
+          WHEN 'SO2' THEN 160
+          WHEN 'CO' THEN 170
           ELSE 100
         END,
         CASE w.forecast_style
@@ -703,7 +796,7 @@ WHERE f.deleted_at IS NULL
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
-{_LATEST_NOTICE_BBOX_FILTER_SQL}
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ORDER BY f.feature_id ASC
 LIMIT :limit
 """
@@ -788,7 +881,10 @@ LEFT JOIN LATERAL (
     ) AS weather_summary
     FROM feature.feature_weather_values AS w
     WHERE w.feature_id = f.feature_id
-      AND w.metric_key IN ('T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP')
+      AND w.metric_key IN (
+        'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
+        'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
+      )
     ORDER BY
         CASE w.metric_key
           WHEN 'T1H' THEN 10
@@ -800,6 +896,13 @@ LEFT JOIN LATERAL (
           WHEN 'REH' THEN 70
           WHEN 'PTY' THEN 80
           WHEN 'PCP' THEN 90
+          WHEN 'PM10' THEN 110
+          WHEN 'PM2_5' THEN 120
+          WHEN 'CAI' THEN 130
+          WHEN 'O3' THEN 140
+          WHEN 'NO2' THEN 150
+          WHEN 'SO2' THEN 160
+          WHEN 'CO' THEN 170
           ELSE 100
         END,
         CASE w.forecast_style
@@ -859,7 +962,7 @@ WHERE f.deleted_at IS NULL
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
-{_LATEST_NOTICE_BBOX_FILTER_SQL}
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ORDER BY f.feature_id ASC
 LIMIT :limit
 """
@@ -872,21 +975,21 @@ LIMIT :limit
 def _cluster_bbox_sql(code_col: str) -> str:
     return f"""
 SELECT
-    {code_col} AS cluster_key,
+    f.{code_col} AS cluster_key,
     count(*) AS feature_count,
-    avg(x_extension.ST_X(coord)) AS lon,
-    avg(x_extension.ST_Y(coord)) AS lat
-FROM feature.features
-WHERE deleted_at IS NULL
-  AND coord IS NOT NULL
-  AND {code_col} IS NOT NULL
-  AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+    avg(x_extension.ST_X(f.coord)) AS lon,
+    avg(x_extension.ST_Y(f.coord)) AS lat
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.{code_col} IS NOT NULL
+  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
-    OR category = ANY(CAST(:categories AS text[]))
+    OR f.category = ANY(CAST(:categories AS text[]))
   )
   AND (
     CAST(:providers AS text[]) IS NULL
@@ -895,17 +998,13 @@ WHERE deleted_at IS NULL
       FROM provider_sync.source_links AS pl
       JOIN provider_sync.source_entities AS pr
         ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = features.feature_id
+      WHERE pl.feature_id = f.feature_id
         AND pl.is_primary_source
         AND pr.provider = ANY(CAST(:providers AS text[]))
     )
   )
-  AND (
-    kind <> 'notice'
-    OR (detail ->> 'valid_end_time') IS NULL
-    OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
-  )
-GROUP BY {code_col}
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+GROUP BY f.{code_col}
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
 """
@@ -976,33 +1075,33 @@ async def cluster_features_in_bbox(
     ]
 
 
-_FEATURE_SEARCH_CTE_SQL: Final[str] = """
+_FEATURE_SEARCH_CTE_SQL: Final[str] = f"""
 WITH candidates AS (
     SELECT
-        feature_id,
-        kind,
-        name,
-        category,
-        x_extension.ST_X(coord) AS lon,
-        x_extension.ST_Y(coord) AS lat,
-        marker_icon,
-        marker_color,
-        status,
+        f.feature_id,
+        f.kind,
+        f.name,
+        f.category,
+        x_extension.ST_X(f.coord) AS lon,
+        x_extension.ST_Y(f.coord) AS lat,
+        f.marker_icon,
+        f.marker_color,
+        f.status,
         CASE
             WHEN CAST(:q AS text) IS NULL THEN NULL
-            ELSE x_extension.similarity(name, CAST(:q AS text))
+            ELSE x_extension.similarity(f.name, CAST(:q AS text))
         END AS score
-    FROM feature.features
-    WHERE deleted_at IS NULL
+    FROM feature.features AS f
+    WHERE f.deleted_at IS NULL
       AND (
         CAST(:q AS text) IS NULL
-        OR name OPERATOR(x_extension.%) CAST(:q AS text)
+        OR f.name OPERATOR(x_extension.%) CAST(:q AS text)
       )
       AND (
         CAST(:bbox_enabled AS boolean) IS FALSE
         OR (
-          coord IS NOT NULL
-          AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+          f.coord IS NOT NULL
+          AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision),
             CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision),
@@ -1011,39 +1110,31 @@ WITH candidates AS (
           )
         )
       )
-      AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+      AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
         CAST(:categories AS text[]) IS NULL
-        OR category = ANY(CAST(:categories AS text[]))
+        OR f.category = ANY(CAST(:categories AS text[]))
       )
-      AND (
-        kind <> 'notice'
-        OR (detail ->> 'valid_end_time') IS NULL
-        OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
-      )
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
 
-_FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = """
+_FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = f"""
 WITH name_candidates AS MATERIALIZED (
     SELECT
-        feature_id,
-        kind,
-        name,
-        category,
-        coord,
-        marker_icon,
-        marker_color,
-        status,
-        deleted_at,
-        x_extension.similarity(name, CAST(:q AS text)) AS score
-    FROM feature.features
-    WHERE name OPERATOR(x_extension.%) CAST(:q AS text)
-      AND (
-        kind <> 'notice'
-        OR (detail ->> 'valid_end_time') IS NULL
-        OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
-      )
+        f.feature_id,
+        f.kind,
+        f.name,
+        f.category,
+        f.coord,
+        f.marker_icon,
+        f.marker_color,
+        f.status,
+        f.deleted_at,
+        x_extension.similarity(f.name, CAST(:q AS text)) AS score
+    FROM feature.features AS f
+    WHERE f.name OPERATOR(x_extension.%) CAST(:q AS text)
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
 candidates AS (
     SELECT
@@ -1131,7 +1222,7 @@ FROM candidates
 """
 )
 
-_NEARBY_TARGET_CTE_SQL: Final[str] = """
+_NEARBY_TARGET_CTE_SQL: Final[str] = f"""
 WITH target AS (
     SELECT target_id, coord_5179,
            COALESCE(CAST(:radius_km AS double precision), radius_km) * 1000.0
@@ -1186,11 +1277,7 @@ candidates AS (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
-      AND (
-        f.kind <> 'notice'
-        OR (f.detail ->> 'valid_end_time') IS NULL
-        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
-      )
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
 
@@ -1249,7 +1336,7 @@ LIMIT :limit_plus_one
 # 1회만** 변환해 상수로 굳히고(ADR-012), 술어는 STORED ``coord_5179``에 직접
 # ``ST_DWithin``한다. candidates 컬럼/cursor/정렬은 by-target nearby와 동일하므로
 # ``_nearby_row``/``_nearby_cursor_params``/``_encode_nearby_cursor``를 그대로 재사용한다.
-_NEARBY_COORD_CTE_SQL: Final[str] = """
+_NEARBY_COORD_CTE_SQL: Final[str] = f"""
 WITH origin AS (
     SELECT
         x_extension.ST_Transform(
@@ -1308,11 +1395,7 @@ candidates AS (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
-      AND (
-        f.kind <> 'notice'
-        OR (f.detail ->> 'valid_end_time') IS NULL
-        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
-      )
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
 
@@ -1943,21 +2026,23 @@ RETURNING f.feature_id
 
 
 def _supersede_stale_notice_sql(close_missing: bool) -> str:
-    """notice 정리 SQL 2종 — 계보별 latest 아닌 feature soft-delete(+계보 소멸 닫기).
+    """notice 정리 SQL 2종 — 계보별 latest 아닌 feature soft-delete(+snapshot 동기화).
 
-    ``_LATEST_NOTICE_BBOX_FILTER_SQL``(read 필터)과 동일 계보/최신 판정을
-    write 시점에 set 기반으로 적용한다. ``close_missing=True``면 soft-delete
-    대신, 현재 feed에 없는 계보의 latest feature에 ``valid_end_time``을 채운다.
+    ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``(read 필터)과 동일 계보/최신 판정을
+    write 시점에 set 기반으로 적용한다. ``close_missing=True``면 soft-delete 대신
+    현재 feed에 없는 latest 계보를 닫고, 다시 나타난 latest 계보는 이전
+    ``valid_end_time``을 지워 활성 상태로 복구한다. feature·계보별 후보는
+    ``seen_at``/``source_record_key``를 따로 집계하지 않고 실제 최신 row 하나를
+    선택해 read와 winner가 어긋나지 않게 한다.
     """
     lineage_cte = f"""
-WITH lineage AS (
+WITH lineage_candidates AS (
     SELECT
         f.feature_id,
         {_notice_lineage_sql("sr")} AS lineage_key,
-        max(
-            COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at)
-        ) AS seen_at,
-        max(sr.source_record_key) AS tiebreak
+        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
+        sr.source_record_key AS tiebreak,
+        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity
     FROM feature.features AS f
     JOIN provider_sync.source_links AS sl
       ON sl.feature_id = f.feature_id
@@ -1972,7 +2057,16 @@ WITH lineage AS (
       AND sr.provider = :provider
       AND sr.dataset_key = :dataset_key
       AND sr.source_entity_type = :source_entity_type
-    GROUP BY f.feature_id, {_notice_lineage_sql("sr")}
+),
+lineage AS (
+    SELECT DISTINCT ON (feature_id, lineage_key)
+        feature_id,
+        lineage_key,
+        seen_at,
+        tiebreak,
+        canonical_identity
+    FROM lineage_candidates
+    ORDER BY feature_id, lineage_key, seen_at DESC, tiebreak DESC
 ),
 ranked AS (
     SELECT
@@ -1980,7 +2074,11 @@ ranked AS (
         lineage_key,
         row_number() OVER (
             PARTITION BY lineage_key
-            ORDER BY seen_at DESC, tiebreak DESC
+            ORDER BY
+                seen_at DESC,
+                tiebreak DESC,
+                canonical_identity DESC,
+                feature_id ASC
         ) AS rn
     FROM lineage
 )
@@ -1991,16 +2089,33 @@ ranked AS (
             + """
 UPDATE feature.features AS f
 SET detail = jsonb_set(
-        f.detail, '{valid_end_time}', to_jsonb(CAST(:closed_at AS text)), true
+        f.detail,
+        '{valid_end_time}',
+        CASE
+          WHEN r.lineage_key = ANY(CAST(:active_keys AS text[]))
+          THEN 'null'::jsonb
+          ELSE to_jsonb(CAST(:closed_at AS text))
+        END,
+        true
     ),
     updated_at = now()
 FROM ranked AS r
 WHERE f.feature_id = r.feature_id
   AND r.rn = 1
-  AND NOT (r.lineage_key = ANY(CAST(:active_keys AS text[])))
   AND f.deleted_at IS NULL
-  AND (f.detail ->> 'valid_end_time') IS NULL
-RETURNING f.feature_id
+  AND (
+    (
+      r.lineage_key = ANY(CAST(:active_keys AS text[]))
+      AND (f.detail ->> 'valid_end_time') IS NOT NULL
+    )
+    OR (
+      NOT (r.lineage_key = ANY(CAST(:active_keys AS text[])))
+      AND (f.detail ->> 'valid_end_time') IS NULL
+    )
+  )
+RETURNING
+    f.feature_id,
+    (f.detail ->> 'valid_end_time') IS NULL AS reopened
 """
         )
     return (
@@ -2019,10 +2134,11 @@ RETURNING f.feature_id
 
 @dataclass(frozen=True)
 class NoticeReconcileResult:
-    """notice 정리 결과 — ``superseded``(중복 soft-delete) / ``closed``(계보 소멸 닫기)."""
+    """notice 정리 결과 — 중복 제거 / 계보 소멸 닫기 / 재등장 복구 건수."""
 
     superseded: int = 0
     closed: int = 0
+    reopened: int = 0
 
 
 async def close_notice_features(
@@ -2067,9 +2183,10 @@ async def supersede_stale_notice_features(
        latest(최근 확인 시각) 1개만 남기고 나머지를 soft-delete
        (``status='inactive'`` + ``deleted_at``, ADR-017). identity 스킴 변경으로
        재키잉된 구세대 feature가 신세대에 밀려나는 경로다.
-    2. **소멸 닫기** (``active_lineage_keys``/``closed_at`` 제공 시): 현재 feed에
-       없는 계보의 latest feature에 ``valid_end_time=closed_at``을 채운다 —
-       transient feed(KREX 실시간 돌발)에서 사라진 사건의 종료 표현.
+    2. **snapshot 상태 동기화** (``active_lineage_keys``/``closed_at`` 제공 시):
+       현재 feed에 없는 latest 계보는 ``valid_end_time=closed_at``으로 닫고,
+       다시 나타난 latest 계보는 기존 ``valid_end_time``을 지운다. transient
+       feed(KREX 실시간 돌발)의 소멸과 재등장을 모두 self-heal한다.
 
     commit은 호출자 책임.
     """
@@ -2083,6 +2200,7 @@ async def supersede_stale_notice_features(
     )
     superseded = len(result.fetchall())
     closed = 0
+    reopened = 0
     if active_lineage_keys is not None and closed_at is not None:
         result = await session.execute(
             text(_supersede_stale_notice_sql(close_missing=True)),
@@ -2094,8 +2212,14 @@ async def supersede_stale_notice_features(
                 "closed_at": closed_at.isoformat(),
             },
         )
-        closed = len(result.fetchall())
-    return NoticeReconcileResult(superseded=superseded, closed=closed)
+        snapshot_updates = result.mappings().all()
+        reopened = sum(bool(row["reopened"]) for row in snapshot_updates)
+        closed = len(snapshot_updates) - reopened
+    return NoticeReconcileResult(
+        superseded=superseded,
+        closed=closed,
+        reopened=reopened,
+    )
 
 
 # 만료 notice purge (docs/etl/notice-feature-etl.md §9) — 종료일(없으면 발표일)
@@ -2178,6 +2302,26 @@ async def get_feature_rows_by_ids(
     result = await session.execute(text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized})
     rows = result.mappings().all()
     return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
+
+
+async def public_active_notice_feature_ids(
+    session: AsyncSession,
+    feature_ids: Sequence[str],
+) -> set[str]:
+    """public 단건/batch에서 노출 가능한 active/latest notice ID만 반환한다.
+
+    목록·검색·nearby와 같은 ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유해 종료된
+    notice와 같은 계보의 구버전 feature가 ID 직접 조회로 다시 노출되지 않게 한다.
+    일반 ``get_feature_row(s)``는 admin/감사용 raw read 계약을 유지한다.
+    """
+    normalized = _normalized_filter(feature_ids)
+    if normalized is None:
+        return set()
+    result = await session.execute(
+        text(_PUBLIC_ACTIVE_NOTICE_IDS_SQL),
+        {"feature_ids": normalized},
+    )
+    return {str(row.feature_id) for row in result}
 
 
 _LIST_ACTIVE_PLACE_COORDS_SQL: Final[str] = """
@@ -2427,7 +2571,7 @@ async def features_in_bbox(
     return [dict(r) for r in rows]
 
 
-_FEATURES_CONTAINED_IN_AREA_SQL: Final[str] = """
+_FEATURES_CONTAINED_IN_AREA_SQL: Final[str] = f"""
 WITH area_feature AS (
     SELECT feature_id, geom
     FROM feature.features
@@ -2454,11 +2598,7 @@ JOIN feature.features AS f
  AND a.geom OPERATOR(x_extension.&&) f.coord
  AND x_extension.ST_Covers(a.geom, f.coord)
 WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    f.kind <> 'notice'
-    OR (f.detail ->> 'valid_end_time') IS NULL
-    OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
-  )
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ORDER BY f.kind ASC, f.name ASC, f.feature_id ASC
 LIMIT :limit
 """
@@ -2877,17 +3017,13 @@ async def features_nearby(
     return NearbyFeaturePage(items=items, next_cursor=next_cursor)
 
 
-_CATEGORY_FEATURE_COUNTS_SQL: Final[str] = """
-SELECT category, count(*) AS n
-FROM feature.features
-WHERE deleted_at IS NULL
-  AND (NOT CAST(:active_only AS boolean) OR status = 'active')
-  AND (
-    kind <> 'notice'
-    OR (detail ->> 'valid_end_time') IS NULL
-    OR CAST(detail ->> 'valid_end_time' AS timestamptz) > now()
-  )
-GROUP BY category
+_CATEGORY_FEATURE_COUNTS_SQL: Final[str] = f"""
+SELECT f.category, count(*) AS n
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND (NOT CAST(:active_only AS boolean) OR f.status = 'active')
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+GROUP BY f.category
 """
 
 

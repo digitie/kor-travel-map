@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -11,7 +11,18 @@ from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_PROVIDER_NAME,
 )
 
-from dagster import AssetsDefinition, DefaultScheduleStatus, ScheduleDefinition, define_asset_job
+from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
+    AssetsDefinition,
+    DagsterRunStatus,
+    DefaultScheduleStatus,
+    RunRequest,
+    RunsFilter,
+    ScheduleDefinition,
+    ScheduleEvaluationContext,
+    SkipReason,
+    define_asset_job,
+)
 
 from .assets import (
     feature_event_datagokr_cultural_festivals,
@@ -59,6 +70,17 @@ SYSTEM_SCHEDULE_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.timezone": KST_TIMEZONE,
 }
 
+_COALESCING_RUN_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (
+    DagsterRunStatus.QUEUED,
+    DagsterRunStatus.STARTING,
+    DagsterRunStatus.STARTED,
+    DagsterRunStatus.CANCELING,
+)
+"""고빈도 schedule의 다음 tick을 막아야 하는 미종료 run 상태."""
+
+_FRESHNESS_RUN_MAX_RUNTIME_SECONDS: Final[int] = 7_200
+"""고아 run 회수가 중요한 notice/OpiNet job의 개별 실행 상한."""
+
 
 @dataclass(frozen=True)
 class FeatureLoadScheduleSpec:
@@ -72,6 +94,8 @@ class FeatureLoadScheduleSpec:
     dataset_key: str
     description: str
     run_config: Mapping[str, Any] | None = None
+    coalesce_active_runs: bool = False
+    max_runtime_seconds: int | None = None
 
 
 _DATAGOKR_FILEDATA_MONTHLY_CRONS: Final[tuple[str, ...]] = (
@@ -136,6 +160,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="opinet",
         dataset_key="opinet_fuel_station_details",
         description="OpiNet 주유소 place Feature 월 1회 적재.",
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_price_opinet_stations,
@@ -149,6 +174,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="opinet",
         dataset_key="opinet_gas_station_prices",
         description="OpiNet 주유소 price Feature + PriceValue 일 1회 적재(scope 기반).",
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krex_rest_areas,
@@ -176,6 +202,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="krex",
         dataset_key="krex_traffic_notices",
         description="고속도로 교통공지 notice Feature 10분마다 적재.",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_weather_krex_rest_areas,
@@ -394,20 +422,59 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""
 
 
+def _feature_load_run_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
+    tags = {
+        **SYSTEM_SCHEDULE_TAGS,
+        "kor_travel_map.provider": spec.provider,
+        "kor_travel_map.dataset_key": spec.dataset_key,
+    }
+    if spec.max_runtime_seconds is not None:
+        tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
+    return tags
+
+
 FEATURE_LOAD_JOBS: Final = [
     define_asset_job(
         spec.job_name,
         selection=[spec.asset],
         description=spec.description,
-        tags={
-            **SYSTEM_SCHEDULE_TAGS,
-            "kor_travel_map.provider": spec.provider,
-            "kor_travel_map.dataset_key": spec.dataset_key,
-        },
+        tags=_feature_load_run_tags(spec),
     )
     for spec in FEATURE_LOAD_SCHEDULE_SPECS
 ]
 """정기 Feature 적재 schedule이 실행하는 asset job 목록."""
+
+
+def _coalescing_execution_fn(
+    spec: FeatureLoadScheduleSpec,
+) -> Callable[[ScheduleEvaluationContext], RunRequest | SkipReason]:
+    """같은 provider/dataset의 미종료 run이 있으면 이번 tick을 합친다."""
+    schedule_tags = _feature_load_run_tags(spec)
+
+    def _evaluate(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
+        active_runs = context.instance.get_runs(
+            filters=RunsFilter(
+                statuses=_COALESCING_RUN_STATUSES,
+                tags={
+                    "kor_travel_map.provider": spec.provider,
+                    "kor_travel_map.dataset_key": spec.dataset_key,
+                },
+            ),
+            limit=1,
+        )
+        if active_runs:
+            active_run = active_runs[0]
+            return SkipReason(
+                f"{spec.provider}/{spec.dataset_key}의 {active_run.status.value} "
+                f"run({active_run.run_id})이 있어 이번 tick을 생략함"
+            )
+
+        return RunRequest(
+            run_config=dict(spec.run_config or {}),
+            tags=schedule_tags,
+        )
+
+    return _evaluate
 
 
 FEATURE_LOAD_SCHEDULES: Final = [
@@ -417,12 +484,11 @@ FEATURE_LOAD_SCHEDULES: Final = [
         cron_schedule=cron_for_schedule(spec.schedule_name, spec.cron_schedule),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
-        run_config=spec.run_config,
-        tags={
-            **SYSTEM_SCHEDULE_TAGS,
-            "kor_travel_map.provider": spec.provider,
-            "kor_travel_map.dataset_key": spec.dataset_key,
-        },
+        run_config=None if spec.coalesce_active_runs else spec.run_config,
+        execution_fn=(
+            _coalescing_execution_fn(spec) if spec.coalesce_active_runs else None
+        ),
+        tags=_feature_load_run_tags(spec),
         description=spec.description,
     )
     for spec, job in zip(FEATURE_LOAD_SCHEDULE_SPECS, FEATURE_LOAD_JOBS, strict=True)

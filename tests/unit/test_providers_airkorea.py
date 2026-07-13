@@ -22,6 +22,7 @@ from kortravelmap.dto import (
 )
 from kortravelmap.providers.airkorea import (
     AIR_QUALITY_MARKER_COLOR,
+    AIR_QUALITY_MARKER_ICON,
     AIR_QUALITY_STATION_CATEGORY,
     AIRKOREA_NORMALIZATION_VERSION,
     air_quality_to_weather_values,
@@ -85,6 +86,7 @@ def test_station_is_weather_kind_without_detail() -> None:
     assert feature.kind == FeatureKind.WEATHER
     assert feature.name == "중구"
     assert feature.category == AIR_QUALITY_STATION_CATEGORY  # 99000000
+    assert feature.marker_icon == AIR_QUALITY_MARKER_ICON == "air-quality"
     assert feature.marker_color == AIR_QUALITY_MARKER_COLOR
     assert feature.detail is None  # weather kind는 detail 불가.
     assert feature.coord is not None

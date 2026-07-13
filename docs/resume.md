@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-13 (codex) — notice/OpiNet 반복 장애·지도 고zoom 지연 로컬 수정 완료
+
+- **근본 원인 수정**: Dagster 고착 run의 전역 슬롯 고갈, 불완전·역순 KREX snapshot 수용,
+  OpiNet 0건/전일·혼합 가격 성공 오인과 scope 무시 targeted 전국 조회를 각각 run monitoring,
+  pool+DB lock+coalescing, strict 2회 snapshot, cursor 기반 KST 당일 성공 조건으로 차단했다.
+- **사용자 가시 변경**: 종료 공지를 공개 지도·검색·직접 조회에서 제외하고 재등장 시에만
+  복원한다. AirKorea/KMA marker를 분리하며 OpiNet 과거 날짜를 지도·목록에 표시하고 가격
+  이력의 단일·동시각 점도 렌더한다. Feature/큐레이션 고zoom의 tile fan-out·DOM marker·bbox
+  재조회를 줄였다.
+- **리뷰**: 독립 적대적 리뷰를 두 차례 수행해 발견한 S1/S2를 모두 수정했고 최종 재검토의
+  잔여 S1/S2는 0건이다. KREX 원천 envelope 문제는 provider 저장소 PR #11을 먼저 머지하고
+  본 저장소 dependency pin을 갱신했다.
+- **검증**: 외부 인증 live marker를 제외한 전체 Python 1,555건, API 354건, Dagster 260건,
+  frontend 78건, marker 1건과 Ruff·strict mypy·import-linter·OpenAPI/type drift·production
+  build를 통과했다. 로컬 geo live 5건은 미설정 API key 때문에 기존 auth-required 서비스가
+  400을 반환한 환경 전제이고, 변경 범위 테스트 실패는 없다.
+- **다음 한 작업**: remote push 전 보안 감사를 마친 뒤 PR CI green→merge→n150 backlog
+  복구·배포→실제 notice/OpiNet 수집과 live UI E2E를 검증한다.
+
 ## 2026-07-13 (codex) — T-230 다중 관측·collection 큐레이션 n150 검증 완료 (#666)
 
 - **구현 완료**: source entity/current record와 immutable payload history 분리,

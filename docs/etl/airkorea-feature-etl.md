@@ -18,7 +18,7 @@ weather-kind anchor로 만들고 값을 그 anchor에 붙인다. 표준 metric_k
 | Feature.kind | `weather` (측정소 anchor) → 값은 `WeatherValue` |
 | source_entity_type | `air_quality_station` |
 | category | **`99000000`** sentinel (`AIR_QUALITY_STATION_CATEGORY`) — weather-kind는 detail이 없어 category가 부차적이라 KMA 특보와 동일한 placeholder를 쓴다(ADR-018) |
-| marker_icon | `marker` — `99000000`은 maki 카탈로그에 없어 `mapbox_maki_icon_or_none`이 None을 반환, `_DEFAULT_STATION_ICON` fallback |
+| marker_icon | `air-quality` (`AIR_QUALITY_MARKER_ICON`) — KMA 격자의 `weather`와 모양으로도 구분 |
 | marker_color | `P-16` (`AIR_QUALITY_MARKER_COLOR`) |
 | weather_domain | `air_quality` (`WeatherDomain.AIR_QUALITY`) |
 | forecast_style | `observed` (`ForecastStyle.OBSERVED`) |

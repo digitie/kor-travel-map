@@ -190,7 +190,7 @@ identity 재설계로 해소했다:
 | dataset | 자연키 (사건 단위) | 라이프사이클 |
 |---------|-------------------|-------------|
 | `kma_weather_alerts` | `{region_code}::{현상 토큰}` (`kma_alert_natural_key`) — tm_fc/seq/등급 제외. 현상 토큰(호우/풍랑/…)은 `notice_type`이 generic으로 접는 특보를 구분한다 | **해제** title은 feature를 만들지 않고 `weather_alert_lift_closures` → `close_notice_features`가 열린 feature의 `valid_end_time`을 채운다(결합 해제문은 현상별 fan-out). 재발표·등급 변경은 같은 feature upsert + source_records 이력 |
-| `krex_traffic_notices` | 사건 단서 `occurred_date::…::incident_type_code` (기존) — **feature_id에서 bjd_code 제거**(이동하는 정체가 동 경계를 넘으면 재키잉되던 버그) | 적재 직후 `reconcile_notice_features`: 같은 계보 중복 soft-delete(latest 1개 유지) + 이번 feed에 없는 계보는 `valid_end_time=fetched_at`으로 종료 |
+| `krex_traffic_notices` | 사건 단서 `occurred_date::…::incident_type_code` (기존) — **feature_id에서 bjd_code 제거**(이동하는 정체가 동 경계를 넘으면 재키잉되던 버그) | 적재 직후 `reconcile_notice_features`: 같은 계보 중복 soft-delete(latest 1개 유지) + 이번 feed에 없는 계보는 `valid_end_time=fetched_at`으로 종료 + 다시 나타난 계보는 종료 시각 제거 |
 
 read 경로 — **수집 feed에 없는(종료된) notice는 모든 API read에서 기본 제외**한다
 (사용자 요구: "수집 시 notice가 없으면 과거 자료로 보여주지 말고 노출하지 않음").
@@ -198,23 +198,78 @@ read 경로 — **수집 feed에 없는(종료된) notice는 모든 API read에�
 이후 poll이 실패해도 이미 닫힌 notice는 계속 숨는다), KREX feed 소멸 reconcile·KMA 해제가
 이 컬럼을 채운다:
 
-- 지도 bbox·클러스터: 계보별 latest만 + `valid_end_time` 지난 notice 숨김
-  (`_LATEST_NOTICE_BBOX_FILTER_SQL`).
-- 이름 검색(`search_features`), 주변(`features_nearby`/POI target), 영역 포함
-  (`features_contained_in_area`), 카테고리 카운트(`category_feature_counts`):
-  종료 notice 제외(각 SQL에 `valid_end_time` 술어 추가).
+- 지도 bbox·클러스터, 이름 검색(`search_features`), 주변
+  (`features_nearby`/POI target), 영역 포함(`features_contained_in_area`), 카테고리
+  카운트(`category_feature_counts`)는 모두 계보별 latest만 남기고
+  `valid_end_time`이 지난 notice를 숨긴다(`_PUBLIC_ACTIVE_NOTICE_FILTER_SQL`).
 - admin feature 목록(`list_admin_features`)도 **기본 제외**로 전환 —
   감사가 필요하면 `include_ended=true`(API query param) / `종료 포함`으로 조회.
-- **예외**: 단건 조회(`get_feature_row`/by-ids, feature 상세)는 직접 참조라
-  종료 notice도 그대로 반환한다(그 상태를 그대로 노출).
+- infra raw 단건/다건(`get_feature_row`/`get_feature_rows_by_ids`)은 admin 감사와 내부
+  참조를 위해 종료 notice도 보존한다. 그러나 public feature 상세·observation history·
+  service batch는 `public_active_notice_feature_ids`로 같은 active/latest 필터를 적용해
+  종료/구버전 ID를 404 또는 `missing`으로 처리한다.
 
 중복 자체는 write-시점 reconcile이 soft-delete하고, 구세대 identity 잔존분은
 마이그레이션 `0040_notice_dedup_cleanup`이 일회성 정리했다.
+latest 판정은 feature·계보에 연결된 current source record 중
+`(COALESCE(last_seen_at, imported_at, fetched_at), source_record_key)` 내림차순의
+**실제 한 행**을 먼저 고른 뒤, feature 사이에서 같은 tuple → 현 canonical identity →
+`feature_id` 오름차순으로 결정한다. 두 컬럼의 `max()`를 따로 합성하면 존재하지 않는
+tuple이 생겨 read에서 winner가 둘 남거나 write reconcile이 다른 feature를 남길 수 있으므로
+그 방식은 사용하지 않는다.
 
-**빈/실패 feed 안전장치**: KREX notice asset은 fetch가 0건이면 feed-소멸 닫기를
-건너뛴다(`active_lineage_keys=None`) — 빈 집합을 넘기면 모든 active notice가
-"feed에 없음"으로 판정돼 통째로 종료·비노출되므로. 진짜 0건이면 다음 비어있지
-않은 run이 닫는다.
+KREX 조회는 전체 현재 목록 snapshot 계약이다. 요청 page size를 서버가 더 작게 제한해도
+응답 `total_count`까지 모든 페이지를 읽는다. `python-krex-api`의 범용 EX normalizer는
+HTTP 200의 `{}`/message-only/count-only 응답도 빈 `Page`로 만들 수 있으므로, map-side
+lifecycle 경계에서 `page.raw.realTimeSMSList`와 `count`, 페이지 사이 count 불변성까지
+검증한다. count가 그대로여도 수집 중 page boundary가 이동하면 앞 page의 사건이 다음
+page에 중복되고 다른 사건이 누락될 수 있다. 따라서 map 자연키와 같은
+`occurred_date/occurred_time/route_no/direction/point_name/incident_type_code` identity를
+전체 page에서 추적하고, 중복이면 snapshot을 실패시킨다. 자연키 단서가 모두 비면 raw
+payload 전체 hash를 converter와 동일한 fallback으로 쓴다(`series_no`가 raw에 있으면
+hash에 자연스럽게 포함되지만 별도 identity로 취급하지 않는다). 예외·중간 빈 페이지·
+구조 누락·사건 중복처럼 snapshot 완결성을 입증할 수 없는 경우에는
+적재·reconcile·sync 성공 기록을 하지 않는다.
+
+단일 pass 안에 중복이 없어도 수집 도중 `A,B,C`가 `A,B,D`로 교체되면 count와 unique
+건수만으로 누락을 알아낼 수 없다. destructive 종료 근거는 같은 client로 전체 pagination을
+**연속 2회** 수집하고, 두 pass의 record 수와 lineage identity set이 모두 같을 때만 성립한다.
+각 pass에 위 envelope/count/page/duplicate 검증을 독립 적용하며, 일치 확인 전에는 record를
+한 건도 asset에 yield하지 않는다. 일치하면 더 최신인 두 번째 pass payload를 적재하고,
+불일치하면 `RuntimeError`로 load/reconcile을 전부 건너뛴다. 반대로 2회 모두 예외 없이
+완결된 **0건 snapshot은 authoritative empty**이므로 `active_lineage_keys=∅`로 모든 열린
+KREX notice를 종료한다. 같은 payload가 다음 snapshot에 재등장해 source record upsert가
+생략되더라도 reconcile이 `valid_end_time`을 지워 자동 복구한다. sync cursor는 load가 아니라
+reconcile까지 모두 성공한 뒤에만 전진한다.
+
+이 raw 구조 검증은 종료 오판을 막는 map-side 최소 방어다. `python-krex-api`의 strict snapshot
+envelope와 dependency pin을 정렬한 뒤에도 lifecycle의 destructive 종료 경계에서 독립 검증을
+유지한다. `realTimeSMSList`는 provider 계약대로 다건 list와 단건 object를 모두 허용한다.
+
+10분 schedule보다 한 run이 오래 걸릴 수 있으므로 asset은 `krex_notice_snapshot` Dagster
+pool을 사용한다. `docker/dagster.yaml`의 run 단위 기본 한도 1이 snapshot fetch부터
+load/reconcile까지 직렬화해, 늦게 끝난 이전 run이 새 snapshot 결과를 다시 덮는 순서 역전을
+막는다. 추가로 sync cursor의 `snapshot_applied_at`(구 cursor는 `loaded_at` fallback)을
+watermark로 확인해 과거·같은 `fetched_at` run은 load 전에 실패시킨다. 성공 cursor는 reconcile
+뒤에만 새 watermark를 기록한다.
+
+10분 freshness critical path에서는 KREX row별 reverse geocoding을 하지 않는다. 운영 실측상
+원격 주소 보강이 포함된 run은 약 38분 걸려 다음 schedule보다 늦게 끝났고, 그동안 종료
+notice 반영도 지연됐다. incident의 원천 위·경도는 geocoder 없이도 `Feature.coord`와
+`SourceRecord.raw_latitude/raw_longitude`에 그대로 보존되며, 사건 identity/feature_id도
+행정코드와 무관하다. 따라서 snapshot fetch→load→reconcile을 먼저 끝내고 행정구역 주소는
+이 짧은 수명 lifecycle 경로의 필수 조건으로 두지 않는다.
+두 pass 검증으로 KREX HTTP 호출 수는 page 수의 2배가 되지만, 기존 run 대부분을 차지하던
+row별 reverse geocoding을 제거했으므로 10분 cadence 안에서 snapshot 안정성을 우선한다.
+
+`run_feature_notice_krex_traffic_notices`는 targeted feature update worker가 Dagster asset
+pool을 우회해 직접 호출하는 경로도 있으므로, fetch 시작 전부터 reconcile과 sync cursor 성공
+기록까지 PostgreSQL session advisory lock
+(`provider-run:python-krex-api:krex_traffic_notices`)도 잡는다. 이 DB lock이 서로 다른
+process/instance의 snapshot apply를 직렬화하는 최종 경계이며, pool은 불필요한 run 시작과 lock
+대기를 줄인다. watermark는 실행 순서가 아니라 배포 전 queued run처럼 이미 반영된 과거
+snapshot의 재적용을 거부하는 2차 방어다. process/connection 종료 시 session lock은 자동
+해제된다.
 
 ## 6. 핵심 함수
 

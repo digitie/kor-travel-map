@@ -111,7 +111,56 @@ Dagster GraphQL을 조회할 때는 `KOR_TRAVEL_MAP_API_DAGSTER_URL`을 쓴다. 
 외부 telemetry 호출을 피하기 위해
 `DAGSTER_DISABLE_TELEMETRY=yes`를 기본값으로 둔다. Docker Dagster 이미지는
 `docker/dagster.yaml`을 포함하며, 이 파일은 telemetry 비활성화와 Postgres metadata
-storage를 함께 설정한다.
+storage, 고아 run 자동 회수(`run_monitoring`)를 함께 설정한다. 재기동 뒤 schedule은
+`RUNNING`인데 새 run이 계속 `QUEUED`이면 `STARTED`/`STARTING` 장기 잔존 run이 동시성 슬롯을
+점유하는지 먼저 확인한다. 정상 설정에서는 시작·취소 10분, 실행 6시간을 넘긴 run을 daemon이
+종료 상태로 전환해 슬롯을 되돌린다. 단, 최신성이 중요한 KREX notice와 OpiNet place/price
+job은 `dagster/max_runtime=7200` run tag로 2시간 상한을 적용한다. 이 tag는 schedule과
+수동 실행이 공유하는 job 정의에 있다.
+
+`run_monitoring`은 worker 소멸을 즉시 감지하지 않고 실행 시간 상한이 지난 run만 처리하며,
+이미 쌓인 `QUEUED` run을 만료시키지 않는다. 장기 정체를 복구하거나 같은 상태에서 배포할 때는
+다음 순서를 지킨다.
+
+1. Dagster daemon을 먼저 중지해 backlog가 provider로 한꺼번에 실행되지 않게 한다.
+2. 상태별 run 수와 가장 오래된 시각을 확인하고, 정체 기간에 쌓인 `QUEUED` run을 취소한다.
+   worker가 없는 장기 `STARTED`/`STARTING`도 종료 상태로 정리한다. 현재 실행 중인 정상 run은
+   생성 시각과 worker 존재를 확인하기 전 임의로 종료하지 않는다.
+3. daemon을 다시 시작한 뒤 queue와 in-progress 수가 설정 상한 아래인지 확인한다.
+4. 최신성이 중요한 notice와 OpiNet 가격 job을 각각 한 번 명시적으로 실행한다. notice는 현재
+   feed 부재 항목이 종료됐는지, OpiNet은 오늘(KST) `observed_at`/`collected_at` 행이 생겼는지
+   DB와 UI 양쪽에서 확인한다.
+
+운영 host별 명령·접속값과 실제 취소 스크립트는 tracked 문서에 넣지 않고
+`docs/deploy-runbook.local.md`를 따른다.
+
+같은 설정의 `concurrency.pools`는 pool 기본 한도를 run 단위 1개로 둔다. 현재
+`feature_place_opinet_stations`와 `feature_price_opinet_stations`가 같은 `opinet_api`
+pool을 사용하므로 둘을 동시에 수동 실행해도 하나만 시작해야 한다. 배포 후 Dagster UI/API에서
+두 OpiNet run을 함께 제출해 둘 다 즉시 `STARTED`가 되면 이미지의
+`$DAGSTER_HOME/dagster.yaml` 반영 여부를 먼저 확인한다.
+KREX notice도 별도 `krex_notice_snapshot` pool을 사용해 snapshot reconcile을 직렬화한다.
+여기에 KREX notice 10분 schedule은 같은 provider/dataset tag의 `QUEUED`/`STARTING`/
+`STARTED`/`CANCELING` run이 있으면 해당 tick을 skip해 새 backlog 생성을 예방한다. Dagster
+schedule tick 상세의 skip 사유에는 기존 run 상태와 id가 남는다. 이는 배포 전에 이미 쌓인
+queue를 지우지는 않으므로 위 복구 절차는 여전히 필요하다. 수동 run과 schedule tick의 동시
+제출처럼 조회 직후 생기는 경합은 pool이 Dagster 실행을 직렬화하고, pool 우회 경로까지 아래
+PostgreSQL advisory lock이 최종 방어한다.
+
+실제 최종 방어는 provider 실행 함수의 PostgreSQL advisory lock이다. targeted feature update
+worker는 asset pool을 거치지 않고 같은 함수를 직접 실행하므로, OpiNet place/price와 KREX
+notice는 fetch→load/reconcile→sync 성공 전체에서 각각 고정된 provider lock을 공유한다. pool과
+coalescing은 불필요한 run 시작·queue 누적·DB lock 대기를 줄이는 운영 제어다. worker process가
+비정상 종료돼도 connection 종료와 함께 session lock이 풀린다.
+
+OpiNet은 `provider_dataset` 이외 targeted feature update에서
+`global_provider_not_targetable` 사유로 정상 skip되는 것이 기대 동작이다. 현재 lowTop 조회가
+요청 범위를 소비하지 못하므로 이를 강제로 실행하면 같은 전국 window만 반복해 quota를
+고갈시킨다. system schedule이나 provider-wide 수동 run이 갱신을 맡고, Dagster materialization
+metadata의 `today_values_count`가 `price_values_upserted`보다 작으면 당일 price 성공으로
+합치지 않아 다음 정식 run이 다시 시도한다. 두 값이 같아도 `latest_observed_at`이 cursor
+`loaded_at`과 같은 KST 날짜가 아니면 재시도해야 한다. `already_succeeded_today_kst` skip은
+같은 KST 날짜에 적재값 전체가 당일 가격인 뒤에만 정상이다.
 
 ## 2. 포트 정리
 

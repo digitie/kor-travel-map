@@ -10,6 +10,8 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 type FeatureSummary = components["schemas"]["FeatureSummary"];
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type FeaturesInBoundsResponse =
+  components["schemas"]["FeaturesInBoundsResponse"];
 type Meta = components["schemas"]["Meta"];
 type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -43,6 +45,14 @@ function makeWeatherFeature(
     marker_icon: "marker",
     name: "기상청 초단기 서울",
     status: "active",
+    weather_summary: {
+      forecast_style: "nowcast",
+      metric_key: "TMP",
+      metric_name: "기온",
+      provider: "python-kma-api",
+      unit: "deg_c",
+      value_number: 21.5,
+    },
     ...overrides,
   };
 }
@@ -51,6 +61,28 @@ function makeFeaturesInBboxResponse(
   items: FeatureSummary[],
 ): FeaturesInBboxResponse {
   return { data: { items }, meta: makeMeta() };
+}
+
+function makeFeaturesInBoundsResponse(
+  items: FeatureSummary[],
+): FeaturesInBoundsResponse {
+  return {
+    data: {
+      clusters:
+        items.length > 0
+          ? [
+              {
+                cluster_key: "1100000000",
+                feature_count: items.length,
+                lat: items[0]?.lat ?? SEOUL_LAT,
+                lon: items[0]?.lon ?? SEOUL_LON,
+              },
+            ]
+          : [],
+      items: [],
+    },
+    meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
+  };
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
@@ -145,6 +177,13 @@ async function mockFeatureRoutes(
       return;
     }
     if (
+      url.pathname === "/v1/features/in-bounds" ||
+      url.pathname === "/api/proxy/v1/features/in-bounds"
+    ) {
+      await fulfillJson(route, makeFeaturesInBoundsResponse(items));
+      return;
+    }
+    if (
       url.pathname.startsWith("/v1/features/") ||
       url.pathname.startsWith("/api/proxy/v1/features/")
     ) {
@@ -184,6 +223,13 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
         marker_color: "P-16",
         lon: SEOUL_LON,
         lat: SEOUL_LAT + 0.012,
+        weather_summary: {
+          metric_key: "PM10",
+          metric_name: "미세먼지",
+          provider: "python-airkorea-api",
+          unit: "㎍/㎥",
+          value_number: 35,
+        },
       }),
     ];
     await mockFeatureRoutes(page, items);
@@ -206,9 +252,15 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
     // 지도 뷰: 분리된 좌표에서 KMA 마커가 개별 렌더(aria-label = 이름).
     await page.getByRole("tab", { name: "지도" }).click();
     await setMapZoom(page, 15);
-    await expect(
-      page.getByRole("button", { name: /기상청 초단기 서울/ }),
-    ).toBeVisible();
+    const kmaMarker = page.getByRole("button", { name: /기상청 초단기 서울/ });
+    const airKoreaMarker = page.getByRole("button", {
+      name: /서울 대기질 측정소/,
+    });
+    await expect(kmaMarker).toBeVisible();
+    await expect(airKoreaMarker).toBeVisible();
+    // API가 아직 기존 marker_icon="marker"를 보내도 weather provider로 즉시 구분.
+    await expect(kmaMarker).toContainText("☀");
+    await expect(airKoreaMarker).toContainText("🌫");
   });
 
   test("같은 격자 좌표 초단기·단기 마커 겹침 → '겹친 지점' 팝업으로 선택 (#604)", async ({

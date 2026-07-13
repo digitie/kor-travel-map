@@ -6,11 +6,12 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import date
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from dagster import build_init_resource_context
+from kortravelmap.providers import krex as krex_provider
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -330,11 +331,19 @@ def _install_fake_krheritage(
 
 class _FakePage:
     def __init__(
-        self, *, items: tuple[object, ...], total_count: int, page_no: int
+        self,
+        *,
+        items: tuple[object, ...],
+        total_count: int | None,
+        page_no: int,
+        num_of_rows: int | None = None,
+        raw: dict[str, Any] | None = None,
     ) -> None:
         self.items = items
         self.total_count = total_count
         self.page_no = page_no
+        self.num_of_rows = num_of_rows
+        self.raw = raw
 
 
 class _FakeRestareaService:
@@ -458,39 +467,89 @@ def test_krex_rest_area_fuel_prices_fetch_paginates(
 
 
 class _FakeIncidentService:
-    def __init__(self, total: int) -> None:
+    def __init__(
+        self,
+        total: int,
+        page_size_limit: int | None,
+        empty_page_no: int | None,
+    ) -> None:
         self.total = total
+        self.page_size_limit = page_size_limit
+        self.empty_page_no = empty_page_no
         self.calls: list[tuple[int, int]] = []
 
     def incident(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
     ) -> _FakePage:
         self.calls.append((num_of_rows, page_no))
-        start = (page_no - 1) * num_of_rows
-        end = min(start + num_of_rows, self.total)
-        items = tuple(object() for _ in range(max(0, end - start)))
-        return _FakePage(items=items, total_count=self.total, page_no=page_no)
+        page_size = min(num_of_rows, self.page_size_limit or num_of_rows)
+        start = (page_no - 1) * page_size
+        end = min(start + page_size, self.total)
+        items = (
+            ()
+            if page_no == self.empty_page_no
+            else tuple(_fake_incident(index) for index in range(start, end))
+        )
+        return _FakePage(
+            items=items,
+            total_count=self.total,
+            page_no=page_no,
+            num_of_rows=page_size,
+            raw={
+                "count": self.total,
+                "pageNo": page_no,
+                "numOfRows": page_size,
+                "realTimeSMSList": [{} for _ in items],
+            },
+        )
+
+
+def _fake_incident(index: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        occurred_date=f"snapshot-row-{index}",
+        occurred_time=None,
+        route_no=None,
+        direction=None,
+        point_name=None,
+        incident_type_code=None,
+        series_no=index,
+        raw={"seriesNM": index},
+    )
 
 
 class _FakeKrexTrafficClient:
     instances: list[_FakeKrexTrafficClient] = []
     total: int = 0
+    page_size_limit: int | None = None
+    empty_page_no: int | None = None
 
     def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
         self.ex_api_key = ex_api_key
         self.closed = False
-        self.traffic = _FakeIncidentService(type(self).total)
+        self.close_calls = 0
+        self.traffic = _FakeIncidentService(
+            type(self).total,
+            type(self).page_size_limit,
+            type(self).empty_page_no,
+        )
         _FakeKrexTrafficClient.instances.append(self)
 
     def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
 
 
 def _install_fake_krex_traffic(
-    monkeypatch: pytest.MonkeyPatch, *, total: int
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    total: int,
+    page_size_limit: int | None = None,
+    empty_page_no: int | None = None,
 ) -> type[_FakeKrexTrafficClient]:
     _FakeKrexTrafficClient.instances = []
     _FakeKrexTrafficClient.total = total
+    _FakeKrexTrafficClient.page_size_limit = page_size_limit
+    _FakeKrexTrafficClient.empty_page_no = empty_page_no
     module = ModuleType("krex")
     module.__dict__["KrexClient"] = _FakeKrexTrafficClient
     monkeypatch.setitem(sys.modules, "krex", module)
@@ -505,10 +564,11 @@ def test_krex_traffic_notices_fetch_raises_when_credential_missing() -> None:
         next(generator)
 
 
-def test_krex_traffic_notices_fetch_paginates_yields_and_closes(
+def test_krex_traffic_notices_fetch_requires_two_stable_passes_before_yield(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # total 1003 → page1=1000(full)·page2=3(short) → 2 pages, short-page stop.
+    # total 1003 → pass마다 page1=1000·page2=3. 동일 사건 집합을 2회
+    # 확인한 뒤에만 두 번째 pass record를 yield한다.
     fake = _install_fake_krex_traffic(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
@@ -519,8 +579,8 @@ def test_krex_traffic_notices_fetch_paginates_yields_and_closes(
     client = fake.instances[0]
     assert client.ex_api_key == "ex-key"
     assert client.closed is True
-    # 페이지네이션: page_no 1,2 만 호출(빈 3페이지 미호출), num_of_rows=1000.
-    assert client.traffic.calls == [(1000, 1), (1000, 2)]
+    assert client.close_calls == 1
+    assert client.traffic.calls == [(1000, 1), (1000, 2)] * 2
 
 
 def test_krex_traffic_notices_fetch_stops_on_total_count(
@@ -533,8 +593,359 @@ def test_krex_traffic_notices_fetch_stops_on_total_count(
     records = list(fetch_krex_traffic_notices(settings))
 
     assert len(records) == 2000
+    assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)] * 2
+    assert fake.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_reaches_total_when_server_clamps_page_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EX realTimeSms는 num_of_rows=1000 요청도 99건으로 clamp한다. 첫 99건을
+    # short page로 오인하지 않고 total_count=190까지 두 페이지를 모두 읽어야 한다.
+    fake = _install_fake_krex_traffic(
+        monkeypatch,
+        total=190,
+        page_size_limit=99,
+    )
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert len(records) == 190
+    assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)] * 2
+    assert fake.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_accepts_explicit_empty_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krex_traffic(monkeypatch, total=0)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert records == []
+    assert fake.instances[0].traffic.calls == [(1000, 1)] * 2
+    assert fake.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_rejects_empty_page_before_total_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krex_traffic(
+        monkeypatch,
+        total=190,
+        page_size_limit=99,
+        empty_page_no=2,
+    )
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(RuntimeError, match=r"seen=99, total_count=190, page_no=2"):
+        list(fetch_krex_traffic_notices(settings))
+
     assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)]
     assert fake.instances[0].closed is True
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {},
+        {"message": "temporary upstream response"},
+        {"count": 0},
+        {"realTimeSMSList": []},
+    ],
+)
+def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: dict[str, Any],
+) -> None:
+    class _MalformedIncidentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def incident(
+            self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+        ) -> _FakePage:
+            self.calls.append((num_of_rows, page_no))
+            return _FakePage(
+                items=(),
+                total_count=raw.get("count"),
+                page_no=page_no,
+                num_of_rows=0,
+                raw=raw,
+            )
+
+    class _MalformedClient:
+        instances: list[_MalformedClient] = []
+
+        def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+            self.ex_api_key = ex_api_key
+            self.closed = False
+            self.traffic = _MalformedIncidentService()
+            _MalformedClient.instances.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _MalformedClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(RuntimeError, match="KREX traffic_notices"):
+        list(fetch_krex_traffic_notices(settings))
+
+    assert _MalformedClient.instances[0].traffic.calls == [(1000, 1)]
+    assert _MalformedClient.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_rejects_count_change_between_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ChangingCountIncidentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def incident(
+            self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+        ) -> _FakePage:
+            self.calls.append((num_of_rows, page_no))
+            total = 2 if page_no == 1 else 1
+            return _FakePage(
+                items=(_fake_incident(page_no),),
+                total_count=total,
+                page_no=page_no,
+                num_of_rows=1,
+                raw={
+                    "count": total,
+                    "pageNo": page_no,
+                    "numOfRows": 1,
+                    "realTimeSMSList": [{}],
+                },
+            )
+
+    class _ChangingCountClient:
+        instances: list[_ChangingCountClient] = []
+
+        def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+            self.ex_api_key = ex_api_key
+            self.closed = False
+            self.traffic = _ChangingCountIncidentService()
+            _ChangingCountClient.instances.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _ChangingCountClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(RuntimeError, match="페이지 사이 count"):
+        list(fetch_krex_traffic_notices(settings))
+
+    assert _ChangingCountClient.instances[0].traffic.calls == [(1000, 1), (1000, 2)]
+    assert _ChangingCountClient.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """count 불변이어도 A,B / B,D면 B 중복+C 누락 snapshot이므로 거부한다."""
+
+    class _OverlappingIncidentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def incident(
+            self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+        ) -> _FakePage:
+            self.calls.append((num_of_rows, page_no))
+            indexes = (1, 2) if page_no == 1 else (2, 4)
+            items = tuple(_fake_incident(index) for index in indexes)
+            return _FakePage(
+                items=items,
+                total_count=4,
+                page_no=page_no,
+                num_of_rows=2,
+                raw={
+                    "count": 4,
+                    "pageNo": page_no,
+                    "numOfRows": 2,
+                    "realTimeSMSList": [item.raw for item in items],
+                },
+            )
+
+    class _OverlappingClient:
+        instances: list[_OverlappingClient] = []
+
+        def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+            self.ex_api_key = ex_api_key
+            self.closed = False
+            self.traffic = _OverlappingIncidentService()
+            _OverlappingClient.instances.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _OverlappingClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(RuntimeError, match="중복 사건 identity"):
+        list(fetch_krex_traffic_notices(settings))
+
+    [client] = _OverlappingClient.instances
+    assert client.traffic.calls == [(1000, 1), (1000, 2)]
+    assert client.closed is True
+
+
+def test_krex_traffic_notices_fetch_rejects_nonoverlap_replacement_between_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """두 pass 모두 count/unique가 정상이어도 A,B → D,E 교체면 거부한다."""
+
+    class _ReplacingIncidentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def incident(
+            self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+        ) -> _FakePage:
+            self.calls.append((num_of_rows, page_no))
+            indexes = (1, 2) if len(self.calls) == 1 else (4, 5)
+            items = tuple(_fake_incident(index) for index in indexes)
+            return _FakePage(
+                items=items,
+                total_count=2,
+                page_no=page_no,
+                num_of_rows=2,
+                raw={
+                    "count": 2,
+                    "pageNo": page_no,
+                    "numOfRows": 2,
+                    "realTimeSMSList": [item.raw for item in items],
+                },
+            )
+
+    class _ReplacingClient:
+        instances: list[_ReplacingClient] = []
+
+        def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+            self.ex_api_key = ex_api_key
+            self.close_calls = 0
+            self.traffic = _ReplacingIncidentService()
+            _ReplacingClient.instances.append(self)
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _ReplacingClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(RuntimeError, match="연속 snapshot의 사건 집합이 다르다"):
+        list(fetch_krex_traffic_notices(settings))
+
+    [client] = _ReplacingClient.instances
+    assert client.traffic.calls == [(1000, 1), (1000, 1)]
+    assert client.close_calls == 1
+
+
+def test_krex_traffic_notice_identity_fallback_matches_converter_raw_hash() -> None:
+    natural_fields = {
+        "occurred_date": None,
+        "occurred_time": None,
+        "route_no": None,
+        "direction": None,
+        "point_name": None,
+        "incident_type_code": None,
+    }
+    raw_a = SimpleNamespace(**natural_fields, raw={"smsText": "동일 사건"}, series_no=1)
+    raw_b = SimpleNamespace(**natural_fields, raw={"smsText": "동일 사건"}, series_no=2)
+    series_a = SimpleNamespace(**natural_fields, raw={}, series_no=7)
+    series_b = SimpleNamespace(**natural_fields, raw={}, series_no=8)
+
+    assert provider_fetchers._krex_traffic_notice_lineage_identity(
+        raw_a
+    ) == provider_fetchers._krex_traffic_notice_lineage_identity(raw_b)
+    assert provider_fetchers._krex_traffic_notice_lineage_identity(
+        series_a
+    ) == provider_fetchers._krex_traffic_notice_lineage_identity(series_b)
+    for item in (raw_a, raw_b, series_a, series_b):
+        assert provider_fetchers._krex_traffic_notice_lineage_identity(
+            item
+        ) == krex_provider._traffic_notice_natural_key(item)
+
+
+@pytest.mark.parametrize(
+    ("raw", "page_no", "num_of_rows", "message"),
+    [
+        (
+            {"count": 0, "pageNo": 2, "numOfRows": 0, "realTimeSMSList": []},
+            1,
+            0,
+            "pageNo가 요청과 다르다",
+        ),
+        (
+            {"count": 0, "pageNo": 1, "realTimeSMSList": []},
+            1,
+            None,
+            "유효한 numOfRows가 없다",
+        ),
+    ],
+)
+def test_krex_traffic_notices_page_requires_explicit_pagination_metadata(
+    raw: dict[str, Any],
+    page_no: int,
+    num_of_rows: int | None,
+    message: str,
+) -> None:
+    page = _FakePage(
+        items=(),
+        total_count=0,
+        page_no=page_no,
+        num_of_rows=num_of_rows,
+        raw=raw,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        provider_fetchers._validate_krex_traffic_notice_page(
+            page,
+            page_no=1,
+            seen=0,
+            item_count=0,
+            expected_total=None,
+        )
+
+
+def test_krex_traffic_notices_page_accepts_single_object_item() -> None:
+    page = _FakePage(
+        items=(object(),),
+        total_count=1,
+        page_no=1,
+        num_of_rows=1,
+        raw={
+            "count": 1,
+            "pageNo": 1,
+            "numOfRows": 1,
+            "realTimeSMSList": {"smsText": "단건"},
+        },
+    )
+
+    assert (
+        provider_fetchers._validate_krex_traffic_notice_page(
+            page,
+            page_no=1,
+            seen=0,
+            item_count=1,
+            expected_total=None,
+        )
+        == 1
+    )
 
 
 def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
@@ -549,6 +960,8 @@ def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
     generator.close()
 
     assert fake.instances[0].closed is True
+    assert fake.instances[0].close_calls == 1
+    assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)] * 2
 
 
 def test_mois_fetch_raises_when_source_db_unset() -> None:
@@ -1908,10 +2321,10 @@ def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_rate_limit_stops_early(
+def test_opinet_stations_low_top_area_rate_limit_fails_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """서버가 OpinetRateLimitError를 던지면 lowTop10 중단 + grid 진입 안 함(#545)."""
+    """rate-limit 뒤 부분 성공을 RUN_SUCCESS로 오인하지 않고 예외를 전파한다."""
     fake = _install_fake_opinet(
         monkeypatch,
         stations=[],
@@ -1936,9 +2349,9 @@ def test_opinet_stations_low_top_area_rate_limit_stops_early(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    with pytest.raises(_FakeOpinetRateLimitError, match="daily limit"):
+        list(fetch_opinet_stations(settings))
 
-    assert [r.uni_id for r in records] == ["A1"]
     client = fake.instances[0]
     assert client.low_top_calls == [
         ("B027", 20, "0101"),
@@ -1946,6 +2359,32 @@ def test_opinet_stations_low_top_area_rate_limit_stops_early(
     ]
     assert grid_called is False
     assert client.around_calls == []
+    assert client.closed is True
+
+
+def test_opinet_stations_grid_rate_limit_fails_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[],
+        root_areas=[],
+        around={(127.0, 37.5, "B027"): _FakeOpinetRateLimitError("daily limit")},
+    )
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_sample_grid_centers",
+        lambda: iter([(127.0, 37.5)]),
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
+    )
+
+    with pytest.raises(_FakeOpinetRateLimitError, match="daily limit"):
+        list(fetch_opinet_stations(settings))
+
+    client = fake.instances[0]
+    assert client.around_calls == [(127.0, 37.5, 5000, "B027")]
     assert client.closed is True
 
 

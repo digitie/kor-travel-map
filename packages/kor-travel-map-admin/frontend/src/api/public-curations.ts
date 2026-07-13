@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 import { getJson, pathWithQuery } from "./client";
 import type {
@@ -124,6 +125,146 @@ export interface PublicCurationGroupsParams {
   page_size?: number;
 }
 
+const CURATION_BBOX_CELLS_PER_VIEWPORT = 4;
+const MIN_CURRATION_BBOX_STEP = 2 ** -10;
+const MERCATOR_LAT_LIMIT = 85.05112878;
+
+function paddedQuantizedRange(
+  first: number,
+  second: number,
+  domainMin: number,
+  domainMax: number,
+): [number, number] {
+  const min = Math.min(first, second);
+  const max = Math.max(first, second);
+  const span = max - min;
+  // viewport 폭의 약 1/4을 power-of-two cell로 고정한다. 같은 zoom band에서 작은
+  // pan은 동일 중심 cell을 재사용하고, 중심 반올림 여유를 둔 padding이 화면을 보장한다.
+  const targetStep = Math.max(
+    span / CURATION_BBOX_CELLS_PER_VIEWPORT,
+    MIN_CURRATION_BBOX_STEP,
+  );
+  const step = 2 ** Math.floor(Math.log2(targetStep));
+  const center = (min + max) / 2;
+  const quantizedCenter = Math.round(center / step) * step;
+  // 중심 반올림 오차(최대 0.5 cell)까지 포함할 만큼만 확장한다. 무조건 한 cell을
+  // 더하는 것보다 fetch 면적을 줄이면서 원 viewport 포함 조건은 유지한다.
+  const halfCells = Math.ceil(span / (2 * step) + 0.5);
+  return [
+    Math.max(domainMin, quantizedCenter - halfCells * step),
+    Math.min(domainMax, quantizedCenter + halfCells * step),
+  ];
+}
+
+/**
+ * 지도 bbox를 zoom-band별 grid에 맞춘 padded bbox로 바꾼다. query key와 실제 API
+ * 요청이 같은 정규화 params를 사용하므로 작은 pan은 캐시를 재사용하면서도 현재
+ * viewport가 캐시 범위를 벗어나 stale marker를 보이는 문제를 피한다.
+ */
+export function stabilizePublicCurationGroupsParams(
+  params: PublicCurationGroupsParams,
+): PublicCurationGroupsParams {
+  const { min_lon, min_lat, max_lon, max_lat } = params;
+  if (
+    typeof min_lon !== "number" ||
+    !Number.isFinite(min_lon) ||
+    typeof min_lat !== "number" ||
+    !Number.isFinite(min_lat) ||
+    typeof max_lon !== "number" ||
+    !Number.isFinite(max_lon) ||
+    typeof max_lat !== "number" ||
+    !Number.isFinite(max_lat)
+  ) {
+    return params;
+  }
+  const [minLon, maxLon] = paddedQuantizedRange(
+    min_lon,
+    max_lon,
+    -180,
+    180,
+  );
+  const [minLat, maxLat] = paddedQuantizedRange(
+    min_lat,
+    max_lat,
+    -MERCATOR_LAT_LIMIT,
+    MERCATOR_LAT_LIMIT,
+  );
+  return {
+    ...params,
+    min_lon: minLon,
+    min_lat: minLat,
+    max_lon: maxLon,
+    max_lat: maxLat,
+  };
+}
+
+interface PublicCurationViewportBounds {
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+}
+
+function publicCurationViewportBounds(
+  params: PublicCurationGroupsParams,
+): PublicCurationViewportBounds | null {
+  const { min_lon, min_lat, max_lon, max_lat } = params;
+  if (
+    typeof min_lon !== "number" ||
+    !Number.isFinite(min_lon) ||
+    typeof min_lat !== "number" ||
+    !Number.isFinite(min_lat) ||
+    typeof max_lon !== "number" ||
+    !Number.isFinite(max_lon) ||
+    typeof max_lat !== "number" ||
+    !Number.isFinite(max_lat)
+  ) {
+    return null;
+  }
+  return {
+    minLon: Math.min(min_lon, max_lon),
+    minLat: Math.min(min_lat, max_lat),
+    maxLon: Math.max(min_lon, max_lon),
+    maxLat: Math.max(min_lat, max_lat),
+  };
+}
+
+/**
+ * padded bbox로 받은 캐시 응답을 현재 viewport로 다시 자른다. 이 함수는 queryFn이
+ * 아니라 observer의 select에서 실행해 작은 pan의 네트워크 캐시는 공유하되, 지도와
+ * 테이블에는 화면 밖 POI 및 padded bbox의 total이 노출되지 않게 한다.
+ */
+export function filterPublicCurationGroupsToViewport(
+  response: PublicCurationGroupsResponse,
+  viewportParams: PublicCurationGroupsParams,
+): PublicCurationGroupsResponse {
+  const bounds = publicCurationViewportBounds(viewportParams);
+  if (bounds === null) return response;
+
+  const items = response.data.items.filter((group) => {
+    const { lon, lat } = group.feature;
+    return (
+      typeof lon === "number" &&
+      Number.isFinite(lon) &&
+      typeof lat === "number" &&
+      Number.isFinite(lat) &&
+      lon >= bounds.minLon &&
+      lon <= bounds.maxLon &&
+      lat >= bounds.minLat &&
+      lat <= bounds.maxLat
+    );
+  });
+  const page = response.meta.page;
+  return {
+    ...response,
+    data: { items },
+    meta: {
+      ...response.meta,
+      page: page ? { ...page, total: items.length } : page,
+    },
+  };
+}
+
 function mergeGroup(
   existing: PublicCurationGroup,
   incoming: PublicCurationGroup,
@@ -199,10 +340,23 @@ export function usePublicCurationGroups(
   params: PublicCurationGroupsParams,
   options: { enabled?: boolean } = {},
 ) {
+  const stableParams = stabilizePublicCurationGroupsParams(params);
+  const selectViewportGroups = useCallback(
+    (response: PublicCurationGroupsResponse) =>
+      filterPublicCurationGroupsToViewport(response, {
+        min_lat: params.min_lat,
+        min_lon: params.min_lon,
+        max_lat: params.max_lat,
+        max_lon: params.max_lon,
+      }),
+    [params.max_lat, params.max_lon, params.min_lat, params.min_lon],
+  );
   return useQuery<PublicCurationGroupsResponse, Error>({
-    queryKey: ["public-curation-groups", params] as const,
-    queryFn: ({ signal }) => fetchAllPublicCurationGroups(params, signal),
+    queryKey: ["public-curation-groups", stableParams] as const,
+    queryFn: ({ signal }) => fetchAllPublicCurationGroups(stableParams, signal),
+    select: selectViewportGroups,
     enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }

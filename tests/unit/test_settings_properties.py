@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -42,3 +42,9 @@ def test_geo_api_key_value_strips_and_returns_none_for_blank() -> None:
         is None
     )
     assert KorTravelMapSettings(kor_travel_geo_api_key=None).kor_travel_geo_api_key_value is None
+
+
+def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:
+    assert KorTravelMapSettings(opinet_run_call_budget=700).opinet_run_call_budget == 700
+    with pytest.raises(ValidationError):
+        KorTravelMapSettings(opinet_run_call_budget=701)

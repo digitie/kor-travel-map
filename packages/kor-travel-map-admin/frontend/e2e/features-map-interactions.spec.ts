@@ -87,7 +87,11 @@ function makeFeaturesInBoundsResponse(
   };
 }
 
-async function setMapZoom(page: Page, zoom: number) {
+async function setMapZoom(
+  page: Page,
+  zoom: number,
+  center?: [number, number],
+) {
   await expect
     .poll(
       () =>
@@ -100,12 +104,15 @@ async function setMapZoom(page: Page, zoom: number) {
       { timeout: 20_000 },
     )
     .toBe(true);
-  await page.evaluate((nextZoom) => {
+  await page.evaluate(({ nextZoom, nextCenter }) => {
     const container = document.querySelector(
       '[data-testid="map-canvas-container"]',
     ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
-    container?._maplibreMap?.jumpTo({ zoom: nextZoom });
-  }, zoom);
+    container?._maplibreMap?.jumpTo({
+      ...(nextCenter ? { center: nextCenter } : {}),
+      zoom: nextZoom,
+    });
+  }, { nextCenter: center, nextZoom: zoom });
 }
 
 function makeFeatureDetail(
@@ -465,6 +472,117 @@ test.describe("/features map interactions", () => {
     await expect(page.getByTestId("map-canvas-container")).toBeAttached();
   });
 
+  test("고zoom 기본 weather/notice 조회는 geometry SQL을 요청하지 않는다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page);
+
+    await page.goto("/features");
+    await setMapZoom(page, 14);
+
+    await expect
+      .poll(() => requests.listIncludeGeometry.at(-1))
+      .toBe("false");
+
+    // 빈 kind set은 API에서 "전체 kind"이므로 route/area geometry도 다시 포함한다.
+    const kindFilter = page.getByTestId("kind-filter");
+    await kindFilter.getByRole("button", { name: "weather", exact: true }).click();
+    await kindFilter.getByRole("button", { name: "notice", exact: true }).click();
+    await expect.poll(() => requests.listIncludeGeometry.at(-1)).toBe("true");
+  });
+
+  test("VWorld raster sourcedata를 무시하고 source tile 중복도 marker 전에 제거한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page);
+
+    await page.goto("/features");
+    await setMapZoom(page, 16, [126.978, 37.5665]);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
+
+    const sourceId = "kor-feature-clusters";
+    await expect
+      .poll(() =>
+        page.evaluate((id) => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          const map = container?._maplibreMap;
+          return Boolean(map?.getSource(id) && map.isSourceLoaded(id));
+        }, sourceId),
+      )
+      .toBe(true);
+
+    const calls = await page.evaluate(async (id) => {
+      const container = document.querySelector(
+        '[data-testid="map-canvas-container"]',
+      ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+      if (!container?._maplibreMap) throw new Error("maplibre map is not ready");
+      const map = container._maplibreMap;
+
+      type InstrumentedMap = {
+        fire: (type: string, properties: Record<string, unknown>) => unknown;
+        querySourceFeatures: (sourceId: string) => ReturnType<
+          typeof map.querySourceFeatures
+        >;
+      };
+      const instrumentedMap = map as unknown as InstrumentedMap;
+      const nextFrame = () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      // source load 완료 직후 이미 예약된 updater를 먼저 비운 뒤 계측한다.
+      await nextFrame();
+      await nextFrame();
+      const originalQuery = instrumentedMap.querySourceFeatures.bind(map);
+      let queryCalls = 0;
+      let sourceFeatureCount = 0;
+      instrumentedMap.querySourceFeatures = (nextSourceId: string) => {
+        if (nextSourceId === id) queryCalls += 1;
+        const features = originalQuery(nextSourceId);
+        if (nextSourceId === id) sourceFeatureCount = features.length;
+        return nextSourceId === id ? [...features, ...features] : features;
+      };
+      const fireSourceData = (nextSourceId: string, isSourceLoaded: boolean) => {
+        instrumentedMap.fire("sourcedata", {
+          dataType: "source",
+          isSourceLoaded,
+          sourceDataType: "content",
+          sourceId: nextSourceId,
+        });
+      };
+
+      try {
+        fireSourceData("vworld-raster-test", true);
+        await nextFrame();
+        const afterRaster = queryCalls;
+
+        fireSourceData(id, false);
+        await nextFrame();
+        const afterUnloadedFeatureSource = queryCalls;
+
+        fireSourceData(id, true);
+        await nextFrame();
+        const duplicateBadgeCount = Array.from(
+          container.querySelectorAll('.maplibregl-marker [aria-hidden="true"]'),
+        ).filter((element) => element.textContent === "2").length;
+        return {
+          afterRaster,
+          afterUnloadedFeatureSource,
+          duplicateBadgeCount,
+          final: queryCalls,
+          sourceFeatureCount,
+        };
+      } finally {
+        instrumentedMap.querySourceFeatures = originalQuery;
+      }
+    }, sourceId);
+
+    expect(calls.afterRaster).toBe(0);
+    expect(calls.afterUnloadedFeatureSource).toBe(0);
+    expect(calls.final).toBe(1);
+    expect(calls.sourceFeatureCount).toBeGreaterThan(0);
+    expect(calls.duplicateBadgeCount).toBe(0);
+  });
+
   test("route/area geometry — 선·면과 이름 라벨을 지도에 표시", async ({
     page,
   }) => {
@@ -507,6 +625,9 @@ test.describe("/features map interactions", () => {
 
     await page.goto("/features");
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    const kindFilter = page.getByTestId("kind-filter");
+    await kindFilter.getByRole("button", { name: "route", exact: true }).click();
+    await kindFilter.getByRole("button", { name: "area", exact: true }).click();
 
     await setMapZoom(page, 14);
     await expect.poll(() => requests.listIncludeGeometry).toContain("true");
@@ -674,6 +795,8 @@ test.describe("/features map interactions", () => {
   test("price feature — 마커 현재 가격과 우측 price 패널 표시", async ({
     page,
   }) => {
+    await page.clock.setFixedTime(new Date("2026-06-26T15:01:00.000Z"));
+    const observedToday = "2026-06-26T15:00:00.000Z"; // 6/27 00:00 KST
     const priceSummary = [
       {
         observed_at: "2026-06-26T06:18:00.000Z",
@@ -687,7 +810,7 @@ test.describe("/features map interactions", () => {
         value_number: 1820,
       },
       {
-        observed_at: "2026-06-26T06:18:00.000Z",
+        observed_at: observedToday,
         price_domain: "opinet_gas_station",
         product_key: "diesel",
         product_name: "경유",
@@ -722,16 +845,36 @@ test.describe("/features map interactions", () => {
           price_summary: priceSummary,
         }),
       ],
+      price: {
+        data: {
+          asof: null,
+          current: priceSummary,
+          feature_id: FEATURE_ID,
+          history: priceSummary,
+          is_stale: false,
+          latest_at: observedToday,
+        },
+        meta: makeMeta({ request_id: "e2e-feature-price-multi-product" }),
+      },
     });
 
     await page.goto("/features");
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await page
+      .getByTestId("kind-filter")
+      .getByRole("button", { name: "price", exact: true })
+      .click();
     await setMapZoom(page, 14);
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     await expect(page.getByText("휘 1,820")).toBeVisible();
     await expect(page.getByText("경 1,650")).toBeVisible();
     await expect(page.getByText("고 2,050")).toBeVisible();
+    const priceMarker = page.getByRole("button", { name: /서울주유소 유가/ });
+    await expect(priceMarker).toContainText("휘 1,820 · 과거 6/26");
+    await expect(priceMarker).toContainText("경 1,650");
+    await expect(priceMarker).not.toContainText("경 1,650 · 과거");
+    await expect(priceMarker).toContainText("고 2,050 · 과거 6/26");
 
     await page.getByRole("button", { name: /서울주유소 유가.*휘 1,820/ }).click();
     const panel = page.getByTestId("feature-detail-panel");
@@ -740,6 +883,10 @@ test.describe("/features map interactions", () => {
     await expect(panel.getByTestId("feature-price-panel")).toBeVisible();
     await expect(panel.getByText("휘발유 1,820")).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
+    const graph = panel.getByRole("img", { name: "price history graph" });
+    await expect(graph).toBeVisible();
+    await expect(graph.locator("circle")).toHaveCount(3);
+    await expect(graph.locator("polyline")).toHaveCount(0);
   });
 
   test("bbox list 5xx → destructive Alert(role=alert) error surface", async ({

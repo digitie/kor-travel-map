@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 import pytest
-from dagster import DefaultScheduleStatus, build_schedule_context
+from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
+    DagsterInstance,
+    DagsterRunStatus,
+    DefaultScheduleStatus,
+    build_schedule_context,
+)
+from dagster._core.remote_origin import (
+    RegisteredCodeLocationOrigin,
+    RemoteJobOrigin,
+    RemoteRepositoryOrigin,
+)
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
 
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS, FEATURE_LOAD_RETRY_POLICY
@@ -211,6 +222,104 @@ def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
     assert schedule.job_name == "feature_notice_krex_traffic_notices_job"
     assert schedule.tags["kor_travel_map.provider"] == "krex"
     assert schedule.tags["kor_travel_map.dataset_key"] == "krex_traffic_notices"
+
+
+def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
+    schedule = defs.resolve_schedule_def(
+        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+    )
+    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+    remote_origin = RemoteJobOrigin(
+        RemoteRepositoryOrigin(
+            RegisteredCodeLocationOrigin("test"),
+            "__repository__",
+        ),
+        job.name,
+    )
+
+    with DagsterInstance.local_temp() as instance:
+        for run_status in (
+            DagsterRunStatus.QUEUED,
+            DagsterRunStatus.STARTING,
+            DagsterRunStatus.STARTED,
+            DagsterRunStatus.CANCELING,
+        ):
+            run = instance.create_run_for_job(
+                job,
+                status=run_status,
+                tags={
+                    "kor_travel_map.provider": "krex",
+                    "kor_travel_map.dataset_key": "krex_traffic_notices",
+                },
+                remote_job_origin=(
+                    remote_origin if run_status == DagsterRunStatus.QUEUED else None
+                ),
+            )
+
+            with build_schedule_context(instance=instance) as context:
+                tick = schedule.evaluate_tick(context)
+
+            assert tick.run_requests == []
+            assert tick.skip_message is not None
+            assert run_status.value in tick.skip_message
+            instance.delete_run(run.run_id)
+
+
+def test_krex_traffic_notices_schedule_requests_run_without_non_terminal_run() -> None:
+    schedule = defs.resolve_schedule_def(
+        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+    )
+    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+
+    with DagsterInstance.local_temp() as instance:
+        with build_schedule_context(instance=instance) as context:
+            tick_without_runs = schedule.evaluate_tick(context)
+
+        for terminal_status in (
+            DagsterRunStatus.SUCCESS,
+            DagsterRunStatus.FAILURE,
+            DagsterRunStatus.CANCELED,
+        ):
+            instance.create_run_for_job(
+                job,
+                status=terminal_status,
+                tags={
+                    "kor_travel_map.provider": "krex",
+                    "kor_travel_map.dataset_key": "krex_traffic_notices",
+                },
+            )
+
+        with build_schedule_context(instance=instance) as context:
+            tick_with_terminal_runs = schedule.evaluate_tick(context)
+
+    for tick in (tick_without_runs, tick_with_terminal_runs):
+        assert tick.skip_message is None
+        assert len(tick.run_requests) == 1
+        assert tick.run_requests[0].tags["kor_travel_map.provider"] == "krex"
+        assert tick.run_requests[0].tags["kor_travel_map.dataset_key"] == (
+            "krex_traffic_notices"
+        )
+
+
+def test_freshness_sensitive_jobs_have_two_hour_runtime_tag() -> None:
+    assert MAX_RUNTIME_SECONDS_TAG == "dagster/max_runtime"
+
+    expected = {
+        "feature_place_opinet_stations_job": (
+            "feature_place_opinet_stations_monthly_schedule"
+        ),
+        "feature_price_opinet_stations_job": (
+            "feature_price_opinet_stations_daily_schedule"
+        ),
+        "feature_notice_krex_traffic_notices_job": (
+            "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        ),
+    }
+    for job_name, schedule_name in expected.items():
+        job = defs.resolve_job_def(job_name)
+        schedule = defs.resolve_schedule_def(schedule_name)
+        assert job.tags[MAX_RUNTIME_SECONDS_TAG] == "7200"
+        assert schedule.tags[MAX_RUNTIME_SECONDS_TAG] == "7200"
 
 
 def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:

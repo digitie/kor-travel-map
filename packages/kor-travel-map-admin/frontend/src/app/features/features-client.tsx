@@ -276,7 +276,9 @@ export function FeaturesClient() {
       ? providerFilter
       : "";
   const includeFeatureGeometry =
-    kindFilter.includes("route") || viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
+    kindFilter.length === 0 ||
+    kindFilter.includes("route") ||
+    (kindFilter.includes("area") && viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM);
   const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
 
   // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를

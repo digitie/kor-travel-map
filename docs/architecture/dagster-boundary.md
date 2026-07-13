@@ -584,6 +584,52 @@ Docker compose는 `dagster-db-init`로 같은 Postgres container 안에
 run/event/schedule metadata를 영속화한다. `dagster dev`는 로컬 단일 프로세스 편의
 명령으로만 사용할 수 있고 운영 compose에서는 사용하지 않는다.
 
+같은 `docker/dagster.yaml`은 run monitoring도 켠다. 컨테이너 재시작으로 worker process만
+사라지고 metadata가 `STARTED`/`STARTING`에 남으면 queued-run 동시성 슬롯이 영구 점유되므로,
+시작·취소 10분 및 전체 실행 6시간 상한으로 고아 run을 실패 처리해 슬롯을 회수한다.
+전역 상한은 과거 정상 MOIS bulk run(약 2시간 48분)을 끊지 않도록 잡았다. 최신성이 중요한
+KREX notice와 OpiNet place/price job은 Dagster 1.13의 공개
+`MAX_RUNTIME_SECONDS_TAG`(`dagster/max_runtime`)를 `7200`으로 선언해 schedule·수동 실행
+모두 2시간 상한을 적용한다. process 재개는 하지 않아 부분 적재를 중복 실행하지 않는다
+(`max_resume_run_attempts: 0`). provider 적재는 멱등이고 다음 schedule 또는 명시적 재실행으로
+복구한다.
+
+provider 동시성도 같은 파일에서 실제로 강제한다. OpiNet place/price asset은 모두
+`opinet_api` pool을 선언하고, `concurrency.pools.default_limit: 1`과
+`granularity: run`이 schedule·수동 실행을 포함한 instance 전역 동시 실행을 1개로 제한한다.
+Dagster DB에 운영자가 별도 pool 값을 수동 입력해야만 성립하는 계약이 아니다. 현재 pool을
+선언한 asset은 OpiNet 2개와 KREX notice 1개다. KREX notice의
+`krex_notice_snapshot` pool은 10분 schedule보다 실행이 길 때 이전/newer snapshot의
+load·reconcile 순서가 역전되는 것을 막는다. 다만 targeted feature update worker는 asset 함수를
+직접 호출하므로 pool만으로는 모든 실행 경로를 포괄하지 못한다. OpiNet place/price는 공통
+`provider-run:python-opinet-api`, KREX notice는 dataset 전용
+`provider-run:python-krex-api:krex_traffic_notices` PostgreSQL session advisory lock을
+fetch 시작부터 load/reconcile/sync 성공 기록까지 유지한다. DB lock이 서로 다른 process와
+Dagster instance를 포함한 최종 상호 배제 경계이고, pool은 불필요한 시작과 lock 대기를 줄인다.
+connection이 끊기면 lock은 PostgreSQL이 회수한다. persisted sync cursor watermark도 이미 반영한
+과거/같은 notice snapshot의 load를 거부한다. 이후 다른 provider pool을 추가하면 안전한 기본값
+1에서 시작해 근거가 있을 때만 인스턴스 설정을 확장한다.
+
+OpiNet targeted update는 별도 예외 경계가 있다. 현재 `low_top_area` fetcher는 요청의
+feature/bbox/cache-target scope가 아니라 설정된 전국 회전 window를 읽으므로,
+`provider_dataset` 이외 scope는 provider 호출 전에
+`skipped(global_provider_not_targetable)`로 끝낸다. 서로 다른 target 요청이 같은 전국 조회를
+반복해 quota를 고갈시키는 것을 막고, 실제 갱신은 system schedule 또는 명시적 provider-wide
+실행이 담당한다. 이 두 경로도 provider DB lock 안에서 cursor `loaded_at` 기준 dataset별 KST
+당일 성공을 합치되(DB commit 시각은 자정 통과 오판 때문에 쓰지 않음),
+price는 성공 cursor의 적재값 전체가 실제 당일 관측값일 때만 합친다
+(`today_values_count == price_values_upserted > 0`). 이때 `latest_observed_at`도 cursor의
+`loaded_at`과 같은 KST 날짜여야 하므로, 전일 값만 또는 날짜가 섞인 성공 run은 다음 정식
+schedule을 막지 않는다.
+
+KREX notice schedule은 고빈도 snapshot에만 opt-in한 tick coalescing도 적용한다. 같은
+`provider=krex`/`dataset_key=krex_traffic_notices` tag의 run이 `QUEUED`, `STARTING`,
+`STARTED`, `CANCELING` 중 하나면 새 `RunRequest`를 만들지 않고 기존 run id와 상태를
+Dagster tick의 skip 사유로 남긴다. 따라서 10분보다 실행이 길어도 scheduled run backlog가
+계속 늘지 않는다. 조회와 run 생성 사이의 경합 또는 tag가 없는 수동 실행까지 원자적으로 막는
+장치는 아니며, 그 경우에도 DB advisory lock이 실제 동시 실행과 snapshot 적용 순서 역전을
+막는다. 이 coalescing은 다른 저빈도 provider schedule에는 적용하지 않는다.
+
 로컬 `npm run admin:stack`도 같은 기준을 따른다. 시작 전 `kor_travel_map_dagster` DB
 존재를 확인/생성하고, `docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한 뒤
 `dagster-webserver`와 `dagster-daemon`을 별도 프로세스로 띄운다. `$DAGSTER_HOME`에

@@ -38,7 +38,7 @@ function productColor(productKey: string): string {
   return PRODUCT_COLORS[productKey] ?? "#475569";
 }
 
-function PriceHistoryChart({ history }: { history: PricePoint[] }) {
+export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
   const series = useMemo(() => {
     const groups = new Map<string, PricePoint[]>();
     for (const point of history) {
@@ -62,7 +62,7 @@ function PriceHistoryChart({ history }: { history: PricePoint[] }) {
   }, [history]);
 
   const allPoints = series.flatMap((item) => item.points);
-  if (allPoints.length < 2) {
+  if (allPoints.length === 0) {
     return (
       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
         그래프를 그릴 price history가 부족합니다.
@@ -83,7 +83,10 @@ function PriceHistoryChart({ history }: { history: PricePoint[] }) {
   const chartHeight = height - padTop - padBottom;
   const timeSpan = Math.max(1, maxTime - minTime);
   const priceSpan = Math.max(1, maxPrice - minPrice);
-  const x = (timestamp: number) => padX + ((timestamp - minTime) / timeSpan) * chartWidth;
+  const x = (timestamp: number) =>
+    maxTime === minTime
+      ? padX + chartWidth / 2
+      : padX + ((timestamp - minTime) / timeSpan) * chartWidth;
   const y = (value: number) =>
     padTop + chartHeight - ((value - minPrice) / priceSpan) * chartHeight;
 
@@ -119,17 +122,35 @@ function PriceHistoryChart({ history }: { history: PricePoint[] }) {
           {chartPriceFormatter.format(minPrice)}
         </text>
         {series.map((item) => (
-          <polyline
-            fill="none"
-            key={item.productKey}
-            points={item.points
-              .map((point) => `${x(point.timestamp)},${y(point.value_number)}`)
-              .join(" ")}
-            stroke={productColor(item.productKey)}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-          />
+          <g key={item.productKey}>
+            {item.points.length >= 2 ? (
+              <polyline
+                fill="none"
+                points={item.points
+                  .map((point) => `${x(point.timestamp)},${y(point.value_number)}`)
+                  .join(" ")}
+                stroke={productColor(item.productKey)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+              />
+            ) : null}
+            {item.points.map((point, index) => (
+              <circle
+                cx={x(point.timestamp)}
+                cy={y(point.value_number)}
+                fill={productColor(item.productKey)}
+                key={`${point.observed_at}:${index}`}
+                r="3"
+                stroke="#ffffff"
+                strokeWidth="1"
+              >
+                <title>
+                  {item.label} {priceLabel(point)} {formatDateTime(point.observed_at)}
+                </title>
+              </circle>
+            ))}
+          </g>
         ))}
       </svg>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">

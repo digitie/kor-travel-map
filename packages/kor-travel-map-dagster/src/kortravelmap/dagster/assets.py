@@ -1,13 +1,13 @@
 """kor-travel-map 소유 provider Feature 적재 Dagster asset."""
 
 import inspect
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.geocoding import ReverseGeocoder
-from kortravelmap.infra.feature_repo import AirQualityLoadResult
+from kortravelmap.infra.feature_repo import AirQualityLoadResult, FeatureLoadResult
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -135,6 +135,18 @@ FEATURE_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
 )
 """provider Feature load asset 공통 retry policy."""
 
+OPINET_API_POOL: Final[str] = "opinet_api"
+"""OpiNet 호출 asset을 인스턴스 전체에서 직렬화하는 Dagster pool."""
+
+OPINET_PROVIDER_RUN_LOCK: Final[str] = "provider-run:python-opinet-api"
+"""OpiNet fetch→load를 모든 실행 경로에서 직렬화하는 PostgreSQL lock key."""
+
+KREX_NOTICE_SNAPSHOT_POOL: Final[str] = "krex_notice_snapshot"
+"""KREX notice snapshot의 load/reconcile 순서를 직렬화하는 Dagster pool."""
+
+KREX_NOTICE_PROVIDER_RUN_LOCK: Final[str] = "provider-run:python-krex-api:krex_traffic_notices"
+"""KREX notice fetch→reconcile을 모든 실행 경로에서 직렬화하는 DB lock key."""
+
 MOIS_RECORD_BATCH_SIZE: Final[int] = 1000
 """MOIS bulk record를 FeatureBundle로 변환하기 전에 끊어 읽는 record batch 크기."""
 
@@ -181,9 +193,36 @@ async def feature_event_datagokr_cultural_festivals(
 async def run_feature_place_opinet_stations(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
+    """OpiNet 주유소를 DB lock + KST 일일 coalescing 안에서 적재한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    async with client.provider_run_lock(OPINET_PROVIDER_RUN_LOCK):
+        fetched_at = await _fetched_at(context)
+        if await _skip_opinet_if_already_succeeded_today(
+            context,
+            client,
+            dataset_key=OPINET_STATION_DATASET_KEY,
+            fetched_at=fetched_at,
+        ):
+            return await _load(
+                context,
+                provider=OPINET_PROVIDER_NAME,
+                dataset_key=OPINET_STATION_DATASET_KEY,
+                bundles=[],
+                record_sync_state=False,
+            )
+        return await _run_feature_place_opinet_stations_locked(
+            context,
+            fetched_at=fetched_at,
+        )
+
+
+async def _run_feature_place_opinet_stations_locked(
+    context: AssetExecutionContext,
+    *,
+    fetched_at: datetime,
+) -> DagsterFeatureLoadResult:
     """OpiNet 주유소 record를 place Feature로 적재한다."""
     records = await _record_list(context, "opinet_stations")
-    fetched_at = await _fetched_at(context)
     bundles = await stations_to_bundles(
         records,
         fetched_at=fetched_at,
@@ -201,6 +240,7 @@ async def run_feature_place_opinet_stations(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_stations"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=OPINET_API_POOL,
 )
 async def feature_place_opinet_stations(
     context: AssetExecutionContext,
@@ -211,11 +251,43 @@ async def feature_place_opinet_stations(
 async def run_feature_price_opinet_stations(
     context: AssetExecutionContext,
 ) -> PriceFeatureLoadResult:
+    """OpiNet 가격을 DB lock + KST 일일 coalescing 안에서 적재한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    async with client.provider_run_lock(OPINET_PROVIDER_RUN_LOCK):
+        fetched_at = await _fetched_at(context)
+        if await _skip_opinet_if_already_succeeded_today(
+            context,
+            client,
+            dataset_key=OPINET_PRICE_DATASET_KEY,
+            fetched_at=fetched_at,
+        ):
+            return PriceFeatureLoadResult(features=FeatureLoadResult(), price_values=0)
+        return await _run_feature_price_opinet_stations_locked(
+            context,
+            client,
+            fetched_at=fetched_at,
+        )
+
+
+async def _run_feature_price_opinet_stations_locked(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    fetched_at: datetime,
+) -> PriceFeatureLoadResult:
     """OpiNet 주유소 상세 가격을 price Feature + PriceValue로 적재한다."""
     records = await _record_list(context, "opinet_station_price_details")
-    fetched_at = await _fetched_at(context)
+    if not records:
+        # enabled scope에서 0건을 RUN_SUCCESS로 기록하면 마지막 성공 cursor만
+        # 전진하고 실제 갱신 중단은 감춰진다. 개별 area/product의 no-data는 fetcher가
+        # 계속 허용하되, whole-run zero는 provider/scope 장애로 취급한다.
+        raise RuntimeError(
+            "OpiNet 가격 조회가 전체 scope에서 0건을 반환했다. "
+            "provider 응답·쿼터·scope 설정을 확인하라."
+        )
     reverse_geocoder = _reverse_geocoder(context)
-    if any(hasattr(record, "prices") for record in records):
+    has_station_details = any(hasattr(record, "prices") for record in records)
+    if has_station_details:
         station_bundles, bundles, values = await station_details_to_price_features_and_values(
             records,
             fetched_at=fetched_at,
@@ -227,7 +299,19 @@ async def run_feature_price_opinet_stations(
             fetched_at=fetched_at,
             reverse_geocoder=reverse_geocoder,
         )
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    if not values:
+        # raw station record가 있어도 가격 필드 누락/스키마 drift로 모든 row가
+        # 정규화 단계에서 탈락할 수 있다. 이를 성공으로 기록하면 cursor만 전진해
+        # 실제 OpiNet 가격 갱신 중단을 숨기므로 load 전에 명시적으로 실패한다.
+        raise RuntimeError(
+            "OpiNet 가격 record를 PriceValue로 0건 변환했다. "
+            "provider 응답 스키마와 제품 가격 필드를 확인하라."
+        )
+    latest_observed_at = max(value.observed_at for value in values).astimezone(_KST)
+    today_kst = fetched_at.astimezone(_KST).date()
+    today_values_count = sum(
+        value.observed_at.astimezone(_KST).date() == today_kst for value in values
+    )
     # 가격 feature의 parent_feature_id가 가리키는 주유소 place feature를 가격보다
     # 먼저 upsert한다. 가격 detail에만 있고 stations 목록 asset에는 없는 주유소
     # (endpoint coverage 불일치)의 부모 place도 보장돼, price INSERT가 FK 제약
@@ -235,12 +319,20 @@ async def run_feature_price_opinet_stations(
     if station_bundles:
         await client.load_feature_bundles(station_bundles)
     result = await client.load_price_features(bundles, values)
+    coverage = "configured_scope" if has_station_details else "rotating_partial"
+    load_metadata = {
+        **result.as_metadata(),
+        "records_fetched": len(records),
+        "coverage": coverage,
+        "latest_observed_at": latest_observed_at.isoformat(),
+        "today_values_count": today_values_count,
+    }
     _add_output_metadata(
         context,
         {
             "provider": OPINET_PROVIDER_NAME,
             "dataset_key": OPINET_PRICE_DATASET_KEY,
-            **result.as_metadata(),
+            **load_metadata,
         },
     )
     await _record_feature_sync_success(
@@ -248,9 +340,99 @@ async def run_feature_price_opinet_stations(
         client,
         provider=OPINET_PROVIDER_NAME,
         dataset_key=OPINET_PRICE_DATASET_KEY,
-        cursor_extra=result.as_metadata(),
+        cursor_extra=load_metadata,
     )
     return result
+
+
+async def _skip_opinet_if_already_succeeded_today(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    dataset_key: str,
+    fetched_at: datetime,
+) -> bool:
+    """같은 OpiNet dataset의 KST 당일 성공이 있으면 API fetch 전에 합친다.
+
+    request scope를 반영할 수 없는 targeted 경로는 runner가 호출 전에 생략한다.
+    이 함수는 남은 schedule/manual/provider-wide 경로를 provider DB lock 안에서
+    persisted sync state로 합쳐, place/price의 불필요한 당일 중복 호출을 줄인다.
+    실패 run은 success 시각을 전진시키지 않아 같은 날 재시도할 수 있다.
+    """
+    state = await client.get_sync_state(
+        provider=OPINET_PROVIDER_NAME,
+        dataset_key=dataset_key,
+    )
+    last_success_at = state.last_success_at if state is not None else None
+    if last_success_at is None:
+        return False
+    cursor = getattr(state, "cursor", None)
+    raw_loaded_at = cursor.get("loaded_at") if isinstance(cursor, Mapping) else None
+    loaded_at = _aware_datetime_or_none(raw_loaded_at)
+    if loaded_at is None:
+        return False
+    if last_success_at.tzinfo is None or last_success_at.utcoffset() is None:
+        raise RuntimeError("OpiNet sync state last_success_at은 timezone-aware여야 한다.")
+    if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
+        raise RuntimeError("OpiNet fetched_at은 timezone-aware datetime이어야 한다.")
+    # last_success_at은 DB commit 시각이라 자정을 넘긴 run에서는 다음 KST 날짜가
+    # 된다. cursor의 run-start loaded_at과 현재 run-start를 비교해야 다음 날
+    # schedule을 잘못 막지 않는다.
+    if loaded_at.astimezone(_KST).date() != fetched_at.astimezone(_KST).date():
+        return False
+    if dataset_key == OPINET_PRICE_DATASET_KEY:
+        today_values_count = (
+            cursor.get("today_values_count") if isinstance(cursor, Mapping) else None
+        )
+        price_values_upserted = (
+            cursor.get("price_values_upserted") if isinstance(cursor, Mapping) else None
+        )
+        latest_observed_at = _aware_datetime_or_none(
+            cursor.get("latest_observed_at") if isinstance(cursor, Mapping) else None
+        )
+        if (
+            not isinstance(today_values_count, int)
+            or isinstance(today_values_count, bool)
+            or today_values_count <= 0
+            or not isinstance(price_values_upserted, int)
+            or isinstance(price_values_upserted, bool)
+            or today_values_count != price_values_upserted
+            or latest_observed_at is None
+            or latest_observed_at.astimezone(_KST).date()
+            != loaded_at.astimezone(_KST).date()
+        ):
+            # 오전 수동 run이 전일/혼합 가격을 받아도 last_success_at은 오늘이 된다.
+            # 이를 당일 성공으로 합치면 18:18 정식 run까지 건너뛰므로, 적재한 모든
+            # 값이 오늘 observed_at인 성공만 price 일일 coalescing 근거로 쓴다.
+            return False
+
+    metadata = {
+        "provider": OPINET_PROVIDER_NAME,
+        "dataset_key": dataset_key,
+        "skipped": True,
+        "skip_reason": "already_succeeded_today_kst",
+        "last_success_at": last_success_at.astimezone(_KST).isoformat(),
+    }
+    _add_output_metadata(context, metadata)
+    context.log.info(
+        "OpiNet %s는 KST 당일 이미 성공해 중복 API fetch를 생략함(last_success_at=%s).",
+        dataset_key,
+        metadata["last_success_at"],
+    )
+    return True
+
+
+def _aware_datetime_or_none(value: object) -> datetime | None:
+    """ISO-8601 aware datetime만 파싱하고 legacy/손상 cursor는 합치지 않는다."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 @asset(
@@ -262,6 +444,7 @@ async def run_feature_price_opinet_stations(
     deps=[feature_place_opinet_stations],
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_station_price_details"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=OPINET_API_POOL,
 )
 async def feature_price_opinet_stations(
     context: AssetExecutionContext,
@@ -363,57 +546,139 @@ async def feature_price_krex_rest_areas(
 async def run_feature_notice_krex_traffic_notices(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
+    """KREX notice snapshot을 provider 전역 DB lock 안에서 반영한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    async with client.provider_run_lock(KREX_NOTICE_PROVIDER_RUN_LOCK):
+        return await _run_feature_notice_krex_traffic_notices_locked(context, client)
+
+
+async def _run_feature_notice_krex_traffic_notices_locked(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+) -> DagsterFeatureLoadResult:
     """KREX 교통 공지 record를 notice Feature로 적재한다.
 
     적재 직후 reconcile(#632): 같은 계보의 중복 feature(identity 스킴 변경으로
     재키잉된 구세대 등)를 soft-delete하고, 이번 feed에 없는 계보의 latest
     feature는 ``valid_end_time=fetched_at``으로 닫는다 — 실시간 돌발 feed에서
-    사라진 사건이 영구 active로 남지 않게.
+    사라진 사건이 영구 active로 남지 않게. 다시 나타난 계보는 이전 종료 시각을
+    지워 active 상태로 복구한다.
     """
-    records = await _record_list(context, "krex_traffic_notices")
     fetched_at = await _fetched_at(context)
+    await _guard_notice_snapshot_watermark(
+        context,
+        client,
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        fetched_at=fetched_at,
+    )
+    records = await _record_list(context, "krex_traffic_notices")
     bundles = await traffic_notices_to_bundles(
         records,
         fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
+        # 10분 freshness 경로에서 row별 reverse geocoding을 수행하면 snapshot
+        # 수집보다 주소 보강이 더 오래 걸린다. 원천 좌표는 converter가 그대로
+        # Feature.coord/SourceRecord에 보존하므로 lifecycle 반영에는 geocoder가 없다.
+        reverse_geocoder=None,
     )
     result = await _load(
         context,
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         bundles=bundles,
+        record_sync_state=False,
     )
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    # 빈/실패 feed 안전장치: fetch가 0건(장애·쿼터·상류 중단)이면 feed-소멸 닫기를
-    # 건너뛴다 — active_lineage_keys=∅로 넘기면 모든 active notice가 "feed에 없음"으로
-    # 판정돼 전부 valid_end_time이 채워지고 API에서 통째로 사라진다. bundle이 있을 때만
-    # 닫기를 켠다(중복 정리 superseded는 무해하므로 항상 수행). 진짜 0건이면 다음
-    # 비어있지 않은 run이 닫는다.
-    has_feed = bool(bundles)
+    # fetch 예외는 _record_list 단계에서 전파되어 여기까지 오지 않는다. 따라서
+    # 정상적으로 materialize된 빈 목록은 authoritative empty snapshot이며, 모든
+    # 기존 latest 계보를 닫아야 한다. 현재 계보는 이전 오종료도 함께 self-heal한다.
     reconciled = await client.reconcile_notice_features(
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         source_entity_type="traffic_notice",
-        active_lineage_keys=(
-            {bundle.source_record.source_entity_id for bundle in bundles}
-            if has_feed
-            else None
-        ),
-        closed_at=fetched_at if has_feed else None,
+        active_lineage_keys={bundle.source_record.source_entity_id for bundle in bundles},
+        closed_at=fetched_at,
     )
-    if reconciled.superseded or reconciled.closed:
+    if reconciled.superseded or reconciled.closed or reconciled.reopened:
         context.log.info(
-            "KREX notice reconcile — 중복 soft-delete %d건, feed 소멸 닫음 %d건.",
+            "KREX notice reconcile — 중복 soft-delete %d건, feed 소멸 닫음 %d건, 재등장 복구 %d건.",
             reconciled.superseded,
             reconciled.closed,
+            reconciled.reopened,
         )
+    # load 성공만으로 sync cursor를 전진시키지 않는다. reconcile까지 성공한 뒤에만
+    # snapshot 전체 처리를 성공으로 기록한다.
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        cursor_extra={
+            **_feature_result_cursor_extra(result),
+            "notices_superseded": reconciled.superseded,
+            "notices_closed": reconciled.closed,
+            "notices_reopened": reconciled.reopened,
+            "snapshot_applied_at": fetched_at.isoformat(),
+        },
+    )
     return result
+
+
+async def _guard_notice_snapshot_watermark(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    *,
+    provider: str,
+    dataset_key: str,
+    fetched_at: datetime,
+) -> None:
+    """이미 반영한 snapshot보다 과거/같은 run의 destructive reconcile을 막는다.
+
+    Dagster pool이 정상 경로를 직렬화하지만, 배포 이전 queued run이나 pool 설정이
+    반영되지 않은 실행까지 방어하도록 persisted sync cursor를 watermark로 쓴다.
+    """
+    get_sync_state = getattr(client, "get_sync_state", None)
+    if not callable(get_sync_state):
+        raise RuntimeError("KREX notice snapshot은 get_sync_state를 제공하는 client가 필요하다.")
+    if not callable(getattr(client, "record_sync_success", None)):
+        raise RuntimeError(
+            "KREX notice snapshot은 record_sync_success를 제공하는 client가 필요하다."
+        )
+    state = await get_sync_state(provider=provider, dataset_key=dataset_key)
+    if state is None:
+        return
+    cursor = getattr(state, "cursor", None)
+    if not isinstance(cursor, dict):
+        raise RuntimeError("notice snapshot sync cursor가 object가 아니다.")
+    raw_watermark = cursor.get("snapshot_applied_at") or cursor.get("loaded_at")
+    if raw_watermark is None:
+        return
+    watermark = _parse_snapshot_watermark(raw_watermark)
+    if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
+        raise RuntimeError("notice snapshot fetched_at은 timezone-aware datetime이어야 한다.")
+    if fetched_at <= watermark:
+        raise RuntimeError(
+            "KREX notice snapshot이 이미 반영한 watermark보다 과거 또는 같다: "
+            f"fetched_at={fetched_at.isoformat()}, watermark={watermark.isoformat()}"
+        )
+
+
+def _parse_snapshot_watermark(value: object) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError("notice snapshot watermark가 비어 있거나 문자열이 아니다.")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RuntimeError("notice snapshot watermark가 ISO-8601 datetime이 아니다.") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise RuntimeError("notice snapshot watermark는 timezone-aware datetime이어야 한다.")
+    return parsed
 
 
 @asset(
     group_name="features_notice",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_traffic_notices"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=KREX_NOTICE_SNAPSHOT_POOL,
 )
 async def feature_notice_krex_traffic_notices(
     context: AssetExecutionContext,

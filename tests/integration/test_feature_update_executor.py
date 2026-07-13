@@ -304,6 +304,70 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     )[0].feature_id == seed.feature.feature_id
 
 
+async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
+    migrated_session: AsyncSession,
+) -> None:
+    seed = await _load_seed(migrated_session, "EXEC-RUNNER-SKIP")
+    await upsert_provider_refresh_policy(
+        migrated_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+        source_kind="openapi",
+        targeted_policy="allow_targeted",
+    )
+    target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system="external-app",
+        target_key="poi-runner-skip",
+        lon=126.9780,
+        lat=37.5665,
+        radius_km=1.0,
+    )
+    request = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": ["poi-runner-skip"],
+        },
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+
+    async def runner(
+        _session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        return ProviderDatasetRefreshResult(
+            provider=scope.provider,
+            dataset_key=scope.dataset_key,
+            status="skipped",
+            metadata={"skip_reason": "global_provider_not_targetable"},
+        )
+
+    result = await execute_next_feature_update_request(
+        migrated_session,
+        runner=runner,
+    )
+
+    assert result is not None
+    assert result.status == "done"
+    assert result.results[0].status == "skipped"
+    refreshed_target = await get_poi_cache_target_by_key(
+        migrated_session,
+        external_system="external-app",
+        target_key="poi-runner-skip",
+    )
+    assert refreshed_target is not None
+    assert refreshed_target.last_requested_at is not None
+    assert refreshed_target.last_refreshed_at is None
+    assert (
+        await list_poi_cache_target_feature_links(
+            migrated_session,
+            target.target_id,
+        )
+    )[0].feature_id == seed.feature.feature_id
+
+
 async def test_failed_runner_rolls_back_refresh_writes(
     migrated_session: AsyncSession,
 ) -> None:

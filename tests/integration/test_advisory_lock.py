@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.advisory_lock import advisory_lock, try_advisory_lock
 
 if TYPE_CHECKING:
@@ -73,3 +74,21 @@ async def test_same_session_reentrant_via_int_key(pg_engine: AsyncEngine) -> Non
         try_advisory_lock(s1, lock_id) as acquired,
     ):
         assert acquired is True
+
+
+async def test_client_provider_run_lock_excludes_other_process_path(
+    pg_engine: AsyncEngine,
+) -> None:
+    """client 공개 lock이 독립 connection의 동일 provider 실행을 막고 해제한다."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    key = "provider-run:test-provider"
+    client = AsyncKorTravelMapClient(pg_engine)
+    async with AsyncSession(pg_engine) as competitor:
+        async with (
+            client.provider_run_lock(key),
+            try_advisory_lock(competitor, key) as acquired,
+        ):
+            assert acquired is False
+        async with try_advisory_lock(competitor, key) as acquired:
+            assert acquired is True

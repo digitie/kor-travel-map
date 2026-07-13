@@ -22,6 +22,10 @@ import {
 } from "react";
 
 import {
+  opinetPastPriceLabel,
+  scheduleKstMidnightTicks,
+} from "@/lib/price-freshness";
+import {
   buildVWorldStyle,
   getVWorldMaxZoom,
   redactVWorldUrl,
@@ -455,6 +459,7 @@ export interface ClusterFeatureInput {
 }
 
 interface ClusterPriceSummaryPoint {
+  provider: string;
   product_key: string;
   product_name?: string | null;
   value_number: number;
@@ -463,6 +468,7 @@ interface ClusterPriceSummaryPoint {
 }
 
 interface ClusterWeatherSummaryPoint {
+  provider?: string | null;
   forecast_style?: string | null;
   metric_key: string;
   metric_name?: string | null;
@@ -520,6 +526,12 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
 }
 
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
+  if (feature.kind === "weather") {
+    if (feature.weather_summary?.provider === "python-kma-api") return "weather";
+    if (feature.weather_summary?.provider === "python-airkorea-api") {
+      return "air-quality";
+    }
+  }
   return feature.marker_icon ?? null;
 }
 
@@ -556,12 +568,14 @@ function priceMarkerLabel(
     .sort((a, b) => fuelPriceOrder(a.product_key) - fuelPriceOrder(b.product_key));
   if (points.length === 0) return null;
   return points
-    .map(
-      (point) =>
-        `${fuelShortLabel(point.product_key, point.product_name)} ${priceFormatter.format(
-          point.value_number,
-        )}`,
-    )
+    .map((point) => {
+      const price = `${fuelShortLabel(
+        point.product_key,
+        point.product_name,
+      )} ${priceFormatter.format(point.value_number)}`;
+      const pastLabel = opinetPastPriceLabel([point]);
+      return pastLabel ? `${price} · ${pastLabel}` : price;
+    })
     .join("\n");
 }
 
@@ -1026,6 +1040,15 @@ export function VWorldFeatureClusters({
     }
     return byId.size === features.length ? features : Array.from(byId.values());
   }, [features]);
+  const hasOpinetPriceSummary = useMemo(
+    () =>
+      dedupedFeatures.some((feature) =>
+        feature.price_summary?.some(
+          (point) => point.provider === "python-opinet-api",
+        ),
+      ),
+    [dedupedFeatures],
+  );
 
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
@@ -1044,6 +1067,15 @@ export function VWorldFeatureClusters({
     priceSummariesRef.current = summaries;
     weatherSummariesRef.current = weatherSummaries;
   });
+
+  // 페이지를 자정 너머 열어 둔 경우에도 OpiNet의 "과거 M/D" 판정이 바뀌도록 KST
+  // 자정에만 DOM 마커 갱신을 예약한다. 분 단위 state tick/re-render는 만들지 않는다.
+  useEffect(() => {
+    if (!hasOpinetPriceSummary) return;
+    return scheduleKstMidnightTicks(() => {
+      schedulePointMarkerUpdateRef.current?.();
+    });
+  }, [hasOpinetPriceSummary]);
 
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
@@ -1467,30 +1499,45 @@ export function VWorldFeatureClusters({
     const updateMarkers = () => {
       if (!map.getSource(SRC) || !map.isStyleLoaded()) return;
       const next = new Set<string>();
-      const seen = new Set<string>();
       const selectedId = selectedFeatureIdRef.current;
       pointElements.clear();
       const rendered = map.querySourceFeatures(SRC);
+      // GeoJSON source는 tile 경계에서 같은 feature/cluster를 중복 반환할 수 있다.
+      // 겹침 계산 전에 먼저 dedup해 badge count와 두 번의 전체 순회 비용이 부풀지 않게 한다.
+      const uniqueRendered: typeof rendered = [];
+      const renderedIds = new Set<string>();
+      for (const feat of rendered) {
+        const props = feat.properties ?? {};
+        let identity: string | null = null;
+        if (props.cluster && props.cluster_id != null) {
+          identity = `cluster-${String(props.cluster_id)}`;
+        } else if (!props.cluster && props.feature_id != null) {
+          identity = `pt-${String(props.feature_id)}`;
+        }
+        if (identity === null || renderedIds.has(identity)) continue;
+        renderedIds.add(identity);
+        uniqueRendered.push(feat);
+      }
       // 겹침 그룹 선계산: 화면 픽셀 셀(≈마커 크기)로 point feature를 묶는다. zoom마다
       // 픽셀 위치가 바뀌므로 update마다 다시 계산하고, 클릭 핸들러는 ref로 최신값을 읽는다.
       const OVERLAP_PX = 24;
       const cellGroups = new Map<string, CoincidentEntry[]>();
-      for (const feat of rendered) {
+      for (const feat of uniqueRendered) {
         if (feat.geometry.type !== "Point") continue;
         const props = feat.properties ?? {};
         if (props.cluster) continue;
         const c = feat.geometry.coordinates as [number, number];
         const p = map.project(c);
         const cellKey = `${Math.round(p.x / OVERLAP_PX)}:${Math.round(p.y / OVERLAP_PX)}`;
-          const entry: CoincidentEntry = {
-            feature_id: String(props.feature_id),
-            name: String(props.name),
-            kind: String(props.kind),
-            lon: c[0],
-            lat: c[1],
-            marker_color:
-              typeof props.marker_color === "string" ? props.marker_color : null,
-          };
+        const entry: CoincidentEntry = {
+          feature_id: String(props.feature_id),
+          name: String(props.name),
+          kind: String(props.kind),
+          lon: c[0],
+          lat: c[1],
+          marker_color:
+            typeof props.marker_color === "string" ? props.marker_color : null,
+        };
         const arr = cellGroups.get(cellKey);
         if (arr) arr.push(entry);
         else cellGroups.set(cellKey, [entry]);
@@ -1507,14 +1554,12 @@ export function VWorldFeatureClusters({
         for (const e of arr) coincident.set(e.feature_id, arr);
       }
       coincidentGroupsRef.current = coincident;
-      for (const feat of rendered) {
+      for (const feat of uniqueRendered) {
         if (feat.geometry.type !== "Point") continue;
         const coords = feat.geometry.coordinates as [number, number];
         const props = feat.properties ?? {};
         if (props.cluster) {
           const id = `cluster-${String(props.cluster_id)}`;
-          if (seen.has(id)) continue;
-          seen.add(id);
           const count = Number(props.point_count) || 0;
           const label = String(props.point_count_abbreviated ?? count);
           const clusterId = props.cluster_id as number;
@@ -1587,8 +1632,6 @@ export function VWorldFeatureClusters({
         } else {
           const featureId = String(props.feature_id);
           const id = `pt-${featureId}`;
-          if (seen.has(id)) continue;
-          seen.add(id);
           const title = `${String(props.name)} (${String(props.kind)})`;
           const markerIcon = (props.marker_icon as string | null) ?? undefined;
           const markerColor = (props.marker_color as string | null) ?? undefined;
@@ -1682,12 +1725,17 @@ export function VWorldFeatureClusters({
       ensureSource();
     };
 
+    const handleSourceData = (event: maplibregl.MapSourceDataEvent) => {
+      // VWorld raster tile을 포함한 모든 source의 sourcedata가 발생한다. 자체 GeoJSON
+      // source가 완전히 갱신된 시점만 받아 수백 DOM marker의 반복 순회를 막는다.
+      if (event.sourceId !== SRC || !event.isSourceLoaded) return;
+      scheduleUpdate();
+    };
+
     ensureSource();
     schedulePointMarkerUpdateRef.current = scheduleUpdate;
     map.on("moveend", scheduleUpdate);
-    map.on("zoomend", scheduleUpdate);
-    map.on("sourcedata", scheduleUpdate);
-    map.on("idle", scheduleUpdate);
+    map.on("sourcedata", handleSourceData);
     map.on("styledata", handleStyleData);
     scheduleUpdate();
 
@@ -1697,9 +1745,7 @@ export function VWorldFeatureClusters({
       }
       if (raf !== 0) cancelAnimationFrame(raf);
       map.off("moveend", scheduleUpdate);
-      map.off("zoomend", scheduleUpdate);
-      map.off("sourcedata", scheduleUpdate);
-      map.off("idle", scheduleUpdate);
+      map.off("sourcedata", handleSourceData);
       map.off("styledata", handleStyleData);
       popupRef.current?.remove();
       popupRef.current = null;

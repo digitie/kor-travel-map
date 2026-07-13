@@ -35,6 +35,7 @@ ADR 참조
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
@@ -46,6 +47,7 @@ from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
+from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
     BatchDagRunResult,
 )
@@ -258,7 +260,7 @@ from kortravelmap.providers.visitkorea import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Mapping, Sequence
+    from collections.abc import AsyncIterator, Collection, Iterable, Mapping, Sequence
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -400,6 +402,22 @@ class AsyncKorTravelMapClient:
     ) -> None:
         # engine 수명은 호출자 소유 (ADR-004 infra/db.py) — 여기서 dispose 안 함.
         return None
+
+    @asynccontextmanager
+    async def provider_run_lock(self, key: str) -> AsyncIterator[None]:
+        """provider fetch→load 전체 실행을 DB instance 전역에서 직렬화한다.
+
+        Dagster asset pool은 scheduled/manual asset run의 불필요한 동시 시작을
+        줄이지만, feature update worker가 같은 실행 함수를 직접 부르는 경로까지
+        포괄하지 못한다. 별도 DB session에 session-level advisory lock을 유지해
+        어느 process/실행 경로에서 호출하든 같은 ``key``의 provider 작업이 겹치지
+        않게 한다. process가 종료되면 PostgreSQL connection과 함께 lock도 해제된다.
+        """
+        async with (
+            self._session_factory() as session,
+            advisory_lock(session, key),
+        ):
+            yield
 
     # ─── write (transaction 소유) ──────────────────────────────────────────
 

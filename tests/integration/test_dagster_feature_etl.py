@@ -535,6 +535,98 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     assert price_value_count == 5
 
 
+async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
+    map_client: AsyncKorTravelMapClient,
+) -> None:
+    """seed→partial→empty→reappear snapshot이 종료/복구와 cursor를 함께 반영한다."""
+
+    def _notice(*, occurred_time: str, route_no: str, point_name: str) -> _Notice:
+        return _Notice(
+            occurred_date="2026.07.13",
+            occurred_time=occurred_time,
+            incident_type="사고",
+            incident_type_code="1",
+            direction="서울방향",
+            message=f"{point_name} 교통사고",
+            point_name=point_name,
+            route_no=route_no,
+            route_name="경부고속도로",
+            process_status="진행",
+            process_status_code="1",
+            latitude=None,
+            longitude=None,
+            congestion_length=None,
+            series_no=1,
+            raw={"routeNo": route_no, "pointName": point_name},
+        )
+
+    async def _valid_end(feature_id: str) -> str | None:
+        row = await map_client.get_feature(feature_id)
+        assert row is not None
+        detail = row["detail"]
+        assert isinstance(detail, dict)
+        value = detail.get("valid_end_time")
+        assert value is None or isinstance(value, str)
+        return value
+
+    async def _sync_cursor() -> dict[str, Any]:
+        state = await map_client.get_sync_state(
+            provider="python-krex-api",
+            dataset_key="krex_traffic_notices",
+        )
+        assert state is not None
+        return state.cursor
+
+    first_seen = _FETCHED
+    partial_at = first_seen + timedelta(minutes=10)
+    empty_at = first_seen + timedelta(minutes=20)
+    reappeared_at = first_seen + timedelta(minutes=30)
+    a = _notice(occurred_time="10:00:00", route_no="0010", point_name="양재")
+    b = _notice(occurred_time="10:01:00", route_no="0020", point_name="판교")
+
+    seeded = await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[a, b],
+        fetched_at=first_seen,
+    )
+    a_id, b_id = seeded.feature_ids
+    assert await _valid_end(a_id) is None
+    assert await _valid_end(b_id) is None
+
+    await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[a],
+        fetched_at=partial_at,
+    )
+    assert await _valid_end(a_id) is None
+    assert await _valid_end(b_id) == partial_at.isoformat()
+    assert (await _sync_cursor())["notices_closed"] == 1
+
+    await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[],
+        fetched_at=empty_at,
+    )
+    assert await _valid_end(a_id) == empty_at.isoformat()
+    assert await _valid_end(b_id) == partial_at.isoformat()
+    assert (await _sync_cursor())["notices_closed"] == 1
+
+    await _run_asset(
+        run_feature_notice_krex_traffic_notices,
+        map_client,
+        krex_traffic_notices=[a],
+        fetched_at=reappeared_at,
+    )
+    assert await _valid_end(a_id) is None
+    assert await _valid_end(b_id) == partial_at.isoformat()
+    cursor = await _sync_cursor()
+    assert cursor["notices_reopened"] == 1
+    assert cursor["loaded_at"] == reappeared_at.isoformat()
+
+
 async def _run_asset(
     runner: Callable[[AssetExecutionContext], Awaitable[Any]],
     client: AsyncKorTravelMapClient,

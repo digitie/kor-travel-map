@@ -21,7 +21,11 @@ from kortravelmap.providers.mois import (
     DATASET_KEY_HISTORY,
 )
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
-from kortravelmap.providers.opinet import OPINET_PROVIDER_NAME, OPINET_STATION_DATASET_KEY
+from kortravelmap.providers.opinet import (
+    OPINET_PRICE_DATASET_KEY,
+    OPINET_PROVIDER_NAME,
+    OPINET_STATION_DATASET_KEY,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import feature_update_runner as runner_mod
@@ -61,14 +65,15 @@ def _scope(
     *,
     provider: str = "demo",
     dataset_key: str = "places",
+    scope_type: str = "provider_dataset",
 ) -> ProviderDatasetRefreshScope:
     return ProviderDatasetRefreshScope(
         request_id="11111111-1111-4111-8111-111111111111",
         provider=provider,
         dataset_key=dataset_key,
-        scope_type="provider_dataset",
+        scope_type=scope_type,
         request_scope={
-            "type": "provider_dataset",
+            "type": scope_type,
             "provider": provider,
             "dataset_key": dataset_key,
         },
@@ -136,6 +141,7 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
     assert result.loaded_count == 2
     assert result.metadata is not None
     assert result.metadata["features_inserted"] == 1
+    assert result.metadata["seen"] is True
 
 
 async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None:
@@ -153,6 +159,110 @@ async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None
 
     with pytest.raises(RuntimeError, match="지원하지 않는 provider/dataset"):
         await runner(object(), _scope(provider="unknown", dataset_key="missing"))
+
+
+@pytest.mark.parametrize(
+    "dataset_key",
+    [OPINET_STATION_DATASET_KEY, OPINET_PRICE_DATASET_KEY],
+)
+async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
+    dataset_key: str,
+) -> None:
+    called = False
+
+    async def _run(_context: object) -> _FakeAssetResult:
+        nonlocal called
+        called = True
+        raise AssertionError("targeted OpiNet request가 asset fetch를 실행하면 안 된다.")
+
+    def _resources(
+        _settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> RunnerResources:
+        raise AssertionError("targeted OpiNet request가 resource를 만들면 안 된다.")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider=OPINET_PROVIDER_NAME,
+                dataset_keys=frozenset(
+                    {OPINET_STATION_DATASET_KEY, OPINET_PRICE_DATASET_KEY}
+                ),
+                run=_run,
+                resources=_resources,
+                asset_key="feature_place_opinet_stations",
+            ),
+        ),
+    )
+
+    result = await runner(
+        object(),
+        _scope(
+            provider=OPINET_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            scope_type="center_radius",
+        ),
+    )
+
+    assert called is False
+    assert result.status == "skipped"
+    assert result.loaded_count == 0
+    assert result.metadata == {
+        "provider": OPINET_PROVIDER_NAME,
+        "dataset_key": dataset_key,
+        "skipped": True,
+        "skip_reason": "global_provider_not_targetable",
+        "scope_type": "center_radius",
+    }
+
+
+async def test_feature_update_asset_runner_allows_opinet_provider_wide_refresh() -> None:
+    called: list[str] = []
+
+    async def _run(context: object) -> _FakeAssetResult:
+        context_any = cast(Any, context)
+        called.extend(cast(Any, context_any.resources).opinet_records)
+        return _FakeAssetResult(
+            provider=OPINET_PROVIDER_NAME,
+            dataset_key=OPINET_STATION_DATASET_KEY,
+            feature_ids=("station-1",),
+        )
+
+    def _resources(
+        _settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> RunnerResources:
+        return RunnerResources({"opinet_records": ("fetched",)})
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider=OPINET_PROVIDER_NAME,
+                dataset_keys=frozenset({OPINET_STATION_DATASET_KEY}),
+                run=_run,
+                resources=_resources,
+                asset_key="feature_place_opinet_stations",
+            ),
+        ),
+    )
+
+    result = await runner(
+        object(),
+        _scope(
+            provider=OPINET_PROVIDER_NAME,
+            dataset_key=OPINET_STATION_DATASET_KEY,
+        ),
+    )
+
+    assert called == ["fetched"]
+    assert result.status == "done"
+    assert result.loaded_feature_ids == ("station-1",)
 
 
 def test_default_runner_accepts_airkorea_stations_alias() -> None:

@@ -14,6 +14,8 @@
 | 코드 entrypoint | `kortravelmap.providers.kma` |
 | 갱신 주기 | endpoint별 (10분~12시간) |
 | category | 격자 weather feature(`kind=weather`)는 `category="99000000"` sentinel (weather kind는 detail 없음). 초단기/단기 격자 feature는 §3 참조 (`docs/architecture/category.md` §4). 산악 관측소 anchor는 `WEATHER_MOUNTAIN_STATION` 신설 후보 (forest-feature-etl.md §11.6) |
+| marker_icon | `weather` (`KMA_GRID_MARKER_ICON`) — AirKorea 측정소의 `air-quality`와 모양으로도 구분 |
+| marker_color | `P-01` (`KMA_GRID_MARKER_COLOR`) — AirKorea의 `P-16`과 구분 |
 
 ## 2. 4종 weather endpoint
 
@@ -49,6 +51,11 @@ KMA 예보값은 이 격자 feature에 붙는다. place feature를 빌리지 않
 격자×feature 팬아웃(약 30M행)은 없다(#496 anti-replication 유지). 다른 place의
 날씨는 `build_weather_card`가 반경 내 가장 가까운 KMA 격자 기온 anchor를 조회·병합해
 서빙한다(`weather_repo` nearest-temp, 반경 50km).
+
+지도 표시는 provider 요약값도 함께 확인한다. 기존 DB 행이 과거 fallback
+`marker_icon="marker"`를 갖고 있더라도 `python-kma-api`는 `weather`,
+`python-airkorea-api`는 `air-quality`로 즉시 구분하며, 이후 재수집 시 저장값도 같은
+아이콘으로 정렬된다.
 
 **초단기·단기는 격자 간격·갱신 주기가 달라 별개 feature로 분리**한다(같은 격자
 `(nx,ny)`라도 `source_type`이 달라 `feature_id`가 다름):

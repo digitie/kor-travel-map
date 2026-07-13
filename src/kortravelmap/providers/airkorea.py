@@ -60,6 +60,7 @@ __all__ = [
     "DATASET_KEY_STATIONS",
     "DATASET_KEY_AIR_QUALITY",
     "AIR_QUALITY_STATION_CATEGORY",
+    "AIR_QUALITY_MARKER_ICON",
     "AIR_QUALITY_MARKER_COLOR",
     "AIRKOREA_POLLUTANTS",
     "AIRKOREA_NORMALIZATION_VERSION",
@@ -77,8 +78,9 @@ _STATION_ENTITY_TYPE: Final[str] = "air_quality_station"
 AIR_QUALITY_STATION_CATEGORY: Final[str] = "99000000"
 """weather kind는 NoticeDetail/PlaceDetail이 없어 category가 부차적 — KMA 특보와
 동일하게 ``99000000`` placeholder를 쓴다(ADR-018 weather=detail 없음)."""
+AIR_QUALITY_MARKER_ICON: Final[str] = "air-quality"
+"""KMA 날씨 격자와 형태로도 구분되는 AirKorea 대기질 마커 아이콘."""
 AIR_QUALITY_MARKER_COLOR: Final[str] = "P-16"
-_DEFAULT_STATION_ICON: Final[str] = "marker"
 AIRKOREA_NORMALIZATION_VERSION: Final[str] = "airkorea-v1.0"
 
 _KST: Final[timezone] = timezone(timedelta(hours=9))
@@ -314,7 +316,7 @@ async def _station_to_bundle(
         category=AIR_QUALITY_STATION_CATEGORY,
         marker_icon=(
             mapbox_maki_icon_or_none(AIR_QUALITY_STATION_CATEGORY)
-            or _DEFAULT_STATION_ICON
+            or AIR_QUALITY_MARKER_ICON
         ),
         marker_color=AIR_QUALITY_MARKER_COLOR,
         detail=None,  # weather kind는 detail 불가(ADR-018) — 값은 WeatherValue.
