@@ -73,6 +73,7 @@ _RELATIONS: Final = frozenset(
     }
 )
 _REUSE_POLICIES: Final = frozenset({"allowed", "blocked", "manual_review"})
+_POSTGRES_INTEGER_MAX: Final = 2_147_483_647
 
 
 @dataclass(frozen=True)
@@ -1438,7 +1439,7 @@ async def add_curation_item(
         raise ValueError("invalid curation item status")
     if curation_relation not in _RELATIONS or reuse_policy not in _REUSE_POLICIES:
         raise ValueError("invalid curation item policy")
-    if sort_order < 0 or not external_item_id.strip():
+    if not 0 <= sort_order <= _POSTGRES_INTEGER_MAX or not external_item_id.strip():
         raise ValueError("invalid curation item identity")
     if not await _lock_collection(session, collection_id):
         raise LookupError("curation collection 없음")
@@ -1477,8 +1478,7 @@ async def add_curation_item(
         ).scalar_one_or_none()
         if unresolved_exists is not None:
             raise ValueError(
-                "같은 외부 항목 ID의 미연결 항목이 이미 존재합니다. "
-                "PATCH로 Feature를 연결하세요."
+                "같은 외부 항목 ID의 미연결 항목이 이미 존재합니다. PATCH로 Feature를 연결하세요."
             )
     else:
         resolved_exists = (
@@ -1581,7 +1581,9 @@ async def update_curation_item(
             raise ValueError("invalid curation item relation")
         if key == "reuse_policy" and value not in _REUSE_POLICIES:
             raise ValueError("invalid curation item reuse policy")
-        if key == "sort_order" and (not isinstance(value, int) or value < 0):
+        if key == "sort_order" and (
+            not isinstance(value, int) or not 0 <= value <= _POSTGRES_INTEGER_MAX
+        ):
             raise ValueError("invalid curation item sort order")
         if key in {"external_item_id", "place_name"}:
             if not isinstance(value, str) or not value.strip():
@@ -1963,6 +1965,8 @@ def validate_resolved_curation_identities(
 def _ensure_resolved_curation_identities(
     rows: Sequence[ResolvedCurationImportRow],
 ) -> None:
+    if any(not 0 <= row.sort_order <= _POSTGRES_INTEGER_MAX for row in rows):
+        raise ValueError("curation item sort_order is outside the PostgreSQL integer range")
     issues = validate_resolved_curation_identities(rows)
     if issues:
         raise ValueError(issues[0].message)

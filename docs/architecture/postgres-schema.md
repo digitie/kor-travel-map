@@ -68,6 +68,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
   다시 반영하면 모든 변경 수가 0이고 관련 `updated_at`도 바뀌지 않는다.
 - 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
   `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
+- 0044 downgrade는 연결된 source entity에 immutable record가 둘 이상이면 구 record별
+  link metadata를 정확히 복원할 수 없으므로 `P0001`로 중단한다.
 
 ### 3.2 `provider_sync.*`
 
@@ -376,9 +378,10 @@ async def test_alembic_upgrade_then_downgrade_then_upgrade(pg_engine):
     # schema가 idempotent
 ```
 
-0045는 예외다. legacy에서 완전히 재구성 가능한 데이터의 round-trip은 허용하지만,
-collection/item이 신규 의미나 actor 감사값을 담은 뒤에는 downgrade가 `P0001`로 거절되는지
-별도 통합 테스트한다. 이는 실패가 아니라 의도한 데이터 손실 방지 gate다.
+0044와 0045는 예외다. 0044는 연결된 entity에 immutable record가 둘 이상이면,
+0045는 legacy에서 완전히 재구성할 수 없는 collection/item이나 감사값이 있으면 downgrade를
+`P0001`로 거절한다. 완전히 재구성 가능한 데이터의 round-trip은 허용한다. 이는 실패가
+아니라 의도한 데이터 손실 방지 gate다.
 
 ### 8.4 명명 규약
 

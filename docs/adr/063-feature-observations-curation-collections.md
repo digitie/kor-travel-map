@@ -135,6 +135,11 @@ Feature aggregate는 collection/item 계약만 사용한다. DB migration은 기
 
 ### 7. 표현력이 큰 데이터를 조용히 버리는 downgrade는 금지한다
 
+0044 migration은 연결된 source entity에 immutable record가 둘 이상 있으면 downgrade를
+거절한다. 새 entity link 하나만으로는 구 record별 link의 role·confidence·생성 시각을
+정확히 복원할 수 없기 때문이다. 운영자는 이력을 먼저 export하고 명시적으로 정리한 뒤에만
+구 스키마로 내릴 수 있다.
+
 0045 migration의 downgrade는 기존 `curated_features`만으로 완전히 재구성할 수 있는
 legacy collection/item에만 허용한다. 신규 collection, 수동 변경, 연결/미연결 membership,
 collection actor 또는 legacy `selected_by`와 일치하지 않는 item actor처럼 구 flat overlay가

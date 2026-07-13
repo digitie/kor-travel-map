@@ -278,7 +278,13 @@ export function CurationCollectionsClient() {
   };
 
   const commitCsv = async () => {
-    if (!csvFile || !importReport || importReport.data.invalid_rows > 0) return;
+    if (
+      !csvFile ||
+      !importReport ||
+      importReport.data.invalid_rows > 0 ||
+      importReport.data.issues.length > 0
+    )
+      return;
     const removalWarning =
       importReport.data.removed > 0
         ? `\nCSV에 없는 기존 항목 ${importReport.data.removed}개가 제거됩니다.`
@@ -601,6 +607,7 @@ export function CurationCollectionsClient() {
                   !csvFile ||
                   !importReport?.data.dry_run ||
                   importReport.data.invalid_rows > 0 ||
+                  importReport.data.issues.length > 0 ||
                   importCsv.isPending
                 }
                 type="button"

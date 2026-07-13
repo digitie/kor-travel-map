@@ -98,9 +98,7 @@ def test_feature_detail_returns_every_current_observation(
     async def _row(_session: object, _feature_id: str) -> dict[str, Any]:
         return _feature_row()
 
-    async def _curations(
-        _session: object, **_kwargs: Any
-    ) -> dict[str, tuple[Any, ...]]:
+    async def _curations(_session: object, **_kwargs: Any) -> dict[str, tuple[Any, ...]]:
         return {}
 
     async def _observations(
@@ -117,12 +115,8 @@ def test_feature_detail_returns_every_current_observation(
         return _observation(), second
 
     monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
-    monkeypatch.setattr(
-        module.curation_repo, "list_curation_items_by_feature_ids", _curations
-    )
-    monkeypatch.setattr(
-        module.observation_repo, "get_current_observations", _observations
-    )
+    monkeypatch.setattr(module.curation_repo, "list_curation_items_by_feature_ids", _curations)
+    monkeypatch.setattr(module.observation_repo, "get_current_observations", _observations)
 
     response = client.get("/v1/features/feature:multi")
 
@@ -141,12 +135,16 @@ def test_observation_history_exposes_cursor_page(
 ) -> None:
     from kortravelmap.api.routers import features as module
 
+    async def _row(_session: object, _feature_id: str) -> dict[str, Any]:
+        return _feature_row()
+
     async def _history(_session: object, **kwargs: Any) -> ObservationHistoryPage:
         assert kwargs["feature_id"] == "feature:multi"
         assert kwargs["source_entity_key"] == "se_mcst"
         assert kwargs["limit"] == 1
         return ObservationHistoryPage(items=(_observation(current=False),), next_cursor="next")
 
+    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
     monkeypatch.setattr(module.observation_repo, "get_observation_history", _history)
 
     response = client.get(
@@ -157,3 +155,39 @@ def test_observation_history_exposes_cursor_page(
     assert response.status_code == 200
     assert response.json()["data"]["items"][0]["raw_data"] == {"edition": "2023"}
     assert response.json()["meta"]["page"]["next_cursor"] == "next"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/features/feature:multi",
+        "/v1/features/feature:multi/observations/se_mcst/history",
+    ],
+)
+@pytest.mark.parametrize(
+    ("feature_status", "deleted"),
+    [("hidden", False), ("deleted", False), ("inactive", True)],
+)
+def test_public_feature_detail_and_history_hide_non_public_features(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    feature_status: str,
+    deleted: bool,
+) -> None:
+    from kortravelmap.api.routers import features as module
+
+    row = _feature_row()
+    row["status"] = feature_status
+    if deleted:
+        row["deleted_at"] = datetime(2026, 7, 13, tzinfo=UTC)
+
+    async def _row(_session: object, _feature_id: str) -> dict[str, Any]:
+        return row
+
+    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
+
+    response = client.get(path)
+
+    assert response.status_code == 404

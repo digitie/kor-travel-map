@@ -13,7 +13,8 @@
 - **검증 완료**: 전체 Python/PostGIS/API/frontend/OpenAPI/import-linter 게이트와 적대적 리뷰를
   통과했다. n150 prod를 Alembic 0045로 migration하고 공식 collection 19개·membership 486개를
   적재했다. 두 회차 중첩 Feature 40개, 복수 provider 관측 2개, 동일 CSV 재적재 변경 0건,
-  prod live Playwright 4 passed를 확인했다.
+  prod live Playwright 4 passed를 확인했다. 최종 적대적 리뷰의 공개 원본 노출·정수 overflow·
+  손실성 downgrade와 두 LOW까지 모두 수정해 잔여 지적은 0건이다.
 - **다음 한 작업**: PR #666 CI green과 review를 확인해 merge한 뒤 main을 n150에 재배포하고
   0045·19/486·로그인·live smoke를 마지막으로 재확인한다.
 

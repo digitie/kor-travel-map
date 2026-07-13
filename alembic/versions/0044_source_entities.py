@@ -55,10 +55,7 @@ def upgrade() -> None:
         "WHERE current_source_record_key IS NOT NULL"
     )
 
-    op.execute(
-        "ALTER TABLE provider_sync.source_records "
-        "ADD COLUMN source_entity_key text"
-    )
+    op.execute("ALTER TABLE provider_sync.source_records ADD COLUMN source_entity_key text")
     op.execute(
         f"""
         UPDATE provider_sync.source_records
@@ -89,8 +86,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "ALTER TABLE provider_sync.source_records "
-        "ALTER COLUMN source_entity_key SET NOT NULL"
+        "ALTER TABLE provider_sync.source_records ALTER COLUMN source_entity_key SET NOT NULL"
     )
     op.execute(
         "ALTER TABLE provider_sync.source_records "
@@ -143,10 +139,7 @@ def upgrade() -> None:
     # record-version link를 entity link로 접는다. 같은 entity의 여러 payload link는
     # current record link를 우선하고, 없으면 current 결정 순서와 같은 최신 link를
     # 남겨 Feature↔entity membership을 하나도 잃지 않는다.
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "ADD COLUMN source_entity_key text"
-    )
+    op.execute("ALTER TABLE provider_sync.source_links ADD COLUMN source_entity_key text")
     op.execute(
         """
         UPDATE provider_sync.source_links AS sl
@@ -184,23 +177,14 @@ def upgrade() -> None:
         """
     )
     op.execute("DROP INDEX IF EXISTS provider_sync.idx_source_links_record")
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "DROP CONSTRAINT IF EXISTS pk_source_links"
-    )
+    op.execute("ALTER TABLE provider_sync.source_links DROP CONSTRAINT IF EXISTS pk_source_links")
     op.execute(
         "ALTER TABLE provider_sync.source_links "
         "DROP CONSTRAINT IF EXISTS "
         "fk_source_links_source_record_key_source_records"
     )
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "DROP COLUMN source_record_key"
-    )
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "ALTER COLUMN source_entity_key SET NOT NULL"
-    )
+    op.execute("ALTER TABLE provider_sync.source_links DROP COLUMN source_record_key")
+    op.execute("ALTER TABLE provider_sync.source_links ALTER COLUMN source_entity_key SET NOT NULL")
     op.execute(
         "ALTER TABLE provider_sync.source_links "
         "ADD CONSTRAINT pk_source_links "
@@ -214,16 +198,36 @@ def upgrade() -> None:
         "ON DELETE RESTRICT"
     )
     op.execute(
-        "CREATE INDEX idx_source_links_entity "
-        "ON provider_sync.source_links (source_entity_key)"
+        "CREATE INDEX idx_source_links_entity ON provider_sync.source_links (source_entity_key)"
     )
 
 
 def downgrade() -> None:
     op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "ADD COLUMN source_record_key text"
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM provider_sync.source_links AS sl
+                JOIN provider_sync.source_records AS sr
+                  ON sr.source_entity_key = sl.source_entity_key
+                GROUP BY sl.feature_id, sl.source_entity_key
+                HAVING count(*) > 1
+            ) THEN
+                RAISE EXCEPTION USING
+                    ERRCODE = 'P0001',
+                    MESSAGE = (
+                        '0044 downgrade refused: linked source entity has '
+                        'multiple immutable records; export or explicitly '
+                        'remove history before downgrade'
+                    );
+            END IF;
+        END
+        $$
+        """
     )
+    op.execute("ALTER TABLE provider_sync.source_links ADD COLUMN source_record_key text")
     op.execute(
         """
         UPDATE provider_sync.source_links AS sl
@@ -233,23 +237,14 @@ def downgrade() -> None:
         """
     )
     op.execute("DROP INDEX IF EXISTS provider_sync.idx_source_links_entity")
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "DROP CONSTRAINT IF EXISTS pk_source_links"
-    )
+    op.execute("ALTER TABLE provider_sync.source_links DROP CONSTRAINT IF EXISTS pk_source_links")
     op.execute(
         "ALTER TABLE provider_sync.source_links "
         "DROP CONSTRAINT IF EXISTS "
         "fk_source_links_source_entity_key_source_entities"
     )
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "DROP COLUMN source_entity_key"
-    )
-    op.execute(
-        "ALTER TABLE provider_sync.source_links "
-        "ALTER COLUMN source_record_key SET NOT NULL"
-    )
+    op.execute("ALTER TABLE provider_sync.source_links DROP COLUMN source_entity_key")
+    op.execute("ALTER TABLE provider_sync.source_links ALTER COLUMN source_record_key SET NOT NULL")
     op.execute(
         "ALTER TABLE provider_sync.source_links "
         "ADD CONSTRAINT pk_source_links "
@@ -263,8 +258,7 @@ def downgrade() -> None:
         "ON DELETE RESTRICT"
     )
     op.execute(
-        "CREATE INDEX idx_source_links_record "
-        "ON provider_sync.source_links (source_record_key)"
+        "CREATE INDEX idx_source_links_record ON provider_sync.source_links (source_record_key)"
     )
 
     op.execute(
@@ -281,8 +275,5 @@ def downgrade() -> None:
         "DROP CONSTRAINT IF EXISTS "
         "fk_source_records_source_entity_key_source_entities"
     )
-    op.execute(
-        "ALTER TABLE provider_sync.source_records "
-        "DROP COLUMN source_entity_key"
-    )
+    op.execute("ALTER TABLE provider_sync.source_records DROP COLUMN source_entity_key")
     op.execute("DROP TABLE provider_sync.source_entities")

@@ -12,6 +12,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
@@ -31,7 +32,7 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
         command.upgrade(cfg, revision)
 
 
-async def test_source_entity_migration_backfills_and_downgrades(
+async def test_source_entity_migration_backfills_and_guards_lossy_downgrade(
     pg_container: Any,
 ) -> None:
     raw_dsn = pg_container.get_connection_url()
@@ -119,28 +120,30 @@ async def test_source_entity_migration_backfills_and_downgrades(
         )
         async with target_engine.connect() as conn:
             entity = (
-                await conn.execute(
-                    text(
-                        "SELECT * FROM provider_sync.source_entities "
-                        "WHERE source_entity_key = :key"
-                    ),
-                    {"key": expected_entity_key},
-                )
-            ).mappings().one()
-            record_entity_keys = (
-                await conn.execute(
-                    text(
-                        "SELECT DISTINCT source_entity_key "
-                        "FROM provider_sync.source_records"
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT * FROM provider_sync.source_entities "
+                            "WHERE source_entity_key = :key"
+                        ),
+                        {"key": expected_entity_key},
                     )
                 )
-            ).scalars().all()
+                .mappings()
+                .one()
+            )
+            record_entity_keys = (
+                (
+                    await conn.execute(
+                        text("SELECT DISTINCT source_entity_key FROM provider_sync.source_records")
+                    )
+                )
+                .scalars()
+                .all()
+            )
             links = (
                 await conn.execute(
-                    text(
-                        "SELECT feature_id, source_entity_key "
-                        "FROM provider_sync.source_links"
-                    )
+                    text("SELECT feature_id, source_entity_key FROM provider_sync.source_links")
                 )
             ).all()
 
@@ -149,6 +152,27 @@ async def test_source_entity_migration_backfills_and_downgrades(
         assert entity["last_seen_at"] == later_seen
         assert record_entity_keys == [expected_entity_key]
         assert links == [("feature:migration-1", expected_entity_key)]
+
+        await target_engine.dispose()
+        with pytest.raises(DBAPIError, match="0044 downgrade refused"):
+            await asyncio.to_thread(
+                _run_alembic,
+                target_dsn,
+                "0043_weather_history_idx",
+                downgrade=True,
+            )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.begin() as conn:
+            revision = (
+                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+            assert revision == "0044_source_entities"
+            await conn.execute(
+                text(
+                    "DELETE FROM provider_sync.source_records "
+                    "WHERE source_record_key = 'sr_current'"
+                )
+            )
 
         await target_engine.dispose()
         await asyncio.to_thread(
@@ -160,9 +184,7 @@ async def test_source_entity_migration_backfills_and_downgrades(
         target_engine = make_async_engine(target_dsn)
         async with target_engine.connect() as conn:
             entity_table = (
-                await conn.execute(
-                    text("SELECT to_regclass('provider_sync.source_entities')")
-                )
+                await conn.execute(text("SELECT to_regclass('provider_sync.source_entities')"))
             ).scalar_one()
             record_link = (
                 await conn.execute(

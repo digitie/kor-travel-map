@@ -143,6 +143,8 @@ def _csv_content(
     valid: bool = True,
     feature_ids: tuple[str, ...] = ("",),
     distinct_source_items: bool = False,
+    official_ordinal: str = "",
+    sort_order: str = "",
 ) -> bytes:
     values = dict.fromkeys(CURATION_CSV_HEADERS, "")
     values.update(
@@ -158,6 +160,8 @@ def _csv_content(
             "source_name": "국립등대박물관",
             "source_item_key": "healing:ganjeolgot",
             "place_name": "간절곶등대" if valid else "",
+            "official_ordinal": official_ordinal,
+            "sort_order": sort_order,
         }
     )
     output = io.StringIO(newline="")
@@ -251,6 +255,39 @@ def test_csv_commit_rejects_whole_file_on_format_error(
 
 
 @pytest.mark.unit
+def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: ()}
+
+    async def _preview(
+        _session: object, *, rows: tuple[Any, ...]
+    ) -> CurationImportPlan:
+        assert rows[0].sort_order == 0
+        return CurationImportPlan(collections=1, inserted=1, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={
+            "file": (
+                "zero-ordinal.csv",
+                _csv_content(official_ordinal="0"),
+                "text/csv",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.unit
 def test_csv_rejects_identity_that_becomes_mixed_after_feature_resolution(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -301,18 +338,14 @@ def test_csv_too_many_rows_does_not_count_unprocessed_row_as_valid(
 ) -> None:
     from kortravelmap.api.routers import curations as module
 
-    async def _matches(
-        _session: object, **_kwargs: Any
-    ) -> dict[int, tuple[Any, ...]]:
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
         return {}
 
     async def _unexpected_preview(_session: object, **_kwargs: Any) -> Any:
         raise AssertionError("행 제한 오류 파일은 변경 preview를 실행하면 안 됩니다.")
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
-    monkeypatch.setattr(
-        module.curation_repo, "preview_curation_import", _unexpected_preview
-    )
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _unexpected_preview)
     response = client.post(
         "/v1/admin/curations/import",
         params={"dry_run": "true"},
@@ -512,6 +545,18 @@ def test_admin_curation_uuid_and_archive_status_are_validated(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
         json={"place_name": None},
     )
+    overflow_item = client.post(
+        f"/v1/admin/curations/{COLLECTION_ID}/items",
+        json={
+            "external_item_id": "overflow-order",
+            "place_name": "범위 초과",
+            "sort_order": 2_147_483_648,
+        },
+    )
+    overflow_item_patch = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        json={"sort_order": 2_147_483_648},
+    )
 
     assert bad_path.status_code == 422
     assert bad_theme.status_code == 422
@@ -520,6 +565,8 @@ def test_admin_curation_uuid_and_archive_status_are_validated(
     assert null_collection_metadata.status_code == 422
     assert null_collection_title.status_code == 422
     assert null_item_place_name.status_code == 422
+    assert overflow_item.status_code == 422
+    assert overflow_item_patch.status_code == 422
 
 
 @pytest.mark.unit

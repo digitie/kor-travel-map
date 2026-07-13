@@ -60,6 +60,7 @@ __all__ = [
 
 router = APIRouter(prefix="/features", tags=["features"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
+_PUBLICLY_HIDDEN_FEATURE_STATUSES = frozenset({"hidden", "deleted"})
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -443,9 +444,7 @@ def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
     )
 
 
-def _resolve_cluster_unit(
-    cluster_unit: ClusterUnit | None, zoom: int | None
-) -> ClusterUnit | None:
+def _resolve_cluster_unit(cluster_unit: ClusterUnit | None, zoom: int | None) -> ClusterUnit | None:
     """명시 ``cluster_unit``이 우선. 없으면 ``zoom``으로 유도(T-213c).
 
     zoom ≤7=sido / ≤10=sigungu / ≤13=eupmyeondong / ≥14=개별 feature(None).
@@ -482,6 +481,14 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         marker_color=row["marker_color"],
         status=row["status"],
         updated_at=row["updated_at"],
+    )
+
+
+def _is_public_feature(row: dict[str, Any] | None) -> bool:
+    return bool(
+        row is not None
+        and row.get("deleted_at") is None
+        and row.get("status") not in _PUBLICLY_HIDDEN_FEATURE_STATUSES
     )
 
 
@@ -723,12 +730,7 @@ async def search_public_features(
             detail="bbox는 min_lon/min_lat/max_lon/max_lat 4개를 모두 지정해야 합니다.",
         )
     bbox: tuple[float, float, float, float] | None = None
-    if (
-        min_lon is not None
-        and min_lat is not None
-        and max_lon is not None
-        and max_lat is not None
-    ):
+    if min_lon is not None and min_lat is not None and max_lon is not None and max_lat is not None:
         bbox = (min_lon, min_lat, max_lon, max_lat)
     try:
         page = await feature_repo.search_features(
@@ -950,23 +952,19 @@ async def get_feature(
 ) -> FeatureDetailEnvelopeResponse:
     started_at = perf_counter()
     row = await feature_repo.get_feature_row(session, feature_id)
-    if row is None or row["deleted_at"] is not None:
+    if not _is_public_feature(row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
+    assert row is not None
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=True
     )
-    observations = await observation_repo.get_current_observations(
-        session, feature_id
-    )
+    observations = await observation_repo.get_current_observations(session, feature_id)
     detail = _detail_from_row(row).model_copy(
         update={
-            "curations": [
-                _curation_item_view(item)
-                for item in curations.get(feature_id, ())
-            ],
+            "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
             "observations": [_observation_view(item) for item in observations],
         }
     )
@@ -980,7 +978,10 @@ async def get_feature(
     "/{feature_id}/observations/{source_entity_key}/history",
     response_model=FeatureObservationHistoryResponse,
     summary="feature 제공기관 payload 관측 이력",
-    responses={422: {"description": "cursor 또는 page_size 오류"}},
+    responses={
+        404: {"description": "공개 feature 또는 observation 없음"},
+        422: {"description": "cursor 또는 page_size 오류"},
+    },
 )
 async def get_feature_observation_history(
     request: Request,
@@ -991,6 +992,12 @@ async def get_feature_observation_history(
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
+    row = await feature_repo.get_feature_row(session, feature_id)
+    if not _is_public_feature(row):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
     try:
         page = await observation_repo.get_observation_history(
             session,
@@ -1004,9 +1011,7 @@ async def get_feature_observation_history(
     if not page.items and cursor is None:
         raise HTTPException(status_code=404, detail="feature observation 없음")
     return FeatureObservationHistoryResponse(
-        data=FeatureObservationHistoryData(
-            items=[_observation_view(item) for item in page.items]
-        ),
+        data=FeatureObservationHistoryData(items=[_observation_view(item) for item in page.items]),
         meta=make_meta(
             request,
             started_at=started_at,
@@ -1071,9 +1076,7 @@ async def get_feature_weather(
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
-    card = await weather_repo.build_weather_card(
-        session, feature_id=feature_id, asof=asof
-    )
+    card = await weather_repo.build_weather_card(session, feature_id=feature_id, asof=asof)
     metrics = [
         WeatherMetricOut(
             forecast_style=m.forecast_style,
@@ -1124,11 +1127,12 @@ async def get_area_contained_features(
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
     area_row = await feature_repo.get_feature_row(session, feature_id)
-    if area_row is None or area_row["deleted_at"] is not None:
+    if not _is_public_feature(area_row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
+    assert area_row is not None
     if area_row["kind"] != "area":
         raise HTTPException(
             status_code=422,
@@ -1212,13 +1216,9 @@ async def get_features_batch(
     items = {
         feature_id: _detail_from_row(rows[feature_id]).model_copy(
             update={
-                "curations": [
-                    _curation_item_view(item)
-                    for item in curations.get(feature_id, ())
-                ],
+                "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
                 "observations": [
-                    _observation_view(item)
-                    for item in observations.get(feature_id, ())
+                    _observation_view(item) for item in observations.get(feature_id, ())
                 ],
             }
         )

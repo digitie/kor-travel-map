@@ -12,6 +12,7 @@ from kortravelmap.curation_import import (
     CURATION_CSV_MAX_BYTES,
     CURATION_CSV_MAX_CELL_LENGTH,
     CURATION_CSV_MAX_ROWS,
+    CURATION_INTEGER_MAX,
     parse_curation_csv,
 )
 
@@ -161,6 +162,15 @@ def test_parse_curation_csv_rejects_negative_order() -> None:
     }
 
 
+@pytest.mark.parametrize("column", ["official_ordinal", "sort_order"])
+def test_parse_curation_csv_rejects_postgres_integer_overflow(column: str) -> None:
+    preview = parse_curation_csv(_csv_bytes(_valid_row(**{column: str(CURATION_INTEGER_MAX + 1)})))
+
+    assert ("integer_out_of_range", column) in {
+        (issue.code, issue.column) for issue in preview.rows[0].issues
+    }
+
+
 def test_parse_curation_csv_rejects_conflicting_collection_definition() -> None:
     preview = parse_curation_csv(
         _csv_bytes(
@@ -182,9 +192,7 @@ def test_parse_curation_csv_rejects_duplicate_item_identity() -> None:
 
 
 def test_parse_curation_csv_rejects_duplicate_unresolved_item_with_other_name() -> None:
-    preview = parse_curation_csv(
-        _csv_bytes(_valid_row(), _valid_row(place_name="다른 공식 표기"))
-    )
+    preview = parse_curation_csv(_csv_bytes(_valid_row(), _valid_row(place_name="다른 공식 표기")))
 
     assert preview.invalid_rows == 1
     assert "duplicate_item" in {issue.code for issue in preview.rows[1].issues}

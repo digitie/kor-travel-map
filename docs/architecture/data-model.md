@@ -368,6 +368,11 @@ trigger가 같은 ID의 collection item으로 동기화해 전환 중 두 정본
 item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
 중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.
 
+0044 downgrade도 연결된 entity에 immutable source record가 둘 이상이면 `P0001`로
+거절한다. entity link를 구 record별 link로 임의 복제하면 과거 role·confidence·생성 시각을
+복원한 것처럼 보이면서 실제로는 데이터를 조작하게 되므로, 먼저 이력을 export하고 명시적으로
+정리해야 한다.
+
 ## 2. `provider_sync.source_entities` / `provider_sync.source_records`
 
 provider 자연 entity의 identity와 변경 불가능한 payload 관측 이력을 분리한다(ADR-063,

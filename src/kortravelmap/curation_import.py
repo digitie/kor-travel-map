@@ -33,6 +33,7 @@ CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
 CURATION_CSV_MAX_BYTES: Final = 2 * 1024 * 1024
 CURATION_CSV_MAX_ROWS: Final = 2_000
 CURATION_CSV_MAX_CELL_LENGTH: Final = 10_000
+CURATION_INTEGER_MAX: Final = 2_147_483_647
 
 _REQUIRED_VALUES: Final[tuple[str, ...]] = (
     "collection_key",
@@ -344,6 +345,16 @@ def _parse_integer(
             )
         )
         return None
+    if parsed > CURATION_INTEGER_MAX:
+        issues.append(
+            CurationImportIssue(
+                code="integer_out_of_range",
+                message=(f"{CURATION_INTEGER_MAX} 이하의 정수여야 합니다: {column}"),
+                row_number=row_number,
+                column=column,
+            )
+        )
+        return None
     return parsed
 
 
@@ -356,9 +367,9 @@ def _validate_collection_consistency(
     item_identities: set[tuple[str, str, str]] = set()
     resolution_modes: dict[tuple[str, str], set[bool]] = {}
     for row in rows:
-        resolution_modes.setdefault(
-            (row.collection_key, row.source_item_key), set()
-        ).add(bool(row.feature_id))
+        resolution_modes.setdefault((row.collection_key, row.source_item_key), set()).add(
+            bool(row.feature_id)
+        )
     validated: list[CurationImportRow] = []
     for row in rows:
         signature = (
@@ -379,8 +390,7 @@ def _validate_collection_consistency(
                 CurationImportIssue(
                     code="collection_definition_conflict",
                     message=(
-                        "같은 collection_key의 theme/title/edition/source 정의가 "
-                        "앞 행과 다릅니다."
+                        "같은 collection_key의 theme/title/edition/source 정의가 앞 행과 다릅니다."
                     ),
                     row_number=row.row_number,
                     column="collection_key",
@@ -407,8 +417,7 @@ def _validate_collection_consistency(
                 CurationImportIssue(
                     code="mixed_resolved_unresolved_item",
                     message=(
-                        "같은 collection/item에 Feature 연결 행과 미연결 행을 "
-                        "함께 둘 수 없습니다."
+                        "같은 collection/item에 Feature 연결 행과 미연결 행을 함께 둘 수 없습니다."
                     ),
                     row_number=row.row_number,
                     column="feature_id",

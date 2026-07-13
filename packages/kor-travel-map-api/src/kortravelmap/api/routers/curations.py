@@ -14,6 +14,7 @@ from fastapi.responses import Response
 from kortravelmap.curation_import import (
     CURATION_CSV_HEADERS,
     CURATION_CSV_MAX_BYTES,
+    CURATION_INTEGER_MAX,
     CurationImportIssue,
     CurationImportRow,
     parse_curation_csv,
@@ -283,7 +284,7 @@ class CurationItemCreateRequest(BaseModel):
     address_hint: str | None = Field(default=None, max_length=1000)
     source_record_key: str | None = None
     status: ActiveItemStatus = "included"
-    sort_order: int = Field(default=0, ge=0)
+    sort_order: int = Field(default=0, ge=0, le=CURATION_INTEGER_MAX)
     item_title: str | None = None
     item_summary: str | None = None
     curation_relation: CurationRelation = "nearby_option"
@@ -306,7 +307,9 @@ class CurationItemPatchRequest(BaseModel):
     address_hint: str | None = Field(default=None, max_length=1000)
     source_record_key: str | None = None
     status: ActiveItemStatus = None  # type: ignore[assignment]
-    sort_order: int = Field(default=None, ge=0)  # type: ignore[assignment]
+    sort_order: int = Field(  # type: ignore[assignment]
+        default=None, ge=0, le=CURATION_INTEGER_MAX
+    )
     item_title: str | None = None
     item_summary: str | None = None
     curation_relation: CurationRelation = None  # type: ignore[assignment]
@@ -561,7 +564,11 @@ async def import_admin_curations(
                 sort_order=(
                     row.sort_order
                     if row.sort_order is not None
-                    else row.official_ordinal or row.row_number - 1
+                    else (
+                        row.official_ordinal
+                        if row.official_ordinal is not None
+                        else row.row_number - 1
+                    )
                 ),
                 item_title=row.item_title or None,
                 item_summary=row.item_summary or None,

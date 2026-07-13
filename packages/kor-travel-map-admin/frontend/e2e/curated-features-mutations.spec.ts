@@ -51,7 +51,7 @@ function importRow(status: "valid" | "imported" | "unmatched") {
   };
 }
 
-function importResponse(dryRun: boolean) {
+function importResponse(dryRun: boolean, fileIssues: unknown[] = []) {
   return {
     data: {
       dry_run: dryRun,
@@ -73,13 +73,16 @@ function importResponse(dryRun: boolean) {
         },
       ],
       items: [importRow(dryRun ? "valid" : "imported"), importRow("unmatched")],
-      issues: [],
+      issues: fileIssues,
     },
     meta: {},
   };
 }
 
-async function mockCsvImportRoutes(page: Page): Promise<ImportRequests> {
+async function mockCsvImportRoutes(
+  page: Page,
+  fileIssues: unknown[] = [],
+): Promise<ImportRequests> {
   const requests: ImportRequests = { commit: 0, preview: 0 };
 
   await page.route("**/api/proxy/v1/admin/curated-themes**", (route) =>
@@ -96,7 +99,7 @@ async function mockCsvImportRoutes(page: Page): Promise<ImportRequests> {
       if (dryRun) requests.preview += 1;
       else requests.commit += 1;
       expect(request.headers()["content-type"]).toContain("multipart/form-data");
-      await fulfillJson(route, importResponse(dryRun));
+      await fulfillJson(route, importResponse(dryRun, dryRun ? fileIssues : []));
       return;
     }
     await fulfillJson(route, { data: { items: [] }, meta: {} });
@@ -151,5 +154,29 @@ test.describe("큐레이션 CSV import", () => {
     await expect(report.getByText("반영됨")).toBeVisible();
     await expect(report.getByText("미일치")).toBeVisible();
     expect(requests.commit).toBe(1);
+  });
+
+  test("파일 전체 오류가 있으면 전체 반영을 막는다", async ({ page }) => {
+    const requests = await mockCsvImportRoutes(page, [
+      {
+        code: "too_many_rows",
+        message: "CSV 데이터 행은 2000개 이하여야 합니다.",
+        row_number: null,
+        column: null,
+      },
+    ]);
+    await page.goto("/admin/features/curated");
+
+    await page.getByLabel("CSV 파일").setInputFiles({
+      name: "too-many.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("collection_key\ntoo-many\n"),
+    });
+    await page.getByRole("button", { name: "매칭 미리보기" }).click();
+
+    await expect(page.getByText("CSV 데이터 행은 2000개 이하여야 합니다.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "전체 반영" })).toBeDisabled();
+    expect(requests.preview).toBe(1);
+    expect(requests.commit).toBe(0);
   });
 });

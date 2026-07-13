@@ -208,9 +208,7 @@ def _encoded(value: Any) -> str:
 
 
 def test_row_projection_and_public_feature_redaction() -> None:
-    collection = repo._collection(
-        _collection_row(source_id=None, metadata='{"from_json":true}')
-    )
+    collection = repo._collection(_collection_row(source_id=None, metadata='{"from_json":true}'))
     assert collection.source_id is None
     assert collection.metadata == {"from_json": True}
 
@@ -361,9 +359,7 @@ async def test_list_collections_applies_filters_clamps_limit_and_pages() -> None
 
 async def test_get_collection_found_missing_and_public_projection() -> None:
     missing = _FakeSession(_FakeResult(rows=[]))
-    assert (
-        await repo.get_curation_collection(missing, collection_id=_COLLECTION_ID) is None
-    )
+    assert await repo.get_curation_collection(missing, collection_id=_COLLECTION_ID) is None
 
     found = _FakeSession(
         _FakeResult(rows=[_collection_row()]),
@@ -550,6 +546,7 @@ async def test_archive_collection_delegates(monkeypatch: pytest.MonkeyPatch) -> 
         {"curation_relation": "bad"},
         {"reuse_policy": "bad"},
         {"sort_order": -1},
+        {"sort_order": 2_147_483_648},
         {"external_item_id": " "},
     ],
 )
@@ -661,9 +658,7 @@ async def test_add_item_success_normalizes_and_touches_collection(
     assert item.curation_item_id == _CURATION_ITEM_ID
     upsert_params = session.calls[-2][1]
     assert upsert_params["external_item_id"] == "external"
-    assert upsert_params["place_name"] == (
-        "DB Feature 이름" if feature_id else "직접 장소"
-    )
+    assert upsert_params["place_name"] == ("DB Feature 이름" if feature_id else "직접 장소")
     assert upsert_params["address_hint"] == "서울"
     touch.assert_awaited_once()
 
@@ -721,6 +716,7 @@ async def test_update_item_returns_none_for_missing_collection_or_item(
         ({"curation_relation": "bad"}, "relation"),
         ({"reuse_policy": "bad"}, "reuse"),
         ({"sort_order": -1}, "sort order"),
+        ({"sort_order": 2_147_483_648}, "sort order"),
         ({"sort_order": "1"}, "sort order"),
         ({"external_item_id": " "}, "external_item_id"),
         ({"place_name": None}, "place_name"),
@@ -838,9 +834,7 @@ async def test_archive_item_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_get_feature_group_missing_empty_and_success() -> None:
     missing = _FakeSession(_FakeResult(rows=[]))
-    assert (
-        await repo.get_feature_curation_group(missing, feature_id="feature:one") is None
-    )
+    assert await repo.get_feature_curation_group(missing, feature_id="feature:one") is None
 
     empty = _FakeSession(_FakeResult(rows=[_feature_row()]), _FakeResult(rows=[]))
     assert await repo.get_feature_curation_group(empty, feature_id="feature:one") is None
@@ -909,9 +903,7 @@ async def test_list_feature_groups_validates_bbox_and_pages(
         _FakeResult(rows=[{"feature_id": "feature:missing"}]),
         _FakeResult(rows=[]),
     )
-    groups, cursor = await repo.list_feature_curation_groups(
-        missing_feature, page_size=10, q=" "
-    )
+    groups, cursor = await repo.list_feature_curation_groups(missing_feature, page_size=10, q=" ")
     assert groups == ()
     assert cursor is None
 
@@ -1004,6 +996,8 @@ def test_resolved_identity_validation_reports_mixed_duplicate_and_valid() -> Non
     ]
     with pytest.raises(ValueError, match="Feature 해소 후"):
         repo._ensure_resolved_curation_identities(mixed)
+    with pytest.raises(ValueError, match="PostgreSQL integer"):
+        repo._ensure_resolved_curation_identities((_resolved_row(sort_order=2_147_483_648),))
 
 
 async def test_preview_import_empty_counts_updates_and_removals() -> None:

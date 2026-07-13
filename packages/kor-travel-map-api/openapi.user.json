@@ -7091,6 +7091,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 또는 observation 없음"
+          },
           "422": {
             "content": {
               "application/problem+json": {

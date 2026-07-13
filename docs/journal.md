@@ -28,8 +28,10 @@
   prod Playwright는 CSV 반영·등대·admin 상세·지도 marker·목록·Feature 상세·관측 이력 4건을 통과했다.
 - **게이트/리뷰**: 비통합 Python 1,761 passed(1 skipped), PostGIS 286 passed, frontend Vitest
   62 passed, route-mocked Playwright 35 passed, prod live Playwright 4 passed다. CI 단위 coverage는
-  `curation_repo.py` 99.55%, 전체 80.44%(1,255 passed)로 복구했다. 별도 적대적 리뷰의 남은
-  HIGH/MEDIUM 지적은 0건이며 게시 PR은 #666이다.
+  `curation_repo.py` 99.55%, 전체 80.44%(1,255 passed)로 복구했다. 최종 적대적 리뷰에서 찾은
+  공개 hidden/deleted 관측 이력 노출, CSV `int4` overflow, 0044 손실성 downgrade를 모두
+  차단했다. 파일 전체 CSV 오류의 UI 반영 차단과 ordinal 0 보존까지 보완해 남은 HIGH/MEDIUM/LOW
+  지적은 0건이며 게시 PR은 #666이다.
 
 ## 2026-07-13 (codex) — concierge 소비자 키를 DB read scope 계약으로 전환
 
