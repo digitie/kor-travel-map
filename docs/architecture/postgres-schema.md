@@ -31,8 +31,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | schema | 책임 | 테이블 수 (v2 1차) |
 |--------|------|------------------|
-| `feature` | feature 도메인 본체 (features + versions + 5 detail + opening_hours + weather + price + files) | 12 |
-| `provider_sync` | source 추적 + sync state | 3 |
+| `feature` | feature 도메인 본체 + 큐레이션 collection/item overlay | 핵심 14+ |
+| `provider_sync` | provider entity/current payload + immutable 이력 + sync state | 4 |
 | `ops` | 운영 (작업 큐, 검수, 정합성, 사용자 변경 요청, api 로그) | 13 |
 | `x_extension` | 확장 (postgis 등) | extensions only |
 
@@ -54,13 +54,28 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
+| `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; created_by/updated_by; 공식 회차·캠페인 묶음 |
+| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/status/sort_order; created_by/updated_by; 공식 membership과 미연결 항목 모두 보존 |
+
+0045 큐레이션 write는 다음 불변식을 지킨다.
+
+- actor 값은 인증된 admin proxy context에서만 받고 collection/item 양쪽에 감사값을 남긴다.
+  public projection에서는 이 필드를 제거하고 admin projection에서만 반환한다.
+- 수동 item 추가·수정·보관은 parent collection row를 먼저 잠그고 collection의
+  `updated_by`/`updated_at`도 함께 갱신한다.
+- CSV authoritative replace는 transaction advisory lock으로 직렬화한 뒤 대상 collection을
+  UUID 순서로 `FOR UPDATE`한다. dry-run은 쓰기 없이 삭제 예정 item까지 계산하며, 동일 CSV를
+  다시 반영하면 모든 변경 수가 0이고 관련 `updated_at`도 바뀌지 않는다.
+- 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
+  `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
 
 ### 3.2 `provider_sync.*`
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `source_records` | `source_record_key` | UNIQUE (provider,dataset_key,source_entity_type,source_entity_id,raw_payload_hash); raw_data JSONB |
-| `source_links` | `(feature_id, source_record_key)` | source_role CHECK 8종, confidence 0-100, is_primary_source bool |
+| `source_entities` | `source_entity_key` | UNIQUE (provider,dataset_key,source_entity_type,source_entity_id); current_source_record_key; first/last_seen_at |
+| `source_records` | `source_record_key` | source_entity_key FK; UNIQUE (provider,dataset_key,source_entity_type,source_entity_id,raw_payload_hash); immutable raw_data JSONB 이력 |
+| `source_links` | `(feature_id, source_entity_key)` | Feature↔provider entity N:M; source_role CHECK 8종, confidence 0-100, 여러 primary 허용 |
 | `provider_sync_state` | `(provider, dataset_key, sync_scope)` | status, cursor JSONB, last_success_at, next_run_after |
 
 ### 3.3 `ops.*`
@@ -108,15 +123,32 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 |--------|------|------|
 | `idx_feature_versions_request` | (request_id) | 사용자 변경 요청에서 snapshot 역추적 |
 
+### 4.1.2 `feature.curation_*`
+
+| 인덱스 | 컬럼 | 비고 |
+|--------|------|------|
+| `idx_curation_collections_theme_status_edition` | (theme_id, status, edition_key, collection_id) | 테마·공개 회차 목록 |
+| `idx_curation_collections_source_status` | (source_id, status, collection_id) | 출처별 collection 목록 |
+| `uq_curation_items_active_identity` | UNIQUE (collection_id, external_item_id, feature_id) NULLS NOT DISTINCT | active membership 및 미연결 공식 항목 중복 방지 |
+| `idx_curation_items_collection_status_order` | (collection_id, status, sort_order, curation_item_id) | collection 상세 정렬 |
+| `idx_curation_items_feature_status_collection` | (feature_id, status, collection_id) | Feature별 모든 큐레이션 조회 |
+
+collection 목록 API는 `updated_at DESC, collection_id DESC` keyset cursor를 사용하고
+`page_size`를 최대 500으로 제한한다. Feature group 목록은 먼저 `feature_id` key를 page한 뒤
+membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
+
 ### 4.2 `provider_sync.*`
 
 | 인덱스 | 컬럼 | 비고 |
 |--------|------|------|
+| `idx_source_entities_current_record` | (current_source_record_key) | partial NOT NULL, 현재 immutable payload 포인터 |
 | `idx_source_records_provider_dataset_entity` | (provider, dataset_key, source_entity_type, source_entity_id) | |
+| `idx_source_records_entity_history` | (source_entity_key, last_seen_at DESC, fetched_at DESC, imported_at DESC, source_record_key DESC) | 재관측 시각 우선 entity payload 이력 cursor |
 | `idx_source_records_imported_at_brin` | BRIN(imported_at) | 시계열 |
 | `idx_source_records_fetched_at_brin` | BRIN(fetched_at) | |
+| `idx_source_records_last_seen_at_brin` | BRIN(last_seen_at) | payload 재관측 시계열 |
 | `idx_source_records_expires_at` | (expires_at) | partial NOT NULL (purge) |
-| `idx_source_links_record` | (source_record_key) | |
+| `idx_source_links_entity` | (source_entity_key) | entity→Feature 역조회 |
 | `idx_source_links_role` | (source_role) | |
 | `idx_source_links_primary` | (feature_id) | partial is_primary_source |
 | `idx_sync_state_next_run` | (next_run_after) | partial status='active' |
@@ -192,6 +224,13 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_versions` | `ck_feature_versions_version` | ≥ 0 |
 | `feature_versions` | `ck_feature_versions_origin` | provider/user_request |
 | `feature_versions` | `ck_feature_versions_change_kind` | load/add/update/delete |
+| `curation_collections` | `ck_curation_collections_status` | draft/published/archived |
+| `curation_collections` | `ck_curation_collections_visibility` | admin_only/public |
+| `curation_items` | `ck_curation_items_status` | candidate/included/rejected/archived |
+| `curation_items` | `ck_curation_items_sort_order` | ≥ 0 |
+| `curation_items` | `ck_curation_items_relation` | primary_stop/food_stop/cafe_stop/bookstore_stop/nearby_option/accessibility_support/pet_support/family_support/theme_area_anchor |
+| `curation_items` | `ck_curation_items_reuse_policy` | allowed/blocked/manual_review |
+| `curation_items` | `uq_curation_items_active_identity` | active `(collection_id, external_item_id, feature_id)` 중복 금지, NULL도 동일값 취급 |
 | `feature_files` | `ck_feature_files_file_type` | image/video/audio/document/file |
 | `feature_files` | `ck_feature_files_display_order` | ≥ 0 |
 | `feature_files` | `ck_feature_files_byte_size` | NULL or ≥ 0 |
@@ -207,6 +246,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_opening_periods` | `ck_opening_duration` | 0 < n ≤ 10080 |
 | `source_links` | `ck_source_links_confidence` | 0-100 |
 | `source_links` | `ck_source_links_role` | SourceRole 8종 |
+| `source_entities` | `ck_source_entities_seen_order` | first_seen_at ≤ last_seen_at |
 | `feature_price_values` | `ck_price_value_nonnegative` | value_number ≥ 0 |
 | `feature_price_values` | `uq_price_value_identity` | feature_id/provider/price_domain/product_key/observed_at 중복 방지 |
 | `import_jobs` | `ck_import_jobs_status` | queued/running/done/failed/cancelled |
@@ -246,7 +286,14 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_price_values.feature_id` → `features` | CASCADE | price anchor 삭제 시 시계열도 삭제 |
 | `feature_price_values.source_record_key` → `source_records` | SET NULL | source 정리 후에도 가격값 유지 |
 | `source_links.feature_id` → `features` | CASCADE | |
-| `source_links.source_record_key` → `source_records` | CASCADE | |
+| `source_links.source_entity_key` → `source_entities` | RESTRICT | Feature link가 있는 provider entity 삭제 금지 |
+| `source_records.source_entity_key` → `source_entities` | RESTRICT | immutable payload의 자연 entity 보존 |
+| `source_entities.(source_entity_key,current_source_record_key)` → `source_records` | RESTRICT, deferred | 현재 포인터가 같은 entity의 record만 가리킴 |
+| `curation_collections.theme_id` → `curated_themes` | RESTRICT | collection의 theme 의미 보존 |
+| `curation_collections.source_id` → `curated_sources` | SET NULL | source metadata 삭제 후에도 공식 collection 보존 |
+| `curation_items.collection_id` → `curation_collections` | CASCADE | collection archive는 soft 처리, 물리 삭제 시 membership 함께 삭제 |
+| `curation_items.feature_id` → `features` | SET NULL | Feature 삭제 후에도 공식 항목명·원천키 보존 |
+| `curation_items.source_record_key` → `source_records` | SET NULL | 원천 record 정리 후에도 큐레이션 membership 보존 |
 | `features.parent_feature_id` → `features` | SET NULL | 부모 삭제 시 고아 허용 |
 | `dedup_review_queue.feature_id_*` → `features` | CASCADE | |
 | `feature_overrides.feature_id` → `features` | CASCADE | |
@@ -279,10 +326,14 @@ WHERE d.feature_id=f.feature_id
 DELETE FROM feature.feature_price_values pv
 WHERE pv.observed_at < now() - interval '10 years';
 
--- orphan source_records
+-- current가 아닌 명시 만료 payload history
 DELETE FROM provider_sync.source_records sr
-WHERE NOT EXISTS (SELECT 1 FROM provider_sync.source_links sl WHERE sl.source_record_key=sr.source_record_key)
-  AND (sr.expires_at IS NULL OR sr.expires_at < now() - interval '30 days');
+WHERE NOT EXISTS (
+    SELECT 1 FROM provider_sync.source_entities se
+    WHERE se.current_source_record_key = sr.source_record_key
+  )
+  AND sr.expires_at IS NOT NULL
+  AND sr.expires_at < now();
 ```
 
 ## 8. Alembic 마이그레이션 가이드
@@ -324,6 +375,10 @@ async def test_alembic_upgrade_then_downgrade_then_upgrade(pg_engine):
     await alembic_upgrade(pg_engine, "head")
     # schema가 idempotent
 ```
+
+0045는 예외다. legacy에서 완전히 재구성 가능한 데이터의 round-trip은 허용하지만,
+collection/item이 신규 의미나 actor 감사값을 담은 뒤에는 downgrade가 `P0001`로 거절되는지
+별도 통합 테스트한다. 이는 실패가 아니라 의도한 데이터 손실 방지 gate다.
 
 ### 8.4 명명 규약
 
@@ -406,4 +461,4 @@ pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-
 - [ ] BRIN 인덱스 효율 측정 (1주 운영 후)
 - [ ] 인덱스 hit ratio 95%+ 확인
 - [ ] 부분 인덱스 vs 전체 인덱스 디스크 비교
-- [ ] Alembic upgrade/downgrade round-trip 통합 테스트 통과
+- [ ] Alembic upgrade/downgrade round-trip 및 표현력 손실 downgrade 거절 테스트 통과

@@ -7,8 +7,8 @@ F1~F4 + Phase 2 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 
 검사 케이스
 -----------
-- **F1** orphan source_record — ``source_links``가 하나도 없는
-  ``provider_sync.source_records`` (ETL transform 누수 → Feature 미생성).
+- **F1** orphan source entity — ``source_links``가 하나도 없는
+  ``provider_sync.source_entities`` (ETL transform 누수 → Feature 미생성).
   severity=ERROR.
 - **F2** detail 누락 — detail-bearing kind(place/event/notice/route/area)인데
   ``features.detail`` JSONB가 비어 있음 (ADR-018 위배). severity=ERROR.
@@ -127,13 +127,13 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         code="F1",
         severity="ERROR",
-        description="orphan source_record (source_links 없음 — ETL transform 누수)",
+        description="orphan source_entity (source_links 없음 — ETL transform 누수)",
         sql=(
-            "SELECT sr.source_record_key AS id "
-            "FROM provider_sync.source_records sr "
+            "SELECT se.source_entity_key AS id "
+            "FROM provider_sync.source_entities se "
             "LEFT JOIN provider_sync.source_links sl "
-            "  ON sl.source_record_key = sr.source_record_key "
-            "WHERE sl.source_record_key IS NULL"
+            "  ON sl.source_entity_key = se.source_entity_key "
+            "WHERE sl.source_entity_key IS NULL"
         ),
     ),
     CaseSpec(
@@ -355,8 +355,11 @@ primary_sources AS (
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
       ) AS rn
     FROM provider_sync.source_links AS sl
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
     JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = sl.source_record_key
+      ON sr.source_entity_key = se.source_entity_key
+     AND sr.source_record_key = se.current_source_record_key
     WHERE sl.is_primary_source
   ) AS ranked
   WHERE rn = 1

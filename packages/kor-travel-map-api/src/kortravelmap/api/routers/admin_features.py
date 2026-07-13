@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.core import make_feature_id
+from kortravelmap.infra import curation_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
     AdminFeatureDetailFeature,
@@ -38,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.api.auth import require_admin_destructive_enabled
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.routers.curations import AdminCurationItemView
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -387,6 +389,7 @@ class AdminFeatureDetailSourceRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    source_entity_key: str
     source_record_key: str
     provider: str
     dataset_key: str
@@ -500,6 +503,7 @@ class AdminFeatureDetailData(BaseModel):
     versions: list[AdminFeatureDetailVersionRecord]
     change_requests: list[AdminFeatureChangeRequestRecord]
     files: list[AdminFeatureDetailFileRecord]
+    curations: list[AdminCurationItemView]
 
 
 class AdminFeatureDetailResponse(BaseModel):
@@ -636,6 +640,7 @@ def _detail_response(
     row: AdminFeatureDetail,
     *,
     started_at: float,
+    curations: tuple[curation_repo.CurationItem, ...] = (),
 ) -> AdminFeatureDetailResponse:
     return AdminFeatureDetailResponse(
         data=AdminFeatureDetailData(
@@ -646,6 +651,10 @@ def _detail_response(
             versions=[_detail_version(item) for item in row.versions],
             change_requests=[_change_record(item) for item in row.change_requests],
             files=[_detail_file(item) for item in row.files],
+            curations=[
+                AdminCurationItemView.model_validate(item, from_attributes=True)
+                for item in curations
+            ],
         ),
         meta=make_meta(started_at=started_at),
     )
@@ -831,7 +840,14 @@ async def get_feature_detail_route(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
-    return _detail_response(row, started_at=started_at)
+    curations = await curation_repo.list_curation_items_by_feature_ids(
+        session, feature_ids=[feature_id], public_only=False
+    )
+    return _detail_response(
+        row,
+        started_at=started_at,
+        curations=curations.get(feature_id, ()),
+    )
 
 
 @router.post("", response_model=AdminFeatureChangeResponse)

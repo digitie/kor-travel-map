@@ -24,6 +24,8 @@ CHECK constraint가 여기에 박혀 있고, Alembic migration 작성 시 본 �
 - **PK 명명**: `feature_id`, `source_record_key`, `job_id` 등 의미 있는 prefix.
   raw UUID 단독 사용은 `dedup_review_queue`, `import_jobs` 같은 운영 테이블에만.
 - **외래키 정책**: 도메인 cascade 명시 — `source_links.feature_id ON DELETE CASCADE`,
+  `source_links.source_entity_key ON DELETE RESTRICT`,
+  `curation_items.feature_id ON DELETE SET NULL`,
   `feature_files.source_record_key ON DELETE SET NULL` 등.
 
 ## 1. `feature.features` (기준 테이블)
@@ -248,11 +250,156 @@ cache를 추가했다.
 PinVi는 REST snapshot을 읽어 `app.curated_trip_plans` /
 `app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
-## 2. `provider_sync.source_records`
+### 1.3 `feature.curation_collections` / `feature.curation_items` (ADR-063, alembic 0045)
+
+공식 목록·회차·캠페인처럼 하나의 Feature가 여러 큐레이션 사실을 동시에 가질 수 있는
+데이터는 collection과 membership을 분리한다. 기존 `feature.curated_features`의 source-rule
+자동 후보화 표면은 유지하지만, 신규 공식·수동 큐레이션의 정본은 아래 두 테이블이다.
+
+```sql
+CREATE TABLE feature.curation_collections (
+  collection_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  collection_key TEXT NOT NULL UNIQUE,
+  theme_id UUID NOT NULL REFERENCES feature.curated_themes(theme_id) ON DELETE RESTRICT,
+  source_id UUID REFERENCES feature.curated_sources(source_id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  edition_key TEXT NOT NULL DEFAULT '',
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',          -- draft / published / archived
+  visibility TEXT NOT NULL DEFAULT 'admin_only', -- admin_only / public
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  archived_at TIMESTAMPTZ,
+
+  CONSTRAINT ck_curation_collections_key CHECK (btrim(collection_key) <> ''),
+  CONSTRAINT ck_curation_collections_title CHECK (btrim(title) <> ''),
+  CONSTRAINT ck_curation_collections_status
+    CHECK (status IN ('draft','published','archived')),
+  CONSTRAINT ck_curation_collections_visibility
+    CHECK (visibility IN ('admin_only','public')),
+  CONSTRAINT ck_curation_collections_metadata
+    CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+CREATE TABLE feature.curation_items (
+  curation_item_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  collection_id UUID NOT NULL
+    REFERENCES feature.curation_collections(collection_id) ON DELETE CASCADE,
+  feature_id TEXT REFERENCES feature.features(feature_id) ON DELETE SET NULL,
+  source_record_key TEXT
+    REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
+  external_item_id TEXT NOT NULL,
+  place_name TEXT NOT NULL,
+  address_hint TEXT,
+  status TEXT NOT NULL DEFAULT 'candidate',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  item_title TEXT,
+  item_summary TEXT,
+  curation_relation TEXT NOT NULL DEFAULT 'nearby_option',
+  reuse_policy TEXT NOT NULL DEFAULT 'manual_review',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  archived_at TIMESTAMPTZ,
+
+  CONSTRAINT ck_curation_items_external_id CHECK (btrim(external_item_id) <> ''),
+  CONSTRAINT ck_curation_items_place_name CHECK (btrim(place_name) <> ''),
+  CONSTRAINT ck_curation_items_status
+    CHECK (status IN ('candidate','included','rejected','archived')),
+  CONSTRAINT ck_curation_items_sort_order CHECK (sort_order >= 0),
+  CONSTRAINT ck_curation_items_relation CHECK (
+    curation_relation IN (
+      'primary_stop','food_stop','cafe_stop','bookstore_stop','nearby_option',
+      'accessibility_support','pet_support','family_support','theme_area_anchor'
+    )
+  ),
+  CONSTRAINT ck_curation_items_reuse_policy
+    CHECK (reuse_policy IN ('allowed','blocked','manual_review')),
+  CONSTRAINT ck_curation_items_metadata CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+CREATE UNIQUE INDEX uq_curation_items_active_identity
+  ON feature.curation_items (collection_id, external_item_id, feature_id)
+  NULLS NOT DISTINCT WHERE archived_at IS NULL;
+CREATE INDEX idx_curation_collections_theme_status_edition
+  ON feature.curation_collections (theme_id, status, edition_key, collection_id);
+CREATE INDEX idx_curation_collections_source_status
+  ON feature.curation_collections (source_id, status, collection_id);
+CREATE INDEX idx_curation_items_collection_status_order
+  ON feature.curation_items (collection_id, status, sort_order, curation_item_id);
+CREATE INDEX idx_curation_items_feature_status_collection
+  ON feature.curation_items (feature_id, status, collection_id);
+```
+
+`feature_id`는 의도적으로 nullable이다. CSV의 공식 항목을 기존 Feature와 안전하게
+확정하지 못해도 `place_name`·`address_hint`·원천 안정키를 보존하고, 이후 정확한 Feature가
+확인되면 미연결 행을 연결 행으로 대체한다. 좌표는 기존 `feature.features`에서만 읽으며
+큐레이션 item이 별도 좌표를 소유하지 않는다. 같은 공식 복합 장소를 여러 Feature에 연결할
+때는 `external_item_id`를 공유한다. `NULLS NOT DISTINCT`는 한 collection 안에 같은
+미연결 공식 항목이 중복 생성되는 것을 막는다. repository는 parent collection row lock 아래
+같은 `external_item_id`의 연결 행과 미연결 행이 동시에 active인 상태도 금지한다. 여러
+Feature에 연결한 복합 공식 장소는 모두 non-null `feature_id`이므로 그대로 허용한다.
+
+collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor만 기록한다.
+수동 item 추가·수정·보관은 item과 parent collection의 `updated_by`/`updated_at`을 함께
+갱신한다. public projection은 actor 필드를 제외하고 게시·공개 collection의 included
+item만 반환한다. admin collection/item projection은 actor 필드를 포함하고 collection
+상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
+
+CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritative replace한다.
+incoming 안정키에 없는 기존 item을 삭제한 뒤 들어온 연결·미연결 membership을 upsert하므로
+삭제, A→B, 연결↔미연결 변경이 잔존 행 없이 반영된다. dry-run은 동일한 필드 비교 규칙으로
+`inserted`/`updated`/`removed`와 삭제 예정 item 전체를 미리 반환한다. 동일 파일 재업로드는
+변경 수가 모두 0이며 theme/source/collection/item의 `updated_at`도 바꾸지 않는다.
+
+동시 authoritative replace는
+`pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))`으로 직렬화한다.
+여러 대상 collection row는 UUID 정렬 순서로 `FOR UPDATE`하고, 수동 item write도 parent
+collection을 먼저 잠가 import와 충돌하지 않게 한다. 기존 `curated_features` writer는 0045
+trigger가 같은 ID의 collection item으로 동기화해 전환 중 두 정본이 갈라지지 않게 한다.
+
+0045 downgrade는 구 `curated_features`에서 완전히 재구성할 수 있는 legacy 행만 허용한다.
+신규 collection/item, 수동 변경, collection actor 또는 legacy `selected_by`와 일치하지 않는
+item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
+중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.
+
+## 2. `provider_sync.source_entities` / `provider_sync.source_records`
+
+provider 자연 entity의 identity와 변경 불가능한 payload 관측 이력을 분리한다(ADR-063,
+alembic 0044). `source_entities`는 현재 record 포인터와 관측 수명을, `source_records`는
+payload hash별 이력을 소유한다.
+
+```sql
+CREATE TABLE provider_sync.source_entities (
+  source_entity_key TEXT PRIMARY KEY, -- se_ + sha256(provider|dataset|type|id)
+  provider TEXT NOT NULL,
+  dataset_key TEXT NOT NULL,
+  source_entity_type TEXT NOT NULL,
+  source_entity_id TEXT NOT NULL,
+  current_source_record_key TEXT,
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,
+
+  CONSTRAINT uq_source_entities_identity UNIQUE (
+    provider, dataset_key, source_entity_type, source_entity_id
+  ),
+  CONSTRAINT ck_source_entities_seen_order CHECK (first_seen_at <= last_seen_at)
+);
+```
+
+`current_source_record_key`는 아래 `(source_entity_key, source_record_key)` 복합
+외래키를 통해 반드시 같은 entity의 record만 가리킨다. 두 테이블의 상호 참조는
+`DEFERRABLE INITIALLY DEFERRED`, 삭제는 `RESTRICT`다.
 
 ```sql
 CREATE TABLE provider_sync.source_records (
   source_record_key      TEXT PRIMARY KEY,            -- make_source_record_key(...)
+  source_entity_key      TEXT NOT NULL REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT,
   provider               TEXT NOT NULL,               -- canonical provider name
   dataset_key            TEXT NOT NULL,
   source_entity_type     TEXT NOT NULL,
@@ -269,11 +416,26 @@ CREATE TABLE provider_sync.source_records (
   last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at             TIMESTAMPTZ,
 
-  CONSTRAINT uq_source_records UNIQUE (provider, dataset_key, source_entity_type, source_entity_id, raw_payload_hash)
+  CONSTRAINT uq_source_records UNIQUE (provider, dataset_key, source_entity_type, source_entity_id, raw_payload_hash),
+  CONSTRAINT uq_source_records_entity_record UNIQUE (source_entity_key, source_record_key)
 );
 
+ALTER TABLE provider_sync.source_entities
+  ADD CONSTRAINT fk_source_entities_current_record
+  FOREIGN KEY (source_entity_key, current_source_record_key)
+  REFERENCES provider_sync.source_records (source_entity_key, source_record_key)
+  ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+CREATE INDEX idx_source_entities_current_record
+  ON provider_sync.source_entities (current_source_record_key)
+  WHERE current_source_record_key IS NOT NULL;
 CREATE INDEX idx_source_records_provider_dataset_entity
   ON provider_sync.source_records (provider, dataset_key, source_entity_type, source_entity_id);
+CREATE INDEX idx_source_records_entity_history
+  ON provider_sync.source_records (
+    source_entity_key, last_seen_at DESC, fetched_at DESC,
+    imported_at DESC, source_record_key DESC
+  );
 CREATE INDEX idx_source_records_imported_at_brin
   ON provider_sync.source_records USING BRIN (imported_at);
 CREATE INDEX idx_source_records_fetched_at_brin
@@ -285,6 +447,9 @@ CREATE INDEX idx_source_records_expires_at
 ```
 
 **인덱스 설계**:
+- `source_entities.current_source_record_key` — entity별 현재 관측을 record PK 조회로 연결한다.
+- `source_records_entity_history` — entity별 과거 payload를 마지막 관측 시각 우선 cursor로
+  조회한다. 같은 payload의 재관측도 현재성에 반영해 `A → B → A`를 정확히 표현한다.
 - BRIN on `imported_at/fetched_at` — 적재 시계열 누적 패턴에 최적, 디스크 절약.
 - partial on `expires_at IS NOT NULL` — purge job에서만 스캔.
 
@@ -293,14 +458,14 @@ CREATE INDEX idx_source_records_expires_at
 ```sql
 CREATE TABLE provider_sync.source_links (
   feature_id           TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  source_record_key    TEXT NOT NULL REFERENCES provider_sync.source_records(source_record_key) ON DELETE CASCADE,
+  source_entity_key    TEXT NOT NULL REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT,
   source_role          TEXT NOT NULL,                 -- SourceRole enum
   match_method         TEXT NOT NULL,                 -- 'natural_key', 'reverse_geocode', 'place_phone_search', ...
   confidence           NUMERIC(5,2) NOT NULL,
   is_primary_source    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  PRIMARY KEY (feature_id, source_record_key),
+  PRIMARY KEY (feature_id, source_entity_key),
   CONSTRAINT ck_source_links_confidence CHECK (confidence BETWEEN 0 AND 100),
   CONSTRAINT ck_source_links_role CHECK (source_role IN (
     'base_address','base_coordinate','primary','enrichment','correction',
@@ -308,10 +473,16 @@ CREATE TABLE provider_sync.source_links (
   ))
 );
 
-CREATE INDEX idx_source_links_record       ON provider_sync.source_links (source_record_key);
+CREATE INDEX idx_source_links_entity       ON provider_sync.source_links (source_entity_key);
 CREATE INDEX idx_source_links_role         ON provider_sync.source_links (source_role);
 CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (feature_id) WHERE is_primary_source;
 ```
+
+link는 payload version이 아니라 provider entity에 붙는다. 따라서 같은 entity의 payload가
+바뀌어도 Feature link 수는 늘지 않는다. `is_primary_source=true`는 Feature당 하나라는
+제약이 없으며 MOIS와 MCST처럼 서로 다른 primary entity를 모두 보존한다. 기본 Feature 상세는
+각 link의 `source_entities.current_source_record_key`를 따라 현재 관측 전부를 반환하고,
+과거 payload는 entity별 이력 API에서만 조회한다.
 
 ## 4. `provider_sync.provider_sync_state`
 
@@ -1068,11 +1239,15 @@ DELETE FROM feature.feature_event_details d USING feature.features f
 WHERE d.feature_id=f.feature_id
   AND f.kind='event' AND d.ends_on < (now() - interval '20 years')::date;
 
--- source_records: 대응 feature 보존 기간 이상 → purge cascade 자동
--- (source_records는 source_links로 cascade; orphan만 별도 purge)
+-- source_records: 현재 payload 포인터가 아니며 보존기한이 지난 이력만 정리한다.
+-- Feature link는 source_entity에 붙으므로 record 삭제가 link를 cascade하지 않는다.
 DELETE FROM provider_sync.source_records sr
-WHERE NOT EXISTS (SELECT 1 FROM provider_sync.source_links sl WHERE sl.source_record_key=sr.source_record_key)
-  AND (sr.expires_at IS NULL OR sr.expires_at < now() - interval '30 days');
+WHERE NOT EXISTS (
+    SELECT 1 FROM provider_sync.source_entities se
+    WHERE se.current_source_record_key = sr.source_record_key
+  )
+  AND sr.expires_at IS NOT NULL
+  AND sr.expires_at < now();
 ```
 
 이 SQL은 Dagster purge asset에서 실행한다. `infra/purge_repo.py`에 상수로 박는다.
@@ -1091,6 +1266,10 @@ make_source_record_key(*, provider: str, dataset_key: str,
                        source_entity_type: str, source_entity_id: str,
                        raw_payload_hash: str) -> str
 # 포맷: sr_{sha1(input)[:20]}
+
+_make_source_entity_key(*, provider: str, dataset_key: str,
+                        source_entity_type: str, source_entity_id: str) -> str
+# provider entity 내부 결정키. 포맷: se_{sha256(input)}, payload hash는 포함하지 않는다.
 
 make_payload_hash(data: Any, *, length: int = 32) -> str
 # canonical_json(data) → sha256 → [:length]
@@ -1154,7 +1333,7 @@ purge는 Dagster asset에 위임한다(purge SQL 표준 예시는 §10, `infra/p
 | `notice` | 종료일 또는 발표일 +1년 |
 | `feature_price_values` | 가격 domain별 기본값(초기 유가 10년 권장, purge asset에서 관리) |
 | `weather_values` | 기본 3년(예보 발표 이력 비교용, ADR-062) |
-| `source_records` | 대응 feature 보존 기간 이상, orphan만 별도 purge |
+| `source_records` | entity 현재 record는 보존. 과거 payload는 대응 Feature 보존 기간 이상 또는 명시 `expires_at` 정책으로 purge |
 
 ### feature 정합성 리포트 단계적 도입 (구 ADR-033)
 

@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+### 다중 관측·회차형 큐레이션과 등대 카테고리 (2026-07-13)
+
+- **ADDED**: provider 자연 entity와 immutable payload version을 분리하는
+  `provider_sync.source_entities`를 추가했다. Feature 단건/batch/admin 상세는 연결된 entity별
+  현재 `observations[]`를 모두 반환하고, 과거 payload는
+  `/v1/features/{feature_id}/observations/{source_entity_key}/history`에서 cursor 조회한다.
+- **ADDED**: 테마·제목·회차·출처 묶음과 장소 membership을 분리한
+  `feature.curation_collections` / `feature.curation_items` 및 `/v1/curations*`,
+  `/v1/admin/curations*` API를 추가했다. 같은 Feature의 여러 연도·기관 큐레이션을 지도 marker
+  하나의 상세와 REST 배열에서 모두 보여준다.
+- **ADDED**: 관리자 큐레이션 수동 입력, UTF-8 CSV 양식 다운로드, dry-run preview와 collection
+  단위 원자적 replace import를 추가했다. 삭제·연결 변경을 반영하고 변경 건수에 `removed`를
+  포함한다. 기존 Feature를 안전하게 확정하지 못한 공식 항목도 nullable `feature_id`와 공식
+  장소명으로 보존한다.
+- **ADDED**: 한국관광 100선 2023~2024·2025~2026, 국가유산 방문 캠페인,
+  2026 수목원·정원 스탬프투어, 등대 스탬프투어 공식 CSV와 검증 manifest를
+  `resources/curations/`에 추가했다.
+- **ADDED**: place category `01050400`(`TOURISM_NATURE_LIGHTHOUSE`,
+  `관광 > 자연명소 > 등대`)과 지도 marker icon을 추가했다.
+- **CHANGED**: `source_links`의 정체성을 payload record가 아닌 provider entity로 바꾸고,
+  한 Feature에 서로 다른 primary source를 여러 개 허용한다. 신규 공식·수동 큐레이션은 기존
+  평면 `curated_features` 대표 행이 아니라 collection/item 계약을 사용한다.
+- **FIXED**: provider current는 `last_seen_at`을 우선해 `A → B → A` 재관측을 정확히 가리키고,
+  기존 `curated_features` writer는 migration trigger로 새 collection/item에 즉시 동기화한다.
+
 ### Feature 지도 기본 weather/notice 필터와 초기화 버튼 복원 (2026-07-10)
 
 - **CHANGED**: Feature 지도 kind 필터의 기본 선택을 `weather`, `notice`로 변경했다. 저zoom

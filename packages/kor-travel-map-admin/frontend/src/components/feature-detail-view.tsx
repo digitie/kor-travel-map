@@ -6,6 +6,7 @@ import {
   DatabaseIcon,
   FileTextIcon,
   GitBranchIcon,
+  Layers3Icon,
   LinkIcon,
   MapPinIcon,
   ScrollTextIcon,
@@ -31,6 +32,7 @@ import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { formatDateTime, shortId } from "@/lib/format";
 
 type SourceRow = AdminFeatureDetailData["sources"][number];
+type CurationRow = AdminFeatureDetailData["curations"][number];
 type IssueRow = AdminFeatureDetailData["issues"][number];
 type OverrideRow = AdminFeatureDetailData["overrides"][number];
 type FileRow = AdminFeatureDetailData["files"][number];
@@ -164,7 +166,7 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
                 {shortId(source.source_record_key, 18)}
               </summary>
               <div className="mt-2 min-w-72">
-                <JsonBlock value={source.raw_data} />
+                <JsonBlock value={source} />
               </div>
             </details>
           );
@@ -197,6 +199,114 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
         columns={columns}
         data={data.sources}
         getRowId={(row) => row.source_record_key}
+        emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
+        containerClassName="overflow-auto"
+      />
+    </Section>
+  );
+}
+
+function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
+  const columns = useMemo<ColumnDef<CurationRow, unknown>[]>(
+    () => [
+      {
+        id: "collection",
+        header: "큐레이션",
+        cell: ({ row }) => (
+          <div className="min-w-56">
+            <div className="font-medium">{row.original.title}</div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              <Badge variant="outline">{row.original.theme_name}</Badge>
+              {row.original.edition_key ? (
+                <Badge variant="secondary">{row.original.edition_key}</Badge>
+              ) : null}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "source",
+        header: "출처",
+        cell: ({ row }) => {
+          const item = row.original;
+          return (
+            <div>
+              <div>
+                {item.source_url ? (
+                  <a
+                    className="text-primary underline-offset-4 hover:underline"
+                    href={item.source_url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {item.source_name ?? item.source_url}
+                  </a>
+                ) : (
+                  item.source_name ?? "-"
+                )}
+              </div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {item.provider ?? "-"} / {item.dataset_key ?? "-"}
+              </div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {item.source_record_key ?? "source record 없음"}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: "item",
+        header: "항목",
+        cell: ({ row }) => (
+          <div>
+            <div>{row.original.item_title ?? row.original.feature_name}</div>
+            {row.original.item_summary ? (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {row.original.item_summary}
+              </div>
+            ) : null}
+            <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+              {row.original.external_item_id}
+            </div>
+            {row.original.address_hint ? (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {row.original.address_hint}
+              </div>
+            ) : null}
+            <div className="mt-1 flex flex-wrap gap-1">
+              <StatusBadge status={row.original.status} />
+              <Badge variant="outline">순서 {row.original.sort_order}</Badge>
+              <Badge variant="outline">{row.original.curation_relation}</Badge>
+              <Badge variant="outline">{row.original.reuse_policy}</Badge>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "detail",
+        header: "상세",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <details>
+            <summary className="cursor-pointer text-xs font-medium">전체 정보</summary>
+            <div className="mt-2 min-w-80">
+              <JsonBlock value={row.original} />
+            </div>
+          </details>
+        ),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <Section count={data.curations.length} icon={Layers3Icon} title="큐레이션">
+      <DataTable
+        columns={columns}
+        data={data.curations}
+        getRowId={(row) => row.curation_item_id}
         emptyMessage={EMPTY_MESSAGE}
         manualSorting={false}
         containerClassName="overflow-auto"
@@ -854,6 +964,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_28rem]">
         <div className="flex min-w-0 flex-col gap-4">
           <SourcesTable data={data} />
+          <CurationsTable data={data} />
           <NoticeHistoryPanel data={data} />
           <IssuesTable data={data} />
           <OverridesTable data={data} />

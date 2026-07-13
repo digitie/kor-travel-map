@@ -27,6 +27,7 @@ from kortravelmap.infra.feature_repo import upsert_feature
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
 )
@@ -61,9 +62,23 @@ def _feature_row(
     )
 
 
+def _source_entity(key: str, provider: str = "python-mois-api") -> SourceEntityRow:
+    return SourceEntityRow(
+        source_entity_key=f"se-{key}",
+        provider=provider,
+        dataset_key="mois_license_features_bulk",
+        source_entity_type="license_place",
+        source_entity_id=key,
+        current_source_record_key=None,
+        first_seen_at=_NOW,
+        last_seen_at=_NOW,
+    )
+
+
 def _source_record(key: str, provider: str = "python-mois-api") -> SourceRecordRow:
     return SourceRecordRow(
         source_record_key=key,
+        source_entity_key=f"se-{key}",
         provider=provider,
         dataset_key="mois_license_features_bulk",
         source_entity_type="license_place",
@@ -80,7 +95,7 @@ def _source_record(key: str, provider: str = "python-mois-api") -> SourceRecordR
 def _source_link(feature_id: str, source_record_key: str) -> SourceLinkRow:
     return SourceLinkRow(
         feature_id=feature_id,
-        source_record_key=source_record_key,
+        source_entity_key=f"se-{source_record_key}",
         source_role="primary",
         match_method="natural_key",
         confidence=100,
@@ -116,7 +131,12 @@ async def _seed_feature(
     feature_id: str = "feature-admin-1",
 ) -> None:
     session.add(_feature_row(feature_id, name="광화문"))
+    entity = _source_entity(f"sr-{feature_id}")
+    session.add(entity)
+    await session.flush()
     session.add(_source_record(f"sr-{feature_id}"))
+    await session.flush()
+    entity.current_source_record_key = f"sr-{feature_id}"
     await session.flush()
     session.add(_source_link(feature_id, f"sr-{feature_id}"))
     await session.flush()

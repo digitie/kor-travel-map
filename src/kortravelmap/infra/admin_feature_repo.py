@@ -158,6 +158,7 @@ class AdminFeatureDetailFeature:
 class AdminFeatureDetailSource:
     """Feature에 연결된 SourceRecord + SourceLink snapshot."""
 
+    source_entity_key: str
     source_record_key: str
     provider: str
     dataset_key: str
@@ -667,8 +668,11 @@ _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
         OR EXISTS (
             SELECT 1
             FROM provider_sync.source_links AS qsl
+            JOIN provider_sync.source_entities AS qse
+              ON qse.source_entity_key = qsl.source_entity_key
             JOIN provider_sync.source_records AS qsr
-              ON qsr.source_record_key = qsl.source_record_key
+              ON qsr.source_entity_key = qse.source_entity_key
+             AND qsr.source_record_key = qse.current_source_record_key
             WHERE qsl.feature_id = f.feature_id
               AND (
                 qsr.source_record_key ILIKE CAST(:q_like AS text)
@@ -714,8 +718,11 @@ WITH base AS (
     LEFT JOIN LATERAL (
         SELECT sr.provider, sr.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = f.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -858,6 +865,7 @@ WHERE feature_id = :feature_id
 
 _ADMIN_FEATURE_SOURCES_SQL: Final[str] = """
 SELECT
+    se.source_entity_key,
     sr.source_record_key,
     sr.provider,
     sr.dataset_key,
@@ -880,12 +888,14 @@ SELECT
     sr.expires_at,
     sl.created_at AS linked_at
 FROM provider_sync.source_links AS sl
+JOIN provider_sync.source_entities AS se
+  ON se.source_entity_key = sl.source_entity_key
 JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
+  ON sr.source_entity_key = se.source_entity_key
+ AND sr.source_record_key = se.current_source_record_key
 WHERE sl.feature_id = :feature_id
 ORDER BY sl.is_primary_source DESC, sr.imported_at DESC NULLS LAST,
          sl.created_at DESC, sr.source_record_key
-LIMIT 50
 """
 
 _ADMIN_FEATURE_ISSUES_SQL: Final[str] = """
@@ -1040,6 +1050,7 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
 
 def _admin_feature_detail_source(row: Any) -> AdminFeatureDetailSource:
     return AdminFeatureDetailSource(
+        source_entity_key=str(row["source_entity_key"]),
         source_record_key=str(row["source_record_key"]),
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
@@ -2181,8 +2192,11 @@ expanded AS (
     LEFT JOIN LATERAL (
         SELECT sr.provider, sr.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = fa.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -2191,8 +2205,11 @@ expanded AS (
     LEFT JOIN LATERAL (
         SELECT sr.provider, sr.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = fb.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -2270,8 +2287,11 @@ expanded AS (
     LEFT JOIN LATERAL (
         SELECT sr.provider, sr.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = fa.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
@@ -2280,8 +2300,11 @@ expanded AS (
     LEFT JOIN LATERAL (
         SELECT sr.provider, sr.dataset_key
         FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_entities AS se
+          ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = sl.source_record_key
+          ON sr.source_entity_key = se.source_entity_key
+         AND sr.source_record_key = se.current_source_record_key
         WHERE sl.feature_id = fb.feature_id
           AND sl.is_primary_source
         ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key

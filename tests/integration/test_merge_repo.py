@@ -1,8 +1,10 @@
 """``test_merge_repo`` — dedup 수동 병합 1차 함수 (ADR-016, Sprint 4a).
 
 ``merge_from_review``/``apply_feature_merge``가 실 PostGIS에서:
-① loser source_link를 master로 재지정(+ 충돌 link drop) ② loser feature soft-delete
-③ ``feature_merge_history`` 기록 ④ ``dedup_review_queue`` ``merged`` 전이 하는지 검증.
+① loser source_link를 master로 재지정(+ 충돌 link drop)
+② loser curation item을 master로 재지정(+ 동일 item 충돌 drop)
+③ loser feature soft-delete ④ ``feature_merge_history`` 기록
+⑤ ``dedup_review_queue`` ``merged`` 전이 하는지 검증.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from kortravelmap.infra.merge_repo import (
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
 )
@@ -45,30 +48,42 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
         kind="place",
         name="불국사",
         category=_CAT,
-        coord=WKTElement("POINT(129.3320 35.7900)", srid=4326)
-        if with_coord
-        else None,
+        coord=WKTElement("POINT(129.3320 35.7900)", srid=4326) if with_coord else None,
         detail={"summary": "temple"},
     )
 
 
-def _source_record(key: str, provider: str) -> SourceRecordRow:
-    return SourceRecordRow(
-        source_record_key=key,
+def _source_entity(key: str, provider: str) -> SourceEntityRow:
+    return SourceEntityRow(
+        source_entity_key=key,
         provider=provider,
         dataset_key="d",
         source_entity_type="t",
         source_entity_id=key,
+        current_source_record_key=None,
+        first_seen_at=_FETCHED,
+        last_seen_at=_FETCHED,
+    )
+
+
+def _source_record(key: str, provider: str, *, source_entity_key: str) -> SourceRecordRow:
+    return SourceRecordRow(
+        source_record_key=key,
+        source_entity_key=source_entity_key,
+        provider=provider,
+        dataset_key="d",
+        source_entity_type="t",
+        source_entity_id=source_entity_key,
         raw_payload_hash="h",
         raw_data={},
         fetched_at=_FETCHED,
     )
 
 
-def _link(feature_id: str, key: str, *, primary: bool = True) -> SourceLinkRow:
+def _link(feature_id: str, entity_key: str, *, primary: bool = True) -> SourceLinkRow:
     return SourceLinkRow(
         feature_id=feature_id,
-        source_record_key=key,
+        source_entity_key=entity_key,
         source_role="primary" if primary else "enrichment",
         match_method="natural_key",
         confidence=100,
@@ -79,17 +94,100 @@ def _link(feature_id: str, key: str, *, primary: bool = True) -> SourceLinkRow:
 async def _seed_pair(engine: AsyncEngine) -> str:
     """master(좌표 O) + loser(좌표 X) + source_links(충돌 SR 포함) + 큐 1행 적재.
 
-    반환: 생성된 ``review_id``. SR1은 양쪽 모두 링크(충돌), SR2는 loser 전용.
+    반환: 생성된 ``review_id``. SE1은 양쪽 모두 링크(충돌), SE2는 loser 전용.
     """
     async with AsyncSession(engine) as session, session.begin():
         session.add(_feature("f_master", with_coord=True))
         session.add(_feature("f_loser", with_coord=False))
-        session.add(_source_record("SR1", "python-mois-api"))
-        session.add(_source_record("SR2", "python-visitkorea-api"))
+        entity_1 = _source_entity("SE1", "python-mois-api")
+        entity_2 = _source_entity("SE2", "python-visitkorea-api")
+        session.add(entity_1)
+        session.add(entity_2)
         await session.flush()
-        session.add(_link("f_master", "SR1"))
-        session.add(_link("f_loser", "SR1", primary=False))  # 충돌 — master 보유
-        session.add(_link("f_loser", "SR2"))  # loser 전용 — 이동 대상
+        session.add(_source_record("SR1", "python-mois-api", source_entity_key="SE1"))
+        session.add(_source_record("SR2", "python-visitkorea-api", source_entity_key="SE2"))
+        await session.flush()
+        entity_1.current_source_record_key = "SR1"
+        entity_2.current_source_record_key = "SR2"
+        await session.flush()
+        session.add(_link("f_master", "SE1"))
+        session.add(_link("f_loser", "SE1", primary=False))  # 충돌 — master 보유
+        session.add(_link("f_loser", "SE2"))  # loser 전용 — 이동 대상
+        await session.execute(
+            text(
+                """
+                WITH theme AS (
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group
+                    ) VALUES ('merge-test', '병합 테스트', 'test')
+                    RETURNING theme_id
+                ), collection AS (
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, title
+                    )
+                    SELECT 'merge-test:2026', theme_id, '병합 테스트 2026'
+                    FROM theme
+                    RETURNING collection_id
+                )
+                INSERT INTO feature.curation_items (
+                    collection_id, feature_id, external_item_id, place_name, status
+                )
+                SELECT collection_id, 'f_master', 'shared', '마스터 장소', 'included'
+                FROM collection
+                UNION ALL
+                SELECT collection_id, 'f_loser', 'shared', '병합 대상 장소', 'included'
+                FROM collection
+                UNION ALL
+                SELECT collection_id, 'f_loser', 'loser-only', '병합 대상 장소', 'included'
+                FROM collection
+                """
+            )
+        )
+        await session.execute(
+            text(
+                """
+                WITH source AS (
+                    INSERT INTO feature.curated_sources (
+                        provider, dataset_key, source_name, source_kind,
+                        update_cycle, provider_status, metadata
+                    ) VALUES (
+                        'merge-test-provider', 'legacy-curation',
+                        '병합 legacy 출처', 'manual', 'unknown',
+                        'manual_only', '{}'::jsonb
+                    )
+                    RETURNING source_id
+                ), themes AS (
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group, visibility
+                    ) VALUES
+                        ('legacy-merge-conflict', 'legacy 병합 충돌', 'test', 'public'),
+                        ('legacy-merge-loser-only', 'legacy 병합 단독', 'test', 'public')
+                    RETURNING theme_id, theme_slug
+                )
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id, curation_status,
+                    selection_origin, display_title, display_summary
+                )
+                SELECT
+                    themes.theme_id, 'f_master', source.source_id, 'curated',
+                    'admin', 'legacy 충돌 master', '병합 전 master'
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'legacy-merge-conflict'
+                UNION ALL
+                SELECT
+                    themes.theme_id, 'f_loser', source.source_id, 'curated',
+                    'admin', 'legacy 충돌 loser', '병합 전 loser'
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'legacy-merge-conflict'
+                UNION ALL
+                SELECT
+                    themes.theme_id, 'f_loser', source.source_id, 'curated',
+                    'admin', 'legacy 단독 loser', '병합 전 loser'
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'legacy-merge-loser-only'
+                """
+            )
+        )
         row = DedupReviewQueueRow(
             feature_id_a="f_loser",
             feature_id_b="f_master",
@@ -106,9 +204,7 @@ async def _seed_pair(engine: AsyncEngine) -> str:
 async def _links_of(engine: AsyncEngine, feature_id: str) -> set[str]:
     async with AsyncSession(engine) as session:
         result = await session.execute(
-            select(SourceLinkRow.source_record_key).where(
-                SourceLinkRow.feature_id == feature_id
-            )
+            select(SourceLinkRow.source_entity_key).where(SourceLinkRow.feature_id == feature_id)
         )
         return {r[0] for r in result}
 
@@ -125,50 +221,125 @@ async def _feature_status(engine: AsyncEngine, feature_id: str) -> tuple[str, bo
         return (row[0], row[1] is not None)
 
 
-async def _merge_from_review_with_short_lock_timeout(
-    session: AsyncSession, review_id: str
-) -> None:
+async def _merge_from_review_with_short_lock_timeout(session: AsyncSession, review_id: str) -> None:
     await session.execute(text("SET LOCAL lock_timeout = '100ms'"))
     await merge_from_review(session, review_id)
 
 
 @pytest.fixture
-async def seeded(
-    pg_container: object, migrated_engine: AsyncEngine
-) -> object:
+async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
     """병합 대상 1쌍 적재 + teardown TRUNCATE. 반환: review_id."""
     review_id = await _seed_pair(migrated_engine)
     yield review_id
     async with AsyncSession(migrated_engine) as session, session.begin():
         await session.execute(
             text(
-                "TRUNCATE feature.features, provider_sync.source_records, "
+                "TRUNCATE feature.curation_collections, feature.curated_themes, "
+                "feature.curated_sources, "
+                "feature.features, provider_sync.source_entities, "
+                "provider_sync.source_records, "
                 "provider_sync.source_links, ops.dedup_review_queue, "
                 "ops.feature_merge_history RESTART IDENTITY CASCADE"
             )
         )
 
 
-async def test_merge_from_review_full_flow(
-    seeded: str, migrated_engine: AsyncEngine
-) -> None:
+async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEngine) -> None:
     review_id = seeded
     async with AsyncSession(migrated_engine) as session, session.begin():
-        outcome = await merge_from_review(
-            session, review_id, merged_by="op-1", reason="dup"
-        )
+        outcome = await merge_from_review(session, review_id, merged_by="op-1", reason="dup")
 
     # 좌표 보유 master 선정 (ADR-016 1순위).
     assert outcome.master_feature_id == "f_master"
     assert outcome.loser_feature_id == "f_loser"
-    # SR2 이동(1), 충돌 SR1 drop(1).
+    # SE2 이동(1), 충돌 SE1 drop(1).
     assert outcome.source_links_moved == 1
     assert outcome.source_links_dropped == 1
     assert outcome.queue_updated is True
 
-    # master는 SR1+SR2 보유, loser는 링크 없음.
-    assert await _links_of(migrated_engine, "f_master") == {"SR1", "SR2"}
+    # master는 SE1+SE2 보유, loser는 링크 없음.
+    assert await _links_of(migrated_engine, "f_master") == {"SE1", "SE2"}
     assert await _links_of(migrated_engine, "f_loser") == set()
+    async with AsyncSession(migrated_engine) as session:
+        items = (
+            await session.execute(
+                text(
+                    """
+                    SELECT feature_id, external_item_id
+                    FROM feature.curation_items
+                    WHERE collection_id = (
+                        SELECT collection_id
+                        FROM feature.curation_collections
+                        WHERE collection_key = 'merge-test:2026'
+                    )
+                      AND archived_at IS NULL
+                    ORDER BY external_item_id
+                    """
+                )
+            )
+        ).all()
+    assert items == [
+        ("f_master", "loser-only"),
+        ("f_master", "shared"),
+    ]
+
+    # legacy row도 master로 옮겨야 이후 0045 sync trigger가 loser를 되살리지 않는다.
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        legacy_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT display_title, feature_id, curation_status,
+                           archived_at IS NOT NULL AS archived
+                    FROM feature.curated_features
+                    WHERE display_title LIKE 'legacy %'
+                    ORDER BY display_title
+                    """
+                )
+            )
+        ).all()
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curated_features
+                SET display_summary = '병합 후 legacy writer 갱신',
+                    updated_at = clock_timestamp()
+                WHERE display_title IN ('legacy 충돌 loser', 'legacy 단독 loser')
+                """
+            )
+        )
+    assert legacy_rows == [
+        ("legacy 단독 loser", "f_master", "curated", False),
+        ("legacy 충돌 loser", "f_master", "archived", True),
+        ("legacy 충돌 master", "f_master", "curated", False),
+    ]
+    async with AsyncSession(migrated_engine) as session:
+        active_legacy_items = (
+            await session.execute(
+                text(
+                    """
+                    SELECT c.title, i.feature_id
+                    FROM feature.curation_items AS i
+                    JOIN feature.curation_collections AS c
+                      ON c.collection_id = i.collection_id
+                    WHERE c.collection_key LIKE 'legacy:legacy-merge-%'
+                      AND i.archived_at IS NULL
+                    ORDER BY c.title
+                    """
+                )
+            )
+        ).all()
+        loser_memberships = (
+            await session.execute(
+                text("SELECT count(*) FROM feature.curation_items WHERE feature_id = 'f_loser'")
+            )
+        ).scalar_one()
+    assert active_legacy_items == [
+        ("legacy 단독 loser", "f_master"),
+        ("legacy 충돌 loser", "f_master"),
+        ("legacy 충돌 master", "f_master"),
+    ]
+    assert loser_memberships == 0
     # loser soft-delete.
     assert await _feature_status(migrated_engine, "f_loser") == ("deleted", True)
     # master는 그대로 active.
@@ -192,10 +363,7 @@ async def test_merge_from_review_full_flow(
         assert str(hist[4]) == review_id
         qstatus = (
             await session.execute(
-                text(
-                    "SELECT status, reviewed_by FROM ops.dedup_review_queue "
-                    "WHERE review_id = :k"
-                ),
+                text("SELECT status, reviewed_by FROM ops.dedup_review_queue WHERE review_id = :k"),
                 {"k": review_id},
             )
         ).one()
@@ -225,9 +393,7 @@ async def test_merge_from_review_unknown_key_raises(
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
         with pytest.raises(MergeNotFoundError, match="review_id 없음"):
-            await merge_from_review(
-                session, "00000000-0000-0000-0000-000000000000"
-            )
+            await merge_from_review(session, "00000000-0000-0000-0000-000000000000")
 
 
 async def test_merge_from_review_already_merged_raises(
@@ -257,9 +423,7 @@ async def test_merge_from_review_locks_review_row(
 
         async with AsyncSession(migrated_engine) as contender:
             with pytest.raises(DBAPIError):
-                await _merge_from_review_with_short_lock_timeout(
-                    contender, review_id
-                )
+                await _merge_from_review_with_short_lock_timeout(contender, review_id)
 
 
 async def test_apply_feature_merge_distinct_guard(
@@ -267,23 +431,17 @@ async def test_apply_feature_merge_distinct_guard(
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
         with pytest.raises(MergeConflictError, match="master와 loser가 같음"):
-            await apply_feature_merge(
-                session, master_id="f_master", loser_id="f_master"
-            )
+            await apply_feature_merge(session, master_id="f_master", loser_id="f_master")
 
 
-async def test_merge_history_count_after_merge(
-    seeded: str, migrated_engine: AsyncEngine
-) -> None:
+async def test_merge_history_count_after_merge(seeded: str, migrated_engine: AsyncEngine) -> None:
     review_id = seeded
     async with AsyncSession(migrated_engine) as session, session.begin():
         await merge_from_review(session, review_id)
     async with AsyncSession(migrated_engine) as session:
         count = (
             await session.execute(
-                select(func.count()).select_from(
-                    text("ops.feature_merge_history")
-                )
+                select(func.count()).select_from(text("ops.feature_merge_history"))
             )
         ).scalar_one()
     assert count == 1

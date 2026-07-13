@@ -1,8 +1,8 @@
 """``kortravelmap.category`` 단위 테스트 (PR#18 - ADR-023 이전 + ADR-027 적용).
 
 검증 항목:
-- 총 144건 (원본 141 + ADR-027 3건)
-- depth별 통계 (sentinel 1 / Tier1 7 / Tier2 34 / Tier3 73 / Tier4 29)
+- 총 145건 (기존 144 + 등대 1건)
+- depth별 통계 (sentinel 1 / Tier1 7 / Tier2 34 / Tier3 74 / Tier4 29)
 - Tier 1 enum 8개 (00 sentinel + 01~07)
 - ADR-027 신규 3건 (LODGING_MOUNTAIN_SHELTER + KNPS + KFS)
 - ADR-027 maki = ``shelter`` (3건 모두)
@@ -31,13 +31,13 @@ from kortravelmap.category import (
     mapbox_maki_icon_or_none,
 )
 
-# ── 144 카탈로그 ─────────────────────────────────────────────────────────
+# ── 145 카탈로그 ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_total_definitions_count() -> None:
-    """원본 141 + ADR-027 3건 = 144."""
-    assert len(PLACE_CATEGORY_DEFINITIONS) == 144
+    """기존 144 + 등대 1건 = 145."""
+    assert len(PLACE_CATEGORY_DEFINITIONS) == 145
 
 
 @pytest.mark.unit
@@ -51,7 +51,7 @@ def test_depth_distribution() -> None:
         0: 1,   # sentinel UNCLASSIFIED
         1: 7,   # Tier 1 (01~07, 00 제외)
         2: 34,  # Tier 2 (원본 33 + ADR-027 1)
-        3: 73,  # Tier 3 (원본 71 + ADR-027 2)
+        3: 74,  # Tier 3 (기존 73 + 등대)
         4: 29,  # Tier 4
     }
 
@@ -66,15 +66,15 @@ def test_tier1_enum_count() -> None:
 
 @pytest.mark.unit
 def test_unique_codes() -> None:
-    """144건 모두 고유한 code."""
+    """145건 모두 고유한 code."""
     codes = [c.code for c in PLACE_CATEGORY_DEFINITIONS]
-    assert len(codes) == len(set(codes)) == 144
+    assert len(codes) == len(set(codes)) == 145
 
 
 @pytest.mark.unit
 def test_by_code_lookup() -> None:
-    """`PLACE_CATEGORY_BY_CODE` lookup 144 entries."""
-    assert len(PLACE_CATEGORY_BY_CODE) == 144
+    """`PLACE_CATEGORY_BY_CODE` lookup 145 entries."""
+    assert len(PLACE_CATEGORY_BY_CODE) == 145
     for category in PLACE_CATEGORY_DEFINITIONS:
         assert PLACE_CATEGORY_BY_CODE[category.code] is category
 
@@ -125,6 +125,15 @@ def test_adr027_tier2_names_03_includes_shelter() -> None:
     """`PLACE_CATEGORY_TIER2_NAMES_BY_TIER1['03']`에 `08 대피소·산장` 추가."""
     tier2_03 = PLACE_CATEGORY_TIER2_NAMES_BY_TIER1["03"]
     assert tier2_03["08"] == "대피소·산장"
+
+
+@pytest.mark.unit
+def test_lighthouse_category() -> None:
+    lighthouse = get_category(PlaceCategoryCode.TOURISM_NATURE_LIGHTHOUSE)
+    assert lighthouse.code == "01050400"
+    assert lighthouse.label == "관광 > 자연명소 > 등대"
+    assert lighthouse.parent_code == "01050000"
+    assert lighthouse.mapbox_maki_icon == "lighthouse"
 
 
 # ── maki icon 매핑 ───────────────────────────────────────────────────────
@@ -180,16 +189,16 @@ def test_category_path_and_label() -> None:
 
 @pytest.mark.unit
 def test_iter_categories_all() -> None:
-    """`iter_categories()` 기본은 active_only=True (144건 모두 active)."""
+    """`iter_categories()` 기본은 active_only=True (145건 모두 active)."""
     all_categories = list(iter_categories())
-    assert len(all_categories) == 144
+    assert len(all_categories) == 145
 
 
 @pytest.mark.unit
 def test_iter_categories_by_depth() -> None:
-    """`iter_categories(depth=3)` Tier 3만 (73건)."""
+    """`iter_categories(depth=3)` Tier 3만 (74건)."""
     tier3 = list(iter_categories(depth=3))
-    assert len(tier3) == 73
+    assert len(tier3) == 74
     for c in tier3:
         assert c.depth == 3
 

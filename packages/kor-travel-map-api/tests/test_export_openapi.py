@@ -66,6 +66,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/nearby/by-target",
         "/v1/features/search",
         "/v1/features/{feature_id}",
+        "/v1/features/{feature_id}/observations/{source_entity_key}/history",
         "/v1/features/{feature_id}/price",
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/forecast",
@@ -80,6 +81,10 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/public/festivals/{feature_id}",
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
+        "/v1/curations",
+        "/v1/curations/collections",
+        "/v1/curations/collections/{collection_id}",
+        "/v1/curations/features/{feature_id}",
     }
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
@@ -90,6 +95,10 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "CuratedFeatureView" in schemas
+    assert "FeatureObservationHistoryResponse" in schemas
+    assert "FeatureCurationGroupsResponse" in schemas
+    assert "CurationCollectionResponse" in schemas
+    assert "FeatureCurationGroupResponse" in schemas
     assert "CuratedFeatureDetailSnapshotView" not in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas

@@ -37,6 +37,7 @@ async def _insert_feature(
     updated_at: datetime = _FETCHED,
 ) -> None:
     source_record_key = f"src:{feature_id}"
+    source_entity_key = f"entity:{feature_id}"
     await session.execute(
         text(
             """
@@ -69,18 +70,42 @@ async def _insert_feature(
     await session.execute(
         text(
             """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider, dataset_key, source_entity_type,
+                source_entity_id, first_seen_at, last_seen_at
+            )
+            VALUES (
+                :source_entity_key, :provider, :dataset_key, 'place',
+                :feature_id, :fetched_at, :fetched_at
+            )
+            """
+        ),
+        {
+            "source_entity_key": source_entity_key,
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "feature_id": feature_id,
+            "fetched_at": _FETCHED,
+        },
+    )
+    await session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_records (
-                source_record_key, provider, dataset_key, source_entity_type,
+                source_record_key, source_entity_key,
+                provider, dataset_key, source_entity_type,
                 source_entity_id, raw_payload_hash, fetched_at
             )
             VALUES (
-                :source_record_key, :provider, :dataset_key, 'place',
+                :source_record_key, :source_entity_key,
+                :provider, :dataset_key, 'place',
                 :feature_id, :raw_payload_hash, :fetched_at
             )
             """
         ),
         {
             "source_record_key": source_record_key,
+            "source_entity_key": source_entity_key,
             "provider": provider,
             "dataset_key": dataset_key,
             "feature_id": feature_id,
@@ -91,17 +116,30 @@ async def _insert_feature(
     await session.execute(
         text(
             """
+            UPDATE provider_sync.source_entities
+            SET current_source_record_key = :source_record_key
+            WHERE source_entity_key = :source_entity_key
+            """
+        ),
+        {
+            "source_record_key": source_record_key,
+            "source_entity_key": source_entity_key,
+        },
+    )
+    await session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_links (
-                feature_id, source_record_key, source_role,
+                feature_id, source_entity_key, source_role,
                 match_method, confidence, is_primary_source
             )
             VALUES (
-                :feature_id, :source_record_key, 'primary',
+                :feature_id, :source_entity_key, 'primary',
                 'natural_key', 100, true
             )
             """
         ),
-        {"feature_id": feature_id, "source_record_key": source_record_key},
+        {"feature_id": feature_id, "source_entity_key": source_entity_key},
     )
     await session.flush()
 

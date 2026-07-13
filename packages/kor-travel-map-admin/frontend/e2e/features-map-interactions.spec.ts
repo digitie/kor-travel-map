@@ -21,6 +21,12 @@ type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 type FeaturePriceResponse = components["schemas"]["FeaturePriceResponse"];
+type AdminFeatureDetailData = components["schemas"]["AdminFeatureDetailData"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureDetailSourceRecord =
+  components["schemas"]["AdminFeatureDetailSourceRecord"];
+type CurationItemView = components["schemas"]["AdminCurationItemView"];
 
 const FEATURE_ID = "mock-provider::mock-dataset::seoul-place-1";
 const MOCK_NAME = "Seoul Mock Place";
@@ -82,6 +88,18 @@ function makeFeaturesInBoundsResponse(
 }
 
 async function setMapZoom(page: Page, zoom: number) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          return Boolean(container?._maplibreMap);
+        }),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
   await page.evaluate((nextZoom) => {
     const container = document.querySelector(
       '[data-testid="map-canvas-container"]',
@@ -113,6 +131,114 @@ function makeFeatureDetailEnvelope(
   detail: FeatureDetailResponse = makeFeatureDetail(),
 ): FeatureDetailEnvelopeResponse {
   return { data: detail, meta: makeMeta({ request_id: "e2e-feature-detail" }) };
+}
+
+function makeAdminSource(
+  overrides: Partial<AdminFeatureDetailSourceRecord> = {},
+): AdminFeatureDetailSourceRecord {
+  return {
+    confidence: 0.97,
+    dataset_key: "admin-dataset",
+    expires_at: null,
+    fetched_at: MOCK_UPDATED_AT,
+    imported_at: MOCK_UPDATED_AT,
+    is_primary_source: true,
+    last_seen_at: MOCK_UPDATED_AT,
+    linked_at: MOCK_UPDATED_AT,
+    match_method: "natural_key",
+    provider: "admin-provider",
+    raw_address: "세종대로 110",
+    raw_data: { admin_source_marker: "admin-source-visible" },
+    raw_latitude: 37.5665,
+    raw_longitude: 126.978,
+    raw_name: MOCK_NAME,
+    raw_payload_hash: "admin-map-source-hash",
+    source_entity_id: "admin-map-entity",
+    source_entity_key: "admin-provider::admin-dataset::admin-map-entity",
+    source_entity_type: "place",
+    source_record_key: "admin-provider::admin-dataset::admin-map-record",
+    source_role: "secondary",
+    source_version: "v2",
+    ...overrides,
+  };
+}
+
+function makeAdminCuration(
+  overrides: Partial<CurationItemView> = {},
+): CurationItemView {
+  return {
+    address: { road: "세종대로 110" },
+    address_hint: "서울 중구",
+    archived_at: null,
+    collection_id: "admin-map-collection-id",
+    collection_key: "admin-map-only-collection",
+    created_at: MOCK_UPDATED_AT,
+    created_by: "e2e-admin",
+    curation_item_id: "admin-map-curation-item",
+    curation_relation: "primary_stop",
+    dataset_key: "admin-dataset",
+    edition_key: "2026",
+    external_item_id: "admin-map-official-item",
+    feature_category: "01070300",
+    feature_id: FEATURE_ID,
+    feature_kind: "place",
+    feature_name: MOCK_NAME,
+    item_summary: "admin-only map membership summary",
+    item_title: "Admin-only map membership",
+    lat: 37.5665,
+    lon: 126.978,
+    metadata: { visibility: "admin_only" },
+    place_name: MOCK_NAME,
+    provider: "admin-provider",
+    reuse_policy: "manual_review",
+    sort_order: 9,
+    source_name: "Admin map source",
+    source_record_key: "admin-provider::admin-dataset::admin-map-record",
+    source_url: "https://example.test/admin-map-source",
+    status: "candidate",
+    theme_group: "admin map group",
+    theme_name: "Admin map theme",
+    theme_slug: "admin-map-theme",
+    title: "Admin-only map collection",
+    updated_at: MOCK_UPDATED_AT,
+    updated_by: "e2e-admin",
+    ...overrides,
+  };
+}
+
+function makeAdminFeatureDetailResponse(
+  overrides: Partial<AdminFeatureDetailData> = {},
+): AdminFeatureDetailResponse {
+  return {
+    data: {
+      change_requests: [],
+      curations: [makeAdminCuration()],
+      feature: {
+        address: { road: "세종대로 110" },
+        category: "01070300",
+        created_at: MOCK_UPDATED_AT,
+        data_origin: "provider",
+        data_version: 1,
+        detail: { source: "e2e-admin-mock" },
+        feature_id: FEATURE_ID,
+        kind: "place",
+        lat: 37.5665,
+        lon: 126.978,
+        name: MOCK_NAME,
+        raw_refs: [],
+        status: "active",
+        updated_at: MOCK_UPDATED_AT,
+        urls: {},
+      },
+      files: [],
+      issues: [],
+      overrides: [],
+      sources: [makeAdminSource()],
+      versions: [],
+      ...overrides,
+    },
+    meta: makeMeta({ request_id: "e2e-admin-feature-detail" }),
+  };
 }
 
 function makeFeatureWeatherResponse(): FeatureWeatherResponse {
@@ -173,6 +299,10 @@ interface FeaturesRouteOptions {
   listStatus?: number;
   /** 5xx 본문은 envelope이 아니라 plain text(ApiClientError가 response.text() 사용). */
   listErrorBody?: string;
+  /** admin 단건 상세 응답 override. */
+  adminDetail?: AdminFeatureDetailResponse;
+  /** admin 단건 상세 실패 상태. */
+  adminDetailStatus?: number;
 }
 
 /**
@@ -187,6 +317,7 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     list: 0,
     cluster: 0,
     detail: 0,
+    adminDetail: 0,
     price: 0,
     weather: 0,
     /** list 쿼리마다 url.searchParams.getAll("kind") 기록 — 마지막 요청 shape 검증용. */
@@ -196,6 +327,19 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     /** route/area geometry 요청 여부 기록. */
     listIncludeGeometry: [] as string[],
   };
+
+  await page.route("**/v1/admin/features/**", async (route) => {
+    requests.adminDetail += 1;
+    if (options.adminDetailStatus && options.adminDetailStatus >= 400) {
+      await fulfillJson(
+        route,
+        { detail: "admin feature 상세 실패" },
+        options.adminDetailStatus,
+      );
+      return;
+    }
+    await fulfillJson(route, options.adminDetail ?? makeAdminFeatureDetailResponse());
+  });
 
   await page.route("**/v1/features**", async (route) => {
     const request = route.request();
@@ -305,7 +449,7 @@ test.describe("/features map interactions", () => {
 
     // 가상화 테이블 → 명시 role=table + aria-label로 한정(native role 죽음). 4종 columnheader.
     const table = page.getByRole("table", { name: "이름순 feature" });
-    for (const column of ["name", "kind", "status", "coord"]) {
+    for (const column of ["이름", "종류", "상태", "좌표"]) {
       await expect(
         table.getByRole("columnheader", { name: column }),
       ).toBeVisible();
@@ -390,12 +534,22 @@ test.describe("/features map interactions", () => {
           ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
           const map = container?._maplibreMap;
           if (!map) return null;
-          const sourceFeatures = map.querySourceFeatures(sourceId);
+          const source = map.getSource(sourceId) as
+            | import("maplibre-gl").GeoJSONSource
+            | undefined;
+          const serializedData = source?.serialize().data;
+          const featureCount =
+            typeof serializedData === "object" &&
+            serializedData !== null &&
+            "features" in serializedData &&
+            Array.isArray(serializedData.features)
+              ? serializedData.features.length
+              : map.querySourceFeatures(sourceId).length;
           return {
             hasRouteLayer: Boolean(map.getLayer(routeLayerId)),
             hasAreaLayer: Boolean(map.getLayer(areaLayerId)),
-            sourceLoaded: Boolean(map.getSource(sourceId)),
-            featureCount: sourceFeatures.length,
+            sourceLoaded: Boolean(source),
+            featureCount,
           };
         }, evalArgs),
       )
@@ -464,7 +618,7 @@ test.describe("/features map interactions", () => {
 
     // name 셀의 Link는 stopPropagation이라 row onRowClick을 막는다 → 비-Link 영역(status 셀)을
     // 클릭해 setSelectedFeatureId를 발화시킨다.
-    await row.getByRole("cell", { name: "active" }).click();
+    await row.getByRole("cell", { name: "활성" }).click();
 
     // '지도' 탭으로 전환 → 상세 패널 노출. CardDescription에 선택 feature_id(mono) 표시.
     await page.getByRole("tab", { name: "지도" }).click();
@@ -478,14 +632,43 @@ test.describe("/features map interactions", () => {
     await expect(
       panel.getByRole("heading", { level: 2, name: MOCK_NAME }),
     ).toBeVisible();
-    await expect(panel.getByText("place", { exact: true })).toBeVisible();
-    await expect(panel.getByText("active", { exact: true })).toBeVisible();
+    await expect(
+      panel.locator('[data-slot="badge"]').filter({ hasText: /^place$/ }).first(),
+    ).toBeVisible();
+    await expect(
+      panel.locator('[data-slot="badge"]').filter({ hasText: /^활성$/ }).first(),
+    ).toBeVisible();
     await expect(panel.getByRole("link", { name: "상세 열기" })).toBeVisible();
+    await expect.poll(() => requests.adminDetail).toBeGreaterThanOrEqual(1);
+    const associations = panel.getByTestId("feature-associations");
+    await expect(associations.getByText("Admin-only map collection")).toBeVisible();
+    await expect(associations.getByText("admin-provider").first()).toBeVisible();
+    await associations.getByText("membership 전체 정보").click();
+    await expect(associations.getByText("admin-map-only-collection")).toBeVisible();
 
     // '닫기' → setSelectedFeatureId(null) → 패널 hidden.
     // (NOTE: marker(WebGL canvas) 클릭 기반 선택은 의도적으로 out-of-scope — uncertainties.)
     await panel.getByRole("button", { name: "닫기" }).click();
     await expect(page.getByTestId("feature-detail-panel")).toBeHidden();
+  });
+
+  test("admin 상세 실패를 source 없음으로 숨기지 않고 오류로 표시", async ({ page }) => {
+    const requests = await mockFeatureRoutes(page, { adminDetailStatus: 500 });
+
+    await page.goto("/features");
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
+    await page.getByRole("tab", { name: "테이블" }).click();
+    const row = page
+      .getByRole("table", { name: "이름순 feature" })
+      .getByRole("row", { name: new RegExp(MOCK_NAME) });
+    await row.getByRole("cell", { name: "활성" }).click();
+    await page.getByRole("tab", { name: "지도" }).click();
+
+    const panel = page.getByTestId("feature-detail-panel");
+    await expect(panel.getByText("admin 연결 정보 조회 실패")).toBeVisible();
+    await expect(panel.getByText("조회 실패", { exact: true }).first()).toBeVisible();
+    await expect(panel.getByText("연결된 큐레이션이 없습니다.")).toHaveCount(0);
   });
 
   test("price feature — 마커 현재 가격과 우측 price 패널 표시", async ({
@@ -598,7 +781,7 @@ test.describe("/features map interactions", () => {
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
 
     // list가 items=[]로 200 → 헤더 status Badge가 '0건 표시'(items.length ?? 0).
-    await expect(page.getByText("0건 표시")).toBeVisible();
+    await expect(page.getByText("0건 표시").first()).toBeVisible();
 
     // '테이블' 탭 → DataTable이 emptyMessage='표시할 feature가 없습니다.' 렌더.
     await page.getByRole("tab", { name: "테이블" }).click();

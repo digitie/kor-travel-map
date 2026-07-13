@@ -6,7 +6,6 @@ import {
   ExternalLinkIcon,
   ListIcon,
   MapIcon,
-  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -20,15 +19,12 @@ import {
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
 import {
-  useAdminCuratedFeature,
-  useAdminCuratedFeatures,
-  useAdminCuratedSources,
-  useAdminCuratedThemes,
-  type CuratedFeature,
-} from "@/api/curated";
+  usePublicCurationCollections,
+  usePublicCurationGroups,
+  type PublicCurationGroup,
+  type PublicCurationItem,
+} from "@/api/public-curations";
 import { AdminShell } from "@/components/admin-shell";
-import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
-import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,23 +36,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  ComboboxMultiple,
-  type ComboboxMultipleOption,
-} from "@/components/ui/combobox-multiple";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   type ClusterFeatureInput,
   VWorldFeatureClusters,
   VWorldMapView,
 } from "@/components/vworld-map-view";
-import { formatDateTime, shortId } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { shortId } from "@/lib/format";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT, type FeatureViewMode, type MapViewport } from "@/state/map";
 
@@ -82,76 +72,170 @@ function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
-function curatedFeatureHref(curatedFeatureId: string): string {
-  return `/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`;
-}
-
-function coordLabel(feature: CuratedFeature): string {
-  return typeof feature.lon === "number" && typeof feature.lat === "number"
-    ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
+function coordLabel(group: PublicCurationGroup): string {
+  const { lon, lat } = group.feature;
+  return typeof lon === "number" && typeof lat === "number"
+    ? `${lon.toFixed(5)}, ${lat.toFixed(5)}`
     : "없음";
 }
 
-function titleLabel(feature: CuratedFeature): string {
-  return feature.display_title ?? "제목 없음";
+function addressLabel(address: Record<string, unknown>): string {
+  const preferredKeys = [
+    "road_address",
+    "roadAddress",
+    "address",
+    "jibun_address",
+    "full_address",
+  ];
+  for (const key of preferredKeys) {
+    const value = address[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  const strings = Object.values(address).filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  return strings.join(" ") || "없음";
 }
 
-function sourceLabel(feature: CuratedFeature): string {
-  return `${feature.source_name} · ${feature.provider}/${feature.dataset_key}`;
+function sourceLabel(item: PublicCurationItem): string {
+  const parts = [item.source_name, item.provider, item.dataset_key].filter(
+    (value): value is string => Boolean(value),
+  );
+  return parts.join(" · ") || "출처 없음";
 }
 
-function toClusterFeature(feature: CuratedFeature): ClusterFeatureInput {
+function itemTitle(item: PublicCurationItem): string {
+  return item.item_title || item.title;
+}
+
+function toClusterFeature(group: PublicCurationGroup): ClusterFeatureInput {
   return {
-    feature_id: feature.curated_feature_id,
-    name: feature.feature_name,
-    kind: feature.feature_kind,
-    category: feature.feature_category,
-    lon: feature.lon ?? null,
-    lat: feature.lat ?? null,
+    feature_id: group.feature.feature_id,
+    name: group.feature.name,
+    kind: group.feature.kind,
+    category: group.feature.category,
+    lon: group.feature.lon,
+    lat: group.feature.lat,
     marker_icon: null,
     marker_color: null,
     geometry: null,
   };
 }
 
-function CuratedDetailPanel({
-  curatedFeatureId,
-  fallback,
+function MembershipCard({ item }: { item: PublicCurationItem }) {
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border p-3"
+      data-testid="curation-membership"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">{item.theme_name}</Badge>
+        {item.edition_key ? <Badge variant="outline">{item.edition_key}</Badge> : null}
+        <Badge variant="outline">{item.status}</Badge>
+      </div>
+      <div>
+        <p className="font-medium">{itemTitle(item)}</p>
+        {item.item_title && item.item_title !== item.title ? (
+          <p className="text-xs text-muted-foreground">컬렉션: {item.title}</p>
+        ) : null}
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">테마</dt>
+        <dd>{item.theme_name} ({item.theme_slug})</dd>
+        <dt className="text-muted-foreground">출처</dt>
+        <dd>
+          {item.source_url ? (
+            <a
+              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+              href={item.source_url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {sourceLabel(item)}
+              <ExternalLinkIcon className="size-3" />
+            </a>
+          ) : (
+            sourceLabel(item)
+          )}
+        </dd>
+        <dt className="text-muted-foreground">항목 ID</dt>
+        <dd className="break-all font-mono">{item.external_item_id}</dd>
+        <dt className="text-muted-foreground">관계</dt>
+        <dd>{item.curation_relation}</dd>
+      </dl>
+      {item.item_summary ? (
+        <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+          {item.item_summary}
+        </p>
+      ) : null}
+      <details>
+        <summary className="cursor-pointer text-xs text-muted-foreground">
+          membership 전체 정보
+        </summary>
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          <dt className="text-muted-foreground">collection_key</dt>
+          <dd className="break-all font-mono">{item.collection_key}</dd>
+          <dt className="text-muted-foreground">collection_id</dt>
+          <dd className="break-all font-mono">{item.collection_id}</dd>
+          <dt className="text-muted-foreground">curation_item_id</dt>
+          <dd className="break-all font-mono">{item.curation_item_id}</dd>
+          <dt className="text-muted-foreground">theme</dt>
+          <dd>{item.theme_group} · {item.theme_slug}</dd>
+          <dt className="text-muted-foreground">source_record_key</dt>
+          <dd className="break-all font-mono">{item.source_record_key ?? "-"}</dd>
+          <dt className="text-muted-foreground">place_name</dt>
+          <dd>{item.place_name || "-"}</dd>
+          <dt className="text-muted-foreground">address_hint</dt>
+          <dd>{item.address_hint ?? "-"}</dd>
+          <dt className="text-muted-foreground">relation</dt>
+          <dd>{item.curation_relation}</dd>
+          <dt className="text-muted-foreground">reuse_policy</dt>
+          <dd>{item.reuse_policy}</dd>
+          <dt className="text-muted-foreground">sort_order</dt>
+          <dd>{item.sort_order}</dd>
+          <dt className="text-muted-foreground">created_at</dt>
+          <dd>{item.created_at}</dd>
+          <dt className="text-muted-foreground">updated_at</dt>
+          <dd>{item.updated_at}</dd>
+          <dt className="text-muted-foreground">archived_at</dt>
+          <dd>{item.archived_at ?? "-"}</dd>
+        </dl>
+        <div className="mt-2 text-xs font-medium">metadata</div>
+        <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
+          {JSON.stringify(item.metadata, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function CurationGroupDetailPanel({
+  group,
   onClose,
 }: {
-  curatedFeatureId: string;
-  fallback: CuratedFeature | null;
+  group: PublicCurationGroup;
   onClose: () => void;
 }) {
-  const detail = useAdminCuratedFeature(curatedFeatureId);
-  const feature = detail.data?.data ?? fallback;
-
   return (
-    <Card className="absolute right-3 top-3 z-10 max-h-[calc(100%-1.5rem)] w-[min(26rem,calc(100%-1.5rem))] overflow-auto shadow-lg">
+    <Card
+      className="absolute right-3 top-3 z-10 max-h-[calc(100%-1.5rem)] w-[min(28rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
+      data-testid="curation-group-detail"
+    >
       <CardHeader className="grid-cols-[1fr_auto]">
         <div>
-          <CardTitle>선택 Curated Feature</CardTitle>
-          <CardDescription className="break-all font-mono">
-            {curatedFeatureId}
+          <CardTitle>{group.feature.name}</CardTitle>
+          <CardDescription>
+            큐레이션 소속 {group.curations.length}건
           </CardDescription>
         </div>
         <div className="flex items-center gap-1">
           <Link
-            aria-label="curated 상세 열기"
-            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
-            href={curatedFeatureHref(curatedFeatureId)}
+            aria-label="feature 상세 열기"
+            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+            href={featureDetailHref(group.feature.feature_id)}
           >
             <ExternalLinkIcon />
           </Link>
-          {feature ? (
-            <Link
-              aria-label="feature 상세 열기"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
-              href={featureDetailHref(feature.feature_id)}
-            >
-              <SparklesIcon />
-            </Link>
-          ) : null}
           <Button
             aria-label="닫기"
             size="icon-sm"
@@ -164,60 +248,30 @@ function CuratedDetailPanel({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {detail.isLoading && !feature ? <Skeleton className="h-48 w-full" /> : null}
-        {detail.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>curated feature 상세 호출 실패</AlertTitle>
-            <AlertDescription>{detail.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {feature ? (
-          <>
-            <div className="flex flex-col gap-2">
-              <h2 className="text-base font-semibold">{feature.feature_name}</h2>
-              <div className="flex flex-wrap gap-2">
-                <Badge>{feature.feature_kind}</Badge>
-                <Badge variant="secondary">{feature.theme_name}</Badge>
-                <Badge title={feature.curation_status} variant="outline">
-                  {statusLabel(feature.curation_status)}
-                </Badge>
-              </div>
-            </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">제목</dt>
-              <dd>{titleLabel(feature)}</dd>
-              <dt className="text-muted-foreground">소스</dt>
-              <dd>{sourceLabel(feature)}</dd>
-              <dt className="text-muted-foreground">coord</dt>
-              <dd className="font-mono">{coordLabel(feature)}</dd>
-              <dt className="text-muted-foreground">feature_id</dt>
-              <dd>
-                <Link
-                  className="break-all font-mono text-primary underline-offset-4 hover:underline"
-                  href={featureDetailHref(feature.feature_id)}
-                >
-                  {shortId(feature.feature_id, 28)}
-                </Link>
-              </dd>
-              <dt className="text-muted-foreground">selected</dt>
-              <dd>{formatDateTime(feature.selected_at)}</dd>
-              <dt className="text-muted-foreground">updated</dt>
-              <dd>{formatDateTime(feature.updated_at)}</dd>
-            </dl>
-            <FeatureKindDetailPanel
-              compact
-              feature={{
-                feature_id: feature.feature_id,
-                kind: feature.feature_kind,
-                name: feature.feature_name,
-                category: feature.feature_category,
-                detail: feature.detail,
-                updated_at: feature.updated_at,
-              }}
-              featureId={feature.feature_id}
-            />
-          </>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Badge>{group.feature.kind}</Badge>
+          <Badge variant="outline">{group.feature.category}</Badge>
+        </div>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">주소</dt>
+          <dd>{addressLabel(group.feature.address)}</dd>
+          <dt className="text-muted-foreground">좌표</dt>
+          <dd className="font-mono">{coordLabel(group)}</dd>
+          <dt className="text-muted-foreground">feature_id</dt>
+          <dd className="break-all font-mono">
+            <Link
+              className="text-primary underline-offset-4 hover:underline"
+              href={featureDetailHref(group.feature.feature_id)}
+            >
+              {group.feature.feature_id}
+            </Link>
+          </dd>
+        </dl>
+        <div className="flex flex-col gap-2">
+          {group.curations.map((item) => (
+            <MembershipCard item={item} key={item.curation_item_id} />
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
@@ -227,34 +281,25 @@ export function CuratedFeatureMapClient() {
   const [viewport, setViewport] = useState<MapViewport>(DEFAULT_VIEWPORT);
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [viewMode, setViewMode] = useState<FeatureViewMode>("map");
-  const [selectedCuratedId, setSelectedCuratedId] = useState<string | null>(null);
-  const [poiName, setPoiName] = useState("");
-  const [themeId, setThemeId] = useState("");
-  const [displayTitles, setDisplayTitles] = useState<string[]>([]);
-  const [sourceId, setSourceId] = useState("");
-  const deferredPoiName = useDeferredValue(poiName);
+  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [themeSlug, setThemeSlug] = useState("");
+  const [editionKey, setEditionKey] = useState("");
+  const [provider, setProvider] = useState("");
+  const deferredSearch = useDeferredValue(search);
 
-  const themes = useAdminCuratedThemes({ limit: 500 });
-  const sources = useAdminCuratedSources({ limit: 500 });
-  const titleOptionsQuery = useAdminCuratedFeatures({
-    curation_status: "curated",
-    page_size: 200,
-  });
-
-  const featuresQuery = useAdminCuratedFeatures({
-    ...(bbox ?? {}),
-    curation_status: "curated",
-    feature_name: deferredPoiName.trim() || undefined,
-    theme_id: themeId || undefined,
-    display_titles: displayTitles.length > 0 ? displayTitles : undefined,
-    source_id: sourceId || undefined,
-    include_archived: false,
-    page_size: 200,
-    // 지도는 물리 feature당 마커 1개 — REST API가 rank_score 최고 큐레이션 1건만
-    // 반환하도록 dedup을 위임한다(cross-theme 중복 제거). 아래 clusterItems의
-    // 클라이언트 dedup은 방어선으로 유지.
-    distinct_by_feature: true,
-  });
+  const collectionsQuery = usePublicCurationCollections();
+  const groupsQuery = usePublicCurationGroups(
+    {
+      ...(bbox ?? {}),
+      q: deferredSearch.trim() || undefined,
+      theme_slug: themeSlug || undefined,
+      edition_key: editionKey || undefined,
+      provider: provider || undefined,
+      page_size: 500,
+    },
+    { enabled: bbox !== null },
+  );
 
   const updateViewportFromMap = useCallback((map: MapLibreMap) => {
     const center = map.getCenter();
@@ -262,83 +307,101 @@ export function CuratedFeatureMapClient() {
     setBbox(boundsToBbox(map.getBounds()));
   }, []);
 
-  const curatedItems = useMemo(
-    () => featuresQuery.data?.data.items ?? [],
-    [featuresQuery.data],
-  );
-  const clusterItems = useMemo(() => {
-    // 같은 물리 feature가 여러 큐레이션 엔트리(테마·소스 등)로 잡히면 좌표가 같아
-    // 지도에 마커가 겹쳐 중복으로 보인다("고불개 해변" 사례). 지도에서는 물리 feature당
-    // 한 번만 그린다(가장 최근 큐레이션 엔트리 유지 — 목록은 cf.updated_at DESC 정렬).
-    const byFeature = new Map<string, ClusterFeatureInput>();
-    for (const item of curatedItems) {
-      if (!byFeature.has(item.feature_id)) {
-        byFeature.set(item.feature_id, toClusterFeature(item));
-      }
+  const groups = useMemo(() => groupsQuery.data?.data.items ?? [], [groupsQuery.data]);
+  const clusterItems = useMemo(() => groups.map(toClusterFeature), [groups]);
+  const selectedGroup =
+    groups.find((group) => group.feature.feature_id === selectedFeatureId) ?? null;
+
+  const filterOptions = useMemo(() => {
+    const collections = collectionsQuery.data?.data.items ?? [];
+    const themes = new Map<string, string>();
+    const editions = new Set<string>();
+    const providers = new Set<string>();
+    for (const collection of collections) {
+      themes.set(collection.theme_slug, collection.theme_name);
+      if (collection.edition_key) editions.add(collection.edition_key);
+      if (collection.provider) providers.add(collection.provider);
     }
-    return Array.from(byFeature.values());
-  }, [curatedItems]);
-  const selectedFeature =
-    curatedItems.find((item) => item.curated_feature_id === selectedCuratedId) ??
-    null;
-
-  const titleOptions = useMemo<ComboboxMultipleOption[]>(() => {
-    const titles = new Set(
-      (titleOptionsQuery.data?.data.items ?? [])
-        .map((item) => item.display_title)
-        .filter((value): value is string => Boolean(value)),
-    );
-    for (const title of displayTitles) titles.add(title);
-    return Array.from(titles)
-      .sort((a, b) => a.localeCompare(b, "ko"))
-      .map((title) => ({ value: title, label: title }));
-  }, [displayTitles, titleOptionsQuery.data]);
-
-  const sourceOptions = sources.data?.data.items ?? [];
-  const themeOptions = themes.data?.data.items ?? [];
+    return {
+      themes: Array.from(themes, ([value, label]) => ({ value, label })).sort((a, b) =>
+        a.label.localeCompare(b.label, "ko"),
+      ),
+      editions: Array.from(editions).sort((a, b) => b.localeCompare(a, "ko")),
+      providers: Array.from(providers).sort((a, b) => a.localeCompare(b, "ko")),
+    };
+  }, [collectionsQuery.data]);
 
   const [tableSorting, setTableSorting] = useState<SortingState>([
     { id: "feature_name", desc: false },
   ]);
-  const columns = useMemo<ColumnDef<CuratedFeature, unknown>[]>(
+  const columns = useMemo<ColumnDef<PublicCurationGroup, unknown>[]>(
     () => [
       {
-        accessorKey: "feature_name",
+        id: "feature_name",
+        accessorFn: (group) => group.feature.name,
         header: "POI명",
         sortingFn: (rowA, rowB) =>
-          rowA.original.feature_name.localeCompare(
-            rowB.original.feature_name,
-            "ko",
-          ),
+          rowA.original.feature.name.localeCompare(rowB.original.feature.name, "ko"),
         cell: ({ row }) => (
           <div className="max-w-[22rem] whitespace-normal">
             <Link
               className="font-medium text-primary underline-offset-4 hover:underline"
-              href={featureDetailHref(row.original.feature_id)}
+              href={featureDetailHref(row.original.feature.feature_id)}
               onClick={(event) => event.stopPropagation()}
             >
-              {row.original.feature_name}
+              {row.original.feature.name}
             </Link>
             <div className="break-all font-mono text-xs text-muted-foreground">
-              {shortId(row.original.feature_id, 18)}
+              {shortId(row.original.feature.feature_id, 18)}
             </div>
           </div>
         ),
       },
       {
-        accessorKey: "theme_name",
+        id: "curation_count",
+        accessorFn: (group) => group.curations.length,
+        header: "소속",
+        cell: ({ row }) => `${row.original.curations.length}건`,
+      },
+      {
+        id: "themes",
         header: "테마",
-        cell: ({ row }) => <Badge variant="secondary">{row.original.theme_name}</Badge>,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex max-w-64 flex-wrap gap-1">
+            {Array.from(new Set(row.original.curations.map((item) => item.theme_name))).map(
+              (theme) => (
+                <Badge key={theme} variant="secondary">{theme}</Badge>
+              ),
+            )}
+          </div>
+        ),
       },
       {
-        accessorKey: "display_title",
-        header: "제목",
-        cell: ({ row }) => titleLabel(row.original),
+        id: "collections",
+        header: "컬렉션 / 연도",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="max-w-72 space-y-1 whitespace-normal text-sm">
+            {row.original.curations.map((item) => (
+              <div key={item.curation_item_id}>
+                {item.title}{item.edition_key ? ` · ${item.edition_key}` : ""}
+              </div>
+            ))}
+          </div>
+        ),
       },
       {
-        accessorKey: "source_name",
+        id: "sources",
         header: "데이터소스",
-        cell: ({ row }) => sourceLabel(row.original),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="max-w-64 space-y-1 whitespace-normal text-xs">
+            {Array.from(new Set(row.original.curations.map(sourceLabel))).map((source) => (
+              <div key={source}>{source}</div>
+            ))}
+          </div>
+        ),
       },
       {
         id: "coord",
@@ -355,30 +418,31 @@ export function CuratedFeatureMapClient() {
   );
 
   const status = useMemo(() => {
-    if (featuresQuery.isLoading) return "curated feature 로딩 중";
-    if (featuresQuery.isError) return "curated feature 호출 실패";
-    const count = featuresQuery.data?.data.items.length ?? 0;
-    return featuresQuery.isFetching ? `${count}건 표시 · 갱신 중` : `${count}건 표시`;
-  }, [featuresQuery]);
+    if (bbox === null) return "지도 범위 준비 중";
+    if (groupsQuery.isLoading) return "큐레이션 그룹 로딩 중";
+    if (groupsQuery.isError) return "큐레이션 그룹 호출 실패";
+    const count = groups.length;
+    const pages = groupsQuery.data?.pages_loaded ?? 0;
+    return groupsQuery.isFetching
+      ? `${count}곳 · ${pages}페이지 누적 · 갱신 중`
+      : `${count}곳 · ${pages}페이지 전체 반영`;
+  }, [bbox, groups, groupsQuery]);
 
   const clearSelectionAnd = (action: () => void) => {
     action();
-    setSelectedCuratedId(null);
+    setSelectedFeatureId(null);
   };
 
   return (
     <AdminShell
       actions={
         <>
-          <Link
-            className={buttonVariants({ variant: "outline" })}
-            href="/features"
-          >
+          <Link className={buttonVariants({ variant: "outline" })} href="/features">
             Feature 지도
           </Link>
           <Link
             className={buttonVariants({ variant: "outline" })}
-            href="/admin/features/curated"
+            href="/admin/curated-features"
           >
             큐레이션 관리
           </Link>
@@ -390,71 +454,75 @@ export function CuratedFeatureMapClient() {
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
         <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 xl:flex-row xl:items-center">
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Badge variant="secondary">Curated 지도</Badge>
-            <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
+            <Badge variant="secondary">Feature 그룹 지도</Badge>
+            <Badge variant={groupsQuery.isError ? "destructive" : "outline"}>
               {status}
             </Badge>
           </div>
           <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:justify-end">
             <Input
-              aria-label="POI명 필터"
-              className="w-60 shrink-0"
-              placeholder="POI명"
-              value={poiName}
+              aria-label="POI명 또는 큐레이션 제목 필터"
+              className="w-64 shrink-0"
+              placeholder="POI명, 제목, 테마 검색"
+              value={search}
               onChange={(event) =>
-                clearSelectionAnd(() => setPoiName(event.target.value))
+                clearSelectionAnd(() => setSearch(event.target.value))
               }
             />
             <NativeSelect
               aria-label="테마 필터"
               className="w-52 shrink-0"
-              value={themeId}
+              value={themeSlug}
               onChange={(event) =>
-                clearSelectionAnd(() => setThemeId(event.target.value))
+                clearSelectionAnd(() => setThemeSlug(event.target.value))
               }
             >
               <NativeSelectOption value="">테마 전체</NativeSelectOption>
-              {themeOptions.map((theme) => (
-                <NativeSelectOption key={theme.theme_id} value={theme.theme_id}>
-                  {theme.theme_name}
+              {filterOptions.themes.map((theme) => (
+                <NativeSelectOption key={theme.value} value={theme.value}>
+                  {theme.label}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <ComboboxMultiple
-              className="w-52 shrink-0"
-              label="제목"
-              labelClassName="sr-only"
-              value={displayTitles}
-              options={titleOptions}
-              placeholder="제목 전체"
-              searchPlaceholder="제목 검색"
-              emptyMessage="선택할 제목이 없습니다."
-              onChange={(next) =>
-                clearSelectionAnd(() => setDisplayTitles(next))
-              }
-            />
             <NativeSelect
-              aria-label="데이터소스 필터"
-              className="w-52 shrink-0"
-              value={sourceId}
+              aria-label="연도 필터"
+              className="w-44 shrink-0"
+              value={editionKey}
               onChange={(event) =>
-                clearSelectionAnd(() => setSourceId(event.target.value))
+                clearSelectionAnd(() => setEditionKey(event.target.value))
               }
             >
-              <NativeSelectOption value="">데이터소스 전체</NativeSelectOption>
-              {sourceOptions.map((source) => (
-                <NativeSelectOption key={source.source_id} value={source.source_id}>
-                  {source.source_name}
-                </NativeSelectOption>
+              <NativeSelectOption value="">연도 전체</NativeSelectOption>
+              {filterOptions.editions.map((edition) => (
+                <NativeSelectOption key={edition} value={edition}>{edition}</NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="제공자 필터"
+              className="w-44 shrink-0"
+              value={provider}
+              onChange={(event) =>
+                clearSelectionAnd(() => setProvider(event.target.value))
+              }
+            >
+              <NativeSelectOption value="">제공자 전체</NativeSelectOption>
+              {filterOptions.providers.map((value) => (
+                <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>
               ))}
             </NativeSelect>
           </div>
         </div>
 
-        {featuresQuery.isError ? (
+        {groupsQuery.isError ? (
           <Alert className="m-4" variant="destructive">
-            <AlertTitle>curated feature 호출 실패</AlertTitle>
-            <AlertDescription>{featuresQuery.error.message}</AlertDescription>
+            <AlertTitle>큐레이션 그룹 호출 실패</AlertTitle>
+            <AlertDescription>{groupsQuery.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {collectionsQuery.isError ? (
+          <Alert className="mx-4 mt-4" variant="destructive">
+            <AlertTitle>큐레이션 필터 조회 실패</AlertTitle>
+            <AlertDescription>{collectionsQuery.error.message}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -494,51 +562,54 @@ export function CuratedFeatureMapClient() {
                 >
                   <VWorldFeatureClusters
                     features={clusterItems}
-                    selectedFeatureId={selectedCuratedId}
-                    onSelectFeature={setSelectedCuratedId}
+                    selectedFeatureId={selectedFeatureId}
+                    onSelectFeature={setSelectedFeatureId}
                   />
                 </VWorldMapView>
               </div>
-              {selectedCuratedId ? (
-                <CuratedDetailPanel
-                  curatedFeatureId={selectedCuratedId}
-                  fallback={selectedFeature}
-                  onClose={() => setSelectedCuratedId(null)}
+              {selectedGroup ? (
+                <CurationGroupDetailPanel
+                  group={selectedGroup}
+                  onClose={() => setSelectedFeatureId(null)}
                 />
               ) : null}
             </Card>
           </TabsContent>
 
           <TabsContent value="table">
-            <Card className="h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden">
+            <Card className="relative h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden">
               <CardHeader>
-                <CardTitle>Curated feature</CardTitle>
+                <CardTitle>큐레이션 Feature 그룹</CardTitle>
                 <CardDescription>
-                  현재 지도 범위와 필터에 해당하는 curated feature입니다.
+                  한 행은 한 Feature이며, 관련된 모든 큐레이션 소속을 함께 표시합니다.
                 </CardDescription>
               </CardHeader>
               <CardContent className="min-h-0">
                 <DataTable
                   columns={columns}
-                  data={curatedItems}
-                  getRowId={(feature) => feature.curated_feature_id}
-                  isLoading={featuresQuery.isLoading}
-                  emptyMessage="표시할 curated feature가 없습니다."
-                  onRowClick={(feature) =>
-                    setSelectedCuratedId(feature.curated_feature_id)
-                  }
-                  isRowActive={(feature) =>
-                    feature.curated_feature_id === selectedCuratedId
+                  data={groups}
+                  getRowId={(group) => group.feature.feature_id}
+                  isLoading={groupsQuery.isLoading}
+                  emptyMessage="표시할 큐레이션 Feature가 없습니다."
+                  onRowClick={(group) => setSelectedFeatureId(group.feature.feature_id)}
+                  isRowActive={(group) =>
+                    group.feature.feature_id === selectedFeatureId
                   }
                   sorting={tableSorting}
                   onSortingChange={setTableSorting}
                   manualSorting={false}
                   virtualized
-                  estimateRowSize={52}
+                  estimateRowSize={64}
                   containerClassName="h-[calc(100vh-28rem)] min-h-80"
-                  ariaLabel="Curated feature"
+                  ariaLabel="큐레이션 Feature 그룹"
                 />
               </CardContent>
+              {selectedGroup ? (
+                <CurationGroupDetailPanel
+                  group={selectedGroup}
+                  onClose={() => setSelectedFeatureId(null)}
+                />
+              ) : null}
             </Card>
           </TabsContent>
         </Tabs>

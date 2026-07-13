@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { type ColumnDef } from "@tanstack/react-table";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DataTable } from "./data-table";
 
@@ -113,6 +113,43 @@ describe("DataTable", () => {
       />,
     );
     expect(screen.getAllByTestId("sample-row")).toHaveLength(2);
+  });
+
+  it("clickable rows are focusable and activate with click, Enter, and Space", () => {
+    const onRowClick = vi.fn();
+    render(
+      <DataTable
+        columns={columns}
+        data={data}
+        getRowId={getRowId}
+        onRowClick={onRowClick}
+      />,
+    );
+
+    const row = screen.getByText("베타").closest("tr");
+    expect(row).not.toBeNull();
+    expect(row?.getAttribute("tabindex")).toBe("0");
+    row?.focus();
+    expect(document.activeElement).toBe(row);
+
+    fireEvent.click(row!);
+    fireEvent.keyDown(row!, { key: "Enter" });
+    fireEvent.keyDown(row!, { key: " " });
+
+    expect(onRowClick).toHaveBeenCalledTimes(3);
+    expect(onRowClick).toHaveBeenNthCalledWith(1, data[0]);
+    expect(onRowClick).toHaveBeenNthCalledWith(2, data[0]);
+    expect(onRowClick).toHaveBeenNthCalledWith(3, data[0]);
+  });
+
+  it("rows without onRowClick remain outside the tab order", () => {
+    render(<DataTable columns={columns} data={data} getRowId={getRowId} />);
+
+    const dataRows = screen.getAllByRole("row").slice(1);
+    expect(dataRows).toHaveLength(2);
+    for (const row of dataRows) {
+      expect(row.getAttribute("tabindex")).toBeNull();
+    }
   });
 
   it("getCanSelect predicate disables non-selectable row checkboxes", () => {

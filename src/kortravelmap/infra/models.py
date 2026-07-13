@@ -41,6 +41,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -70,12 +71,15 @@ __all__ = [
     "Base",
     "FeatureRow",
     "FeatureVersionRow",
+    "SourceEntityRow",
     "SourceRecordRow",
     "SourceLinkRow",
     "CuratedThemeRow",
     "CuratedSourceRow",
     "CuratedSourceRuleRow",
     "CuratedFeatureRow",
+    "CurationCollectionRow",
+    "CurationItemRow",
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
@@ -337,8 +341,57 @@ class FeatureVersionRow(Base):
 
 
 # =============================================================================
-# provider_sync.source_records  (docs/architecture/data-model.md §2)
+# provider_sync.source_entities / source_records  (ADR-063)
 # =============================================================================
+
+
+class SourceEntityRow(Base):
+    """Provider 자연 entity와 현재 immutable payload version의 매핑."""
+
+    __tablename__ = "source_entities"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "dataset_key",
+            "source_entity_type",
+            "source_entity_id",
+            name="uq_source_entities_identity",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key", "current_source_record_key"],
+            [
+                "provider_sync.source_records.source_entity_key",
+                "provider_sync.source_records.source_record_key",
+            ],
+            name="fk_source_entities_current_record",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint(
+            "first_seen_at <= last_seen_at",
+            name="seen_order",
+        ),
+        Index(
+            "idx_source_entities_current_record",
+            "current_source_record_key",
+            postgresql_where=text("current_source_record_key IS NOT NULL"),
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    source_entity_key: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    current_source_record_key: Mapped[str | None] = mapped_column(String)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class SourceRecordRow(Base):
@@ -355,6 +408,11 @@ class SourceRecordRow(Base):
             "provider", "dataset_key", "source_entity_type",
             "source_entity_id", "raw_payload_hash",
             name="source_records",
+        ),
+        UniqueConstraint(
+            "source_entity_key",
+            "source_record_key",
+            name="uq_source_records_entity_record",
         ),
         Index(
             "idx_source_records_provider_dataset_entity",
@@ -376,10 +434,26 @@ class SourceRecordRow(Base):
             "idx_source_records_expires_at", "expires_at",
             postgresql_where=text("expires_at IS NOT NULL"),
         ),
+        Index(
+            "idx_source_records_entity_history",
+            "source_entity_key",
+            text("last_seen_at DESC"),
+            text("fetched_at DESC"),
+            text("imported_at DESC"),
+            text("source_record_key DESC"),
+        ),
         {"schema": "provider_sync"},
     )
 
     source_record_key: Mapped[str] = mapped_column(String, primary_key=True)
+    source_entity_key: Mapped[str] = mapped_column(
+        String,
+        ForeignKey(
+            "provider_sync.source_entities.source_entity_key",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
     provider: Mapped[str] = mapped_column(String, nullable=False)
     dataset_key: Mapped[str] = mapped_column(String, nullable=False)
     source_entity_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -411,10 +485,10 @@ class SourceRecordRow(Base):
 
 
 class SourceLinkRow(Base):
-    """``provider_sync.source_links`` row mapping — Feature ↔ SourceRecord N:M.
+    """``provider_sync.source_links`` row mapping — Feature ↔ SourceEntity N:M.
 
-    PK = ``(feature_id, source_record_key)``. ``is_primary_source=True``는
-    Feature당 최대 1건 (partial UNIQUE).
+    PK = ``(feature_id, source_entity_key)``. 한 Feature에 여러 primary entity를
+    연결할 수 있다.
     """
 
     __tablename__ = "source_links"
@@ -430,7 +504,7 @@ class SourceLinkRow(Base):
             name="source_links_confidence",
         ),
         Index(
-            "idx_source_links_record", "source_record_key",
+            "idx_source_links_entity", "source_entity_key",
         ),
         Index(
             "idx_source_links_role", "source_role",
@@ -447,10 +521,10 @@ class SourceLinkRow(Base):
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    source_record_key: Mapped[str] = mapped_column(
+    source_entity_key: Mapped[str] = mapped_column(
         String,
         ForeignKey(
-            "provider_sync.source_records.source_record_key",
+            "provider_sync.source_entities.source_entity_key",
             ondelete="RESTRICT",
         ),
         primary_key=True,
@@ -719,6 +793,7 @@ class CuratedFeatureRow(Base):
             "feature_id",
             unique=True,
             postgresql_where=text("archived_at IS NULL"),
+            postgresql_nulls_not_distinct=True,
         ),
         Index(
             "idx_curated_features_status_keyset",
@@ -801,6 +876,189 @@ class CuratedFeatureRow(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CurationCollectionRow(Base):
+    """테마·제목·회차·공식 출처를 공유하는 큐레이션 묶음."""
+
+    __tablename__ = "curation_collections"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(collection_key) <> ''", name="key"
+        ),
+        CheckConstraint("btrim(title) <> ''", name="title"),
+        CheckConstraint(
+            "status IN ('draft','published','archived')",
+            name="status",
+        ),
+        CheckConstraint(
+            "visibility IN ('admin_only','public')",
+            name="visibility",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name="metadata",
+        ),
+        Index(
+            "idx_curation_collections_theme_status_edition",
+            "theme_id",
+            "status",
+            "edition_key",
+            "collection_id",
+        ),
+        Index(
+            "idx_curation_collections_source_status",
+            "source_id",
+            "status",
+            "collection_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    collection_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    collection_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    theme_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_themes.theme_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_sources.source_id", ondelete="SET NULL"),
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    edition_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'draft'")
+    )
+    visibility: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'admin_only'")
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_by: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CurationItemRow(Base):
+    """기존 Feature가 큐레이션 묶음에 속한다는 membership 한 건."""
+
+    __tablename__ = "curation_items"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(external_item_id) <> ''", name="external_id"
+        ),
+        CheckConstraint("btrim(place_name) <> ''", name="place_name"),
+        CheckConstraint(
+            "status IN ('candidate','included','rejected','archived')",
+            name="status",
+        ),
+        CheckConstraint("sort_order >= 0", name="sort_order"),
+        CheckConstraint(
+            "curation_relation IN ("
+            "'primary_stop','food_stop','cafe_stop','bookstore_stop',"
+            "'nearby_option','accessibility_support','pet_support',"
+            "'family_support','theme_area_anchor'"
+            ")",
+            name="relation",
+        ),
+        CheckConstraint(
+            "reuse_policy IN ('allowed','blocked','manual_review')",
+            name="reuse_policy",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name="metadata",
+        ),
+        Index(
+            "uq_curation_items_active_identity",
+            "collection_id",
+            "external_item_id",
+            "feature_id",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index(
+            "idx_curation_items_collection_status_order",
+            "collection_id",
+            "status",
+            "sort_order",
+            "curation_item_id",
+        ),
+        Index(
+            "idx_curation_items_feature_status_collection",
+            "feature_id",
+            "status",
+            "collection_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    curation_item_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    collection_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curation_collections.collection_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
+    )
+    source_record_key: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key", ondelete="SET NULL"
+        ),
+    )
+    external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    place_name: Mapped[str] = mapped_column(Text, nullable=False)
+    address_hint: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'candidate'")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    item_title: Mapped[str | None] = mapped_column(Text)
+    item_summary: Mapped[str | None] = mapped_column(Text)
+    curation_relation: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'nearby_option'")
+    )
+    reuse_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'manual_review'")
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_by: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

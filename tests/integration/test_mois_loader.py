@@ -204,8 +204,10 @@ async def _active_entity_ids(session: AsyncSession) -> set[str]:
                 "SELECT sr.source_entity_id "
                 "FROM feature.features f "
                 "JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id "
+                "JOIN provider_sync.source_entities se "
+                "  ON se.source_entity_key = sl.source_entity_key "
                 "JOIN provider_sync.source_records sr "
-                "  ON sr.source_record_key = sl.source_record_key "
+                "  ON sr.source_record_key = se.current_source_record_key "
                 "WHERE f.deleted_at IS NULL AND sl.is_primary_source"
             )
         )

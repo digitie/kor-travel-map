@@ -123,14 +123,48 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
     await session.execute(
         text(
             """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider, dataset_key,
+                source_entity_type, source_entity_id,
+                first_seen_at, last_seen_at
+            )
+            SELECT
+                'perf:se:' || lpad(g::text, 6, '0'),
+                CASE
+                  WHEN g % 5 = 0 THEN 'python-mois-api'
+                  WHEN g % 5 = 1 THEN 'python-datagokr-api'
+                  WHEN g % 5 = 2 THEN 'python-visitkorea-api'
+                  WHEN g % 5 = 3 THEN 'python-opinet-api'
+                  ELSE 'python-krheritage-api'
+                END,
+                CASE
+                  WHEN g % 5 = 0 THEN 'mois_license_features_bulk'
+                  WHEN g % 5 = 1 THEN 'standard_tourist_attractions'
+                  WHEN g % 5 = 2 THEN 'visitkorea_festival_events'
+                  WHEN g % 5 = 3 THEN 'opinet_stations'
+                  ELSE 'krheritage_events'
+                END,
+                'perf_entity',
+                lpad(g::text, 6, '0'),
+                now() - (g::text || ' minutes')::interval,
+                now() - (g::text || ' seconds')::interval
+            FROM generate_series(1, :n) AS g
+            """
+        ),
+        {"n": n},
+    )
+    await session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_records (
-                source_record_key, provider, dataset_key,
+                source_record_key, source_entity_key, provider, dataset_key,
                 source_entity_type, source_entity_id,
                 raw_name, raw_address, raw_data, raw_payload_hash,
                 fetched_at, imported_at
             )
             SELECT
                 'perf:sr:' || lpad(g::text, 6, '0'),
+                'perf:se:' || lpad(g::text, 6, '0'),
                 CASE
                   WHEN g % 5 = 0 THEN 'python-mois-api'
                   WHEN g % 5 = 1 THEN 'python-datagokr-api'
@@ -161,13 +195,23 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
     await session.execute(
         text(
             """
+            UPDATE provider_sync.source_entities AS se
+            SET current_source_record_key =
+                'perf:sr:' || right(se.source_entity_key, 6)
+            WHERE se.source_entity_key LIKE 'perf:se:%'
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
             INSERT INTO provider_sync.source_links (
-                feature_id, source_record_key, source_role,
+                feature_id, source_entity_key, source_role,
                 match_method, confidence, is_primary_source, created_at
             )
             SELECT
                 'perf:f:' || lpad(g::text, 6, '0'),
-                'perf:sr:' || lpad(g::text, 6, '0'),
+                'perf:se:' || lpad(g::text, 6, '0'),
                 'primary',
                 'natural_key',
                 100,

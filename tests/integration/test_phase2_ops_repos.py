@@ -15,6 +15,7 @@ from kortravelmap.infra.integrity_violation_repo import (
     list_data_integrity_violations,
     set_data_integrity_violation_status,
 )
+from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetConflict,
     delete_poi_cache_target,
@@ -52,27 +53,34 @@ async def _insert_feature(session: AsyncSession, feature_id: str) -> None:
 
 
 async def _insert_source_record(session: AsyncSession, source_record_key: str) -> None:
-    await session.execute(
-        text(
-            """
-            INSERT INTO provider_sync.source_records (
-                source_record_key, provider, dataset_key, source_entity_type,
-                source_entity_id, raw_payload_hash, fetched_at
-            )
-            VALUES (
-                :source_record_key, 'python-mois-api', 'mois_license_features_bulk',
-                'license', :source_entity_id, :raw_payload_hash,
-                :fetched_at
-            )
-            """
-        ),
-        {
-            "source_record_key": source_record_key,
-            "source_entity_id": source_record_key,
-            "raw_payload_hash": f"hash-{source_record_key}",
-            "fetched_at": _FETCHED,
-        },
+    source_entity_key = f"se:{source_record_key}"
+    entity = SourceEntityRow(
+        source_entity_key=source_entity_key,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        source_entity_type="license",
+        source_entity_id=source_record_key,
+        current_source_record_key=None,
+        first_seen_at=_FETCHED,
+        last_seen_at=_FETCHED,
     )
+    session.add(entity)
+    await session.flush()
+    session.add(
+        SourceRecordRow(
+            source_record_key=source_record_key,
+            source_entity_key=source_entity_key,
+            provider="python-mois-api",
+            dataset_key="mois_license_features_bulk",
+            source_entity_type="license",
+            source_entity_id=source_record_key,
+            raw_payload_hash=f"hash-{source_record_key}",
+            fetched_at=_FETCHED,
+        )
+    )
+    await session.flush()
+    entity.current_source_record_key = source_record_key
+    await session.flush()
 
 
 async def test_provider_refresh_policy_upsert_get_list(
@@ -299,6 +307,13 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert still_resolved.status == "resolved"
     assert still_resolved.resolved_at == resolved.resolved_at
 
+    await migrated_session.execute(
+        text(
+            "UPDATE provider_sync.source_entities "
+            "SET current_source_record_key = NULL "
+            "WHERE current_source_record_key = 'src:violation:1'"
+        )
+    )
     await migrated_session.execute(
         text("DELETE FROM provider_sync.source_records WHERE source_record_key = 'src:violation:1'")
     )

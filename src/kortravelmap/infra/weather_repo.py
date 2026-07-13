@@ -415,7 +415,7 @@ WITH alert_records AS (
         sr.last_seen_at
     FROM provider_sync.source_records AS sr
     LEFT JOIN provider_sync.source_links AS sl
-      ON sl.source_record_key = sr.source_record_key
+      ON sl.source_entity_key = sr.source_entity_key
      AND sl.is_primary_source
     LEFT JOIN feature.features AS f
       ON f.feature_id = sl.feature_id

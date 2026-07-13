@@ -836,6 +836,629 @@
         "title": "CuratedFeaturesResponse",
         "type": "object"
       },
+      "CurationCollectionData": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/CurationCollectionView"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "collection",
+          "items"
+        ],
+        "title": "CurationCollectionData",
+        "type": "object"
+      },
+      "CurationCollectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CurationCollectionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CurationCollectionResponse",
+        "type": "object"
+      },
+      "CurationCollectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "edition_key": {
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_id": {
+            "format": "uuid",
+            "title": "Theme Id",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "admin_only",
+              "public"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection_id",
+          "collection_key",
+          "theme_id",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "source_id",
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url",
+          "title",
+          "edition_key",
+          "description",
+          "status",
+          "visibility",
+          "metadata",
+          "item_count",
+          "created_at",
+          "updated_at",
+          "archived_at"
+        ],
+        "title": "CurationCollectionView",
+        "type": "object"
+      },
+      "CurationCollectionsData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCollectionView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CurationCollectionsData",
+        "type": "object"
+      },
+      "CurationCollectionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CurationCollectionsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CurationCollectionsResponse",
+        "type": "object"
+      },
+      "CurationFeatureView": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "kind",
+          "category",
+          "lon",
+          "lat",
+          "address",
+          "status"
+        ],
+        "title": "CurationFeatureView",
+        "type": "object"
+      },
+      "CurationItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "address_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "curation_relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "edition_key": {
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "external_item_id": {
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "feature_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Category"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "feature_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Kind"
+          },
+          "feature_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Name"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "place_name": {
+            "title": "Place Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "included",
+              "rejected",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_id",
+          "collection_key",
+          "title",
+          "edition_key",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url",
+          "feature_id",
+          "feature_name",
+          "feature_kind",
+          "feature_category",
+          "lon",
+          "lat",
+          "address",
+          "source_record_key",
+          "external_item_id",
+          "place_name",
+          "address_hint",
+          "status",
+          "sort_order",
+          "item_title",
+          "item_summary",
+          "curation_relation",
+          "reuse_policy",
+          "metadata",
+          "created_at",
+          "updated_at",
+          "archived_at"
+        ],
+        "title": "CurationItemView",
+        "type": "object"
+      },
       "FeatureBatchData": {
         "additionalProperties": false,
         "description": "feature batch 상세 data payload.",
@@ -900,6 +1523,83 @@
         "title": "FeatureBatchResponse",
         "type": "object"
       },
+      "FeatureCurationGroupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureCurationGroupView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureCurationGroupResponse",
+        "type": "object"
+      },
+      "FeatureCurationGroupView": {
+        "additionalProperties": false,
+        "properties": {
+          "curation_count": {
+            "title": "Curation Count",
+            "type": "integer"
+          },
+          "curations": {
+            "items": {
+              "$ref": "#/components/schemas/CurationItemView"
+            },
+            "title": "Curations",
+            "type": "array"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/CurationFeatureView"
+          }
+        },
+        "required": [
+          "feature",
+          "curations",
+          "curation_count"
+        ],
+        "title": "FeatureCurationGroupView",
+        "type": "object"
+      },
+      "FeatureCurationGroupsData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureCurationGroupView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureCurationGroupsData",
+        "type": "object"
+      },
+      "FeatureCurationGroupsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureCurationGroupsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureCurationGroupsResponse",
+        "type": "object"
+      },
       "FeatureDetailEnvelopeResponse": {
         "additionalProperties": false,
         "description": "``GET /features/{feature_id}`` public envelope 응답.",
@@ -942,6 +1642,14 @@
           "category": {
             "title": "Category",
             "type": "string"
+          },
+          "curations": {
+            "description": "이 Feature가 속한 공개 큐레이션 membership 전부.",
+            "items": {
+              "$ref": "#/components/schemas/CurationItemView"
+            },
+            "title": "Curations",
+            "type": "array"
           },
           "detail": {
             "additionalProperties": true,
@@ -1015,6 +1723,14 @@
             "title": "Name",
             "type": "string"
           },
+          "observations": {
+            "description": "이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.",
+            "items": {
+              "$ref": "#/components/schemas/FeatureObservationView"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
           "sido_code": {
             "anyOf": [
               {
@@ -1064,6 +1780,232 @@
           "updated_at"
         ],
         "title": "FeatureDetailResponse",
+        "type": "object"
+      },
+      "FeatureObservationHistoryData": {
+        "additionalProperties": false,
+        "description": "provider entity별 immutable payload history data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureObservationView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureObservationHistoryData",
+        "type": "object"
+      },
+      "FeatureObservationHistoryResponse": {
+        "additionalProperties": false,
+        "description": "관측 payload history cursor 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureObservationHistoryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureObservationHistoryResponse",
+        "type": "object"
+      },
+      "FeatureObservationView": {
+        "additionalProperties": false,
+        "description": "한 제공기관 entity의 현재 또는 과거 payload 관측값.",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "entity_last_seen_at": {
+            "format": "date-time",
+            "title": "Entity Last Seen At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "first_seen_at": {
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "is_current": {
+            "title": "Is Current",
+            "type": "boolean"
+          },
+          "is_primary_source": {
+            "title": "Is Primary Source",
+            "type": "boolean"
+          },
+          "linked_at": {
+            "format": "date-time",
+            "title": "Linked At",
+            "type": "string"
+          },
+          "match_method": {
+            "title": "Match Method",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "raw_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Address"
+          },
+          "raw_data": {
+            "additionalProperties": true,
+            "title": "Raw Data",
+            "type": "object"
+          },
+          "raw_latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Latitude"
+          },
+          "raw_longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Longitude"
+          },
+          "raw_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Name"
+          },
+          "raw_payload_hash": {
+            "title": "Raw Payload Hash",
+            "type": "string"
+          },
+          "record_last_seen_at": {
+            "format": "date-time",
+            "title": "Record Last Seen At",
+            "type": "string"
+          },
+          "source_entity_id": {
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_entity_key": {
+            "title": "Source Entity Key",
+            "type": "string"
+          },
+          "source_entity_type": {
+            "title": "Source Entity Type",
+            "type": "string"
+          },
+          "source_record_key": {
+            "title": "Source Record Key",
+            "type": "string"
+          },
+          "source_role": {
+            "title": "Source Role",
+            "type": "string"
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version"
+          }
+        },
+        "required": [
+          "feature_id",
+          "source_entity_key",
+          "provider",
+          "dataset_key",
+          "source_entity_type",
+          "source_entity_id",
+          "first_seen_at",
+          "entity_last_seen_at",
+          "source_record_key",
+          "source_version",
+          "raw_name",
+          "raw_address",
+          "raw_longitude",
+          "raw_latitude",
+          "raw_data",
+          "raw_payload_hash",
+          "fetched_at",
+          "imported_at",
+          "record_last_seen_at",
+          "expires_at",
+          "source_role",
+          "match_method",
+          "confidence",
+          "is_primary_source",
+          "linked_at",
+          "is_current"
+        ],
+        "title": "FeatureObservationView",
         "type": "object"
       },
       "FeaturePriceResponse": {
@@ -3610,7 +4552,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포)",
+        "summary": "PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포)",
         "tags": [
           "categories"
         ]
@@ -3999,6 +4941,525 @@
         "summary": "Get Curated Feature Route",
         "tags": [
           "curated"
+        ]
+      }
+    },
+    "/v1/curations": {
+      "get": {
+        "operationId": "list_public_curation_groups_v1_curations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme_slug",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme Slug"
+            }
+          },
+          {
+            "in": "query",
+            "name": "edition_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Edition Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureCurationGroupsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Public Curation Groups",
+        "tags": [
+          "curations"
+        ]
+      }
+    },
+    "/v1/curations/collections": {
+      "get": {
+        "operationId": "list_public_curation_collections_v1_curations_collections_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "theme_slug",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme Slug"
+            }
+          },
+          {
+            "in": "query",
+            "name": "edition_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Edition Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCollectionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "List Public Curation Collections",
+        "tags": [
+          "curations"
+        ]
+      }
+    },
+    "/v1/curations/collections/{collection_id}": {
+      "get": {
+        "operationId": "get_public_curation_collection_v1_curations_collections__collection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCollectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Public Curation Collection",
+        "tags": [
+          "curations"
+        ]
+      }
+    },
+    "/v1/curations/features/{feature_id}": {
+      "get": {
+        "operationId": "get_public_feature_curations_v1_curations_features__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureCurationGroupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Get Public Feature Curations",
+        "tags": [
+          "curations"
         ]
       }
     },
@@ -5543,6 +7004,115 @@
           }
         },
         "summary": "feature 단건 상세",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/observations/{source_entity_key}/history": {
+      "get": {
+        "operationId": "get_feature_observation_history_v1_features__feature_id__observations__source_entity_key__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_entity_key",
+            "required": true,
+            "schema": {
+              "title": "Source Entity Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureObservationHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 또는 page_size 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "feature 제공기관 payload 관측 이력",
         "tags": [
           "features"
         ]

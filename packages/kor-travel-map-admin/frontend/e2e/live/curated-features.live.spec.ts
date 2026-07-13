@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import * as F from "./_fixtures";
 
 /**
- * LIVE (non-mock) Playwright e2e — /admin/features/curated against prod data
+ * LIVE (non-mock) Playwright e2e — /admin/curated-features against prod data
  * (1.09M features). NON-DESTRUCTIVE only: page.goto, read assertions, and clicks
  * limited to nav links / status & enabled filter selects / page-size select /
  * search typing (GET). No select/unselect/archive/patch/apply/save mutations.
@@ -21,7 +21,7 @@ import * as F from "./_fixtures";
  */
 
 const TIMEOUT = { timeout: 15000 } as const;
-const ROUTE = "/admin/features/curated";
+const ROUTE = "/admin/curated-features";
 const CURATED_REFRESH_SCHEDULE = "curated_features_refresh_daily_schedule";
 const EXPANDED_THEME_LABELS = [
   "봄꽃 여행지",

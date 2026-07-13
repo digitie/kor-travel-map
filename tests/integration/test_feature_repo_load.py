@@ -195,8 +195,12 @@ async def test_load_bundle_inserts_and_roundtrips(
     link = (
         await migrated_session.execute(
             text(
-                "SELECT source_record_key, is_primary_source "
-                "FROM provider_sync.source_links WHERE feature_id = :fid"
+                "SELECT se.current_source_record_key AS source_record_key, "
+                "sl.is_primary_source "
+                "FROM provider_sync.source_links AS sl "
+                "JOIN provider_sync.source_entities AS se "
+                "ON se.source_entity_key = sl.source_entity_key "
+                "WHERE sl.feature_id = :fid"
             ),
             {"fid": bundle.feature.feature_id},
         )
@@ -418,17 +422,45 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
         ("old", "공사 시작", "100", old_seen),
         ("new", "공사 내용 수정", "101", new_seen),
     ):
+        source_entity_id = f"legacy-hash-key-{suffix}"
+        source_entity_key = feature_repo._make_source_entity_key(
+            provider="python-krex-api",
+            dataset_key="krex_traffic_notices",
+            source_entity_type="traffic_notice",
+            source_entity_id=source_entity_id,
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_entities (
+                    source_entity_key, provider, dataset_key,
+                    source_entity_type, source_entity_id,
+                    first_seen_at, last_seen_at
+                ) VALUES (
+                    :source_entity_key, 'python-krex-api', 'krex_traffic_notices',
+                    'traffic_notice', :source_entity_id,
+                    :seen_at, :seen_at
+                )
+                """
+            ),
+            {
+                "source_entity_key": source_entity_key,
+                "source_entity_id": source_entity_id,
+                "seen_at": seen_at,
+            },
+        )
         await migrated_session.execute(
             text(
                 """
                 INSERT INTO provider_sync.source_records (
-                    source_record_key, provider, dataset_key,
+                    source_record_key, source_entity_key, provider, dataset_key,
                     source_entity_type, source_entity_id,
                     raw_name, raw_data, raw_payload_hash,
                     fetched_at, imported_at, last_seen_at
                 )
                 VALUES (
-                    :source_record_key, 'python-krex-api', 'krex_traffic_notices',
+                    :source_record_key, :source_entity_key,
+                    'python-krex-api', 'krex_traffic_notices',
                     'traffic_notice', :source_entity_id,
                     :raw_name, CAST(:raw_data AS jsonb), :raw_payload_hash,
                     :seen_at, :seen_at, :seen_at
@@ -437,7 +469,8 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             ),
             {
                 "source_record_key": f"sr_notice_legacy_{suffix}",
-                "source_entity_id": f"legacy-hash-key-{suffix}",
+                "source_entity_key": source_entity_key,
+                "source_entity_id": source_entity_id,
                 "raw_name": message,
                 "raw_payload_hash": f"hash-{suffix}",
                 "raw_data": (
@@ -458,19 +491,32 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
         await migrated_session.execute(
             text(
                 """
+                UPDATE provider_sync.source_entities
+                SET current_source_record_key = :source_record_key
+                WHERE source_entity_key = :source_entity_key
+                """
+            ),
+            {
+                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "source_entity_key": source_entity_key,
+            },
+        )
+        await migrated_session.execute(
+            text(
+                """
                 INSERT INTO provider_sync.source_links (
-                    feature_id, source_record_key, source_role,
+                    feature_id, source_entity_key, source_role,
                     match_method, confidence, is_primary_source, created_at
                 )
                 VALUES (
-                    :feature_id, :source_record_key, 'primary',
+                    :feature_id, :source_entity_key, 'primary',
                     'natural_key', 100, true, :seen_at
                 )
                 """
             ),
             {
                 "feature_id": f"f_notice_legacy_{suffix}",
-                "source_record_key": f"sr_notice_legacy_{suffix}",
+                "source_entity_key": source_entity_key,
                 "seen_at": seen_at,
             },
         )

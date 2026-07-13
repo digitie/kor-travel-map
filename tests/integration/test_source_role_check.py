@@ -38,29 +38,52 @@ async def test_all_source_role_values_pass_db_check(
     await migrated_session.flush()
 
     # enum의 모든 값으로 source_link INSERT — CHECK 위반 없어야 한다.
-    # (feature_id, source_record_key)가 PK라 source_record를 role마다 새로 만든다.
+    # (feature_id, source_entity_key)가 PK라 source entity를 role마다 새로 만든다.
     # uq_source_records(provider,dataset_key,entity_type,entity_id,payload_hash)
     # 충돌 회피 위해 entity_id/payload_hash를 i로 유일화.
     for i, role in enumerate(SourceRole):
         key = f"sr-check-k-{i}"
+        entity_key = f"se-check-k-{i}"
+        await migrated_session.execute(
+            text(
+                "INSERT INTO provider_sync.source_entities "
+                "(source_entity_key, provider, dataset_key, source_entity_type, "
+                " source_entity_id, first_seen_at, last_seen_at) "
+                "VALUES (:sek,'datagokr','ds','e',:eid,:ts,:ts)"
+            ),
+            {"sek": entity_key, "eid": str(i), "ts": _FETCHED},
+        )
         await migrated_session.execute(
             text(
                 "INSERT INTO provider_sync.source_records "
-                "(source_record_key, provider, dataset_key, source_entity_type, "
+                "(source_record_key, source_entity_key, provider, dataset_key, "
+                " source_entity_type, "
                 " source_entity_id, raw_payload_hash, fetched_at) "
-                "VALUES (:k,'datagokr','ds','e',:eid,:h,:ts)"
+                "VALUES (:k,:sek,'datagokr','ds','e',:eid,:h,:ts)"
             ),
-            {"k": key, "eid": str(i), "h": f"h{i}", "ts": _FETCHED},
+            {
+                "k": key,
+                "sek": entity_key,
+                "eid": str(i),
+                "h": f"h{i}",
+                "ts": _FETCHED,
+            },
         )
-        await migrated_session.flush()
+        await migrated_session.execute(
+            text(
+                "UPDATE provider_sync.source_entities "
+                "SET current_source_record_key = :k WHERE source_entity_key = :sek"
+            ),
+            {"k": key, "sek": entity_key},
+        )
         await migrated_session.execute(
             text(
                 "INSERT INTO provider_sync.source_links "
-                "(feature_id, source_record_key, source_role, match_method, "
+                "(feature_id, source_entity_key, source_role, match_method, "
                 " confidence, is_primary_source) "
-                "VALUES ('sr-check-f1', :k, :role, 'natural_key', 100, false)"
+                "VALUES ('sr-check-f1', :sek, :role, 'natural_key', 100, false)"
             ),
-            {"k": key, "role": role.value},
+            {"sek": entity_key, "role": role.value},
         )
         await migrated_session.flush()
 

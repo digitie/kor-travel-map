@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-13 (codex) — 다중 관측·collection 큐레이션 구현 진행
+
+- **스키마/관측**: Alembic 0044에서 provider 자연 entity와 immutable payload record를
+  분리했다. `source_links`는 Feature↔entity membership이 되고, Feature 단건·batch·admin
+  상세는 entity별 현재 관측을 모두 반환하며 과거 payload는 별도 cursor 이력 API로 조회한다.
+- **큐레이션**: Alembic 0045에서 theme/title/edition/source를 소유하는 collection과
+  공식 membership item을 분리했다. item의 `feature_id`는 nullable이며, 기존 Feature와
+  안전하게 매칭하지 못한 공식 항목도 장소명·주소 hint·원천 안정키를 잃지 않고 저장한다.
+- **API/UI**: Feature별 grouped public API, collection 상세, admin 수동 입력·편집·archive,
+  CSV 양식 다운로드·dry-run·원자적 멱등 import를 구현했다. Feature 지도·목록·상세와 admin
+  상세는 같은 Feature의 여러 회차 큐레이션과 여러 provider 현재 관측을 배열로 모두 표시한다.
+- **공식 데이터**: 한국관광 100선 2개 회차, 국가유산 방문 캠페인, 2026 수목원·정원
+  스탬프투어, 등대 스탬프투어 CSV를 `resources/curations/`에 추가했다. 공식 462개 항목을
+  복합 장소 membership 486행으로 보존하며 217행은 기존 Feature에 확정 연결하고 269행은
+  미연결 상태로 보존한다.
+- **카테고리**: `01050400`(`관광 > 자연명소 > 등대`)과 marker icon을 추가했다. 박물관 등
+  등대가 아닌 stamp point에는 등대 category를 제안하지 않는다.
+- **진행 상태**: 로컬 전체 gate, 적대적 리뷰, n150 prod migration·실데이터 import·live UI
+  E2E, PR/CI/merge는 아직 남아 있다.
+
 ## 2026-07-13 (codex) — concierge 소비자 키를 DB read scope 계약으로 전환
 
 - **소비 계약**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`를 concierge static

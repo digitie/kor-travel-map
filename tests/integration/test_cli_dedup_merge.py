@@ -20,6 +20,7 @@ from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
+    SourceEntityRow,
     SourceLinkRow,
     SourceRecordRow,
 )
@@ -60,8 +61,22 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         session.add(_feature("f_master", with_coord=True))
         session.add(_feature("f_loser", with_coord=False))
         session.add(
+            SourceEntityRow(
+                source_entity_key="SE1",
+                provider="python-mois-api",
+                dataset_key="d",
+                source_entity_type="t",
+                source_entity_id="SR1",
+                current_source_record_key=None,
+                first_seen_at=_FETCHED,
+                last_seen_at=_FETCHED,
+            )
+        )
+        await session.flush()
+        session.add(
             SourceRecordRow(
                 source_record_key="SR1",
+                source_entity_key="SE1",
                 provider="python-mois-api",
                 dataset_key="d",
                 source_entity_type="t",
@@ -72,10 +87,14 @@ async def _seed_pair(engine: AsyncEngine) -> str:
             )
         )
         await session.flush()
+        entity = await session.get(SourceEntityRow, "SE1")
+        assert entity is not None
+        entity.current_source_record_key = "SR1"
+        await session.flush()
         session.add(
             SourceLinkRow(
                 feature_id="f_loser",
-                source_record_key="SR1",
+                source_entity_key="SE1",
                 source_role="primary",
                 match_method="natural_key",
                 confidence=100,

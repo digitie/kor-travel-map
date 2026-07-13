@@ -114,10 +114,10 @@ def test_prometheus_metrics_records_public_rest_surface() -> None:
     labels, value = sample
     assert value is not None
     assert value >= 1.0
-    # surface=public인 요청은 /v1/categories뿐. path 라벨은 매칭된 라우트 템플릿
-    # ``/categories``로 정확히 기록돼야 한다(__unmatched__ 아님). /v1 prefix는
-    # include_router로 적용돼 scope route 템플릿에는 나타나지 않는다(성공 메트릭과 동일).
-    assert labels["path"] == "/categories"
+    # surface=public인 요청은 /v1/categories뿐. path 라벨은 외부 REST 계약의
+    # 매칭된 라우트 템플릿 ``/v1/categories``로 기록돼야 한다
+    # (__unmatched__ 아님).
+    assert labels["path"] == "/v1/categories"
 
 
 @pytest.mark.unit

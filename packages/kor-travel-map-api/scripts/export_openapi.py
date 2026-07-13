@@ -49,6 +49,9 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     # 비버저닝 유지(ADR-048).
     "/v1/features/in-bounds": frozenset({"get"}),
     "/v1/features/{feature_id}": frozenset({"get"}),
+    "/v1/features/{feature_id}/observations/{source_entity_key}/history": frozenset(
+        {"get"}
+    ),
     "/v1/features/{feature_id}/price": frozenset({"get"}),
     "/v1/features/{feature_id}/weather": frozenset({"get"}),
     "/v1/features/{feature_id}/weather/forecast": frozenset({"get"}),
@@ -65,6 +68,10 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/v1/public/festivals/{feature_id}": frozenset({"get"}),
     "/v1/curated-features": frozenset({"get"}),
     "/v1/curated-features/{curated_feature_id}": frozenset({"get"}),
+    "/v1/curations": frozenset({"get"}),
+    "/v1/curations/collections": frozenset({"get"}),
+    "/v1/curations/collections/{collection_id}": frozenset({"get"}),
+    "/v1/curations/features/{feature_id}": frozenset({"get"}),
     "/v1/categories": frozenset({"get"}),
     "/v1/providers": frozenset({"get"}),
     "/v1/providers/{provider}/last-sync": frozenset({"get"}),

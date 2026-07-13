@@ -32,6 +32,7 @@ import {
 } from "@/api/features";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -174,6 +175,8 @@ function FeatureDetailPanel({
               <dd className="flex flex-wrap gap-1">
                 {adminDetailQuery.isLoading ? (
                   <span className="text-muted-foreground">로딩 중</span>
+                ) : adminDetailQuery.isError ? (
+                  <span className="text-destructive">조회 실패</span>
                 ) : sourceProviders.length > 0 ? (
                   sourceProviders.map((provider) => (
                     <Badge key={provider} variant="outline">
@@ -185,8 +188,16 @@ function FeatureDetailPanel({
                 )}
               </dd>
               <dt className="text-muted-foreground">data_origin</dt>
-              <dd>{dataOrigin ?? "없음"}</dd>
+              <dd>
+                {adminDetailQuery.isError ? "조회 실패" : dataOrigin ?? "없음"}
+              </dd>
             </dl>
+            {adminDetailQuery.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>admin 연결 정보 조회 실패</AlertTitle>
+                <AlertDescription>{adminDetailQuery.error.message}</AlertDescription>
+              </Alert>
+            ) : null}
             <details>
               <summary className="cursor-pointer text-sm font-medium">address</summary>
               <JsonBlock value={detailQuery.data.address} />
@@ -196,6 +207,15 @@ function FeatureDetailPanel({
               feature={detailQuery.data}
               featureId={featureId}
             />
+            {adminDetailQuery.isLoading ? (
+              <Skeleton className="h-40 w-full" />
+            ) : adminDetailQuery.data ? (
+              <FeatureAssociations
+                compact
+                curations={adminDetailQuery.data.data.curations}
+                observations={adminDetailQuery.data.data.sources}
+              />
+            ) : null}
             <details>
               <summary className="cursor-pointer text-sm font-medium">detail</summary>
               <JsonBlock value={detailQuery.data.detail} />

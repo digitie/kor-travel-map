@@ -60,6 +60,7 @@ const MAKI_GLYPH: Readonly<Record<string, string>> = Object.freeze({
   "garden": "\u{1F337}", // 🌷
   "hot-spring": "\u{2668}", // ♨
   "viewpoint": "\u{1F52D}", // 🔭
+  "lighthouse": "\u{1F5FC}", // 🗼 (lighthouse/tower fallback)
   "water": "\u{1F4A7}", // 💧
   "attraction": "\u{1F3A1}", // 🎡
   "amusement-park": "\u{1F3A2}", // 🎢

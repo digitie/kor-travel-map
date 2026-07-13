@@ -684,11 +684,14 @@ upserted AS (
         now()
     FROM rule
     JOIN feature.curated_sources AS s ON s.source_id = rule.source_id
+    JOIN provider_sync.source_entities AS se
+      ON se.provider = s.provider
+     AND se.dataset_key = s.dataset_key
     JOIN provider_sync.source_records AS sr
-      ON sr.provider = s.provider
-     AND sr.dataset_key = s.dataset_key
+      ON sr.source_entity_key = se.source_entity_key
+     AND sr.source_record_key = se.current_source_record_key
     JOIN provider_sync.source_links AS sl
-      ON sl.source_record_key = sr.source_record_key
+      ON sl.source_entity_key = se.source_entity_key
     JOIN feature.features AS f ON f.feature_id = sl.feature_id
     WHERE f.deleted_at IS NULL
       AND f.status = 'active'
@@ -1786,8 +1789,11 @@ async def sync_concierge_themes(
                     FROM feature.features AS f
                     JOIN provider_sync.source_links AS sl
                       ON sl.feature_id = f.feature_id
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
                     JOIN provider_sync.source_records AS sr
-                      ON sr.source_record_key = sl.source_record_key
+                      ON sr.source_entity_key = se.source_entity_key
+                     AND sr.source_record_key = se.current_source_record_key
                     WHERE sr.provider = :provider
                       AND sr.dataset_key = :dataset_key
                       AND f.deleted_at IS NULL

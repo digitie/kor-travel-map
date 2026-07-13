@@ -34,6 +34,7 @@ type AdminFeatureDetailVersionRecord =
   components["schemas"]["AdminFeatureDetailVersionRecord"];
 type AdminFeatureChangeRequestRecord =
   components["schemas"]["AdminFeatureChangeRequestRecord"];
+type CurationItemView = components["schemas"]["AdminCurationItemView"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
 type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
@@ -52,6 +53,8 @@ const OVERRIDE_FIELD_PATH = "name";
 const FILE_OBJECT_KEY = "features/section-depth/image-001.jpg";
 const RAW_DETAIL_MARKER = "e2e-detail-marker-value";
 const RAW_REFS_MARKER = "e2e-raw-refs-marker-value";
+const CURATION_COLLECTION_KEY = "tourism-100-2025-2026";
+const CURATION_METADATA_MARKER = "e2e-curation-metadata-marker";
 
 function makeFeature(
   overrides: Partial<AdminFeatureDetailFeatureRecord> = {},
@@ -101,10 +104,54 @@ function makeSource(
     raw_name: "여의도공원",
     raw_payload_hash: "hash-source-001",
     source_entity_id: "126508",
+    source_entity_key: "se-e2e-visitkorea-126508",
     source_entity_type: "area_based_item",
     source_record_key: "python-visitkorea-api::visitkorea_area_based::126508",
     source_role: "primary",
     source_version: "v1",
+    ...overrides,
+  };
+}
+
+function makeCuration(
+  overrides: Partial<CurationItemView> = {},
+): CurationItemView {
+  return {
+    address: { road: "서울특별시 영등포구 여의공원로 120" },
+    address_hint: "서울 영등포구",
+    archived_at: null,
+    collection_id: "collection-section-depth-001",
+    collection_key: CURATION_COLLECTION_KEY,
+    created_at: "2026-06-08T00:00:00.000Z",
+    created_by: "e2e-admin",
+    curation_item_id: "curation-item-section-depth-001",
+    curation_relation: "primary_stop",
+    dataset_key: "tourism-100",
+    edition_key: "2025-2026",
+    external_item_id: "tourism-100-yeouido",
+    feature_category: "01070300",
+    feature_id: FEATURE_ID,
+    feature_kind: "place",
+    feature_name: "여의도공원",
+    item_summary: "2025~2026 선정지",
+    item_title: "여의도공원",
+    lat: 37.5263,
+    lon: 126.9239,
+    metadata: { marker: CURATION_METADATA_MARKER },
+    place_name: "여의도공원",
+    provider: "mcst",
+    reuse_policy: "manual_review",
+    sort_order: 12,
+    source_name: "문화체육관광부",
+    source_record_key: "mcst::tourism-100::yeouido",
+    source_url: "https://example.test/tourism-100",
+    status: "included",
+    theme_group: "관광 선정",
+    theme_name: "한국관광 100선",
+    theme_slug: "korean-tourism-100",
+    title: "2025~2026 한국관광 100선",
+    updated_at: "2026-06-09T00:00:00.000Z",
+    updated_by: "e2e-admin",
     ...overrides,
   };
 }
@@ -251,6 +298,7 @@ function makeDetailData(
 ): AdminFeatureDetailData {
   return {
     change_requests: [],
+    curations: [],
     feature: makeFeature(),
     files: [],
     issues: [],
@@ -304,6 +352,12 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
+function apiPath(url: URL): string {
+  return url.pathname.startsWith("/api/proxy/")
+    ? url.pathname.slice("/api/proxy".length)
+    : url.pathname;
+}
+
 interface MockOptions {
   data?: AdminFeatureDetailData;
   nearby?: NearbyFeatureSummary[];
@@ -336,9 +390,10 @@ async function mockFeatureDetail(
   await page.route("**/v1/admin/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "GET" && url.pathname === DETAIL_PATH) {
+    const pathname = apiPath(url);
+    if (request.method() === "GET" && pathname === DETAIL_PATH) {
       counters.detail += 1;
-      counters.detailPaths.push(url.pathname);
+      counters.detailPaths.push(pathname);
       await fulfillJson(route, makeDetailResponse(data));
       return;
     }
@@ -348,7 +403,8 @@ async function mockFeatureDetail(
   await page.route("**/v1/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "GET" && url.pathname === NEARBY_PATH) {
+    const pathname = apiPath(url);
+    if (request.method() === "GET" && pathname === NEARBY_PATH) {
       counters.nearby += 1;
       if (options.nearbyStatus && options.nearbyStatus >= 400) {
         await fulfillJson(route, { detail: "nearby 조회 실패" }, options.nearbyStatus);
@@ -379,6 +435,7 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     await mockFeatureDetail(page, {
       data: makeDetailData({
         sources: [makeSource()],
+        curations: [makeCuration()],
         issues: [makeIssue()],
         overrides: [makeOverride()],
         files: [makeFile()],
@@ -393,24 +450,24 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     const detailView = page.getByTestId("feature-detail-view");
     await expect(detailView).toBeVisible();
 
+    const sectionScope = (title: string) =>
+      detailView.locator("section").filter({ hasText: title }).first();
+
     // 섹션 타이틀 — detail-view scope 안에서만(헤더 nav 동명 링크와 분리).
-    for (const section of ["Sources", "Issues", "Overrides", "Files"]) {
-      await expect(detailView.getByText(section, { exact: true })).toBeVisible();
+    for (const section of ["Sources", "큐레이션", "Issues", "Overrides", "Files"]) {
+      await expect(sectionScope(section)).toBeVisible();
     }
 
     // 컬럼헤더는 소유 섹션 scope 안에서 검증한다. "provider"는 Sources/Files 두
     // 테이블이 모두 가지므로 detail-view 전체 scope에서는 strict-mode 충돌(2건)이
     // 난다 → 각 헤더를 자기 Section(<section> ancestor)으로 좁힌다(Nearby 카운트
     // 배지 검증과 동일한 house 패턴).
-    const sectionScope = (title: string) =>
-      detailView
-        .getByText(title, { exact: true })
-        .locator("xpath=ancestor::section[1]");
     // [헤더 텍스트, 소유 섹션 타이틀] — 섹션별 unique 헤더로 표가 렌더됐음을 확인.
     const sectionColumns: [string, string][] = [
       ["provider", "Sources"],
       ["entity", "Sources"],
-      ["imported", "Sources"],
+      ["seen", "Sources"],
+      ["상세", "큐레이션"],
       ["field", "Overrides"],
       ["provider", "Files"],
       ["object", "Files"],
@@ -432,6 +489,19 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
       detailView.getByText(OVERRIDE_FIELD_PATH, { exact: true }).first(),
     ).toBeVisible();
     await expect(detailView.getByText(FILE_OBJECT_KEY)).toBeVisible();
+    await expect(
+      detailView.getByText("2025~2026 한국관광 100선", { exact: true }),
+    ).toBeVisible();
+
+    const curationSection = sectionScope("큐레이션");
+    await curationSection.getByText("전체 정보").click();
+    await expect(curationSection.getByText(new RegExp(CURATION_COLLECTION_KEY))).toBeVisible();
+    await expect(curationSection.getByText(new RegExp(CURATION_METADATA_MARKER))).toBeVisible();
+    await expect(curationSection.getByText("manual_review", { exact: true })).toBeVisible();
+
+    const sourcesSection = sectionScope("Sources");
+    await sourcesSection.locator("summary").first().click();
+    await expect(sourcesSection.getByText(new RegExp("hash-source-001"))).toBeVisible();
 
     // 모든 표가 비어있지 않으므로 EMPTY_MESSAGE는 0건.
     await expect(detailView.getByText("데이터가 없습니다.")).toHaveCount(0);
@@ -534,6 +604,7 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     page,
   }) => {
     await mockFeatureDetail(page, {
+      data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
       weather: {
         asof: "2026-06-08T09:00:00.000Z",
         is_stale: true,
@@ -547,14 +618,14 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     const panel = page.getByTestId("feature-weather-panel");
     await expect(panel).toBeVisible();
     await expect(panel.getByText("Weather")).toBeVisible();
-    await expect(panel.getByText("최신 forecast_style별 metric")).toBeVisible();
+    await expect(panel.getByText("날씨 정보와 최근 업데이트 시간")).toBeVisible();
 
     // is_stale=true → 배지 텍스트 "stale"(fresh 아님).
     await expect(panel.getByText("stale")).toBeVisible();
     await expect(panel.getByText("fresh")).toHaveCount(0);
 
     // dl 라벨 + source_styles outline 배지(패널 scope에서 헤더 동명 라벨과 분리).
-    await expect(panel.getByText("latest", { exact: true })).toBeVisible();
+    await expect(panel.getByText("최근 업데이트", { exact: true })).toBeVisible();
     await expect(panel.getByText("asof", { exact: true })).toBeVisible();
     await expect(panel.getByText("styles", { exact: true })).toBeVisible();
     await expect(panel.getByText("short_term").first()).toBeVisible();
@@ -576,7 +647,10 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
   });
 
   test("Weather 호출 실패 — 패널 내부 alert + 페이지 잔존", async ({ page }) => {
-    await mockFeatureDetail(page, { weatherStatus: 500 });
+    await mockFeatureDetail(page, {
+      data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
+      weatherStatus: 500,
+    });
     await page.goto(`/features/${FEATURE_ID}`);
 
     const panel = page.getByTestId("feature-weather-panel");

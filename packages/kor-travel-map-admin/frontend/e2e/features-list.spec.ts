@@ -22,12 +22,12 @@ type AdminFeatureDeactivateData =
   components["schemas"]["AdminFeatureDeactivateData"];
 type AdminFeatureDeactivateResponse =
   components["schemas"]["AdminFeatureDeactivateResponse"];
-type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
-type FeatureDetailEnvelopeResponse =
-  components["schemas"]["FeatureDetailEnvelopeResponse"];
-type WeatherCardData = components["schemas"]["WeatherCardData"];
-type FeatureWeatherResponse =
-  components["schemas"]["FeatureWeatherResponse"];
+type AdminFeatureDetailData = components["schemas"]["AdminFeatureDetailData"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureDetailSourceRecord =
+  components["schemas"]["AdminFeatureDetailSourceRecord"];
+type CurationItemView = components["schemas"]["AdminCurationItemView"];
 
 const MOCK_NOW = "2026-06-16T00:00:00.000Z";
 const LIST_PATH = "/v1/admin/features";
@@ -38,6 +38,12 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
     contentType: "application/json",
     status,
   });
+}
+
+function apiPath(url: URL): string {
+  return url.pathname.startsWith("/api/proxy/")
+    ? url.pathname.slice("/api/proxy".length)
+    : url.pathname;
 }
 
 function makeMeta(page: PageMeta, overrides: Partial<Meta> = {}): Meta {
@@ -116,45 +122,113 @@ function makeDeactivateResponse(
   };
 }
 
-function makeFeatureDetailEnvelope(
-  feature: AdminFeatureRecord,
-): FeatureDetailEnvelopeResponse {
-  const detail: FeatureDetailResponse = {
-    address: { road: feature.address_label },
-    category: feature.category,
-    detail: {},
-    feature_id: feature.feature_id,
-    kind: feature.kind,
-    lat: feature.lat ?? null,
-    legal_dong_code: null,
-    lon: feature.lon ?? null,
-    marker_color: null,
-    marker_icon: null,
-    name: feature.name,
-    sido_code: null,
-    sigungu_code: null,
-    status: feature.status,
-    updated_at: feature.updated_at,
-    urls: {},
-  };
+function makeAdminSource(
+  overrides: Partial<AdminFeatureDetailSourceRecord> = {},
+): AdminFeatureDetailSourceRecord {
   return {
-    data: detail,
-    meta: { duration_ms: 1, page: null, request_id: "e2e-feature-detail" },
+    confidence: 1,
+    dataset_key: "admin-dataset",
+    expires_at: null,
+    fetched_at: MOCK_NOW,
+    imported_at: MOCK_NOW,
+    is_primary_source: true,
+    last_seen_at: MOCK_NOW,
+    linked_at: MOCK_NOW,
+    match_method: "natural_key",
+    provider: "admin-provider",
+    raw_address: "서울 마포구 와우산로",
+    raw_data: { admin_source_marker: "admin-source-visible" },
+    raw_latitude: 37.5665,
+    raw_longitude: 126.978,
+    raw_name: "Admin source place",
+    raw_payload_hash: "admin-source-hash",
+    source_entity_id: "admin-entity-1",
+    source_entity_key: "admin-provider::admin-dataset::admin-entity-1",
+    source_entity_type: "place",
+    source_record_key: "admin-provider::admin-dataset::admin-record-1",
+    source_role: "primary",
+    source_version: "v1",
+    ...overrides,
   };
 }
 
-function makeWeatherResponse(featureId: string): FeatureWeatherResponse {
-  const data: WeatherCardData = {
-    asof: null,
-    feature_id: featureId,
-    is_stale: false,
-    latest_at: null,
-    metrics: [],
-    source_styles: [],
-  };
+function makeCuration(
+  feature: AdminFeatureRecord,
+  overrides: Partial<CurationItemView> = {},
+): CurationItemView {
   return {
-    data,
-    meta: { duration_ms: 1, page: null, request_id: "e2e-feature-weather" },
+    address: { road: feature.address_label },
+    address_hint: "서울 마포구",
+    archived_at: null,
+    collection_id: "admin-collection-id",
+    collection_key: "admin-only-collection",
+    created_at: MOCK_NOW,
+    created_by: "e2e-admin",
+    curation_item_id: "admin-curation-item",
+    curation_relation: "primary_stop",
+    dataset_key: "admin-dataset",
+    edition_key: "2026",
+    external_item_id: "admin-official-item",
+    feature_category: feature.category,
+    feature_id: feature.feature_id,
+    feature_kind: feature.kind,
+    feature_name: feature.name,
+    item_summary: "admin-only membership summary",
+    item_title: "Admin only membership",
+    lat: feature.lat ?? null,
+    lon: feature.lon ?? null,
+    metadata: { visibility: "admin_only" },
+    place_name: feature.name,
+    provider: "admin-provider",
+    reuse_policy: "manual_review",
+    sort_order: 7,
+    source_name: "Admin source",
+    source_record_key: "admin-provider::admin-dataset::admin-record-1",
+    source_url: "https://example.test/admin-source",
+    status: "candidate",
+    theme_group: "admin group",
+    theme_name: "Admin theme",
+    theme_slug: "admin-theme",
+    title: "Admin-only collection",
+    updated_at: MOCK_NOW,
+    updated_by: "e2e-admin",
+    ...overrides,
+  };
+}
+
+function makeAdminFeatureDetailResponse(
+  feature: AdminFeatureRecord,
+  overrides: Partial<AdminFeatureDetailData> = {},
+): AdminFeatureDetailResponse {
+  return {
+    data: {
+      change_requests: [],
+      curations: [makeCuration(feature)],
+      feature: {
+        address: { road: feature.address_label },
+        category: feature.category,
+        created_at: feature.created_at,
+        data_origin: "provider",
+        data_version: 1,
+        detail: {},
+        feature_id: feature.feature_id,
+        kind: feature.kind,
+        lat: feature.lat ?? null,
+        lon: feature.lon ?? null,
+        name: feature.name,
+        raw_refs: [],
+        status: feature.status,
+        updated_at: feature.updated_at,
+        urls: {},
+      },
+      files: [],
+      issues: [],
+      overrides: [],
+      sources: [makeAdminSource()],
+      versions: [],
+      ...overrides,
+    },
+    meta: { duration_ms: 1, page: null, request_id: "e2e-admin-feature-detail" },
   };
 }
 
@@ -169,6 +243,7 @@ async function mockFeaturesList(
   page: Page,
   options: {
     handler: (url: URL) => AdminFeaturesListResponse;
+    detail?: AdminFeatureDetailResponse;
   },
 ) {
   const listSearches: URLSearchParams[] = [];
@@ -178,13 +253,14 @@ async function mockFeaturesList(
   await page.route("**/v1/admin/features**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const pathname = apiPath(url);
 
     // most-specific: deactivate kill-switch.
-    if (request.method() === "POST" && url.pathname.endsWith("/deactivate")) {
-      deactivateUrls.push(url.pathname);
+    if (request.method() === "POST" && pathname.endsWith("/deactivate")) {
+      deactivateUrls.push(pathname);
       deactivateBodies.push(request.postDataJSON() as Record<string, unknown>);
       const featureId = decodeURIComponent(
-        url.pathname.replace(/^\/v1\/admin\/features\//, "").replace(
+        pathname.replace(/^\/v1\/admin\/features\//, "").replace(
           /\/deactivate$/,
           "",
         ),
@@ -196,14 +272,23 @@ async function mockFeaturesList(
     }
 
     // GET list (정확한 pathname). change-requests 등은 매칭하지 않음.
-    if (request.method() === "GET" && url.pathname === LIST_PATH) {
+    if (request.method() === "GET" && pathname === LIST_PATH) {
       listSearches.push(url.searchParams);
       await fulfillJson(route, options.handler(url));
       return;
     }
 
+    if (
+      request.method() === "GET" &&
+      pathname.startsWith(`${LIST_PATH}/`) &&
+      options.detail
+    ) {
+      await fulfillJson(route, options.detail);
+      return;
+    }
+
     throw new Error(
-      `Unhandled admin features route: ${request.method()} ${url.pathname}`,
+      `Unhandled admin features route: ${request.method()} ${pathname}`,
     );
   });
 
@@ -363,9 +448,10 @@ test.describe("admin/features list depth", () => {
     // 둔다. 성공 본문만 schema 바인딩(admin-ops.spec.ts risk note).
     await page.route("**/v1/admin/features**", async (route) => {
       const url = new URL(route.request().url());
+      const pathname = apiPath(url);
       if (
         route.request().method() === "GET" &&
-        url.pathname === LIST_PATH
+        pathname === LIST_PATH
       ) {
         await fulfillJson(
           route,
@@ -379,7 +465,7 @@ test.describe("admin/features list depth", () => {
         );
         return;
       }
-      throw new Error(`Unexpected route in error test: ${url.pathname}`);
+      throw new Error(`Unexpected route in error test: ${pathname}`);
     });
 
     await page.goto("/admin/features");
@@ -446,21 +532,7 @@ test.describe("admin/features list depth", () => {
     });
     await mockFeaturesList(page, {
       handler: () => listResponse([feature]),
-    });
-
-    // row 클릭 시 inspector가 GET /v1/features/{id} + /weather 두 건을 쏜다.
-    const encodedPath = `/v1/features/${encodeURIComponent(featureId)}`;
-    await page.route("**/v1/features/**", async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname.endsWith("/weather")) {
-        await fulfillJson(route, makeWeatherResponse(featureId));
-        return;
-      }
-      if (url.pathname === encodedPath) {
-        await fulfillJson(route, makeFeatureDetailEnvelope(feature));
-        return;
-      }
-      throw new Error(`Unexpected features route: ${url.pathname}`);
+      detail: makeAdminFeatureDetailResponse(feature),
     });
 
     await page.goto("/admin/features");
@@ -476,7 +548,12 @@ test.describe("admin/features list depth", () => {
 
     // row 본문 클릭으로 선택 → 우측 preview가 렌더되되 전체 상세 링크는 노출하지 않는다.
     await row.click();
-    await expect(page.getByText("Feature 상세", { exact: true })).toBeVisible();
+    const associations = page.getByTestId("feature-associations");
+    await expect(associations).toBeVisible();
+    await expect(associations.getByText("Admin-only collection")).toBeVisible();
+    await expect(associations.getByText("admin-provider").first()).toBeVisible();
+    await associations.getByText("membership 전체 정보").click();
+    await expect(associations.getByText("admin-only-collection")).toBeVisible();
     await expect(page.getByRole("link", { name: "전체 상세" })).toHaveCount(0);
   });
 
