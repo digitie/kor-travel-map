@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (codex) — notice reconcile 제곱 비용 운영 재현·제거
+
+- **운영 재현**: 0046 배포 후 KREX 실수집에서 asset step이 6분 넘게 진행되지 않았다. DB wait
+  audit 결과 lock 대기가 아니라 약 9,700개 KREX entity를 대상으로 한
+  `lineage_candidates` query가 계속 실행 중이었고, 동일 scope의 각 계보마다 동일 scope 전체를
+  다시 찾는 lateral 비교를 확인했다.
+- **근본 수정**: 동일 provider/dataset/type winner는 기존 `ranked` CTE 결과를 재사용한다.
+  전역 lateral 비교는 호출 scope 밖의 primary lineage를 공유한 Feature 보호에만 남겨,
+  cross-provider 생존 의미는 보존하면서 동일 scope의 제곱 탐색을 제거했다.
+- **검증**: SQL 구조 회귀 unit 2건을 추가하고 feature repository unit 14건, notice lifecycle
+  PostGIS integration 23건, 변경 파일 Ruff와 strict mypy를 통과했다.
+- **적대적 리뷰 2회**: 1차 `S1 0 / S2 0 / S3 1`에서 scope 세 차원의 정확한 `OR`와
+  provider/dataset/entity type 단독 차이 회귀 검증이 부족하다는 지적을 반영했다. 차원별
+  PostGIS 통합 3건을 추가한 뒤 2차 독립 리뷰는 `S1/S2/S3 0`으로 종료했다.
+
 ## 2026-07-14 (codex) — notice 반복 중복·오종료의 계보 상태 원천 수정
 
 - **반복 원인**: notice 부재/해제를 각 실행의 scope-local 집합과 Feature ID 직접 갱신으로

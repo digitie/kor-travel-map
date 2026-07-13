@@ -133,6 +133,25 @@ def test_module_exports_load_helpers() -> None:
         assert hasattr(feature_repo, name)
 
 
+@pytest.mark.parametrize("close_missing", [False, True])
+def test_notice_reconcile_reranks_only_out_of_scope_feature_lineages(
+    close_missing: bool,
+) -> None:
+    """동일 scope는 ``ranked``를 재사용해 lineage 수의 제곱 비용을 피한다."""
+    sql = feature_repo._supersede_stale_notice_sql(close_missing)
+    out_of_scope = sql.split("out_of_scope_feature_lineages AS (", 1)[1].split(
+        "),\nglobal_feature_wins AS (", 1
+    )[0]
+    normalized = " ".join(out_of_scope.split())
+
+    assert (
+        "sr.provider <> :provider OR sr.dataset_key <> :dataset_key OR "
+        "sr.source_entity_type <> :source_entity_type"
+    ) in normalized
+    assert "FROM out_of_scope_feature_lineages AS current_notice" in sql
+    assert "FROM global_feature_lineages AS current_notice" not in sql
+
+
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
     sql = feature_repo._NEARBY_TARGET_CTE_SQL
 

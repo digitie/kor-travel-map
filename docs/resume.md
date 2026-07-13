@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (codex) — notice reconcile 운영 제곱 비용 제거
+
+- **운영 원인**: 0046 첫 KREX 실수집에서 lock 대기가 아닌 reconcile SQL 자체가 6분 이상
+  실행됐다. 약 9,700개 동일 scope lineage 각각에 대해 동일 scope 전체를 lateral 비교해
+  제곱 비용이 발생했다.
+- **수정·보호**: 동일 scope winner는 set 기반 `ranked` 결과를 재사용하고, 다른
+  provider/dataset/type 계보를 공유한 Feature만 cross-scope 보호 비교를 수행한다. 다중 lineage와
+  cross-provider 생존 통합 테스트는 그대로 통과한다.
+- **검증**: repository unit 14건, notice lifecycle PostGIS integration 23건, Ruff·strict mypy 통과.
+- **적대적 리뷰**: 1차 `S1 0 / S2 0 / S3 1`의 scope `OR`/차원별 검증 지적을 반영했고,
+  2차 독립 리뷰는 `S1/S2/S3 0`으로 종료했다.
+- **다음 한 작업**: 적대적 리뷰 2회와 CI green 후 n150에 재배포하고, KREX 2회 실행 시간·
+  중복 0·동일 snapshot no-op을 확인한 뒤 KMA/OpiNet 및 live UI E2E를 완료한다.
+
 ## 2026-07-14 (codex) — notice 계보 수명주기 영속화·원자 적용 완료
 
 - **근본 수정**: Alembic 0046의 scope/member 상태로 KREX authoritative snapshot과 KMA rolling

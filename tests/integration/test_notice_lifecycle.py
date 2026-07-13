@@ -740,6 +740,63 @@ async def test_multi_lineage_winner_survives_public_read_and_reconcile(
     assert await _public_notice_ids(migrated_session) == expected
 
 
+@pytest.mark.parametrize(
+    ("different_dimension", "provider", "dataset_key", "source_entity_type"),
+    [
+        ("provider", _CROSS_PROVIDER, _KREX_DS, _KREX_ET),
+        ("dataset", _KREX, _CROSS_DS, _KREX_ET),
+        ("entity-type", _KREX, _KREX_DS, _CROSS_ET),
+    ],
+)
+async def test_snapshot_preserves_winner_differing_in_each_scope_dimension(
+    migrated_session: AsyncSession,
+    different_dimension: str,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+) -> None:
+    """provider/dataset/type 중 하나만 달라도 별도 scope winner로 보호한다."""
+    scoped = _krex_notice_bundle(
+        source_entity_id=f"scope-dimension::{different_dimension}",
+        raw_data={"scope": "current", "dimension": different_dimension},
+        feature_suffix=f"scope-dimension::{different_dimension}",
+    )
+    await feature_repo.load_bundles(migrated_session, [scoped])
+    cross = await _attach_cross_scope_winner(
+        migrated_session,
+        feature_id=scoped.feature.feature_id,
+        source_entity_id=f"cross-dimension::{different_dimension}",
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+    )
+    cross_present = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        active_lineage_keys={cross.source_record.source_entity_id},
+        closed_at=_NOW + timedelta(minutes=1),
+    )
+    assert cross_present == feature_repo.NoticeReconcileResult()
+
+    scoped_absent = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys=set(),
+        closed_at=_NOW + timedelta(minutes=2),
+    )
+    assert scoped_absent == feature_repo.NoticeReconcileResult()
+    status, deleted_at, valid_end = await _feature_state(
+        migrated_session, scoped.feature.feature_id
+    )
+    assert status == "active"
+    assert deleted_at is None
+    assert valid_end is None
+
+
 async def test_reconcile_preserves_cross_provider_dataset_winners(
     migrated_session: AsyncSession,
 ) -> None:

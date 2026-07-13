@@ -7,6 +7,9 @@
 
 ### Notice 계보 수명주기 원자화 (2026-07-14)
 
+- **FIXED**: KREX reconcile이 약 1만 개의 동일 scope 계보마다 동일 scope 전체를 다시
+  lateral 비교하던 제곱 비용을 제거했다. 동일 scope winner는 이미 만든 set 기반 rank를
+  재사용하고, 추가 비교는 다른 provider/dataset 계보를 공유한 Feature에만 수행한다.
 - **FIXED**: KREX snapshot에 없는 공지를 scope-local 메모리 집합만으로 닫아, 같은 Feature를
   공유하는 KMA·다른 dataset 공지가 살아 있어도 종료되거나 다음 실행에서 중복 재노출되던
   반복 문제를 영속 계보 상태와 전역 winner 판정으로 수정했다.
