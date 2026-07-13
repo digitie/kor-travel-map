@@ -42,8 +42,8 @@ kor-travel-map API backend가 Kakao Local, NAVER Search, Google Places API를 �
 | `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID` / `KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET` | admin curated place search | NAVER Developers | backend 직접 호출용. 짧은 이름에서 매핑 가능 |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
 | `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY` | admin curated place search | Google Cloud Console (Places API New) | backend 직접 호출용. `GOOGLE_PLACES_API_KEY`에서 매핑 가능 |
-| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
-| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12601` |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge DB `read` scope 키 | `X-API-Key` 헤더로만 전송, static `API_KEYS` 공유 금지 |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` / `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI 및 admin frontend의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값을 넣는다. geo v2는 VWorld 호환 `key` query를 요구한다. |
@@ -167,11 +167,19 @@ API 키 우선순위:
    ADR-053).
 2. kor-travel-map Dagster는 `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`을 host root로 받고,
    path는 fetcher가 `/api/v1/features/{snapshot|changes}`로 붙인다.
-3. `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`는 kor-travel-concierge 운영 환경의 `API_KEYS` 중
-   하나와 같아야 하며, `X-API-Key` 헤더로만 전송한다.
+3. `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`는 kor-travel-concierge에서 외부 소비자용으로
+   발급한 DB `read` scope 키여야 한다. static `API_KEYS`는 BFF/operator용 admin credential이므로
+   공유하지 않는다. 키는 `?key=` query가 아니라 `X-API-Key` 헤더로만 전송한다.
 4. `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
    `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`,
    `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
+5. 회전은 Concierge scope migration 검증 → 새 `read` 키 발급 → kor-travel-map secret 교체·
+   Dagster 재시작 → snapshot/changes 다중 page와 cursor 불변식·같은 키의 내부/write 403 확인
+   순서로 한다. 구 static 키가 BFF와 공유됐다면 BFF/operator admin 키를 overlap 방식으로 먼저
+   교체·검증한 뒤 구 static 키를 제거한다. 키 값·길이·digest는 문서·로그에 남기지 않는다.
+   cursor는 opaque하므로 크기를 비교하지 않는다. `has_more=true`면 새 `next_cursor`를 그대로
+   다음 요청에 쓰고, `has_more=false`면 non-null cursor여도 종료하며 빈 최종 page의 입력 cursor
+   echo를 허용한다. 각 모드에서 export ID 중복 없이 2 page 이상을 소비해야 합격이다.
 
 ### 3.14 문화체육관광부 (MCST, `python-mcst-api`)
 

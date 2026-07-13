@@ -88,8 +88,8 @@ async def fetch_kor_travel_concierge_youtube_features(
     if secret is None:
         raise ProviderCredentialMissing(
             "kor-travel-concierge YouTube feature live fetch에는 "
-            "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY (kor-travel-concierge API_KEYS 중 하나)가 "
-            "필요하다."
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY "
+            "(kor-travel-concierge DB read scope 키)가 필요하다."
         )
 
     endpoint = settings.kor_travel_concierge_feature_sync_endpoint

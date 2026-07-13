@@ -413,8 +413,8 @@ class KorTravelMapSettings(BaseSettings):
     kor_travel_concierge_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "kor-travel-concierge 외부 호출용 ``X-API-Key`` 값. kor-travel-concierge 운영 "
-            "환경의 ``API_KEYS`` 중 하나와 일치해야 한다."
+            "kor-travel-concierge 외부 호출용 ``X-API-Key`` 값. kor-travel-concierge에서 "
+            "외부 소비자용으로 발급한 DB ``read`` scope 키를 사용한다."
         ),
     )
     kor_travel_concierge_feature_sync_endpoint: Literal["snapshot", "changes"] = Field(

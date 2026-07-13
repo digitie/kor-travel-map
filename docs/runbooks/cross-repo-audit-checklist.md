@@ -27,8 +27,9 @@ admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
       (provider/dataset_key/source_entity_type) 문자열 일치 확인.
 - [ ] **포트/베이스**: PinVi env 기본값이 admin **API=12701**(12705는 UI)을
       가리키는지, agent/manager 포트가 integration-map §1과 일치하는지.
-- [ ] **인증 헤더**: `X-Kor-Travel-Map-Service-Token`(krtour batch) / `X-API-Key`(agent) /
-      kill-switch(admin) 사용처가 integration-map §3과 일치하는지.
+- [ ] **인증 헤더**: `X-Kor-Travel-Map-Service-Token`(krtour batch) / DB `read` scope
+      `X-API-Key`(concierge export) / kill-switch(admin) 사용처가 integration-map §3과
+      일치하는지. concierge static `API_KEYS`를 consumer에 공유하지 않는지도 확인한다.
 
 ## 2. 문서 — 전제 신선도
 

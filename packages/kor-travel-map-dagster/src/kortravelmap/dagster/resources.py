@@ -292,10 +292,10 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         provider_package="kor-travel-concierge",
         dataset_key="youtube_place_candidates",
         setting_names=("kor_travel_concierge_base_url", "kor_travel_concierge_api_key"),
-        source_env_names=("API_KEYS",),
         note=(
             "kor-travel-concierge의 /api/v1/features/{snapshot|changes} REST export를 "
-            "pull한다. source env API_KEYS 중 하나를 kor-travel-map API key로 주입한다."
+            "pull한다. kor-travel-concierge에서 발급한 DB read scope 키를 "
+            "kor-travel-map API key로 주입하며 source env API_KEYS는 공유하지 않는다."
         ),
     ),
     ProviderRecordResourceSpec(

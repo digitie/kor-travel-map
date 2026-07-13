@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-13 (codex) — concierge DB read key 소비 계약 로컬 반영
+
+- **완료(로컬 편집)**: Concierge feature fetcher의 환경변수 이름과 header wire contract는 유지하면서,
+  credential 출처를 static `API_KEYS` 공유에서 DB `read` scope 키로 전환했다. resource source env
+  metadata와 운영 회전 문서·회귀 테스트를 함께 정렬했다.
+- **검증**: n150 Python 3.11 일회성 컨테이너에서 core/lint 1,169개, API 331개, Dagster
+  220개 테스트 통과·Dagster 1개 환경성 skip, 전체 Ruff, main/API/Dagster strict mypy, import 계약,
+  prod 문서 redaction 검사를 통과했다. 로컬 테스트는 실행하지 않았다.
+- **다음 한 작업**: PR/CI green → Concierge scope migration → read 키 주입 후 snapshot/changes
+  다중 page·cursor 및 내부/write 403 → BFF/operator admin overlap 회전 → 구 static consumer 키 제거.
+
 ## 2026-07-12 (codex) — Feature 목록/상세 polish 로컬 완료
 
 - **완료(로컬)**: Feature 목록 요약 배지를 표 헤더로 옮기고 pagination 테두리를 한 겹 줄였다.
