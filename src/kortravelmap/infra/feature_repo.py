@@ -2406,7 +2406,9 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     ``seen_at``/``source_record_key``를 따로 집계하지 않고 실제 최신 row 하나를
     선택해 read와 winner가 어긋나지 않게 한다. 호출 scope에서 밀린 feature도
     다른 provider/dataset의 primary 계보 winner라면 feature 전체를 삭제하지 않고,
-    그 계보로 열린 공유 feature를 현재 scope의 snapshot 부재로 닫지 않는다.
+    그 계보로 열린 공유 feature를 현재 scope의 snapshot 부재로 닫지 않는다. 호출
+    scope 자체의 winner는 ``ranked``에서 이미 계산하므로 cross-scope 보호 CTE에서
+    다시 전수 비교하지 않는다.
     """
     candidate_lifecycle = (
         """
@@ -2483,7 +2485,7 @@ scoped_feature_ids AS (
     SELECT DISTINCT feature_id
     FROM ranked
 ),
-global_feature_lineages AS (
+out_of_scope_feature_lineages AS (
     SELECT DISTINCT ON (
         f.feature_id,
         sr.provider,
@@ -2518,6 +2520,11 @@ global_feature_lineages AS (
      AND lineage_state.source_entity_type = sr.source_entity_type
      AND lineage_state.lineage_key = {_notice_lineage_sql("sr")}
     WHERE f.kind = 'notice'
+      AND (
+        sr.provider <> :provider
+        OR sr.dataset_key <> :dataset_key
+        OR sr.source_entity_type <> :source_entity_type
+      )
     ORDER BY
         f.feature_id,
         sr.provider,
@@ -2580,7 +2587,7 @@ global_feature_wins AS (
             WHERE better.better_exists IS NULL
               AND current_notice.snapshot_present IS FALSE
         ) AS last_inactive_winner_changed_at
-    FROM global_feature_lineages AS current_notice
+    FROM out_of_scope_feature_lineages AS current_notice
     LEFT JOIN LATERAL (
         SELECT 1 AS better_exists
         FROM provider_sync.source_entities AS other_se
