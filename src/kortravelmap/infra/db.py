@@ -27,6 +27,7 @@ Sprint 1 scope
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import (
@@ -98,6 +99,7 @@ def make_async_engine(
     pool_size: int = 5,
     max_overflow: int = 10,
     pool_pre_ping: bool = True,
+    server_settings: Mapping[str, str] | None = None,
 ) -> AsyncEngine:
     """``AsyncEngine`` 인스턴스를 만든다 (asyncpg driver).
 
@@ -114,6 +116,9 @@ def make_async_engine(
         pool 초과 허용량.
     pool_pre_ping
         체크아웃 시 ``SELECT 1`` 확인 (idle 끊김 방지). 운영 권장 ``True``.
+    server_settings
+        asyncpg 신규 연결에 적용할 PostgreSQL session setting. 호출자가
+        명시한 설정만 전달하며 기본값은 빈 맵이다.
 
     Returns
     -------
@@ -128,6 +133,11 @@ def make_async_engine(
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_pre_ping=pool_pre_ping,
+        connect_args=(
+            {"server_settings": dict(server_settings)}
+            if server_settings is not None
+            else {}
+        ),
     )
 
 

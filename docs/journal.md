@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-13 (codex) — 고zoom Feature bbox PostgreSQL JIT 병목 수정
+
+- **원인 확정**: 운영 중앙 서울 z12 tile을 읽기 전용
+  ``EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)``로 재현했다. 실제 feature
+  scan은 51건을 찾는 데 약 14ms였지만, notice 계보·weather 상관
+  subplan의 높은 추정 cost가 JIT 78개 function을 컴파일해 약
+  1.8초를 소모했다. 동일 query는 ``jit=off``에서 전체 20.2ms였다.
+- **수정**: ``make_async_engine``에 후방 호환 optional ``server_settings``를
+  추가하고 FastAPI engine에만 asyncpg ``server_settings={"jit": "off"}``를
+  적용했다. Dagster/CLI는 배치 특성을 고려해 기본 JIT 설정을 유지한다.
+- **영향도·검증**: codegraph ``impact make_async_engine --depth 2``로 127개
+  영향 symbol을 확인했다. 기존 caller는 optional 기본값으로 동작을
+  유지하고 API caller 하나만 설정을 넘긴다. engine 전달·API 정책 unit
+  13건과 변경 파일 Ruff/strict mypy를 통과했다.
+
 ## 2026-07-13 (codex) — 지도 신선도 반복 장애 근본 수정·적대적 리뷰 2회
 
 - **운영 원인**: n150에서 종료되지 않은 Dagster run 10개가 전역 동시 실행 슬롯을 모두
