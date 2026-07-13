@@ -294,7 +294,7 @@ def test_provider_record_resource_env_mapping() -> None:
         "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL",
         "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY",
     )
-    assert specs["kor_travel_concierge_youtube_features"].source_env_names == ("API_KEYS",)
+    assert specs["kor_travel_concierge_youtube_features"].source_env_names == ()
 
 
 def test_provider_record_guard_message_hides_secret(

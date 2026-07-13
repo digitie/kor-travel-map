@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-13 (codex) — concierge 소비자 키를 DB read scope 계약으로 전환
+
+- **소비 계약**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`를 concierge static
+  `API_KEYS` 공유값이 아니라 외부 소비자용 DB `read` scope 키로 정의했다. fetcher는 기존처럼
+  `/api/v1/features/{snapshot|changes}`와 `X-API-Key` header만 사용한다.
+- **resource metadata**: provider source env `API_KEYS` 매핑을 제거하고, 설정 설명·guard 메시지·
+  resource 테스트를 read 키 발급 모델로 정렬했다.
+- **회전 계약**: Concierge scope migration → 새 read 키 발급 → kor-travel-map secret 교체·재시작 →
+  snapshot/changes 다중 page·cursor 불변식과 내부/write 403 → BFF/operator static admin overlap 회전 →
+  구 키 폐기 순서를 문서화했다. 실제 키 값·길이·digest는 기록하지 않는다.
+- **n150 검증**: Python 3.11 일회성 컨테이너에서 core/lint 1,169개, API 331개, Dagster
+  220개 테스트를 통과했고 Dagster 1개는 환경성 skip이었다. 전체 Ruff, main/API/Dagster strict
+  mypy, import 계약, prod 문서 redaction 검사도 통과했다. live smoke는 prod 전환 단계에서 수행한다.
+
 ## 2026-07-12 (codex) — Feature 목록/상세 polish와 큐레이션 지도 필터 보정
 
 - **Feature 목록**: rows/page/page size/duration 요약을 필터줄에서 표 헤더의 "Feature 목록" 옆으로

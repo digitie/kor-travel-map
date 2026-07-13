@@ -53,6 +53,8 @@ GET /api/v1/features/changes    # incremental
 - 인증 헤더: `X-API-Key`
 - env: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`,
   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`
+- API key: kor-travel-concierge에서 외부 소비자용으로 발급한 DB `read` scope 키. BFF/operator용
+  static `API_KEYS`는 사용하지 않는다.
 - export 경로에 downstream(소비자) 이름을 넣지 않는다 — 중립적
   `/api/v1/features/{snapshot,changes}`.
 
@@ -121,8 +123,9 @@ in-place 갱신한다. (구 ADR-057에서 결정 — 정본 구현 `_item_to_bun
 
 ## 8. 검증
 
-- 외부 export API(producer T-066) 배포 전까지 live smoke는 fake response/계약
-  테스트로 제한된다.
+- producer export API 배포 후 n150 live 환경에서 DB `read` 키로 snapshot/changes를 각각
+  다중 page 소비하고 cursor 비반복·export ID 비중복·내부/write 403을 확인한다. fake response와
+  계약 테스트는 배포 전 회귀 게이트이며 live smoke를 대체하지 않는다.
 - 회귀: geocoder 유무 동일 feature_id, category None↔8자리 동일 feature_id
   (`tests/unit/test_providers_kor_travel_concierge.py`).
 
@@ -158,3 +161,6 @@ in-place 갱신한다. (구 ADR-057에서 결정 — 정본 구현 `_item_to_bun
   clean cut해야 canonical name·자연키·resource·env가 영구 호환 매핑 없이 같은
   어휘를 공유한다(ADR-046). 실데이터 적재 전 변경이라 재적재가 장기 유지비가 낮다.
   (§1, 4, 7, 9에 통합.)
+  - **2026-07-13 보강**: consumer credential은 producer ADR-36의 DB `read` scope 키만
+    사용한다. BFF/operator static admin 키를 공유하지 않으며, scope migration과 live read/write
+    검증, BFF admin overlap 회전이 끝난 뒤 구 static 키를 제거한다.

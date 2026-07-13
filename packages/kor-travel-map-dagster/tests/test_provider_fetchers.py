@@ -170,7 +170,7 @@ async def test_kor_travel_concierge_youtube_fetch_paginates_and_closes(
     )
     settings = KorTravelMapSettings(
         kor_travel_concierge_base_url="https://kor-travel-concierge.example",
-        kor_travel_concierge_api_key=SecretStr("agent-key"),
+        kor_travel_concierge_api_key=SecretStr("concierge-read-key"),
     )
 
     records = [
@@ -181,7 +181,7 @@ async def test_kor_travel_concierge_youtube_fetch_paginates_and_closes(
     assert len(fake.instances) == 1
     client = fake.instances[0]
     assert client.base_url == "https://kor-travel-concierge.example"
-    assert client.headers == {"X-API-Key": "agent-key"}
+    assert client.headers == {"X-API-Key": "concierge-read-key"}
     assert client.closed is True
     assert client.calls == [
         ("/api/v1/features/snapshot", {"limit": 200}),
@@ -227,6 +227,18 @@ async def test_kor_travel_concierge_youtube_fetch_raises_when_credential_missing
     )
 
     with pytest.raises(ProviderCredentialMissing):
+        await anext(generator)
+
+
+async def test_kor_travel_concierge_youtube_fetch_requires_api_key() -> None:
+    generator = fetch_kor_travel_concierge_youtube_features(
+        KorTravelMapSettings(
+            kor_travel_concierge_base_url="https://kor-travel-concierge.example",
+            kor_travel_concierge_api_key=None,
+        )
+    )
+
+    with pytest.raises(ProviderCredentialMissing, match="DB read scope 키"):
         await anext(generator)
 
 

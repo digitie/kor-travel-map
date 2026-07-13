@@ -63,7 +63,7 @@
 | kor-travel-map 공용 read (`/v1/features*` GET 등) | 비강제(운영은 인프라 SSO) | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
 | kor-travel-map service read (`POST /v1/features/batch`) | `X-Kor-Travel-Map-Service-Token` | 〃 (`data={found{},missing[]}`) | 〃 |
 | kor-travel-map admin/ops (`/v1/admin/*`·`/v1/ops/*`) | 인프라 SSO/IP allowlist + `admin_destructive_enabled` kill-switch | 〃 | 〃 |
-| kor-travel-concierge export (`/api/v1/features/*`) | `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
+| kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
