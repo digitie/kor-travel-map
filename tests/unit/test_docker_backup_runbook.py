@@ -73,6 +73,8 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "--if-exists" in script
     assert "--no-owner" in script
     assert "--no-privileges" in script
+    assert "vacuumdb" in script
+    assert "--analyze-in-stages" in script
     assert "rustfs-data.tar.gz" in script
     assert "docker run --rm" in script
     assert "KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" in script
@@ -98,9 +100,22 @@ def test_restore_verify_script_checks_staging_counts() -> None:
     script = _read("scripts/docker-restore-verify.sh")
 
     assert "feature.features" in script
+    assert "last_analyze" in script
+    assert "last_autoanalyze" in script
+    assert "feature_stats=ready" in script
     assert "information_schema.tables" in script
     assert "docker volume inspect" in script
     assert "file_count" in script
+
+
+@pytest.mark.unit
+def test_n150_restore_runner_analyzes_restored_databases() -> None:
+    script = _read("live-e2e-backup-runner/restore.sh")
+    readme = _read("live-e2e-backup-runner/README.md")
+
+    assert script.index("pg_restore") < script.index("vacuumdb")
+    assert "--analyze-in-stages" in script
+    assert "vacuumdb --analyze-in-stages" in readme
 
 
 @pytest.mark.unit

@@ -76,7 +76,13 @@ require_database "$RESTORE_APP_DB"
 require_database "$RESTORE_DAGSTER_DB"
 
 FEATURE_COUNT="$(query_scalar "$RESTORE_APP_DB" "SELECT count(*) FROM feature.features")"
+FEATURE_STATS_READY="$(query_scalar "$RESTORE_APP_DB" "SELECT (last_analyze IS NOT NULL OR last_autoanalyze IS NOT NULL)::int FROM pg_stat_user_tables WHERE schemaname = 'feature' AND relname = 'features'")"
 DAGSTER_TABLE_COUNT="$(query_scalar "$RESTORE_DAGSTER_DB" "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')")"
+
+if [[ "$FEATURE_STATS_READY" != "1" ]]; then
+  echo "Restore verification failed: feature.features planner statistics are missing" >&2
+  exit 1
+fi
 
 if [[ "$RESTORE_SKIP_RUSTFS" == "1" ]]; then
   RUSTFS_FILE_COUNT="skipped"
@@ -91,7 +97,7 @@ fi
 
 cat <<SUMMARY
 Restore verification complete:
-  app_db=${RESTORE_APP_DB} feature_count=${FEATURE_COUNT}
+  app_db=${RESTORE_APP_DB} feature_count=${FEATURE_COUNT} feature_stats=ready
   dagster_db=${RESTORE_DAGSTER_DB} table_count=${DAGSTER_TABLE_COUNT}
   rustfs_volume=${RESTORE_RUSTFS_VOLUME} file_count=${RUSTFS_FILE_COUNT}
 SUMMARY

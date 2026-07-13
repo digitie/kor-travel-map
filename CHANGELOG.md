@@ -7,6 +7,11 @@
 
 ### Notice 계보 수명주기 원자화 (2026-07-14)
 
+- **FIXED**: 대량 적재 뒤 `feature.features` planner 통계가 생성되지 않아 실제 약 102만 행을
+  약 970행으로 오인하고 notice lifecycle UPDATE가 5분 이상 걸리던 문제를 수정했다. Alembic
+  0047이 reconcile join table을 `ANALYZE`해 정상 join plan을 복원한다. 통계를 보존하지 않는
+  `pg_restore` 뒤에도 staged analyze를 강제하고 swap 검증에서 통계 누락을 거부해 재발 경로를
+  차단했다.
 - **FIXED**: KREX reconcile이 약 1만 개의 동일 scope 계보마다 동일 scope 전체를 다시
   lateral 비교하던 제곱 비용을 제거했다. 동일 scope winner는 이미 만든 set 기반 rank를
   재사용하고, 추가 비교는 다른 provider/dataset 계보를 공유한 Feature에만 수행한다.

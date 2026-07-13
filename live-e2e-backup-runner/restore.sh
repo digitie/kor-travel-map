@@ -121,6 +121,8 @@ restore_db() {
   docker exec -i -e KTM_SUPER_ROLE="$role" -e KTM_DB="$target_db" "$postgres_container" \
     sh -lc 'pg_restore --clean --if-exists --no-owner --no-privileges -U "$KTM_SUPER_ROLE" -d "$KTM_DB"' \
     < "$backup_dir/$dump_rel"
+  docker exec -e KTM_SUPER_ROLE="$role" -e KTM_DB="$target_db" "$postgres_container" \
+    sh -lc 'vacuumdb --analyze-in-stages -U "$KTM_SUPER_ROLE" -d "$KTM_DB"'
 }
 
 if [[ "$skip_checksum" != "1" ]]; then
