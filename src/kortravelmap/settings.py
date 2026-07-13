@@ -237,10 +237,12 @@ class KorTravelMapSettings(BaseSettings):
     opinet_run_call_budget: int = Field(
         default=600,
         ge=1,
+        le=700,
         description=(
             "``low_top_area`` run당 OpiNet 총 호출 hard cap(#545 — get_area_codes + "
             "lowTop10 + aroundAll 합산). 기본 600이면 월간 place job과 같은 날 "
-            "겹쳐도(2×600=1,200) 무료키 1,500회/일 아래. "
+            "겹쳐도(2×600=1,200) 무료키 1,500회/일 아래. place/price KST 일일 "
+            "coalescing과 함께 쓰며, 두 dataset 합계와 운영 여유를 보장하도록 최대 700. "
             "env ``OPINET_RUN_CALL_BUDGET``."
         ),
     )

@@ -14,6 +14,7 @@ from kortravelmap.dto import FeatureKind, SourceRole
 from kortravelmap.providers.kma import (
     KMA_GRID_CATEGORY,
     KMA_GRID_MARKER_COLOR,
+    KMA_GRID_MARKER_ICON,
     KMA_PROVIDER_NAME,
     KMA_SHORT_GRID_DATASET_KEY,
     KMA_ULTRA_SHORT_GRID_DATASET_KEY,
@@ -40,6 +41,7 @@ async def test_grid_to_weather_bundle_basic() -> None:
     assert KMA_GRID_CATEGORY == "99000000"
     assert feature.category == KMA_GRID_CATEGORY
     assert feature.detail is None  # weather kind는 detail 불가(ADR-018)
+    assert feature.marker_icon == KMA_GRID_MARKER_ICON == "weather"
     assert feature.marker_color == KMA_GRID_MARKER_COLOR
 
     # 좌표 = 호출자가 넘긴 격자 중심(`kma.grid.to_latlon`)

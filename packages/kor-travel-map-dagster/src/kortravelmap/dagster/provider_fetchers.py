@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import httpx
+from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto._time import kst_now
 from kortravelmap.providers.opinet import (
     OPINET_PROVIDER_NAME,
@@ -361,14 +362,20 @@ def fetch_krex_traffic_notices(
 
     ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
     읽어 ``KrexClient(ex_api_key=...)``를 열고 ``client.traffic.incident(
-    num_of_rows=1000, page_no=N)``을 페이지네이션하며 record(``krex.models.
-    Incident``, ``KrexTrafficNoticeItem`` Protocol 충족)를 lazily yield한다.
+    num_of_rows=1000, page_no=N)``을 페이지네이션한다. 완전 snapshot 검증 뒤
+    record(``krex.models.Incident``, ``KrexTrafficNoticeItem`` Protocol 충족)를 yield한다.
     rest_areas와 달리 EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
 
-    EX 돌발 feed는 휘발성(transient) — 해소된 사건은 사라진다(ADR-044). 페이지
-    네이션은 빈 페이지 / 마지막 페이지(``len(items) < num_of_rows``) /
-    ``total_count`` 도달 중 먼저 만나는 조건에서 멈춘다. generator 소비 종료
-    (또는 close)시 ``finally``에서 ``client.close()``.
+    EX 돌발 feed는 휘발성(transient) — 해소된 사건은 사라진다(ADR-044). 서버가
+    요청한 ``num_of_rows``보다 작은 page size로 clamp할 수 있으므로 응답
+    ``total_count``까지 수집한다. 이 feed의 부재는 notice 종료를 뜻하므로
+    ``page.raw``에 endpoint 고유 목록 키와 count가 모두 있는 완결된 snapshot만
+    성공으로 인정한다. HTTP 200의 ``{}``, message-only, count-only 응답은 실패시켜
+    asset reconcile이 실행되지 않게 한다. page 사이 동일 사건 identity가 다시
+    나타나는 snapshot도 page boundary 이동으로 한 사건이 중복되고 다른 사건이
+    누락된 불완전 응답일 수 있으므로 거부한다. 완전 pagination을 연속 2회 수행해
+    record 수와 사건 identity set이 같을 때만 두 번째 pass를 yield한다. generator
+    소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -386,25 +393,197 @@ def fetch_krex_traffic_notices(
     client = krex.KrexClient(ex_api_key=api_key)
     num_of_rows = 1000
     try:
-        page_no = 1
-        seen = 0
-        while True:
-            page = client.traffic.incident(
-                num_of_rows=num_of_rows, page_no=page_no
+        first_records, first_identities = _fetch_krex_traffic_notice_snapshot(
+            client,
+            num_of_rows=num_of_rows,
+        )
+        second_records, second_identities = _fetch_krex_traffic_notice_snapshot(
+            client,
+            num_of_rows=num_of_rows,
+        )
+        if (
+            len(first_records) != len(second_records)
+            or first_identities != second_identities
+        ):
+            raise RuntimeError(
+                "KREX traffic_notices 연속 snapshot의 사건 집합이 다르다: "
+                f"first_count={len(first_records)}, second_count={len(second_records)}"
             )
-            items = list(page.items)
-            if not items:
-                break
-            yield from items
-            seen += len(items)
-            total_count = page.total_count
-            if len(items) < num_of_rows:
-                break
-            if total_count is not None and seen >= total_count:
-                break
-            page_no += 1
+        # 두 번째 pass가 동일 사건 집합을 확인한 가장 최신 payload다. 검증이 끝나기
+        # 전에는 한 건도 yield하지 않아 asset의 destructive reconcile과 격리한다.
+        yield from second_records
     finally:
         client.close()
+
+
+def _fetch_krex_traffic_notice_snapshot(
+    client: Any,
+    *,
+    num_of_rows: int,
+) -> tuple[list[Any], set[str]]:
+    """KREX incident snapshot 한 pass를 완전 수집하고 사건 identity를 반환한다."""
+    records: list[Any] = []
+    seen_lineage_identities: set[str] = set()
+    page_no = 1
+    expected_total: int | None = None
+    while True:
+        page = client.traffic.incident(
+            num_of_rows=num_of_rows, page_no=page_no
+        )
+        items = list(page.items)
+        total_count = _validate_krex_traffic_notice_page(
+            page,
+            page_no=page_no,
+            seen=len(records),
+            item_count=len(items),
+            expected_total=expected_total,
+        )
+        if expected_total is None:
+            expected_total = total_count
+        if not items:
+            break
+        for item_index, item in enumerate(items):
+            identity = _krex_traffic_notice_lineage_identity(item)
+            if identity in seen_lineage_identities:
+                raise RuntimeError(
+                    "KREX traffic_notices snapshot에 중복 사건 identity가 있다: "
+                    f"page_no={page_no}, item_index={item_index}"
+                )
+            seen_lineage_identities.add(identity)
+        records.extend(items)
+        if len(records) == total_count:
+            break
+        page_no += 1
+    if expected_total is None or len(records) != expected_total:
+        raise RuntimeError(
+            "KREX traffic_notices snapshot record 수가 count와 다르다: "
+            f"records={len(records)}, total_count={expected_total!r}"
+        )
+    return records, seen_lineage_identities
+
+
+def _krex_traffic_notice_lineage_identity(item: Any) -> str:
+    """map KREX 사건 자연키와 같은 필드로 pagination 중복을 판정한다.
+
+    converter ``_traffic_notice_natural_key``와 동일하게 typed natural-key 필드를
+    strip/lower한 뒤 빈 값을 제외해 ``::``로 잇는다. 전부 비면 ``series_no``를
+    별도 identity로 쓰지 않고 raw payload 전체의 hash로 fallback한다.
+    """
+    parts = tuple(
+        part
+        for part in (
+            (item.occurred_date or "").strip().lower(),
+            (item.occurred_time or "").strip().lower(),
+            (item.route_no or "").strip().lower(),
+            (item.direction or "").strip().lower(),
+            (item.point_name or "").strip().lower(),
+            (item.incident_type_code or "").strip().lower(),
+        )
+        if part
+    )
+    if parts:
+        return "::".join(parts)
+    return f"raw::{make_payload_hash(item.raw)}"
+
+
+def _validate_krex_traffic_notice_page(
+    page: Any,
+    *,
+    page_no: int,
+    seen: int,
+    item_count: int,
+    expected_total: int | None,
+) -> int:
+    """KREX incident page가 종료 판정에 쓸 수 있는 snapshot 조각인지 검증한다.
+
+    ``python-krex-api``의 범용 EX normalizer는 목록 키가 없는 HTTP 200 object도
+    빈 ``Page``로 정규화한다. 일반 조회에는 편리하지만, 빈 목록이 곧 모든 기존
+    notice 종료인 본 asset에서는 source 실패를 정상 empty로 오인한다. 로컬 provider의
+    live fixture가 고정한 ``realTimeSMSList`` + ``count`` 구조를 이 lifecycle 경계에서
+    한 번 더 확인한다. 단건 응답은 provider 계약대로 object도 허용한다.
+    """
+    raw = getattr(page, "raw", None)
+    if not isinstance(raw, dict):
+        raise RuntimeError(
+            "KREX traffic_notices 응답 raw가 JSON object가 아니다: "
+            f"page_no={page_no}"
+        )
+    if "realTimeSMSList" not in raw:
+        raise RuntimeError(
+            "KREX traffic_notices 응답에 realTimeSMSList가 없다: "
+            f"page_no={page_no}"
+        )
+    raw_items = raw["realTimeSMSList"]
+    if isinstance(raw_items, list):
+        raw_item_count = len(raw_items)
+    elif isinstance(raw_items, dict):
+        raw_item_count = 1
+    else:
+        raise RuntimeError(
+            "KREX traffic_notices realTimeSMSList가 list/object가 아니다: "
+            f"page_no={page_no}"
+        )
+    if raw_item_count != item_count:
+        raise RuntimeError(
+            "KREX traffic_notices raw/parsed item 수가 다르다: "
+            f"raw={raw_item_count}, parsed={item_count}, page_no={page_no}"
+        )
+
+    raw_page_no = _strict_non_negative_int(raw.get("pageNo"))
+    if raw_page_no != page_no or getattr(page, "page_no", None) != page_no:
+        raise RuntimeError(
+            "KREX traffic_notices 응답 pageNo가 요청과 다르다: "
+            f"requested={page_no}, raw={raw_page_no!r}, "
+            f"parsed={getattr(page, 'page_no', None)!r}"
+        )
+    raw_num_of_rows = _strict_non_negative_int(raw.get("numOfRows"))
+    if raw_num_of_rows is None or getattr(page, "num_of_rows", None) != raw_num_of_rows:
+        raise RuntimeError(
+            "KREX traffic_notices 응답에 유효한 numOfRows가 없다: "
+            f"raw={raw_num_of_rows!r}, parsed={getattr(page, 'num_of_rows', None)!r}, "
+            f"page_no={page_no}"
+        )
+
+    total_count = _strict_non_negative_int(raw.get("count"))
+    if total_count is None or total_count < 0:
+        raise RuntimeError(
+            "KREX traffic_notices 응답에 유효한 count가 없다: "
+            f"page_no={page_no}"
+        )
+    if getattr(page, "total_count", None) != total_count:
+        raise RuntimeError(
+            "KREX traffic_notices raw/parsed count가 다르다: "
+            f"raw={total_count}, parsed={getattr(page, 'total_count', None)!r}, "
+            f"page_no={page_no}"
+        )
+    if expected_total is not None and total_count != expected_total:
+        raise RuntimeError(
+            "KREX traffic_notices 페이지 사이 count가 바뀌었다: "
+            f"expected={expected_total}, actual={total_count}, page_no={page_no}"
+        )
+    if seen + item_count > total_count:
+        raise RuntimeError(
+            "KREX traffic_notices item 수가 count를 초과했다: "
+            f"seen={seen}, page_items={item_count}, total_count={total_count}, "
+            f"page_no={page_no}"
+        )
+    if item_count == 0 and seen < total_count:
+        raise RuntimeError(
+            "KREX traffic_notices pagination이 total_count 도달 전에 빈 page를 반환했다: "
+            f"seen={seen}, total_count={total_count}, page_no={page_no}"
+        )
+    return total_count
+
+
+def _strict_non_negative_int(value: Any) -> int | None:
+    """bool/float를 수로 오인하지 않는 provider metadata 정수 파서."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def fetch_krex_rest_area_fuel_prices(
@@ -1254,26 +1433,6 @@ def _opinet_no_data_error_type() -> type[Exception]:
     return RuntimeError
 
 
-def _opinet_rate_limit_error_type() -> type[Exception]:
-    """현재 설치된 ``opinet`` 모듈의 호출 한도 초과 예외 타입(#545).
-
-    호출 budget(``_OPINET_RUN_CALL_BUDGET``)이 보수적 안전망이지만, 서버가 먼저
-    429/한도 초과를 알리면 ``OpinetRateLimitError``로 즉시 enumeration을 중단한다.
-    ``OpinetNoDataError``와 달리 빈 응답이 아니라 quota 신호이므로 area/product를
-    더 돌지 않고 빠져나간다. 모듈이 해당 예외를 노출하지 않으면(구버전) 절대
-    매칭되지 않는 sentinel을 반환해 호출부 ``except``를 무력화한다.
-    """
-    opinet = importlib.import_module("opinet")
-    error_type = getattr(opinet, "OpinetRateLimitError", None)
-    if isinstance(error_type, type) and issubclass(error_type, Exception):
-        return error_type
-
-    class _UnreachableOpinetRateLimit(Exception):
-        """``OpinetRateLimitError`` 미노출 시 매칭되지 않는 sentinel."""
-
-    return _UnreachableOpinetRateLimit
-
-
 def _opinet_rotation_offset(
     *, window_areas: int, on_date: date | None = None
 ) -> int:
@@ -1312,7 +1471,8 @@ def _opinet_low_top_area_stations(
       ``lowTop10`` + ``aroundAll`` 호출을 합산해 초과 시 즉시 중단한다.
     - ``lowTop10``이 충분히(``_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS``) 산출되면
       grid fallback을 **건너뛴다**(부분 성공 후 전체 grid를 도는 케이스 차단).
-    - 서버가 먼저 ``OpinetRateLimitError``를 던지면 enumeration을 조기 종료한다.
+    - 서버가 먼저 ``OpinetRateLimitError``를 던지면 run을 실패시킨다. 일부 record를
+      얻었더라도 성공으로 삼으면 sync cursor가 전진해 갱신 장애가 숨겨지기 때문이다.
 
     시군 윈도 로테이션: ``rotation_offset``(기본 = 오늘 KST 날짜 기반
     ``_opinet_rotation_offset``)만큼 area 목록을 회전시켜 매 run이 다른 시군
@@ -1322,7 +1482,6 @@ def _opinet_low_top_area_stations(
     yielded = 0
     low_top_calls = 0
     no_data_error = _opinet_no_data_error_type()
-    rate_limit_error = _opinet_rate_limit_error_type()
     budget = _OpinetCallBudget(run_call_budget)
     window_areas = max(max_low_top_calls // max(len(_OPINET_LOW_TOP_PRODUCTS), 1), 1)
     if rotation_offset is None:
@@ -1360,7 +1519,6 @@ def _opinet_low_top_area_stations(
         shift = rotation_offset % len(areas)
         areas = areas[shift:] + areas[:shift]
 
-    rate_limited = False
     for area in areas:
         if budget.exhausted:
             break
@@ -1378,20 +1536,13 @@ def _opinet_low_top_area_stations(
                 )
             except no_data_error:
                 continue
-            except rate_limit_error:
-                rate_limited = True
-                break
             yield from _emit(stations)
-        if (
-            rate_limited
-            or budget.exhausted
-            or low_top_calls >= max_low_top_calls
-        ):
+        if budget.exhausted or low_top_calls >= max_low_top_calls:
             break
 
     # 부분 성공이라도 분포 임계치를 넘겼으면 grid fallback을 돌지 않는다(#545).
     # budget이 이미 소진됐어도 grid를 시작하지 않는다.
-    if rate_limited or budget.exhausted or yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
+    if budget.exhausted or yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
         return
 
     for center_lon, center_lat in _opinet_sample_grid_centers():
@@ -1409,8 +1560,6 @@ def _opinet_low_top_area_stations(
                 )
             except no_data_error:
                 continue
-            except rate_limit_error:
-                return
             yield from _emit(stations)
 
 

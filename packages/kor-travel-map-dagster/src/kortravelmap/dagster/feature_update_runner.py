@@ -245,6 +245,31 @@ class FeatureUpdateAssetRunner:
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
+        if scope.provider == OPINET_PROVIDER_NAME and scope.scope_type != "provider_dataset":
+            # OpiNet lowTop fetcher는 개별 feature/bbox/cache-target request scope를
+            # 소비하지 않고 현재 설정의 전국 회전 window를 다시 조회한다. targeted
+            # request마다 같은 무료키 quota를 소진하는 대신 system schedule에 맡긴다.
+            metadata: dict[str, object] = {
+                "provider": scope.provider,
+                "dataset_key": scope.dataset_key,
+                "skipped": True,
+                "skip_reason": "global_provider_not_targetable",
+                "scope_type": scope.scope_type,
+            }
+            log_info = getattr(self._log, "info", None)
+            if callable(log_info):
+                log_info(
+                    "OpiNet %s targeted refresh 생략(scope_type=%s): "
+                    "현재 fetcher는 request scope를 적용할 수 없음.",
+                    scope.dataset_key,
+                    scope.scope_type,
+                )
+            return ProviderDatasetRefreshResult(
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                status="skipped",
+                metadata=metadata,
+            )
         settings = self._settings_factory()
         # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를 포함할 수
         # 있으므로 이벤트 루프를 막지 않게 스레드로 보낸다(#617 리뷰).
@@ -258,7 +283,11 @@ class FeatureUpdateAssetRunner:
             result = await spec.run(context)
         finally:
             await _close_teardowns(extra.teardowns)
-        return _as_refresh_result(result, scope=scope)
+        return _as_refresh_result(
+            result,
+            scope=scope,
+            output_metadata=context.output_metadata,
+        )
 
     def _spec_for_scope(
         self, scope: ProviderDatasetRefreshScope
@@ -350,10 +379,13 @@ def _as_refresh_result(
     result: object,
     *,
     scope: ProviderDatasetRefreshScope,
+    output_metadata: list[dict[str, object]] | None = None,
 ) -> ProviderDatasetRefreshResult:
     if isinstance(result, ProviderDatasetRefreshResult):
         return result
     metadata = _metadata_for_result(result)
+    for item in output_metadata or ():
+        metadata.update(item)
     loaded_feature_ids = _loaded_feature_ids(result, metadata)
     return ProviderDatasetRefreshResult(
         provider=str(metadata.get("provider") or scope.provider),

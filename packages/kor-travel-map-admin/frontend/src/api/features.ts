@@ -63,10 +63,12 @@ interface FeatureTile {
   z: number;
 }
 
-const MAX_FEATURE_TILES = 24;
+// n150 API는 4-core다. 화면 한 번에 과도한 병렬 bbox를 던지지 않으면서도 고zoom에서
+// z12(약 9.7km) 후보를 계속 읽지 않도록 최대 8개까지 세분화한다.
+const MAX_FEATURE_TILES = 8;
 const MAX_GEOMETRY_LIGHT_TILE_PAGES = 10;
 const MIN_FEATURE_TILE_ZOOM = 5;
-const MAX_FEATURE_TILE_ZOOM = 12;
+const MAX_FEATURE_TILE_ZOOM = 15;
 const MERCATOR_LAT_LIMIT = 85.05112878;
 const GEOMETRY_LIGHT_KINDS = new Set(["area", "route"]);
 
@@ -115,7 +117,7 @@ function tileYToLat(y: number, zoom: number): number {
   return (180 / Math.PI) * Math.atan(Math.sinh(n));
 }
 
-function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
+export function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
   const rawZoom = typeof params.zoom === "number" ? params.zoom : 8;
   // area/route 단독 필터는 summary payload가 작지만 특정 tile에 500건이 몰려
   // false partial이 뜨기 쉽다. 한 단계 더 잘게 나눠 누락/재시도 체감을 줄인다.
@@ -140,8 +142,10 @@ function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
     const minY = latToTileY(maxLat, tileZoom);
     const maxY = latToTileY(minLat, tileZoom);
     const count = (maxX - minX + 1) * (maxY - minY + 1);
-    if (count > MAX_FEATURE_TILES && tileZoom > MIN_FEATURE_TILE_ZOOM) {
-      continue;
+    if (count > MAX_FEATURE_TILES) {
+      if (tileZoom > MIN_FEATURE_TILE_ZOOM) continue;
+      // 비정상적으로 큰 bbox는 수백 tile fan-out 대신 기존 single-bbox fallback을 쓴다.
+      return [];
     }
 
     const tiles: FeatureTile[] = [];
@@ -360,27 +364,7 @@ export function useFeaturesInBbox(
   // tile 분할은 한 번만 계산해 queryKey와 fetch에 함께 쓴다(이전엔 hook과 fetcher가
   // 각각 buildFeatureTiles를 호출해 동일 계산을 두 번 했다).
   const tiles = buildFeatureTiles(queryParams);
-  // normal path에선 tile key 집합이 fetch 결과를 완전히 결정한다(같은 tile 집합 =
-  // 같은 데이터). 따라서 outer key의 viewport는 tiles=[] fallback(single-bbox) 경우만
-  // 구분하면 된다. 과거 `.toFixed(4)`(~11m)는 tile이 최소 ~9.7km인데도 sub-tile pan마다
-  // 새 outer key를 만들어 tile cache가 다 hit인데도 outer query를 재실행(재merge/재렌더)
-  // 시켰다. ~1.1km(`.toFixed(2)`)로 낮춰 tile 내부 pan은 순수 cache hit이 되게 한다.
-  const viewportSignature = [
-    params.min_lon.toFixed(2),
-    params.min_lat.toFixed(2),
-    params.max_lon.toFixed(2),
-    params.max_lat.toFixed(2),
-  ].join(",");
-  const key = [
-    "features",
-    "viewport",
-    viewportSignature,
-    tiles.map((tile) => tile.key).join("|"),
-    params.kinds?.join(",") ?? "",
-    params.provider?.join(",") ?? "",
-    params.includeGeometry ? "geometry" : "summary",
-    params.page_size ?? 500,
-  ] as const;
+  const key = featureViewportQueryKey(params, tiles);
   return useQuery<TiledFeaturesResponse, Error>({
     queryKey: key,
     queryFn: ({ signal }) =>
@@ -391,6 +375,36 @@ export function useFeaturesInBbox(
     // fresh한데도 refocus/재렌더에서 outer query가 불필요하게 refetch됐다.
     staleTime: 30_000,
   });
+}
+
+/**
+ * normal path는 tile key 집합이 결과를 완전히 결정한다. 같은 tile 안의 작은 pan/zoom은
+ * viewport 실수값이 달라도 outer merge와 GeoJSON setData를 반복하지 않는다. tile을 만들
+ * 수 없는 single-bbox fallback만 실제 viewport 서명으로 구분한다.
+ */
+export function featureViewportQueryKey(
+  params: FeaturesInBboxParams,
+  tiles: readonly FeatureTile[],
+) {
+  const viewportSignature =
+    tiles.length === 0
+      ? [
+          params.min_lon.toFixed(2),
+          params.min_lat.toFixed(2),
+          params.max_lon.toFixed(2),
+          params.max_lat.toFixed(2),
+        ].join(",")
+      : "";
+  return [
+    "features",
+    "viewport",
+    viewportSignature,
+    tiles.map((tile) => tile.key).join("|"),
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+    params.includeGeometry ? "geometry" : "summary",
+    params.page_size ?? 500,
+  ] as const;
 }
 
 // ── 저zoom region 클러스터 (`GET /v1/features/in-bounds`, zoom 유도) ─────────────

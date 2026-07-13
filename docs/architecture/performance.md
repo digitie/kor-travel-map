@@ -108,6 +108,28 @@ GROUP BY f.sigungu_code;
 `coord && bbox` 인덱스 사용 + `GROUP BY sigungu_code` (인덱스 `idx_features_sigungu`
 보조). 큰 zoom out에서는 결과 row 수가 적어 빠르다.
 
+관리 Feature 지도는 zoom 13 이하에서 위 region rollup만 조회한다. 개별 feature로
+전환하는 고zoom에서는 현재 화면을 Web Mercator tile로 나누되 다음 규칙을 지킨다.
+
+- 카메라 zoom에 맞춰 최대 zoom 15 tile을 사용해 고zoom 요청이 고정 zoom 12의 넓은
+  후보 집합을 반복 읽지 않게 한다.
+- 한 화면의 tile fan-out은 최대 8개다. 그보다 많으면 한 단계씩 낮추고, 비정상적으로
+  큰 bbox는 single-bbox 요청으로 되돌아가 API 4-core를 병렬 요청으로 포화시키지 않는다.
+- 정상 tile 경로의 query key는 실제 tile key 집합으로만 정한다. 같은 tile 안의 작은
+  pan은 outer merge와 GeoJSON `setData`를 다시 수행하지 않는다.
+- 기본 `weather`/`notice`처럼 point만 선택했으면 `include_geometry=false`다. `route`, 또는
+  표시 zoom 이상의 `area`, 전체 kind 선택일 때만 geometry를 요청한다.
+
+MapLibre의 DOM marker 갱신은 해당 GeoJSON source가 완전히 적재된 `sourcedata`와
+`moveend`에서만 수행한다. VWorld raster source의 tile 이벤트와 중복 `idle`/`zoomend`
+구독은 marker 전체 순회를 유발하므로 사용하지 않으며, tile 경계에서 중복 반환된
+feature/cluster는 겹침 계산 전에 식별자로 제거한다.
+
+큐레이션 지도는 viewport를 power-of-two grid에 맞춘 padded bbox로 정규화해 query key와
+실제 요청에 함께 쓴다. 작은 pan은 같은 cache를 재사용하고 새 응답 중에도 이전 marker를
+유지한다. padding 밖으로 이동하면 새 bbox를 요청하므로 화면 밖의 stale marker만 남는
+오류는 허용하지 않는다.
+
 ### 2.5 LINESTRING/POLYGON 교차
 
 ```sql

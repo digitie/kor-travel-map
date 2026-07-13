@@ -89,6 +89,7 @@ __all__ = [
     "KMA_ULTRA_SHORT_GRID_DATASET_KEY",
     "KMA_SHORT_GRID_DATASET_KEY",
     "KMA_GRID_CATEGORY",
+    "KMA_GRID_MARKER_ICON",
     "KMA_GRID_MARKER_COLOR",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
@@ -143,9 +144,10 @@ KMA_SHORT_GRID_DATASET_KEY: Final[str] = "kma_short_grid"
 _GRID_ENTITY_TYPE: Final[str] = "kma_grid"
 KMA_GRID_CATEGORY: Final[str] = "99000000"
 """weather kind는 detail이 없어 category가 부차적 — airkorea/특보와 동일 sentinel."""
+KMA_GRID_MARKER_ICON: Final[str] = "weather"
+"""AirKorea 대기질 측정소와 형태로도 구분되는 KMA 날씨 마커 아이콘."""
 KMA_GRID_MARKER_COLOR: Final[str] = "P-01"
 """airkorea 측정소(P-16 violet)와 구분되는 KMA 격자 마커색(P-01 blue)."""
-_DEFAULT_GRID_ICON: Final[str] = "marker"
 
 
 async def grid_to_weather_bundle(
@@ -224,7 +226,9 @@ async def grid_to_weather_bundle(
         coord=coord,
         address=address,
         category=KMA_GRID_CATEGORY,
-        marker_icon=mapbox_maki_icon_or_none(KMA_GRID_CATEGORY) or _DEFAULT_GRID_ICON,
+        marker_icon=(
+            mapbox_maki_icon_or_none(KMA_GRID_CATEGORY) or KMA_GRID_MARKER_ICON
+        ),
         marker_color=KMA_GRID_MARKER_COLOR,
         detail=None,  # weather kind는 detail 불가(ADR-018) — 값은 WeatherValue.
     )

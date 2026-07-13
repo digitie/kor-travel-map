@@ -26,7 +26,8 @@
   `StationDetail`, `OilPrice`), KATEC (EPSG:5181) 좌표 처리.
 - `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
   `Feature(kind=price)` + `PriceValue`, DB 적재.
-- kor-travel-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
+- kor-travel-map Dagster: schedule, run당 호출 예산, OpiNet asset 직렬 실행
+  (`opinet_api` pool, instance 전역 `max_concurrent=1`).
 
 ## 3. 변환 계약
 
@@ -142,24 +143,63 @@ OpiNet 공개 API에는 전국/지역 단위 전체 주유소 bulk endpoint가 �
   윈도 크기`)으로 시군 목록을 회전시켜 매일 윈도 크기만큼 전진한다 → 전국 1주기
   ≈ ceil(230/60) = **4일**, 호출량은 그대로(~198/run). round-robin 인접 시군은 서로
   다른 시도라 윈도 안 지리 분포 공정성도 유지된다.
-- 표시 계층 정합: 로테이션 주기보다 오래된 price 관측은 현재가에서 숨긴다(아래
-  `KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`, 기본 4일 — 지도 `price_summary` 마커와
-  price card `current`에서 제외, 이력은 보존).
+- 이 4일은 **시군 조회 윈도**의 1주기이지, 저장된 모든 주유소 가격의 갱신 보장이
+  아니다. `lowTop10`의 유종별 top-20 밖으로 밀린 기존 주유소는 다시 응답될 때까지
+  더 오래된 값이 남을 수 있다. 일일 quota 안에서 전체 known station을 `detailById`로
+  매일 갱신할 수 없으므로, 지도는 관측 날짜를 숨기지 않고 아래처럼 과거로 표시한다.
+  stale-first `detailById` 보강은 별도 quota/주기 설계 없이는 이 계약에 포함하지 않는다.
+- 표시 계층 정합: price card의 `current`는 로테이션 주기보다 오래된 관측을 숨긴다
+  (`KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`, 기본 4일; 이력은 보존). 지도 API는 갱신
+  장애를 은폐하지 않도록 오래된 `price_summary`도 `observed_at`과 함께 반환하며,
+  admin 지도 마커는 오늘(KST)이 아닌 OpiNet 유종마다 `과거 M/D`를 표시한다.
 
 OpiNet 쿼터 가드(#545):
 
-- 분당 60회 — Dagster `ConcurrencyConfig(opinet_api, max_concurrent=1)` + provider
-  라이브러리의 token bucket.
+- 동시 실행 1개 — place/price asset 모두 Dagster `opinet_api` pool을 선언하고,
+  `docker/dagster.yaml`의 `concurrency.pools.default_limit=1`, `granularity=run`이
+  schedule·수동 materialize를 포함해 instance 전역에서 직렬화한다. 이전 문서의
+  `ConcurrencyConfig` 표기는 실제 설정이 아니었다.
+- pool을 거치지 않고 같은 `run_feature_*` 함수를 직접 호출하는 targeted feature update
+  worker까지 포함하도록, 두 실행 함수는 fetch 시작 전부터 sync 성공 기록까지 공통
+  PostgreSQL session advisory lock(`provider-run:python-opinet-api`)을 잡는다. pool은
+  불필요한 run 시작·DB lock 대기를 줄이는 1차 제어이고, DB lock이 process/실행 경로를
+  가로지르는 최종 상호 배제 경계다. process/connection 종료 시 lock은 자동 해제된다.
+- OpiNet `low_top_area`는 update request의 feature/bbox/cache-target scope를 직접 적용하지
+  못하고 설정된 전국 회전 window를 다시 조회한다. 따라서 `provider_dataset`이 아닌 targeted
+  request에서는 OpiNet place/price를 API fetch 전에
+  `skipped(global_provider_not_targetable)`로 기록하고 system schedule에 맡긴다. 이를 허용하면
+  서로 다른 target request가 같은 전국 조회를 반복해 무료키 일일 quota를 소진한다.
+- schedule 또는 명시적 provider-wide 실행도 DB lock 안에서 persisted sync state를 확인한다.
+  같은 dataset의 성공 cursor `loaded_at`과 현재 run 시작이 KST 당일이면 provider fetch를
+  한 번으로 합친다(DB commit 시각 `last_success_at`은 자정 통과 run에서 쓰지 않는다). 단 price는 그
+  성공 cursor의 `today_values_count == price_values_upserted > 0`, 즉 적재값 전체가 당일
+  관측이고 `latest_observed_at`도 같은 KST 날짜일 때만 합친다. 오전 수동 실행이 전일/혼합
+  가격을 받아도 저녁 정식 schedule을 막지 않으며, 실패 run은 성공 시각을 전진시키지 않아
+  재시도할 수 있다.
+- 분당 60회 — `python-opinet-api`(`bb6385c` 확인)는 token bucket을 제공하지 않고
+  README에서 rate-limit을 호출자 책임으로 둔다. transport의 sleep은 5xx/network retry
+  backoff일 뿐 요청 pacing이 아니다. 따라서 현재 보호선은 **동시 run 직렬화 + run당
+  hard budget + 서버 `OpinetRateLimitError` 즉시 run 실패**다. provider에 실제 limiter가
+  추가되기 전까지 token bucket이 있다고 가정하지 않는다.
 - 일일 1,500회 — `low_top_area` fetcher가 run당 hard call budget
-  (`KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`, 기본 600, `get_area_codes`+`lowTop10`+
-  `aroundAll` 합산)을 적용하고, 서버가 먼저 `OpinetRateLimitError`를 던지면 조기
-  종료한다. 가격 적재는 일 1회로 낮춰 월간 place job과 같은 날 겹쳐도 한도 아래를
-  유지한다.
-- 운영 노브: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180)로 윈도를 키울 수
-  있다 — 예: 700이면 시군 ~230개 전부를 매일 1회 갱신(≈ 18 + 230×3 = 708회/run).
-  이때 budget도 함께 상향해야 하며, **매월 1일에는 place job이 같은 lowTop10 경로를
-  한 번 더 돌므로** 두 run 합이 1,500 아래인지 확인할 것(708×2 = 1,416은 여유가
-  얇다 — place job 날짜를 옮기거나 place 쪽 노브를 기본값으로 둘 것).
+  (`KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`, 기본 600, 최대 700,
+  `get_area_codes`+`lowTop10`+
+  `aroundAll` 합산)을 적용한다. 서버가 먼저 `OpinetRateLimitError`를 던지면 일부 record를
+  이미 받았어도 run을 실패시켜 sync 성공으로 오인하지 않는다. 가격 적재는 일 1회로
+  낮춰 월간 place job과 같은 날 겹쳐도 한도 아래를 유지한다.
+- 가격 asset의 enabled scope 전체 raw 결과가 0건이거나, raw record는 있어도 변환된
+  `PriceValue`가 0건이면 load/sync 성공을 기록하지 않고 실패한다. 후자는 provider 응답
+  스키마 drift나 가격 필드 누락으로 갱신이 멈췄는데 성공 cursor만 전진하는 반복 장애를
+  막는다. 개별 시군·유종의 정상 no-data는 계속 허용한다. 성공 cursor와 Dagster materialize
+  metadata에는 `records_fetched`, `coverage=configured_scope|rotating_partial`,
+  `latest_observed_at`, `today_values_count`를 기록한다. `today_values_count`는 asset의
+  `fetched_at`과 각 `PriceValue.observed_at`을 모두 KST 날짜로 바꿔 계산하므로, run 성공과
+  별개로 실제 당일 유가가 들어왔는지 운영에서 판별할 수 있다.
+- 운영 노브: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180)는 반드시 run budget에서
+  시도 코드 조회 호출량을 뺀 범위 안에서만 늘린다. 무료키 한도에 대한 안전 여유를 지키기
+  위해 `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`은 최대 700으로 검증하며, place/price가 같은
+  날 각각 한 번 실행돼도 합계 1,400회 이하가 된다. 기본값은 `max_calls=180`,
+  `run_call_budget=600`이다.
 
 ### 8.3 가격 시계열만 갱신 (일 1회)
 
@@ -196,10 +236,10 @@ bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-0
 | place asset 이름 | `feature_place_opinet_stations` |
 | price asset 이름 | `feature_price_opinet_stations` |
 | JOB_SPEC | Dagster asset/job 정의 |
-| suggested cron (place) | `0 3 1 * *` (매월 1일 03:00 KST) |
-| suggested cron (price) | `0 6,14,22 * * *` (일 3회) |
+| cron (place) | `5 3 1 * *` (매월 1일 03:05 KST) |
+| cron (price) | `18 18 * * *` (매일 18:18 KST) |
 | group | `features_place` / `features_price` |
-| ConcurrencyConfig | `opinet_api: max_concurrent=1` |
+| 실행 직렬화 | `opinet_api` Dagster pool + `provider-run:python-opinet-api` DB advisory lock |
 
 ## 10. 검증
 

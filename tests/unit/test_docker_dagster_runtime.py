@@ -110,6 +110,29 @@ def test_dagster_image_config_points_storage_to_postgres() -> None:
 
 
 @pytest.mark.unit
+def test_dagster_image_config_recovers_orphaned_runs() -> None:
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+
+    assert config["run_monitoring"] == {
+        "enabled": True,
+        "start_timeout_seconds": 600,
+        "cancel_timeout_seconds": 600,
+        "max_runtime_seconds": 21600,
+        "max_resume_run_attempts": 0,
+        "poll_interval_seconds": 15,
+    }
+
+
+@pytest.mark.unit
+def test_dagster_image_config_serializes_provider_pools() -> None:
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+
+    assert config["concurrency"] == {
+        "pools": {"default_limit": 1, "granularity": "run"}
+    }
+
+
+@pytest.mark.unit
 def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
     script = _script("scripts/run-admin-stack.sh")
 

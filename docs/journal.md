@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-13 (codex) — 지도 신선도 반복 장애 근본 수정·적대적 리뷰 2회
+
+- **운영 원인**: n150에서 종료되지 않은 Dagster run 10개가 전역 동시 실행 슬롯을 모두
+  점유해 OpiNet/KREX 예약 실행 수백 개가 대기했다. 여기에 notice 불완전 snapshot 수용과
+  비직렬 reconcile, OpiNet 0건/전일·혼합 가격 성공 판정, scope를 무시한 targeted 전국 조회가
+  겹쳐 공지 중복·재노출과 유가 미갱신이 반복됐다.
+- **provider 수집 경계**: KREX notice는 strict envelope/pagination과 lineage 중복 검사를 거친
+  동일한 2회 연속 snapshot만 적재하고, 부재 항목은 종료·재등장 항목은 재개 처리한다. KREX
+  upstream envelope 검증은 `python-krex-api` PR #11에 먼저 반영·머지하고 본 저장소 pin을
+  갱신했다. OpiNet은 raw/변환 0건을 실패시키고 실제 KST 당일 가격 전체 적재와 최신 관측일을
+  cursor로 증명해야만 당일 성공을 합친다.
+- **실행 복구**: Dagster run monitoring, provider별 pool·최대 실행 시간, KREX tick coalescing과
+  PostgreSQL advisory lock을 결합했다. pool을 우회하는 targeted worker도 같은 DB lock을 쓰며,
+  scope를 적용할 수 없는 OpiNet targeted update는 호출 전에 생략하고 cache target 신선도를
+  잘못 전진시키지 않는다. KREX 10분 snapshot에서는 row별 reverse geocoding을 제거했다.
+- **지도/UI**: AirKorea와 KMA marker를 violet 대기질/blue 날씨로 구분했다. OpiNet은 KST 기준
+  전일 가격에 `과거 M/D`를 표시하고 단일·동시각 이력도 점으로 그린다. Feature tile fan-out과
+  DOM marker 범위를 제한하고, 큐레이션 지도는 padded quantized bbox cache와 실제 viewport
+  필터를 사용한다.
+- **적대적 리뷰 2회**: 1차의 snapshot 순서·pagination·AirKorea SQL·canonical tie-break·
+  큐레이션 경계·KST 자정 지적과, 2차의 provider별 timeout·asset pool 우회·OpiNet 0건/targeted
+  quota/혼합 날짜·notice direct lookup·KREX geocoder/churn 지적을 모두 반영했다. 최종 전 diff
+  재검토에서 S1/S2 잔여 지적은 0건이다.
+- **로컬 게이트**: 외부 인증이 필요한 live marker를 제외한 전체 Python 1,555건, API 354건,
+  Dagster 260건, frontend Vitest 78건과 marker 1건을 통과했다. Ruff, core/API/Dagster strict
+  mypy, import-linter, OpenAPI all profile·admin/user 생성 타입 drift, frontend/marker type-check·
+  build도 통과했다. 로컬 geo live 5건은 API key가 없는 상태에서 auth-required 서비스가
+  `/v2/reverse` 400을 반환하는 기존 fixture 전제이며 n150 인증 환경에서 별도 검증한다.
+
 ## 2026-07-13 (codex) — 다중 관측·collection 큐레이션 구현·n150 검증
 
 - **스키마/관측**: Alembic 0044에서 provider 자연 entity와 immutable payload record를

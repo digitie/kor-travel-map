@@ -531,7 +531,10 @@ async def _execute_feature_update_request_locked(
         await set_update_request_matched_scope(
             session, started.request_id, matched_scope=final_matched_scope
         )
-        if results:
+        # runner가 scope를 실제 호출하지 못해 ``skipped``로 돌려준 경우(예:
+        # request 범위를 적용할 수 없는 OpiNet global fetch)는 target freshness를
+        # 전진시키면 안 된다. 적어도 한 provider scope가 실제 완료된 경우만 갱신한다.
+        if any(result.status == "done" for result in results):
             await mark_poi_cache_targets_refreshed(session, target_ids)
         done = await finish_update_request(
             session, started.request_id, status="done", dagster_run_id=dagster_run_id

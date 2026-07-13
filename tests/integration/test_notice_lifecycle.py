@@ -1,9 +1,9 @@
 """``test_notice_lifecycle`` — notice 사건 단위 identity 라이프사이클 (#632).
 
 ``close_notice_features``(특보 해제) / ``supersede_stale_notice_features``
-(계보 중복 soft-delete + feed 소멸 닫기) / ``purge_expired_notices``(§9 보존)
-/ bbox read 필터(계보 latest만 + 종료 notice 숨김)를 testcontainers PostGIS로
-끝까지 검증한다. 정리 마이그레이션(0040)의 KREX 술어는
+(계보 중복 soft-delete + feed 소멸 닫기) / ``purge_expired_notices``(§9 보존) /
+사용자 활성 read 필터(계보 latest만 + 종료 notice 숨김)를 testcontainers
+PostGIS로 끝까지 검증한다. 정리 마이그레이션(0040)의 KREX 술어는
 ``supersede_stale_notice_features``와 동일 계보/최신 판정이라 본 테스트가
 사실상 그 술어의 회귀 가드다.
 """
@@ -33,6 +33,7 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.infra import admin_feature_repo, feature_repo
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from kortravelmap.providers.kma import (
     kma_alert_notice_feature_id,
     weather_alert_lift_closures,
@@ -173,6 +174,74 @@ async def _seed_dup_lineage(
     return old_gen, new_gen
 
 
+async def _seed_split_max_tuple_lineage(
+    session: AsyncSession,
+) -> tuple[FeatureBundle, FeatureBundle]:
+    """서로 다른 row에서 ``max(seen_at)``/``max(source_record_key)``가 나오는 계보.
+
+    한 feature에 같은 계보의 current source entity가 여러 개 연결될 수 있다. 낮은
+    record key에는 최신 시각을, 높은 record key에는 과거 시각을 주고, 두 key 사이의
+    최신 row를 다른 feature에 둔다. 합성 max tuple은 존재하지 않으며 실제
+    lexicographic winner는 가운데 key의 feature다.
+    """
+    bundles = [
+        _krex_notice_bundle(
+            source_entity_id=f"split-max::{suffix}",
+            raw_data={**_CLUES, "gen": suffix},
+            feature_suffix=suffix,
+        )
+        for suffix in ("a", "b", "c")
+    ]
+    await feature_repo.load_bundles(session, bundles)
+    low, middle, high = sorted(
+        bundles,
+        key=lambda bundle: bundle.source_record.source_record_key,
+    )
+
+    # low/high entity를 한 feature에 묶는다. high의 원 feature는 감사 이력으로
+    # soft-delete해 후보에서 제외하고, middle feature만 실제 최신 경쟁자로 둔다.
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method,
+                confidence, is_primary_source, created_at
+            )
+            SELECT
+                :feature_id, source_entity_key, 'primary',
+                'identity_migration', 100, true, :seen_at
+            FROM provider_sync.source_records
+            WHERE source_record_key = :source_record_key
+            """
+        ),
+        {
+            "feature_id": low.feature.feature_id,
+            "seen_at": _NOW,
+            "source_record_key": high.source_record.source_record_key,
+        },
+    )
+    await session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = :deleted_at"
+            " WHERE feature_id = :feature_id"
+        ),
+        {
+            "deleted_at": _NOW,
+            "feature_id": high.feature.feature_id,
+        },
+    )
+    await _pin_seen_at(session, low.source_record.source_record_key, _NOW)
+    await _pin_seen_at(session, middle.source_record.source_record_key, _NOW)
+    await _pin_seen_at(
+        session,
+        high.source_record.source_record_key,
+        _NOW - timedelta(hours=1),
+    )
+    await session.flush()
+    return low, middle
+
+
 async def _feature_state(
     session: AsyncSession, feature_id: str
 ) -> tuple[str, datetime | None, Any]:
@@ -212,6 +281,236 @@ async def test_supersede_soft_deletes_non_latest_per_lineage(
     assert valid_end is None  # 계보가 살아 있으면 닫지 않는다.
 
 
+async def test_reconcile_exact_tie_prefers_current_identity(
+    migrated_session: AsyncSession,
+) -> None:
+    """seen/source record 동률에도 현 사건 identity feature가 남는다.
+
+    identity 이행 중 하나의 current source entity가 구/신 feature 양쪽에
+    primary link로 남은 실제 형태를 재현한다. ``feature_id ASC``만으로
+    고르면 구세대가 이기도록 구 ID를 작게 정해 canonical 판정을 검증한다.
+    """
+    current = _krex_notice_bundle(
+        source_entity_id=_LINEAGE,
+        raw_data={**_CLUES, "gen": "current"},
+    )
+    await feature_repo.load_bundles(migrated_session, [current])
+    legacy_feature_id = "f_global_n_0000000000000000"
+    assert legacy_feature_id < current.feature.feature_id
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord, coord_precision_digits,
+                marker_icon, marker_color, detail, status
+            )
+            SELECT
+                :legacy_feature_id, kind, name, category, coord,
+                coord_precision_digits, marker_icon, marker_color, detail, status
+            FROM feature.features
+            WHERE feature_id = :current_feature_id
+            """
+        ),
+        {
+            "legacy_feature_id": legacy_feature_id,
+            "current_feature_id": current.feature.feature_id,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method,
+                confidence, is_primary_source, created_at
+            )
+            SELECT
+                :legacy_feature_id, source_entity_key, 'primary',
+                'identity_migration', 100, true, :seen_at
+            FROM provider_sync.source_records
+            WHERE source_record_key = :source_record_key
+            """
+        ),
+        {
+            "legacy_feature_id": legacy_feature_id,
+            "seen_at": _NOW,
+            "source_record_key": current.source_record.source_record_key,
+        },
+    )
+    await migrated_session.flush()
+
+    # write reconcile 전 read 필터도 동일 canonical 1건만 노출한다.
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=127.0,
+        min_lat=37.0,
+        max_lon=127.5,
+        max_lat=37.8,
+        kinds=["notice"],
+    )
+    assert {row["feature_id"] for row in rows} == {current.feature.feature_id}
+
+    result = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+    )
+    assert result.superseded == 1
+    assert (await _feature_state(migrated_session, legacy_feature_id))[1] is not None
+    assert (await _feature_state(migrated_session, current.feature.feature_id))[1] is None
+
+    # 같은 snapshot/reconcile을 다시 적용해도 winner가 바뀌지 않는다.
+    again = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+    )
+    assert again.superseded == 0
+    assert (await _feature_state(migrated_session, current.feature.feature_id))[1] is None
+
+
+async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
+    migrated_session: AsyncSession,
+) -> None:
+    """분리된 max 값으로 존재하지 않는 tuple을 만들지 않고 실제 row 하나를 고른다."""
+    synthesized_winner, actual_winner = await _seed_split_max_tuple_lineage(migrated_session)
+    expected_ids = {actual_winner.feature.feature_id}
+    candidate_ids = {
+        synthesized_winner.feature.feature_id,
+        actual_winner.feature.feature_id,
+    }
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET sido_code = '11', name = '[테스트] 동일 교통 공지'"
+            " WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+        ),
+        {"feature_ids": list(candidate_ids)},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord, geom, status
+            ) VALUES (
+                'notice-split-max-area', 'area', '공지 lexicographic 테스트 영역',
+                '03000000',
+                x_extension.ST_SetSRID(
+                    x_extension.ST_MakePoint(127.1, 37.4), 4326
+                ),
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,'
+                        '127.0 37.5,127.0 37.3))'
+                    ),
+                    4326
+                ),
+                'active'
+            )
+            """
+        )
+    )
+    target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system="notice-test",
+        target_key="split-max-tuple",
+        lon=127.1,
+        lat=37.4,
+        radius_km=10.0,
+    )
+    await migrated_session.flush()
+
+    bbox = (127.0, 37.3, 127.2, 37.5)
+    for include_geometry in (False, True):
+        rows = await feature_repo.features_in_bbox(
+            migrated_session,
+            min_lon=bbox[0],
+            min_lat=bbox[1],
+            max_lon=bbox[2],
+            max_lat=bbox[3],
+            kinds=["notice"],
+            include_geometry=include_geometry,
+        )
+        assert {row["feature_id"] for row in rows} == expected_ids
+
+    search_by_bbox = await feature_repo.search_features(
+        migrated_session,
+        bbox=bbox,
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in search_by_bbox.items} == expected_ids
+    assert search_by_bbox.total_count == 1
+
+    search_by_name = await feature_repo.search_features(
+        migrated_session,
+        q="[테스트] 동일 교통 공지",
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in search_by_name.items} == expected_ids
+    assert search_by_name.total_count == 1
+
+    nearby = await feature_repo.features_nearby(
+        migrated_session,
+        lon=127.1,
+        lat=37.4,
+        radius_m=20_000,
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in nearby.items} == expected_ids
+
+    nearby_target = await feature_repo.features_nearby_poi_cache_target(
+        migrated_session,
+        target_id=target.target_id,
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in nearby_target.items} == expected_ids
+
+    contained = await feature_repo.features_contained_in_area(
+        migrated_session,
+        feature_id="notice-split-max-area",
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {row["feature_id"] for row in contained} == expected_ids
+
+    clusters = await feature_repo.cluster_features_in_bbox(
+        migrated_session,
+        min_lon=bbox[0],
+        min_lat=bbox[1],
+        max_lon=bbox[2],
+        max_lat=bbox[3],
+        cluster_unit="sido",
+        kinds=["notice"],
+    )
+    assert clusters == [
+        {
+            "cluster_key": "11",
+            "feature_count": 1,
+            "lon": 127.1,
+            "lat": 37.4,
+        }
+    ]
+    counts = await feature_repo.category_feature_counts(migrated_session)
+    assert counts.get("99000000", 0) == 1
+
+    result = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+    )
+    assert result.superseded == 1
+    assert (await _feature_state(migrated_session, actual_winner.feature.feature_id))[1] is None
+    assert (await _feature_state(migrated_session, synthesized_winner.feature.feature_id))[
+        1
+    ] is not None
+
+
 async def test_supersede_closes_lineage_missing_from_feed(
     migrated_session: AsyncSession,
 ) -> None:
@@ -229,13 +528,14 @@ async def test_supersede_closes_lineage_missing_from_feed(
 
     assert result.superseded == 1  # 구세대는 여전히 중복 정리.
     assert result.closed == 1
+    assert result.reopened == 0
     _, deleted_at, valid_end = await _feature_state(migrated_session, new_gen.feature.feature_id)
     assert deleted_at is None  # latest는 soft-delete가 아니라 '종료'.
     assert valid_end is not None
     assert datetime.fromisoformat(valid_end) == closed_at
 
-    # 계보가 feed에 있으면 닫지 않는다 (idempotent 재실행 겸 검증).
-    again = await feature_repo.supersede_stale_notice_features(
+    # 종료됐던 계보가 feed에 다시 나타나면 active로 self-heal한다.
+    reappeared = await feature_repo.supersede_stale_notice_features(
         migrated_session,
         provider=_KREX,
         dataset_key=_KREX_DS,
@@ -243,8 +543,24 @@ async def test_supersede_closes_lineage_missing_from_feed(
         active_lineage_keys={_LINEAGE},
         closed_at=closed_at + timedelta(minutes=10),
     )
-    assert again.superseded == 0
-    assert again.closed == 0  # 이미 닫힌 feature는 다시 닫지 않는다.
+    assert reappeared.superseded == 0
+    assert reappeared.closed == 0
+    assert reappeared.reopened == 1
+    _, deleted_at, valid_end = await _feature_state(migrated_session, new_gen.feature.feature_id)
+    assert deleted_at is None
+    assert valid_end is None
+
+    # 이미 열린 상태에서 같은 snapshot을 재적용하면 no-op이다.
+    again = await feature_repo.supersede_stale_notice_features(
+        migrated_session,
+        provider=_KREX,
+        dataset_key=_KREX_DS,
+        source_entity_type=_KREX_ET,
+        active_lineage_keys={_LINEAGE},
+        closed_at=closed_at + timedelta(minutes=20),
+    )
+    assert again.closed == 0
+    assert again.reopened == 0
 
 
 async def test_close_notice_features_kma_lift_roundtrip(
@@ -346,6 +662,146 @@ async def test_bbox_read_hides_non_latest_and_ended(
     assert new_gen.feature.feature_id not in ids
 
 
+async def test_public_active_reads_share_latest_and_ended_notice_filter(
+    migrated_session: AsyncSession,
+) -> None:
+    """legacy/current 중복과 종료 notice를 모든 사용자 목록·집계에서 동일 제외한다.
+
+    admin 감사 목록은 원천 이력 추적을 위해 세 feature를 모두 유지한다.
+    """
+    old_gen, new_gen = await _seed_dup_lineage(migrated_session)
+    ended = _krex_notice_bundle(
+        source_entity_id="public-read::ended",
+        raw_data={
+            "occurred_date": "2026.07.03",
+            "occurred_time": "08:10:00",
+            "route_no": "0010",
+            "direction": "서울방향",
+            "point_name": "종료지점",
+            "incident_type_code": "03",
+        },
+        lon=127.11,
+        lat=37.41,
+    )
+    await feature_repo.load_bundles(migrated_session, [ended])
+    all_ids = {
+        old_gen.feature.feature_id,
+        new_gen.feature.feature_id,
+        ended.feature.feature_id,
+    }
+    expected_ids = {new_gen.feature.feature_id}
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET sido_code = '11', detail = CASE"
+            " WHEN feature_id = :ended_id THEN jsonb_set("
+            " detail, '{valid_end_time}', to_jsonb(CAST(:ended_at AS text)), true)"
+            " ELSE detail END WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+        ),
+        {
+            "ended_id": ended.feature.feature_id,
+            "ended_at": (_NOW - timedelta(hours=1)).isoformat(),
+            "feature_ids": list(all_ids),
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord, geom, status
+            ) VALUES (
+                'notice-public-read-area', 'area', '공지 조회 테스트 영역', '03000000',
+                x_extension.ST_SetSRID(
+                    x_extension.ST_MakePoint(127.1, 37.4), 4326
+                ),
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,'
+                        '127.0 37.5,127.0 37.3))'
+                    ),
+                    4326
+                ),
+                'active'
+            )
+            """
+        )
+    )
+    await migrated_session.flush()
+
+    bbox = (127.0, 37.3, 127.2, 37.5)
+    bbox_rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=bbox[0],
+        min_lat=bbox[1],
+        max_lon=bbox[2],
+        max_lat=bbox[3],
+        kinds=["notice"],
+    )
+    assert {row["feature_id"] for row in bbox_rows} == expected_ids
+
+    search_page = await feature_repo.search_features(
+        migrated_session,
+        bbox=bbox,
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in search_page.items} == expected_ids
+    assert search_page.total_count == 1
+
+    nearby_page = await feature_repo.features_nearby(
+        migrated_session,
+        lon=127.1,
+        lat=37.4,
+        radius_m=20_000,
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {item.feature_id for item in nearby_page.items} == expected_ids
+
+    contained = await feature_repo.features_contained_in_area(
+        migrated_session,
+        feature_id="notice-public-read-area",
+        kinds=["notice"],
+        limit=20,
+    )
+    assert {row["feature_id"] for row in contained} == expected_ids
+
+    clusters = await feature_repo.cluster_features_in_bbox(
+        migrated_session,
+        min_lon=bbox[0],
+        min_lat=bbox[1],
+        max_lon=bbox[2],
+        max_lat=bbox[3],
+        cluster_unit="sido",
+        kinds=["notice"],
+    )
+    assert clusters == [
+        {
+            "cluster_key": "11",
+            "feature_count": 1,
+            "lon": 127.1,
+            "lat": 37.4,
+        }
+    ]
+
+    counts = await feature_repo.category_feature_counts(migrated_session)
+    assert counts.get("99000000", 0) == 1
+
+    direct_public_ids = await feature_repo.public_active_notice_feature_ids(
+        migrated_session,
+        list(all_ids),
+    )
+    assert direct_public_ids == expected_ids
+
+    audit_page = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        kinds=["notice"],
+        statuses=None,
+        include_ended=True,
+        page_size=100,
+    )
+    assert all_ids <= {item.feature_id for item in audit_page.items}
+
+
 async def test_purge_expired_notices(migrated_session: AsyncSession) -> None:
     stale = _krex_notice_bundle(
         source_entity_id="purge::stale",
@@ -374,7 +830,7 @@ async def test_read_paths_exclude_ended_notice_by_default(
 ) -> None:
     """수집 feed에서 사라져 종료된(valid_end_time) notice는 목록·카운트 등 read에서
     기본 제외되고(사용자 요구: 수집에 없는 notice는 과거 자료로 노출하지 않음),
-    by-id 직접 조회로만 노출된다. admin 목록은 include_ended=True면 감사용으로 포함.
+    infra raw by-id와 admin 감사 목록에만 남고 public by-id에서는 숨는다.
 
     (bbox/search/nearby/area/cluster/counts/admin이 모두 동일 ``valid_end_time``
     술어를 공유하므로 counts·admin·by-id로 대표 검증한다 — bbox는 별도 테스트.)
@@ -424,19 +880,21 @@ async def test_read_paths_exclude_ended_notice_by_default(
     )
     assert ended_id in {item.feature_id for item in audit_page.items}
 
-    # by-id 직접 조회는 종료돼도 반환한다(직접 참조·상세).
+    # infra raw by-id는 admin/감사를 위해 종료돼도 반환한다.
     row = await feature_repo.get_feature_row(migrated_session, ended_id)
     assert row is not None
     assert row["feature_id"] == ended_id
+    # public 단건/batch가 사용하는 필터는 ID 직접 조회 우회를 허용하지 않는다.
+    assert await feature_repo.public_active_notice_feature_ids(
+        migrated_session,
+        [active_id, ended_id],
+    ) == {active_id}
 
 
-async def test_reconcile_empty_feed_closes_nothing(
+async def test_reconcile_empty_snapshot_closes_all_active_lineages(
     migrated_session: AsyncSession,
 ) -> None:
-    """빈/실패 feed 안전장치: asset은 fetch가 0건이면 ``active_lineage_keys=None``을
-    넘긴다. 이 경우 reconcile은 어떤 notice의 ``valid_end_time``도 채우지 않는다 —
-    장애 poll에서 전체 notice가 통째로 API에서 사라지는 사고를 방지한다.
-    """
+    """성공한 빈 snapshot은 모든 latest notice가 feed에서 소멸했다는 뜻이다."""
     a = _krex_notice_bundle(
         source_entity_id="empty::a",
         raw_data={"occurred_date": "2026.07.03", "route_no": "0030"},
@@ -452,15 +910,16 @@ async def test_reconcile_empty_feed_closes_nothing(
         provider=_KREX,
         dataset_key=_KREX_DS,
         source_entity_type=_KREX_ET,
-        active_lineage_keys=None,  # 빈 feed → asset이 None을 넘김
-        closed_at=None,
+        active_lineage_keys=set(),
+        closed_at=_NOW + timedelta(minutes=10),
     )
 
-    assert result.closed == 0
+    assert result.closed == 2
+    assert result.reopened == 0
     for bundle in (a, b):
         status, deleted_at, valid_end = await _feature_state(
             migrated_session, bundle.feature.feature_id
         )
-        assert valid_end is None, "빈 feed에서 notice가 닫히면 안 된다"
+        assert valid_end is not None
         assert deleted_at is None
         assert status == "active"

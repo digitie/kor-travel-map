@@ -13,6 +13,9 @@ import pytest
 from dagster import AssetsDefinition
 
 from kortravelmap.dagster.assets import (
+    KREX_NOTICE_SNAPSHOT_POOL,
+    OPINET_API_POOL,
+    feature_notice_krex_traffic_notices,
     feature_place_krex_rest_areas,
     feature_place_opinet_stations,
     feature_price_krex_rest_areas,
@@ -36,3 +39,14 @@ def test_price_asset_depends_on_parent_place(
 ) -> None:
     """가격 asset은 부모 place asset을 dagster 상류 의존으로 선언한다."""
     assert place_asset.key in price_asset.dependency_keys
+
+
+def test_opinet_assets_share_serial_api_pool() -> None:
+    """schedule/manual 실행 방식과 무관하게 OpiNet 호출 asset은 같은 pool을 쓴다."""
+    assert feature_place_opinet_stations.node_def.pool == OPINET_API_POOL
+    assert feature_price_opinet_stations.node_def.pool == OPINET_API_POOL
+
+
+def test_krex_notice_asset_uses_serial_snapshot_pool() -> None:
+    """10분 schedule run이 겹쳐도 snapshot load/reconcile 순서가 역전되지 않는다."""
+    assert feature_notice_krex_traffic_notices.node_def.pool == KREX_NOTICE_SNAPSHOT_POOL

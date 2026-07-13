@@ -5,3 +5,24 @@ storage:
   postgres:
     postgres_url:
       env: KOR_TRAVEL_MAP_DAGSTER_PG_URL
+
+# pool을 선언한 provider asset은 instance 전역에서 동시에 1개 run만 실행한다.
+# OpiNet place/price는 ``opinet_api``, KREX notice는 ``krex_notice_snapshot`` pool을
+# 사용한다. 전자는 key 동시 소비를, 후자는 10분 cron보다 오래 걸린 snapshot의
+# load/reconcile 순서 역전을 막는다.
+concurrency:
+  pools:
+    default_limit: 1
+    granularity: run
+
+# 컨테이너 재시작으로 worker process만 사라지고 metadata가 STARTED/STARTING에
+# 남으면 queued-run 동시성 슬롯을 영구 점유한다. MOIS처럼 정상적으로 2시간을 넘는
+# bulk run을 보호하도록 전역 상한은 6시간으로 두고, 최신성 provider는 job별 2시간
+# ``dagster/max_runtime`` tag로 더 일찍 회수한다.
+run_monitoring:
+  enabled: true
+  start_timeout_seconds: 600
+  cancel_timeout_seconds: 600
+  max_runtime_seconds: 21600
+  max_resume_run_attempts: 0
+  poll_interval_seconds: 15

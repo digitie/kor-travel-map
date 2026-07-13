@@ -492,6 +492,23 @@ def _is_public_feature(row: dict[str, Any] | None) -> bool:
     )
 
 
+async def _is_public_feature_for_request(
+    session: AsyncSession,
+    row: dict[str, Any] | None,
+) -> bool:
+    """기본 공개 상태와 notice의 active/latest 계보 조건을 함께 확인한다."""
+    if not _is_public_feature(row):
+        return False
+    assert row is not None
+    if row.get("kind") != "notice":
+        return True
+    visible_ids = await feature_repo.public_active_notice_feature_ids(
+        session,
+        [str(row["feature_id"])],
+    )
+    return str(row["feature_id"]) in visible_ids
+
+
 def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
     return CurationItemView.model_validate(row, from_attributes=True)
 
@@ -580,6 +597,10 @@ async def list_features_in_bbox(
             limit=page_size + 1,
             cursor=cursor,
             include_geometry=include_geometry,
+            # 지도에서는 오래된 가격도 숨기지 않고 observed_at과 함께 내려 UI가
+            # KST 날짜 기준으로 명확히 "과거" 표시한다. 값 은폐는 갱신 장애를
+            # 다시 보이지 않게 만들므로 price card의 current 지평선과 분리한다.
+            price_stale_hide_days=None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -688,6 +709,7 @@ async def list_public_features_in_bounds(
         providers=provider,
         limit=max_items,
         include_geometry=include_geometry,
+        price_stale_hide_days=None,
     )
     items = [FeatureSummary(**row) for row in rows]
     return FeaturesInBoundsResponse(
@@ -952,7 +974,7 @@ async def get_feature(
 ) -> FeatureDetailEnvelopeResponse:
     started_at = perf_counter()
     row = await feature_repo.get_feature_row(session, feature_id)
-    if not _is_public_feature(row):
+    if not await _is_public_feature_for_request(session, row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
@@ -993,7 +1015,7 @@ async def get_feature_observation_history(
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
     row = await feature_repo.get_feature_row(session, feature_id)
-    if not _is_public_feature(row):
+    if not await _is_public_feature_for_request(session, row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
@@ -1127,7 +1149,7 @@ async def get_area_contained_features(
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
     area_row = await feature_repo.get_feature_row(session, feature_id)
-    if not _is_public_feature(area_row):
+    if not await _is_public_feature_for_request(session, area_row):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
@@ -1207,6 +1229,20 @@ async def get_features_batch(
     started_at = perf_counter()
     feature_ids = list(dict.fromkeys(body.feature_ids))
     rows = await feature_repo.get_feature_rows_by_ids(session, feature_ids)
+    public_rows = {feature_id: row for feature_id, row in rows.items() if _is_public_feature(row)}
+    notice_ids = [
+        feature_id for feature_id, row in public_rows.items() if row.get("kind") == "notice"
+    ]
+    if notice_ids:
+        visible_notice_ids = await feature_repo.public_active_notice_feature_ids(
+            session,
+            notice_ids,
+        )
+        public_rows = {
+            feature_id: row
+            for feature_id, row in public_rows.items()
+            if row.get("kind") != "notice" or feature_id in visible_notice_ids
+        }
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=feature_ids, public_only=True
     )
@@ -1214,7 +1250,7 @@ async def get_features_batch(
         session, feature_ids
     )
     items = {
-        feature_id: _detail_from_row(rows[feature_id]).model_copy(
+        feature_id: _detail_from_row(public_rows[feature_id]).model_copy(
             update={
                 "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
                 "observations": [
@@ -1223,9 +1259,9 @@ async def get_features_batch(
             }
         )
         for feature_id in feature_ids
-        if feature_id in rows
+        if feature_id in public_rows
     }
-    missing = [feature_id for feature_id in feature_ids if feature_id not in rows]
+    missing = [feature_id for feature_id in feature_ids if feature_id not in public_rows]
     return FeatureBatchResponse(
         data=FeatureBatchData(found=items, missing=missing),
         meta=make_meta(request, started_at=started_at),

@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+### 지도 신선도·provider 복구와 고zoom 응답성 보강 (2026-07-13)
+
+- **FIXED**: KREX notice를 두 번 연속 조회한 완전 snapshot으로만 반영하고, snapshot에서
+  사라진 공지는 종료 처리한다. strict pagination·중복 lineage 검증, 실행 직렬화와 watermark를
+  함께 적용해 불완전 응답·역순 실행으로 인한 중복/재노출을 막는다.
+- **FIXED**: OpiNet 실행의 raw/변환 결과 0건과 전일·혼합 가격을 성공으로 오인하지 않는다.
+  요청 범위를 적용할 수 없는 targeted update는 전국 조회 전에 생략하고, provider schedule은
+  실제 KST 당일 가격 전체 적재가 확인될 때만 같은 날 실행을 합친다.
+- **CHANGED**: Feature 지도에서 AirKorea 대기질과 KMA 날씨를 서로 다른 marker 색상·glyph로
+  표시한다. OpiNet 관측일이 오늘이 아니면 지도·목록에 `과거 M/D`를 표시하고, 가격 이력은
+  단일·동시각 관측을 포함한 모든 유효 점을 그래프로 그린다.
+- **CHANGED**: Feature 고zoom 조회는 viewport tile fan-out을 제한하고 더 적합한 tile zoom으로
+  내려가며, marker는 현재 source/viewport만 렌더한다. 큐레이션 지도는 quantized padded bbox와
+  이전 데이터 유지·viewport 필터를 사용해 cluster 해제와 pan 중 재조회/DOM 부하를 줄인다.
+- **FIXED**: Dagster 고착 실행이 provider 갱신을 장기간 막지 않도록 run monitoring timeout,
+  provider pool·DB advisory lock과 KREX schedule coalescing을 추가했다. KREX snapshot 경로에서는
+  row별 reverse geocoding을 제거해 10분 주기보다 길던 실행 시간을 줄인다.
+
 ### 다중 관측·회차형 큐레이션과 등대 카테고리 (2026-07-13)
 
 - **ADDED**: provider 자연 entity와 immutable payload version을 분리하는

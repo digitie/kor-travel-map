@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 지도 신선도·provider 실행·고zoom 성능 반복 장애 수정 (2026-07-13, `T-231`)
+
+- [x] **T-231 — notice/OpiNet 반복 장애 근본 수정과 지도 응답성 보강.** KREX notice를
+  strict pagination·lineage 검증을 거친 동일한 2회 연속 snapshot으로만 반영하고, 부재 공지
+  종료·재등장 복원·공개 active 필터를 일관 적용했다. Dagster 고착 run 슬롯 고갈은 monitoring,
+  provider pool·DB advisory lock, KREX tick coalescing으로 차단했다. OpiNet raw/변환 0건과
+  전일·혼합 가격 성공 오인, scope를 무시한 targeted 전국 재조회도 실패/skip/cursor 계약으로
+  교정했다. AirKorea/KMA marker, 과거 유가 표기·단일 시계열 점, Feature/큐레이션 고zoom
+  로딩을 함께 보강했다. KREX upstream 수정은 `python-krex-api` PR #11에 선반영했다. 적대적
+  리뷰 2회 후 S1/S2 잔여 0건이며 전체 로컬 Python/API/Dagster/frontend/OpenAPI 게이트를
+  통과했다. PR merge·n150 운영 복구와 live E2E 인수 결과는 `docs/resume.md`의 다음 작업으로
+  추적한다.
+
 ## 큐레이션 CSV·다중 관측 aggregate 계약 (2026-07-13, `T-230`)
 
 - [x] **T-230 — 큐레이션 CSV·다중 source/연도 aggregate 계약 구현** (#665, PR #666).

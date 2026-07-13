@@ -84,6 +84,7 @@ def test_in_bounds_high_zoom_returns_individual_features(
     from kortravelmap.api.routers import features as mod
 
     async def _bbox(_s: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["price_stale_hide_days"] is None
         return [
             {
                 "feature_id": "f1", "kind": "place", "name": "x", "category": "06020000",

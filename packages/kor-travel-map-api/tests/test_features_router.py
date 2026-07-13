@@ -24,9 +24,7 @@ from kortravelmap.api.settings import ApiSettings
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(
-        create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
-    )
+    return TestClient(create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None)))
 
 
 @pytest.mark.unit
@@ -58,30 +56,35 @@ def test_features_in_bbox_exposes_provider_filter(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     params = spec["paths"]["/v1/features"]["get"].get("parameters", [])
     names = {p["name"] for p in params}
-    assert "provider" in names, (
-        f"/v1/features must expose the provider filter; has {sorted(names)}"
-    )
+    assert "provider" in names, f"/v1/features must expose the provider filter; has {sorted(names)}"
 
 
 @pytest.mark.unit
 def test_features_nearby_validation(client: TestClient) -> None:
     # radius_m 필수 — 누락 시 DB 도달 전 422.
-    assert client.get(
-        "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5}
-    ).status_code == 422
+    assert client.get("/v1/features/nearby", params={"lon": 127.0, "lat": 37.5}).status_code == 422
     # lon 범위 초과 → 422.
-    assert client.get(
-        "/v1/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
-    ).status_code == 422
+    assert (
+        client.get(
+            "/v1/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
+        ).status_code
+        == 422
+    )
     # radius_m must be > 0 → 422.
-    assert client.get(
-        "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
-    ).status_code == 422
+    assert (
+        client.get(
+            "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
+        ).status_code
+        == 422
+    )
     # invalid sort → 422.
-    assert client.get(
-        "/v1/features/nearby",
-        params={"lon": 127.0, "lat": 37.5, "radius_m": 1000, "sort": "bogus"},
-    ).status_code == 422
+    assert (
+        client.get(
+            "/v1/features/nearby",
+            params={"lon": 127.0, "lat": 37.5, "radius_m": 1000, "sort": "bogus"},
+        ).status_code
+        == 422
+    )
 
 
 @pytest.mark.unit
@@ -89,9 +92,15 @@ def test_features_routes_disabled_unmounts() -> None:
     app = create_app(ApiSettings(features_routes_enabled=False))
     c = TestClient(app)
     # bbox 조회는 422(검증) 이전에 라우트 자체가 없어 404.
-    r = c.get("/v1/features", params={
-        "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
-    })
+    r = c.get(
+        "/v1/features",
+        params={
+            "min_lon": 126,
+            "min_lat": 37,
+            "max_lon": 127,
+            "max_lat": 38,
+        },
+    )
     assert r.status_code == 404
     assert c.get("/v1/features/x").status_code == 404
     assert c.post("/v1/features/batch", json={"feature_ids": ["x"]}).status_code == 404
@@ -108,9 +117,15 @@ def test_bbox_min_greater_than_max_returns_422(client: TestClient) -> None:
 
     client.app.dependency_overrides[get_session] = _empty_session
     try:
-        r = client.get("/v1/features", params={
-            "min_lon": 128, "min_lat": 37, "max_lon": 127, "max_lat": 38,
-        })
+        r = client.get(
+            "/v1/features",
+            params={
+                "min_lon": 128,
+                "min_lat": 37,
+                "max_lon": 127,
+                "max_lat": 38,
+            },
+        )
         assert r.status_code == 422
         assert "bbox" in r.json()["detail"]
     finally:
@@ -126,9 +141,7 @@ class _FakeSession:
 
 
 @pytest.mark.unit
-def test_get_feature_404_when_missing(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
@@ -150,16 +163,59 @@ def test_get_feature_404_when_missing(
 
 
 @pytest.mark.unit
-def test_list_features_maps_bbox_rows(
+def test_get_feature_404_when_notice_is_ended_or_non_latest(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
+    row = {
+        "feature_id": "notice-old",
+        "kind": "notice",
+        "status": "active",
+        "deleted_at": None,
+    }
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return row
+
+    async def _public_ids(_session: Any, feature_ids: list[str]) -> set[str]:
+        assert feature_ids == ["notice-old"]
+        return set()
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.feature_repo,
+        "public_active_notice_feature_ids",
+        _public_ids,
+    )
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/features/notice-old")
+        assert r.status_code == 404
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
     rows = [
         {
-            "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
-            "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
+            "feature_id": "f1",
+            "kind": "place",
+            "name": "장소",
+            "category": "01010100",
+            "lon": 126.97,
+            "lat": 37.56,
+            "marker_icon": "star",
+            "marker_color": "P-03",
             "status": "active",
             "price_summary": None,
         }
@@ -168,6 +224,7 @@ def test_list_features_maps_bbox_rows(
     async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
         assert _kw["limit"] == 101
         assert _kw["cursor"] is None
+        assert _kw["price_stale_hide_days"] is None
         return rows
 
     monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
@@ -177,10 +234,16 @@ def test_list_features_maps_bbox_rows(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/v1/features", params={
-            "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
-            "kind": ["place"],
-        })
+        r = client.get(
+            "/v1/features",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 127,
+                "max_lat": 38,
+                "kind": ["place"],
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
@@ -288,8 +351,14 @@ def test_list_features_default_omits_geometry(
 
     rows = [
         {
-            "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
-            "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
+            "feature_id": "f1",
+            "kind": "place",
+            "name": "장소",
+            "category": "01010100",
+            "lon": 126.97,
+            "lat": 37.56,
+            "marker_icon": "star",
+            "marker_color": "P-03",
             "status": "active",
         }
     ]
@@ -305,9 +374,15 @@ def test_list_features_default_omits_geometry(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/v1/features", params={
-            "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
-        })
+        r = client.get(
+            "/v1/features",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 127,
+                "max_lat": 38,
+            },
+        )
         assert r.status_code == 200
         item = r.json()["data"]["items"][0]
         assert item["geometry"] is None
@@ -355,10 +430,16 @@ def test_list_public_features_in_bounds_include_geometry(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/v1/features/in-bounds", params={
-            "min_lon": 126, "min_lat": 37, "max_lon": 128, "max_lat": 38,
-            "include_geometry": "true",
-        })
+        r = client.get(
+            "/v1/features/in-bounds",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 128,
+                "max_lat": 38,
+                "include_geometry": "true",
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["meta"]["cluster"] is None
@@ -378,8 +459,14 @@ def test_list_public_features_in_bounds_uses_envelope(
 
     rows = [
         {
-            "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
-            "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
+            "feature_id": "f1",
+            "kind": "place",
+            "name": "장소",
+            "category": "01010100",
+            "lon": 126.97,
+            "lat": 37.56,
+            "marker_icon": "star",
+            "marker_color": "P-03",
             "status": "active",
         }
     ]
@@ -395,10 +482,16 @@ def test_list_public_features_in_bounds_uses_envelope(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/v1/features/in-bounds", params={
-            "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
-            "category": ["01010100"],
-        })
+        r = client.get(
+            "/v1/features/in-bounds",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 127,
+                "max_lat": 38,
+                "category": ["01010100"],
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
@@ -409,22 +502,33 @@ def test_list_public_features_in_bounds_uses_envelope(
 
 
 @pytest.mark.unit
-def test_get_feature_detail_maps_row(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
-        "feature_id": "f1", "kind": "event", "name": "축제", "category": "01000000",
-        "lon": 126.92, "lat": 37.52, "coord_5179_srid": 5179,
-        "address": {"road": "서울"}, "detail": {"event_kind": "festival"},
-        "urls": {}, "raw_refs": [],
-        "legal_dong_code": None, "sido_code": "11", "sigungu_code": "11560",
-        "marker_icon": "star", "marker_color": "P-11", "status": "active",
-        "parent_feature_id": None, "sibling_group_id": None,
+        "feature_id": "f1",
+        "kind": "event",
+        "name": "축제",
+        "category": "01000000",
+        "lon": 126.92,
+        "lat": 37.52,
+        "coord_5179_srid": 5179,
+        "address": {"road": "서울"},
+        "detail": {"event_kind": "festival"},
+        "urls": {},
+        "raw_refs": [],
+        "legal_dong_code": None,
+        "sido_code": "11",
+        "sigungu_code": "11560",
+        "marker_icon": "star",
+        "marker_color": "P-11",
+        "status": "active",
+        "parent_feature_id": None,
+        "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
-        "updated_at": "2026-05-29T00:00:00+09:00", "deleted_at": None,
+        "updated_at": "2026-05-29T00:00:00+09:00",
+        "deleted_at": None,
     }
 
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
@@ -581,15 +685,28 @@ def test_features_batch_returns_items_and_missing(
     from kortravelmap.api.routers import features as features_mod
 
     row = {
-        "feature_id": "f1", "kind": "event", "name": "축제", "category": "01000000",
-        "lon": 126.92, "lat": 37.52, "coord_5179_srid": 5179,
-        "address": {"road": "서울"}, "detail": {"event_kind": "festival"},
-        "urls": {}, "raw_refs": [],
-        "legal_dong_code": None, "sido_code": "11", "sigungu_code": "11560",
-        "marker_icon": "star", "marker_color": "P-11", "status": "active",
-        "parent_feature_id": None, "sibling_group_id": None,
+        "feature_id": "f1",
+        "kind": "event",
+        "name": "축제",
+        "category": "01000000",
+        "lon": 126.92,
+        "lat": 37.52,
+        "coord_5179_srid": 5179,
+        "address": {"road": "서울"},
+        "detail": {"event_kind": "festival"},
+        "urls": {},
+        "raw_refs": [],
+        "legal_dong_code": None,
+        "sido_code": "11",
+        "sigungu_code": "11560",
+        "marker_icon": "star",
+        "marker_color": "P-11",
+        "status": "active",
+        "parent_feature_id": None,
+        "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
-        "updated_at": "2026-05-29T00:00:00+09:00", "deleted_at": None,
+        "updated_at": "2026-05-29T00:00:00+09:00",
+        "deleted_at": None,
     }
 
     async def _get_rows(_session: Any, feature_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -603,9 +720,7 @@ def test_features_batch_returns_items_and_missing(
         assert public_only is True
         return {}
 
-    async def _observations(
-        _session: Any, feature_ids: list[str]
-    ) -> dict[str, tuple[Any, ...]]:
+    async def _observations(_session: Any, feature_ids: list[str]) -> dict[str, tuple[Any, ...]]:
         assert feature_ids == ["f1", "missing"]
         return {}
 
@@ -639,6 +754,63 @@ def test_features_batch_returns_items_and_missing(
         assert body["data"]["found"]["f1"]["curations"] == []
         assert body["data"]["found"]["f1"]["observations"] == []
         assert body["data"]["missing"] == ["missing"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_features_batch_reports_ended_or_non_latest_notice_as_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _get_rows(_session: Any, feature_ids: list[str]) -> dict[str, dict[str, Any]]:
+        assert feature_ids == ["notice-old"]
+        return {
+            "notice-old": {
+                "feature_id": "notice-old",
+                "kind": "notice",
+                "status": "active",
+                "deleted_at": None,
+            }
+        }
+
+    async def _public_ids(_session: Any, feature_ids: list[str]) -> set[str]:
+        assert feature_ids == ["notice-old"]
+        return set()
+
+    async def _empty(_session: Any, *args: Any, **kwargs: Any) -> dict[str, tuple[Any, ...]]:
+        return {}
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(
+        features_mod.feature_repo,
+        "public_active_notice_feature_ids",
+        _public_ids,
+    )
+    monkeypatch.setattr(
+        features_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _empty,
+    )
+    monkeypatch.setattr(
+        features_mod.observation_repo,
+        "get_current_observations_by_feature_ids",
+        _empty,
+    )
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.post(
+            "/v1/features/batch",
+            json={"feature_ids": ["notice-old"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["data"] == {"found": {}, "missing": ["notice-old"]}
     finally:
         client.app.dependency_overrides.clear()
 
