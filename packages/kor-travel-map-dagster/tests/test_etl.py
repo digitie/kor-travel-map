@@ -89,6 +89,50 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert context.metadata[-1]["bundles_total"] == 5
 
 
+async def test_load_feature_bundles_for_dagster_uses_atomic_load_all_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(5)]
+    context = _Context()
+    client = _Client()
+    atomic_calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    async def _load_all(items: Any) -> FeatureLoadResult:
+        materialized = list(items)
+        atomic_calls.append(
+            tuple(bundle.feature.feature_id for bundle in materialized)
+        )
+        return FeatureLoadResult(
+            bundles_total=len(materialized),
+            features_inserted=len(materialized),
+        )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="notices",
+        chunk_size=2,
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert atomic_calls == [tuple(bundle.feature.feature_id for bundle in bundles)]
+    assert client.chunks == []
+    assert result.load.bundles_total == 5
+
+
 def _error_summary(items: Any, *, error_feature_id: str) -> FeatureAddressValidationSummary:
     return FeatureAddressValidationSummary(
         total=len(items),

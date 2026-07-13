@@ -1,13 +1,25 @@
 """kor-travel-map 소유 provider Feature 적재 Dagster asset."""
 
 import inspect
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable, Mapping
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.geocoding import ReverseGeocoder
-from kortravelmap.infra.feature_repo import AirQualityLoadResult, FeatureLoadResult
+from kortravelmap.infra.feature_repo import (
+    AirQualityLoadResult,
+    FeatureLoadResult,
+    NoticeFeatureLoadResult,
+)
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -570,6 +582,7 @@ async def _run_feature_notice_krex_traffic_notices_locked(
         client,
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        source_entity_type="traffic_notice",
         fetched_at=fetched_at,
     )
     records = await _record_list(context, "krex_traffic_notices")
@@ -581,23 +594,44 @@ async def _run_feature_notice_krex_traffic_notices_locked(
         # Feature.coord/SourceRecord에 보존하므로 lifecycle 반영에는 geocoder가 없다.
         reverse_geocoder=None,
     )
+    active_lineage_keys = {
+        bundle.source_record.source_entity_id for bundle in bundles
+    }
+    reconciled: Any | None = None
+
+    async def load_snapshot_atomically(
+        validated_bundles: Sequence[Any],
+    ) -> FeatureLoadResult:
+        nonlocal reconciled
+        atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
+        if not callable(atomic_load):
+            raise RuntimeError(
+                "KREX notice snapshot은 atomic snapshot load client가 필요하다."
+            )
+        outcome = cast(
+            "NoticeFeatureLoadResult",
+            await atomic_load(
+                bundles=validated_bundles,
+                provider=KREX_PROVIDER_NAME,
+                dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+                source_entity_type="traffic_notice",
+                active_lineage_keys=active_lineage_keys,
+                observed_at=fetched_at,
+            ),
+        )
+        reconciled = outcome.reconcile
+        return outcome.load
+
     result = await _load(
         context,
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         bundles=bundles,
         record_sync_state=False,
+        load_all=load_snapshot_atomically,
     )
-    # fetch 예외는 _record_list 단계에서 전파되어 여기까지 오지 않는다. 따라서
-    # 정상적으로 materialize된 빈 목록은 authoritative empty snapshot이며, 모든
-    # 기존 latest 계보를 닫아야 한다. 현재 계보는 이전 오종료도 함께 self-heal한다.
-    reconciled = await client.reconcile_notice_features(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
-        source_entity_type="traffic_notice",
-        active_lineage_keys={bundle.source_record.source_entity_id for bundle in bundles},
-        closed_at=fetched_at,
-    )
+    if reconciled is None:
+        raise RuntimeError("KREX notice atomic load가 reconcile 결과를 반환하지 않았다.")
     if reconciled.superseded or reconciled.closed or reconciled.reopened:
         context.log.info(
             "KREX notice reconcile — 중복 soft-delete %d건, feed 소멸 닫음 %d건, 재등장 복구 %d건.",
@@ -629,9 +663,10 @@ async def _guard_notice_snapshot_watermark(
     *,
     provider: str,
     dataset_key: str,
+    source_entity_type: str,
     fetched_at: datetime,
 ) -> None:
-    """이미 반영한 snapshot보다 과거/같은 run의 destructive reconcile을 막는다.
+    """이미 반영한 snapshot보다 과거인 run의 destructive reconcile을 막는다.
 
     Dagster pool이 정상 경로를 직렬화하지만, 배포 이전 queued run이나 pool 설정이
     반영되지 않은 실행까지 방어하도록 persisted sync cursor를 watermark로 쓴다.
@@ -643,21 +678,40 @@ async def _guard_notice_snapshot_watermark(
         raise RuntimeError(
             "KREX notice snapshot은 record_sync_success를 제공하는 client가 필요하다."
         )
+    watermarks: list[datetime] = []
+    get_scope_watermark = getattr(client, "get_notice_snapshot_watermark", None)
+    if callable(get_scope_watermark):
+        scope_watermark = await get_scope_watermark(
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+        )
+        if scope_watermark is not None:
+            if (
+                scope_watermark.tzinfo is None
+                or scope_watermark.utcoffset() is None
+            ):
+                raise RuntimeError("notice scope watermark는 timezone-aware datetime이어야 한다.")
+            watermarks.append(scope_watermark)
+
     state = await get_sync_state(provider=provider, dataset_key=dataset_key)
-    if state is None:
+    if state is not None:
+        cursor = getattr(state, "cursor", None)
+        if not isinstance(cursor, dict):
+            raise RuntimeError("notice snapshot sync cursor가 object가 아니다.")
+        raw_watermark = cursor.get("snapshot_applied_at") or cursor.get("loaded_at")
+        if raw_watermark is not None:
+            watermarks.append(_parse_snapshot_watermark(raw_watermark))
+    if not watermarks:
         return
-    cursor = getattr(state, "cursor", None)
-    if not isinstance(cursor, dict):
-        raise RuntimeError("notice snapshot sync cursor가 object가 아니다.")
-    raw_watermark = cursor.get("snapshot_applied_at") or cursor.get("loaded_at")
-    if raw_watermark is None:
-        return
-    watermark = _parse_snapshot_watermark(raw_watermark)
+    watermark = max(watermarks)
     if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
         raise RuntimeError("notice snapshot fetched_at은 timezone-aware datetime이어야 한다.")
-    if fetched_at <= watermark:
+    # 동일 watermark는 core의 fingerprint CAS가 exact replay인지 충돌인지
+    # 판정한다. 여기서 막으면 누락된 member state를 replay로 self-heal할 수 없다.
+    if fetched_at < watermark:
         raise RuntimeError(
-            "KREX notice snapshot이 이미 반영한 watermark보다 과거 또는 같다: "
+            "KREX notice snapshot이 이미 반영한 watermark보다 과거다: "
             f"fetched_at={fetched_at.isoformat()}, watermark={watermark.isoformat()}"
         )
 
@@ -1388,6 +1442,7 @@ async def _load(
     dataset_key: str,
     bundles: list[Any],
     record_sync_state: bool = True,
+    load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     # bool(True/False) 하위호환 + settings 모드 문자열(strict/drop/off, #376).
@@ -1402,6 +1457,7 @@ async def _load(
         provider=provider,
         dataset_key=dataset_key,
         strict_address=strict_address,
+        load_all=load_all,
     )
     if record_sync_state:
         await _record_feature_sync_success(

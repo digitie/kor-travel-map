@@ -35,7 +35,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
@@ -62,11 +62,15 @@ __all__ = [
     "upsert_source_link",
     "load_bundle",
     "load_bundles",
+    "load_authoritative_notice_snapshot",
+    "load_notice_event_bundles",
     "soft_delete_features_not_in_snapshot",
     "inactivate_features_by_source_entity_ids",
     "inactivate_geometryless_area_features_by_source",
     "NoticeReconcileResult",
+    "NoticeFeatureLoadResult",
     "close_notice_features",
+    "get_notice_snapshot_watermark",
     "supersede_stale_notice_features",
     "purge_expired_notices",
     "get_feature_row",
@@ -414,12 +418,25 @@ FROM feature.features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
-_FEATURE_EXISTS_SQL: Final[str] = """
-SELECT EXISTS (
-    SELECT 1
-    FROM feature.features
-    WHERE feature_id = :feature_id
-)
+_FEATURE_LOAD_STATE_SQL: Final[str] = """
+SELECT
+    f.feature_id IS NOT NULL AS feature_exists,
+    COALESCE(
+        f.status = 'inactive'
+        AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+        AND NOT EXISTS (
+            SELECT 1
+            FROM ops.feature_overrides AS fo
+            WHERE fo.feature_id = f.feature_id
+              AND fo.field_path = 'status'
+              AND fo.status = 'active'
+              AND fo.prevent_provider_reactivation
+        ),
+        false
+    ) AS needs_provider_reactivation
+FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
+LEFT JOIN feature.features AS f
+  ON f.feature_id = wanted.feature_id
 """
 
 
@@ -521,8 +538,9 @@ _ENDED_NOTICE_HIDDEN_SQL: Final[str] = """
   )
 """
 
-# 한 feature에 같은 계보의 primary entity가 여러 개 연결될 수 있다. seen_at/key의
-# max를 따로 구하면 존재하지 않는 tuple이 되므로 DISTINCT ON으로 실제 최신 row를 고른다.
+# 한 feature에 여러 계보의 primary entity가 연결될 수 있다. 각 계보의 실제 최신 row를
+# 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
+# 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
 _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
   AND (
     f.kind <> 'notice'
@@ -561,48 +579,54 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
             ) DESC,
             cur_sr.source_record_key DESC
       ) AS current_notice
-      JOIN provider_sync.source_entities AS other_se
-        ON other_se.provider = current_notice.provider
-       AND other_se.dataset_key = current_notice.dataset_key
-       AND other_se.source_entity_type = current_notice.source_entity_type
-      JOIN provider_sync.source_records AS other_sr
-        ON other_sr.source_record_key = other_se.current_source_record_key
-       AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
-      JOIN provider_sync.source_links AS other_sl
-        ON other_sl.source_entity_key = other_se.source_entity_key
-      JOIN feature.features AS other_f
-        ON other_f.feature_id = other_sl.feature_id
-      WHERE other_sl.is_primary_source
-        AND other_f.feature_id <> f.feature_id
-        AND other_f.kind = 'notice'
-        AND other_f.deleted_at IS NULL
-        AND (
-          COALESCE(other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at)
-            > current_notice.seen_at
-          OR (
+      LEFT JOIN LATERAL (
+        SELECT 1 AS better_exists
+        FROM provider_sync.source_entities AS other_se
+        JOIN provider_sync.source_records AS other_sr
+          ON other_sr.source_record_key = other_se.current_source_record_key
+         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE other_se.provider = current_notice.provider
+          AND other_se.dataset_key = current_notice.dataset_key
+          AND other_se.source_entity_type = current_notice.source_entity_type
+          AND other_sl.is_primary_source
+          AND other_f.feature_id <> f.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL
+          AND (
             COALESCE(
                 other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-            ) = current_notice.seen_at
-            AND other_sr.source_record_key > current_notice.source_record_key
-          )
-          OR (
-            COALESCE(
-                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
-            ) = current_notice.seen_at
-            AND other_sr.source_record_key = current_notice.source_record_key
-            AND (
-              (
-                {_canonical_notice_feature_sql("other_f", "other_sr")}
-                AND NOT current_notice.canonical_identity
-              )
-              OR (
-                {_canonical_notice_feature_sql("other_f", "other_sr")}
-                  = current_notice.canonical_identity
-                AND other_f.feature_id < f.feature_id
+            ) > current_notice.seen_at
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key > current_notice.source_record_key
+            )
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key = current_notice.source_record_key
+              AND (
+                (
+                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                  AND NOT current_notice.canonical_identity
+                )
+                OR (
+                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                    = current_notice.canonical_identity
+                  AND other_f.feature_id < f.feature_id
+                )
               )
             )
           )
-        )
+        LIMIT 1
+      ) AS better ON true
+      HAVING bool_and(better.better_exists IS NOT NULL)
     )
   )
 """
@@ -1830,12 +1854,25 @@ async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> b
     return (await _upsert_source_record_state(session, record)).inserted
 
 
-async def _feature_exists(session: AsyncSession, feature_id: str) -> bool:
-    result = await session.execute(
-        text(_FEATURE_EXISTS_SQL),
-        {"feature_id": feature_id},
+@dataclass(frozen=True)
+class _FeatureLoadState:
+    exists: bool
+    needs_provider_reactivation: bool
+
+
+async def _feature_load_state(
+    session: AsyncSession, feature_id: str
+) -> _FeatureLoadState:
+    row = (
+        await session.execute(
+            text(_FEATURE_LOAD_STATE_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    return _FeatureLoadState(
+        exists=bool(row["feature_exists"]),
+        needs_provider_reactivation=bool(row["needs_provider_reactivation"]),
     )
-    return bool(result.scalar_one())
 
 
 async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
@@ -1849,8 +1886,10 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
 
     동일 source_record_key 재수집이면 원문 내용은 이미 같은 payload라는 뜻이므로
     feature 본문/version은 갱신하지 않고 ``source_records.last_seen_at``만 갱신한다.
-    단, source_record만 있고 feature가 없는 비정상 상태라면 FK 복구를 위해 feature를
-    생성한다. commit은 호출자 책임.
+    단, source_record만 있고 feature가 없는 비정상 상태는 생성하고, provider가
+    다시 보낸 active feature가 과거 정리/비활성화로 ``inactive`` 상태라면 복구한다.
+    ``user_request`` feature와 provider 재활성화 방지 override는 복구하지 않는다.
+    commit은 호출자 책임.
     """
     record_state = await _upsert_source_record_state(
         session, bundle.source_record
@@ -1859,9 +1898,20 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     feature_inserted = False
     feature_updated = False
     feature_missing = False
+    needs_provider_reactivation = False
     if not record_inserted:
-        feature_missing = not await _feature_exists(session, bundle.feature.feature_id)
-    if record_state.became_current or feature_missing:
+        feature_state = await _feature_load_state(session, bundle.feature.feature_id)
+        feature_missing = not feature_state.exists
+        needs_provider_reactivation = (
+            feature_state.needs_provider_reactivation
+            and bundle.feature.status.value == "active"
+            and bundle.feature.deleted_at is None
+        )
+    if (
+        record_state.became_current
+        or feature_missing
+        or needs_provider_reactivation
+    ):
         feature_inserted = await upsert_feature(session, bundle.feature)
         feature_updated = not feature_inserted
     link_inserted = await upsert_source_link(session, bundle.source_link)
@@ -2001,28 +2051,349 @@ async def inactivate_geometryless_area_features_by_source(
 
 # ── notice 라이프사이클 (#632 — 사건 단위 identity + 중복 정리) ─────────────
 
-# 특보 해제 등 "닫기" — 열린 notice의 detail.valid_end_time을 채운다.
-# 재발표로 이미 더 새 valid_start를 가진 feature는 건드리지 않는다(해제가
-# 재발표보다 과거인 경우 — 배치 내 해제→재발표 순서 역전 방어).
-# :closed_at(timestamptz 비교)와 :closed_at_iso(jsonb 텍스트)는 같은 값의 두
-# 표현 — asyncpg가 한 바인드를 두 타입으로 추론하지 못해 분리한다.
-_CLOSE_NOTICE_FEATURE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET detail = jsonb_set(
-        f.detail, '{valid_end_time}', to_jsonb(CAST(:closed_at_iso AS text)), true
-    ),
-    updated_at = now()
-WHERE f.feature_id = :feature_id
-  AND f.kind = 'notice'
-  AND f.deleted_at IS NULL
-  AND (f.detail ->> 'valid_end_time') IS NULL
-  AND (
-    (f.detail ->> 'valid_start_time') IS NULL
-    OR CAST(f.detail ->> 'valid_start_time' AS timestamptz)
-       <= CAST(:closed_at AS timestamptz)
-  )
-RETURNING f.feature_id
+_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL: Final[str] = """
+SELECT pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('kortravelmap:notice-snapshot-reconcile', 0)
+)
 """
+
+_GET_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
+SELECT mode, applied_at, state_fingerprint
+FROM provider_sync.notice_lifecycle_scopes
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+  AND source_entity_type = :source_entity_type
+"""
+
+_INSERT_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
+INSERT INTO provider_sync.notice_lifecycle_scopes (
+    provider, dataset_key, source_entity_type,
+    mode, applied_at, state_fingerprint
+) VALUES (
+    :provider, :dataset_key, :source_entity_type,
+    :mode, CAST(:applied_at AS timestamptz), :state_fingerprint
+)
+"""
+
+_UPDATE_NOTICE_SNAPSHOT_SCOPE_SQL: Final[str] = """
+UPDATE provider_sync.notice_lifecycle_scopes
+SET applied_at = CAST(:applied_at AS timestamptz),
+    state_fingerprint = :state_fingerprint
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+  AND source_entity_type = :source_entity_type
+"""
+
+_UPSERT_NOTICE_EVENT_SCOPE_SQL: Final[str] = """
+INSERT INTO provider_sync.notice_lifecycle_scopes (
+    provider, dataset_key, source_entity_type,
+    mode, applied_at, state_fingerprint
+) VALUES (
+    :provider, :dataset_key, :source_entity_type,
+    'event', CAST(:applied_at AS timestamptz), :state_fingerprint
+)
+ON CONFLICT (provider, dataset_key, source_entity_type)
+DO UPDATE SET
+    applied_at = GREATEST(
+        provider_sync.notice_lifecycle_scopes.applied_at,
+        EXCLUDED.applied_at
+    ),
+    state_fingerprint = CASE
+        WHEN EXCLUDED.applied_at
+             >= provider_sync.notice_lifecycle_scopes.applied_at
+        THEN EXCLUDED.state_fingerprint
+        ELSE provider_sync.notice_lifecycle_scopes.state_fingerprint
+    END
+"""
+
+
+def _sync_notice_lineage_states_sql() -> str:
+    """알려진 scope 계보의 present 전이만 changed_at과 함께 저장한다."""
+    return f"""
+WITH known_lineages AS (
+    SELECT DISTINCT {_notice_lineage_sql("sr")} AS lineage_key
+    FROM provider_sync.source_entities AS se
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = se.current_source_record_key
+    WHERE se.provider = :provider
+      AND se.dataset_key = :dataset_key
+      AND se.source_entity_type = :source_entity_type
+    UNION
+    SELECT lineage_key
+    FROM provider_sync.notice_lineage_states
+    WHERE provider = :provider
+      AND dataset_key = :dataset_key
+      AND source_entity_type = :source_entity_type
+    UNION
+    SELECT unnest(CAST(:active_keys AS text[]))
+), desired AS (
+    SELECT
+        lineage_key,
+        lineage_key = ANY(CAST(:active_keys AS text[])) AS present,
+        CAST(NULL AS timestamptz) AS valid_until
+    FROM known_lineages
+)
+INSERT INTO provider_sync.notice_lineage_states (
+    provider, dataset_key, source_entity_type,
+    lineage_key, present, changed_at, valid_until
+)
+SELECT
+    :provider, :dataset_key, :source_entity_type,
+    lineage_key, present, CAST(:closed_at AS timestamptz), valid_until
+FROM desired
+ON CONFLICT (provider, dataset_key, source_entity_type, lineage_key)
+DO UPDATE SET
+    present = EXCLUDED.present,
+    changed_at = EXCLUDED.changed_at,
+    valid_until = EXCLUDED.valid_until
+WHERE provider_sync.notice_lineage_states.present IS DISTINCT FROM EXCLUDED.present
+   OR provider_sync.notice_lineage_states.valid_until
+      IS DISTINCT FROM EXCLUDED.valid_until
+"""
+
+
+def _notice_snapshot_fingerprint(active_lineage_keys: Sequence[str]) -> str:
+    canonical = json.dumps(
+        sorted(set(active_lineage_keys)),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return "snapshot:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def _advance_notice_snapshot_scope(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    mode: str,
+    checked_at: datetime,
+    fingerprint: str,
+) -> bool:
+    """scope watermark를 전진한다. exact replay면 ``False``를 반환한다."""
+    params = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "source_entity_type": source_entity_type,
+        "mode": mode,
+        "applied_at": checked_at,
+        "state_fingerprint": fingerprint,
+    }
+    current = (
+        await session.execute(text(_GET_NOTICE_SNAPSHOT_SCOPE_SQL), params)
+    ).mappings().one_or_none()
+    if current is not None:
+        if current["mode"] != mode:
+            raise ValueError("notice lifecycle scope mode conflict")
+        current_checked_at = current["applied_at"]
+        if checked_at < current_checked_at:
+            raise ValueError("stale authoritative notice snapshot watermark")
+        if checked_at == current_checked_at:
+            if fingerprint != current["state_fingerprint"]:
+                raise ValueError(
+                    "conflicting authoritative notice snapshot at equal watermark"
+                )
+            return False
+        await session.execute(text(_UPDATE_NOTICE_SNAPSHOT_SCOPE_SQL), params)
+    else:
+        await session.execute(text(_INSERT_NOTICE_SNAPSHOT_SCOPE_SQL), params)
+    return True
+
+
+async def _persist_notice_snapshot_state(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    active_lineage_keys: Sequence[str],
+    checked_at: datetime,
+) -> None:
+    """scope watermark를 검증·전진하고 lineage 상태 전이만 영속화한다."""
+    fingerprint = _notice_snapshot_fingerprint(active_lineage_keys)
+    params = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "source_entity_type": source_entity_type,
+        "active_keys": list(active_lineage_keys),
+        "closed_at": checked_at,
+    }
+    await _advance_notice_snapshot_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        mode="snapshot",
+        checked_at=checked_at,
+        fingerprint=fingerprint,
+    )
+    # exact replay도 이 동기화를 실행한다. 이전 버전의 부분 반영이나 load 뒤
+    # 처음 알려진 lineage 누락을 같은 snapshot 재시도로 self-heal한다.
+    await session.execute(text(_sync_notice_lineage_states_sql()), params)
+
+
+_NOTICE_LINEAGE_EVENT_CONFLICT_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT lineage_key, present, changed_at, valid_until
+    FROM jsonb_to_recordset(CAST(:lineage_events AS jsonb)) AS event(
+        lineage_key text,
+        present boolean,
+        changed_at timestamptz,
+        valid_until timestamptz
+    )
+)
+SELECT EXISTS (
+    SELECT 1
+    FROM incoming
+    JOIN provider_sync.notice_lineage_states AS state
+      ON state.provider = :provider
+     AND state.dataset_key = :dataset_key
+     AND state.source_entity_type = :source_entity_type
+     AND state.lineage_key = incoming.lineage_key
+    WHERE state.changed_at = incoming.changed_at
+      AND (
+          state.present IS DISTINCT FROM incoming.present
+          OR state.valid_until IS DISTINCT FROM incoming.valid_until
+      )
+)
+"""
+
+_UPSERT_NOTICE_LINEAGE_EVENTS_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT lineage_key, present, changed_at, valid_until
+    FROM jsonb_to_recordset(CAST(:lineage_events AS jsonb)) AS event(
+        lineage_key text,
+        present boolean,
+        changed_at timestamptz,
+        valid_until timestamptz
+    )
+)
+INSERT INTO provider_sync.notice_lineage_states (
+    provider, dataset_key, source_entity_type,
+    lineage_key, present, changed_at, valid_until
+)
+SELECT
+    :provider, :dataset_key, :source_entity_type,
+    lineage_key, present, changed_at, valid_until
+FROM incoming
+ON CONFLICT (provider, dataset_key, source_entity_type, lineage_key)
+DO UPDATE SET
+    present = EXCLUDED.present,
+    changed_at = EXCLUDED.changed_at,
+    valid_until = EXCLUDED.valid_until
+WHERE provider_sync.notice_lineage_states.changed_at < EXCLUDED.changed_at
+"""
+
+_ACCEPTED_PRESENT_NOTICE_EVENTS_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT lineage_key, present, changed_at, valid_until
+    FROM jsonb_to_recordset(CAST(:lineage_events AS jsonb)) AS event(
+        lineage_key text,
+        present boolean,
+        changed_at timestamptz,
+        valid_until timestamptz
+    )
+)
+SELECT incoming.lineage_key
+FROM incoming
+JOIN provider_sync.notice_lineage_states AS state
+  ON state.provider = :provider
+ AND state.dataset_key = :dataset_key
+ AND state.source_entity_type = :source_entity_type
+ AND state.lineage_key = incoming.lineage_key
+WHERE incoming.present
+  AND state.present
+  AND state.changed_at = incoming.changed_at
+  AND state.valid_until IS NOT DISTINCT FROM incoming.valid_until
+"""
+
+
+def _notice_lineage_events_fingerprint(
+    lineage_events: Mapping[str, tuple[bool, datetime, datetime | None]],
+) -> str:
+    canonical_events = [
+        [
+            lineage_key,
+            present,
+            changed_at.astimezone(UTC).isoformat(),
+            valid_until.astimezone(UTC).isoformat()
+            if valid_until is not None
+            else None,
+        ]
+        for lineage_key, (present, changed_at, valid_until) in sorted(
+            lineage_events.items()
+        )
+    ]
+    canonical = json.dumps(
+        canonical_events,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return "events:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def _persist_notice_lineage_events(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    lineage_events: Mapping[str, tuple[bool, datetime, datetime | None]],
+    observed_at: datetime,
+) -> frozenset[str]:
+    """계보별 최신 event를 저장하고 load 가능한 current-present key를 반환한다."""
+    fingerprint = _notice_lineage_events_fingerprint(lineage_events)
+    scope_params = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "source_entity_type": source_entity_type,
+        "applied_at": observed_at,
+        "state_fingerprint": fingerprint,
+    }
+    current_scope = (
+        await session.execute(text(_GET_NOTICE_SNAPSHOT_SCOPE_SQL), scope_params)
+    ).mappings().one_or_none()
+    if current_scope is not None and current_scope["mode"] != "event":
+        raise ValueError("notice lifecycle scope mode conflict")
+    await session.execute(text(_UPSERT_NOTICE_EVENT_SCOPE_SQL), scope_params)
+    if not lineage_events:
+        return frozenset()
+    payload = [
+        {
+            "lineage_key": lineage_key,
+            "present": present,
+            "changed_at": changed_at.isoformat(),
+            "valid_until": (
+                valid_until.isoformat() if valid_until is not None else None
+            ),
+        }
+        for lineage_key, (present, changed_at, valid_until) in sorted(
+            lineage_events.items()
+        )
+    ]
+    params = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "source_entity_type": source_entity_type,
+        "lineage_events": json.dumps(payload, ensure_ascii=False),
+    }
+    conflict = bool(
+        (
+            await session.execute(
+                text(_NOTICE_LINEAGE_EVENT_CONFLICT_SQL),
+                params,
+            )
+        ).scalar_one()
+    )
+    if conflict:
+        raise ValueError("conflicting notice lineage event at equal event time")
+    await session.execute(text(_UPSERT_NOTICE_LINEAGE_EVENTS_SQL), params)
+    accepted = await session.execute(
+        text(_ACCEPTED_PRESENT_NOTICE_EVENTS_SQL),
+        params,
+    )
+    return frozenset(str(row.lineage_key) for row in accepted)
 
 
 def _supersede_stale_notice_sql(close_missing: bool) -> str:
@@ -2033,8 +2404,20 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     현재 feed에 없는 latest 계보를 닫고, 다시 나타난 latest 계보는 이전
     ``valid_end_time``을 지워 활성 상태로 복구한다. feature·계보별 후보는
     ``seen_at``/``source_record_key``를 따로 집계하지 않고 실제 최신 row 하나를
-    선택해 read와 winner가 어긋나지 않게 한다.
+    선택해 read와 winner가 어긋나지 않게 한다. 호출 scope에서 밀린 feature도
+    다른 provider/dataset의 primary 계보 winner라면 feature 전체를 삭제하지 않고,
+    그 계보로 열린 공유 feature를 현재 scope의 snapshot 부재로 닫지 않는다.
     """
+    candidate_lifecycle = (
+        """
+      AND (
+        f.deleted_at IS NULL
+        OR f.status = 'inactive'
+      )
+"""
+        if close_missing
+        else "      AND f.deleted_at IS NULL\n"
+    )
     lineage_cte = f"""
 WITH lineage_candidates AS (
     SELECT
@@ -2042,7 +2425,10 @@ WITH lineage_candidates AS (
         {_notice_lineage_sql("sr")} AS lineage_key,
         COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
         sr.source_record_key AS tiebreak,
-        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity
+        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
+        lineage_state.present AS snapshot_present,
+        lineage_state.changed_at AS snapshot_changed_at,
+        lineage_state.valid_until AS snapshot_valid_until
     FROM feature.features AS f
     JOIN provider_sync.source_links AS sl
       ON sl.feature_id = f.feature_id
@@ -2051,12 +2437,17 @@ WITH lineage_candidates AS (
       ON se.source_entity_key = sl.source_entity_key
     JOIN provider_sync.source_records AS sr
       ON sr.source_record_key = se.current_source_record_key
+    LEFT JOIN provider_sync.notice_lineage_states AS lineage_state
+      ON lineage_state.provider = sr.provider
+     AND lineage_state.dataset_key = sr.dataset_key
+     AND lineage_state.source_entity_type = sr.source_entity_type
+     AND lineage_state.lineage_key = {_notice_lineage_sql("sr")}
     WHERE f.kind = 'notice'
-      AND f.deleted_at IS NULL
       AND COALESCE(f.data_origin, 'provider') <> 'user_request'
       AND sr.provider = :provider
       AND sr.dataset_key = :dataset_key
       AND sr.source_entity_type = :source_entity_type
+{candidate_lifecycle}
 ),
 lineage AS (
     SELECT DISTINCT ON (feature_id, lineage_key)
@@ -2064,7 +2455,10 @@ lineage AS (
         lineage_key,
         seen_at,
         tiebreak,
-        canonical_identity
+        canonical_identity,
+        snapshot_present,
+        snapshot_changed_at,
+        snapshot_valid_until
     FROM lineage_candidates
     ORDER BY feature_id, lineage_key, seen_at DESC, tiebreak DESC
 ),
@@ -2072,6 +2466,9 @@ ranked AS (
     SELECT
         feature_id,
         lineage_key,
+        snapshot_present,
+        snapshot_changed_at,
+        snapshot_valid_until,
         row_number() OVER (
             PARTITION BY lineage_key
             ORDER BY
@@ -2081,51 +2478,386 @@ ranked AS (
                 feature_id ASC
         ) AS rn
     FROM lineage
+),
+scoped_feature_ids AS (
+    SELECT DISTINCT feature_id
+    FROM ranked
+),
+global_feature_lineages AS (
+    SELECT DISTINCT ON (
+        f.feature_id,
+        sr.provider,
+        sr.dataset_key,
+        sr.source_entity_type,
+        {_notice_lineage_sql("sr")}
+    )
+        f.feature_id,
+        sr.provider,
+        sr.dataset_key,
+        sr.source_entity_type,
+        {_notice_lineage_sql("sr")} AS lineage_key,
+        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) AS seen_at,
+        sr.source_record_key AS tiebreak,
+        {_canonical_notice_feature_sql("f", "sr")} AS canonical_identity,
+        lineage_state.present AS snapshot_present,
+        lineage_state.changed_at AS snapshot_changed_at,
+        lineage_state.valid_until AS snapshot_valid_until
+    FROM scoped_feature_ids AS scoped
+    JOIN feature.features AS f
+      ON f.feature_id = scoped.feature_id
+    JOIN provider_sync.source_links AS sl
+      ON sl.feature_id = f.feature_id
+     AND sl.is_primary_source
+    JOIN provider_sync.source_entities AS se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = se.current_source_record_key
+    LEFT JOIN provider_sync.notice_lineage_states AS lineage_state
+      ON lineage_state.provider = sr.provider
+     AND lineage_state.dataset_key = sr.dataset_key
+     AND lineage_state.source_entity_type = sr.source_entity_type
+     AND lineage_state.lineage_key = {_notice_lineage_sql("sr")}
+    WHERE f.kind = 'notice'
+    ORDER BY
+        f.feature_id,
+        sr.provider,
+        sr.dataset_key,
+        sr.source_entity_type,
+        {_notice_lineage_sql("sr")},
+        COALESCE(sr.last_seen_at, sr.imported_at, sr.fetched_at) DESC,
+        sr.source_record_key DESC
+),
+global_feature_wins AS (
+    SELECT
+        current_notice.feature_id,
+        bool_or(better.better_exists IS NULL) AS wins_any_lineage,
+        bool_or(
+            better.better_exists IS NULL
+            AND NOT (
+                current_notice.provider = :provider
+                AND current_notice.dataset_key = :dataset_key
+                AND current_notice.source_entity_type = :source_entity_type
+            )
+        ) AS wins_out_of_scope_lineage,
+        bool_or(
+            better.better_exists IS NULL
+            AND NOT (
+                current_notice.provider = :provider
+                AND current_notice.dataset_key = :dataset_key
+                AND current_notice.source_entity_type = :source_entity_type
+            )
+            AND current_notice.snapshot_present IS TRUE
+        ) AS has_present_out_of_scope_winning_lineage,
+        bool_or(
+            better.better_exists IS NULL
+            AND NOT (
+                current_notice.provider = :provider
+                AND current_notice.dataset_key = :dataset_key
+                AND current_notice.source_entity_type = :source_entity_type
+            )
+            AND current_notice.snapshot_present IS TRUE
+            AND current_notice.snapshot_valid_until IS NULL
+        ) AS has_open_present_out_of_scope_winning_lineage,
+        max(current_notice.snapshot_valid_until) FILTER (
+            WHERE better.better_exists IS NULL
+              AND NOT (
+                  current_notice.provider = :provider
+                  AND current_notice.dataset_key = :dataset_key
+                  AND current_notice.source_entity_type = :source_entity_type
+              )
+              AND current_notice.snapshot_present IS TRUE
+        ) AS max_present_valid_until_out_of_scope,
+        bool_or(
+            better.better_exists IS NULL
+            AND NOT (
+                current_notice.provider = :provider
+                AND current_notice.dataset_key = :dataset_key
+                AND current_notice.source_entity_type = :source_entity_type
+            )
+            AND current_notice.snapshot_present IS NULL
+        ) AS has_unknown_out_of_scope_winning_lineage,
+        max(current_notice.snapshot_changed_at) FILTER (
+            WHERE better.better_exists IS NULL
+              AND current_notice.snapshot_present IS FALSE
+        ) AS last_inactive_winner_changed_at
+    FROM global_feature_lineages AS current_notice
+    LEFT JOIN LATERAL (
+        SELECT 1 AS better_exists
+        FROM provider_sync.source_entities AS other_se
+        JOIN provider_sync.source_records AS other_sr
+          ON other_sr.source_record_key = other_se.current_source_record_key
+         AND {_notice_lineage_sql("other_sr")} = current_notice.lineage_key
+        JOIN provider_sync.source_links AS other_sl
+          ON other_sl.source_entity_key = other_se.source_entity_key
+        JOIN feature.features AS other_f
+          ON other_f.feature_id = other_sl.feature_id
+        WHERE other_se.provider = current_notice.provider
+          AND other_se.dataset_key = current_notice.dataset_key
+          AND other_se.source_entity_type = current_notice.source_entity_type
+          AND other_sl.is_primary_source
+          AND other_f.feature_id <> current_notice.feature_id
+          AND other_f.kind = 'notice'
+          AND other_f.deleted_at IS NULL
+          AND (
+            COALESCE(
+                other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+            ) > current_notice.seen_at
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key > current_notice.tiebreak
+            )
+            OR (
+              COALESCE(
+                  other_sr.last_seen_at, other_sr.imported_at, other_sr.fetched_at
+              ) = current_notice.seen_at
+              AND other_sr.source_record_key = current_notice.tiebreak
+              AND (
+                (
+                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                  AND NOT current_notice.canonical_identity
+                )
+                OR (
+                  {_canonical_notice_feature_sql("other_f", "other_sr")}
+                    = current_notice.canonical_identity
+                  AND other_f.feature_id < current_notice.feature_id
+                )
+              )
+            )
+          )
+        LIMIT 1
+    ) AS better ON true
+    GROUP BY current_notice.feature_id
 )
 """
     if close_missing:
         return (
             lineage_cte
             + """
+, feature_snapshot AS (
+    SELECT
+        feature_id,
+        bool_or(rn = 1) AS wins_any_lineage,
+        bool_or(
+            rn = 1 AND snapshot_present IS TRUE
+        ) AS has_present_winning_lineage,
+        bool_or(
+            rn = 1
+            AND snapshot_present IS TRUE
+            AND snapshot_valid_until IS NULL
+        ) AS has_open_present_winning_lineage,
+        max(snapshot_valid_until) FILTER (
+            WHERE rn = 1 AND snapshot_present IS TRUE
+        ) AS max_present_valid_until,
+        bool_or(
+            rn = 1 AND snapshot_present IS NULL
+        ) AS has_unknown_winning_lineage,
+        max(snapshot_changed_at) FILTER (
+            WHERE rn = 1 AND snapshot_present IS FALSE
+        ) AS inactive_changed_at
+    FROM ranked
+    GROUP BY feature_id
+), feature_lifecycle AS (
+    SELECT
+        s.feature_id,
+        (
+            s.has_present_winning_lineage
+            OR COALESCE(
+                global_wins.has_present_out_of_scope_winning_lineage,
+                false
+            )
+        ) AS has_present_winning_lineage,
+        (
+            s.has_open_present_winning_lineage
+            OR COALESCE(
+                global_wins.has_open_present_out_of_scope_winning_lineage,
+                false
+            )
+        ) AS has_open_present_winning_lineage,
+        (
+            s.has_unknown_winning_lineage
+            OR COALESCE(
+                global_wins.has_unknown_out_of_scope_winning_lineage,
+                false
+            )
+        ) AS has_unknown_winning_lineage,
+        COALESCE(
+            GREATEST(
+                s.max_present_valid_until,
+                global_wins.max_present_valid_until_out_of_scope
+            ),
+            s.max_present_valid_until,
+            global_wins.max_present_valid_until_out_of_scope
+        ) AS max_present_valid_until,
+        COALESCE(
+            GREATEST(
+                global_wins.last_inactive_winner_changed_at,
+                s.inactive_changed_at
+            ),
+            global_wins.last_inactive_winner_changed_at,
+            s.inactive_changed_at,
+            CAST(:closed_at AS timestamptz)
+        ) AS inactive_changed_at
+    FROM feature_snapshot AS s
+    LEFT JOIN global_feature_wins AS global_wins
+      ON global_wins.feature_id = s.feature_id
+    WHERE s.wins_any_lineage
+       OR COALESCE(global_wins.wins_out_of_scope_lineage, false)
+), lifecycle_desired AS (
+    SELECT
+        f.feature_id,
+        f.status AS old_status,
+        f.deleted_at AS old_deleted_at,
+        CAST(f.detail ->> 'valid_end_time' AS timestamptz) AS old_valid_end_time,
+        lifecycle.has_present_winning_lineage,
+        lifecycle.has_unknown_winning_lineage,
+        CASE
+          WHEN lifecycle.has_present_winning_lineage
+           AND lifecycle.has_open_present_winning_lineage
+          THEN NULL
+          WHEN lifecycle.has_unknown_winning_lineage
+          THEN CASE
+            WHEN lifecycle.has_present_winning_lineage
+            THEN CASE
+              WHEN f.status = 'active'
+               AND f.deleted_at IS NULL
+               AND (
+                   (f.detail ->> 'valid_end_time') IS NULL
+                   OR CAST(f.detail ->> 'valid_end_time' AS timestamptz)
+                      > CAST(:evaluated_at AS timestamptz)
+               )
+              THEN CASE
+                WHEN (f.detail ->> 'valid_end_time') IS NULL
+                THEN NULL
+                ELSE GREATEST(
+                    lifecycle.max_present_valid_until,
+                    CAST(f.detail ->> 'valid_end_time' AS timestamptz)
+                )
+              END
+              ELSE lifecycle.max_present_valid_until
+            END
+            ELSE CAST(f.detail ->> 'valid_end_time' AS timestamptz)
+          END
+          WHEN lifecycle.has_present_winning_lineage
+          THEN lifecycle.max_present_valid_until
+          ELSE lifecycle.inactive_changed_at
+        END AS desired_valid_end_time,
+        EXISTS (
+            SELECT 1
+            FROM ops.feature_overrides AS fo
+            WHERE fo.feature_id = f.feature_id
+              AND fo.field_path = 'status'
+              AND fo.status = 'active'
+              AND fo.prevent_provider_reactivation
+        ) AS reactivation_blocked
+    FROM feature.features AS f
+    JOIN feature_lifecycle AS lifecycle
+      ON lifecycle.feature_id = f.feature_id
+), lifecycle_targets AS (
+    SELECT
+        desired.*,
+        (
+            desired.has_present_winning_lineage
+            AND NOT desired.reactivation_blocked
+            AND (
+                desired.desired_valid_end_time IS NULL
+                OR desired.desired_valid_end_time
+                   > CAST(:evaluated_at AS timestamptz)
+            )
+        ) AS should_activate,
+        (
+            desired.old_status = 'active'
+            AND desired.old_deleted_at IS NULL
+            AND (
+                desired.old_valid_end_time IS NULL
+                OR desired.old_valid_end_time
+                   > CAST(:evaluated_at AS timestamptz)
+            )
+        ) AS was_visible
+    FROM lifecycle_desired AS desired
+), lifecycle_changes AS (
+    SELECT
+        target.*,
+        (
+            (
+                target.should_activate
+                OR (
+                    target.old_status = 'active'
+                    AND target.old_deleted_at IS NULL
+                )
+            )
+            AND (
+                target.desired_valid_end_time IS NULL
+                OR target.desired_valid_end_time
+                   > CAST(:evaluated_at AS timestamptz)
+            )
+        ) AS will_be_visible
+    FROM lifecycle_targets AS target
+)
 UPDATE feature.features AS f
 SET detail = jsonb_set(
         f.detail,
         '{valid_end_time}',
         CASE
-          WHEN r.lineage_key = ANY(CAST(:active_keys AS text[]))
+          WHEN target.desired_valid_end_time IS NULL
           THEN 'null'::jsonb
-          ELSE to_jsonb(CAST(:closed_at AS text))
+          ELSE to_jsonb(
+              CAST(target.desired_valid_end_time AS text)
+          )
         END,
         true
     ),
+    status = CASE
+      WHEN target.should_activate
+      THEN 'active'
+      ELSE f.status
+    END,
+    deleted_at = CASE
+      WHEN target.should_activate
+      THEN NULL
+      ELSE f.deleted_at
+    END,
     updated_at = now()
-FROM ranked AS r
-WHERE f.feature_id = r.feature_id
-  AND r.rn = 1
-  AND f.deleted_at IS NULL
+FROM lifecycle_changes AS target
+WHERE f.feature_id = target.feature_id
   AND (
-    (
-      r.lineage_key = ANY(CAST(:active_keys AS text[]))
-      AND (f.detail ->> 'valid_end_time') IS NOT NULL
-    )
-    OR (
-      NOT (r.lineage_key = ANY(CAST(:active_keys AS text[])))
-      AND (f.detail ->> 'valid_end_time') IS NULL
-    )
+      target.old_valid_end_time
+        IS DISTINCT FROM target.desired_valid_end_time
+      OR (
+          target.should_activate
+          AND (
+              target.old_deleted_at IS NOT NULL
+              OR target.old_status <> 'active'
+          )
+      )
   )
 RETURNING
     f.feature_id,
-    (f.detail ->> 'valid_end_time') IS NULL AS reopened
+    (NOT target.was_visible AND target.will_be_visible) AS reopened,
+    (target.was_visible AND NOT target.will_be_visible) AS closed
 """
         )
     return (
         lineage_cte
         + """
+, feature_rank AS (
+    SELECT
+        feature_id,
+        bool_or(rn = 1) AS wins_any_lineage,
+        bool_or(rn > 1) AS loses_any_lineage
+    FROM ranked
+    GROUP BY feature_id
+)
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
-FROM ranked AS r
+FROM feature_rank AS r
+LEFT JOIN global_feature_wins AS global_wins
+  ON global_wins.feature_id = r.feature_id
 WHERE f.feature_id = r.feature_id
-  AND r.rn > 1
+  AND r.loses_any_lineage
+  AND NOT r.wins_any_lineage
+  AND NOT COALESCE(global_wins.wins_any_lineage, false)
   AND f.deleted_at IS NULL
 RETURNING f.feature_id
 """
@@ -2141,31 +2873,215 @@ class NoticeReconcileResult:
     reopened: int = 0
 
 
+@dataclass(frozen=True)
+class NoticeFeatureLoadResult:
+    """notice bundle 원자 적재와 영속 lifecycle materialize 결과."""
+
+    load: FeatureLoadResult
+    reconcile: NoticeReconcileResult
+
+
+async def load_authoritative_notice_snapshot(
+    session: AsyncSession,
+    *,
+    bundles: Sequence[FeatureBundle],
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    active_lineage_keys: Collection[str],
+    observed_at: datetime,
+) -> NoticeFeatureLoadResult:
+    """full snapshot 적재·state CAS·Feature lifecycle을 한 transaction에서 수행."""
+    await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
+    normalized_active_keys = sorted(set(active_lineage_keys))
+    fingerprint = _notice_snapshot_fingerprint(normalized_active_keys)
+    # scope CAS는 적재 전에 수행해 stale/conflicting snapshot이 Feature를
+    # 건드리지 못하게 한다. lineage 동기화는 적재 뒤에 수행해야 이번 snapshot에
+    # 처음 등장한 source lineage까지 known set에 포함된다.
+    await _advance_notice_snapshot_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        mode="snapshot",
+        checked_at=observed_at,
+        fingerprint=fingerprint,
+    )
+    loaded = await load_bundles(session, bundles)
+    await _persist_notice_snapshot_state(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        active_lineage_keys=normalized_active_keys,
+        checked_at=observed_at,
+    )
+    reconciled = await _reconcile_persisted_notice_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        closed_at=observed_at,
+    )
+    return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
+
+
+async def load_notice_event_bundles(
+    session: AsyncSession,
+    *,
+    bundles: Sequence[FeatureBundle],
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    lineage_events: Mapping[str, tuple[bool, datetime, datetime | None]],
+    observed_at: datetime,
+) -> NoticeFeatureLoadResult:
+    """event notice 적재·member 전이·Feature lifecycle을 한 transaction에서 수행."""
+    bundle_lineage_keys: list[str] = []
+    seen_bundle_lineage_keys: set[str] = set()
+    duplicate_lineage_keys: set[str] = set()
+    for bundle in bundles:
+        lineage_key = bundle.source_record.source_entity_id
+        bundle_lineage_keys.append(lineage_key)
+        if lineage_key in seen_bundle_lineage_keys:
+            duplicate_lineage_keys.add(lineage_key)
+        seen_bundle_lineage_keys.add(lineage_key)
+    if duplicate_lineage_keys:
+        raise ValueError(
+            "notice event batch contains multiple bundles for one lineage: "
+            + ", ".join(sorted(duplicate_lineage_keys))
+        )
+    invalid_bundle_lineage_keys = sorted(
+        lineage_key
+        for lineage_key in bundle_lineage_keys
+        if lineage_key not in lineage_events
+    )
+    if invalid_bundle_lineage_keys:
+        raise ValueError(
+            "notice event bundle requires a matching lineage event: "
+            + ", ".join(invalid_bundle_lineage_keys)
+        )
+    await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
+    accepted_present = await _persist_notice_lineage_events(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events=lineage_events,
+        observed_at=observed_at,
+    )
+    accepted_bundles = [
+        bundle
+        for bundle in bundles
+        if bundle.source_record.source_entity_id in accepted_present
+    ]
+    materialized_at = datetime.now(UTC)
+    active_bundles: list[FeatureBundle] = []
+    expired_bundles: list[FeatureBundle] = []
+    for bundle in accepted_bundles:
+        valid_until = lineage_events[
+            bundle.source_record.source_entity_id
+        ][2]
+        target = (
+            active_bundles
+            if valid_until is None or valid_until > materialized_at
+            else expired_bundles
+        )
+        target.append(bundle)
+    loaded = await load_bundles(session, active_bundles)
+    # 만료된 rolling-window 발표도 SourceRecord 감사 이력은 남긴다. 다만 일반
+    # bundle load의 provider reactivation을 거치면 soft-delete/purge된 Feature가
+    # 과거 사건으로 되살아나므로 Feature/source_link는 만들거나 갱신하지 않는다.
+    for bundle in expired_bundles:
+        source_record_inserted = await upsert_source_record(
+            session, bundle.source_record
+        )
+        loaded = loaded.merge(
+            FeatureLoadResult(
+                bundles_total=1,
+                source_records_inserted=int(source_record_inserted),
+            )
+        )
+    reconciled = await _reconcile_persisted_notice_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        closed_at=max(
+            (changed_at for _, changed_at, _ in lineage_events.values()),
+            default=observed_at,
+        ),
+        evaluated_at=materialized_at,
+    )
+    return NoticeFeatureLoadResult(load=loaded, reconcile=reconciled)
+
+
+async def get_notice_snapshot_watermark(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+) -> datetime | None:
+    """해당 authoritative notice scope의 최근 적용 watermark를 반환한다."""
+    result = await session.execute(
+        text(_GET_NOTICE_SNAPSHOT_SCOPE_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+        },
+    )
+    row = result.mappings().one_or_none()
+    return None if row is None else row["applied_at"]
+
+
 async def close_notice_features(
     session: AsyncSession,
     *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
     closures: Mapping[str, datetime],
+    announcements: Mapping[str, datetime] | None = None,
 ) -> int:
-    """열린 notice feature의 ``valid_end_time``을 채운다 (특보 해제 등, #632).
+    """계보별 발표/해제를 영속화하고 공유 notice Feature lifecycle을 재계산한다.
 
-    ``closures``는 ``feature_id → 닫기 시각``. 이미 닫혔거나 soft-delete됐거나,
-    닫기 시각보다 **나중에 재발표**된 feature는 건드리지 않는다. 빈 매핑은
-    no-op(0). commit은 호출자 책임.
+    key는 모두 사건 ``lineage_key``다. 최신 announcement는 ``present=true``,
+    lift는 ``present=false`` 전이이며, 같은 Feature의 다른 scope winner가
+    present면 실제 close를 미룬다. commit은 호출자 책임.
     """
-    if not closures:
+    lineage_events: dict[str, tuple[bool, datetime, datetime | None]] = {}
+    for present, events in ((True, announcements or {}), (False, closures)):
+        for lineage_key, changed_at in events.items():
+            current = lineage_events.get(lineage_key)
+            if current is None or changed_at > current[1]:
+                lineage_events[lineage_key] = (present, changed_at, None)
+            elif changed_at == current[1] and present != current[0]:
+                raise ValueError("conflicting notice lineage event at equal event time")
+    if not lineage_events:
         return 0
-    closed = 0
-    for feature_id, closed_at in sorted(closures.items()):
-        result = await session.execute(
-            text(_CLOSE_NOTICE_FEATURE_SQL),
-            {
-                "feature_id": feature_id,
-                "closed_at": closed_at,
-                "closed_at_iso": closed_at.isoformat(),
-            },
-        )
-        closed += len(result.fetchall())
-    return closed
+    await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
+    await _persist_notice_lineage_events(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        lineage_events=lineage_events,
+        observed_at=max(
+            changed_at for _, changed_at, _ in lineage_events.values()
+        ),
+    )
+    result = await _reconcile_persisted_notice_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        closed_at=max(
+            changed_at for _, changed_at, _ in lineage_events.values()
+        ),
+    )
+    return result.closed
 
 
 async def supersede_stale_notice_features(
@@ -2190,6 +3106,48 @@ async def supersede_stale_notice_features(
 
     commit은 호출자 책임.
     """
+    snapshot_params: dict[str, object] | None = None
+    if active_lineage_keys is not None and closed_at is not None:
+        # snapshot 상태 갱신과 공유 Feature lifecycle 판정을 scope 간 직렬화한다.
+        # transaction advisory lock이므로 caller commit/rollback까지 유지된다.
+        await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
+        normalized_active_keys = sorted(set(active_lineage_keys))
+        snapshot_params = {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+            "active_keys": normalized_active_keys,
+            "closed_at": closed_at,
+        }
+        await _persist_notice_snapshot_state(
+            session,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            active_lineage_keys=normalized_active_keys,
+            checked_at=closed_at,
+        )
+
+    return await _reconcile_persisted_notice_scope(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        closed_at=closed_at if snapshot_params is not None else None,
+    )
+
+
+async def _reconcile_persisted_notice_scope(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    closed_at: datetime | None,
+    evaluated_at: datetime | None = None,
+) -> NoticeReconcileResult:
+    """영속 lineage state로 scope의 dedup과 Feature lifecycle을 재계산한다."""
+    lifecycle_evaluated_at = evaluated_at or datetime.now(UTC)
     result = await session.execute(
         text(_supersede_stale_notice_sql(close_missing=False)),
         {
@@ -2201,20 +3159,33 @@ async def supersede_stale_notice_features(
     superseded = len(result.fetchall())
     closed = 0
     reopened = 0
-    if active_lineage_keys is not None and closed_at is not None:
+    if closed_at is not None:
         result = await session.execute(
             text(_supersede_stale_notice_sql(close_missing=True)),
             {
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "source_entity_type": source_entity_type,
-                "active_keys": sorted(active_lineage_keys),
-                "closed_at": closed_at.isoformat(),
+                "closed_at": closed_at,
+                "evaluated_at": lifecycle_evaluated_at,
             },
         )
         snapshot_updates = result.mappings().all()
         reopened = sum(bool(row["reopened"]) for row in snapshot_updates)
-        closed = len(snapshot_updates) - reopened
+        closed = sum(bool(row["closed"]) for row in snapshot_updates)
+        # soft-delete됐던 winner를 복구하면서 같은 계보의 legacy active feature와
+        # 다시 공존할 수 있다. 복구가 실제 발생한 경우에만 한 번 더 정리해
+        # transaction 밖으로 중복 active feature가 노출되지 않게 한다.
+        if reopened:
+            result = await session.execute(
+                text(_supersede_stale_notice_sql(close_missing=False)),
+                {
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                    "source_entity_type": source_entity_type,
+                },
+            )
+            superseded += len(result.fetchall())
     return NoticeReconcileResult(
         superseded=superseded,
         closed=closed,

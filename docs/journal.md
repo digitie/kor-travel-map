@@ -2,6 +2,52 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (codex) — notice 반복 중복·오종료의 계보 상태 원천 수정
+
+- **반복 원인**: notice 부재/해제를 각 실행의 scope-local 집합과 Feature ID 직접 갱신으로
+  처리해, 같은 Feature에 연결된 다른 provider/dataset 계보의 현재 상태를 다음 실행이 알 수
+  없었다. KREX bundle load와 reconcile도 서로 다른 transaction이라 부분 성공 시 중복·재노출이
+  반복될 수 있었다.
+- **영속 정본**: Alembic 0046에 scope별 `snapshot`/`event` mode, watermark/fingerprint와
+  계보별 `present`/`changed_at`/`valid_until`을 저장했다. KREX는 과거/equal-conflict
+  snapshot을 CAS로 거부하고 exact replay를 허용하며, KMA는 batch watermark가 아니라 계보별
+  event 시각으로 발표·해제와 공급자 예정 종료를 적용한다. backfill 없는 계보는 `unknown`으로
+  보수적으로 보존한다. 상태가 생긴 뒤의 손실성 0046 downgrade는 명시적으로 거부한다.
+- **원자 적용**: 전역 transaction advisory lock 아래 bundle 적재, 상태 전이, 중복 정리,
+  Feature 종료·재개를 한 transaction으로 묶었다. 모든 구조적 winner가 명시적 `false`일 때만
+  마지막 winner 전이 시각으로 닫고, 다른 scope의 `true` winner는 재개방 근거로 사용한다.
+- **적대적 리뷰 1차 반영**: load 전에 member를 동기화해 신규 lineage를 누락하던 순서, equal replay의
+  self-heal 누락, cross-scope 마지막 종료 시각 대신 첫 시각을 쓰던 계산, out-of-scope
+  `true`/`unknown`을 같은 재개방 근거로 취급하던 문제와 중복 JOIN을 수정했다. 같은 `false`의
+  더 최신 event 또는 미래 예정 종료보다 이른 explicit lift가 materialized 종료 시각에 반영되지
+  않던 양방향 drift도 차단했다.
+- **적대적 리뷰 2차 반영**: 늦은 과거 KMA 발표의 다른 payload가 source current/Feature 본문을
+  되돌리던 경로는 DB가 수락한 current-present bundle만 적재하도록 막았다. finite/open,
+  `unknown` 혼합, 운영자 재활성화 방지, 실제 공개 전이 count와 정상 발표+동일 계보 해제 batch를
+  경우표로 고정했다. KREX preflight는 equal watermark를 DB fingerprint CAS로 넘겼다. 두 리뷰
+  모두 수정 후 재검토에서 S1/S2/S3 0건으로 종료했다.
+- **영향도·검증**: codegraph `impact close_notice_features --depth 3`에서 48개 영향 symbol을
+  확인하고 실제 직접 호출자는 client/KMA/tests로 재확인했다. core unit 1,259건, 외부 live
+  `kor-travel-geo` 5건을 제외한 PostGIS integration 308건, Dagster 전체 262건, frontend Vitest
+  78건을 통과했다. 변경 Python Ruff, core 102개/Dagster 21개 strict mypy, import-linter 4계약,
+  frontend type-check·lint(기존 경고 2건, 오류 0건), Alembic single head를 통과했다.
+
+## 2026-07-13 (codex) — 동일 provider payload 재등장 self-heal 보강
+
+- **운영 재현**: n150 KREX 수집은 46건을 정상 반환했지만 그중 5건이 과거 중복 정리로
+  soft-delete된 Feature에만 연결되어 공개 지도에서 보이지 않았다. 사용자 변경이나
+  ``prevent_provider_reactivation`` override는 없었다.
+- **근본 원인**: 동일 ``source_record_key`` 재수집 fast-path가 Feature 존재 여부만 확인해,
+  원문이 변하지 않은 채 재등장한 provider Feature의 ``inactive + deleted_at`` 상태를
+  복구하는 upsert를 건너뛰었다.
+- **수정**: provider 소유 ``inactive`` 상태를 ``deleted_at`` 유무와 관계없이 1회 재활성화하고,
+  사용자 요청 Feature와 재활성화 방지 override는 그대로 보호한다. notice snapshot reconcile도
+  현재 feed의 soft-delete된 정본을 복구하며, 다중 primary 계보 Feature는 한 계보라도 winner면
+  보존하고 active인 winner 계보만으로 종료·재등장을 결정한다.
+- **검증**: 동일 payload 복구 후 다음 수집 no-op, 사용자/override 보호, notice 정본 복구·
+  다중 계보 공개 read와 중복 정리를 포함한 관련 통합 33건·unit 12건과 Ruff·strict mypy를
+  통과했다.
+
 ## 2026-07-13 (codex) — 고zoom Feature bbox PostgreSQL JIT 병목 수정
 
 - **원인 확정**: 운영 중앙 서울 z12 tile을 읽기 전용

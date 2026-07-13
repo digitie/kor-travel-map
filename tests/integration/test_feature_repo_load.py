@@ -29,7 +29,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra import feature_repo
+from kortravelmap.infra import admin_feature_repo, feature_repo
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
@@ -270,6 +270,153 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     ).mappings().one()
     assert source_row["count"] == 1
     assert source_row["last_seen_at"] > before
+
+
+@pytest.mark.parametrize(
+    "deleted_at",
+    [None, _FETCHED],
+    ids=["inactive", "soft-deleted"],
+)
+async def test_identical_provider_bundle_reactivates_inactive_once(
+    migrated_session: AsyncSession,
+    deleted_at: datetime | None,
+) -> None:
+    """동일 payload 재등장도 provider inactive 상태를 1회만 self-heal한다."""
+    suffix = "SOFT-DELETED" if deleted_at is not None else "INACTIVE"
+    bundle = await _bundle(f"FEST-REPO-REAPPEARED-{suffix}")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = :deleted_at, updated_at = now()"
+            " WHERE feature_id = :feature_id"
+        ),
+        {
+            "deleted_at": deleted_at,
+            "feature_id": bundle.feature.feature_id,
+        },
+    )
+
+    recovered = await feature_repo.load_bundle(migrated_session, bundle)
+    assert recovered.features_inserted == 0
+    assert recovered.features_updated == 1
+    assert recovered.source_records_inserted == 0
+    status = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at FROM feature.features"
+                " WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert status.status == "active"
+    assert status.deleted_at is None
+
+    # 복구 뒤 같은 payload는 다시 feature upsert/version write를 일으키지 않는다.
+    repeated = await feature_repo.load_bundle(migrated_session, bundle)
+    assert repeated.features_updated == 0
+    assert repeated.source_records_inserted == 0
+
+
+async def test_identical_bundle_reactivates_deactivate_without_prevention(
+    migrated_session: AsyncSession,
+) -> None:
+    """prevent=false 운영 비활성화는 다음 provider snapshot이 되살릴 수 있다."""
+    bundle = await _bundle("FEST-REPO-DEACTIVATE-ALLOW")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    deactivated = await admin_feature_repo.deactivate_feature(
+        migrated_session,
+        bundle.feature.feature_id,
+        reason="provider 재활성화 허용 테스트",
+        operator="integration-test",
+        prevent_provider_reactivation=False,
+    )
+    assert deactivated is not None
+    assert deactivated.status == "inactive"
+    assert deactivated.override_created is False
+
+    recovered = await feature_repo.load_bundle(migrated_session, bundle)
+    assert recovered.features_updated == 1
+    row = await feature_repo.get_feature_row(
+        migrated_session, bundle.feature.feature_id
+    )
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["deleted_at"] is None
+
+
+async def test_identical_bundle_does_not_reactivate_user_request_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    bundle = await _bundle("FEST-REPO-USER-DELETED")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = now(),"
+            " data_origin = 'user_request', data_version = 1, updated_at = now()"
+            " WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": bundle.feature.feature_id},
+    )
+
+    protected = await feature_repo.load_bundle(migrated_session, bundle)
+    assert protected.features_updated == 0
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at, data_origin FROM feature.features"
+                " WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "inactive"
+    assert row.deleted_at is not None
+    assert row.data_origin == "user_request"
+
+
+async def test_identical_bundle_respects_prevent_reactivation_override(
+    migrated_session: AsyncSession,
+) -> None:
+    bundle = await _bundle("FEST-REPO-OVERRIDE")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features"
+            " SET status = 'inactive', deleted_at = now(), updated_at = now()"
+            " WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": bundle.feature.feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.feature_overrides (
+                feature_id, field_path, override_value,
+                prevent_provider_reactivation, status
+            ) VALUES (
+                :feature_id, 'status', to_jsonb('inactive'::text), true, 'active'
+            )
+            """
+        ),
+        {"feature_id": bundle.feature.feature_id},
+    )
+
+    protected = await feature_repo.load_bundle(migrated_session, bundle)
+    assert protected.features_updated == 0
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at FROM feature.features"
+                " WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "inactive"
+    assert row.deleted_at is not None
 
 
 async def test_notice_first_probe_start_time_is_preserved_on_payload_update(

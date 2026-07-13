@@ -1,5 +1,40 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (codex) — notice 계보 수명주기 영속화·원자 적용 완료
+
+- **근본 수정**: Alembic 0046의 scope/member 상태로 KREX authoritative snapshot과 KMA rolling
+  event를 분리해 영속화했다. scope-local 부재 집합이나 Feature ID 직접 close 대신 모든
+  provider/dataset 구조적 winner 상태를 함께 판단해, 마지막 active 계보가 실제로 사라질 때만
+  공지를 닫고 재발표 시 다시 연다. KMA 공급자 예정 종료는 member `valid_until`로 보존하고,
+  backfill되지 않은 `unknown` 계보는 오종료 근거로 쓰지 않는다.
+- **원자성·순서 방어**: 전역 transaction advisory lock 아래 bundle load→lineage state→dedup→
+  Feature lifecycle을 한 transaction으로 반영한다. KREX는 stale/equal-conflict CAS와 exact replay
+  self-heal, KMA는 계보별 최신 event와 stale announcement 무시를 적용한다. Dagster preflight도
+  scope watermark를 읽되 equal run의 최종 판정은 DB fingerprint CAS에 맡긴다.
+- **리뷰·검증**: 적대적 리뷰 1차에서 발견한 신규 lineage state 누락, cross-scope 종료 시각,
+  out-of-scope `true`/`unknown` 재개방 의미, false 종료 시각 drift, 예정 종료 삭제, stale KMA
+  payload의 source current 역전과 SQL JOIN 오류를 수정했다. 2차에서 정상 발표+동일 계보 해제
+  batch와 non-empty 0046 downgrade를 보강했다. 두 리뷰 모두 수정 후 S1/S2/S3 0건이다. core unit
+  1,259건, PostGIS integration 308건(`kor-travel-geo` live 5건 제외), Dagster 전체 262건, frontend
+  Vitest 78건과 Ruff·core/Dagster strict mypy, import-linter, frontend type-check·lint, Alembic single
+  head를 통과했다.
+- **다음 한 작업**: PR CI green→merge→
+  n150 Alembic 0046 배포·실제 KREX/KMA 수집→notice 중복 0/종료·재등장 확인→live UI E2E를 수행한다.
+
+## 2026-07-13 (codex) — provider soft-delete 재등장 self-heal 로컬 완료
+
+- **운영 발견**: n150 배포 검증에서 KREX 현재 feed 46건 중 5건이 과거 soft-delete 상태에
+  남아 비표시되는 것을 확인했다. 해당 행은 provider 소유이고 사용자 편집·재활성화 방지
+  override가 없어 역사적 중복 정리 잔존임을 확정했다.
+- **수정**: 동일 payload fast-path도 현재 Feature의 lifecycle을 확인해 provider 소유
+  ``inactive`` 상태를 한 번만 복구한다. 직접 notice reconcile은 현재 feed의 soft-delete된
+  정본을 복구하고, 다중 primary 계보에서는 한 계보라도 winner인 Feature를 보존한 채 active
+  winner 계보만으로 종료·재등장을 결정한다.
+- **보호·검증**: ``user_request``와 ``prevent_provider_reactivation``은 건드리지 않으며,
+  복구 다음 실행은 다시 no-op이다. 관련 통합 33건·unit 12건, Ruff·strict mypy를 통과했다.
+- **다음 한 작업**: 적대적 리뷰 2회와 CI green 후 머지·n150 재배포하고, 주입 없는 KREX
+  수집에서 현재 feed 전건 활성·중복 0건을 확인한다.
+
 ## 2026-07-13 (codex) — Feature bbox JIT 지연 로컬 수정 완료
 
 - **근본 원인**: 고zoom 12 tile 병렬 조회의 SQL 실행 자체는 수십 ms이지만,

@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### Notice 계보 수명주기 원자화 (2026-07-14)
+
+- **FIXED**: KREX snapshot에 없는 공지를 scope-local 메모리 집합만으로 닫아, 같은 Feature를
+  공유하는 KMA·다른 dataset 공지가 살아 있어도 종료되거나 다음 실행에서 중복 재노출되던
+  반복 문제를 영속 계보 상태와 전역 winner 판정으로 수정했다.
+- **ADDED**: Alembic 0046에 notice scope watermark/fingerprint와 계보별 발표·해제 상태를
+  저장하는 `provider_sync.notice_lifecycle_scopes` / `notice_lineage_states`를 추가했다.
+  KMA 예정 종료(`valid_until`)도 발표 상태와 분리해 보존한다. 기존 상태를 알 수 없는 계보는
+  열린 공지를 보존하며, 모든 winner가 명시적으로 사라진 마지막 시각에만 종료한다.
+- **CHANGED**: KREX 전체 snapshot과 KMA rolling event는 bundle 적재, 계보 상태 전이,
+  중복 정리, Feature 종료·재개를 전역 transaction lock 아래 한 transaction으로 반영한다.
+  과거 snapshot/event와 같은 시각의 상반 상태는 거부하고 exact snapshot replay는 누락 상태를
+  self-heal한다.
+- **FIXED**: DB가 수락한 최신 KMA 발표와 일치하는 bundle만 적재해 늦은 과거 payload가 Feature
+  본문/source current를 되돌리지 못하게 했다. 예정 종료와 실제 해제를 구분해 과거 특보의
+  영구 재개방 및 실제 해제보다 오래 노출되는 문제도 막았다.
+
 ### Feature 지도 API JIT 지연 제거 (2026-07-13)
 
 - **FIXED**: 고zoom Feature 지도의 병렬 bbox 조회에서 실제 SQL 실행보다
@@ -20,6 +37,9 @@
 - **FIXED**: KREX notice를 두 번 연속 조회한 완전 snapshot으로만 반영하고, snapshot에서
   사라진 공지는 종료 처리한다. strict pagination·중복 lineage 검증, 실행 직렬화와 watermark를
   함께 적용해 불완전 응답·역순 실행으로 인한 중복/재노출을 막는다.
+- **FIXED**: 동일 원문으로 다시 나타난 provider Feature가 idempotency fast-path 때문에
+  ``inactive`` 상태에 남던 문제를 수정했다. 사용자 요청·재활성화 방지 override는 보호하며,
+  다중 primary notice 계보도 한 계보의 패배 때문에 다른 활성 계보까지 삭제·비표시하지 않는다.
 - **FIXED**: OpiNet 실행의 raw/변환 결과 0건과 전일·혼합 가격을 성공으로 오인하지 않는다.
   요청 범위를 적용할 수 없는 targeted update는 전국 조회 전에 생략하고, provider schedule은
   실제 KST 당일 가격 전체 적재가 확인될 때만 같은 날 실행을 합친다.

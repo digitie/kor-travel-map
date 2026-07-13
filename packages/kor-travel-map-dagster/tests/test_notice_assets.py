@@ -12,6 +12,7 @@ import pytest
 from dagster import build_asset_context
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
+    NoticeFeatureLoadResult,
     NoticeReconcileResult,
 )
 
@@ -48,24 +49,29 @@ class _Client:
         self.events.append("load")
         return FeatureLoadResult(bundles_total=len(materialized))
 
-    async def reconcile_notice_features(
+    async def load_authoritative_notice_snapshot(
         self,
         *,
+        bundles: Any,
         provider: str,
         dataset_key: str,
         source_entity_type: str,
         active_lineage_keys: set[str],
-        closed_at: datetime,
-    ) -> NoticeReconcileResult:
-        self.events.append("reconcile")
+        observed_at: datetime,
+    ) -> NoticeFeatureLoadResult:
+        materialized = list(bundles)
+        self.events.append("atomic_notice")
         assert provider == "python-krex-api"
         assert dataset_key == "krex_traffic_notices"
         assert source_entity_type == "traffic_notice"
         assert active_lineage_keys == set()
-        assert closed_at == _FETCHED_AT
+        assert observed_at == _FETCHED_AT
         if self.reconcile_error is not None:
             raise self.reconcile_error
-        return NoticeReconcileResult(closed=2)
+        return NoticeFeatureLoadResult(
+            load=FeatureLoadResult(bundles_total=len(materialized)),
+            reconcile=NoticeReconcileResult(closed=2),
+        )
 
     async def record_sync_success(
         self,
@@ -90,10 +96,23 @@ class _WatermarkClient(_Client):
         self.watermark = watermark
 
     async def get_sync_state(self, *, provider: str, dataset_key: str) -> Any:
-        self.events.append("watermark")
+        self.events.append("sync_watermark")
         assert provider == "python-krex-api"
         assert dataset_key == "krex_traffic_notices"
         return SimpleNamespace(cursor={"snapshot_applied_at": self.watermark.isoformat()})
+
+    async def get_notice_snapshot_watermark(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+    ) -> datetime:
+        self.events.append("scope_watermark")
+        assert provider == "python-krex-api"
+        assert dataset_key == "krex_traffic_notices"
+        assert source_entity_type == "traffic_notice"
+        return self.watermark
 
 
 def _context(
@@ -121,8 +140,7 @@ async def test_empty_snapshot_reconciles_before_sync_success() -> None:
     assert result.load.bundles_total == 0
     assert client.events == [
         f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
-        "load",
-        "reconcile",
+        "atomic_notice",
         "sync_success",
         f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
     ]
@@ -138,34 +156,40 @@ async def test_reconcile_failure_does_not_record_sync_success() -> None:
 
     assert client.events == [
         f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
-        "load",
-        "reconcile",
+        "atomic_notice",
         f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
     ]
     assert client.success_calls == []
 
 
-@pytest.mark.parametrize(
-    "watermark",
-    [
-        _FETCHED_AT,
-        _FETCHED_AT + timedelta(minutes=10),
-    ],
-)
-async def test_older_or_same_snapshot_fails_before_destructive_load(
-    watermark: datetime,
-) -> None:
-    client = _WatermarkClient(watermark)
+async def test_older_snapshot_fails_before_destructive_load() -> None:
+    client = _WatermarkClient(_FETCHED_AT + timedelta(minutes=10))
 
-    with pytest.raises(RuntimeError, match="watermark보다 과거 또는 같다"):
+    with pytest.raises(RuntimeError, match="watermark보다 과거"):
         await run_feature_notice_krex_traffic_notices(_context(client))
 
     assert client.events == [
         f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
-        "watermark",
+        "scope_watermark",
+        "sync_watermark",
         f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
     ]
     assert client.success_calls == []
+
+
+async def test_same_snapshot_reaches_core_fingerprint_cas() -> None:
+    client = _WatermarkClient(_FETCHED_AT)
+
+    await run_feature_notice_krex_traffic_notices(_context(client))
+
+    assert client.events == [
+        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        "scope_watermark",
+        "sync_watermark",
+        "atomic_notice",
+        "sync_success",
+        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+    ]
 
 
 async def test_newer_snapshot_records_applied_watermark() -> None:
@@ -175,9 +199,9 @@ async def test_newer_snapshot_records_applied_watermark() -> None:
 
     assert client.events == [
         f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
-        "watermark",
-        "load",
-        "reconcile",
+        "scope_watermark",
+        "sync_watermark",
+        "atomic_notice",
         "sync_success",
         f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
     ]
