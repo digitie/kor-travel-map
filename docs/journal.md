@@ -37,6 +37,14 @@ types 생성물은 각 백엔드 PR에서 재생성(T-C6 일괄안은 openapi-dr
   `provider_address_mismatch`(error·drop)로 **한 번도 적재된 적 없음** — 유효해
   보이는 국내 장소(해동용궁사 등) 포함. 검증 규칙 적합성 검토를 이슈 **#673**으로
   분리(역지오코딩 시군구명 vs provider 주소 문자열 대조 규칙).
+- **live UI e2e(n150 prod, 저부하 per-file 배치)**: dagster-runs-roundtrip 3 passed ·
+  providers-consistency 111 passed/1 failed · features-list 핵심(status/kind 필터)
+  42 passed · features-detail 딥링크 25 passed — 총 **181 passed / 1 failed**.
+  유일 실패는 제품 회귀가 아니라 `/ops/providers` 요약 배지의 i18n(영문→한국어)
+  이후 미갱신 스펙 드리프트(`PROVIDER_BADGE_LABELS`) — 한국어 라벨(제공자/데이터셋/
+  정책/실패)로 정정 후 해당 테스트 라이브 재실행 green. e2e CI 부재로 스펙 드리프트가
+  머지됐던 사례(메모리 규칙 재확인). features-list/detail 전체 매트릭스(각 333/310
+  테스트)는 n150 4코어 저부하 원칙에 따라 핵심 부분집합만 실행.
 
 ## 2026-07-14 (claude) — concierge export 소비 계약 정렬 (endpoint 기본 changes·provenance 평면 키·되돌리기 회귀)
 
