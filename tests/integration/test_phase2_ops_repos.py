@@ -97,6 +97,7 @@ async def test_provider_refresh_policy_upsert_get_list(
         min_interval_seconds=300,
         max_requests_per_minute=30,
         max_concurrent=2,
+        stale_after_minutes=45,
         rate_limit_source={
             "provider_repo": "F:/dev/python-kma-api",
             "docs": ["docs/rate-limit.md"],
@@ -107,6 +108,7 @@ async def test_provider_refresh_policy_upsert_get_list(
     assert created.provider == "python-kma-api"
     assert created.targeted_policy == "allow_targeted"
     assert created.max_concurrent == 2
+    assert created.stale_after_minutes == 45
     assert created.rate_limit_source["provider_repo"] == "F:/dev/python-kma-api"
 
     updated = await upsert_provider_refresh_policy(
@@ -118,10 +120,12 @@ async def test_provider_refresh_policy_upsert_get_list(
         system_interval_seconds=900,
         max_concurrent=1,
         enabled=False,
+        stale_after_minutes=90,
     )
     assert updated.targeted_policy == "follow_system"
     assert updated.system_interval_seconds == 900
     assert updated.enabled is False
+    assert updated.stale_after_minutes == 90
 
     loaded = await get_provider_refresh_policy(
         migrated_session,

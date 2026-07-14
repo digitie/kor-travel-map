@@ -11,7 +11,9 @@ import pytest
 
 from kortravelmap.infra.dataset_status_repo import (
     DatasetIntegrityIssueCount,
+    DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
+    list_latest_dataset_executions,
     list_ops_import_jobs_by_ids,
 )
 from kortravelmap.infra.ops_repo import OpsImportJob
@@ -68,6 +70,27 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         finished_at=at,
         heartbeat_at=at,
         dagster_run_id="run-1",
+    )
+
+
+def _latest_execution_row(*, at: datetime) -> SimpleNamespace:
+    return SimpleNamespace(
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        kind="update_request",
+        execution_id="11111111-1111-1111-1111-111111111111",
+        status="running",
+        status_source="update_request",
+        job_status="running",
+        created_at=at,
+        started_at=at,
+        finished_at=None,
+        dagster_run_id="run-1",
+        job_id="22222222-2222-2222-2222-222222222222",
+        request_id="11111111-1111-1111-1111-111111111111",
+        progress=40,
+        current_stage="fetch",
+        error_message=None,
     )
 
 
@@ -130,6 +153,36 @@ async def test_count_open_issues_passes_filters() -> None:
             "dataset_key": "mois_license_features_bulk",
         }
     ]
+
+
+@pytest.mark.unit
+async def test_list_latest_dataset_executions_maps_root_and_child_status() -> None:
+    at = datetime(2026, 7, 15, tzinfo=UTC)
+    session = _Session(_Result([_latest_execution_row(at=at)]))
+
+    executions = await list_latest_dataset_executions(cast(Any, session))
+
+    assert session.params == [{}]
+    assert executions == (
+        DatasetLatestExecution(
+            provider="python-mois-api",
+            dataset_key="mois_license_features_bulk",
+            kind="update_request",
+            execution_id="11111111-1111-1111-1111-111111111111",
+            status="running",
+            status_source="update_request",
+            job_status="running",
+            created_at=at,
+            started_at=at,
+            finished_at=None,
+            dagster_run_id="run-1",
+            job_id="22222222-2222-2222-2222-222222222222",
+            request_id="11111111-1111-1111-1111-111111111111",
+            progress=40,
+            current_stage="fetch",
+            error_message=None,
+        ),
+    )
 
 
 @pytest.mark.unit

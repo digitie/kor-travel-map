@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ProviderRefreshPolicy",
     "get_provider_refresh_policy",
+    "list_all_provider_refresh_policies",
     "list_provider_refresh_policies",
     "upsert_provider_refresh_policy",
 ]
@@ -39,7 +40,7 @@ _RETURN_COLUMNS: Final[str] = (
     "system_interval_seconds, optimal_interval_seconds, min_interval_seconds, "
     "max_requests_per_minute, max_requests_per_hour, max_requests_per_day, "
     "max_concurrent, burst_size, rate_limit_source, config_source, enabled, "
-    "created_at, updated_at"
+    "stale_after_minutes, created_at, updated_at"
 )
 
 
@@ -64,6 +65,7 @@ class ProviderRefreshPolicy:
     enabled: bool
     created_at: datetime
     updated_at: datetime
+    stale_after_minutes: int | None = None
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -89,6 +91,7 @@ def _row_to_policy(row: Any) -> ProviderRefreshPolicy:
         rate_limit_source=_json_dict(row.rate_limit_source),
         config_source=str(row.config_source),
         enabled=bool(row.enabled),
+        stale_after_minutes=row.stale_after_minutes,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -101,6 +104,7 @@ def _validate_policy(
     source_kind: str,
     targeted_policy: str,
     max_concurrent: int,
+    stale_after_minutes: int | None,
 ) -> None:
     if not provider:
         raise ValueError("provider must be non-empty")
@@ -114,6 +118,8 @@ def _validate_policy(
         )
     if max_concurrent <= 0:
         raise ValueError("max_concurrent must be greater than 0")
+    if stale_after_minutes is not None and stale_after_minutes <= 0:
+        raise ValueError("stale_after_minutes must be greater than 0")
 
 
 _UPSERT_SQL: Final[str] = f"""
@@ -122,13 +128,14 @@ INSERT INTO ops.provider_refresh_policies (
     system_interval_seconds, optimal_interval_seconds, min_interval_seconds,
     max_requests_per_minute, max_requests_per_hour, max_requests_per_day,
     max_concurrent, burst_size, rate_limit_source, config_source, enabled,
+    stale_after_minutes,
     updated_at
 ) VALUES (
     :provider, :dataset_key, :source_kind, :targeted_policy,
     :system_interval_seconds, :optimal_interval_seconds, :min_interval_seconds,
     :max_requests_per_minute, :max_requests_per_hour, :max_requests_per_day,
     :max_concurrent, :burst_size, CAST(:rate_limit_source AS jsonb),
-    :config_source, :enabled, now()
+    :config_source, :enabled, :stale_after_minutes, now()
 )
 ON CONFLICT (provider, dataset_key) DO UPDATE SET
     source_kind = EXCLUDED.source_kind,
@@ -144,6 +151,7 @@ ON CONFLICT (provider, dataset_key) DO UPDATE SET
     rate_limit_source = EXCLUDED.rate_limit_source,
     config_source = EXCLUDED.config_source,
     enabled = EXCLUDED.enabled,
+    stale_after_minutes = EXCLUDED.stale_after_minutes,
     updated_at = now()
 RETURNING {_RETURN_COLUMNS}
 """
@@ -161,6 +169,12 @@ WHERE (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
   AND (CAST(:enabled AS boolean) IS NULL OR enabled = CAST(:enabled AS boolean))
 ORDER BY provider, dataset_key
 LIMIT :limit
+"""
+
+_LIST_ALL_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.provider_refresh_policies
+ORDER BY provider, dataset_key
 """
 
 
@@ -182,6 +196,7 @@ async def upsert_provider_refresh_policy(
     rate_limit_source: Mapping[str, Any] | None = None,
     config_source: str = "db",
     enabled: bool = True,
+    stale_after_minutes: int | None = None,
 ) -> ProviderRefreshPolicy:
     """정책 row를 upsert한다. commit은 호출자 책임."""
     _validate_policy(
@@ -190,6 +205,7 @@ async def upsert_provider_refresh_policy(
         source_kind=source_kind,
         targeted_policy=targeted_policy,
         max_concurrent=max_concurrent,
+        stale_after_minutes=stale_after_minutes,
     )
     row = (
         await session.execute(
@@ -214,6 +230,7 @@ async def upsert_provider_refresh_policy(
                 ),
                 "config_source": config_source,
                 "enabled": enabled,
+                "stale_after_minutes": stale_after_minutes,
             },
         )
     ).one()
@@ -251,4 +268,12 @@ async def list_provider_refresh_policies(
             {"provider": provider, "enabled": enabled, "limit": safe_limit},
         )
     ).all()
+    return tuple(_row_to_policy(row) for row in rows)
+
+
+async def list_all_provider_refresh_policies(
+    session: AsyncSession,
+) -> tuple[ProviderRefreshPolicy, ...]:
+    """datasets grid 조립용으로 정책을 silent limit 없이 전량 반환한다."""
+    rows = (await session.execute(text(_LIST_ALL_SQL))).all()
     return tuple(_row_to_policy(row) for row in rows)

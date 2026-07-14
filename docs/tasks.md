@@ -10,12 +10,16 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [x] `T-ADM-C1` — 플랜 확정 + ADR-064 + tasks 등록 (본 문서 PR)
   - [x] `T-ADM-C2` — backend `/ops/datasets/*` (agent A, PR #676)
+  - [ ] `T-ADM-C2R` — C2 적대적 리뷰 차단 계약 보강 (agent A, issue #678)
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
-  - [ ] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682)
+  - [x] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682, PR #687)
   - [ ] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679)
   - [ ] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681)
   - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
   - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
+  - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
+  - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
+  - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
   - [ ] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
   - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
   - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
@@ -47,6 +51,13 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   재생성 포함**(rebase 충돌은 재생성으로 해소, 수동 병합 금지). 적대적 리뷰
   2인 반영 — S2 transaction 순서 500 수정(실세션 integration 회귀 포함),
   S3 PUT 허용 집합 확장(카탈로그∪잔존 sync∪기존 policy)·`.env.example` flag.
+- [ ] `T-ADM-C2R` — **C2 적대적 리뷰 차단 계약 보강** (agent **A**, issue
+  **#678**, C4 선행): 서버 계산 freshness(명시적 `stale_after_minutes`만 사용),
+  `eligible_after`와 Dagster 실제 `next_scheduled_at` 분리, root request 우선 최신
+  실행 batch projection(N+1/쌍둥이 행 제거), provider/dataset 이슈 분리, orphan
+  mutation 금지, fixture-only typed preview(`max_items`/timeout/외부 호출 budget 0/
+  `truncated`)를 완결한다. router는 schema/service/query/preview 경계로 분리한다.
+  schedule/manual 전체 실행 정본·원자 취소는 **#679**로 분리하며 C3와 함께 해소한다.
 - [x] `T-ADM-C3` — **backend pipeline 그룹** (agent **B**, 의존 C1, **PR #677**):
   `/v1/ops/pipeline` overview(+sensor)·executions(DB-only UNION keyset)·
   `/{kind}/{id}`(+cancel)·events(전역)·dagster-runs(보조)·schedules(+PATCH
@@ -57,8 +68,8 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   cursor/식별자 UUID 검증(500→422), 감사 필드(override 삭제·request cancel) 구조화
   로그, 409 Retry-After 헤더 명문화, datasets `dataset_status_repo`에
   `dagster_run_id` 전파.
-- [ ] `T-ADM-C3a` — **pipeline 공용 application service/schema 추출**
-  (agent **B**, 이슈 **#682**, C3 후속 1/5): `ops_pipeline.py`가 삭제 예정인
+- [x] `T-ADM-C3a` — **pipeline 공용 application service/schema 추출**
+  (agent **B**, 이슈 **#682**, **PR #687**, C3 후속 1/5): `ops_pipeline.py`가 삭제 예정인
   `routers/dagster.py`·`routers/feature_update_requests.py` private 심볼을 직접
   import하지 않도록 Dagster 외부 I/O/transaction application service와 순수
   schema/parser를 분리한다. legacy/new router가 전환 기간 같은 public 모듈을
@@ -86,10 +97,22 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   import 실행이 같은 canonical operation 정본과 provider/dataset identity를 사용하고,
   stable correlation id·Dagster run id·최종 상태를 기록한다. mixed-version 백필·
   인덱스·datasets recent execution 연결까지 포함한다.
-- [ ] `T-ADM-C4` — **frontend `/ops/datasets`** (agent **A**, 의존 C2): 그리드(3원
+- [ ] `T-ADM-C4R` — **C4 UI 소비 계약 수정** (agent **A**, issue **#684**,
+  **PR 1개**, 의존 C2R·C3e): freshness/schedule/latest operation/orphan/preview의
+  보강 계약을 UI 상태·조작 모델에 반영한다. `T-ADM-C4` 완료 전에 반드시 머지한다.
+- [ ] `T-ADM-C45X` — **sync_scope 전파 + active request 멱등성** (agent **A**,
+  issue **#686**, **PR 1개**, 의존 C2R·C3e): datasets→pipeline 갱신 폐루프가 정확한
+  scope를 보존하고 active 중복 요청을 만들지 않게 한다. C4/C5 실행 조작 완료의
+  선행 조건이다.
+- [ ] `T-ADM-C7A` — **ops-live same-origin 인증 + query invalidation** (agent
+  **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
+  인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
+  전에 반드시 머지한다.
+- [ ] `T-ADM-C4` — **frontend `/ops/datasets`**
+  (agent **A**, 의존 C2R·C3e·C4R·C45X): 그리드(3원
   행·never_run/stale 구분·이슈 배지)+drawer(정책 편집·ETL preview·지금 갱신 인라인
   폐루프·Feature 보기)+mock e2e.
-- [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3): 상태
+- [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
   홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3 API 소비 전제**(#677):
@@ -113,7 +136,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   200+`status=error` envelope을 404/502 problem+json으로 승격할지 함께 검토.
   ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
   이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
-- [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존 C6b): 기존 게이트
+- [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존 C6b·C7A): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, dry_run 우선, per-file 저부하 실행표 + 검증 리포트.
 

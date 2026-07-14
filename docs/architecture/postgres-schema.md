@@ -91,7 +91,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `data_integrity_violations` | `issue_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
 | `poi_cache_targets` | `target_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — external_system+target_key active UNIQUE, lon/lat, coord/coord_5179, radius_km, refresh_policy, provider_overrides, soft delete |
 | `poi_cache_target_feature_links` | `(target_id, feature_id)` | **구현됨(alembic 0009, ADR-045 T-205c)** — target 주변 feature link, provider/dataset, distance_m, relation, active |
-| `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, rate_limit_source, enabled |
+| `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009 + 0049, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, 명시적 `stale_after_minutes`, rate_limit_source, enabled |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
 | `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008, ADR-045 T-205a)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), status (queued/running/done/failed/cancelled — import_jobs와 동일 전이), matched_scope JSONB, job_id FK, dagster_run_id, operator, reason, error_message. DDL 정본: `docs/architecture/openapi-admin-contract.md` §6.1 + `docs/architecture/data-model.md` §9.8 |
@@ -270,7 +270,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `poi_cache_target_feature_links` | `ck_poi_cache_link_relation` | within_radius/same_sigungu/manual |
 | `provider_refresh_policies` | `ck_provider_refresh_source_kind` | openapi/filedata/manual/system |
 | `provider_refresh_policies` | `ck_provider_refresh_targeted_policy` | follow_system/allow_targeted/disabled |
-| `provider_refresh_policies` | `ck_provider_refresh_*` | interval/rate-limit/max_concurrent/burst 양수 |
+| `provider_refresh_policies` | `ck_provider_refresh_*` | interval/rate-limit/max_concurrent/burst/`stale_after_minutes` 양수 |
 | `feature_change_requests` | `ck_feature_change_action` | add/update/delete |
 | `feature_change_requests` | `ck_feature_change_state` | pending/applied/rejected |
 | `feature_change_requests` | `ck_feature_change_review_mode` | require_review/immediate |
