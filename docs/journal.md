@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (claude, agent A) — T-ADM-C3c 잔여범위 감사 → 전 항목 기충족 확인·종결
+
+T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수용 기준 전 항목이
+이미 main(3f3ef6d3)에 머지된 후속 체인으로 충족되어 **추가 구현 없이 종결**한다
+(tasks.md C3c `[x]` + 본 감사 기록만 반영).
+
+- 상세 endpoint `GET /v1/ops/pipeline/dagster-runs/{run_id}` — 기충족(#690).
+- event cursor 전진 페이지네이션(`after` opaque cursor, `event_cursor`/
+  `event_has_more`; DB keyset cursor 정본과 분리) — 기충족(#690).
+- `failure_reason`·`failure_events`(현재 event page 범위 명시) — 기충족(#690).
+- 404 `DAGSTER_RUN_NOT_FOUND` / 503 `DAGSTER_UNAVAILABLE` / 502
+  `DAGSTER_QUERY_FAILED` RFC7807 + 목록 degrade 계약 유지 —
+  기충족(#690, `test_ops_pipeline_router.py` 상세 테스트 9건 실측).
+- 외부 Dagster 링크 fallback(`dagster_url`/`graphql_url`) — 기충족(#690).
+- pipeline `nux-seen` 계약 삭제(legacy `/ops/dagster/nux-seen`은 C6b까지
+  존치) — 기충족(#687, openapi.json 실측: pipeline 그룹에 nux 없음).
+- C3a 공용 service 경계 — 신/구 라우터가 `dagster_query_service.get_run_detail`
+  공유(직접 import 실측), private 심볼 사용 없음 — 기충족(#687/#690).
+- OpenAPI/admin types 고정 — 기충족(#690 재생성분, `types.ts`에
+  `/v1/ops/pipeline/dagster-runs/{run_id}` 실측). UI 소비 경로는 C5(#691)/C4R.
+
 ## 2026-07-15 (codex, agent A) — pipeline Dagster run 상세 계약 이식 (T-ADM-C3c, #681)
 
 - `GET /v1/ops/pipeline/dagster-runs/{run_id}`를 추가했다. event cursor는

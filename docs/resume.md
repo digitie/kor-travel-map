@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (claude, agent A) — T-ADM-C3c 감사 종결 (전 항목 기충족)
+
+- **T-ADM-C3c 종결**: 착수 전 잔여범위 감사 결과 이슈 #681 수용 기준 전 항목이
+  #687(공용 service 경계·pipeline nux-seen 계약 삭제)·#690(strict run 상세 —
+  event cursor·page-local failure 구조·404/503/502 RFC7807·OpenAPI/types
+  재생성)으로 **이미 main에 머지·충족**되어 추가 구현 없이 tasks.md `[x]` +
+  감사 기록으로 닫는다(아래 codex 엔트리의 "다음 한 작업: draft PR"은 #690
+  머지로 이행 완료 — stale). 상세 항목별 매핑은 journal 2026-07-15 (claude,
+  agent A).
+- **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
+  agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
+
 ## 2026-07-15 (codex, agent A) — T-ADM-C3c pipeline Dagster run 상세 (#681)
 
 - **구현 완료**: 신규 pipeline run 상세에 opaque event cursor와 page-local failure

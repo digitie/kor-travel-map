@@ -14,7 +14,8 @@
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
   - [x] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682, PR #687)
   - [x] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679, PR #689)
-  - [ ] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681)
+  - [x] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681 — 감사 결과
+    전 항목 #687/#690에서 기충족, 잔여범위 감사 기록 PR)
   - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
   - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
@@ -96,7 +97,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   EXPLAIN integration 10건과 Ruff, strict mypy 155파일, import 계약 4/4,
   OpenAPI/admin types drift를 통과했다. root/agent A 적대적 리뷰 2인은
   S1/S2 0건으로 승인했고 CI 8/8 green 뒤 merge했다.
-- [ ] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **A**,
+- [x] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **A**,
   이슈 **#681**, C3 후속 3/5, C3b 뒤): event cursor와 failure 구조를 신규 그룹에
   이식한다. 개별 상세는 성공만 200이고 `not_found`는
   `404 DAGSTER_RUN_NOT_FOUND`, 연결 실패는 `503 DAGSTER_UNAVAILABLE`,
@@ -104,6 +105,11 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   failure 요약은 현재 event page 범위이며 opaque event cursor는 DB cursor 정본에
   섞지 않는다. 외부 Dagster 링크를 fallback으로 유지하고, iframe 미사용 새 UI의
   pipeline `nux-seen`만 제거한다(legacy route/service/schema는 C6b까지 유지).
+  **잔여범위 감사 결과 전 항목 기충족** — 상세 endpoint+cursor+failure 구조+
+  RFC7807 3분류+테스트 9건은 #690, pipeline `nux-seen` 계약 삭제와 공용
+  `dagster_query_service` 경계(신/구 라우터 공유)는 #687, OpenAPI/admin types
+  고정은 #690 재생성분. UI 소비는 C5(#691)/C4R 범위. 감사 기록은 journal
+  2026-07-15 (claude, agent A).
 - [ ] `T-ADM-C3d` — **실제 계층형 취소** (agent **B**, 이슈 **#680**, C3 후속
   4/5, C3c 뒤): root CAS `cancellation_requested` commit → worker claim/write 경로가
   중단 상태를 존중 → running Dagster run terminate → terminal 재확인 →
