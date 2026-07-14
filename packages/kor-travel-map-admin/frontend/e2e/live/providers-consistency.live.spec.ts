@@ -64,12 +64,14 @@ const CONSISTENCY_CARDS = [
   "Integrity issues",
 ] as const;
 
-// Section summary badge labels on /ops/providers (providers-client.tsx).
+// Section summary badge labels on /ops/providers (providers-client.tsx §summary
+// section — 한국어 라벨이 정본. 구 영문 라벨은 i18n 전환 이후 스펙 드리프트로
+// 2026-07-14 live run에서 검출·정정).
 const PROVIDER_BADGE_LABELS = [
-  "providers",
-  "datasets",
-  "policies",
-  "failing",
+  "제공자",
+  "데이터셋",
+  "정책",
+  "실패",
 ] as const;
 
 // Deep-link query params we exercise as read-only GET variations. The pages
