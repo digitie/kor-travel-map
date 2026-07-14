@@ -111,7 +111,8 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.payload["kor_travel_concierge"]["youtube"]["video_id"] == "video-1"  # type: ignore[union-attr]
     # nested pass-through — curated source rule이 읽는 경로
     # (detail #>> '{payload,kor_travel_concierge,youtube,source_title}').
-    assert feature.detail.payload["kor_travel_concierge"]["youtube"]["source_title"] == "검색: 제주 동쪽 여행"  # type: ignore[union-attr]
+    nested_youtube = feature.detail.payload["kor_travel_concierge"]["youtube"]  # type: ignore[union-attr]
+    assert nested_youtube["source_title"] == "검색: 제주 동쪽 여행"
 
     source_record = bundle.source_record
     assert source_record.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
