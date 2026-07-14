@@ -47,6 +47,16 @@
   평면 키 backfill 포함). 실코드→Address 반영+feature_id 불변 unit 1건 추가.
   ④ 여러 줄 assert의 무효 `# type: ignore` 위치 정정. ⑤ cursor 전제(FEATURE_CURSOR
   미설정) 배포 확인 문구를 §3/external-apis에 명시.
+- **적대적 리뷰 2차 반영**(독립 리뷰어 2명·교차 배치, S1/S2 0·S3 6): ① asset
+  압축 배선 asset-level 테스트 2건 신설(`test_concierge_assets.py` — 배선 제거/
+  편측 적용 리팩터 시 빨간불). ② 되돌리기 문구 정정 — producer `reopen_candidate`는
+  되돌리기·제거 복원 시 **즉시 tombstone**을 발행하고 재확정 시에만 upsert 재발행
+  (재확정 전 inactive 유지가 정상). ③ sido 유도 규칙에 legal_dong 앞 2자리
+  fallback 병기. ④ 통합/유닛 픽스처 정밀화 — `schema_version: 1` 추가,
+  `source_title`을 접두사 없는 검색어 원문으로(producer `_source_title` 실동작).
+  ⑤ resume 배포 체크에 `..._FEATURE_CURSOR` 부재 확인 병기. ⑥ E501 1건 정정.
+  리뷰어 검증으로 T-189 이후 producer 커밋(T-190~T-173)의 export 계약 무변경,
+  압축 "마지막 관측=최신" 전제(sequence 단조 전진·후보당 1행)도 확인됐다.
 
 ## 2026-07-14 (codex) — notice reconcile 제곱 비용 운영 재현·제거
 

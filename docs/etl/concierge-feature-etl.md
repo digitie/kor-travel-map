@@ -96,7 +96,8 @@ bundles = await kor_travel_concierge_items_to_bundles(
   보내며 후보 수명 동안 불변. 이 키가 inactive 매칭·feature_id anchoring의 기준이다.
 - **행정코드(producer T-189, 2026-07-14)**: producer는 장소 매칭·보강된 후보에
   `place.address.{legal_dong_code,sigungu_code}` 실데이터와 유도 `sido_code`
-  (sigungu 앞 2자리)를 보낸다(미매칭·미보강은 여전히 None). 소비자는 자리수 검증
+  (sigungu 앞 2자리, 없으면 legal_dong 앞 2자리)를 보낸다(미매칭·미보강은 여전히
+  None). 소비자는 자리수 검증
   후 Address로 싣고, 없으면 기존대로 좌표 reverse geocoding fallback을 쓴다.
   item 상위에 additive `schema_version`(현재 1)도 실린다 — raw_data 보존 외 소비
   분기는 없다. 이 전환으로 **전 item payload_hash가 재발급**되므로 소비자는 다음
@@ -122,10 +123,12 @@ bundles = await kor_travel_concierge_items_to_bundles(
   전환한다. `kor_travel_concierge_inactive_entity_ids`가 inactive 대상
   `source_entity_id`를 모은다.
 - **되돌리기 재활성화(producer #202, 2026-07-14 반영)**: concierge 검수 UI의
-  soft-delete/제거 목록·검수 회수(needs_review 재전환, grounding 실패 재판정)는
-  `tombstone`/`reject`를, **되돌리기·재확정은 같은 후보의 `upsert` 재발행**을
-  만든다. 소비 측은 이 재-upsert에서 `load_bundle`의 provider self-heal(동일
-  payload fast-path·변경 payload upsert 경로 모두)로 feature를 active로 복구한다.
+  soft-delete/제거 목록·검수 회수(needs_review 재전환, grounding 실패 재판정)와
+  **되돌리기(reopen)·제거 목록 복원 자체도 즉시 `tombstone`/`reject`**를 발행하고,
+  재검수 **재확정 시**에만 같은 후보의 `upsert`가 재발행된다(재확정 전까지는
+  inactive 유지가 정상). 소비 측은 이 재-upsert에서 `load_bundle`의 provider
+  self-heal(동일 payload fast-path·변경 payload upsert 경로 모두)로 feature를
+  active로 복구한다.
   `user_request` feature와 `prevent_provider_reactivation` override는 복구하지
   않는다. 회귀:
   `tests/integration/test_feature_repo_load.py::test_kor_travel_concierge_revert_*`.

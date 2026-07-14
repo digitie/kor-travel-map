@@ -434,6 +434,7 @@ def _concierge_item(
         "export_id": f"ytpc_{candidate_id}",
         "candidate_id": candidate_id,
         "operation": "upsert",
+        "schema_version": 1,
         "place": {
             "name": "성산일출봉",
             "description": description,
@@ -456,7 +457,8 @@ def _concierge_item(
             "video_title": "제주 동부 여행",
             "source_type": "keyword",
             "source_value": "제주 동부 여행",
-            "source_title": "검색: 제주 동부 여행",
+            # keyword 수집의 source_title은 접두사 없는 검색어 원문(producer _source_title).
+            "source_title": "제주 동부 여행 코스",
             "source_search_query": "제주 동부 여행 코스",
             "corrected_search_query": "제주 동부 여행 코스",
             "channel_id": "channel-revert-1",
@@ -502,10 +504,11 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
 ) -> None:
     """concierge #202 되돌리기 — tombstone→inactive 후 같은 payload 재-upsert가 복구한다.
 
-    concierge 검수 UI의 제거 목록/soft-delete는 tombstone을, 되돌리기는 같은 후보의
-    upsert 재발행을 만든다(export ledger는 후보당 1행 최신 operation). 소비 측은
-    tombstone에서 inactive 전환, 재-upsert에서 provider self-heal 복구가 성립해야
-    되돌린 후보가 지도에 다시 보인다(ADR-050 #4 확장).
+    concierge 검수 UI의 제거 목록/soft-delete와 되돌리기(reopen) 자체는 tombstone을
+    발행하고, 재검수 **재확정 시** 같은 후보의 upsert가 재발행된다(export ledger는
+    후보당 1행 최신 operation). 소비 측은 tombstone에서 inactive 전환, 재확정
+    재-upsert에서 provider self-heal 복구가 성립해야 복원된 후보가 지도에 다시
+    보인다(ADR-050 #4 확장).
     """
     item = _concierge_item(candidate_id=9101)
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)

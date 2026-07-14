@@ -54,10 +54,11 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "video_url": "https://www.youtube.com/watch?v=video-1",
             "video_title": "제주 동쪽 여행",
             # producer 8720dda(2026-06-25) — 수집 대상 provenance. keyword 수집이면
-            # source_search_query/corrected_search_query가 채워진다.
+            # source_search_query/corrected_search_query가 채워지고, source_title은
+            # 접두사 없는 검색어 원문이다(producer _source_title).
             "source_type": "keyword",
             "source_value": "제주 동쪽 여행",
-            "source_title": "검색: 제주 동쪽 여행",
+            "source_title": "제주 동쪽 여행 브이로그",
             "source_search_query": "제주 동쪽 여행 브이로그",
             "corrected_search_query": "제주 동쪽 여행 브이로그",
             "channel_id": "channel-1",
@@ -106,13 +107,13 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.facility_info["confidence_score"] == 86  # type: ignore[union-attr]
     # producer provenance(8720dda) — 출처 UX가 읽는 평면 미러(§4).
     assert feature.detail.facility_info["youtube_source_type"] == "keyword"  # type: ignore[union-attr]
-    assert feature.detail.facility_info["youtube_source_title"] == "검색: 제주 동쪽 여행"  # type: ignore[union-attr]
+    assert feature.detail.facility_info["youtube_source_title"] == "제주 동쪽 여행 브이로그"  # type: ignore[union-attr]
     assert feature.detail.facility_info["youtube_source_search_query"] == "제주 동쪽 여행 브이로그"  # type: ignore[union-attr]
     assert feature.detail.payload["kor_travel_concierge"]["youtube"]["video_id"] == "video-1"  # type: ignore[union-attr]
     # nested pass-through — curated source rule이 읽는 경로
     # (detail #>> '{payload,kor_travel_concierge,youtube,source_title}').
     nested_youtube = feature.detail.payload["kor_travel_concierge"]["youtube"]  # type: ignore[union-attr]
-    assert nested_youtube["source_title"] == "검색: 제주 동쪽 여행"
+    assert nested_youtube["source_title"] == "제주 동쪽 여행 브이로그"
 
     source_record = bundle.source_record
     assert source_record.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
