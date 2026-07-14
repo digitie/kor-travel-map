@@ -111,11 +111,25 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   고정은 #690 재생성분. UI 소비는 C5(#691)/C4R 범위. 감사 기록은 journal
   2026-07-15 (claude, agent A).
 - [ ] `T-ADM-C3d` — **실제 계층형 취소** (agent **B**, 이슈 **#680**, C3 후속
-  4/5, C3c 뒤): root CAS `cancellation_requested` commit → worker claim/write 경로가
-  중단 상태를 존중 → running Dagster run terminate → terminal 재확인 →
-  `cancelled|cancel_failed` 확정. GraphQL 호출을 DB transaction 안에서 하지 않고,
-  종료 확인 전 허위 `cancelled`를 금지한다. 인증/BFF actor를 서버에서 파생하고
-  durable audit와 이미 commit된 데이터 비롤백 의미를 계약화한다.
+  4/5, C3c 뒤): 기존 job/request status CHECK를 늘리지 않고 두 base table에
+  `cancellation_id/requested_at/requested_by/reason` marker를 추가한다. C3b와 같은
+  request-owner branch/duplicate non-owner/standalone partition/nested-request 경계로
+  frozen scope를 만들고, 정규화한 attempt/member/run 행을 대상·결과·재시도 정본으로
+  쓴다. root가 terminal이어도 active descendant는 계속 취소하며, ancestor marker 뒤에는
+  같은 canonical root transaction lock으로 child attach/enqueue를 직렬화하고 worker
+  claim/start/scope write/heartbeat/finish를 marker CAS로 막는다. queued member는 marker 뒤
+  DB CAS로 취소하고 running member만 Dagster terminal 확인을 요구한다.
+  marker·감사 commit → transaction 밖 Dagster terminate → terminal 재확인 순서를 지키고,
+  `CANCELED`만 cancelled, 안전하게 대응되는 `SUCCESS`/`FAILURE`만 done/failed로
+  reconcile한다. run id 없는 active local job, mapping 불일치, terminate 실패에는 base
+  상태를 거짓으로 바꾸지 않고 member `cancel_failed`와 retryable/cancel_failed attempt를
+  남긴다. 재시도는 이전 frozen scope의 미해결 member만 복사하며 hierarchy를 재탐색하지
+  않는다. feature update는 같은 전용 `AsyncConnection`에 session advisory lock을 고정해
+  scope별 짧은 transaction으로 분리하고 이미 commit된 데이터는 rollback하지 않는다.
+  body는 reason만 받고 actor는 인증 context에서 파생하며, durable audit·RFC7807
+  404/409/502/503·`Retry-After`·OpenAPI/admin type·0050 strict downgrade를 함께 완결한다.
+  **문서 우선 gate**: data model/REST/task/journal/resume 계약을 적대적 재승인받기 전에는
+  source를 수정하지 않는다.
 - [ ] `T-ADM-C3e` — **schedule/manual canonical operation 영속화** (agent **B**,
   이슈 **#679**, C3 후속 5/5, C3d 뒤): schedule tick/manual launch/update request/
   import 실행이 같은 canonical operation 정본과 provider/dataset identity를 사용하고,

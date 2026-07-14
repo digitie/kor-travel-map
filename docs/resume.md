@@ -12,6 +12,24 @@
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
 
+## 2026-07-15 (codex, agent B) — T-ADM-C3d 계층형 취소 문서 우선 설계 (#680)
+
+- **계약 고정**: 기존 job/request status CHECK는 유지하고 base marker와 정규화한
+  cancellation attempt/member/run을 영속 정본으로 삼는다. scope는 C3b의 request owner
+  branch·duplicate non-owner·standalone partition·nested request 경계를 그대로 사용하며,
+  terminal root 아래 active descendant도 취소한다.
+- **안전 경계**: marker와 durable audit를 먼저 commit하고 transaction 밖에서 Dagster
+  terminate한 뒤 terminal을 재확인한다. `CANCELED`만 cancelled로 확정하고, exact
+  member-marker-run mapping의 `SUCCESS`/`FAILURE`만 done/failed로 reconcile한다. 실패·
+  timeout·run 부재·local running은 허위 cancelled 없이 marker와 대상별 오류를 남긴다.
+  재시도는 이전 frozen scope의 미해결 member만 복사한다.
+- **worker/transaction 정본**: claim/start/scope write/heartbeat/finish와 descendant 생성은
+  marker CAS를 요구한다. feature update scope별 commit은 전용 `AsyncConnection` 하나에
+  session advisory lock을 고정하고, 이미 commit된 데이터는 rollback하지 않는다.
+- **다음 한 작업**: 이 문서-only commit의 적대적 재승인을 받는다. 승인 전 source edit은
+  0으로 유지하며, 승인 뒤 alembic 0050 → repository/coordinator → Dagster terminate service →
+  REST/OpenAPI 순서로 구현한다.
+
 ## 2026-07-15 (codex, agent A) — T-ADM-C3c pipeline Dagster run 상세 (#681)
 
 - **구현 완료**: 신규 pipeline run 상세에 opaque event cursor와 page-local failure
@@ -25,8 +43,7 @@
   1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff, strict mypy
   main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin TypeScript
   drift가 통과했다. DB/migration 변경이 없어 별도 PostGIS gate는 적용하지 않았다.
-- **다음 한 작업**: remote push 전 보안 감사 후 draft PR을 올리고, 원격 diff를 다시
-  적대적으로 검토해 CI green을 확인한다. PR merge 전까지 task는 진행 중이다.
+- **완료**: PR #690이 CI 8/8 green 뒤 merge됐다.
 
 ## 2026-07-15 (codex, agent B) — T-ADM-C3b pipeline root projection (#679)
 
@@ -36,9 +53,9 @@
 - **검증 완료**: root/agent A 적대적 리뷰 2인이 S1/S2 0건으로 승인했다.
   root unit 1,285건, API 전체 416건, 관련 PostGIS/EXPLAIN integration 10건과
   Ruff, strict mypy 155파일, import 계약 4/4, OpenAPI/admin types drift가 통과했다.
-- **다음 한 작업**: 보안 감사 후 draft PR을 올리고 원격 diff 재리뷰와
-  CI green을 확인한다. C3b는 PR merge 전까지 진행 중이며 C3e 전에는 C5를
-  시작하지 않는다.
+- **완료**: PR #689가 보안 감사와 CI 8개 green을 거쳐 merge commit
+  `d131c37c858d7fa8f6dda2b434dcae18d6d54b3f`로 main에 반영됐다. 다음 pipeline
+  작업은 T-ADM-C3d 문서 우선 설계이며 C3e 전에는 C5를 시작하지 않는다.
 
 ## 2026-07-15 (codex, agent A) — T-ADM-C2R datasets 차단 계약 보강 (#678)
 

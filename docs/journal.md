@@ -23,6 +23,30 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
 - OpenAPI/admin types 고정 — 기충족(#690 재생성분, `types.ts`에
   `/v1/ops/pipeline/dagster-runs/{run_id}` 실측). UI 소비 경로는 C5(#691)/C4R.
 
+## 2026-07-15 (codex, agent B) — 계층형 취소 문서 우선 설계 (T-ADM-C3d, #680)
+
+- C3b root projection과 동일한 scope를 취소 정본으로 고정했다. owner request는 nearest
+  anchor branch만, duplicate non-owner request는 자기 행만, standalone root는 미소유
+  partition만 소유한다. import job 취소는 request branch 안이면 request root로
+  canonicalize하고 nested request branch를 넘지 않는다. terminal root 아래 active
+  descendant는 계속 처리한다.
+- 기존 job/request status CHECK에 중간 상태를 추가하지 않는다. 두 base table의 marker와
+  정규화한 `pipeline_cancellations`, `pipeline_cancellation_members`,
+  `pipeline_cancellation_runs`를 시도·대상·run 결과의 durable 정본으로 설계했다. 같은 run은
+  시도당 한 번만 terminate하고 member에 결과를 전파한다. 재시도는 이전 frozen scope의
+  미해결 member만 복사하며 hierarchy를 다시 탐색하지 않는다.
+- marker/감사를 먼저 commit하고 외부 transaction 없이 Dagster terminate한 뒤 terminal을
+  재확인한다. `CANCELED`만 cancelled, 정확한 marker/member/run의 `SUCCESS`/`FAILURE`만
+  done/failed다. run id 없는 local running, mapping 불일치, GraphQL/terminate 실패는 base
+  상태를 보존하고 `cancel_failed`/retryable audit와 marker를 남긴다.
+- feature update의 장기 transaction은 전용 `AsyncConnection` 하나에 session advisory
+  lock을 고정한 scope별 짧은 transaction으로 분리하기로 했다. 이미 commit된 scope와
+  provider 외부 효과는 rollback하지 않으며 REST 응답도
+  `committed_data_rolled_back=false`로 명시한다. downgrade는 active marker/시도가 있으면
+  거부한다.
+- 이번 단계는 data model/REST/tasks/journal/resume 문서만 수정했다. 적대적 문서 재승인
+  전 source edit은 0으로 유지한다.
+
 ## 2026-07-15 (codex, agent A) — pipeline Dagster run 상세 계약 이식 (T-ADM-C3c, #681)
 
 - `GET /v1/ops/pipeline/dagster-runs/{run_id}`를 추가했다. event cursor는
@@ -42,7 +66,7 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
   root unit/lint 1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff,
   strict mypy main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin
   TypeScript drift가 통과했다. C3c는 DB/migration 변경이 없어 별도 PostGIS 전용
-  integration gate는 적용하지 않았다.
+  integration gate는 적용하지 않았다. PR #690은 CI 8/8 green 뒤 merge됐다.
 
 ## 2026-07-15 (codex, agent B) — pipeline root projection (T-ADM-C3b, #679)
 
