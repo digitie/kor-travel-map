@@ -12,6 +12,17 @@
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
 
+## 2026-07-15 (codex, agent A/B) — T-ADM-C3d coordinator crash 계약 보강
+
+- 두 사전 적대 리뷰에서 요청 단위 session autobegin과 외부 호출 중 transaction 유지,
+  process crash 뒤 `in_progress` 고착/중복 terminate dispatch 위험을 확인했다.
+- canonical root별 nonblocking session lease와 run별 `termination_reserved_at` CAS를 문서 정본에
+  추가했다. lease 획득자는 orphan attempt를 frozen scope 그대로 재개하고, 이미 dispatch CAS가
+  commit된 run은 같은 attempt에서 mutation을 다시 호출하지 않는다.
+- 두 적대 리뷰어가 S1/S2 없이 문서 우선 gate를 승인했다.
+- **다음 한 작업**: application coordinator/Dagster transport와 feature-update connection 고정
+  phase를 agent A/B로 병렬 구현한다.
+
 ## 2026-07-15 (codex, agent B) — T-ADM-C3d DB phase 2차 적대 리뷰 보강 진행 중
 
 - **진행 중**: queued shared-run 독립 취소, running-only retry, exact retryable과 definitive

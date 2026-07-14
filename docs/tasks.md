@@ -121,6 +121,12 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   claim/start/scope write/heartbeat/finish를 marker CAS로 막는다. queued member는 marker 뒤
   DB CAS로 취소하고 running member만 Dagster terminal 확인을 요구한다.
   marker·감사 commit → transaction 밖 Dagster terminate → terminal 재확인 순서를 지키고,
+  preliminary canonical resolve 뒤 전용 connection에서 먼저 얻는 canonical root별
+  nonblocking session lease로 동시 coordinator를 막는다. lease 전 attempt/marker 생성과 외부
+  phase의 열린 lease transaction을 금지한다. orphan
+  `in_progress`는 같은 frozen scope에서 재개하고, run별 `termination_reserved_at` NULL CAS를
+  첫 권위 `initial_status`·audit와 함께 외부 호출 전에 commit해 attempt별 at-most-once
+  dispatch와 crash 복구를 함께 보장한다.
   running은 `CANCELED`만 cancelled, 안전하게 대응되는 `SUCCESS`/`FAILURE`만 done/failed로
   reconcile한다. run id 없는 active local job, mapping 불일치, terminate 실패에는 base
   상태를 거짓으로 바꾸지 않고 member `cancel_failed`와 retryable/failed attempt를
@@ -146,6 +152,13 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   한다. 502/503 뒤 GET overlay 복구, no-op 200, 완료 결과 replay 시 attempt/run-call 증가 0도
   API 회귀로 고정한다. GET in-progress와 5xx details의 member/run result는 `pending`을
   허용하고, 200 completed 응답에는 `pending`이 0건이라는 DTO/invariant도 검증한다.
+  same-root winner/loser lease와 다른-root 병행, resolve↔lease root 변경, marker·reservation·
+  mutation·partial result·finish 각 crash resume, reservation CAS loser 외부 0회, shared run 1회,
+  lease backend PID/외부 중 no-tx/exact unlock·invalidate를 통합 테스트로 고정한다. 신규 action과
+  legacy import-job/feature-update cancel 세 진입점은 reason-only+인증 actor+동일 coordinator 위임을
+  API 테스트로 검증한다. pre-marker lease loser 409는 bounded reload 뒤에도 attempt가 없으면
+  canonical root와 `cancellation:null`을 반환한다. `termination_reserved_at`은 GET detail·5xx
+  snapshot·OpenAPI·admin generated type에 같은 nullable 필드로 보존한다.
   **문서 우선 gate**: data model/REST/task/journal/resume 계약을 적대적 재승인받기 전에는
   source를 수정하지 않는다.
 - [ ] `T-ADM-C3d-P1R` — **취소 DB phase 2차 적대 리뷰 보강** (agent **B**, C3d

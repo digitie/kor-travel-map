@@ -406,8 +406,10 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
 - **응답 정본**: 200 `data`는 `cancellation_id`, `previous_cancellation_id`, canonical
   `root {kind,id}`, attempt `status`, `members[]`, `dagster_runs[]`,
   `committed_data_rolled_back:false`, `warnings[]`를 반환한다. 각 member/run은
-  `initial_status`, `result`(`pending`/`cancelled`/`already_terminal`/`cancel_failed`),
-  `terminal_status`, nullable structured `error`를 갖고, Dagster 첫 조회가 실패한 run의
+  member는 `member_kind`, `member_id`, nullable `dagster_run_id`, `initial_status`,
+  `result`(`pending`/`cancelled`/`already_terminal`/`cancel_failed`), `terminal_status`, nullable
+  structured `error`를 갖는다. run은 `dagster_run_id`, nullable `initial_status`, nullable
+  `termination_reserved_at`, 같은 `result`/`terminal_status`/`error`를 갖고, Dagster 첫 조회가 실패한 run의
   `initial_status`는 null이다. root가 terminal이어도 active descendant가 있으면 root 결과만
   `already_terminal`로 두고 descendant 취소를 계속한다.
   이미 commit된 scope 데이터와 외부 provider 효과는 rollback하지 않으며 이 사실을
@@ -416,6 +418,17 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   `pending`/`cancel_failed`가 하나도 없을 때만 허용한다.
 - **실행 순서**: 짧은 DB transaction에서 frozen scope·정규화 member/run·base marker와
   durable audit를 먼저 commit한 뒤 transaction 밖에서 Dagster terminate를 호출한다.
+  preliminary canonical resolve 뒤 전용 `AsyncConnection`으로 canonical root별 nonblocking
+  coordinator lease를 먼저 획득·commit하고, 그 다음 marker/audit prepare transaction을 시작한다.
+  lease 획득 전 attempt/marker 생성은 금지하며 lease connection은 exact unlock까지 물리적으로
+  pin하되 외부 phase에서는 열린 transaction을 유지하지 않는다.
+  lease 경합은 `409 PIPELINE_CANCELLATION_IN_PROGRESS`로 반환한다. lease 획득 뒤 남아 있는
+  `in_progress` attempt는 crash 복구로 재개한다. active run은 외부 호출 전에
+  `termination_reserved_at` NULL CAS·첫 권위 `initial_status`·audit를 같은 transaction에
+  commit하며, CAS 패자는 외부 mutation을 호출하지 않는다. 이미 값이 있으면 같은 attempt에서
+  `terminateRun`을 재호출하지 않고 terminal poll만 수행한다. 이 경계는 attempt별 at-most-once
+  dispatch를 보장한다. mutation HTTP timeout이나 응답 유실도 같은 attempt에서 재호출하지 않고
+  terminal poll을 먼저 수행한 뒤에만 retryable 여부를 정한다.
   취소 snapshot과 child attach/enqueue는 같은 canonical root transaction lock을 공유한다.
   terminal 재조회 뒤 같은 attempt/marker/run임을 확인한 짧은 transaction에서만 base
   상태를 확정한다. marker로 claim이 차단된 queued member는 DB CAS로 `cancelled`, running
@@ -433,6 +446,9 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   다시 탐색하지 않는다. 같은 Dagster run은 attempt당 한 번만 terminate한다. marker는
   terminal 뒤에도 durable하게 남아 worker claim/write와 새 descendant 생성을 막고, retry
   CAS만 이전 attempt id를 새 id로 바꾼다.
+  `termination_reserved_at` commit 직후 실제 HTTP 전 crash가 난 run은 orphan attempt에서
+  poll만 한 뒤 미종결이면 `DAGSTER_TERMINATION_TIMEOUT` retryable·503으로 닫고, 다음 attempt에서
+  새 dispatch 기회를 얻는다.
 - **오류**: root 부재는 404 `PIPELINE_EXECUTION_NOT_FOUND`, 동시 active attempt는 409
   `PIPELINE_CANCELLATION_IN_PROGRESS`, Dagster run id가 없는 active local job이나
   marker/run mapping 불일치처럼 안전하게 중단을 증명할 수 없는 경우는 409
@@ -440,11 +456,21 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   `RunNotFound`는 502 `DAGSTER_TERMINATE_FAILED`, 연결 불가/timeout은 503
   `DAGSTER_UNAVAILABLE`/`DAGSTER_TERMINATION_TIMEOUT`이다. 모든 오류는
   `application/problem+json`이고, retry 가능한 502/503과 concurrent 409에는
-  `Retry-After`와 `details.cancellation_id`/미해결 member를 포함한다. GET detail의
+  `Retry-After`를 포함한다. lease loser는 winner의 prepare commit을 짧게 bounded DB-only
+  reload하며, current attempt가 보이면 `details.cancellation_id`/미해결 member/run을 포함한다.
+  bounded reload 뒤에도 pre-marker winner라 current attempt가 보이지 않으면 409 details는 canonical
+  `root`와 `cancellation:null`을 명시한다. GET detail의
   in-progress overlay와 5xx `details.members[]`/`dagster_runs[]`는 같은 result enum을
   사용하므로 `pending`을 반환할 수 있다. 실패 attempt와 대상별 error는 응답 전에 영속되며
   marker는 유지된다.
-- **legacy/mutator 차단**: legacy import-job cancel은 이 root coordinator에 위임한다.
+- **legacy/mutator 차단**: 신규 pipeline action, legacy `/ops/import-jobs/{job_id}/cancel`,
+  `/admin/features/update-requests/{request_id}/cancel`과 hidden
+  `/admin/feature-update-requests/{request_id}/cancel`은 모두 reason-only body,
+  endpoint의 `AdminProxyContext.actor`, 같은 coordinator/DTO/error adapter에 위임한다. 세 route는
+  direct `cancel_import_job`/`cancel_update_request`를 호출하지 않는다. 특히 legacy ops route도
+  endpoint 자체에서 admin frontend context를 요구한다. main-library
+  `AsyncKorTravelMapClient.cancel_update_request`는 Dagster HTTP 경계가 아니므로 marker-guarded
+  low-level API로만 남고 REST coordinator로 사용하지 않는다.
   cancel/requeue, payload update, stale recovery, batch/load-batch attach를 포함한 모든 base
   status·payload·lineage mutation은 marker guard를 적용하며 event/system audit append만
   허용한다. 따라서 구 endpoint나 내부 repository 호출로 marker를 우회해 상태를 바꿀 수

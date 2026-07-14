@@ -1293,6 +1293,7 @@ CREATE TABLE ops.pipeline_cancellation_runs (
                   ON DELETE RESTRICT,
   dagster_run_id  TEXT NOT NULL,
   initial_status  TEXT,
+  termination_reserved_at TIMESTAMPTZ,
   result          TEXT NOT NULL DEFAULT 'pending'
                   CHECK (result IN
                     ('pending', 'cancelled', 'already_terminal', 'cancel_failed')),
@@ -1300,13 +1301,15 @@ CREATE TABLE ops.pipeline_cancellation_runs (
   error           JSONB,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (
-    (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
-    (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR
-    (result = 'already_terminal' AND
-      (terminal_status IS NULL OR terminal_status IN ('SUCCESS', 'FAILURE')) AND
-      error IS NULL) OR
-    (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL AND
-      jsonb_typeof(error) = 'object')
+    (termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND (
+      (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
+      (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR
+      (result = 'already_terminal' AND
+        (terminal_status IS NULL OR terminal_status IN ('SUCCESS', 'FAILURE')) AND
+        error IS NULL) OR
+      (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL AND
+        jsonb_typeof(error) = 'object')
+    )
   ),
   PRIMARY KEY (cancellation_id, dagster_run_id)
 );
@@ -1424,8 +1427,9 @@ terminal/no-op은 durable하고 멱등적이다.
   attempt/audit/member를 만들지 않고 그 attempt의 member/run 결과를 그대로 200으로
   재현한다. Dagster terminate도 다시 호출하지 않는다.
 - 최신 attempt가 `retryable`이면 no-op 재판정 대신 그 frozen scope의 미해결 member만
-  재시도한다. `in_progress`는 동시 실행 409, definitive `failed`는 안전 조치 전까지
-  409를 유지한다. terminal root 아래 active descendant가 있으면 일반 취소 절차를 계속한다.
+  재시도한다. lease 획득 실패만 동시 실행 409이며, lease를 얻은 뒤 발견한 `in_progress`는
+  orphan으로 재개한다. definitive `failed`는 안전 조치 전까지 409를 유지한다. terminal root
+  아래 active descendant가 있으면 일반 취소 절차를 계속한다.
 
 최초 시도 transaction은 canonical root 키의 transaction advisory lock을 잡고 scope를 한 번만
 계산한 뒤 frozen base row를 kind/UUID 순서로 잠근다. attempt, run, member와 terminal root를
@@ -1495,6 +1499,36 @@ lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail re
 run은 재호출하지 않는다. 이 규칙과 ancestor marker가 최초 snapshot 뒤에 생성된 child가
 취소 scope 밖으로 빠지는 경쟁을 막는다. marker는 terminal 확정 뒤에도 durable audit와
 descendant 생성 차단을 위해 지우지 않으며, retry CAS만 새 attempt id로 바꿀 수 있다.
+
+취소 coordinator는 preliminary canonical resolve 뒤 canonical root마다 별도 session-level
+advisory lease(`pipeline-cancellation:coordinator:{root_kind}:{root_id}`)를 non-blocking으로
+먼저 잡고, 획득 transaction을 commit한 다음 prepare transaction을 시작한다. lease 획득 전에는
+attempt/marker를 생성하지 않으며, 순서는 `preliminary resolve → dedicated lease acquire/commit →
+prepare(lineage-global→root→scope/marker/audit) → external → finish → unlock`이다. engine에서
+전용 `AsyncConnection` 하나를 얻고 `AsyncSession(expire_on_commit=False)`을 bind해 lease 획득부터
+exact unlock까지 같은 backend를 물리적으로 pin한다. prepare/queued finalize/reservation/
+run-member reconcile/finish는 각각 명시적인 짧은 transaction이고 phase 사이와 GraphQL/poll 동안
+`session.in_transaction()`은 false여야 한다. acquire SELECT의 autobegin은 성공/실패 직후
+commit/rollback한다. lease 경합만 동시 실행 409이며, lease를 얻은 뒤 발견한
+`in_progress` attempt는 process crash가 남긴 orphan으로 보고 같은 frozen detail을 재개한다.
+running run의 active 상태를 확인한 뒤에는 외부 호출 전에
+`pipeline_cancellation_runs.termination_reserved_at` NULL CAS, 첫 권위 관측 `initial_status`, 감사
+로그를 같은 transaction으로 먼저 commit한다. CAS 패자는 외부 mutation을 호출하지 않고
+reserved query/poll 경로로 전환한다.
+이미 값이 있으면 같은 attempt에서 `terminateRun`을 다시 보내지 않고 terminal poll만 재개한다.
+reservation 뒤 mutation HTTP timeout·응답 유실도 재호출하지 않고 같은 poll 경로로 합류한다.
+CAS commit 직후 실제 HTTP 호출 전 process가 죽은 경우에도 동일 attempt의 중복 dispatch는 없으며,
+poll 미종결을 `DAGSTER_TERMINATION_TIMEOUT` retryable attempt로 닫고 503을 반환한 다음 새
+attempt가 다시 시도한다. 따라서 보장 범위는 외부
+exactly-once가 아니라 **attempt별 at-most-once dispatch**다. 최초 canonical root 조회와 lease
+획득 사이에 root가 바뀌면 lease를 풀고 새 canonical root로 제한된 횟수만 다시 시작하며,
+반복 변경은 409 `PIPELINE_CANCELLATION_UNSAFE`로 닫는다. 기존
+lineage-global/root transaction lock을 lease로 대체하지 않는다.
+lease 해제는 획득한 exact key를 같은 backend에서 `pg_advisory_unlock`하고 true를 확인한 뒤
+commit한다. 해제 여부를 확인할 수 없거나 connection이 끊기면 해당 connection을 invalidate해
+session lock을 가진 backend가 pool로 돌아가지 못하게 한다. lease 상실이나 reservation/base CAS
+패배를 감지한 old coordinator는 후속 외부 호출·결과 write를 중단하고 fresh session에서 current
+detail을 reload한다.
 
 feature update coordinator는 scope별 commit으로 이미 완료된 데이터와 외부 효과를
 rollback하지 않는다. provider scope 동시 실행 창을 만들지 않기 위해 engine에서 얻은 전용

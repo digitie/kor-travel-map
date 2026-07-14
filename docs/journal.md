@@ -23,6 +23,16 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
 - OpenAPI/admin types 고정 — 기충족(#690 재생성분, `types.ts`에
   `/v1/ops/pipeline/dagster-runs/{run_id}` 실측). UI 소비 경로는 C5(#691)/C4R.
 
+## 2026-07-15 — T-ADM-C3d coordinator crash 계약 보강
+
+- C3d DB phase 최초 실행 게이트에서 단위 14건, cancellation 통합 32건, migration 1건,
+  batch 14건과 Ruff/mypy/import-linter를 통과했다.
+- phase 2 사전 적대 리뷰에서 canonical root coordinator 동시 실행과 process crash 창을 분석했다.
+  별도 nonblocking session lease, `termination_reserved_at` durable CAS, orphan `in_progress`
+  resume를 계약에 추가해 attempt별 at-most-once Dagster terminate dispatch를 명시했다.
+- `termination_reserved_at` commit과 실제 HTTP 사이 crash는 같은 attempt에서 mutation을
+  재호출하지 않고 poll 후 retryable로 닫아 다음 attempt에서 복구한다.
+
 ## 2026-07-15 (codex, agent B) — C3d DB phase 2차 적대 리뷰 보강 진행 중
 
 - cancellation SQL, immutable record, 종결 불변식을 query/types/invariants 모듈로 분리했다.
