@@ -18,9 +18,11 @@ admin ops 통합 재작성 페이지 ①(`/ops/pipeline`)의 백엔드 리소스
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -78,6 +80,8 @@ __all__ = [
 
 
 router = APIRouter(prefix="/ops/pipeline", tags=["ops-pipeline"])
+
+_LOG = logging.getLogger(__name__)
 
 ExecutionKind = Literal["import_job", "update_request"]
 ExecutionState = Literal["queued", "running", "done", "failed", "cancelled"]
@@ -947,17 +951,19 @@ async def _load_execution_detail(
 )
 async def get_execution_detail(
     kind: ExecutionKind,
-    execution_id: str,
+    execution_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     level: Annotated[JobEventLevel | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PipelineExecutionDetailResponse:
+    # id는 UUID 경로 파라미터다 — 비정형 값은 FastAPI가 422로 거른다(SQL uuid
+    # CAST의 DB 오류 500 유출 방지).
     started_at = perf_counter()
     data = await _load_execution_detail(
         session,
         kind=kind,
-        execution_id=execution_id,
+        execution_id=str(execution_id),
         level=level,
         page_size=page_size,
         cursor=cursor,
@@ -979,7 +985,7 @@ async def get_execution_detail(
 )
 async def cancel_execution(
     kind: ExecutionKind,
-    execution_id: str,
+    execution_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     body: PipelineExecutionCancelRequest | None = None,
 ) -> PipelineExecutionCancelResponse:
@@ -988,11 +994,11 @@ async def cancel_execution(
     reason = body.reason if body is not None and body.reason else None
     if kind == "import_job":
         record = await _cancel_import_job_execution(
-            session, execution_id, operator=operator, reason=reason
+            session, str(execution_id), operator=operator, reason=reason
         )
     else:
         record = await _cancel_update_request_execution(
-            session, execution_id, reason=reason
+            session, str(execution_id), operator=operator, reason=reason
         )
     return PipelineExecutionCancelResponse(
         data=record,
@@ -1043,6 +1049,7 @@ async def _cancel_update_request_execution(
     session: AsyncSession,
     request_id: str,
     *,
+    operator: str | None,
     reason: str | None,
 ) -> PipelineExecutionRecord:
     error_message = reason or "cancelled by admin API"
@@ -1061,6 +1068,14 @@ async def _cancel_update_request_execution(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"취소할 수 없는 상태: {existing.status}",
             )
+    # 감사: repo cancel 경로는 operator 컬럼이 없다 — 계약이 받은 operator를
+    # 조용히 버리지 않도록 구조화 로그로 남긴다(reason은 error_message로 영속).
+    _LOG.info(
+        "feature update request 취소 (request_id=%s, operator=%s, reason=%s)",
+        request_id,
+        operator or "unknown",
+        reason or "-",
+    )
     return _execution_from_request(cancelled)
 
 
@@ -1075,7 +1090,7 @@ async def _cancel_update_request_execution(
 )
 async def list_pipeline_events(
     session: Annotated[AsyncSession, Depends(get_session)],
-    job_id: Annotated[str | None, Query()] = None,
+    job_id: Annotated[UUID | None, Query()] = None,
     level: Annotated[JobEventLevel | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
@@ -1086,7 +1101,7 @@ async def list_pipeline_events(
     try:
         page = await list_ops_import_job_events(
             session,
-            job_id,
+            str(job_id) if job_id is not None else None,
             level=level,
             provider=provider,
             dataset_key=dataset_key,
@@ -1303,6 +1318,17 @@ async def patch_pipeline_schedule(
                 operator=body.operator, reason=body.reason
             ),
         )
+        # 감사: override 삭제는 override 행 자체가 사라져 updated_by/reason을
+        # 영속할 자리가 없다 — 계약이 받은 감사 필드를 조용히 버리지 않도록
+        # 구조화 로그로 남긴다(영속 감사 테이블 도입은 후속 판단).
+        _LOG.info(
+            "schedule cron override 삭제 (schedule=%s, operator=%s, reason=%s, "
+            "status=%s)",
+            schedule_name,
+            body.operator or "unknown",
+            body.reason or "-",
+            response.data.status,
+        )
     else:
         response = await dagster_support.update_dagster_schedule(
             request,
@@ -1375,7 +1401,15 @@ async def post_pipeline_schedule_command(
         "run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다."
     ),
     responses={
-        409: {"description": "run_mode=now 요청의 동일 scope advisory lock 경합"}
+        409: {
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합",
+            "headers": {
+                "Retry-After": {
+                    "description": "동일 scope lock 경합 시 재시도 대기 초.",
+                    "schema": {"type": "integer"},
+                }
+            },
+        }
     },
 )
 async def create_pipeline_update_request(
@@ -1400,21 +1434,29 @@ async def create_pipeline_update_request(
     ),
     responses={
         404: {"description": "request_id 없음"},
-        409: {"description": "이미 running 상태 또는 동일 scope lock 경합"},
+        409: {
+            "description": "이미 running 상태 또는 동일 scope lock 경합",
+            "headers": {
+                "Retry-After": {
+                    "description": "동일 scope lock 경합 시 재시도 대기 초.",
+                    "schema": {"type": "integer"},
+                }
+            },
+        },
     },
 )
 async def run_pipeline_update_request_now(
-    request_id: str,
+    request_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     body: FeatureUpdateRequestRunNowRequest | None = None,
 ) -> FeatureUpdateRequestCreateResponse:
     started_at = perf_counter()
     async with session.begin():
-        existing = await get_update_request(session, request_id)
+        existing = await get_update_request(session, str(request_id))
         if existing is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"feature update request 없음: {request_id!r}",
+                detail=f"feature update request 없음: {str(request_id)!r}",
             )
         if existing.status == "running":
             raise HTTPException(

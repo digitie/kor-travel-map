@@ -67,6 +67,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         started_at=at,
         finished_at=at,
         heartbeat_at=at,
+        dagster_run_id="run-1",
     )
 
 
@@ -174,3 +175,5 @@ async def test_list_jobs_by_ids_dedupes_and_maps_rows() -> None:
     assert job.status == "done"
     assert job.progress == 100
     assert job.created_at == at
+    # ADR-064: datasets 상세의 최근 실행 요약에 dagster_run_id 실컬럼이 흘러야 한다.
+    assert job.dagster_run_id == "run-1"

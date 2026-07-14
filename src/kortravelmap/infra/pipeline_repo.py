@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
+from uuid import UUID
 
 from sqlalchemy import text
 
@@ -121,7 +122,9 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
     try:
         at = datetime.fromisoformat(str(payload["at"]))
-        key = str(payload["key"])
+        # key는 SQL에서 uuid로 CAST된다 — 여기서 UUID 형식을 강제해 비정형 값이
+        # DB 오류(500)로 새지 않고 ValueError(라우터 422)로 떨어지게 한다.
+        key = str(UUID(str(payload["key"])))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
     return at, key

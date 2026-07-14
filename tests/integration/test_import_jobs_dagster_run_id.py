@@ -132,3 +132,35 @@ async def test_ops_live_dagster_snapshots_use_real_column(
 
     run = await _dagster_run_snapshot(migrated_session, "run-live")
     assert [job["job_id"] for job in run["linked_jobs"]] == [linked.job_id]
+
+
+async def test_ops_live_snapshots_fall_back_to_payload_in_deploy_window(
+    migrated_session: AsyncSession,
+) -> None:
+    """mixed-version 창 견고화 — 구 dagster 이미지가 0048 migration **이후**에 쓴
+    payload-only row(실컬럼 NULL)도 COALESCE 폴백으로 스냅샷에 잡힌다."""
+    from kortravelmap.api.routers.ops_live import (
+        _dagster_run_snapshot,
+        _dagster_runs_snapshot,
+    )
+
+    # 구 jobs_repo INSERT(dagster_run_id 컬럼 미기록)를 raw SQL로 재현한다.
+    window_job_id = (
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO ops.import_jobs (kind, payload)
+                VALUES ('provider_load',
+                        '{"dagster_run_id": "run-window"}'::jsonb)
+                RETURNING job_id::text
+                """
+            )
+        )
+    ).scalar_one()
+    assert await _column_value(migrated_session, window_job_id) is None
+
+    runs = await _dagster_runs_snapshot(migrated_session)
+    assert "run-window" in runs["run_ids"]
+
+    run = await _dagster_run_snapshot(migrated_session, "run-window")
+    assert [job["job_id"] for job in run["linked_jobs"]] == [window_job_id]

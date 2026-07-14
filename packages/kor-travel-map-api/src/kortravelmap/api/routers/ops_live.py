@@ -344,18 +344,35 @@ FROM ops.offline_uploads
 WHERE upload_id = CAST(:upload_id AS uuid)
 """
 
-# ADR-064/T-ADM-C3 — 실컬럼 ``dagster_run_id`` 기반(0048 migration이 payload
-# ``dagster_run_id``/레거시 ``run_id`` 키를 백필했으므로 payload 경로 폴백 제거).
+# ADR-064/T-ADM-C3 — 실컬럼 ``dagster_run_id`` 우선 + payload 폴백 COALESCE.
+# 0048 migration이 기존 payload(``dagster_run_id``/레거시 ``run_id``)를 백필하지만,
+# migration runner는 api-entrypoint뿐이라 배포 창(mixed-version)에서 구 dagster
+# 이미지가 백필 **이후** payload-only row를 더 쓸 수 있다 — 그 row도 놓치지 않도록
+# 읽기 경로는 정확성 우선으로 폴백을 유지한다(부분 인덱스는 실컬럼 branch fast
+# path용 존치). 폴백 제거(순수 실컬럼 전환)는 구 이미지 소진 + 0048 docstring의
+# 백필 SQL 재실행 후 T-ADM-C6b 시점에 재검토한다.
 _DAGSTER_RUNS_LIVE_SQL: Final[str] = """
 SELECT
-  COALESCE(jsonb_agg(DISTINCT dagster_run_id)
-    FILTER (WHERE dagster_run_id IS NOT NULL),
+  COALESCE(jsonb_agg(DISTINCT j.run_id) FILTER (WHERE j.run_id IS NOT NULL),
     '[]'::jsonb) AS run_ids,
-  COUNT(*)::int AS linked_job_count,
-  MAX(heartbeat_at) AS latest_job_heartbeat_at,
-  MAX(finished_at) AS latest_job_finished_at
-FROM ops.import_jobs
-WHERE dagster_run_id IS NOT NULL
+  COUNT(*) FILTER (WHERE j.run_id IS NOT NULL)::int AS linked_job_count,
+  MAX(j.heartbeat_at) FILTER (WHERE j.run_id IS NOT NULL)
+    AS latest_job_heartbeat_at,
+  MAX(j.finished_at) FILTER (WHERE j.run_id IS NOT NULL)
+    AS latest_job_finished_at
+FROM (
+  SELECT
+    COALESCE(
+      dagster_run_id,
+      NULLIF(COALESCE(payload->>'dagster_run_id', payload->>'run_id'), '')
+    ) AS run_id,
+    heartbeat_at,
+    finished_at
+  FROM ops.import_jobs
+  WHERE dagster_run_id IS NOT NULL
+     OR payload ? 'dagster_run_id'
+     OR payload ? 'run_id'
+) j
 """
 
 _DAGSTER_RUN_LIVE_SQL: Final[str] = """
@@ -372,7 +389,10 @@ FROM (
     heartbeat_at,
     finished_at
   FROM ops.import_jobs
-  WHERE dagster_run_id = :run_id
+  WHERE COALESCE(
+      dagster_run_id,
+      NULLIF(COALESCE(payload->>'dagster_run_id', payload->>'run_id'), '')
+    ) = :run_id
   ORDER BY created_at DESC, job_id DESC
   LIMIT 20
 ) j

@@ -44,8 +44,15 @@
   (`WHERE dagster_run_id IS NOT NULL`). jobs_repo의 INSERT/UPDATE 경로가 payload의
   run id를 실컬럼으로 승격한다.
 - **CHANGED**: `/v1/ops/live`의 `dagster_runs`/`dagster_run:{id}` 스냅샷 SQL을
-  payload JSONB `?`/`->>` 풀스캔에서 실컬럼 `dagster_run_id` 기반으로 전환했다
-  (hot path 2s poll — 전례 #639, 백필했으므로 payload 폴백 제거).
+  실컬럼 `dagster_run_id` 우선 + payload COALESCE 폴백으로 전환했다(hot path
+  2s poll — 전례 #639). 폴백은 mixed-version 배포 창(구 dagster 이미지가 0048
+  백필 이후 payload-only row 기록) 정확성용이며, 배포 순서(api 먼저)와 백필
+  재실행 SQL은 0048 docstring에 명기했다 — 순수 실컬럼 전환은 T-ADM-C6b 재검토.
+- **FIXED**: 리뷰 반영 — executions/cancel/run-now의 id·cursor key·events job_id
+  UUID 검증(비정형 입력 500→422), PATCH override 삭제·update request cancel의
+  operator/reason 구조화 로그(감사 필드 유령 수용 해소), requests·run-now 409
+  응답의 `Retry-After` 헤더 OpenAPI 명문화, datasets 그룹 `dataset_status_repo`에
+  `dagster_run_id` 전파(최근 실행 요약 None 누락 방지).
 
 ### Concierge export 소비 계약 정렬 (2026-07-14)
 

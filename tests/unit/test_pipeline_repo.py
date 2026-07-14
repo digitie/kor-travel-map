@@ -107,6 +107,17 @@ def test_decode_cursor_rejects_malformed_values(cursor: str) -> None:
         pipeline_repo._decode_cursor(cursor)
 
 
+def test_decode_cursor_rejects_non_uuid_key() -> None:
+    # kind/포맷은 정상이지만 key가 UUID가 아니면 SQL uuid CAST(500 유출) 전에
+    # ValueError(라우터 422)로 거른다.
+    cursor = pipeline_repo._encode_cursor(
+        at=datetime(2026, 7, 14, tzinfo=UTC), key="not-a-uuid"
+    )
+
+    with pytest.raises(ValueError, match="pipeline_executions cursor"):
+        pipeline_repo._decode_cursor(cursor)
+
+
 def test_decode_cursor_rejects_foreign_kind() -> None:
     # 다른 목록(import_jobs 등)의 cursor를 흘려 넣으면 거부한다.
     import base64

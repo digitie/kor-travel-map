@@ -574,9 +574,37 @@ def test_execution_detail_missing_import_job_404(
 
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
 
-    response = client.get("/v1/ops/pipeline/executions/import_job/missing")
+    response = client.get(
+        "/v1/ops/pipeline/executions/import_job/"
+        "aaaaaaaa-0000-4000-8000-000000000000"
+    )
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/ops/pipeline/executions/import_job/not-a-uuid",
+        "/v1/ops/pipeline/executions/update_request/12345",
+    ],
+)
+def test_execution_detail_non_uuid_id_is_422(client: TestClient, path: str) -> None:
+    # 비-UUID id는 DB uuid CAST(500)까지 가지 않고 경로 검증에서 422로 떨어진다.
+    response = client.get(path)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_cancel_execution_non_uuid_id_is_422(client: TestClient) -> None:
+    response = client.post(
+        "/v1/ops/pipeline/executions/import_job/not-a-uuid/cancel",
+        json={},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
@@ -646,7 +674,8 @@ def test_cancel_update_request_not_found(
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
 
     response = client.post(
-        "/v1/ops/pipeline/executions/update_request/missing/cancel",
+        "/v1/ops/pipeline/executions/update_request/"
+        "aaaaaaaa-0000-4000-8000-000000000000/cancel",
         json={},
     )
 
@@ -654,28 +683,40 @@ def test_cancel_update_request_not_found(
 
 
 @pytest.mark.unit
-def test_cancel_update_request_returns_record(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_cancel_update_request_returns_record_and_logs_operator(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     async def _cancel(
         _session: Any, request_id: str, **kwargs: Any
     ) -> FeatureUpdateRequest:
         assert request_id == "22222222-2222-2222-2222-222222222222"
-        assert kwargs["error_message"] == "cancelled by admin API"
+        assert kwargs["error_message"] == "잘못된 scope"
         return _update_request(status="cancelled")
 
     monkeypatch.setattr(pipeline_mod, "cancel_update_request", _cancel)
 
-    response = client.post(
-        "/v1/ops/pipeline/executions/update_request/"
-        "22222222-2222-2222-2222-222222222222/cancel",
-        json={},
-    )
+    with caplog.at_level("INFO", logger=pipeline_mod.__name__):
+        response = client.post(
+            "/v1/ops/pipeline/executions/update_request/"
+            "22222222-2222-2222-2222-222222222222/cancel",
+            json={"operator": "tester", "reason": "잘못된 scope"},
+        )
 
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["kind"] == "update_request"
     assert data["status"] == "cancelled"
+    # 감사: 계약이 받은 operator/reason이 조용히 버려지지 않는다(구조화 로그).
+    audit = [
+        record.getMessage()
+        for record in caplog.records
+        if "feature update request 취소" in record.getMessage()
+    ]
+    assert len(audit) == 1
+    assert "operator=tester" in audit[0]
+    assert "잘못된 scope" in audit[0]
 
 
 @pytest.mark.unit
@@ -712,6 +753,15 @@ def test_events_global_list_passes_filters(
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "ev-next"
     assert body["data"]["items"][0]["code"] == "provider.timeout"
+
+
+@pytest.mark.unit
+def test_events_non_uuid_job_id_is_422(client: TestClient) -> None:
+    response = client.get(
+        "/v1/ops/pipeline/events", params={"job_id": "not-a-uuid"}
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
@@ -834,7 +884,9 @@ def test_patch_schedule_upserts_override(
 
 @pytest.mark.unit
 def test_patch_schedule_null_cron_clears_override(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     deletes: list[str] = []
 
@@ -857,17 +909,31 @@ def test_patch_schedule_null_cron_clears_override(
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
     monkeypatch.setattr(dagster_mod, "_delete_schedule_override", _delete)
 
-    response = client.patch(
-        "/v1/ops/pipeline/schedules/"
-        "feature_weather_kma_short_forecast_hourly_schedule",
-        json={"cron_schedule": None},
-    )
+    with caplog.at_level("INFO", logger=pipeline_mod.__name__):
+        response = client.patch(
+            "/v1/ops/pipeline/schedules/"
+            "feature_weather_kma_short_forecast_hourly_schedule",
+            json={
+                "cron_schedule": None,
+                "operator": "tester",
+                "reason": "기본 주기 복귀",
+            },
+        )
 
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["status"] == "ok"
     assert data["command"] == "clear_override"
     assert deletes == ["feature_weather_kma_short_forecast_hourly_schedule"]
+    # 감사: override 삭제 경로도 operator/reason을 버리지 않는다(구조화 로그).
+    audit = [
+        record.getMessage()
+        for record in caplog.records
+        if "cron override 삭제" in record.getMessage()
+    ]
+    assert len(audit) == 1
+    assert "operator=tester" in audit[0]
+    assert "기본 주기 복귀" in audit[0]
 
 
 @pytest.mark.unit
@@ -1179,9 +1245,22 @@ def test_run_now_missing_request_404(
 
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
 
-    response = client.post("/v1/ops/pipeline/requests/missing/run-now", json={})
+    response = client.post(
+        "/v1/ops/pipeline/requests/"
+        "aaaaaaaa-0000-4000-8000-000000000000/run-now",
+        json={},
+    )
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_run_now_non_uuid_request_id_is_422(client: TestClient) -> None:
+    response = client.post(
+        "/v1/ops/pipeline/requests/not-a-uuid/run-now", json={}
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
