@@ -9,11 +9,12 @@
   빈/불일치 run ID와 잘못된 event pagination payload가 정상 응답으로 승격되지
   않도록 parser를 강화했다. legacy route는 같은 malformed payload를 200
   `status=error`로 보존한다.
-- **현재 검증**: 신규/legacy 상세 관련 40건, 변경 파일 Ruff와 diff 검사가
-  통과했다. OpenAPI/admin TypeScript를 재생성했다.
-- **다음 한 작업**: 수정 diff 적대적 재리뷰를 통과한 뒤 전체 unit/API,
-  strict mypy, import-linter, OpenAPI/types drift를 실행하고 보안 감사 후 PR을 올린다.
-  PR merge 전까지 task는 진행 중이다.
+- **검증 완료**: 수정 diff 적대적 재리뷰는 S1/S2 0건으로 승인됐다. root unit/lint
+  1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff, strict mypy
+  main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin TypeScript
+  drift가 통과했다. DB/migration 변경이 없어 별도 PostGIS gate는 적용하지 않았다.
+- **다음 한 작업**: remote push 전 보안 감사 후 draft PR을 올리고, 원격 diff를 다시
+  적대적으로 검토해 CI green을 확인한다. PR merge 전까지 task는 진행 중이다.
 
 ## 2026-07-15 (codex, agent B) — T-ADM-C3b pipeline root projection (#679)
 

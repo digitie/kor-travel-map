@@ -17,9 +17,11 @@
   query error로 분리했다. 새 UI가 iframe을 쓰지 않으므로 신규 pipeline
   `nux-seen`은 제거했고 legacy `/ops/dagster/nux-seen`은 C6b까지 유지한다.
 - 테스트 전 적대적 리뷰 2인은 URL/PythonError 502 공백과 malformed Run 오인 경계를
-  발견했다. 두 지적을 반영한 신규/legacy 상세 회귀 40건, 변경 파일 Ruff,
-  `git diff --check`가 통과했으며 OpenAPI/admin TypeScript를 소스에서 재생성했다.
-  전체 게이트는 수정 diff 재리뷰 뒤 실행한다.
+  발견했다. 두 지적을 반영한 수정 diff 재리뷰는 S1/S2 0건으로 승인됐다.
+  root unit/lint 1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff,
+  strict mypy main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin
+  TypeScript drift가 통과했다. C3c는 DB/migration 변경이 없어 별도 PostGIS 전용
+  integration gate는 적용하지 않았다.
 
 ## 2026-07-15 (codex, agent B) — pipeline root projection (T-ADM-C3b, #679)
 
