@@ -68,6 +68,10 @@ GET /api/v1/features/snapshot   # opt-in — active upsert만(철회 미전파)
 - `snapshot`(opt-in): **active `upsert`만** 반환한다. producer의 제거 목록/
   soft-delete(→tombstone)·검수 회수(→tombstone)가 소비되지 않아 철회된 후보가
   지도에 영구 잔존한다. 철회 전파가 무의미한 일회성 초기 적재 검증에만 쓴다.
+- **cursor 전제**: `changes`의 "전체 ledger 재생·철회 backfill" 보장은
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR` **미설정**이 전제다 —
+  설정돼 있으면 그 sequence 이후만 재생된다(수동 재개용). 기본 전환 배포 전
+  운영 env에 이 값이 남아 있지 않은지 확인한다.
 - producer는 2026-07-14(T-171)부터 공급 GET을 순수 읽기(durable dirty outbox
   동기화)로 바꿨다 — 소비 폴링 비용이 후보 수와 무관해졌고, 응답 스키마·cursor·
   operation 계약은 불변이다.
@@ -90,10 +94,14 @@ bundles = await kor_travel_concierge_items_to_bundles(
 
 - `source_record.source_entity_id = str(candidate.id)` — 모든 operation에 동일하게
   보내며 후보 수명 동안 불변. 이 키가 inactive 매칭·feature_id anchoring의 기준이다.
-- producer는 `place.address.{legal_dong_code,sido_code,sigungu_code}`를 **항상
-  None**으로 보낸다 — bjd는 소비자(kor-travel-map)가 좌표 reverse geocoding으로
-  채운다. (producer 로드맵에 place 실데이터 주입 계획이 있다 — 적용되면 전 item
-  payload_hash가 재발급되며, 소비자는 재수신하면 된다.)
+- **행정코드(producer T-189, 2026-07-14)**: producer는 장소 매칭·보강된 후보에
+  `place.address.{legal_dong_code,sigungu_code}` 실데이터와 유도 `sido_code`
+  (sigungu 앞 2자리)를 보낸다(미매칭·미보강은 여전히 None). 소비자는 자리수 검증
+  후 Address로 싣고, 없으면 기존대로 좌표 reverse geocoding fallback을 쓴다.
+  item 상위에 additive `schema_version`(현재 1)도 실린다 — raw_data 보존 외 소비
+  분기는 없다. 이 전환으로 **전 item payload_hash가 재발급**되므로 소비자는 다음
+  materialize에서 전 후보를 재수신·재-render한다(신규 facility_info 평면 키도 이때
+  일괄 backfill). feature_id는 행정코드와 무관하게 candidate.id에만 고정(ADR-057).
 - Feature detail 원본 payload는 `detail.payload.kor_travel_concierge`에 저장한다.
   출처 UX가 읽는 평면 key는 계속 `detail.facility_info`를 우선한다.
 - **YouTube 수집 provenance(producer 2026-06-25 확장)**: `youtube.source_type`/
@@ -121,9 +129,15 @@ bundles = await kor_travel_concierge_items_to_bundles(
   `user_request` feature와 `prevent_provider_reactivation` override는 복구하지
   않는다. 회귀:
   `tests/integration/test_feature_repo_load.py::test_kor_travel_concierge_revert_*`.
-- reject/tombstone item의 `rejection_reason`(검수 note)은 현재 raw_data
-  (`SourceRecord.raw_data`)에만 보존된다 — inactive 전환 자체에 사유 컬럼을 쓰는
-  구조화 기록은 미구현(후속 결정 필요 시 producer `rejection_reason` 소비).
+- reject/tombstone item의 `rejection_reason`(검수 note)은 **현재 소비 측에 저장되지
+  않는다** — 비-upsert item은 bundle로 변환되지 않아 `SourceRecord`가 생기지 않고,
+  inactive 전환은 status/deleted_at만 바꾼다. 사유 기록이 필요해지면 producer
+  `rejection_reason` 소비(저장 위치 포함)를 별도 결정한다.
+- **mid-run 검수 전이 수렴**: producer는 operation 전이 시 ledger 행을 새 sequence로
+  전진시키므로, `changes` 페이지네이션 도중 되돌리기가 일어나면 같은 후보가 한
+  스트림에 구/신 operation으로 두 번 관측될 수 있다. 소비 asset은 변환 전에
+  `kor_travel_concierge_latest_items`로 후보별 **마지막 관측 item**만 남겨(스트림
+  순서 = sequence 순서) 구 operation이 신 상태를 덮지 않게 한다.
 - inactive 전환된 feature의 외부 경계(OpenAPI) 응답: batch/단건 read에서 `found`에
   **포함하되 status(inactive)를 노출**한다 — `missing` 처리하면 "삭제됨"과
   "철회됨"을 구분할 수 없다. 기존 admin deactivate read 정책과 동일하다.
@@ -184,7 +198,8 @@ in-place 갱신한다. (구 ADR-057에서 결정 — 정본 구현 `_item_to_bun
   provider, kor-travel-map은 feature owner이며 full snapshot+incremental changes를
   모두 pull해 재동기화/운영 효율을 분리한다. (§2~5, 7에 통합.)
 - **(구 ADR-050)** `reject`/`tombstone` operation을 skip으로 끝내지 않고 해당
-  feature의 **inactive 전환(+사유 기록)**으로 처리한다(MOIS Step C와 동형). fetcher는
+  feature의 **inactive 전환(+사유 기록)**으로 처리한다(MOIS Step C와 동형 —
+  단 '사유 기록'은 결정만 있고 미구현, 현행은 §5 참조). fetcher는
   `/api/v1/features/{snapshot,changes}`를 소비하고 계약 정본은 공급 측에 둔다(ADR-044).
   근거: skip-only는 철회 후보를 영구 잔존시켜 품질을 해치고, 계약 정본을 공급 측에
   두면 본 repo는 미러·소비만 해 drift가 준다. inactive read 노출 정책은 §5에 통합.

@@ -174,7 +174,9 @@ API 키 우선순위:
    (기본 `changes` — cursor 없이 시작하면 후보당 1행 ledger 전체를 재생해 철회 전파까지
    포함한 full sync가 된다. `snapshot`은 active upsert만 반환해 reject/tombstone이
    미전파 — 일회성 초기 적재 검증용),
-   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`,
+   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`(설정 시 그 sequence 이후만
+   재생 — full 재생·철회 backfill은 이 값 **미설정**이 전제이므로 배포 전 운영 env
+   부재를 확인한다),
    `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_PAGE_SIZE`로 pull을 조정한다.
 5. 회전은 Concierge scope migration 검증 → 새 `read` 키 발급 → kor-travel-map secret 교체·
    Dagster 재시작 → snapshot/changes 다중 page와 cursor 불변식·같은 키의 내부/write 403 확인

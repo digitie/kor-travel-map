@@ -8,8 +8,12 @@
   되돌리기(tombstone→재-upsert) 재활성화 concierge 경로 통합 테스트 3건 고정.
   wire 계약(envelope·cursor·operation 3종)은 producer diff로 불변 확인. 자세한
   내용은 journal 2026-07-14 (claude).
+- **적대적 리뷰 1차 반영**: mid-run 되돌리기 역전 수정
+  (`kor_travel_concierge_latest_items` 압축), rejection_reason 문서 오류 정정,
+  producer T-189(행정코드 실데이터·schema_version) 미러 반영, cursor 전제 명시.
 - **다음 한 작업**: 적대적 리뷰 2회 반영 → CI green → PR 머지 → n150 dagster/API
-  재배포(endpoint override 미설정이라 재배포만으로 `changes` 전환) →
+  재배포(배포 시 prod env의 `..._FEATURE_SYNC_ENDPOINT` override 유무 확인 —
+  없으면 재배포만으로 `changes` 전환) →
   `feature_place_kor_travel_concierge_youtube` materialize로 철회 전파·재활성화
   live 확인 → live UI e2e(저부하 per-file) 완료.
 

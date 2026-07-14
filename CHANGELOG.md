@@ -21,6 +21,15 @@
   동일 payload fast-path·변경 payload 경로 모두에서 성립하고
   `prevent_provider_reactivation` override가 이를 차단함을 concierge 경로 통합
   테스트로 고정했다.
+- **FIXED**: `changes` 재생 도중 producer 검수 전이(되돌리기)로 같은 후보가 구/신
+  operation으로 한 스트림에 두 번 관측될 때, '적재 후 일괄 inactivate' 순서가 구
+  reject/tombstone으로 신 upsert 상태를 덮던 문제를 후보별 **마지막 관측 item**
+  압축(`kor_travel_concierge_latest_items`)으로 수정했다.
+- **CHANGED**: producer T-189(2026-07-14)의 행정코드 실데이터
+  (`place.address.legal_dong_code`/`sigungu_code` + 유도 `sido_code`)와 additive
+  `schema_version`을 소비 계약 미러에 반영했다 — 기존 자리수 검증 경로로 Address에
+  실리며 feature_id는 candidate.id 고정(ADR-057)이라 불변, 전 item payload_hash
+  재발급으로 다음 materialize에서 전 후보가 재-render된다.
 
 ### Notice 계보 수명주기 원자화 (2026-07-14)
 

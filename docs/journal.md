@@ -17,7 +17,8 @@
   공개 지도에 잔존한다. `changes`는 cursor 없이 시작하면 후보당 1행으로 압축된
   ledger 전체(upsert/reject/tombstone)를 sequence 순 재생 → full sync + 철회
   전파를 매 실행 멱등으로 만족. `snapshot`은 opt-in으로 유지(일회성 초기 적재
-  검증용). n150은 endpoint override 미설정이므로 재배포만으로 전환된다.
+  검증용). n150은 endpoint override 미설정으로 추정(repo `.env.example`에 concierge
+  항목 없음) — 배포 시 실제 env를 확인하고, override가 있으면 `changes`로 정렬한다.
 - **provenance 평면 키**: producer 8720dda(6/25)의 `youtube.source_type`/
   `source_value`/`source_title`/`source_search_query`/`corrected_search_query`를
   `facility_info.youtube_source_*`로 노출(None이면 키 생략). nested pass-through와
@@ -28,11 +29,24 @@
   복원됨을 concierge 경로 통합 테스트 3건으로 고정 — 동일 payload fast-path,
   변경 payload(새 source_record_key) 경로, `prevent_provider_reactivation` 차단.
   코드 수정은 불필요했다(generic loader가 이미 처리).
-- **문서 미러**: `docs/etl/concierge-feature-etl.md` §3(endpoint 선택 기준),
-  §4(provenance), §5(되돌리기 재활성화·producer 게이트 미러·rejection_reason은
-  raw_data 보존만 — 구조화 기록은 미구현 명시), §8(회귀 목록);
-  `docs/external-apis.md` §3.13. producer GET 순수 읽기(T-171 outbox)는 소비
-  폴링 비용 노트로 반영.
+- **문서 미러**: `docs/etl/concierge-feature-etl.md` §3(endpoint 선택 기준·cursor
+  미설정 전제), §4(provenance·T-189 행정코드 실데이터+schema_version), §5(되돌리기
+  재활성화·producer 게이트 미러·rejection_reason은 소비 측에 저장되지 않음 명시·
+  mid-run 수렴), §8(회귀 목록); `docs/external-apis.md` §3.13. producer GET 순수
+  읽기(T-171 outbox)는 소비 폴링 비용 노트로 반영.
+- **적대적 리뷰 1차 반영**(4관점 find + 2인 반증 verify, 사용자 지시로 이후 2인
+  체제 축소): ① 문서 오류 정정 — "rejection_reason이 raw_data에 보존"은 거짓
+  (비-upsert item은 bundle화 전 skip → SourceRecord 자체가 없음), §10 구 ADR-050
+  '(+사유 기록)'에 미구현 주석. ② mid-run 검수 전이 역전 수정 —
+  `kor_travel_concierge_latest_items`(후보별 마지막 관측 item 압축)를 asset 앞단에
+  두어, changes 재생 도중 producer 되돌리기(re-sequence)로 같은 후보가 구 reject·신
+  upsert로 공존해도 구 operation이 신 상태를 덮지 않게 함(+unit 2건). ③ stale 노트
+  정정 — producer T-189(884dc7b, 2026-07-14 오전 머지)가 행정코드 실데이터
+  (`legal_dong_code`/`sigungu_code`+유도 sido)·additive `schema_version`을 이미
+  배송, 전 item payload_hash 재발급 → 다음 materialize에서 전 후보 재-render(신규
+  평면 키 backfill 포함). 실코드→Address 반영+feature_id 불변 unit 1건 추가.
+  ④ 여러 줄 assert의 무효 `# type: ignore` 위치 정정. ⑤ cursor 전제(FEATURE_CURSOR
+  미설정) 배포 확인 문구를 §3/external-apis에 명시.
 
 ## 2026-07-14 (codex) — notice reconcile 제곱 비용 운영 재현·제거
 
