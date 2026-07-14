@@ -1265,8 +1265,8 @@ CREATE TABLE ops.pipeline_cancellations (
   root_id                  UUID NOT NULL,
   status                   TEXT NOT NULL DEFAULT 'in_progress'
                            CHECK (status IN
-                             ('in_progress', 'retryable', 'cancelled', 'cancel_failed')),
-  actor                    TEXT NOT NULL,
+                             ('in_progress', 'retryable', 'completed', 'failed')),
+  requested_by             TEXT NOT NULL,
   reason                   TEXT,
   error                    JSONB,
   requested_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1359,6 +1359,32 @@ ALTER TABLE ops.feature_update_requests
 뒤 첫 권위 있는 Dagster 조회가 성공했을 때 채운다. `error`는 code/message/details만 가진
 비밀 제거 구조체이며 upstream raw body를 저장하지 않는다.
 
+목록과 상세 조회는 base lifecycle 상태를 덮어쓰지 않고 다음 **current cancellation
+overlay**를 별도 투영한다. current attempt는 같은 canonical root의 `in_progress` 행이 있으면
+그 행, 아니면 `(requested_at DESC, cancellation_id DESC)` 최신 행이다. 시도 이력이 없으면
+overlay는 `NULL`이다.
+
+| 필드 | 의미 |
+|------|------|
+| `cancellation_id` | current attempt UUID |
+| `status` | attempt workflow `in_progress`/`retryable`/`completed`/`failed` |
+| `requested_at` / `requested_by` / `reason` | 인증 actor 기반 요청 감사 정보 |
+| `retryable` | attempt `status='retryable'`일 때만 `true` |
+| `unresolved_member_count` | current member 중 `pending` 또는 `cancel_failed` 수 |
+
+attempt status는 결과 aggregate가 아니라 coordinator workflow 상태다. 처리 중이면
+`in_progress`, 모든 member/run이 `cancelled`/`already_terminal`이면 `completed`, transient
+외부 실패로 미해결 member를 다시 호출할 수 있으면 `retryable`, 권위 있는 reconcile
+불가처럼 자동 재시도가 안전하지 않으면 `failed`다. 실제 결과는 member/run `result`에만 둔다.
+
+`GET /v1/ops/pipeline/executions`의 각 root는 이 summary overlay를 반환한다. execution
+detail은 같은 current attempt의 member/run 행도 함께 읽어 POST 응답을 잃은 reload 뒤에도
+대상별 `result`/`terminal_status`/`error`를 복원한다. base `status`와 projected job
+`status`는 overlay status로 대체하지 않는다. transient external 실패와 권위 있는
+SUCCESS/FAILURE reconcile 불가 모두 member `cancel_failed`일 수 있지만, 전자는 attempt
+`retryable`, 후자는 `failed`이므로 UI는 overlay의 `retryable`로 재시도 가능 여부를
+판단한다.
+
 취소 scope는 9.8.1의 root projection과 정확히 같다.
 
 - owner update request는 가장 가까운 anchor branch만 소유하고 nested request branch를
@@ -1369,6 +1395,18 @@ ALTER TABLE ops.feature_update_requests
   `done`/`failed`여도 active descendant가 있으면 root member만 `already_terminal`로
   기록하고 descendant 취소를 계속한다.
 
+terminal/no-op은 durable하고 멱등적이다.
+
+- root가 `done`/`failed`이고 active descendant가 없으며 이전 취소가 없다면 frozen terminal
+  member를 `already_terminal`, attempt를 `completed`로 기록해 새로 남기고 200을 반환한다.
+  외부 Dagster 호출은 없다.
+- 같은 canonical root에 marker와 `status='completed'`인 최신 완료 attempt가 있으면 새
+  attempt/audit/member를 만들지 않고 그 attempt의 member/run 결과를 그대로 200으로
+  재현한다. Dagster terminate도 다시 호출하지 않는다.
+- 최신 attempt가 `retryable`이면 no-op 재판정 대신 그 frozen scope의 미해결 member만
+  재시도한다. `in_progress`는 동시 실행 409, definitive `failed`는 안전 조치 전까지
+  409를 유지한다. terminal root 아래 active descendant가 있으면 일반 취소 절차를 계속한다.
+
 최초 시도 transaction은 canonical root 키의 transaction advisory lock을 잡고 scope를 한 번만
 계산한 뒤 frozen base row를 kind/UUID 순서로 잠근다. attempt, run, member와 terminal root를
 포함한 모든 frozen base row marker를 함께 commit한다. child attach/enqueue도 같은 canonical
@@ -1377,6 +1415,16 @@ root lock을 먼저 잡고 ancestor marker를 확인해야 하므로 snapshot �
 claim/start/scope write/heartbeat/finish SQL도 모두 `cancellation_requested_at IS NULL` CAS를
 요구한다. marker commit 뒤에만 외부 Dagster terminate를 호출하며, 외부 호출 동안 DB
 transaction을 열어 두지 않는다.
+
+marker guard는 위 lifecycle 함수 목록에 한정하지 않는다. `ops.import_jobs`와
+`ops.feature_update_requests`의 **모든 status/progress/stage/heartbeat/payload/run-id/
+matched-scope/lineage(`parent_job_id`, `load_batch_id`, `job_id`) mutation**은 marker NULL 또는
+취소 coordinator가 소유한 동일 `cancellation_id` CAS를 요구한다. 여기에는
+`update_import_job_payload`, `attach_import_jobs_to_batch`, stale recovery,
+batch/load-batch attach, legacy cancel/requeue와 feature update의 내부 job start/finish가
+포함된다. legacy REST cancel은 계층형 coordinator에 위임하고 직접 base status를 바꿀 수
+없다. `ops.import_job_events` append와 cancellation/system audit append는 실행 제어 상태를
+바꾸지 않으므로 marker 뒤에도 허용한다.
 
 terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인해 짧은 transaction으로
 확정한다.
@@ -1412,12 +1460,12 @@ NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit�
 취소 marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
 
 marker/attempt/member/run 전이는 각각 같은 짧은 transaction에서 append-only
-`ops.system_log` 감사 행도 함께 기록한다. 인증 actor가 `actor`와
+`ops.system_log` 감사 행도 함께 기록한다. 인증 actor가 `requested_by`와
 `cancellation_requested_by`의 유일한 출처이며 요청 payload가 이를 덮어쓸 수 없다. 0050
 downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 시도가 하나라도
-있으면 실패해야 한다. terminal base row와 완료된 시도만 남았을 때 명시적 운영 확인 후
-테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는 downgrade는
-금지한다.
+있으면 실패해야 한다. terminal base row와 `completed`/`failed` 시도만 남았을 때 명시적
+운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
+downgrade는 금지한다.
 
 ### 9.9 `ops.feature_change_requests` (alembic 0021)
 

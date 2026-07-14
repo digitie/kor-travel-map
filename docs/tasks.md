@@ -120,14 +120,31 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   claim/start/scope write/heartbeat/finish를 marker CAS로 막는다. queued member는 marker 뒤
   DB CAS로 취소하고 running member만 Dagster terminal 확인을 요구한다.
   marker·감사 commit → transaction 밖 Dagster terminate → terminal 재확인 순서를 지키고,
-  `CANCELED`만 cancelled, 안전하게 대응되는 `SUCCESS`/`FAILURE`만 done/failed로
+  running은 `CANCELED`만 cancelled, 안전하게 대응되는 `SUCCESS`/`FAILURE`만 done/failed로
   reconcile한다. run id 없는 active local job, mapping 불일치, terminate 실패에는 base
-  상태를 거짓으로 바꾸지 않고 member `cancel_failed`와 retryable/cancel_failed attempt를
+  상태를 거짓으로 바꾸지 않고 member `cancel_failed`와 retryable/failed attempt를
   남긴다. 재시도는 이전 frozen scope의 미해결 member만 복사하며 hierarchy를 재탐색하지
-  않는다. feature update는 같은 전용 `AsyncConnection`에 session advisory lock을 고정해
-  scope별 짧은 transaction으로 분리하고 이미 commit된 데이터는 rollback하지 않는다.
+  않는다. 목록/detail DTO는 base status를 덮지 않는 nullable current cancellation overlay
+  (`cancellation_id/status/requested_at/requested_by/reason/retryable/
+  unresolved_member_count`)를 노출하고 detail은 current
+  member/run 결과까지 reload 가능하게 반환한다. terminal root에 active child가 없으면
+  durable `already_terminal` no-op 200, 이미 완료한 terminal cancellation은 같은 결과 200
+  replay로 Dagster 재호출을 막는다. attempt status는 workflow
+  `in_progress|retryable|completed|failed`, 실제 결과는 member/run
+  `cancelled|already_terminal|cancel_failed`로 분리한다. feature update는 같은 전용
+  `AsyncConnection`에 session advisory lock을 고정해 scope별 짧은 transaction으로 분리하고
+  이미 commit된 데이터는 rollback하지 않는다.
   body는 reason만 받고 actor는 인증 context에서 파생하며, durable audit·RFC7807
   404/409/502/503·`Retry-After`·OpenAPI/admin type·0050 strict downgrade를 함께 완결한다.
+  marker 수용 테스트는 `update_import_job_payload`, `attach_import_jobs_to_batch`,
+  `recover_stale_running_jobs`, import job enqueue/claim/heartbeat/finish/cancel,
+  feature update claim/start/matched-scope/finish/cancel과 내부 job start/finish, legacy
+  cancel/requeue를 포함한다. marked row의 모든 status/payload/lineage mutation 0건, unmarked
+  기존 동작, cancellation-id 일치 coordinator CAS, event/audit append 허용을 unit+PostGIS
+  concurrency로 검증하고 base table direct-write SQL inventory가 새 우회 mutator를 거부하게
+  한다. 502/503 뒤 GET overlay 복구, no-op 200, 완료 결과 replay 시 attempt/run-call 증가 0도
+  API 회귀로 고정한다. GET in-progress와 5xx details의 member/run result는 `pending`을
+  허용하고, 200 completed 응답에는 `pending`이 0건이라는 DTO/invariant도 검증한다.
   **문서 우선 gate**: data model/REST/task/journal/resume 계약을 적대적 재승인받기 전에는
   source를 수정하지 않는다.
 - [ ] `T-ADM-C3e` — **schedule/manual canonical operation 영속화** (agent **B**,

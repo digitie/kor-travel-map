@@ -36,9 +36,11 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
   시도당 한 번만 terminate하고 member에 결과를 전파한다. 재시도는 이전 frozen scope의
   미해결 member만 복사하며 hierarchy를 다시 탐색하지 않는다.
 - marker/감사를 먼저 commit하고 외부 transaction 없이 Dagster terminate한 뒤 terminal을
-  재확인한다. `CANCELED`만 cancelled, 정확한 marker/member/run의 `SUCCESS`/`FAILURE`만
-  done/failed다. run id 없는 local running, mapping 불일치, GraphQL/terminate 실패는 base
-  상태를 보존하고 `cancel_failed`/retryable audit와 marker를 남긴다.
+  재확인한다. queued는 marker CAS, running은 `CANCELED`일 때만 cancelled이며 정확한
+  marker/member/run의 `SUCCESS`/`FAILURE`만 done/failed다. attempt status는 workflow
+  `in_progress`/`retryable`/`completed`/`failed`, 실제 결과는 member/run에만 둔다. run id 없는
+  local running·mapping 불일치는 attempt `failed`, GraphQL/terminate transient 실패는
+  `retryable`이며 둘 다 member `cancel_failed`와 marker를 남긴다.
 - feature update의 장기 transaction은 전용 `AsyncConnection` 하나에 session advisory
   lock을 고정한 scope별 짧은 transaction으로 분리하기로 했다. 이미 commit된 scope와
   provider 외부 효과는 rollback하지 않으며 REST 응답도

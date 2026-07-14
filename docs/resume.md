@@ -17,15 +17,19 @@
 - **계약 고정**: 기존 job/request status CHECK는 유지하고 base marker와 정규화한
   cancellation attempt/member/run을 영속 정본으로 삼는다. scope는 C3b의 request owner
   branch·duplicate non-owner·standalone partition·nested request 경계를 그대로 사용하며,
-  terminal root 아래 active descendant도 취소한다.
+  terminal root 아래 active descendant도 취소한다. attempt status는 workflow
+  `in_progress`/`retryable`/`completed`/`failed`, 실제 취소 결과는 member/run에만 둔다.
 - **안전 경계**: marker와 durable audit를 먼저 commit하고 transaction 밖에서 Dagster
-  terminate한 뒤 terminal을 재확인한다. `CANCELED`만 cancelled로 확정하고, exact
-  member-marker-run mapping의 `SUCCESS`/`FAILURE`만 done/failed로 reconcile한다. 실패·
-  timeout·run 부재·local running은 허위 cancelled 없이 marker와 대상별 오류를 남긴다.
+  terminate한 뒤 terminal을 재확인한다. queued는 marker CAS, running은 `CANCELED` 확인
+  때만 cancelled로 확정하고 exact member-marker-run mapping의 `SUCCESS`/`FAILURE`만
+  done/failed로 reconcile한다. timeout 같은 transient 실패는 attempt `retryable`, 권위 있는
+  reconcile 불가는 `failed`로 구분하고, 둘 다 허위 cancelled 없이 marker와 대상별 오류를
+  남긴다.
   재시도는 이전 frozen scope의 미해결 member만 복사한다.
-- **worker/transaction 정본**: claim/start/scope write/heartbeat/finish와 descendant 생성은
-  marker CAS를 요구한다. feature update scope별 commit은 전용 `AsyncConnection` 하나에
-  session advisory lock을 고정하고, 이미 commit된 데이터는 rollback하지 않는다.
+- **worker/transaction 정본**: status/payload/lineage를 포함한 모든 base-row mutation과
+  descendant 생성은 marker CAS/root lock을 요구하며 event/audit append만 허용한다. feature
+  update scope별 commit은 전용 `AsyncConnection` 하나에 session advisory lock을 고정하고,
+  이미 commit된 데이터는 rollback하지 않는다.
 - **다음 한 작업**: 이 문서-only commit의 적대적 재승인을 받는다. 승인 전 source edit은
   0으로 유지하며, 승인 뒤 alembic 0050 → repository/coordinator → Dagster terminate service →
   REST/OpenAPI 순서로 구현한다.

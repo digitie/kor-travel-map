@@ -377,6 +377,9 @@ GET  /v1/ops/providers/{provider}                   # provider 단건 신선도/
 GET  /v1/ops/import-job-events                       # import job 이벤트 스트림(필터: job_id/status/시각)
 GET  /v1/ops/import-jobs/{job_id}/events             # 단일 job 이벤트 타임라인
 POST /v1/ops/import-jobs/{job_id}/cancel             # job 취소(action sub-resource, kill-switch)
+GET  /v1/ops/pipeline/executions                     # root 목록 + current cancellation summary
+GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
+                                                      # root 상세 + current member/run 결과
 POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
@@ -388,15 +391,29 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   request root로 canonicalize하고, request owner branch/duplicate non-owner request/
   standalone 미소유 partition/nested request 경계는
   `docs/architecture/data-model.md` §9.8.1과 동일하다.
+- **조회 overlay**: executions 목록과 상세의 root에는 nullable
+  `cancellation {cancellation_id,status,requested_at,requested_by,reason,retryable,
+  unresolved_member_count}`를 싣는다. current attempt는 active attempt 우선, 없으면 최신
+  attempt다. 이 overlay와 상세 결과는 cancellation 테이블만 읽는 DB-only projection이며
+  조회 시 Dagster를 호출하지 않는다. root/request/projected job의 base `status`는 그대로 두며
+  cancellation status로 덮지 않는다. 상세의 cancellation은 current attempt `members[]`와
+  `dagster_runs[]`도 포함하므로 502/503 뒤 reload해도 대상별 결과와 오류가 보존된다.
+  member 결과가 `cancel_failed`여도 attempt `status='retryable'`이면 transient 외부 실패라
+  재시도 action을 활성화하고, `status='failed'`이면 권위 있는 reconcile 불가라
+  비활성화한다. attempt status는 workflow의
+  `in_progress`/`retryable`/`completed`/`failed`이고, 실제
+  `cancelled`/`already_terminal`/`cancel_failed`는 member/run `result`에만 나타난다.
 - **응답 정본**: 200 `data`는 `cancellation_id`, `previous_cancellation_id`, canonical
   `root {kind,id}`, attempt `status`, `members[]`, `dagster_runs[]`,
   `committed_data_rolled_back:false`, `warnings[]`를 반환한다. 각 member/run은
-  `initial_status`, `result`(`cancelled`/`already_terminal`/`cancel_failed`),
+  `initial_status`, `result`(`pending`/`cancelled`/`already_terminal`/`cancel_failed`),
   `terminal_status`, nullable structured `error`를 갖고, Dagster 첫 조회가 실패한 run의
   `initial_status`는 null이다. root가 terminal이어도 active descendant가 있으면 root 결과만
   `already_terminal`로 두고 descendant 취소를 계속한다.
   이미 commit된 scope 데이터와 외부 provider 효과는 rollback하지 않으며 이 사실을
-  boolean과 warning으로 항상 드러낸다.
+  boolean과 warning으로 항상 드러낸다. cancel action의 200은 attempt
+  `status='completed'`이고 모든 member/run result가 `cancelled`/`already_terminal`, 즉
+  `pending`/`cancel_failed`가 하나도 없을 때만 허용한다.
 - **실행 순서**: 짧은 DB transaction에서 frozen scope·정규화 member/run·base marker와
   durable audit를 먼저 commit한 뒤 transaction 밖에서 Dagster terminate를 호출한다.
   취소 snapshot과 child attach/enqueue는 같은 canonical root transaction lock을 공유한다.
@@ -405,6 +422,12 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   member는 `CANCELED` 확인 때만 `cancelled`다. 권위 있는 `SUCCESS`/`FAILURE`는 정확한
   member-run mapping일 때만 `done`/`failed`로 reconcile한다. 종료 확인 전이나 terminate
   실패 때 running member를 `cancelled`로 반환하거나 기록하지 않는다.
+- **no-op/멱등성**: terminal root에 active descendant가 없고 취소 이력이 없으면
+  `already_terminal` member와 `status='completed'`인 durable attempt를 새로 만들고 200을
+  반환하며 Dagster를 호출하지 않는다. marker와 최신 `status='completed'` attempt가 이미 있으면
+  새 attempt/audit을 만들지 않고 같은 member/run 결과를 200으로 replay하며 terminate도
+  재호출하지 않는다. 최신 retryable attempt는 no-op보다 먼저 미해결 frozen member만
+  재시도하고, terminal root 아래 active descendant가 있으면 일반 취소를 계속한다.
 - **재시도**: retryable 응답의 `details.cancellation_id`를 기준으로 같은 action을 다시
   호출한다. 서버는 이전 frozen scope의 미해결 member만 새 attempt로 복사하며 hierarchy를
   다시 탐색하지 않는다. 같은 Dagster run은 attempt당 한 번만 terminate한다. marker는
@@ -417,8 +440,15 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   `RunNotFound`는 502 `DAGSTER_TERMINATE_FAILED`, 연결 불가/timeout은 503
   `DAGSTER_UNAVAILABLE`/`DAGSTER_TERMINATION_TIMEOUT`이다. 모든 오류는
   `application/problem+json`이고, retry 가능한 502/503과 concurrent 409에는
-  `Retry-After`와 `details.cancellation_id`/미해결 member를 포함한다. 실패 attempt와
-  대상별 error는 응답 전에 영속되며 marker는 유지된다.
+  `Retry-After`와 `details.cancellation_id`/미해결 member를 포함한다. GET detail의
+  in-progress overlay와 5xx `details.members[]`/`dagster_runs[]`는 같은 result enum을
+  사용하므로 `pending`을 반환할 수 있다. 실패 attempt와 대상별 error는 응답 전에 영속되며
+  marker는 유지된다.
+- **legacy/mutator 차단**: legacy import-job cancel은 이 root coordinator에 위임한다.
+  cancel/requeue, payload update, stale recovery, batch/load-batch attach를 포함한 모든 base
+  status·payload·lineage mutation은 marker guard를 적용하며 event/system audit append만
+  허용한다. 따라서 구 endpoint나 내부 repository 호출로 marker를 우회해 상태를 바꿀 수
+  없다.
 
 - **`WS /v1/ops/live`(ops_live.py)**: admin frontend의 TanStack Query invalidation signal
   전용 WebSocket. query `topics`(comma-separated)·client command JSON(`subscribe`/`unsubscribe`/
