@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (claude) — admin ops 통합 플랜 확정(ADR-064) + #672 n150 검증 완료
+
+- **#672 배포·검증 완료**: n150 재배포(alembic 0047 head·4컨테이너 healthy·공개
+  도메인 로그인 200), endpoint/cursor override 부재 확인 → `changes` 전체 재생
+  전환. materialize RUN_SUCCESS — ledger upsert 1,430/철회 0(전파할 철회 없음이
+  정답), T-189 재발급으로 980 재-render + 신규 40 적재(active 1,020). 사전 존재
+  발견: 410건 `provider_address_mismatch` drop 영구 미적재 → 이슈 **#673** 분리.
+- **admin ops 통합 재작성 착수(T-ADM-C1 완료)**: 2페이지(`/ops/pipeline`·
+  `/ops/datasets`) 통합 플랜을 적대적 설계 리뷰 2인 반영으로 확정 —
+  `docs/reports/admin-ops-consolidation-plan-2026-07-14.md` + ADR-064 +
+  `docs/tasks.md` `T-ADM-C1`~`C7`.
+- **다음 한 작업**: `T-ADM-C2`(backend datasets, agent A) + `T-ADM-C3`(backend
+  pipeline + alembic `dagster_run_id`, agent B) 병렬 착수 — 각 PR에 OpenAPI/types
+  재생성 포함, 테스트 전 적대적 리뷰어 2명, 잦은 rebase.
+
 ## 2026-07-14 (claude) — concierge export 소비 계약 정렬 완료 (로컬)
 
 - **완료(코드)**: producer(kor-travel-concierge) 7월 검수 개편(soft-delete 제거
