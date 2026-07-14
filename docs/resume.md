@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex, agent B) — T-ADM-C3a pipeline 공용 application 경계 구현 완료 (이슈 #682)
+
+- **구현 완료**: `/ops/pipeline`과 legacy router가 함께 쓰는 Dagster schema,
+  GraphQL transport/parser, query/schedule application service, feature update
+  schema/service를 public 모듈로 추출했다. FastAPI request/exception 변환은 별도 HTTP
+  adapter에 한정하고 settings·HTTP client·DB session은 명시적으로 주입한다.
+  private router import는 제거했으며 HTTP/OpenAPI 계약은 그대로다.
+- **검증 완료**: 적대적 리뷰 2인과 docstring drift 재리뷰를 통과했다. 관련 API unit
+  68건, API 전체 421건, root unit 1,282건, schedule override integration 1건,
+  Ruff·strict mypy 3패키지·import-linter·OpenAPI admin/user 무변경 검증이 green이다.
+- **다음 한 작업**: 보안 감사 후 draft PR을 열고 CI green·적대적 리뷰를 거쳐
+  `T-ADM-C3a`를 merge한다. 이후 main을 rebase한 뒤 순서대로 `T-ADM-C3b`
+  (root operation SQL projection, #679)에 착수한다. C3e merge 전에는 C5를 시작하지
+  않는다.
+
 ## 2026-07-14 (claude, agent B) — T-ADM-C3 backend /ops/pipeline 그룹 완료 (PR #677)
 
 - **T-ADM-C3 완료**: `/v1/ops/pipeline/*` 12 endpoint(overview+sensor · executions

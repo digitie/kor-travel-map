@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex, agent B) — pipeline 공용 application 경계 추출 (T-ADM-C3a, 이슈 #682)
+
+PR #677 적대적 리뷰에서 확인된 신규 `/ops/pipeline`의 구 라우터 private 심볼
+의존을 제거했다. HTTP 동작과 OpenAPI를 바꾸지 않는 구조 정리이며, C3b~C3e의
+실행 정본 개편은 포함하지 않았다.
+
+- **공유 경계**: Dagster DTO를 `dagster_schema.py`, GraphQL transport/parser를
+  `dagster_graphql.py`, 조회·NUX application 로직을 `dagster_query_service.py`,
+  schedule override·command transaction을 `dagster_schedule_service.py`로 분리했다.
+  feature update 요청도 schema/application service로 나눠 legacy/new router가 같은
+  public 모듈을 사용한다. application 모듈은 FastAPI `Request`/`HTTPException`을
+  모르며 settings·HTTP client·DB session을 명시적으로 받는다.
+- **HTTP adapter**: request dependency 조립과 typed application exception→HTTP
+  응답 변환은 `dagster_http.py`·`feature_update_http.py`에 한정했다. 두 router는
+  decorator와 request-context만 소유하고 공용 service에 위임한다. client 재사용,
+  advisory lock 409 `Retry-After`, 검증 422, resolver 502/503, 미분류 오류 500을
+  adapter 단위 테스트로 고정했다.
+- **적대적 리뷰 2인 반영**: 단일 1,800행 service 이동안을 query/schedule/GraphQL로
+  재분리하고, FastAPI 의존·private alias·테스트 monkeypatch drift·schedule override
+  SQL 식별자 손상을 제거했다. 마지막 OpenAPI 검사에서 발견한 DTO class description
+  drift는 origin/main 문구를 그대로 복원해 admin/user spec 모두 무변경으로 닫았다.
+- **검증**: 관련 API unit 68건, API 패키지 전체 421건, 저장소 unit 1,282건,
+  schedule override PostGIS integration 1건 통과. Ruff 전체, strict mypy 3패키지,
+  import-linter 4계약, OpenAPI `--profile all --check`, `git diff --check` 통과.
+
 ## 2026-07-14 (claude, agent B) — backend /ops/pipeline 그룹 신설 (T-ADM-C3)
 
 ADR-064 페이지 ①(`/ops/pipeline`)의 백엔드 리소스 그룹 12 endpoint를 신설했다

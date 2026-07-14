@@ -17,8 +17,10 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
+from kortravelmap.api import feature_update_service as service_mod
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
+from kortravelmap.api.routers import feature_update_requests as router_mod
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -127,14 +129,12 @@ def test_create_dry_run_returns_preview_without_transaction(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPreview:
         assert kwargs["dry_run"] is True
         assert kwargs["scope"] == {"type": "feature_ids", "feature_ids": ["feature-1"]}
         return _preview()
 
-    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/admin/features/update-requests",
@@ -160,14 +160,12 @@ def test_create_actual_request_uses_transaction(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
         assert kwargs["dry_run"] is False
         assert kwargs["priority"] == 75
         return _request()
 
-    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/admin/features/update-requests",
@@ -209,15 +207,13 @@ def test_create_rejects_legacy_center_radius_shape_before_enqueue(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _unexpected_enqueue(
         _session: Any, **_kwargs: Any
     ) -> FeatureUpdateRequest:
         raise AssertionError("validation should run before enqueue")
 
     monkeypatch.setattr(
-        router_mod, "enqueue_feature_update_request", _unexpected_enqueue
+        service_mod, "enqueue_feature_update_request", _unexpected_enqueue
     )
 
     response = client.post(
@@ -282,15 +278,13 @@ def test_create_rejects_non_refreshable_provider_dataset_before_enqueue(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _unexpected_enqueue(
         _session: Any, **_kwargs: Any
     ) -> FeatureUpdateRequest:
         raise AssertionError("non-refreshable request should be rejected")
 
     monkeypatch.setattr(
-        router_mod, "enqueue_feature_update_request", _unexpected_enqueue
+        service_mod, "enqueue_feature_update_request", _unexpected_enqueue
     )
 
     response = client.post(
@@ -316,8 +310,6 @@ def test_create_sigungu_scope_without_kor_travel_geo_returns_503(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     class _Settings:
         kor_travel_geo_base_url = None
 
@@ -344,8 +336,6 @@ def test_list_requests_passes_filters(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _list(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPage:
         assert kwargs["status"] == "queued"
         assert kwargs["scope_type"] == "feature_ids"
@@ -383,8 +373,6 @@ def test_get_request_404_when_missing(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _missing(_session: Any, _request_id: str) -> None:
         return None
 
@@ -401,8 +389,6 @@ def test_cancel_request_returns_cancelled(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _cancel(
         _session: Any, request_id: str, *, error_message: str | None
     ) -> FeatureUpdateRequest:
@@ -427,8 +413,6 @@ def test_run_now_requeues_existing_request(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _get(_session: Any, request_id: str) -> FeatureUpdateRequest:
         assert request_id == "req-1"
         return _request()
@@ -440,7 +424,7 @@ def test_run_now_requeues_existing_request(
         return _request(request_id="req-2", run_mode="now")
 
     monkeypatch.setattr(router_mod, "get_update_request", _get)
-    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/admin/features/update-requests/req-1/run-now",
@@ -458,12 +442,10 @@ def test_create_run_now_lock_busy_returns_retry_after(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
         raise FeatureUpdateLockBusy(retry_after_seconds=15)
 
-    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/admin/features/update-requests",
@@ -485,12 +467,10 @@ def test_create_unknown_enqueue_error_hides_internal_message(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import feature_update_requests as router_mod
-
     async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
         raise RuntimeError("secret DSN leaked")
 
-    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/admin/features/update-requests",
