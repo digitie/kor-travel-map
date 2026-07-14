@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0048_import_jobs_dagster_run_id"
-down_revision: str | Sequence[str] | None = "0047_notice_reconcile_statistics"
+down_revision: str | Sequence[str] | None = "0047_notice_reconcile_stats"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

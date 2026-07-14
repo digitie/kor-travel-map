@@ -17,7 +17,7 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
 pytestmark = pytest.mark.integration
 
-_PRE_REVISION = "0047_notice_reconcile_statistics"
+_PRE_REVISION = "0047_notice_reconcile_stats"
 _TARGET_REVISION = "0048_import_jobs_dagster_run_id"
 
 
