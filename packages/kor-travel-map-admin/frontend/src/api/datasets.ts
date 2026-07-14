@@ -169,14 +169,15 @@ function fetchDatasetRefreshExecution(
 /**
  * 생성된 갱신 요청 1건의 상태 추적 query (인라인 폐루프).
  *
- * queryKey는 `["feature-update-request", id]` — `api/live.ts`의
- * `feature_update_request:{id}` WS topic invalidation과 같은 키를 써서
- * 실시간 갱신을 그대로 받는다. WS가 꺼진 환경을 위해 queued/running 동안
- * 2s 폴링 fallback을 함께 둔다.
+ * queryKey는 `["feature-update-request", id, "pipeline-execution"]` —
+ * `api/live.ts`의 `feature_update_request:{id}` invalidation(prefix 매칭)을 그대로
+ * 받으면서, 같은 prefix를 쓰는 구 상세 훅(`updateRequests.ts`, 다른 응답 shape)과
+ * 캐시가 섞이지 않게 세그먼트를 분리한다(리뷰 검출 — 동일 키에 이형 shape 캐시
+ * 충돌). WS가 꺼진 환경을 위해 queued/running 동안 2s 폴링 fallback을 함께 둔다.
  */
 export function useDatasetRefreshRequestStatus(requestId: string | null) {
   return useQuery<DatasetRefreshExecutionDetailResponse, Error>({
-    queryKey: ["feature-update-request", requestId],
+    queryKey: ["feature-update-request", requestId, "pipeline-execution"],
     queryFn: ({ signal }) =>
       fetchDatasetRefreshExecution(requestId as string, signal),
     enabled: Boolean(requestId),

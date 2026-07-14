@@ -109,7 +109,7 @@ function makeRunSummary(
 ): OpsDatasetRunSummary {
   return {
     request_id: REQUEST_ID,
-    status: "succeeded",
+    status: "done",
     run_mode: "queued",
     scope_type: "provider_dataset",
     dry_run: false,
@@ -388,7 +388,7 @@ async function mockPipelineRequests(
           execution: {
             kind: "update_request",
             id: NEW_REQUEST_ID,
-            status: options.executionStatus ?? "succeeded",
+            status: options.executionStatus ?? "done",
             created_at: FRESH_AT,
             error_message: null,
             dagster_run_id: null,
@@ -399,7 +399,7 @@ async function mockPipelineRequests(
               "/v1/ops/pipeline/executions/update_request/" + NEW_REQUEST_ID,
           },
           update_request: makeRequestRecord({
-            status: options.executionStatus ?? "succeeded",
+            status: options.executionStatus ?? "done",
           }),
         },
         meta: makeMeta("e2e-execution-detail"),
@@ -708,7 +708,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const { items, details } = defaultGrid();
     const datasetMocks = await mockOpsDatasets(page, { items, details });
     const pipeline = await mockPipelineRequests(page, {
-      executionStatus: "succeeded",
+      executionStatus: "done",
     });
 
     await page.goto("/ops/datasets");
@@ -733,8 +733,11 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       operator: "local-admin",
     });
 
-    // 실행 상세 GET으로 상태 추적 → 성공 배지 + 완료 alert + 페이지 ① 링크.
+    // 실행 상세 GET으로 상태 추적 → terminal 어휘 "done"을 성공으로 인식해야
+    // 한다(리뷰 S2 — 백엔드 _TERMINAL_STATES에 "succeeded"는 없다): 상태 배지
+    // "완료"(statusLabel("done")) + 완료 alert + 페이지 ① 링크.
     await expect.poll(() => pipeline.executionGets.length).toBeGreaterThanOrEqual(1);
+    await expect(page.getByText("완료", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("갱신 완료")).toBeVisible();
     await expect(page.getByRole("link", { name: "자세히" })).toHaveAttribute(
       "href",

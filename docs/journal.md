@@ -34,6 +34,15 @@ ADR-064 페이지 ②의 프론트를 신설했다(구 페이지/훅 삭제는 C
   잔여 spec 정비는 T-ADM-C7로.
 - 게이트: type-check(app+e2e)·lint(0 errors)·vitest 78·`NEXT_PUBLIC_*` build·
   mock e2e 12 전부 green. 백엔드/파이썬 무변경.
+- **적대적 리뷰 2건 반영(PR #683)**: ① [S2] 폐루프 terminal 어휘를 백엔드 정본
+  `_TERMINAL_STATES`({"done","failed","cancelled"})로 정정 — "succeeded" 기대는
+  성공을 영원히 미인식(성공 Alert 불가), mock도 같은 오어휘로 은폐 → mock을
+  "done"으로 고치고 성공 경로 e2e에 상태 배지 "완료" 단언 추가. ② [S3] 상태
+  추적 queryKey를 `["feature-update-request", id, "pipeline-execution"]`으로
+  세그먼트 분리 — 구 상세 훅(다른 응답 shape)과의 캐시 혼입 차단(live.ts
+  invalidation은 prefix 매칭이라 그대로 수신). +부수: 원 커밋 rowKey의 리터럴
+  NUL(0x00) 2바이트(파일이 git에서 binary 취급)를 소스 이스케이프 `\u0000`으로
+  정정.
 
 ## 2026-07-14 (claude, agent B) — backend /ops/pipeline 그룹 신설 (T-ADM-C3)
 
