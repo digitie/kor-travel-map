@@ -11,7 +11,7 @@
   - [x] `T-ADM-C1` — 플랜 확정 + ADR-064 + tasks 등록 (본 문서 PR)
   - [x] `T-ADM-C2` — backend `/ops/datasets/*` (agent A, PR #676)
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
-  - [ ] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
+  - [x] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
   - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
   - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
   - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
@@ -52,9 +52,13 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   cursor/식별자 UUID 검증(500→422), 감사 필드(override 삭제·request cancel) 구조화
   로그, 409 Retry-After 헤더 명문화, datasets `dataset_status_repo`에
   `dagster_run_id` 전파.
-- [ ] `T-ADM-C4` — **frontend `/ops/datasets`** (agent **A**, 의존 C2): 그리드(3원
+- [x] `T-ADM-C4` — **frontend `/ops/datasets`** (agent **A**, 의존 C2): 그리드(3원
   행·never_run/stale 구분·이슈 배지)+drawer(정책 편집·ETL preview·지금 갱신 인라인
-  폐루프·Feature 보기)+mock e2e.
+  폐루프·Feature 보기)+mock e2e. 지금 갱신은 `POST /ops/pipeline/requests`(#677)
+  직접 호출 + `feature_update_request:{id}` WS/폴링 추적. 딥링크
+  `?provider=&dataset=&sync_scope=&panel=` 초기 상태. nav "데이터셋" 추가(구 항목
+  제거는 C6b). mock e2e 12 시나리오 — 로그인 게이트(#520)는 live suite의
+  `E2E_ADMIN_PASSWORD` 관례로 대응.
 - [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.

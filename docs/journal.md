@@ -2,6 +2,39 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (claude, agent A) — frontend /ops/datasets 페이지 신설 (T-ADM-C4)
+
+ADR-064 페이지 ②의 프론트를 신설했다(구 페이지/훅 삭제는 C6a/C6b — 추가만).
+
+- **`src/app/ops/datasets/`**: 3원 그리드(공용 DataTable) — 상태(StatusBadge
+  `never_run`→"미실행" 라벨 추가)와 stale(>48h) 배지 분리, 정책 요약, 이슈
+  destructive 배지, 요약 배지(제공자/행/실패/오래됨/미실행/이슈), 검색·상태
+  FilterBar. 행 선택 drawer는 Tabs 3패널: ① 상태·이력(scope 배열 테이블 +
+  선택 scope cursor JSON + 최근 실행(요청·잡 상태·`/ops/pipeline?execution=
+  update_request:{id}` 딥링크 — 페이지 ①은 C5에서 생김) + 최근 이벤트), ②
+  정책 편집(PUT `/ops/datasets/{p}/{d}/refresh-policy`, `/ops/providers`
+  PolicyEditor와 동일 검증/기본값), ③ ETL 미리보기(fixture 상시, live 403이면
+  opt-in flag 안내). drawer 헤더에 "생성된 Feature 보기"/이슈 링크.
+- **지금 갱신 인라인 폐루프**: `POST /v1/ops/pipeline/requests`(#677,
+  provider_dataset scope + operator/reason) → 생성 request를
+  `feature_update_request:{id}` WS topic(`useOpsLiveInvalidation`) + 2s 폴링
+  fallback(`GET /ops/pipeline/executions/update_request/{id}`)으로 drawer 안에서
+  추적, terminal 전이 시 그리드/상세 신선도 즉시 무효화. 409는 Retry-After 안내,
+  비-refreshable 카탈로그 행은 버튼 비활성+사유 표기.
+- **api 훅 `src/api/datasets.ts`**: 생성 타입 바인딩(datasets 그룹 #676 +
+  pipeline `PipelineExecutionDetailResponse`/requests POST #677). 상태 추적
+  queryKey는 `["feature-update-request", id]` — live.ts topic 무효화 키와 일치.
+- **nav**: admin-shell "수집 파이프라인"에 "데이터셋" 1줄 추가(구 항목 존치).
+- **mock e2e `e2e/ops-datasets.spec.ts` 12 시나리오**(그리드 로드/배지·필터·
+  drawer 이력·정책 PUT·검증 차단·preview fixture/live 403·지금 갱신 성공/409·
+  딥링크 `?provider=&dataset=&sync_scope=&panel=`·빈 그리드·500 alert) —
+  Windows 로컬 12 passed. **발견**: 로그인 게이트(#520) 이후 mock suite는
+  무세션이라 미들웨어가 /login으로 돌려보냄(기존 19파일 공통, e2e CI 부재로
+  잠복) — 본 spec은 live suite의 `E2E_ADMIN_PASSWORD` 관례로 beforeEach 로그인,
+  잔여 spec 정비는 T-ADM-C7로.
+- 게이트: type-check(app+e2e)·lint(0 errors)·vitest 78·`NEXT_PUBLIC_*` build·
+  mock e2e 12 전부 green. 백엔드/파이썬 무변경.
+
 ## 2026-07-14 (claude, agent B) — backend /ops/pipeline 그룹 신설 (T-ADM-C3)
 
 ADR-064 페이지 ①(`/ops/pipeline`)의 백엔드 리소스 그룹 12 endpoint를 신설했다

@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (claude, agent A) — T-ADM-C4 frontend /ops/datasets 페이지 완료
+
+- **T-ADM-C4 완료**: 페이지 ② `/ops/datasets` 신설 — provider×dataset×sync_scope
+  3원 그리드(never_run/stale 구분·정책 요약·이슈 배지·요약 배지·검색/상태 필터)
+  + 행 상세 drawer(상태·이력: scope 배열/cursor/최근 실행
+  `/ops/pipeline?execution=update_request:{id}` 딥링크/이벤트 · 정책 편집 PUT ·
+  ETL preview(fixture 상시/live 403 안내) · **지금 갱신 인라인 폐루프** —
+  `POST /ops/pipeline/requests` → `feature_update_request:{id}` WS+2s 폴링 추적
+  → terminal 전이 시 신선도 refetch). `api/datasets.ts` 훅은 #676/#677 생성 타입
+  바인딩. nav "데이터셋" 추가(구 항목 제거는 C6b). mock e2e
+  `ops-datasets.spec.ts` 12 시나리오 green.
+- **발견(공유)**: 로그인 게이트(#520) 이후 mock e2e suite는 무세션 내비게이션이
+  미들웨어에 막혀 서버에 UI 인증이 구성돼 있으면 전부 /login으로 떨어진다 — 본
+  spec은 live suite의 `E2E_ADMIN_PASSWORD` 관례(로그인 beforeEach)로 green.
+  기존 mock spec 19파일의 동일 정비는 T-ADM-C7(live e2e 재작성)에서 함께 처리.
+- **다음 한 작업**: PR 머지(오케스트레이터) → C5(B) 완료 대기 → 선착
+  `T-ADM-C6a`(존치 화면 링크 재배선) 착수.
+
 ## 2026-07-14 (claude, agent B) — T-ADM-C3 backend /ops/pipeline 그룹 완료 (PR #677)
 
 - **T-ADM-C3 완료**: `/v1/ops/pipeline/*` 12 endpoint(overview+sensor · executions

@@ -74,6 +74,7 @@ const STATUS_LABELS: Record<string, string> = {
   ignored: "무시됨",
   hidden: "숨김",
   not_started: "시작 전",
+  never_run: "미실행",
   stale: "오래됨",
   // 기타/중립
   draft: "초안",
