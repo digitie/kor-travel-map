@@ -9,7 +9,7 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [x] `T-ADM-C1` — 플랜 확정 + ADR-064 + tasks 등록 (본 문서 PR)
-  - [ ] `T-ADM-C2` — backend `/ops/datasets/*` (agent A)
+  - [x] `T-ADM-C2` — backend `/ops/datasets/*` (agent A, PR #676)
   - [ ] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B)
   - [ ] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
   - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
@@ -35,11 +35,13 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 계열은 PinVi 계약으로 존치).
 
 - [x] `T-ADM-C1` — **플랜 확정 + ADR-064 + tasks 등록** (본 PR)
-- [ ] `T-ADM-C2` — **backend datasets 그룹** (agent **A**, 의존 C1):
+- [x] `T-ADM-C2` — **backend datasets 그룹** (agent **A**, 의존 C1, **PR #676**):
   `/v1/ops/datasets`(그리드 join)·`/{provider}/{dataset}`(scope 배열 상세)·
   `refresh-policy` PUT·`preview`(fixture 상시/live opt-in flag). admin 게이트 마운트.
   infra 신규 조회는 `kortravelmap.infra`(coverage·strict 범위). **OpenAPI/types
-  재생성 포함**(rebase 충돌은 재생성으로 해소, 수동 병합 금지).
+  재생성 포함**(rebase 충돌은 재생성으로 해소, 수동 병합 금지). 적대적 리뷰
+  2인 반영 — S2 transaction 순서 500 수정(실세션 integration 회귀 포함),
+  S3 PUT 허용 집합 확장(카탈로그∪잔존 sync∪기존 policy)·`.env.example` flag.
 - [ ] `T-ADM-C3` — **backend pipeline 그룹** (agent **B**, 의존 C1):
   `/v1/ops/pipeline` overview(+sensor)·executions(DB-only UNION keyset)·
   `/{kind}/{id}`(+cancel)·events(전역)·dagster-runs(보조)·schedules(+PATCH

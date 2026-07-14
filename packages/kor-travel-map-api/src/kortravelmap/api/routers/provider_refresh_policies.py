@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from math import ceil
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra.provider_refresh_policy_repo import (
@@ -12,12 +11,13 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
     list_provider_refresh_policies,
     upsert_provider_refresh_policy,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyRecord,
+    ProviderRefreshPolicyUpsertRequest,
     provider_refresh_policy_record,
 )
 from kortravelmap.api.response import Meta, make_meta
@@ -34,55 +34,6 @@ router = APIRouter(
     prefix="/admin/provider-refresh-policies",
     tags=["admin-provider-refresh-policies"],
 )
-
-SourceKind = Literal["openapi", "filedata", "manual", "system"]
-TargetedPolicy = Literal["follow_system", "allow_targeted", "disabled"]
-
-
-class ProviderRefreshPolicyUpsertRequest(BaseModel):
-    """provider/dataset refresh policy full upsert 요청."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_kind: SourceKind
-    targeted_policy: TargetedPolicy = "follow_system"
-    system_interval_seconds: int | None = Field(default=None, gt=0)
-    optimal_interval_seconds: int | None = Field(default=None, gt=0)
-    min_interval_seconds: int | None = Field(default=None, gt=0)
-    max_requests_per_minute: int | None = Field(default=None, gt=0)
-    max_requests_per_hour: int | None = Field(default=None, gt=0)
-    max_requests_per_day: int | None = Field(default=None, gt=0)
-    max_concurrent: int = Field(default=1, gt=0)
-    burst_size: int | None = Field(default=None, gt=0)
-    rate_limit_source: dict[str, Any] = Field(default_factory=dict)
-    config_source: str = Field(default="db", min_length=1, max_length=64)
-    enabled: bool = True
-
-    @model_validator(mode="after")
-    def _validate_interval_floor(self) -> ProviderRefreshPolicyUpsertRequest:
-        floor = self._effective_min_interval_seconds()
-        if self.min_interval_seconds is not None and self.min_interval_seconds < floor:
-            raise ValueError(
-                "min_interval_seconds must not be lower than declared rate limits"
-            )
-        for field_name in ("system_interval_seconds", "optimal_interval_seconds"):
-            value = getattr(self, field_name)
-            if value is not None and value < floor:
-                raise ValueError(
-                    f"{field_name} must be greater than or equal to the effective "
-                    "rate-limit interval"
-                )
-        return self
-
-    def _effective_min_interval_seconds(self) -> int:
-        floors = [self.min_interval_seconds or 0]
-        if self.max_requests_per_minute:
-            floors.append(ceil(60 / self.max_requests_per_minute))
-        if self.max_requests_per_hour:
-            floors.append(ceil(3600 / self.max_requests_per_hour))
-        if self.max_requests_per_day:
-            floors.append(ceil(86400 / self.max_requests_per_day))
-        return max(floors)
 
 
 class ProviderRefreshPolicyListData(BaseModel):

@@ -2,6 +2,44 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (claude, agent A) — backend /ops/datasets 그룹 신설 (T-ADM-C2)
+
+ADR-064 페이지 ②(`/ops/datasets`)의 백엔드 리소스 그룹을 신설했다(구 라우터
+삭제는 T-ADM-C6b 범위 — 추가만).
+
+- **신규 라우터 `routers/ops_datasets.py`** (`/v1/ops/datasets/*` 4 endpoint):
+  ① 그리드 — ETL 카탈로그 전 행 base(비-refreshable 포함, `/etl` 흡수 대비) ×
+  sync state(scope별 다행=3원) × 2원 정책 × 미해결 이슈 카운트, `never_run` 합성.
+  카탈로그에서 빠진 잔존 sync/policy row도 `catalog: null`로 보존(defensive).
+  ② 상세 — scope 배열(cursor 포함) + 최근 실행(update request+연결 import job
+  요약 join) + 최근 이벤트 + 정책/이슈. 카탈로그 조합은 row 없어도 200(never_run
+  scope 합성), 셋 다 없으면 404. ③ refresh-policy PUT — 기존 upsert repo 재사용,
+  카탈로그/잔존 sync state 검증으로 유령 정책 row 방지(404). ④ preview —
+  `/debug/etl` 로직 이식, fixture 상시 / **live는 신규
+  `etl_live_preview_enabled`(기본 off) opt-in 뒤 403 게이트**(OpiNet류 쿼터 보호).
+- **마운트**: `app.py`에 `ops_routes_enabled` + `require_admin_frontend` 의존성의
+  **자체 include 블록**(T-ADM-C3 pipeline 그룹과 rebase 충돌 최소화). 조작 포함
+  그룹이라 무인증 ops 패턴 미승계(ADR-064 결정 3).
+- **infra 신규 `dataset_status_repo`**(strict+coverage 범위):
+  `count_open_integrity_issues_by_dataset`(open/acknowledged 집계, severity 분해,
+  provider/dataset 필터) + `list_ops_import_jobs_by_ids`(jsonb 텍스트 배열→uuid
+  캐스팅, 타임스탬프 포함 `OpsImportJob` 반환). unit+integration(testcontainers)
+  테스트 동반.
+- **공유 schema 이동**: `ProviderRefreshPolicyUpsertRequest`를
+  `provider_refresh_schema.py`로 이동(구/신 라우터 공용) — C6b에서 구 라우터를
+  지워도 계약이 남는다.
+- **생성물**: `openapi.json` + admin `types.ts` 재생성. `openapi.user.json` 불변
+  확인(admin 표면 한정 — PinVi read 계약 무변).
+- 게이트(throwaway python:3.13 Docker, WSL): ruff 6트리 / mypy --strict 3패키지 /
+  lint-imports 4계약 / pytest unit+lint 1274 · api 377 · 신규 integration 2 전부 green.
+- **적대적 리뷰 2인 반영(PR #676)**: refresh-policy PUT의 begin 밖 존재 검증
+  SELECT(autobegin)가 이후 `session.begin()`을 500으로 터뜨리던 S2를 단일
+  transaction 구조로 수정 + 실세션(fresh AsyncSession) integration 회귀
+  (`test_ops_datasets_refresh_policy.py` 4건 — `_FakeSession` unit은 이 결함
+  계급을 못 잡는다는 한계 명주석). PUT 허용 집합을 카탈로그∪잔존 sync∪기존
+  policy로 확장(S3 — policy-only 잔존 행의 read/write 자기모순 해소),
+  `.env.example`에 `..._ETL_LIVE_PREVIEW_ENABLED=false` 항목 추가(S3).
+
 ## 2026-07-14 (claude) — admin ops 통합 재작성 플랜 확정(ADR-064) + concierge #672 n150 live 검증
 
 ### admin ops 통합 재작성 플랜 (T-ADM-C1)

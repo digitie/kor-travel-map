@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+### admin ops datasets 그룹 신설 (2026-07-14, ADR-064 T-ADM-C2)
+
+- **ADDED**: `/v1/ops/datasets/*` 신규 REST 그룹(페이지 ② 백엔드) 4 endpoint —
+  `GET /ops/datasets`(ETL 카탈로그 기반 provider×dataset×sync_scope 3원 그리드,
+  `never_run` 포함 + sync state·refresh policy·미해결 integrity 이슈 카운트 join),
+  `GET /ops/datasets/{provider}/{dataset}`(scope 배열 상세 — cursor·최근 실행
+  (update request+연결 import job 요약)·최근 이벤트·정책·이슈 카운트),
+  `PUT .../refresh-policy`(2원 정책 upsert — 카탈로그/잔존 sync state에 없는
+  조합은 404), `POST .../preview`(ETL dry-run — 기존 `/debug/etl` 로직 이식).
+  `ops_routes_enabled` + `require_admin_frontend` 의존성의 자체 include 블록으로
+  마운트한다(조작 포함 그룹 — 무인증 ops 패턴 미승계, ADR-064 결정 3).
+- **ADDED**: `KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED`(기본 off) — live ETL
+  preview(실 provider 호출·쿼터 소모)는 이 opt-in flag 뒤에서만 열린다(403).
+  fixture preview는 flag와 무관하게 상시 동작.
+- **ADDED**: `kortravelmap.infra.dataset_status_repo` —
+  `count_open_integrity_issues_by_dataset`(provider×dataset별 open/acknowledged
+  이슈 집계) + `list_ops_import_jobs_by_ids`(타임스탬프 포함 import job 일괄
+  조회). 구 라우터 삭제는 범위 아님(T-ADM-C6b) — 기존 `/ops/providers`·
+  `/admin/provider-refresh-policies`·`/debug/etl`은 그대로 둔다.
+
 ### Concierge export 소비 계약 정렬 (2026-07-14)
 
 - **CHANGED**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT` 기본값을

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (claude, agent A) — T-ADM-C2 backend /ops/datasets 그룹 완료 (PR #676)
+
+- **T-ADM-C2 완료**: `/v1/ops/datasets/*` 4 endpoint(3원 그리드·scope 배열 상세·
+  refresh-policy PUT·ETL preview) + `kortravelmap.infra.dataset_status_repo` +
+  live preview opt-in flag(`etl_live_preview_enabled`, 기본 off). admin frontend
+  게이트의 자체 include 블록 마운트, OpenAPI/admin types 재생성
+  (`openapi.user.json` 불변). **적대적 리뷰 2인 반영 포함** — refresh-policy
+  PUT의 SELECT-후-begin 500(S2)을 단일 transaction으로 수정 + 실세션
+  integration 회귀(`tests/integration/test_ops_datasets_refresh_policy.py`),
+  PUT 허용 집합을 카탈로그∪잔존 sync∪기존 policy로 확장(S3),
+  `.env.example` flag 항목(S3).
+- **다음 한 작업**: PR #676 머지(오케스트레이터) 후 `T-ADM-C4`(frontend
+  `/ops/datasets` 페이지+훅+mock e2e, agent A) 착수. agent B의
+  `T-ADM-C3`(#677) rebase 시 `dataset_status_repo._IMPORT_JOB_COLUMNS`에
+  `dagster_run_id` 정리 예정(B 담당).
+
 ## 2026-07-14 (claude) — admin ops 통합 플랜 확정(ADR-064) + #672 n150 검증 완료
 
 - **#672 배포·검증 완료**: n150 재배포(alembic 0047 head·4컨테이너 healthy·공개

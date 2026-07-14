@@ -191,6 +191,16 @@ class ApiSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED``."
         ),
     )
+    etl_live_preview_enabled: bool = Field(
+        default=False,
+        description=(
+            "``POST /v1/ops/datasets/{provider}/{dataset}/preview``의 ``source=live``"
+            "(실 provider 호출) 분기 허용 여부(ADR-064 T-ADM-C2). 기본 False — "
+            "무심코 실 provider 쿼터(OpiNet 일일 한도 등)를 소모하지 않게 opt-in "
+            "으로만 연다. False면 live preview는 403. fixture preview는 flag와 "
+            "무관하게 항상 동작. env ``KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED``."
+        ),
+    )
     dagster_url: str = Field(
         default="http://127.0.0.1:12702",
         description=(

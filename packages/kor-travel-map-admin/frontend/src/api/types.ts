@@ -1829,6 +1829,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * provider×dataset×sync_scope 상태 그리드
+         * @description ETL 카탈로그의 전 provider×dataset을 base set으로 sync state(신선도)·refresh policy·미해결 integrity 이슈 카운트를 LEFT JOIN 한다. sync row가 있는 dataset은 scope별로 여러 행(3원)이 되고, 한 번도 적재되지 않은 조합도 `status='never_run'`으로 노출한다(never_run vs stale 구분 승계). 행 수가 유한해 페이지네이션 없이 전량 반환한다.
+         */
+        get: operations["list_datasets_grid_v1_ops_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/datasets/{provider}/{dataset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * dataset 상세 — scope 배열 + 최근 실행/이벤트 + 정책
+         * @description provider×dataset 1조합의 운영 상세.
+         *
+         *     카탈로그 조합은 sync row가 없어도 200(never_run scope 합성). 카탈로그에
+         *     없더라도 sync state 또는 policy row가 남아 있으면 200(잔존 상태 가시성).
+         *     셋 다 없으면 404.
+         */
+        get: operations["get_dataset_detail_v1_ops_datasets__provider___dataset__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/datasets/{provider}/{dataset}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ETL 변환 dry-run preview
+         * @description fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답한다. DB write 없음. fixture 모드는 외부 의존 없이 상시 동작. live 모드(실 provider 호출·쿼터 소모)는 `KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED=1` opt-in 뒤에서만 열리고, `etl_live.LIVE_LOADER_REGISTRY` 등록 dataset만 지원한다.
+         */
+        post: operations["post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/datasets/{provider}/{dataset}/refresh-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * dataset refresh policy upsert (2원)
+         * @description ``{provider}/{dataset}`` 2원 refresh policy를 full upsert한다.
+         *
+         *     그리드/상세의 3원(scope 포함) 행이라도 정책은 2원 1건에 매핑된다. 오타로
+         *     유령 정책 row가 생기지 않게 카탈로그·잔존 sync state·기존 policy 중 하나에
+         *     있는 조합만 허용하고, 그 외는 404. 존재 검증 SELECT와 upsert는 **하나의
+         *     ``session.begin()`` transaction 안**에서 실행한다 — begin 밖 SELECT는 세션을
+         *     autobegin시켜 이후 ``begin()``이 500으로 터진다(리뷰 S2). 실세션 회귀는
+         *     ``tests/integration/test_ops_datasets_refresh_policy.py``가 고정한다.
+         */
+        put: operations["upsert_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/health-deep": {
         parameters: {
             query?: never;
@@ -6934,6 +7025,275 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * OpsDatasetCatalogInfo
+         * @description ETL 카탈로그(`provider_catalog`)가 아는 dataset 메타.
+         */
+        OpsDatasetCatalogInfo: {
+            /**
+             * Default Sync Scope
+             * @description 카탈로그 기본 sync_scope — 대부분 `default`, KMA 격자/region 예외.
+             */
+            default_sync_scope: string;
+            /**
+             * Feature Kind
+             * @description 산출 Feature 종류 (place/event/notice/price/weather/route/area).
+             */
+            feature_kind: string;
+            /**
+             * Is Feature Load
+             * @description 새 Feature(FeatureBundle) 적재 여부 (WeatherValue/PriceValue는 False).
+             */
+            is_feature_load: boolean;
+            /**
+             * Is Refreshable
+             * @description Dagster feature update request로 실행 가능한 적재/갱신 단위 여부.
+             */
+            is_refreshable: boolean;
+            /**
+             * Label
+             * @description 운영자용 한글 라벨.
+             */
+            label: string;
+            /**
+             * Preview
+             * @description ETL preview 가용성 — `fixture`(오프라인 replay) / `live`(provider 실호출, opt-in flag 필요) / `none`(미배선).
+             * @enum {string}
+             */
+            preview: "fixture" | "live" | "none";
+        };
+        /**
+         * OpsDatasetDetailData
+         * @description ``GET /ops/datasets/{provider}/{dataset}`` data.
+         */
+        OpsDatasetDetailData: {
+            catalog?: components["schemas"]["OpsDatasetCatalogInfo"] | null;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Issue Severity Counts */
+            issue_severity_counts: {
+                [key: string]: number;
+            };
+            /** Open Issue Count */
+            open_issue_count: number;
+            /** Provider */
+            provider: string;
+            /** Recent Events */
+            recent_events: components["schemas"]["OpsDatasetEventRecord"][];
+            /** Recent Runs */
+            recent_runs: components["schemas"]["OpsDatasetRunSummary"][];
+            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            /**
+             * Scopes
+             * @description sync_scope별 상태 배열(3원 차원). sync row가 전혀 없으면 카탈로그 기본 scope 1건을 `never_run`으로 합성한다.
+             */
+            scopes: components["schemas"]["OpsDatasetScopeState"][];
+        };
+        /**
+         * OpsDatasetDetailResponse
+         * @description ``GET /ops/datasets/{provider}/{dataset}`` 응답.
+         */
+        OpsDatasetDetailResponse: {
+            data: components["schemas"]["OpsDatasetDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsDatasetEventRecord
+         * @description dataset과 연결된 최근 import job 이벤트 1건.
+         */
+        OpsDatasetEventRecord: {
+            /** Code */
+            code: string | null;
+            /** Event Id */
+            event_id: string;
+            /** Job Id */
+            job_id: string;
+            /** Level */
+            level: string;
+            /** Message */
+            message: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Stage */
+            stage: string | null;
+        };
+        /**
+         * OpsDatasetGridRow
+         * @description ``GET /ops/datasets`` 그리드의 1행 — provider×dataset×sync_scope 3원.
+         */
+        OpsDatasetGridRow: {
+            /** @description ETL 카탈로그 메타. 카탈로그에서 빠진 잔존 sync/policy row는 null (defensive — dataset 제거 후에도 상태는 계속 보인다). */
+            catalog?: components["schemas"]["OpsDatasetCatalogInfo"] | null;
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Dataset Key */
+            dataset_key: string;
+            /**
+             * Issue Severity Counts
+             * @description 미해결 이슈의 severity별 분해 (없으면 빈 객체).
+             */
+            issue_severity_counts: {
+                [key: string]: number;
+            };
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Next Run After */
+            next_run_after: string | null;
+            /**
+             * Open Issue Count
+             * @description 미해결(open/acknowledged) data integrity 이슈 수.
+             */
+            open_issue_count: number;
+            /** Provider */
+            provider: string;
+            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            /**
+             * Status
+             * @description sync state status. row 없는 카탈로그 조합은 `never_run`.
+             */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
+         * OpsDatasetPreviewData
+         * @description ``POST /ops/datasets/{provider}/{dataset}/preview`` data.
+         */
+        OpsDatasetPreviewData: {
+            /** Dataset */
+            dataset: string;
+            /** Description */
+            description: string;
+            /**
+             * Items
+             * @description 변환 결과 list. variant에 따라 schema가 다르다 — FeatureBundle (feature/source_record/source_link 3-key dict) / WeatherValue / PriceValue 등.
+             */
+            items: {
+                [key: string]: unknown;
+            }[];
+            /** Provider */
+            provider: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "fixture" | "live";
+            /**
+             * Variant
+             * @description `FeatureBundle` / `WeatherValue` / `PriceValue` 등.
+             */
+            variant: string;
+        };
+        /**
+         * OpsDatasetPreviewResponse
+         * @description ``POST /ops/datasets/{provider}/{dataset}/preview`` 응답.
+         */
+        OpsDatasetPreviewResponse: {
+            data: components["schemas"]["OpsDatasetPreviewData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsDatasetRefreshPolicyResponse
+         * @description ``PUT /ops/datasets/{provider}/{dataset}/refresh-policy`` 응답.
+         */
+        OpsDatasetRefreshPolicyResponse: {
+            data: components["schemas"]["ProviderRefreshPolicyRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsDatasetRunSummary
+         * @description dataset과 연결된 최근 실행 1건 — update request + 연결 import job 요약.
+         */
+        OpsDatasetRunSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Error Message */
+            error_message?: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Job Current Stage */
+            job_current_stage?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Job Progress */
+            job_progress?: number | null;
+            /**
+             * Job Status
+             * @description 연결 import job status (job 미연결/미발견 시 null).
+             */
+            job_status?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Priority */
+            priority: number;
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Run Mode */
+            run_mode: string;
+            /** Scope Type */
+            scope_type: string;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OpsDatasetScopeState
+         * @description 상세의 sync_scope 1건 상태 — 운영 내부 cursor 포함.
+         */
+        OpsDatasetScopeState: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Cursor */
+            cursor: {
+                [key: string]: unknown;
+            };
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Next Run After */
+            next_run_after: string | null;
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
+         * OpsDatasetsGridData
+         * @description datasets 그리드 data — 행 수가 유한(카탈로그 기반)해 페이지네이션 없음.
+         */
+        OpsDatasetsGridData: {
+            /** Items */
+            items: components["schemas"]["OpsDatasetGridRow"][];
+        };
+        /**
+         * OpsDatasetsGridResponse
+         * @description ``GET /ops/datasets`` 응답.
+         */
+        OpsDatasetsGridResponse: {
+            data: components["schemas"]["OpsDatasetsGridData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * OpsDedupFpStatsRecord
          * @description dedup 검토 큐 FP 통계.
          */
@@ -7844,7 +8204,10 @@ export interface components {
         };
         /**
          * ProviderRefreshPolicyUpsertRequest
-         * @description provider/dataset refresh policy full upsert 요청.
+         * @description provider/dataset refresh policy full upsert 요청 본문.
+         *
+         *     ``/admin/provider-refresh-policies``(구)와 ``/ops/datasets``(ADR-064 신규)
+         *     라우터가 공유한다 — 구 라우터가 삭제(T-ADM-C6b)돼도 계약은 여기 남는다.
          */
         ProviderRefreshPolicyUpsertRequest: {
             /** Burst Size */
@@ -14689,6 +15052,236 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DagsterSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_datasets_grid_v1_ops_datasets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsDatasetsGridResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_dataset_detail_v1_ops_datasets__provider___dataset__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                dataset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsDatasetDetailResponse"];
+                };
+            };
+            /** @description 카탈로그·sync state·policy 어디에도 없는 조합 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post: {
+        parameters: {
+            query?: {
+                source?: "fixture" | "live";
+            };
+            header?: never;
+            path: {
+                provider: string;
+                dataset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsDatasetPreviewResponse"];
+                };
+            };
+            /** @description source=live인데 etl_live_preview_enabled=False */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 등록되지 않은 (provider, dataset) 또는 fixture 미등록 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description source=live 미구현 (LIVE_LOADER_REGISTRY 미등록) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description provider 외부 API 호출 실패 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description API key 미설정 (.env 확인) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    upsert_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                dataset: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsDatasetRefreshPolicyResponse"];
+                };
+            };
+            /** @description 카탈로그·sync state·기존 policy 어디에도 없는 조합 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */
