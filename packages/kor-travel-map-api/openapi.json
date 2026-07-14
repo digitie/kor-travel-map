@@ -13821,6 +13821,683 @@
         "title": "OpsConsistencyReportsListResponse",
         "type": "object"
       },
+      "OpsDatasetCatalogInfo": {
+        "additionalProperties": false,
+        "description": "ETL 카탈로그(`provider_catalog`)가 아는 dataset 메타.",
+        "properties": {
+          "default_sync_scope": {
+            "description": "카탈로그 기본 sync_scope — 대부분 `default`, KMA 격자/region 예외.",
+            "title": "Default Sync Scope",
+            "type": "string"
+          },
+          "feature_kind": {
+            "description": "산출 Feature 종류 (place/event/notice/price/weather/route/area).",
+            "title": "Feature Kind",
+            "type": "string"
+          },
+          "is_feature_load": {
+            "description": "새 Feature(FeatureBundle) 적재 여부 (WeatherValue/PriceValue는 False).",
+            "title": "Is Feature Load",
+            "type": "boolean"
+          },
+          "is_refreshable": {
+            "description": "Dagster feature update request로 실행 가능한 적재/갱신 단위 여부.",
+            "title": "Is Refreshable",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "운영자용 한글 라벨.",
+            "title": "Label",
+            "type": "string"
+          },
+          "preview": {
+            "description": "ETL preview 가용성 — `fixture`(오프라인 replay) / `live`(provider 실호출, opt-in flag 필요) / `none`(미배선).",
+            "enum": [
+              "fixture",
+              "live",
+              "none"
+            ],
+            "title": "Preview",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_kind",
+          "default_sync_scope",
+          "label",
+          "is_feature_load",
+          "is_refreshable",
+          "preview"
+        ],
+        "title": "OpsDatasetCatalogInfo",
+        "type": "object"
+      },
+      "OpsDatasetDetailData": {
+        "additionalProperties": false,
+        "description": "``GET /ops/datasets/{provider}/{dataset}`` data.",
+        "properties": {
+          "catalog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetCatalogInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "issue_severity_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Issue Severity Counts",
+            "type": "object"
+          },
+          "open_issue_count": {
+            "title": "Open Issue Count",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recent_events": {
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetEventRecord"
+            },
+            "title": "Recent Events",
+            "type": "array"
+          },
+          "recent_runs": {
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetRunSummary"
+            },
+            "title": "Recent Runs",
+            "type": "array"
+          },
+          "refresh_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scopes": {
+            "description": "sync_scope별 상태 배열(3원 차원). sync row가 전혀 없으면 카탈로그 기본 scope 1건을 `never_run`으로 합성한다.",
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetScopeState"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "scopes",
+          "recent_runs",
+          "recent_events",
+          "open_issue_count",
+          "issue_severity_counts"
+        ],
+        "title": "OpsDatasetDetailData",
+        "type": "object"
+      },
+      "OpsDatasetDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/datasets/{provider}/{dataset}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsDatasetDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsDatasetDetailResponse",
+        "type": "object"
+      },
+      "OpsDatasetEventRecord": {
+        "additionalProperties": false,
+        "description": "dataset과 연결된 최근 import job 이벤트 1건.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          }
+        },
+        "required": [
+          "event_id",
+          "job_id",
+          "stage",
+          "level",
+          "code",
+          "message",
+          "occurred_at"
+        ],
+        "title": "OpsDatasetEventRecord",
+        "type": "object"
+      },
+      "OpsDatasetGridRow": {
+        "additionalProperties": false,
+        "description": "``GET /ops/datasets`` 그리드의 1행 — provider×dataset×sync_scope 3원.",
+        "properties": {
+          "catalog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetCatalogInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ETL 카탈로그 메타. 카탈로그에서 빠진 잔존 sync/policy row는 null (defensive — dataset 제거 후에도 상태는 계속 보인다)."
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "issue_severity_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "미해결 이슈의 severity별 분해 (없으면 빈 객체).",
+            "title": "Issue Severity Counts",
+            "type": "object"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "next_run_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run After"
+          },
+          "open_issue_count": {
+            "description": "미해결(open/acknowledged) data integrity 이슈 수.",
+            "title": "Open Issue Count",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "refresh_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "description": "sync state status. row 없는 카탈로그 조합은 `never_run`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "sync_scope",
+          "status",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "next_run_after",
+          "open_issue_count",
+          "issue_severity_counts"
+        ],
+        "title": "OpsDatasetGridRow",
+        "type": "object"
+      },
+      "OpsDatasetPreviewData": {
+        "additionalProperties": false,
+        "description": "``POST /ops/datasets/{provider}/{dataset}/preview`` data.",
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "items": {
+            "description": "변환 결과 list. variant에 따라 schema가 다르다 — FeatureBundle (feature/source_record/source_link 3-key dict) / WeatherValue / PriceValue 등.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "fixture",
+              "live"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "variant": {
+            "description": "`FeatureBundle` / `WeatherValue` / `PriceValue` 등.",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset",
+          "source",
+          "variant",
+          "description",
+          "items"
+        ],
+        "title": "OpsDatasetPreviewData",
+        "type": "object"
+      },
+      "OpsDatasetPreviewResponse": {
+        "additionalProperties": false,
+        "description": "``POST /ops/datasets/{provider}/{dataset}/preview`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsDatasetPreviewData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsDatasetPreviewResponse",
+        "type": "object"
+      },
+      "OpsDatasetRefreshPolicyResponse": {
+        "additionalProperties": false,
+        "description": "``PUT /ops/datasets/{provider}/{dataset}/refresh-policy`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsDatasetRefreshPolicyResponse",
+        "type": "object"
+      },
+      "OpsDatasetRunSummary": {
+        "additionalProperties": false,
+        "description": "dataset과 연결된 최근 실행 1건 — update request + 연결 import job 요약.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job_current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Current Stage"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "job_progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Progress"
+          },
+          "job_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "연결 import job status (job 미연결/미발견 시 null).",
+            "title": "Job Status"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "run_mode": {
+            "title": "Run Mode",
+            "type": "string"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "run_mode",
+          "scope_type",
+          "dry_run",
+          "priority",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "updated_at"
+        ],
+        "title": "OpsDatasetRunSummary",
+        "type": "object"
+      },
+      "OpsDatasetScopeState": {
+        "additionalProperties": false,
+        "description": "상세의 sync_scope 1건 상태 — 운영 내부 cursor 포함.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "cursor": {
+            "additionalProperties": true,
+            "title": "Cursor",
+            "type": "object"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "next_run_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run After"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sync_scope",
+          "status",
+          "cursor",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "next_run_after"
+        ],
+        "title": "OpsDatasetScopeState",
+        "type": "object"
+      },
+      "OpsDatasetsGridData": {
+        "additionalProperties": false,
+        "description": "datasets 그리드 data — 행 수가 유한(카탈로그 기반)해 페이지네이션 없음.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetGridRow"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsDatasetsGridData",
+        "type": "object"
+      },
+      "OpsDatasetsGridResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/datasets`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsDatasetsGridData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsDatasetsGridResponse",
+        "type": "object"
+      },
       "OpsDedupFpStatsRecord": {
         "additionalProperties": false,
         "description": "dedup 검토 큐 FP 통계.",
@@ -16196,7 +16873,7 @@
       },
       "ProviderRefreshPolicyUpsertRequest": {
         "additionalProperties": false,
-        "description": "provider/dataset refresh policy full upsert 요청.",
+        "description": "provider/dataset refresh policy full upsert 요청 본문.\n\n``/admin/provider-refresh-policies``(구)와 ``/ops/datasets``(ADR-064 신규)\n라우터가 공유한다 — 구 라우터가 삭제(T-ADM-C6b)돼도 계약은 여기 남는다.",
         "properties": {
           "burst_size": {
             "anyOf": [
@@ -30913,6 +31590,328 @@
         "tags": [
           "ops",
           "dagster"
+        ]
+      }
+    },
+    "/v1/ops/datasets": {
+      "get": {
+        "description": "ETL 카탈로그의 전 provider×dataset을 base set으로 sync state(신선도)·refresh policy·미해결 integrity 이슈 카운트를 LEFT JOIN 한다. sync row가 있는 dataset은 scope별로 여러 행(3원)이 되고, 한 번도 적재되지 않은 조합도 `status='never_run'`으로 노출한다(never_run vs stale 구분 승계). 행 수가 유한해 페이지네이션 없이 전량 반환한다.",
+        "operationId": "list_datasets_grid_v1_ops_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsDatasetsGridResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "provider×dataset×sync_scope 상태 그리드",
+        "tags": [
+          "ops-datasets"
+        ]
+      }
+    },
+    "/v1/ops/datasets/{provider}/{dataset}": {
+      "get": {
+        "description": "provider×dataset 1조합의 운영 상세.\n\n카탈로그 조합은 sync row가 없어도 200(never_run scope 합성). 카탈로그에\n없더라도 sync state 또는 policy row가 남아 있으면 200(잔존 상태 가시성).\n셋 다 없으면 404.",
+        "operationId": "get_dataset_detail_v1_ops_datasets__provider___dataset__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsDatasetDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "카탈로그·sync state·policy 어디에도 없는 조합"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "dataset 상세 — scope 배열 + 최근 실행/이벤트 + 정책",
+        "tags": [
+          "ops-datasets"
+        ]
+      }
+    },
+    "/v1/ops/datasets/{provider}/{dataset}/preview": {
+      "post": {
+        "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답한다. DB write 없음. fixture 모드는 외부 의존 없이 상시 동작. live 모드(실 provider 호출·쿼터 소모)는 `KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED=1` opt-in 뒤에서만 열리고, `etl_live.LIVE_LOADER_REGISTRY` 등록 dataset만 지원한다.",
+        "operationId": "post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "fixture",
+              "enum": [
+                "fixture",
+                "live"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsDatasetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "source=live인데 etl_live_preview_enabled=False"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "등록되지 않은 (provider, dataset) 또는 fixture 미등록"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "source=live 미구현 (LIVE_LOADER_REGISTRY 미등록)"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "provider 외부 API 호출 실패"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "API key 미설정 (.env 확인)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "ETL 변환 dry-run preview",
+        "tags": [
+          "ops-datasets"
+        ]
+      }
+    },
+    "/v1/ops/datasets/{provider}/{dataset}/refresh-policy": {
+      "put": {
+        "description": "``{provider}/{dataset}`` 2원 refresh policy를 full upsert한다.\n\n그리드/상세의 3원(scope 포함) 행이라도 정책은 2원 1건에 매핑된다. 오타로\n유령 정책 row가 생기지 않게 카탈로그(또는 잔존 sync state)에 있는 조합만\n허용하고, 그 외는 404.",
+        "operationId": "upsert_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsDatasetRefreshPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "카탈로그·sync state 어디에도 없는 조합"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "dataset refresh policy upsert (2원)",
+        "tags": [
+          "ops-datasets"
         ]
       }
     },

@@ -68,6 +68,7 @@ from kortravelmap.api.routers import (
     features_router,
     mois_detail_router,
     offline_uploads_router,
+    ops_datasets_router,
     ops_live_router,
     ops_logs_router,
     ops_router,
@@ -628,6 +629,16 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         application.include_router(ops_live_router, prefix="/v1")
         application.include_router(ops_logs_router, prefix="/v1")
         application.include_router(dagster_router, prefix="/v1")
+
+    # ADR-064 (T-ADM-C2) — 신규 `/ops/datasets` 그룹. 조작(PUT/POST)이 포함되어
+    # 위의 무인증 ops 패턴을 승계하지 않고 admin frontend 게이트를 강제한다.
+    # T-ADM-C3(pipeline 그룹)와의 rebase 충돌을 줄이기 위해 자체 블록으로 둔다.
+    if ops_routes_enabled:
+        application.include_router(
+            ops_datasets_router,
+            prefix="/v1",
+            dependencies=[Depends(require_admin_frontend)],
+        )
 
     # ADR-031/T-452 — 생성 openapi에 RFC7807 problem+json 에러 응답을 주입한다.
     # 중앙 예외 핸들러가 모든 4xx/5xx를 problem+json으로 통일하는 구조를 기계 계약에
