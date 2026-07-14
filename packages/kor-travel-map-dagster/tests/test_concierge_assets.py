@@ -62,12 +62,13 @@ def _export_item(operation: str, *, candidate_id: int = 9201) -> dict[str, Any]:
             "category_code_suggestion": "01020300",
             "longitude": 126.2396,
             "latitude": 33.3941,
+            # T-189 — 장소 매칭 후보는 실 행정코드가 실린다(strict 주소 검증 통과).
             "address": {
                 "official_address": "제주특별자치도 제주시 한림읍 협재리",
                 "road_address": None,
-                "legal_dong_code": None,
-                "sido_code": None,
-                "sigungu_code": None,
+                "legal_dong_code": "5011031025",
+                "sido_code": "50",
+                "sigungu_code": "50110",
             },
         },
         "youtube": {
