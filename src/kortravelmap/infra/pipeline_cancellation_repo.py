@@ -24,6 +24,8 @@ from kortravelmap.core.pipeline_cancellation_states import (
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_invariants import (
+    _FAILED_ERROR_CODES,
+    _RETRYABLE_ERROR_CODES,
     _run_base_mapping,
     _structured_error_code,
     _validate_finish_invariants,
@@ -686,7 +688,7 @@ async def retry_pipeline_cancellation_attempt(
     unresolved = tuple(
         member
         for member in previous.members
-        if member.result in {"pending", "cancel_failed"}
+        if member.initial_status == "running" and member.result == "cancel_failed"
     )
     if not unresolved:
         raise PipelineCancellationInvariantError(
@@ -761,7 +763,7 @@ async def set_pipeline_cancellation_member_result(
         raise ValueError("member result setter only accepts cancel_failed")
     if terminal_status is not None:
         raise ValueError("cancel_failed member cannot have a terminal status")
-    _structured_error_code(error)
+    error_code = _structured_error_code(error)
     if set(expected_results) - {"pending", "cancel_failed"}:
         raise ValueError("member failure CAS only accepts unresolved expected results")
     if await _lock_in_progress_attempt(session, cancellation_id) is None:
@@ -774,21 +776,15 @@ async def set_pipeline_cancellation_member_result(
     )
     if member is None or member.result not in set(expected_results):
         return False
-    if member.dagster_run_id is None:
-        if member.initial_status != "running":
-            raise PipelineCancellationInvariantError(
-                "only a running member may fail without a Dagster run mapping"
-            )
-    else:
+    run = None
+    if member.dagster_run_id is not None:
         run = await _lock_run(
             session,
             cancellation_id=cancellation_id,
             dagster_run_id=member.dagster_run_id,
         )
-        if run is None or run.result != "cancel_failed":
-            raise PipelineCancellationInvariantError(
-                "member failure requires the matching run failure first"
-            )
+        if run is None:
+            raise PipelineCancellationInvariantError("matching cancellation run is missing")
     base = (
         await _lock_scope_members(
             session,
@@ -803,13 +799,37 @@ async def set_pipeline_cancellation_member_result(
             ),
         )
     )[0]
-    if (
-        base.cancellation_id != _uuid(cancellation_id)
-        or base.initial_status not in {"queued", "running"}
-        or base.dagster_run_id != member.dagster_run_id
-    ):
-        raise PipelineCancellationConflict(
-            "member failure base marker/status/run mapping diverged"
+    base_matches = (
+        base.cancellation_id == _uuid(cancellation_id)
+        and base.initial_status == member.initial_status
+        and base.dagster_run_id == member.dagster_run_id
+    )
+    if error_code in _RETRYABLE_ERROR_CODES:
+        if member.initial_status != "running" or not base_matches:
+            raise PipelineCancellationConflict(
+                "retryable member failure requires the exact frozen running base"
+            )
+        if run is None or run.result != "cancel_failed":
+            raise PipelineCancellationInvariantError(
+                "retryable member failure requires the matching run failure first"
+            )
+    elif error_code in _FAILED_ERROR_CODES:
+        terminal_run = (
+            run is not None
+            and run.result == "already_terminal"
+            and run.terminal_status in {"SUCCESS", "FAILURE"}
+        )
+        if member.dagster_run_id is not None and not terminal_run and base_matches:
+            raise PipelineCancellationInvariantError(
+                "definitive failure requires a terminal run or observed base mismatch"
+            )
+        if member.dagster_run_id is None and member.initial_status != "running":
+            raise PipelineCancellationInvariantError(
+                "only a frozen running member may fail without a run mapping"
+            )
+    else:
+        raise PipelineCancellationInvariantError(
+            "member failure code does not match retryable or definitive policy"
         )
     row = (
         await session.execute(
@@ -1071,16 +1091,6 @@ async def cancel_queued_pipeline_cancellation_member(
         raise PipelineCancellationInvariantError(
             "explicit DB-only cancellation only accepts queued members"
         )
-    if member.dagster_run_id is not None:
-        run = await _lock_run(
-            session,
-            cancellation_id=cancellation_id,
-            dagster_run_id=member.dagster_run_id,
-        )
-        if run is None or run.result in {"pending", "cancel_failed"}:
-            raise PipelineCancellationInvariantError(
-                "queued member sharing a running Dagster run must wait for run terminal"
-            )
     base = (
         await _lock_scope_members(
             session,

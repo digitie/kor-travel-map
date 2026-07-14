@@ -120,8 +120,11 @@ async def run_full_load_batch_consistency_gate_op(
     )
     metadata = _metadata(result)
     context.add_output_metadata(metadata)
-    if result.state == "failed":
-        raise Failure(description=result.error_message or "batch consistency gate failed")
+    if result.state not in {"done", "planned"}:
+        raise Failure(
+            description=result.error_message
+            or f"batch consistency gate ended in {result.state}"
+        )
     return metadata
 
 

@@ -11,19 +11,27 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import kortravelmap.client as client_module
+import kortravelmap.infra.batch_dag as batch_module
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.batch_dag import (
+    BatchDagCancellationWon,
     BatchDagMvPrepared,
     BatchDagPrepared,
     BatchDagRequest,
     BatchDagRunResult,
+    fail_batch_dag_phase,
+    make_batch_dag_request,
+    prepare_batch_dag,
+    run_batch_consistency_phase,
+    start_batch_mv_phase,
 )
 from kortravelmap.infra.consistency import ConsistencyReport
 from kortravelmap.infra.jobs_repo import finish_import_job, start_import_job
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
+    lock_pipeline_lineage_mutation,
     resolve_pipeline_cancellation_scope,
 )
 
@@ -56,6 +64,9 @@ async def _cleanup_committed_batch_state(
             await snapshot.scalars(
                 text("SELECT report_id FROM ops.feature_consistency_reports")
             )
+        )
+        system_log_ids = set(
+            await snapshot.scalars(text("SELECT system_log_id FROM ops.system_log"))
         )
     try:
         yield
@@ -102,6 +113,13 @@ async def _cleanup_committed_batch_state(
                     "WHERE report_id <> ALL(CAST(:ids AS uuid[]))"
                 ),
                 {"ids": list(report_ids)},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.system_log "
+                    "WHERE system_log_id <> ALL(CAST(:ids AS uuid[]))"
+                ),
+                {"ids": list(system_log_ids)},
             )
             await cleanup.execute(
                 text(
@@ -244,6 +262,7 @@ async def test_batch_phases_keep_one_backend_but_release_lineage_xact_lock(
         await finish_import_job(setup, child.job_id, status="done")
     backend_pids: list[int] = []
     original_prepare = client_module.prepare_batch_dag
+    original_consistency = client_module.run_batch_consistency_phase
     original_start_mv = client_module.start_batch_mv_phase
     original_finish_mv = client_module.finish_batch_mv_phase
 
@@ -255,7 +274,7 @@ async def test_batch_phases_keep_one_backend_but_release_lineage_xact_lock(
 
     async def fake_consistency(
         session: AsyncSession, prepared: BatchDagPrepared
-    ) -> ConsistencyReport:
+    ) -> ConsistencyReport | BatchDagRunResult:
         backend_pids.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
         async with AsyncSession(migrated_engine) as probe, probe.begin():
             acquired = await probe.scalar(
@@ -267,12 +286,7 @@ async def test_batch_phases_keep_one_backend_but_release_lineage_xact_lock(
                 },
             )
             assert acquired is True
-        return ConsistencyReport(
-            batch_id=prepared.request.load_batch_id,
-            severity_max="OK",
-            cases=[],
-            summary={"total_violations": 0},
-        )
+        return await original_consistency(session, prepared)
 
     async def capture_start_mv(
         session: AsyncSession,
@@ -346,16 +360,6 @@ async def test_mv_phase_exception_rolls_back_before_durable_failure_record(
         child = await start_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
 
-    async def fake_consistency(
-        _session: AsyncSession, prepared: BatchDagPrepared
-    ) -> ConsistencyReport:
-        return ConsistencyReport(
-            batch_id=prepared.request.load_batch_id,
-            severity_max="OK",
-            cases=[],
-            summary={"total_violations": 0},
-        )
-
     async def fail_after_write(
         session: AsyncSession, phase: BatchDagMvPrepared
     ) -> BatchDagRunResult:
@@ -368,7 +372,6 @@ async def test_mv_phase_exception_rolls_back_before_durable_failure_record(
         )
         raise RuntimeError("mv exploded")
 
-    monkeypatch.setattr(client_module, "run_batch_consistency_phase", fake_consistency)
     monkeypatch.setattr(client_module, "finish_batch_mv_phase", fail_after_write)
     result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
         child_job_ids=[child.job_id],
@@ -398,19 +401,16 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
         await finish_import_job(setup, child.job_id, status="done")
     original_finish = client_module.finish_batch_mv_phase
 
-    async def fake_consistency(
-        _session: AsyncSession, prepared: BatchDagPrepared
-    ) -> ConsistencyReport:
-        return ConsistencyReport(
-            batch_id=prepared.request.load_batch_id,
-            severity_max="OK",
-            cases=[],
-            summary={"total_violations": 0},
-        )
-
     async def cancel_then_finish(
         session: AsyncSession, phase: BatchDagMvPrepared
     ) -> BatchDagRunResult:
+        await session.execute(
+            text(
+                "INSERT INTO ops.system_log "
+                "(level, source, event, message, detail) VALUES "
+                "('info','pytest','batch.mv.transient','must rollback','{}'::jsonb)"
+            )
+        )
         root_id = phase.prepared.root_job.job_id
         async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
             scope = await resolve_pipeline_cancellation_scope(
@@ -427,7 +427,6 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
             )
         return await original_finish(session, phase)
 
-    monkeypatch.setattr(client_module, "run_batch_consistency_phase", fake_consistency)
     monkeypatch.setattr(client_module, "finish_batch_mv_phase", cancel_then_finish)
     result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
         child_job_ids=[child.job_id],
@@ -438,3 +437,260 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
     assert result.root_job is not None
     assert result.root_job.status == "running"
     assert result.root_job.cancellation_id is not None
+    async with AsyncSession(migrated_engine) as verify:
+        transient = await verify.scalar(
+            text(
+                "SELECT COUNT(*) FROM ops.system_log "
+                "WHERE event = 'batch.mv.transient'"
+            )
+        )
+    assert transient == 0
+
+
+async def test_cancellation_rolls_back_consistency_report_and_transient_write(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        child = await start_import_job(setup, kind="offline_upload_load")
+        await finish_import_job(setup, child.job_id, status="done")
+    original_checks = batch_module.run_consistency_checks
+
+    async def cancel_after_consistency(
+        session: AsyncSession,
+        *,
+        batch_id: str,
+        persist: bool,
+        sample_limit: int,
+        dedup_pending_threshold: int,
+    ) -> ConsistencyReport:
+        report = await original_checks(
+            session,
+            batch_id=batch_id,
+            persist=persist,
+            sample_limit=sample_limit,
+            dedup_pending_threshold=dedup_pending_threshold,
+        )
+        await session.execute(
+            text(
+                "INSERT INTO ops.system_log "
+                "(level, source, event, message, detail) VALUES "
+                "('info','pytest','batch.consistency.transient','must rollback','{}'::jsonb)"
+            )
+        )
+        async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+            root_id = await cancellation.scalar(
+                text(
+                    "SELECT job_id FROM ops.import_jobs "
+                    "WHERE load_batch_id = CAST(:batch_id AS uuid) "
+                    "AND kind = 'full_load_batch'"
+                ),
+                {"batch_id": batch_id},
+            )
+            assert root_id is not None
+            scope = await resolve_pipeline_cancellation_scope(
+                cancellation,
+                kind="import_job",
+                execution_id=str(root_id),
+            )
+            assert scope is not None
+            await create_pipeline_cancellation_attempt(
+                cancellation,
+                scope=scope,
+                requested_by="admin:test",
+                reason="consistency race",
+            )
+        return report
+
+    monkeypatch.setattr(batch_module, "run_consistency_checks", cancel_after_consistency)
+    batch_id = "aaaaaaaa-0000-0000-0000-000000000009"
+    result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
+        child_job_ids=[child.job_id],
+        load_batch_id=batch_id,
+        consistency_persist=True,
+    )
+
+    assert result.state == "cancelled"
+    async with AsyncSession(migrated_engine) as verify:
+        report_count = await verify.scalar(
+            text(
+                "SELECT COUNT(*) FROM ops.feature_consistency_reports "
+                "WHERE batch_id = CAST(:batch_id AS uuid)"
+            ),
+            {"batch_id": batch_id},
+        )
+        transient_count = await verify.scalar(
+            text(
+                "SELECT COUNT(*) FROM ops.system_log "
+                "WHERE event = 'batch.consistency.transient'"
+            )
+        )
+    assert report_count == transient_count == 0
+
+
+async def test_phase_row_lock_first_can_commit_before_cancellation_progresses(
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        child = await start_import_job(setup, kind="offline_upload_load")
+        await finish_import_job(setup, child.job_id, status="done")
+        prepared = await prepare_batch_dag(
+            setup,
+            make_batch_dag_request(
+                child_job_ids=[child.job_id],
+                load_batch_id="aaaaaaaa-0000-0000-0000-000000000010",
+            ),
+        )
+        assert isinstance(prepared, BatchDagPrepared)
+
+    async with AsyncSession(migrated_engine) as phase:
+        await phase.begin()
+        await phase.execute(text("SET LOCAL lock_timeout = '1s'"))
+        await phase.execute(
+            text(
+                "SELECT job_id FROM ops.import_jobs "
+                "WHERE job_id = CAST(:job_id AS uuid) FOR UPDATE"
+            ),
+            {"job_id": prepared.consistency_job.job_id},
+        )
+
+        async def cancel_scope() -> None:
+            async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+                await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
+                scope = await resolve_pipeline_cancellation_scope(
+                    cancellation,
+                    kind="import_job",
+                    execution_id=prepared.root_job.job_id,
+                )
+                assert scope is not None
+                await create_pipeline_cancellation_attempt(
+                    cancellation,
+                    scope=scope,
+                    requested_by="admin:test",
+                    reason="row lock order",
+                )
+
+        cancellation_task = asyncio.create_task(cancel_scope())
+        await asyncio.sleep(0.05)
+        assert cancellation_task.done() is False
+        await phase.commit()
+        await cancellation_task
+
+
+@pytest.mark.parametrize("phase_name", ["start_mv", "failure"])
+@pytest.mark.parametrize("first_owner", ["phase", "cancellation"])
+async def test_tx3_and_failure_have_no_bidirectional_deadlock(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    phase_name: str,
+    first_owner: str,
+) -> None:
+    suffix = {
+        ("start_mv", "phase"): "11",
+        ("start_mv", "cancellation"): "12",
+        ("failure", "phase"): "13",
+        ("failure", "cancellation"): "14",
+    }[(phase_name, first_owner)]
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        child = await start_import_job(setup, kind="offline_upload_load")
+        await finish_import_job(setup, child.job_id, status="done")
+        prepared = await prepare_batch_dag(
+            setup,
+            make_batch_dag_request(
+                child_job_ids=[child.job_id],
+                load_batch_id=f"aaaaaaaa-0000-0000-0000-0000000000{suffix}",
+            ),
+        )
+        assert isinstance(prepared, BatchDagPrepared)
+    report: ConsistencyReport | None = None
+    if phase_name == "start_mv":
+        async with AsyncSession(migrated_engine) as consistency, consistency.begin():
+            consistency_result = await run_batch_consistency_phase(
+                consistency, prepared
+            )
+            assert isinstance(consistency_result, ConsistencyReport)
+            report = consistency_result
+
+    original_lock = batch_module.lock_pipeline_hierarchy_for_jobs
+    phase_lock_attempted = asyncio.Event()
+    phase_lock_acquired = asyncio.Event()
+    release_phase = asyncio.Event()
+
+    async def observed_phase_lock(
+        session: AsyncSession,
+        job_ids: tuple[str, ...],
+    ) -> object:
+        phase_lock_attempted.set()
+        scopes = await original_lock(session, job_ids)
+        phase_lock_acquired.set()
+        if first_owner == "phase":
+            await release_phase.wait()
+        return scopes
+
+    monkeypatch.setattr(
+        batch_module,
+        "lock_pipeline_hierarchy_for_jobs",
+        observed_phase_lock,
+    )
+
+    async def run_phase() -> None:
+        async with AsyncSession(migrated_engine) as phase, phase.begin():
+            await phase.execute(text("SET LOCAL lock_timeout = '2s'"))
+            if phase_name == "start_mv":
+                assert report is not None
+                await start_batch_mv_phase(phase, prepared, report)
+            else:
+                await fail_batch_dag_phase(
+                    phase,
+                    prepared,
+                    message="forced failure",
+                )
+
+    if first_owner == "phase":
+        phase_task = asyncio.create_task(run_phase())
+        await phase_lock_acquired.wait()
+
+        async def cancel_after_phase() -> None:
+            async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+                await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
+                scope = await resolve_pipeline_cancellation_scope(
+                    cancellation,
+                    kind="import_job",
+                    execution_id=prepared.root_job.job_id,
+                )
+                assert scope is not None
+                await create_pipeline_cancellation_attempt(
+                    cancellation,
+                    scope=scope,
+                    requested_by="admin:test",
+                    reason="phase-first barrier",
+                )
+
+        cancellation_task = asyncio.create_task(cancel_after_phase())
+        await asyncio.sleep(0.05)
+        assert cancellation_task.done() is False
+        release_phase.set()
+        await phase_task
+        await cancellation_task
+    else:
+        async with AsyncSession(migrated_engine) as cancellation:
+            await cancellation.begin()
+            await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
+            scope = await resolve_pipeline_cancellation_scope(
+                cancellation,
+                kind="import_job",
+                execution_id=prepared.root_job.job_id,
+            )
+            assert scope is not None
+            await lock_pipeline_lineage_mutation(cancellation)
+            phase_task = asyncio.create_task(run_phase())
+            await phase_lock_attempted.wait()
+            await create_pipeline_cancellation_attempt(
+                cancellation,
+                scope=scope,
+                requested_by="admin:test",
+                reason="cancellation-first barrier",
+            )
+            await cancellation.commit()
+        with pytest.raises(BatchDagCancellationWon):
+            await phase_task

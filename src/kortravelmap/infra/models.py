@@ -1938,7 +1938,8 @@ class PipelineCancellationRow(Base):
         ),
         CheckConstraint(
             "(status IN ('in_progress','completed') AND error IS NULL) OR "
-            "(status IN ('retryable','failed') AND jsonb_typeof(error) = 'object')",
+            "(status IN ('retryable','failed') AND error IS NOT NULL "
+            " AND jsonb_typeof(error) = 'object')",
             name="ck_pipeline_cancellations_error_shape",
         ),
         Index(
@@ -2008,7 +2009,7 @@ class PipelineCancellationRunRow(Base):
             "(result = 'already_terminal' AND "
             " (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
             " AND error IS NULL) OR "
-            "(result = 'cancel_failed' AND terminal_status IS NULL "
+            "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
             " AND jsonb_typeof(error) = 'object')",
             name="ck_pipeline_cancellation_runs_shape",
         ),
@@ -2059,7 +2060,7 @@ class PipelineCancellationMemberRow(Base):
             "(result = 'cancelled' AND terminal_status = 'cancelled' AND error IS NULL) OR "
             "(result = 'already_terminal' "
             " AND terminal_status IN ('done','failed','cancelled') AND error IS NULL) OR "
-            "(result = 'cancel_failed' AND terminal_status IS NULL "
+            "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
             " AND jsonb_typeof(error) = 'object')",
             name="ck_pipeline_cancellation_members_shape",
         ),

@@ -163,12 +163,6 @@ def _validate_resolved_member(
             raise PipelineCancellationInvariantError(
                 "queued cancellation requires the explicit no-run DB path"
             )
-        if member.dagster_run_id is not None:
-            run = run_by_id[member.dagster_run_id]
-            if run.result not in {"cancelled", "already_terminal"}:
-                raise PipelineCancellationInvariantError(
-                    "queued member's shared Dagster run is not terminal"
-                )
     elif member.initial_status in _BASE_TERMINAL_STATUSES:
         if (
             member.result != "already_terminal"
@@ -196,6 +190,39 @@ def _retry_capable_member(
     return True
 
 
+def _base_matches_frozen_member(
+    detail: PipelineCancellationDetail,
+    member: PipelineCancellationMember,
+    base: PipelineCancellationScopeMember,
+) -> bool:
+    return (
+        base.cancellation_id == detail.attempt.cancellation_id
+        and base.initial_status == member.initial_status
+        and base.dagster_run_id == member.dagster_run_id
+    )
+
+
+def _definitive_failure_member(
+    detail: PipelineCancellationDetail,
+    member: PipelineCancellationMember,
+    base: PipelineCancellationScopeMember,
+    run_by_id: Mapping[str, PipelineCancellationRun],
+) -> bool:
+    try:
+        _structured_error_code(member.error, allowed_codes=_FAILED_ERROR_CODES)
+    except PipelineCancellationInvariantError:
+        return False
+    base_mismatch = not _base_matches_frozen_member(detail, member, base)
+    if member.dagster_run_id is None:
+        return member.initial_status == "running"
+    run = run_by_id[member.dagster_run_id]
+    terminal_run = (
+        run.result == "already_terminal"
+        and run.terminal_status in {"SUCCESS", "FAILURE"}
+    )
+    return terminal_run or base_mismatch
+
+
 def _validate_finish_invariants(
     detail: PipelineCancellationDetail,
     base_by_key: Mapping[tuple[str, str], PipelineCancellationScopeMember],
@@ -205,18 +232,6 @@ def _validate_finish_invariants(
 ) -> None:
     _validate_normalized_shapes(detail)
     run_by_id = {run.dagster_run_id: run for run in detail.runs}
-    for member in detail.members:
-        key = (member.member_kind, member.member_id)
-        base = base_by_key[key]
-        if base.cancellation_id != detail.attempt.cancellation_id:
-            raise PipelineCancellationInvariantError(
-                "base marker no longer references the active cancellation attempt"
-            )
-        if base.dagster_run_id != member.dagster_run_id:
-            raise PipelineCancellationInvariantError(
-                "base/member Dagster run mapping diverged"
-            )
-
     pending_members = tuple(
         member for member in detail.members if member.result == "pending"
     )
@@ -231,9 +246,17 @@ def _validate_finish_invariants(
         if member.result in {"cancelled", "already_terminal"}
     )
     for member in resolved_members:
+        base = base_by_key[(member.member_kind, member.member_id)]
+        if (
+            base.cancellation_id != detail.attempt.cancellation_id
+            or base.dagster_run_id != member.dagster_run_id
+        ):
+            raise PipelineCancellationInvariantError(
+                "resolved member base marker/run mapping diverged"
+            )
         _validate_resolved_member(
             member,
-            base_by_key[(member.member_kind, member.member_id)],
+            base,
             run_by_id,
         )
 
@@ -249,19 +272,14 @@ def _validate_finish_invariants(
         return
 
     if pending_members or pending_runs:
-        raise PipelineCancellationInvariantError(
-            "closed cancellation attempt cannot retain pending results"
-        )
+        if status != "failed" or pending_members:
+            raise PipelineCancellationInvariantError(
+                "completed/retryable cancellation cannot retain pending results"
+            )
     if not failed_members:
         raise PipelineCancellationInvariantError(
             "retryable/failed cancellation requires unresolved members"
         )
-    for member in failed_members:
-        base = base_by_key[(member.member_kind, member.member_id)]
-        if base.initial_status not in {"queued", "running"}:
-            raise PipelineCancellationInvariantError(
-                "cancel_failed member must preserve an active base status"
-            )
     failed_run_ids = {run.dagster_run_id for run in failed_runs}
     referenced_failed_run_ids = {
         member.dagster_run_id
@@ -275,17 +293,34 @@ def _validate_finish_invariants(
 
     if status == "retryable":
         _structured_error_code(error, allowed_codes=_RETRYABLE_ERROR_CODES)
-        if not all(_retry_capable_member(member, run_by_id) for member in failed_members):
+        if not all(
+            _base_matches_frozen_member(
+                detail,
+                member,
+                base_by_key[(member.member_kind, member.member_id)],
+            )
+            and member.initial_status == "running"
+            and _retry_capable_member(member, run_by_id)
+            for member in failed_members
+        ):
             raise PipelineCancellationInvariantError(
-                "retryable cancellation contains a member that cannot be retried"
+                "retryable cancellation requires exact running base/run failures"
             )
         return
 
     if status == "failed":
         _structured_error_code(error, allowed_codes=_FAILED_ERROR_CODES)
-        if all(_retry_capable_member(member, run_by_id) for member in failed_members):
+        if not all(
+            _definitive_failure_member(
+                detail,
+                member,
+                base_by_key[(member.member_kind, member.member_id)],
+                run_by_id,
+            )
+            for member in failed_members
+        ):
             raise PipelineCancellationInvariantError(
-                "retry-capable unresolved members cannot be closed as failed"
+                "failed cancellation requires a definitive member mismatch"
             )
         return
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from kortravelmap.infra.feature_update_repo import (
     cancel_update_request,
@@ -326,6 +326,33 @@ async def test_scope_and_execution_projection_share_standalone_cycle_self_root_r
     cycle_projection = next(item for item in page.items if item.id == _GRANDCHILD)
     assert cycle.root_id == cycle_projection.id == _GRANDCHILD
     assert len(cycle.members) == cycle_projection.linked_job_count == 2
+
+
+@pytest.mark.parametrize("start_id", [_GRANDCHILD, _LOSER])
+async def test_cycle_scope_has_identical_canonical_root_from_both_start_nodes(
+    migrated_session: AsyncSession,
+    start_id: str,
+) -> None:
+    await _job(migrated_session, _GRANDCHILD)
+    await _job(migrated_session, _LOSER)
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.import_jobs SET parent_job_id = CASE "
+            "WHEN job_id = CAST(:first AS uuid) THEN CAST(:second AS uuid) "
+            "ELSE CAST(:first AS uuid) END "
+            "WHERE job_id IN (CAST(:first AS uuid), CAST(:second AS uuid))"
+        ),
+        {"first": _GRANDCHILD, "second": _LOSER},
+    )
+
+    cycle = await _scope(
+        migrated_session,
+        kind="import_job",
+        execution_id=start_id,
+    )
+
+    assert (cycle.root_kind, cycle.root_id) == ("import_job", _GRANDCHILD)
+    assert {member.member_id for member in cycle.members} == {_GRANDCHILD, _LOSER}
 
 
 async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
@@ -750,6 +777,372 @@ async def test_queued_only_run_uses_explicit_no_call_path(
     ) is not None
 
 
+async def test_queued_shared_run_cancels_immediately_and_retry_copies_running_only(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(
+        migrated_session,
+        _ROOT,
+        status="queued",
+        dagster_run_id="run-shared-retry",
+    )
+    await _job(
+        migrated_session,
+        _CHILD,
+        parent_job_id=_ROOT,
+        status="running",
+        dagster_run_id="run-shared-retry",
+    )
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    assert detail.runs[0].result == "pending"
+    assert await cancel_queued_pipeline_cancellation_member(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        member_kind="import_job",
+        member_id=_ROOT,
+    ) is True
+    retry_error = {"code": "DAGSTER_UNAVAILABLE", "message": "timeout"}
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        dagster_run_id="run-shared-retry",
+        result="cancel_failed",
+        initial_status="STARTED",
+        terminal_status=None,
+        error=retry_error,
+    ) is True
+    assert await set_pipeline_cancellation_member_result(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        member_kind="import_job",
+        member_id=_CHILD,
+        result="cancel_failed",
+        terminal_status=None,
+        error=retry_error,
+    ) is True
+    assert await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        status="retryable",
+        error=retry_error,
+    ) is not None
+
+    retried = await retry_pipeline_cancellation_attempt(
+        migrated_session,
+        previous_cancellation_id=detail.attempt.cancellation_id,
+        requested_by="admin:retry",
+        reason=None,
+    )
+
+    assert [(member.member_id, member.initial_status) for member in retried.members] == [
+        (_CHILD, "running")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("dagster_terminal", "target_status"),
+    [("SUCCESS", "done"), ("FAILURE", "failed")],
+)
+async def test_terminal_run_maps_exactly_without_mutating_base_first(
+    migrated_session: AsyncSession,
+    dagster_terminal: str,
+    target_status: str,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-terminal")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    cancellation_id = detail.attempt.cancellation_id
+    before = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, dagster_run_id, cancellation_id "
+                "FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": _ROOT},
+        )
+    ).one()
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id="run-terminal",
+        result="already_terminal",
+        initial_status="STARTED",
+        terminal_status=dagster_terminal,
+        error=None,
+    ) is True
+    unchanged = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, dagster_run_id, cancellation_id "
+                "FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": _ROOT},
+        )
+    ).one()
+    assert unchanged == before
+    wrong_target = "failed" if target_status == "done" else "done"
+    with pytest.raises(PipelineCancellationInvariantError):
+        await transition_pipeline_cancellation_member(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            member_kind="import_job",
+            member_id=_ROOT,
+            dagster_run_id="run-terminal",
+            expected_status="running",
+            target_status=wrong_target,
+            result="already_terminal",
+        )
+    assert await transition_pipeline_cancellation_member(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_kind="import_job",
+        member_id=_ROOT,
+        dagster_run_id="run-terminal",
+        expected_status="running",
+        target_status=target_status,
+        result="already_terminal",
+    ) is True
+    after = await get_import_job(migrated_session, _ROOT)
+    assert after is not None
+    assert after.status == target_status
+    assert after.cancellation_id == cancellation_id
+    assert await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        status="completed",
+        error=None,
+    ) is not None
+
+
+async def test_run_initial_status_preserves_first_observation(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-status")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    error = {"code": "DAGSTER_UNAVAILABLE", "message": "timeout"}
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        dagster_run_id="run-status",
+        result="cancel_failed",
+        initial_status="STARTED",
+        terminal_status=None,
+        error=error,
+    ) is True
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        dagster_run_id="run-status",
+        result="cancel_failed",
+        initial_status="STOPPING",
+        terminal_status=None,
+        error=error,
+        expected_results=("cancel_failed",),
+    ) is True
+    initial_status = await migrated_session.scalar(
+        text(
+            "SELECT initial_status FROM ops.pipeline_cancellation_runs "
+            "WHERE cancellation_id = CAST(:cancellation_id AS uuid) "
+            "AND dagster_run_id = 'run-status'"
+        ),
+        {"cancellation_id": detail.attempt.cancellation_id},
+    )
+    assert initial_status == "STARTED"
+
+
+@pytest.mark.parametrize(
+    ("result", "terminal_status", "error"),
+    [
+        ("cancelled", "SUCCESS", None),
+        ("already_terminal", "CANCELED", None),
+        ("cancel_failed", "FAILURE", {"code": "DAGSTER_UNAVAILABLE", "message": "x"}),
+    ],
+)
+async def test_run_result_rejects_illegal_result_terminal_combinations(
+    migrated_session: AsyncSession,
+    result: str,
+    terminal_status: str,
+    error: dict[str, str] | None,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-invalid")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+
+    with pytest.raises(PipelineCancellationInvariantError):
+        await set_pipeline_cancellation_run_result(
+            migrated_session,
+            cancellation_id=detail.attempt.cancellation_id,
+            dagster_run_id="run-invalid",
+            result=result,
+            initial_status="STARTED",
+            terminal_status=terminal_status,
+            error=error,
+        )
+
+
+@pytest.mark.parametrize("terminal_status", ["SUCCESS", "FAILURE"])
+async def test_definitive_base_run_mismatch_preserves_terminal_run_and_base(
+    migrated_session: AsyncSession,
+    terminal_status: str,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-frozen")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    cancellation_id = detail.attempt.cancellation_id
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id="run-frozen",
+        result="already_terminal",
+        initial_status="STARTED",
+        terminal_status=terminal_status,
+        error=None,
+    ) is True
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.import_jobs SET dagster_run_id = 'run-observed-later' "
+            "WHERE job_id = CAST(:job_id AS uuid)"
+        ),
+        {"job_id": _ROOT},
+    )
+    before = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, dagster_run_id, cancellation_id "
+                "FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": _ROOT},
+        )
+    ).one()
+    error = {
+        "code": "DAGSTER_RECONCILE_FAILED",
+        "message": "base run mapping changed after observation",
+    }
+    assert await set_pipeline_cancellation_member_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_kind="import_job",
+        member_id=_ROOT,
+        result="cancel_failed",
+        terminal_status=None,
+        error=error,
+    ) is True
+    after = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, dagster_run_id, cancellation_id "
+                "FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": _ROOT},
+        )
+    ).one()
+    assert after == before
+    with pytest.raises(PipelineCancellationInvariantError):
+        await finish_pipeline_cancellation_attempt(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            status="retryable",
+            error={"code": "DAGSTER_UNAVAILABLE", "message": "retry"},
+        )
+    finished = await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        status="failed",
+        error=error,
+    )
+    assert finished is not None
+    assert [(run.result, run.terminal_status) for run in finished.runs] == [
+        ("already_terminal", terminal_status)
+    ]
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["attempt_retryable", "attempt_failed", "run", "member"],
+)
+async def test_structured_error_shape_rejects_sql_null(
+    migrated_session: AsyncSession,
+    target: str,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-shape")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    statements = {
+        "attempt_retryable": (
+            "UPDATE ops.pipeline_cancellations SET status='retryable', "
+            "finished_at=now(), error=NULL WHERE cancellation_id=CAST(:id AS uuid)"
+        ),
+        "attempt_failed": (
+            "UPDATE ops.pipeline_cancellations SET status='failed', "
+            "finished_at=now(), error=NULL WHERE cancellation_id=CAST(:id AS uuid)"
+        ),
+        "run": (
+            "UPDATE ops.pipeline_cancellation_runs SET result='cancel_failed', "
+            "terminal_status=NULL, error=NULL WHERE cancellation_id=CAST(:id AS uuid)"
+        ),
+        "member": (
+            "UPDATE ops.pipeline_cancellation_members SET result='cancel_failed', "
+            "terminal_status=NULL, error=NULL WHERE cancellation_id=CAST(:id AS uuid)"
+        ),
+    }
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(statements[target]),
+                {"id": detail.attempt.cancellation_id},
+            )
+
+
 async def test_finish_refuses_pending_and_misclassified_retryable_failure(
     migrated_session: AsyncSession,
 ) -> None:
@@ -789,7 +1182,7 @@ async def test_finish_refuses_pending_and_misclassified_retryable_failure(
         terminal_status=None,
         error={"code": "DAGSTER_UNAVAILABLE", "message": "timeout"},
     )
-    with pytest.raises(PipelineCancellationInvariantError, match="cannot be closed as failed"):
+    with pytest.raises(PipelineCancellationInvariantError, match="definitive member mismatch"):
         await finish_pipeline_cancellation_attempt(
             migrated_session,
             cancellation_id=detail.attempt.cancellation_id,

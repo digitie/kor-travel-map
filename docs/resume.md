@@ -12,19 +12,20 @@
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
 
-## 2026-07-15 (codex, agent B) — T-ADM-C3d DB phase 적대적 보강
+## 2026-07-15 (codex, agent B) — T-ADM-C3d DB phase 2차 적대 리뷰 보강 진행 중
 
-- **구현 완료**: run-first exact terminal mapping, queued DB-only 취소, attempt-first stale
-  writer 차단, retry/finish lock order와 종결 불변식, normalized JSON shape CHECK를 반영했다.
-  repository는 query/types/invariants/facade 경계로 분리했다.
-- **batch transaction 수정**: 단일 transaction gate를 네 phase로 교체했다. 동일 dedicated
-  connection/backend PID와 batch session mutex는 유지하고 장기 consistency/MV transaction에는
-  lineage-global xact lock을 넘기지 않는다. 예외 rollback 뒤 짧은 실패 기록과 cancellation
-  marker 우선 CAS/reload를 적용했다.
-- **검증 상태**: stale writer, run-first, queued-only, finish 불변식, batch mutex·PID·lineage
-  lock 회귀를 코드로 정의했다. 이번 동결에서는 사용자 지시에 따라 실행형 검증을 하지 않았다.
-- **다음 한 작업**: C3d coordinator/Dagster terminate와 REST/OpenAPI propagation을 이 DB
-  phase 계약 위에 완결한 뒤, 승인된 n150 live UI e2e 단계에서 실제 실행 검증한다.
+- **진행 중**: queued shared-run 독립 취소, running-only retry, exact retryable과 definitive
+  mismatch 실패 분리, 최초 Dagster status 보존, normalized JSON error NULL 차단을 수정했다.
+- **batch transaction 재수정**: consistency report와 MV side effect는 장기 transaction 안에서
+  만들되 종료 직전에만 lineage-global→canonical root lock을 잡고 marker CAS/finalize한다.
+  CAS 패배는 내부 sentinel로 장기 transaction 전체를 rollback한 뒤 별도 짧은 read
+  transaction에서 cancellation 결과를 reload한다. Tx3/failure는 첫 mutation 전에 잠근다.
+- **검증 상태**: 실제 report/side-effect rollback, exact terminal mapping, SQL NULL
+  `IntegrityError`, queued/running shared run, 반대 row-lock 순서 회귀를 테스트로 정의했다.
+  사용자 지시에 따라 test/Ruff/mypy/import/compile은 실행하지 않았고 재리뷰·게이트도
+  남아 있으므로 완료 상태가 아니다.
+- **다음 한 작업**: 2차 적대 재리뷰를 통과시키고 허용된 실행 게이트 뒤 C3d 다음 phase로
+  진행한다.
 
 ## 2026-07-15 (codex, agent B) — T-ADM-C3d 계층형 취소 문서 우선 설계 (#680)
 

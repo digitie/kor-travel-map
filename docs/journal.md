@@ -23,22 +23,25 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
 - OpenAPI/admin types 고정 — 기충족(#690 재생성분, `types.ts`에
   `/v1/ops/pipeline/dagster-runs/{run_id}` 실측). UI 소비 경로는 C5(#691)/C4R.
 
-## 2026-07-15 (codex, agent B) — C3d DB phase 적대적 S1/S2 보강
+## 2026-07-15 (codex, agent B) — C3d DB phase 2차 적대 리뷰 보강 진행 중
 
 - cancellation SQL, immutable record, 종결 불변식을 query/types/invariants 모듈로 분리했다.
-  모든 writer는 열린 attempt를 먼저 잠그며 성공 member 결과는 Dagster run 종결과 정확한
+  일반 member/run writer는 열린 attempt를 먼저 잠그며 성공 member 결과는 Dagster run 종결과 정확한
   base marker/status/run 대응을 확인하는 전이에서만 기록한다. queued 대상은 명시적인
   DB-only 경로로 분리했고 닫힌 예전 attempt의 stale write는 거부한다.
 - completed/retryable/failed 종결 조건을 frozen detail과 잠근 base 전체에서 검증한다.
-  retry는 hierarchy를 재탐색하지 않고 lineage-global→root→source attempt→detail→base 순서로
+  attempt finish/retry 같은 계층 writer는 hierarchy를 재탐색하지 않고
+  lineage-global→root→source attempt→detail→base 순서로
   잠근 뒤 실제 retry-capable 미해결 대상만 복사한다. attempt/member/run JSON 상태 조합은
   Alembic/ORM CHECK에도 고정했다.
 - full-load batch gate의 단일 transaction repo orchestrator를 삭제했다. 전용 connection과
   batch별 session mutex는 유지하되 prepare, consistency, MV 시작, MV refresh/finalize를
   각각 commit한다. 장기 단계의 lineage lock 누출, 다른 backend로의 unlock, phase 예외의
   부분 상태, cancellation marker 덮어쓰기를 막는 회귀 테스트를 정의했다.
-- 사용자 지시에 따라 이번 작업에서는 test/ruff/mypy/import/compile 실행을 하지 않았다.
-  실행 검증 결과를 완료로 오인하지 않도록 문서에 미실행 상태를 명시한다.
+- 2차 리뷰의 S1/S2 지적에 따라 queued shared-run, definitive mismatch, batch sentinel
+  rollback, JSON error NULL 제약과 실제 side-effect 부재 테스트를 다시 보강 중이다.
+  사용자 지시에 따라 test/ruff/mypy/import/compile은 실행하지 않았으며, 재리뷰·게이트 전
+  완료로 표시하지 않는다.
 
 ## 2026-07-15 (codex, agent B) — 계층형 취소 문서 우선 설계 (T-ADM-C3d, #680)
 

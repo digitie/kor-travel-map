@@ -179,7 +179,9 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
                 text(
                     """
                     UPDATE ops.pipeline_cancellations
-                    SET status = 'retryable', finished_at = now(), updated_at = now()
+                    SET status = 'retryable',
+                        error = '{"code":"DAGSTER_UNAVAILABLE","message":"retry"}'::jsonb,
+                        finished_at = now(), updated_at = now()
                     WHERE cancellation_id = CAST(:cancellation_id AS uuid)
                     """
                 ),
@@ -210,7 +212,7 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
                 text(
                     """
                     UPDATE ops.pipeline_cancellations
-                    SET status = 'completed', updated_at = now()
+                    SET status = 'completed', error = NULL, updated_at = now()
                     WHERE cancellation_id = CAST(:cancellation_id AS uuid)
                     """
                 ),

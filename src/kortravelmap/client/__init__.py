@@ -51,6 +51,7 @@ from kortravelmap.enrichment import (
 )
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
+    BatchDagCancellationWon,
     BatchDagMvPrepared,
     BatchDagPrepared,
     BatchDagRunResult,
@@ -60,6 +61,7 @@ from kortravelmap.infra.batch_dag import (
     make_batch_dag_request,
     plan_batch_dag,
     prepare_batch_dag,
+    reload_batch_phase_loss_result,
     run_batch_consistency_phase,
     start_batch_mv_phase,
 )
@@ -1389,15 +1391,34 @@ class AsyncKorTravelMapClient:
                         if result is None and prepared is not None:
                             try:
                                 async with session.begin():
-                                    report = await run_batch_consistency_phase(
+                                    consistency_or_result = await run_batch_consistency_phase(
+                                        session, prepared
+                                    )
+                                if isinstance(
+                                    consistency_or_result, BatchDagRunResult
+                                ):
+                                    result = consistency_or_result
+                                else:
+                                    report = consistency_or_result
+                            except BatchDagCancellationWon:
+                                async with session.begin():
+                                    result = await reload_batch_phase_loss_result(
                                         session, prepared
                                     )
                             except Exception as exc:  # noqa: BLE001
                                 message = f"{exc.__class__.__name__}: {exc}"
-                                async with session.begin():
-                                    result = await fail_batch_dag_phase(
-                                        session, prepared, message=message
-                                    )
+                                try:
+                                    async with session.begin():
+                                        result = await fail_batch_dag_phase(
+                                            session, prepared, message=message
+                                        )
+                                except BatchDagCancellationWon:
+                                    async with session.begin():
+                                        result = await reload_batch_phase_loss_result(
+                                            session,
+                                            prepared,
+                                            error_message=message,
+                                        )
 
                         mv_phase: BatchDagMvPrepared | None = None
                         if (
@@ -1414,15 +1435,29 @@ class AsyncKorTravelMapClient:
                                     result = mv_or_result
                                 else:
                                     mv_phase = mv_or_result
+                            except BatchDagCancellationWon:
+                                async with session.begin():
+                                    result = await reload_batch_phase_loss_result(
+                                        session, prepared, report=report
+                                    )
                             except Exception as exc:  # noqa: BLE001
                                 message = f"{exc.__class__.__name__}: {exc}"
-                                async with session.begin():
-                                    result = await fail_batch_dag_phase(
-                                        session,
-                                        prepared,
-                                        message=message,
-                                        report=report,
-                                    )
+                                try:
+                                    async with session.begin():
+                                        result = await fail_batch_dag_phase(
+                                            session,
+                                            prepared,
+                                            message=message,
+                                            report=report,
+                                        )
+                                except BatchDagCancellationWon:
+                                    async with session.begin():
+                                        result = await reload_batch_phase_loss_result(
+                                            session,
+                                            prepared,
+                                            report=report,
+                                            error_message=message,
+                                        )
 
                         if result is None and prepared is not None and mv_phase is not None:
                             try:
@@ -1430,16 +1465,34 @@ class AsyncKorTravelMapClient:
                                     result = await finish_batch_mv_phase(
                                         session, mv_phase
                                     )
-                            except Exception as exc:  # noqa: BLE001
-                                message = f"{exc.__class__.__name__}: {exc}"
+                            except BatchDagCancellationWon:
                                 async with session.begin():
-                                    result = await fail_batch_dag_phase(
+                                    result = await reload_batch_phase_loss_result(
                                         session,
                                         prepared,
-                                        message=message,
                                         report=mv_phase.consistency_report,
                                         mv_job=mv_phase.mv_refresh_job,
                                     )
+                            except Exception as exc:  # noqa: BLE001
+                                message = f"{exc.__class__.__name__}: {exc}"
+                                try:
+                                    async with session.begin():
+                                        result = await fail_batch_dag_phase(
+                                            session,
+                                            prepared,
+                                            message=message,
+                                            report=mv_phase.consistency_report,
+                                            mv_job=mv_phase.mv_refresh_job,
+                                        )
+                                except BatchDagCancellationWon:
+                                    async with session.begin():
+                                        result = await reload_batch_phase_loss_result(
+                                            session,
+                                            prepared,
+                                            report=mv_phase.consistency_report,
+                                            mv_job=mv_phase.mv_refresh_job,
+                                            error_message=message,
+                                        )
                 finally:
                     # advisory_lock의 unlock SELECT도 autobegin하므로 connection을
                     # 반환하기 전에 명시적으로 commit한다.

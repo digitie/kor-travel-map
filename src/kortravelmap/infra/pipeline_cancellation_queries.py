@@ -297,7 +297,7 @@ RETURNING cancellation_id
 
 _UPDATE_RUN_SQL = """
 UPDATE ops.pipeline_cancellation_runs
-SET initial_status = COALESCE(:initial_status, initial_status),
+SET initial_status = COALESCE(initial_status, :initial_status),
     result = :result,
     terminal_status = :terminal_status,
     error = CAST(:error AS jsonb),

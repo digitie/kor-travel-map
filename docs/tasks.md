@@ -17,7 +17,7 @@
   - [x] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681 — 감사 결과
     전 항목 #687/#690에서 기충족, 잔여범위 감사 기록 PR)
   - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
-  - [x] `T-ADM-C3d-P1R` — 취소 DB phase 적대적 S1/S2 보강(본 PR)
+  - [ ] `T-ADM-C3d-P1R` — 취소 DB phase 2차 적대 리뷰 보강(본 PR, 재리뷰·게이트 대기)
   - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
@@ -148,14 +148,13 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   허용하고, 200 completed 응답에는 `pending`이 0건이라는 DTO/invariant도 검증한다.
   **문서 우선 gate**: data model/REST/task/journal/resume 계약을 적대적 재승인받기 전에는
   source를 수정하지 않는다.
-- [x] `T-ADM-C3d-P1R` — **취소 DB phase 적대적 S1/S2 보강** (agent **B**, C3d
-  내부 PR): 성공 member direct setter를 금지하고 run-first exact terminal mapping,
-  queued 전용 no-call 경로, attempt-first writer lock, lineage-global→root→attempt retry/finish
-  순서와 completed/retryable/failed 전체 불변식을 구현했다. batch consistency gate는 단일
-  transaction repo orchestrator를 제거하고 동일 connection/session mutex 위 네 phase로
-  분리했다. cancellation marker가 phase CAS를 이기면 reload하고 덮어쓰지 않으며, 장기
-  consistency/MV 구간에는 lineage xact lock을 보유하지 않는다. normalized shape DB CHECK와
-  stale writer·run-first·queued-only·mutex/backend PID/rollback 경계 회귀 정의를 포함한다.
+- [ ] `T-ADM-C3d-P1R` — **취소 DB phase 2차 적대 리뷰 보강** (agent **B**, C3d
+  내부 PR, 진행 중): queued shared-run 독립 취소, running-only retry, definitive mismatch
+  비변경 경로, JSON error NULL 차단을 반영한다. batch consistency/MV 장기 transaction은
+  side effect 뒤에만 lineage-global→canonical root lock을 얻어 marker CAS와 finalize를
+  원자화하고, CAS 패배는 sentinel rollback 뒤 별도 read transaction으로 reload한다.
+  실제 report/MV side-effect rollback과 반대 lock 순서 회귀를 정의했으나 2차 재리뷰와
+  실행 게이트 전이므로 완료로 표시하지 않는다.
 - [ ] `T-ADM-C3e` — **schedule/manual canonical operation 영속화** (agent **B**,
   이슈 **#679**, C3 후속 5/5, C3d 뒤): schedule tick/manual launch/update request/
   import 실행이 같은 canonical operation 정본과 provider/dataset identity를 사용하고,
