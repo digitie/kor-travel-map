@@ -100,12 +100,24 @@ WS는 브라우저 직결(BFF는 WS 프록시 불가)이라 무게이트 유지 
 | `/ops/pipeline/executions/{kind}/{id}/cancel` | POST | 종류별 cancel 위임 |
 | `/ops/pipeline/events` | GET | 전역 job 이벤트 스트림(level/provider/dataset/job 필터) |
 | `/ops/pipeline/dagster-runs` | GET | 보조 패널용 최근 run(GraphQL, limit, degrade 허용) |
+| `/ops/pipeline/dagster-runs/{run_id}` | GET | 개별 run event/failure 상세(Dagster event cursor 전진 페이지네이션) |
 | `/ops/pipeline/schedules` | GET | 스케줄 목록(override 병합) + sensor 상태 |
 | `/ops/pipeline/schedules/{name}` | PATCH | cron 수정(`cron_schedule: null` = override 삭제) |
 | `/ops/pipeline/schedules/{name}/commands` | POST | `{command: run\|start\|stop\|reset}` 4종 |
 | `/ops/pipeline/requests` | POST | 갱신 요청 생성 — **기존 6-type scope union·카탈로그 검증·geo resolver·advisory lock 409/Retry-After 계약 전량 승계** |
 | `/ops/pipeline/requests/{id}/run-now` | POST | 재큐잉(201 + 새 request) |
-| `/ops/pipeline/nux-seen` | POST | Dagster NUX 승계 |
+
+Dagster 목록·overview는 DB 운영 화면이 Dagster 장애 때문에 사라지지 않도록 기존의
+`200` graceful degrade를 유지한다. 반면 선택한 개별 run 상세는 성공한 조회만 `200`이고,
+Dagster `RunNotFoundError`는 `404 DAGSTER_RUN_NOT_FOUND`, 연결 실패는
+`503 DAGSTER_UNAVAILABLE`, GraphQL/설정/응답 오류는 `502 DAGSTER_QUERY_FAILED`의
+RFC7807 `application/problem+json`으로 승격한다. event cursor는 DB timeline cursor와
+무관한 Dagster opaque cursor이며 전진 방향으로만 사용한다. `failure_reason`과
+`failure_events`는 현재 event page 범위이므로 `event_has_more=true`일 때 전체 run의 실패
+원인이 없다고 해석하지 않는다.
+
+새 UI는 Dagster iframe을 쓰지 않으므로 `/ops/pipeline/nux-seen`을 제공하지 않는다.
+구 `/ops/dagster/nux-seen`은 구 화면 삭제 PR 전까지만 legacy 경계에 남긴다.
 
 ### datasets 그룹 (`/v1/ops/datasets/*`)
 

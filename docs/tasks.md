@@ -13,7 +13,7 @@
   - [x] `T-ADM-C2R` — C2 적대적 리뷰 차단 계약 보강 (agent A, PR #688)
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
   - [x] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682, PR #687)
-  - [ ] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679)
+  - [x] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679, PR #689)
   - [ ] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681)
   - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
   - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
@@ -76,7 +76,8 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   schema/parser를 분리한다. legacy/new router가 전환 기간 같은 public 모듈을
   사용한다. **동작·HTTP 의미·OpenAPI는 보존**하고 schedule capability/actor/
   problem+json 변경은 이 PR에 섞지 않는다.
-- [ ] `T-ADM-C3b` — **root operation SQL projection** (agent **B**, 이슈 **#679**,
+- [x] `T-ADM-C3b` — **root operation SQL projection** (agent **B**, 이슈 **#679**,
+  **PR #689**,
   C3 후속 2/5, C3a 뒤): recursive SQL에서 import job hierarchy를 component로 먼저
   접고, job별 가장 가까운 request anchor로 branch owner를 결정한다. nested anchor는
   상위 branch를 분리하고, 같은 anchor의 다중 request만 생성 시각·ID로 owner 하나를
@@ -94,12 +95,15 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   로컬 게이트는 root unit 1,285건, API 전체 416건, 관련 PostGIS/
   EXPLAIN integration 10건과 Ruff, strict mypy 155파일, import 계약 4/4,
   OpenAPI/admin types drift를 통과했다. root/agent A 적대적 리뷰 2인은
-  S1/S2 0건으로 승인했다. PR merge 전이므로 task는 진행 중으로 두는다.
-- [ ] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **B**,
+  S1/S2 0건으로 승인했고 CI 8/8 green 뒤 merge했다.
+- [ ] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **A**,
   이슈 **#681**, C3 후속 3/5, C3b 뒤): event cursor와 failure 구조를 신규 그룹에
-  이식하고 순수 run not-found와 Dagster unavailable을 구분한다. GraphQL run은
-  DB cursor 정본에 섞지 않으며 외부 Dagster 링크를 fallback으로 유지한다. iframe
-  미사용 새 UI의 `nux-seen`은 제거한다.
+  이식한다. 개별 상세는 성공만 200이고 `not_found`는
+  `404 DAGSTER_RUN_NOT_FOUND`, 연결 실패는 `503 DAGSTER_UNAVAILABLE`,
+  설정·GraphQL·응답 오류는 `502 DAGSTER_QUERY_FAILED` RFC7807로 승격한다.
+  failure 요약은 현재 event page 범위이며 opaque event cursor는 DB cursor 정본에
+  섞지 않는다. 외부 Dagster 링크를 fallback으로 유지하고, iframe 미사용 새 UI의
+  pipeline `nux-seen`만 제거한다(legacy route/service/schema는 C6b까지 유지).
 - [ ] `T-ADM-C3d` — **실제 계층형 취소** (agent **B**, 이슈 **#680**, C3 후속
   4/5, C3c 뒤): root CAS `cancellation_requested` commit → worker claim/write 경로가
   중단 상태를 존중 → running Dagster run terminate → terminal 재확인 →

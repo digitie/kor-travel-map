@@ -8379,7 +8379,7 @@
       },
       "DagsterRunDetailData": {
         "additionalProperties": false,
-        "description": "`GET /ops/dagster/runs/{run_id}` data.",
+        "description": "Dagster run 상세 data(legacy + ``/ops/pipeline/dagster-runs/{run_id}``).",
         "properties": {
           "checked_at": {
             "format": "date-time",
@@ -8406,14 +8406,17 @@
                 "type": "null"
               }
             ],
+            "description": "다음 page의 after query에 그대로 전달할 Dagster opaque cursor.",
             "title": "Event Cursor"
           },
           "event_has_more": {
             "default": false,
+            "description": "뒤 event page 존재 여부. true이면 event_cursor로 전진 조회한다.",
             "title": "Event Has More",
             "type": "boolean"
           },
           "events": {
+            "description": "현재 Dagster event cursor page의 event 목록.",
             "items": {
               "$ref": "#/components/schemas/DagsterRunEvent"
             },
@@ -8421,6 +8424,7 @@
             "type": "array"
           },
           "failure_events": {
+            "description": "현재 event page에서만 추출한 구조화 실패 event. event_has_more=true일 때 빈 배열을 전체 run의 실패 event 부재로 해석하지 않는다.",
             "items": {
               "$ref": "#/components/schemas/DagsterRunFailure"
             },
@@ -8436,6 +8440,7 @@
                 "type": "null"
               }
             ],
+            "description": "현재 event page에서 마지막으로 발견한 실패 원인. 전체 run의 전역 실패 요약이 아니며 event_has_more=true이면 null이어도 뒤 page에 실패가 있을 수 있다.",
             "title": "Failure Reason"
           },
           "graphql_url": {
@@ -8474,7 +8479,7 @@
       },
       "DagsterRunDetailResponse": {
         "additionalProperties": false,
-        "description": "`GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope).",
+        "description": "Dagster run 상세 응답(DA-D-03 envelope).",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DagsterRunDetailData"
@@ -34685,6 +34690,123 @@
         ]
       }
     },
+    "/v1/ops/pipeline/dagster-runs/{run_id}": {
+      "get": {
+        "description": "선택한 Dagster run의 event cursor page와 구조화 실패 event를 조회한다. 목록의 graceful degrade와 달리 성공만 200이며 not-found/unavailable/query 실패는 각각 404/503/502 RFC7807로 반환한다.",
+        "operationId": "get_pipeline_dagster_run_detail_v1_ops_pipeline_dagster_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "이전 응답의 event_cursor(Dagster opaque cursor).",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이전 응답의 event_cursor(Dagster opaque cursor).",
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterRunDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "DAGSTER_RUN_NOT_FOUND — Dagster run 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "DAGSTER_QUERY_FAILED — 설정/GraphQL/응답 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "DAGSTER_UNAVAILABLE — Dagster 연결 실패"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "Dagster run event/failure 상세",
+        "tags": [
+          "ops-pipeline"
+        ]
+      }
+    },
     "/v1/ops/pipeline/events": {
       "get": {
         "description": "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/job 필터.",
@@ -35235,48 +35357,6 @@
           }
         },
         "summary": "실행 취소 (종류별 위임)",
-        "tags": [
-          "ops-pipeline"
-        ]
-      }
-    },
-    "/v1/ops/pipeline/nux-seen": {
-      "post": {
-        "description": "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다 — `/ops/dagster/nux-seen` 승계.",
-        "operationId": "mark_pipeline_nux_seen_v1_ops_pipeline_nux_seen_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterNuxSeenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "Dagster NUX seen 처리 (승계)",
         "tags": [
           "ops-pipeline"
         ]

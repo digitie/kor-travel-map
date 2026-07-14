@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex, agent A) — pipeline Dagster run 상세 계약 이식 (T-ADM-C3c, #681)
+
+- `GET /v1/ops/pipeline/dagster-runs/{run_id}`를 추가했다. event cursor는
+  `after`로 전진 조회하고, `failure_reason`·`failure_events`는 현재 event page
+  범위임을 DTO/OpenAPI에 고정했다. 성공만 200이며 not-found, 연결 실패,
+  query/설정/응답 오류를 각각 404/503/502 RFC7807 problem으로 반환한다.
+- public Dagster parser/service를 재사용하되 `__typename=Run`만으로 성공시키지
+  않는다. 응답 `runId`의 누락·불일치, 잘못된 eventConnection pagination shape,
+  다음 page cursor 누락·빈 값·2,048자 초과를 `status=error`로 차단했다. 신규 strict
+  route는 502, 전환 중인 legacy route는 기존 200 envelope 안의 error로 보존한다.
+  codegraph `impact parse_run_detail` 결과 영향 심볼은 공용 `get_run_detail` 하나였다.
+- HTTP 연결·timeout만 unavailable로 분류하고, upstream HTTP 상태·JSON 해석 실패는
+  query error로 분리했다. 새 UI가 iframe을 쓰지 않으므로 신규 pipeline
+  `nux-seen`은 제거했고 legacy `/ops/dagster/nux-seen`은 C6b까지 유지한다.
+- 테스트 전 적대적 리뷰 2인은 URL/PythonError 502 공백과 malformed Run 오인 경계를
+  발견했다. 두 지적을 반영한 수정 diff 재리뷰는 S1/S2 0건으로 승인됐다.
+  root unit/lint 1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff,
+  strict mypy main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin
+  TypeScript drift가 통과했다. C3c는 DB/migration 변경이 없어 별도 PostGIS 전용
+  integration gate는 적용하지 않았다.
+
 ## 2026-07-15 (codex, agent B) — pipeline root projection (T-ADM-C3b, #679)
 
 - import job `parent_job_id` hierarchy를 recursive SQL에서 cycle-safe component로

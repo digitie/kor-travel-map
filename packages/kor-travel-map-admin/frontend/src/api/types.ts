@@ -2063,6 +2063,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/pipeline/dagster-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dagster run event/failure 상세
+         * @description 선택한 Dagster run의 event cursor page와 구조화 실패 event를 조회한다. 목록의 graceful degrade와 달리 성공만 200이며 not-found/unavailable/query 실패는 각각 404/503/502 RFC7807로 반환한다.
+         */
+        get: operations["get_pipeline_dagster_run_detail_v1_ops_pipeline_dagster_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/pipeline/events": {
         parameters: {
             query?: never;
@@ -2131,26 +2151,6 @@ export interface paths {
         put?: never;
         /** 실행 취소 (종류별 위임) */
         post: operations["cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/ops/pipeline/nux-seen": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dagster NUX seen 처리 (승계)
-         * @description embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다 — `/ops/dagster/nux-seen` 승계.
-         */
-        post: operations["mark_pipeline_nux_seen_v1_ops_pipeline_nux_seen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5314,7 +5314,7 @@ export interface components {
         };
         /**
          * DagsterRunDetailData
-         * @description `GET /ops/dagster/runs/{run_id}` data.
+         * @description Dagster run 상세 data(legacy + ``/ops/pipeline/dagster-runs/{run_id}``).
          */
         DagsterRunDetailData: {
             /**
@@ -5326,18 +5326,31 @@ export interface components {
             dagster_url: string;
             /** Errors */
             errors?: string[];
-            /** Event Cursor */
+            /**
+             * Event Cursor
+             * @description 다음 page의 after query에 그대로 전달할 Dagster opaque cursor.
+             */
             event_cursor?: string | null;
             /**
              * Event Has More
+             * @description 뒤 event page 존재 여부. true이면 event_cursor로 전진 조회한다.
              * @default false
              */
             event_has_more: boolean;
-            /** Events */
+            /**
+             * Events
+             * @description 현재 Dagster event cursor page의 event 목록.
+             */
             events?: components["schemas"]["DagsterRunEvent"][];
-            /** Failure Events */
+            /**
+             * Failure Events
+             * @description 현재 event page에서만 추출한 구조화 실패 event. event_has_more=true일 때 빈 배열을 전체 run의 실패 event 부재로 해석하지 않는다.
+             */
             failure_events?: components["schemas"]["DagsterRunFailure"][];
-            /** Failure Reason */
+            /**
+             * Failure Reason
+             * @description 현재 event page에서 마지막으로 발견한 실패 원인. 전체 run의 전역 실패 요약이 아니며 event_has_more=true이면 null이어도 뒤 page에 실패가 있을 수 있다.
+             */
             failure_reason?: string | null;
             /** Graphql Url */
             graphql_url: string;
@@ -5350,7 +5363,7 @@ export interface components {
         };
         /**
          * DagsterRunDetailResponse
-         * @description `GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope).
+         * @description Dagster run 상세 응답(DA-D-03 envelope).
          */
         DagsterRunDetailResponse: {
             data: components["schemas"]["DagsterRunDetailData"];
@@ -16570,6 +16583,77 @@ export interface operations {
             };
         };
     };
+    get_pipeline_dagster_run_detail_v1_ops_pipeline_dagster_runs__run_id__get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                /** @description 이전 응답의 event_cursor(Dagster opaque cursor). */
+                after?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterRunDetailResponse"];
+                };
+            };
+            /** @description DAGSTER_RUN_NOT_FOUND — Dagster run 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description DAGSTER_QUERY_FAILED — 설정/GraphQL/응답 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description DAGSTER_UNAVAILABLE — Dagster 연결 실패 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     list_pipeline_events_v1_ops_pipeline_events_get: {
         parameters: {
             query?: {
@@ -16757,44 +16841,6 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    mark_pipeline_nux_seen_v1_ops_pipeline_nux_seen_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DagsterNuxSeenResponse"];
                 };
             };
             /** @description Validation Error */

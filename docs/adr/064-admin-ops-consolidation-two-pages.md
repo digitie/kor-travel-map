@@ -20,7 +20,8 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
 ## 결정
 
 1. **2페이지 IA**: `/ops/pipeline`(실행·작업 — 상태 스트립+sensor, DB 스파인 실행
-   타임라인, Dagster runs 보조 패널, 전역 이벤트 뷰, 스케줄 패널, 갱신요청 조작)과
+   타임라인, Dagster run 목록·event/failure 상세 보조 패널, 전역 이벤트 뷰, 스케줄 패널,
+   갱신요청 조작)과
    `/ops/datasets`(상태·정책 — provider×dataset×sync_scope 그리드, 정책 편집, ETL
    미리보기 흡수, "지금 갱신" 인라인 폐루프). 구 6개 라우트는 redirect 없이 폐기.
 2. **실행 타임라인은 DB-only UNION**: `ops.import_jobs` ∪ `ops.feature_update_requests`,
@@ -50,6 +51,11 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
    병렬, OpenAPI/types 생성물은 각 백엔드 PR에서 재생성(rebase 충돌은 재생성으로
    해소), 구 표면 제거는 링크 재배선(C6a) 후 삭제(C6b) 순. live e2e는 기존 게이트
    체계(SAFE provider·finally 복원·쿼터-민감 provider 금지)를 승계한다.
+9. **Dagster 상세 오류 경계**: 목록·overview의 GraphQL 장애는 DB 운영 화면을 보존하기
+   위해 `200` degrade를 유지한다. 선택한 개별 run 상세는 성공만 `200`이고 not-found,
+   연결 실패, query 오류를 각각 `404`/`503`/`502` RFC7807로 반환한다. event/failure는
+   Dagster opaque cursor의 현재 page 범위이며 DB timeline cursor와 합치지 않는다.
+   새 UI는 iframe을 쓰지 않으므로 pipeline NUX mutation을 제공하지 않는다.
 
 ## 근거
 

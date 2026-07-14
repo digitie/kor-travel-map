@@ -880,7 +880,57 @@ Query:
 - `page_size` (`1..200`, 기본 `50`)
 - `cursor`
 
-## 7.2 Dagster 운영 요약 API
+## 7.2.1 통합 pipeline Dagster run 상세 API
+
+#### `GET /ops/pipeline/dagster-runs/{run_id}`
+
+`GET /ops/pipeline/dagster-runs`에서 선택한 Dagster run의 event log와 실패 payload를
+조회하는 읽기 전용 child resource다. 목록·overview는 Dagster 장애 때도 DB 운영 화면을
+보존하도록 `200` graceful degrade하지만, 개별 상세는 성공한 조회만 `200`으로 반환한다.
+
+Path:
+
+- `run_id`: 앞뒤 공백 제거 후 길이 `1..255`. 빈 값이나 초과 길이는 `422`다.
+
+Query:
+
+- `page_size`: `1..200`, 기본 `50`.
+- `after`: 이전 성공 응답의 `event_cursor`. 길이 `1..2048`인 Dagster opaque cursor이며
+  해석·재인코딩하거나 DB execution cursor와 혼합하지 않는다. 미지정이면 첫 page다.
+
+성공 응답은 `DagsterRunDetailResponse` envelope이며 `data.status`는 항상 `ok`다.
+`event_has_more=true`이면 `event_cursor`를 다음 요청의 `after`로 보내 전진한다. backward
+pagination이나 서버의 page 간 event 병합은 제공하지 않는다.
+
+`failure_reason`과 `failure_events`는 **현재 event page에서 발견한 실패 event만** 요약한다.
+따라서 run 상태가 `FAILURE`여도 현재 page에 실패 event가 없으면 두 필드는 각각 `null`과
+빈 배열일 수 있다. 특히 `event_has_more=true`이면 이를 전체 run의 실패 원인 부재로
+해석해서는 안 된다. UI는 뒤 page 조회와
+`{dagster_url}/runs/{URL-encoded run_id}` 외부 링크를 fallback으로 제공한다.
+
+service의 비성공 상태는 router에서 다음 RFC7807 `application/problem+json`으로
+승격한다. 내부 HTTP 오류 payload는 `{code, message, details}`이며 중앙 handler가
+`type`/`title`/`status`/`detail`/`code`/`request_id`와 `details`를 갖는 problem으로
+직렬화한다.
+
+| service 상태 | HTTP | `code` | 의미 |
+|---|---:|---|---|
+| `not_found` | 404 | `DAGSTER_RUN_NOT_FOUND` | Dagster가 `RunNotFoundError`를 반환 |
+| `unavailable` | 503 | `DAGSTER_UNAVAILABLE` | Dagster 연결·timeout 등 request 전송 실패 |
+| `error` | 502 | `DAGSTER_QUERY_FAILED` | upstream HTTP·응답 해석·URL 설정·GraphQL·PythonError 오류 |
+
+`__typename=Run`만으로 성공을 판정하지 않는다. 응답 `runId`가 비어 있거나 요청값과
+다르고, `eventConnection`이 객체가 아니거나 `cursor`·`hasMore`·`events` pagination
+shape가 잘못됐으면 응답 해석 오류다. `hasMore=true`이면 다음 요청에 그대로 쓸 수 있는
+비어 있지 않은 2,048자 이하 cursor가 반드시 있어야 한다.
+
+각 problem의 `details`는 최소 `run_id`와 service의 `errors`를 포함한다. FastAPI path/query
+검증 실패는 공통 `422 VALIDATION_ERROR`다.
+
+새 UI는 Dagster iframe을 embed하지 않으므로 `/ops/pipeline/nux-seen` endpoint를 만들지
+않는다. 구 `/ops/dagster/nux-seen`과 그 service/schema는 구 화면 제거 전까지 유지한다.
+
+## 7.2.2 구 Dagster 운영 요약 API
 
 Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
 같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
@@ -976,7 +1026,8 @@ Path:
 
 Query:
 
-- `event_limit` (`1..200`, 기본 `50`)
+- `page_size` (`1..200`, 기본 `50`)
+- `after` (이전 응답의 `event_cursor`, 전진 방향)
 
 응답(`data` 발췌):
 
@@ -1013,12 +1064,15 @@ Query:
 `status`는 `ok`, `not_found`, `unavailable`, `error` 중 하나다. 이 endpoint도
 Dagster run 재실행, cancel, mutation을 수행하지 않는다.
 
+이 구 endpoint는 전환 기간의 legacy 화면 계약이므로 비성공 상태도 `200` envelope에
+남긴다. 새 pipeline child resource는 §7.2.1의 strict HTTP 오류 계약을 사용한다.
+
 #### `POST /ops/dagster/nux-seen`
 
 embedded Dagster 화면이 로컬 첫 실행 커뮤니티 모달로 가려지지 않도록 Dagster GraphQL
 `setNuxSeen` mutation을 호출한다. summary GET의 부수효과를 없애기 위해 명시 POST로
 분리했다. Admin UI는 `/admin/dagster` summary가 정상 조회되면 이 endpoint를 한 번
-호출한다.
+호출한다. 이 endpoint는 legacy 화면 전용이며 새 `/ops/pipeline` 그룹에는 승계하지 않는다.
 
 응답:
 

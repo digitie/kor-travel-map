@@ -45,6 +45,7 @@ __all__ = [
 
 JsonDict = dict[str, Any]
 _ALLOWED_DAGSTER_SCHEMES = {"http", "https"}
+_MAX_EVENT_CURSOR_LENGTH = 2048
 
 _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "consistency_dedup_refresh_daily_schedule": "45 5 * * *",
@@ -480,12 +481,79 @@ def parse_run_detail(
     *,
     dagster_urls: DagsterUrls,
     checked_at: datetime,
+    expected_run_id: str,
 ) -> DagsterRunDetailData:
     typename = _string(raw_run.get("__typename"))
     if typename == "Run":
-        event_connection = as_dict(raw_run.get("eventConnection"))
+        raw_run_id = raw_run.get("runId")
+        if not isinstance(raw_run_id, str) or not raw_run_id:
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message="Dagster Run 응답에 유효한 runId가 없습니다.",
+            )
+        if raw_run_id != expected_run_id:
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message=(
+                    "Dagster Run 응답의 runId가 요청과 일치하지 않습니다: "
+                    f"{raw_run_id}"
+                ),
+            )
+
+        raw_event_connection = raw_run.get("eventConnection")
+        if not isinstance(raw_event_connection, dict):
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message="Dagster Run 응답의 eventConnection이 객체가 아닙니다.",
+            )
+        required_page_fields = {"cursor", "hasMore", "events"}
+        missing_page_fields = required_page_fields - raw_event_connection.keys()
+        if missing_page_fields:
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message=(
+                    "Dagster Run eventConnection 필드가 누락됐습니다: "
+                    + ", ".join(sorted(missing_page_fields))
+                ),
+            )
+        raw_cursor = raw_event_connection["cursor"]
+        raw_has_more = raw_event_connection["hasMore"]
+        raw_events = raw_event_connection["events"]
+        if raw_cursor is not None and not isinstance(raw_cursor, str):
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message="Dagster Run event cursor가 문자열 또는 null이 아닙니다.",
+            )
+        if not isinstance(raw_has_more, bool):
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message="Dagster Run event hasMore가 boolean이 아닙니다.",
+            )
+        if not isinstance(raw_events, list):
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message="Dagster Run events가 배열이 아닙니다.",
+            )
+        if raw_has_more and (
+            not raw_cursor or len(raw_cursor) > _MAX_EVENT_CURSOR_LENGTH
+        ):
+            return _run_detail_error(
+                dagster_urls=dagster_urls,
+                checked_at=checked_at,
+                message=(
+                    "뒤 event page가 있지만 재사용 가능한 event cursor가 없습니다."
+                ),
+            )
+
         events = [
-            _parse_run_event(raw_event) for raw_event in _list(event_connection.get("events"))
+            _parse_run_event(raw_event) for raw_event in raw_events
         ]
         failure_events = _run_failures(events)
         return DagsterRunDetailData(
@@ -497,8 +565,8 @@ def parse_run_detail(
             events=events,
             failure_reason=(failure_events[-1].message if failure_events else None),
             failure_events=failure_events,
-            event_cursor=optional_string(event_connection.get("cursor")),
-            event_has_more=bool(event_connection.get("hasMore")),
+            event_cursor=raw_cursor,
+            event_has_more=raw_has_more,
         )
     if typename == "RunNotFoundError":
         return DagsterRunDetailData(
@@ -523,6 +591,18 @@ def parse_run_detail(
         graphql_url=dagster_urls.graphql_url,
         checked_at=checked_at,
         errors=[f"알 수 없는 Dagster run 응답 타입: {typename or 'unknown'}"],
+    )
+
+
+def _run_detail_error(
+    *, dagster_urls: DagsterUrls, checked_at: datetime, message: str
+) -> DagsterRunDetailData:
+    return DagsterRunDetailData(
+        status="error",
+        dagster_url=dagster_urls.dagster_url,
+        graphql_url=dagster_urls.graphql_url,
+        checked_at=checked_at,
+        errors=[message],
     )
 
 

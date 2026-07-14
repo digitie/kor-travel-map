@@ -63,7 +63,7 @@ from kortravelmap.api.dagster_http import (
     settings_from_request as _settings_from_request,
 )
 from kortravelmap.api.dagster_schema import (
-    DagsterNuxSeenResponse,
+    DagsterRunDetailResponse,
     DagsterRunSummary,
     DagsterSchedule,
     DagsterScheduleCommandData,
@@ -107,6 +107,10 @@ _EXECUTIONS_URL_PREFIX = "/v1/ops/pipeline/executions"
 _UPDATE_REQUEST_STATUS_URL_PREFIX = f"{_EXECUTIONS_URL_PREFIX}/update_request"
 
 CronString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+DagsterRunId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
 
 
 # =============================================================================
@@ -1332,6 +1336,71 @@ async def list_dagster_runs(
     )
 
 
+@router.get(
+    "/dagster-runs/{run_id}",
+    response_model=DagsterRunDetailResponse,
+    summary="Dagster run event/failure 상세",
+    description=(
+        "선택한 Dagster run의 event cursor page와 구조화 실패 event를 조회한다. "
+        "목록의 graceful degrade와 달리 성공만 200이며 not-found/unavailable/query "
+        "실패는 각각 404/503/502 RFC7807로 반환한다."
+    ),
+    responses={
+        404: {"description": "DAGSTER_RUN_NOT_FOUND — Dagster run 없음"},
+        502: {"description": "DAGSTER_QUERY_FAILED — 설정/GraphQL/응답 오류"},
+        503: {"description": "DAGSTER_UNAVAILABLE — Dagster 연결 실패"},
+    },
+)
+async def get_pipeline_dagster_run_detail(
+    request: Request,
+    run_id: DagsterRunId,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    after: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=2048,
+            description="이전 응답의 event_cursor(Dagster opaque cursor).",
+        ),
+    ] = None,
+) -> DagsterRunDetailResponse:
+    settings = _settings_from_request(request)
+    client = _http_client_from_request(request, settings)
+    response = await dagster_query_service.get_run_detail(
+        settings=settings,
+        client=client,
+        run_id=run_id,
+        page_size=page_size,
+        after=after,
+    )
+    if response.data.status == "ok":
+        return response
+
+    if response.data.status == "not_found":
+        status_code = status.HTTP_404_NOT_FOUND
+        code = "DAGSTER_RUN_NOT_FOUND"
+        message = "Dagster run을 찾을 수 없습니다."
+    elif response.data.status == "unavailable":
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        code = "DAGSTER_UNAVAILABLE"
+        message = "Dagster에 연결할 수 없습니다."
+    else:
+        status_code = status.HTTP_502_BAD_GATEWAY
+        code = "DAGSTER_QUERY_FAILED"
+        message = "Dagster run 상세 조회에 실패했습니다."
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "code": code,
+            "message": message,
+            "details": {
+                "run_id": run_id,
+                "errors": response.data.errors,
+            },
+        },
+    )
+
+
 # =============================================================================
 # endpoints — schedules
 # =============================================================================
@@ -1511,7 +1580,7 @@ async def post_pipeline_schedule_command(
 
 
 # =============================================================================
-# endpoints — 갱신 요청 생성/재큐잉 + NUX
+# endpoints — 갱신 요청 생성/재큐잉
 # =============================================================================
 
 
@@ -1618,18 +1687,3 @@ async def run_pipeline_update_request_now(
         started_at=started_at,
         status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
     )
-
-
-@router.post(
-    "/nux-seen",
-    response_model=DagsterNuxSeenResponse,
-    summary="Dagster NUX seen 처리 (승계)",
-    description=(
-        "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL "
-        "setNuxSeen mutation을 호출한다 — `/ops/dagster/nux-seen` 승계."
-    ),
-)
-async def mark_pipeline_nux_seen(request: Request) -> DagsterNuxSeenResponse:
-    settings = _settings_from_request(request)
-    client = _http_client_from_request(request, settings)
-    return await dagster_query_service.mark_nux_seen(settings=settings, client=client)
