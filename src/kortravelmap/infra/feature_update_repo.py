@@ -75,7 +75,9 @@ _MAX_PEEK_LIMIT: Final[int] = 50
 _RETURN_COLUMNS: Final[str] = (
     "request_id, scope_type, scope, providers, dataset_keys, update_policy, "
     "run_mode, priority, status, dry_run, matched_scope, job_id, dagster_run_id, "
-    "operator, reason, error_message, created_at, started_at, finished_at, updated_at"
+    "cancellation_id, cancellation_requested_at, cancellation_requested_by, "
+    "cancellation_reason, operator, reason, error_message, created_at, started_at, "
+    "finished_at, updated_at"
 )
 
 
@@ -103,6 +105,10 @@ class FeatureUpdateRequest:
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
+    cancellation_id: str | None = None
+    cancellation_requested_at: datetime | None = None
+    cancellation_requested_by: str | None = None
+    cancellation_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +191,12 @@ def _row_to_request(row: Any) -> FeatureUpdateRequest:
         matched_scope=_json_dict(row.matched_scope),
         job_id=str(row.job_id) if row.job_id is not None else None,
         dagster_run_id=row.dagster_run_id,
+        cancellation_id=(
+            str(row.cancellation_id) if row.cancellation_id is not None else None
+        ),
+        cancellation_requested_at=row.cancellation_requested_at,
+        cancellation_requested_by=row.cancellation_requested_by,
+        cancellation_reason=row.cancellation_reason,
         operator=row.operator,
         reason=row.reason,
         error_message=row.error_message,
@@ -288,11 +300,16 @@ _INSERT_REQUEST_SQL: Final[str] = f"""
 INSERT INTO ops.feature_update_requests (
     request_id, scope_type, scope, providers, dataset_keys, update_policy,
     run_mode, priority, status, dry_run, matched_scope, job_id, operator, reason
-) VALUES (
+) SELECT
     :request_id, :scope_type, CAST(:scope AS jsonb), CAST(:providers AS jsonb),
     CAST(:dataset_keys AS jsonb), CAST(:update_policy AS jsonb),
     :run_mode, :priority, 'queued', false, CAST(:matched_scope AS jsonb),
     :job_id, :operator, :reason
+WHERE EXISTS (
+    SELECT 1
+    FROM ops.import_jobs AS job
+    WHERE job.job_id = CAST(:job_id AS uuid)
+      AND job.cancellation_id IS NULL
 )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -311,7 +328,9 @@ SET status = 'running',
 WHERE request_id = (
     SELECT request_id
     FROM ops.feature_update_requests
-    WHERE status = 'queued' AND dry_run IS false
+    WHERE status = 'queued'
+      AND dry_run IS false
+      AND cancellation_id IS NULL
     ORDER BY priority DESC, created_at, request_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -322,7 +341,9 @@ RETURNING {_RETURN_COLUMNS}
 _PEEK_REQUEST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
-WHERE status = 'queued' AND dry_run IS false
+WHERE status = 'queued'
+  AND dry_run IS false
+  AND cancellation_id IS NULL
 ORDER BY priority DESC, created_at, request_id
 LIMIT :limit
 """
@@ -335,6 +356,7 @@ SET status = 'running',
     updated_at = now()
 WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -344,6 +366,7 @@ SET matched_scope = CAST(:matched_scope AS jsonb),
     updated_at = now()
 WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -356,6 +379,7 @@ SET status = :status,
     updated_at = now()
 WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -367,6 +391,7 @@ SET status = 'running',
     current_stage = COALESCE(:current_stage, current_stage)
 WHERE job_id = :job_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 """
 
 _FINISH_IMPORT_JOB_SQL: Final[str] = """
@@ -378,6 +403,7 @@ SET status = :status,
     progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
 WHERE job_id = :job_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 """
 
 _LIST_REQUESTS_SQL: Final[str] = f"""
