@@ -71,6 +71,7 @@ from kortravelmap.api.routers import (
     ops_datasets_router,
     ops_live_router,
     ops_logs_router,
+    ops_pipeline_router,
     ops_router,
     poi_cache_targets_router,
     provider_refresh_policies_router,
@@ -636,6 +637,16 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     if ops_routes_enabled:
         application.include_router(
             ops_datasets_router,
+            prefix="/v1",
+            dependencies=[Depends(require_admin_frontend)],
+        )
+
+    # ADR-064 (T-ADM-C3) — 신규 `/ops/pipeline` 그룹은 조작(POST/PATCH)이 포함되어
+    # 무인증 ops 패턴 대신 admin frontend 게이트로 마운트한다. datasets 그룹
+    # (T-ADM-C2)과의 병렬 작업 충돌을 줄이기 위해 include 블록을 분리해 둔다.
+    if ops_routes_enabled:
+        application.include_router(
+            ops_pipeline_router,
             prefix="/v1",
             dependencies=[Depends(require_admin_frontend)],
         )

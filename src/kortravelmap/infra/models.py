@@ -1587,6 +1587,11 @@ class ImportJobRow(Base):
             text("job_id DESC"),
             postgresql_where=text("parent_job_id IS NOT NULL"),
         ),
+        Index(
+            "idx_import_jobs_dagster_run_id",
+            "dagster_run_id",
+            postgresql_where=text("dagster_run_id IS NOT NULL"),
+        ),
         {"schema": "ops"},
     )
 
@@ -1618,6 +1623,8 @@ class ImportJobRow(Base):
     current_stage: Mapped[str | None] = mapped_column(Text)
     source_checksum: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
+    # Dagster run 연결 실컬럼 (ADR-064/T-ADM-C3) — payload JSONB 조회 hot path 제거.
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
