@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (claude) — admin ops 통합 재작성 플랜 확정(ADR-064) + concierge #672 n150 live 검증
+
+### admin ops 통합 재작성 플랜 (T-ADM-C1)
+
+사용자 지시(dagster job·provider 기능의 다페이지 분산 해소 — 2페이지 통합 재작성,
+호환성·문서계약 무시, 직관적 REST·일관 UI)로 플랜을 수립했다. 초안에 대해 적대적
+설계 리뷰 2인(A: 백엔드·REST·데이터 모델 — S1 1·S2 6·S3 8 / B: UX·운영 워크플로·
+e2e·분할 — S1 3·S2 7·S3 6)을 돌리고 전량 반영해 확정했다. 정본:
+`docs/reports/admin-ops-consolidation-plan-2026-07-14.md` + ADR-064, 실행 단위
+`docs/tasks.md` `T-ADM-C1`~`C7`(agent A/B 병렬).
+
+리뷰가 바꾼 핵심 결정: ① 실행 타임라인은 DB-only UNION(keyset) — Dagster
+run(GraphQL·휘발)은 목록 cursor에 섞지 않고 실컬럼 연결+보조 패널로(“하나의 실행
+이력” 초안 폐기), ② 신규 2그룹은 admin 게이트 마운트(무인증 ops 승계는 현행 대비
+다운그레이드), ③ `GET /v1/providers` 계열은 PinVi read 계약으로 존치, ④ OpenAPI/
+types 생성물은 각 백엔드 PR에서 재생성(T-C6 일괄안은 openapi-drift 게이트와 충돌),
+⑤ `import_jobs.dagster_run_id` 실컬럼+인덱스(현 WS hot path가 payload JSONB 풀스캔),
+⑥ sensor 상태 노출(큐 침묵-정지 장애 모드), ⑦ 진입점 재배선 체크리스트(entity-link
+단일 URL 테이블 등 존치 화면 9파일+mock spec 19파일), ⑧ 파괴적 live e2e의 게이트
+체계·SAFE provider·쿼터 금지 목록 승계.
+
+### concierge export 소비 정렬(#672) n150 배포·live 검증
+
+- **배포**: main(`c8a54dca`)을 표준 절차(노드 clone+rsync+로컬 빌드)로 재배포.
+  alembic `0047` head, 컨테이너 4개 healthy, 공개 도메인 로그인 POST 200. prod
+  dagster env에 `..._FEATURE_SYNC_ENDPOINT`/`..._FEATURE_CURSOR` override 부재
+  확인 → 재배포만으로 `changes` 전체 재생 전환.
+- **materialize 검증**: `feature_place_kor_travel_concierge_youtube` RUN_SUCCESS.
+  producer ledger는 현재 upsert 1,430 / reject·tombstone 0 → 철회 전파 0건이
+  정답(전파할 철회가 아직 없음). T-189 전 item 재발급으로 980건 재-render + 신규
+  40건 적재(active 980→1,020, inactive 0). 평면 provenance 키 backfill 포함.
+- **발견(사전 존재, #672 무관)**: ledger 1,430 중 410건이
+  `provider_address_mismatch`(error·drop)로 **한 번도 적재된 적 없음** — 유효해
+  보이는 국내 장소(해동용궁사 등) 포함. 검증 규칙 적합성 검토를 이슈 **#673**으로
+  분리(역지오코딩 시군구명 vs provider 주소 문자열 대조 규칙).
+
 ## 2026-07-14 (claude) — concierge export 소비 계약 정렬 (endpoint 기본 changes·provenance 평면 키·되돌리기 회귀)
 
 사용자 지시 "concierge api 수정내용반영"으로, producer(kor-travel-concierge)의
