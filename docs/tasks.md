@@ -129,25 +129,23 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 - [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
-  홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3 API 소비 전제**(#677):
-  (a) 타임라인 UNION은 update request와 그 쌍둥이 `kind=feature_update_request`
-  import job을 **모두** 행으로 노출한다 — UI가 연결 필드(`job_id`/`request_id`)로
-  이중 행을 접되, 페이지 경계로 쌍이 분단되면 지연 접기(degrade)로 처리한다.
-  (b) 쌍둥이 job 행은 `provider`가 NULL이라 provider 필터 시 job 쌍만 목록에서
-  탈락한다(request 행 기준으로 판단). (c) `progress`/`current_stage`는 job 쌍에서
-  취득한다(request 행에는 없음). 그리고 구 dagster run 상세 GET은 신규 그룹에
-  없다(설계대로) — C5는 그 UI 패턴을 이식하지 말고 목록+Dagster UI 외부 링크로
-  구성한다.
+  홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3b API 소비 정본**(#689):
+  (a) 타임라인은 request branch 또는 standalone root를 행 하나로 노출하며,
+  descendant job을 별도 행으로 중복 노출하지 않는다. (b) provider/dataset 필터와
+  표시는 effective `providers[]`/`dataset_keys[]`와 typed `provider_dataset` pair를
+  사용한다. (c) request root의 상태와 `projected_job` 상태·진행률·단계를
+  분리해 표시한다. standalone root는 자체 진행률을 쓰고 `projected_job.detail_url`로
+  대표 descendant 상세에 연결한다. Dagster run 상세는 C3c가
+  `GET /v1/ops/pipeline/dagster-runs/{run_id}`로 추가하며 C5는 이 정본을 소비한다.
 - [ ] `T-ADM-C6a` — **존치 화면 링크 재배선** (선착, 의존 C4·C5): entity-link kind
   재매핑(1급)+직접 href 9파일+live.ts topic 매핑+HATEOAS `_job_links`+
   scenario catalog. 구 페이지 제거 **전** 독립 PR.
 - [ ] `T-ADM-C6b` — **구 표면 삭제** (선착, 의존 C6a): 라우트 6종·라우터
   ~30 endpoint·구 훅·mock spec 19파일 삭제 + nav/홈 정리 + OpenAPI 재생성(삭제분).
-  **선행 전제(#677)**: `routers/ops_pipeline.py`가 구 라우터(`dagster.py`·
-  `feature_update_requests.py`)의 private 심볼 ~20개(GraphQL 조립·파서·override
-  CRUD·cron 가드·scope union 모델·`_enqueue`)를 import 재사용 중 — 구 라우터 삭제
-  **전에** 공유 조립/DTO를 중립 모듈로 이식해야 한다. 이식 시점에 스케줄 쓰기의
-  200+`status=error` envelope을 404/502 problem+json으로 승격할지 함께 검토.
+  C3a/#687에서 Dagster application service/schema와 feature update service/schema의
+  public 공유 모듈 추출을 완료했다. legacy router를 삭제해도 이 public 모듈은
+  유지하며, 스케줄 쓰기의 200+`status=error` envelope을 404/502
+  problem+json으로 승격할지만 이 시점에 검토한다.
   ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
   이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존 C6b·C7A): 기존 게이트
