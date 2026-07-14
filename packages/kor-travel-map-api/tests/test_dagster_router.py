@@ -27,6 +27,53 @@ def client() -> Iterator[TestClient]:
         yield test_client
 
 
+def _malformed_run_detail_payload(case: str) -> dict[str, object]:
+    event_connection: object = {
+        "cursor": None,
+        "hasMore": False,
+        "events": [],
+    }
+    run: dict[str, object] = {
+        "__typename": "Run",
+        "runId": "run-1",
+        "status": "SUCCESS",
+        "tags": [],
+        "eventConnection": event_connection,
+    }
+    if case == "missing_run_id":
+        run.pop("runId")
+    elif case == "empty_run_id":
+        run["runId"] = ""
+    elif case == "mismatched_run_id":
+        run["runId"] = "other-run"
+    elif case == "non_object_connection":
+        run["eventConnection"] = []
+    elif case == "missing_events":
+        assert isinstance(event_connection, dict)
+        event_connection.pop("events")
+    elif case == "non_boolean_has_more":
+        assert isinstance(event_connection, dict)
+        event_connection["hasMore"] = "false"
+    elif case == "non_list_events":
+        assert isinstance(event_connection, dict)
+        event_connection["events"] = {}
+    elif case == "non_string_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection["cursor"] = 1
+    elif case == "missing_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection["hasMore"] = True
+    elif case == "empty_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection.update({"cursor": "", "hasMore": True})
+    elif case == "oversized_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection.update({"cursor": "c" * 2049, "hasMore": True})
+    else:  # pragma: no cover - 테스트 파라미터 오타 방어
+        raise AssertionError(f"unknown malformed case: {case}")
+    return {"data": {"runOrError": run}}
+
+
 @pytest.mark.unit
 def test_dagster_summary_parses_graphql_response(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -414,6 +461,43 @@ def test_dagster_run_detail_graphql_error_extracts_message(
     assert data["errors"] == ["Field 'bogus' doesn't exist"]
     # dict repr(파이썬 표현)이 새지 않아야 한다.
     assert "locations" not in data["errors"][0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_run_id",
+        "empty_run_id",
+        "mismatched_run_id",
+        "non_object_connection",
+        "missing_events",
+        "non_boolean_has_more",
+        "non_list_events",
+        "non_string_cursor",
+        "missing_next_cursor",
+        "empty_next_cursor",
+        "oversized_next_cursor",
+    ],
+)
+def test_legacy_dagster_run_detail_returns_error_for_malformed_run(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    async def _fake_post_graphql(**_kwargs: object) -> dict[str, object]:
+        return _malformed_run_detail_payload(case)
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/dagster/runs/run-1")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "error"
+    assert data["run"] is None
+    assert data["events"] == []
+    assert data["errors"]
 
 
 @pytest.mark.unit

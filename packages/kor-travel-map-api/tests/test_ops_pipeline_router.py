@@ -47,12 +47,12 @@ _PIPELINE_PATHS = [
     "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel",
     "/v1/ops/pipeline/events",
     "/v1/ops/pipeline/dagster-runs",
+    "/v1/ops/pipeline/dagster-runs/{run_id}",
     "/v1/ops/pipeline/schedules",
     "/v1/ops/pipeline/schedules/{schedule_name}",
     "/v1/ops/pipeline/schedules/{schedule_name}/commands",
     "/v1/ops/pipeline/requests",
     "/v1/ops/pipeline/requests/{request_id}/run-now",
-    "/v1/ops/pipeline/nux-seen",
 ]
 
 
@@ -94,6 +94,53 @@ def client(session: _FakeSession) -> TestClient:
 
     app.dependency_overrides[get_session] = _fake_session
     return TestClient(app)
+
+
+def _malformed_run_detail_payload(case: str) -> dict[str, Any]:
+    event_connection: object = {
+        "cursor": None,
+        "hasMore": False,
+        "events": [],
+    }
+    run: dict[str, Any] = {
+        "__typename": "Run",
+        "runId": "run-1",
+        "status": "SUCCESS",
+        "tags": [],
+        "eventConnection": event_connection,
+    }
+    if case == "missing_run_id":
+        run.pop("runId")
+    elif case == "empty_run_id":
+        run["runId"] = ""
+    elif case == "mismatched_run_id":
+        run["runId"] = "other-run"
+    elif case == "non_object_connection":
+        run["eventConnection"] = []
+    elif case == "missing_events":
+        assert isinstance(event_connection, dict)
+        event_connection.pop("events")
+    elif case == "non_boolean_has_more":
+        assert isinstance(event_connection, dict)
+        event_connection["hasMore"] = "false"
+    elif case == "non_list_events":
+        assert isinstance(event_connection, dict)
+        event_connection["events"] = {}
+    elif case == "non_string_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection["cursor"] = 1
+    elif case == "missing_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection["hasMore"] = True
+    elif case == "empty_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection.update({"cursor": "", "hasMore": True})
+    elif case == "oversized_next_cursor":
+        assert isinstance(event_connection, dict)
+        event_connection.update({"cursor": "c" * 2049, "hasMore": True})
+    else:  # pragma: no cover - 테스트 파라미터 오타 방어
+        raise AssertionError(f"unknown malformed case: {case}")
+    return {"data": {"runOrError": run}}
 
 
 def _job(
@@ -338,6 +385,15 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "stop",
         "reset",
     ]
+    detail_operation = spec["paths"]["/v1/ops/pipeline/dagster-runs/{run_id}"]["get"]
+    assert {"200", "404", "422", "502", "503", "default"} <= set(
+        detail_operation["responses"]
+    )
+    assert "/v1/ops/pipeline/nux-seen" not in spec["paths"]
+    assert "/v1/ops/dagster/nux-seen" in spec["paths"]
+    detail_schema = spec["components"]["schemas"]["DagsterRunDetailData"]
+    assert "현재 event page" in detail_schema["properties"]["failure_reason"]["description"]
+    assert "현재 event page" in detail_schema["properties"]["failure_events"]["description"]
 
 
 @pytest.mark.unit
@@ -807,6 +863,253 @@ def test_dagster_runs_panel_degrades_to_unavailable(
 
 
 @pytest.mark.unit
+def test_dagster_run_detail_returns_page_local_structured_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        calls.append({"query": kwargs["query"], "variables": kwargs["variables"]})
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "Run",
+                    "runId": "run-1",
+                    "jobName": "provider_job",
+                    "status": "FAILURE",
+                    "tags": [],
+                    "eventConnection": {
+                        "cursor": "event-next",
+                        "hasMore": True,
+                        "events": [
+                            {
+                                "__typename": "RunFailureEvent",
+                                "message": "run failed",
+                                "timestamp": "1710000030.0",
+                                "level": "ERROR",
+                                "stepKey": None,
+                                "eventType": "RUN_FAILURE",
+                                "error": {
+                                    "message": "boom",
+                                    "stack": ["traceback"],
+                                    "className": "RuntimeError",
+                                },
+                            }
+                        ],
+                    },
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get(
+        "/v1/ops/pipeline/dagster-runs/%20run-1%20",
+        params={"page_size": 5, "after": "event-before"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "ok"
+    assert data["run"]["status"] == "FAILURE"
+    assert data["event_cursor"] == "event-next"
+    assert data["event_has_more"] is True
+    assert data["failure_reason"] == "RuntimeError: boom"
+    assert data["failure_events"][0]["error"]["class_name"] == "RuntimeError"
+    assert calls == [
+        {
+            "query": dagster_query._DAGSTER_RUN_DETAIL_QUERY,
+            "variables": {
+                "runId": "run-1",
+                "eventLimit": 5,
+                "afterCursor": "event-before",
+            },
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_not_found_is_problem_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "RunNotFoundError",
+                    "message": "Run not found",
+                    "runId": "missing-run",
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/pipeline/dagster-runs/missing-run")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")
+    problem = response.json()
+    assert problem["code"] == "DAGSTER_RUN_NOT_FOUND"
+    assert problem["details"] == {
+        "run_id": "missing-run",
+        "errors": ["Run not found"],
+    }
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_unavailable_is_problem_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        raise httpx.ConnectError("dagster down")
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/pipeline/dagster-runs/run-1")
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "DAGSTER_UNAVAILABLE"
+    assert response.json()["details"]["errors"] == ["dagster down"]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_query_error_is_problem_502(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        return {"errors": [{"message": "query failed", "path": ["runOrError"]}]}
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/pipeline/dagster-runs/run-1")
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "DAGSTER_QUERY_FAILED"
+    assert response.json()["details"]["errors"] == ["query failed"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure_kind",
+    ["http_status", "invalid_json", "python_error", "disallowed_url"],
+)
+def test_dagster_run_detail_upstream_response_error_is_problem_502(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    calls = 0
+
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if failure_kind == "http_status":
+            request = httpx.Request("POST", "http://dagster.example:12302/graphql")
+            response = httpx.Response(502, request=request)
+            raise httpx.HTTPStatusError(
+                "Dagster upstream HTTP 502",
+                request=request,
+                response=response,
+            )
+        if failure_kind == "python_error":
+            return {
+                "data": {
+                    "runOrError": {
+                        "__typename": "PythonError",
+                        "message": "Dagster resolver failed",
+                    }
+                }
+            }
+        if failure_kind == "disallowed_url":
+            raise AssertionError("disallowed Dagster URL must not be requested")
+        raise ValueError("Dagster JSON decode failed")
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    dagster_url = (
+        "http://disallowed.example:12302"
+        if failure_kind == "disallowed_url"
+        else "http://dagster.example:12302"
+    )
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            dagster_url=dagster_url,
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+    with TestClient(app) as test_client:
+        response = test_client.get("/v1/ops/pipeline/dagster-runs/run-1")
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "DAGSTER_QUERY_FAILED"
+    assert calls == (0 if failure_kind == "disallowed_url" else 1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_run_id",
+        "empty_run_id",
+        "mismatched_run_id",
+        "non_object_connection",
+        "missing_events",
+        "non_boolean_has_more",
+        "non_list_events",
+        "non_string_cursor",
+        "missing_next_cursor",
+        "empty_next_cursor",
+        "oversized_next_cursor",
+    ],
+)
+def test_dagster_run_detail_rejects_malformed_run_as_problem_502(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        return _malformed_run_detail_payload(case)
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/pipeline/dagster-runs/run-1")
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/problem+json")
+    problem = response.json()
+    assert problem["code"] == "DAGSTER_QUERY_FAILED"
+    assert problem["details"]["run_id"] == "run-1"
+    assert problem["details"]["errors"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "params"),
+    [
+        ("/v1/ops/pipeline/dagster-runs/%20%20", {}),
+        (f"/v1/ops/pipeline/dagster-runs/{'r' * 256}", {}),
+        ("/v1/ops/pipeline/dagster-runs/run-1", {"after": ""}),
+        ("/v1/ops/pipeline/dagster-runs/run-1", {"after": "c" * 2049}),
+        ("/v1/ops/pipeline/dagster-runs/run-1", {"page_size": 201}),
+    ],
+)
+def test_dagster_run_detail_rejects_invalid_path_and_query(
+    client: TestClient,
+    path: str,
+    params: dict[str, object],
+) -> None:
+    response = client.get(path, params=params)
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.unit
 def test_schedules_merges_overrides_and_returns_sensors(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1243,18 +1546,8 @@ def test_run_now_non_uuid_request_id_is_422(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_nux_seen_delegates_to_dagster_mutation(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        assert kwargs["query"] == dagster_query._DAGSTER_SET_NUX_SEEN_MUTATION
-        return {"data": {"setNuxSeen": True}}
-
-    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
-
+def test_pipeline_nux_seen_route_is_removed(client: TestClient) -> None:
     response = client.post("/v1/ops/pipeline/nux-seen")
 
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["status"] == "ok"
-    assert data["seen"] is True
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")

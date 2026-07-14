@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex, agent A) — T-ADM-C3c pipeline Dagster run 상세 (#681)
+
+- **구현 완료**: 신규 pipeline run 상세에 opaque event cursor와 page-local failure
+  구조를 이식했다. 성공만 200이며 not-found/연결 실패/query 오류를
+  404/503/502 RFC7807로 구분하고, 신규 pipeline NUX route는 제거했다.
+- **적대적 리뷰 반영**: 허용되지 않은 URL·PythonError 502 회귀를 추가하고,
+  빈/불일치 run ID와 잘못된 event pagination payload가 정상 응답으로 승격되지
+  않도록 parser를 강화했다. legacy route는 같은 malformed payload를 200
+  `status=error`로 보존한다.
+- **현재 검증**: 신규/legacy 상세 관련 40건, 변경 파일 Ruff와 diff 검사가
+  통과했다. OpenAPI/admin TypeScript를 재생성했다.
+- **다음 한 작업**: 수정 diff 적대적 재리뷰를 통과한 뒤 전체 unit/API,
+  strict mypy, import-linter, OpenAPI/types drift를 실행하고 보안 감사 후 PR을 올린다.
+  PR merge 전까지 task는 진행 중이다.
+
 ## 2026-07-15 (codex, agent B) — T-ADM-C3b pipeline root projection (#679)
 
 - **구현 완료**: recursive component와 nearest request anchor로 job을 request branch/

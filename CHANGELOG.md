@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### admin ops pipeline Dagster run 상세 (2026-07-15, ADR-064 T-ADM-C3c)
+
+- **ADDED**: `GET /v1/ops/pipeline/dagster-runs/{run_id}`를 추가했다. Dagster event
+  cursor를 `after`로 전진 조회하며 `failure_reason`과 `failure_events`는 현재 event
+  page 범위로 반환한다.
+- **CHANGED**: 개별 run 상세는 성공만 200이다. run 없음은
+  `404 DAGSTER_RUN_NOT_FOUND`, 연결·timeout은 `503 DAGSTER_UNAVAILABLE`, 설정·
+  GraphQL·upstream HTTP·응답 해석 오류는 `502 DAGSTER_QUERY_FAILED` RFC7807
+  problem으로 구분한다.
+- **FIXED**: Dagster가 `Run` typename과 함께 빈/불일치 `runId`, 잘못된
+  eventConnection pagination shape, 재사용할 수 없는 다음 cursor를 반환하면 정상
+  run으로 오인하지 않는다. 신규 route는 502, legacy route는 200 envelope의
+  `status=error`로 반환한다.
+- **REMOVED**: iframe을 사용하지 않는 새 UI의 `/v1/ops/pipeline/nux-seen`을
+  제거했다. legacy `/v1/ops/dagster/nux-seen`은 구 화면 제거 전까지 유지한다.
+
 ### admin ops pipeline root projection (2026-07-15, ADR-064 T-ADM-C3b)
 
 - **CHANGED**: `GET /v1/ops/pipeline/executions`가 import job hierarchy를 job별

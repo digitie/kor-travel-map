@@ -318,7 +318,18 @@ async def get_run_detail(
             },
             query=_DAGSTER_RUN_DETAIL_QUERY,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPStatusError, ValueError) as exc:
+        return _run_detail_response(
+            DagsterRunDetailData(
+                status="error",
+                dagster_url=urls.dagster_url,
+                graphql_url=urls.graphql_url,
+                checked_at=checked_at,
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
+        )
+    except httpx.RequestError as exc:
         return _run_detail_response(
             DagsterRunDetailData(
                 status="unavailable",
@@ -347,6 +358,7 @@ async def get_run_detail(
             dagster_graphql.as_dict(data.get("runOrError")),
             dagster_urls=urls,
             checked_at=checked_at,
+            expected_run_id=run_id,
         ),
         started_at=started_at,
     )

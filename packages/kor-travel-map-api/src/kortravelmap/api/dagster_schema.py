@@ -214,7 +214,7 @@ class DagsterRunFailure(BaseModel):
 
 
 class DagsterRunDetailData(BaseModel):
-    """`GET /ops/dagster/runs/{run_id}` data."""
+    """Dagster run 상세 data(legacy + ``/ops/pipeline/dagster-runs/{run_id}``)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -223,16 +223,37 @@ class DagsterRunDetailData(BaseModel):
     graphql_url: str
     checked_at: datetime
     run: DagsterRunSummary | None = None
-    events: list[DagsterRunEvent] = Field(default_factory=list)
-    failure_reason: str | None = None
-    failure_events: list[DagsterRunFailure] = Field(default_factory=list)
-    event_cursor: str | None = None
-    event_has_more: bool = False
+    events: list[DagsterRunEvent] = Field(
+        default_factory=list,
+        description="현재 Dagster event cursor page의 event 목록.",
+    )
+    failure_reason: str | None = Field(
+        default=None,
+        description=(
+            "현재 event page에서 마지막으로 발견한 실패 원인. 전체 run의 전역 실패 "
+            "요약이 아니며 event_has_more=true이면 null이어도 뒤 page에 실패가 있을 수 있다."
+        ),
+    )
+    failure_events: list[DagsterRunFailure] = Field(
+        default_factory=list,
+        description=(
+            "현재 event page에서만 추출한 구조화 실패 event. event_has_more=true일 때 "
+            "빈 배열을 전체 run의 실패 event 부재로 해석하지 않는다."
+        ),
+    )
+    event_cursor: str | None = Field(
+        default=None,
+        description="다음 page의 after query에 그대로 전달할 Dagster opaque cursor.",
+    )
+    event_has_more: bool = Field(
+        default=False,
+        description="뒤 event page 존재 여부. true이면 event_cursor로 전진 조회한다.",
+    )
     errors: list[str] = Field(default_factory=list)
 
 
 class DagsterRunDetailResponse(BaseModel):
-    """`GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope)."""
+    """Dagster run 상세 응답(DA-D-03 envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 

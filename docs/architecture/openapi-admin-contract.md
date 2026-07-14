@@ -916,8 +916,13 @@ service의 비성공 상태는 router에서 다음 RFC7807 `application/problem+
 | service 상태 | HTTP | `code` | 의미 |
 |---|---:|---|---|
 | `not_found` | 404 | `DAGSTER_RUN_NOT_FOUND` | Dagster가 `RunNotFoundError`를 반환 |
-| `unavailable` | 503 | `DAGSTER_UNAVAILABLE` | Dagster HTTP 연결·응답 해석 실패 |
-| `error` | 502 | `DAGSTER_QUERY_FAILED` | URL 설정, GraphQL, PythonError 또는 알 수 없는 응답 타입 |
+| `unavailable` | 503 | `DAGSTER_UNAVAILABLE` | Dagster 연결·timeout 등 request 전송 실패 |
+| `error` | 502 | `DAGSTER_QUERY_FAILED` | upstream HTTP·응답 해석·URL 설정·GraphQL·PythonError 오류 |
+
+`__typename=Run`만으로 성공을 판정하지 않는다. 응답 `runId`가 비어 있거나 요청값과
+다르고, `eventConnection`이 객체가 아니거나 `cursor`·`hasMore`·`events` pagination
+shape가 잘못됐으면 응답 해석 오류다. `hasMore=true`이면 다음 요청에 그대로 쓸 수 있는
+비어 있지 않은 2,048자 이하 cursor가 반드시 있어야 한다.
 
 각 problem의 `details`는 최소 `run_id`와 service의 `errors`를 포함한다. FastAPI path/query
 검증 실패는 공통 `422 VALIDATION_ERROR`다.
