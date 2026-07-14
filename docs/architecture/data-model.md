@@ -1216,6 +1216,36 @@ T-205a는 테이블/ORM 매핑까지만 구현했다. scope resolver, enqueue/cl
 repository, client 표면은 T-206a/b/c와 T-208e에서 구현했고, admin API와 Dagster
 sensor는 T-207/T-208에서 연결했다.
 
+#### 9.8.1 Pipeline root projection (T-ADM-C3b, 이슈 #679)
+
+`GET /v1/ops/pipeline/executions`는 별도 operation 테이블을 만들기 전의 read model이다.
+`ops.import_jobs` hierarchy와 `ops.feature_update_requests`를 Python에서 합치지 않고
+하나의 recursive SQL에서 root 단위로 접는다.
+
+- import job은 `parent_job_id`를 위로 따라 component를 만든다. 정상 hierarchy의
+  최상위 job이 component root다. parent row가 없으면 현재 job을 self-root로 삼고,
+  cycle은 `uuid[] path`로 감지·종료한 뒤 cycle member의 최소 `job_id`를 root로 쓴다.
+- 각 job은 ancestry에서 가장 가까운 request anchor(`request.job_id`)에 귀속한다.
+  nested request anchor를 만나면 그 지점부터 별도 branch가 되므로 상위 request가
+  무관한 sibling/descendant까지 소유하지 않는다. 같은 anchor를 가리키는 request가
+  여러 개면 `request.created_at ASC, request_id ASC` 첫 행만 owner다.
+- request anchor가 없는 job은 component의 standalone partition에 귀속한다. batch root와
+  미소유 sibling은 최상위 import job 한 행에 남고, 각 request는 자기 branch만 한 행으로
+  노출한다. owner가 아닌 request도 진단 root로 남지만 job을 공유하지 않는다.
+- 화면에 대표로 보일 job은 각 partition 안에서
+  `anchor/root depth DESC, created_at DESC, job_id DESC` 첫 행이다.
+  root 상태와 대표 job 상태는 서로 덮어쓰지 않으며 `linked_job_count`로 해당
+  request branch 또는 standalone partition의 job 수를 함께 보존한다.
+- request identity는 저장된 `providers`/`dataset_keys`의 순서·중복을 유지하되,
+  `provider_dataset` direct scope 값이 배열에 없으면 끝에 보완한 effective 배열이다.
+  direct scope의 provider/dataset/sync_scope pair는 별도 typed object로 보존한다.
+  standalone import identity는 미소유 partition 전체
+  `ops.import_job_events.provider`/`dataset_key`의 NULL·빈 문자열을 제거한 정렬 DISTINCT
+  배열이다. `ops.import_jobs.payload`는 identity·상관관계·filter에 사용하지 않는다.
+
+이 projection은 read contract만 정의한다. schedule/manual/update/import 실행을 같은
+영속 operation row에 기록하는 모델·백필·migration은 T-ADM-C3e 범위다.
+
 ### 9.9 `ops.feature_change_requests` (alembic 0021)
 
 사용자/admin 요청으로 들어온 place/event feature 추가·수정·삭제 요청을 저장한다.

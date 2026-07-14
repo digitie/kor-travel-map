@@ -706,6 +706,40 @@ T-207d 구현 상태: `kor-travel-map-admin`은 운영 화면이 필요한 DB �
 포함되지 않는다. REST DTO source of truth는 계속 아래 endpoint이며, live frame은
 admin frontend의 query invalidation signal로만 사용한다.
 
+### `GET /v1/ops/pipeline/executions`
+
+DB에 기록된 update request와 import job hierarchy를 root 실행 목록으로 반환한다.
+각 job은 ancestry의 가장 가까운 request anchor branch 또는 standalone partition 중
+정확히 하나에 귀속한다. batch root·미소유 sibling은 최상위 import job 한 행이고,
+각 request branch는 request 한 행이다. descendant job을 별도 root로 반환하지 않는다.
+
+정렬과 cursor 비교는 모두 `(created_at DESC, id DESC, kind DESC)`다. cursor v2는
+`created_at`·UUID `id`·`kind(update_request|import_job)`를 담고, 형식이나 kind가
+잘못되면 DB 조회 전에 `422`다. query는 `kind`, root `status`, `provider`,
+`dataset_key`, `created_from`, `created_to`, `page_size`, `cursor`를 지원한다.
+provider/dataset filter는 request의 저장 배열 membership과 `provider_dataset` direct
+scope를 함께 보고, standalone import root는 전체 lineage event identity를 본다.
+
+각 item의 공통 root 필드는 `kind`, `id`, `status`, `progress`, `current_stage`,
+`dagster_run_id`, `providers[]`, `dataset_keys[]`, `provider_dataset`,
+`created_at`/시작/종료 시각이다. request 배열은 저장 순서·중복을 유지하고 direct
+`provider_dataset` 값이 없을 때만 끝에 보완한다. 두 배열은 독립 identity 목록이므로
+provider/dataset/sync_scope pair는 typed `provider_dataset` object가 정본이다.
+다른 request와 standalone root의 `provider_dataset`은 `null`이다.
+`projected_job`은 `depth DESC, created_at DESC, job_id DESC` 규칙으로 고른 대표 job이며
+root와 별도의 status/progress/error/times/Dagster run/detail URL을 가진다.
+`linked_job_count`는 해당 request branch 또는 standalone partition의 job 수다.
+
+request item은 원래 FK인 `requested_job_id`와 `lineage_owner`를 추가로 제공한다. 같은
+job anchor를 여러 request가 가리키면 생성 시각·ID 기준 owner 하나만
+`lineage_owner=true`와 projection을 갖는다. nested anchor는 상위 request branch를
+그 지점에서 분리한다. 탈락한 request는 `lineage_owner=false`, `linked_job_count=0`,
+`projected_job=null`이지만 `requested_job_id`는 보존한다. 이는 데이터 손실이 아니라
+job hierarchy의 다중 소유·중복 표시를 막는 명시적 진단 상태다.
+
+단건 detail/cancel 계약은 이 목록 projection으로 바꾸지 않는다. Dagster run 상세는
+T-ADM-C3c, 계층 취소는 C3d, canonical operation 영속화는 C3e 범위다.
+
 ### `GET /ops/metrics`
 
 운영 홈/대시보드용 summary metric을 반환한다.

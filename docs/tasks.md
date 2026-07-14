@@ -10,7 +10,7 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [x] `T-ADM-C1` — 플랜 확정 + ADR-064 + tasks 등록 (본 문서 PR)
   - [x] `T-ADM-C2` — backend `/ops/datasets/*` (agent A, PR #676)
-  - [ ] `T-ADM-C2R` — C2 적대적 리뷰 차단 계약 보강 (agent A, issue #678)
+  - [x] `T-ADM-C2R` — C2 적대적 리뷰 차단 계약 보강 (agent A, PR #688)
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
   - [x] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682, PR #687)
   - [ ] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679)
@@ -51,8 +51,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   재생성 포함**(rebase 충돌은 재생성으로 해소, 수동 병합 금지). 적대적 리뷰
   2인 반영 — S2 transaction 순서 500 수정(실세션 integration 회귀 포함),
   S3 PUT 허용 집합 확장(카탈로그∪잔존 sync∪기존 policy)·`.env.example` flag.
-- [ ] `T-ADM-C2R` — **C2 적대적 리뷰 차단 계약 보강** (agent **A**, issue
-  **#678**, C4 선행): 서버 계산 freshness(명시적 `stale_after_minutes`만 사용),
+- [x] `T-ADM-C2R` — **C2 적대적 리뷰 차단 계약 보강** (agent **A**, issue
+  **#678**, **PR #688**, C4 선행): 서버 계산 freshness(명시적
+  `stale_after_minutes`만 사용),
   `eligible_after`와 Dagster 실제 `next_scheduled_at` 분리, root request 우선 최신
   실행 batch projection(N+1/쌍둥이 행 제거), provider/dataset 이슈 분리, orphan
   mutation 금지, fixture-only typed preview(`max_items`/timeout/외부 호출 budget 0/
@@ -76,11 +77,24 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   사용한다. **동작·HTTP 의미·OpenAPI는 보존**하고 schedule capability/actor/
   problem+json 변경은 이 PR에 섞지 않는다.
 - [ ] `T-ADM-C3b` — **root operation SQL projection** (agent **B**, 이슈 **#679**,
-  C3 후속 2/5, C3a 뒤): request를 root로 삼아 연결 import job의 상태·진행을
-  child로 JOIN하고, request 없는 import job만 독립 root로 남긴다. Python 후접기
-  금지. keyset total order는 `(created_at, id, kind)`, `providers[]`/
-  `dataset_keys[]` 원형과 dataset membership filter를 포함한다. root/child 상태는
-  덮어쓰지 않고 각각 노출한다.
+  C3 후속 2/5, C3a 뒤): recursive SQL에서 import job hierarchy를 component로 먼저
+  접고, job별 가장 가까운 request anchor로 branch owner를 결정한다. nested anchor는
+  상위 branch를 분리하고, 같은 anchor의 다중 request만 생성 시각·ID로 owner 하나를
+  고른다. request가 소유하지 않은 partition은 최상위 import job root로 남긴다. cycle은
+  `uuid[] path`로 종료하고 부모 누락은 self-root다. component projection은
+  branch/root 기준 `depth DESC, created_at DESC, job_id DESC`, partition별
+  `linked_job_count`를 함께 노출한다.
+  다중 owner에서 탈락한 request는 `lineage_owner=false`·`requested_job_id`와
+  projection 없음으로 보존한다. Python 후접기 금지. keyset total order는
+  `(created_at DESC, id DESC, kind DESC)`, 저장 순서·중복을 유지하면서 direct scope
+  누락값을 보완한 `providers[]`/`dataset_keys[]`, pair 보존 typed `provider_dataset`,
+  direct scope+array membership filter를 포함한다. standalone identity는 미소유
+  partition의 event 실컬럼을 정렬 DISTINCT 집계하며 import job payload를 읽지 않는다. root/child
+  상태는 덮어쓰지 않고 각각 노출한다. **migration·operation 영속화는 C3e 범위**다.
+  로컬 게이트는 root unit 1,285건, API 전체 416건, 관련 PostGIS/
+  EXPLAIN integration 10건과 Ruff, strict mypy 155파일, import 계약 4/4,
+  OpenAPI/admin types drift를 통과했다. root/agent A 적대적 리뷰 2인은
+  S1/S2 0건으로 승인했다. PR merge 전이므로 task는 진행 중으로 두는다.
 - [ ] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **B**,
   이슈 **#681**, C3 후속 3/5, C3b 뒤): event cursor와 failure 구조를 신규 그룹에
   이식하고 순수 run not-found와 Dagster unavailable을 구분한다. GraphQL run은
@@ -115,25 +129,23 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 - [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
-  홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3 API 소비 전제**(#677):
-  (a) 타임라인 UNION은 update request와 그 쌍둥이 `kind=feature_update_request`
-  import job을 **모두** 행으로 노출한다 — UI가 연결 필드(`job_id`/`request_id`)로
-  이중 행을 접되, 페이지 경계로 쌍이 분단되면 지연 접기(degrade)로 처리한다.
-  (b) 쌍둥이 job 행은 `provider`가 NULL이라 provider 필터 시 job 쌍만 목록에서
-  탈락한다(request 행 기준으로 판단). (c) `progress`/`current_stage`는 job 쌍에서
-  취득한다(request 행에는 없음). 그리고 구 dagster run 상세 GET은 신규 그룹에
-  없다(설계대로) — C5는 그 UI 패턴을 이식하지 말고 목록+Dagster UI 외부 링크로
-  구성한다.
+  홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3b API 소비 정본**(#689):
+  (a) 타임라인은 request branch 또는 standalone root를 행 하나로 노출하며,
+  descendant job을 별도 행으로 중복 노출하지 않는다. (b) provider/dataset 필터와
+  표시는 effective `providers[]`/`dataset_keys[]`와 typed `provider_dataset` pair를
+  사용한다. (c) request root의 상태와 `projected_job` 상태·진행률·단계를
+  분리해 표시한다. standalone root는 자체 진행률을 쓰고 `projected_job.detail_url`로
+  대표 descendant 상세에 연결한다. Dagster run 상세는 C3c가
+  `GET /v1/ops/pipeline/dagster-runs/{run_id}`로 추가하며 C5는 이 정본을 소비한다.
 - [ ] `T-ADM-C6a` — **존치 화면 링크 재배선** (선착, 의존 C4·C5): entity-link kind
   재매핑(1급)+직접 href 9파일+live.ts topic 매핑+HATEOAS `_job_links`+
   scenario catalog. 구 페이지 제거 **전** 독립 PR.
 - [ ] `T-ADM-C6b` — **구 표면 삭제** (선착, 의존 C6a): 라우트 6종·라우터
   ~30 endpoint·구 훅·mock spec 19파일 삭제 + nav/홈 정리 + OpenAPI 재생성(삭제분).
-  **선행 전제(#677)**: `routers/ops_pipeline.py`가 구 라우터(`dagster.py`·
-  `feature_update_requests.py`)의 private 심볼 ~20개(GraphQL 조립·파서·override
-  CRUD·cron 가드·scope union 모델·`_enqueue`)를 import 재사용 중 — 구 라우터 삭제
-  **전에** 공유 조립/DTO를 중립 모듈로 이식해야 한다. 이식 시점에 스케줄 쓰기의
-  200+`status=error` envelope을 404/502 problem+json으로 승격할지 함께 검토.
+  C3a/#687에서 Dagster application service/schema와 feature update service/schema의
+  public 공유 모듈 추출을 완료했다. legacy router를 삭제해도 이 public 모듈은
+  유지하며, 스케줄 쓰기의 200+`status=error` envelope을 404/502
+  problem+json으로 승격할지만 이 시점에 검토한다.
   ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
   이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존 C6b·C7A): 기존 게이트

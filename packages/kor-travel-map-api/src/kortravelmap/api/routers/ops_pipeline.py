@@ -40,6 +40,8 @@ from kortravelmap.infra.ops_repo import (
 )
 from kortravelmap.infra.pipeline_repo import (
     PipelineExecution,
+    PipelineProjectedJob,
+    PipelineProviderDatasetIdentity,
     get_pipeline_status_counts,
     list_pipeline_executions,
 )
@@ -83,6 +85,7 @@ __all__ = [
     "router",
     "ExecutionKind",
     "PipelineExecutionRecord",
+    "PipelineExecutionRootRecord",
     "PipelineExecutionsListResponse",
     "PipelineExecutionDetailResponse",
     "PipelineOverviewResponse",
@@ -103,9 +106,7 @@ PipelineScheduleCommand = Literal["run", "start", "stop", "reset"]
 _EXECUTIONS_URL_PREFIX = "/v1/ops/pipeline/executions"
 _UPDATE_REQUEST_STATUS_URL_PREFIX = f"{_EXECUTIONS_URL_PREFIX}/update_request"
 
-CronString = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
-]
+CronString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 
 # =============================================================================
@@ -114,7 +115,7 @@ CronString = Annotated[
 
 
 class PipelineExecutionRecord(BaseModel):
-    """실행 타임라인 1행 — import job 또는 feature update request."""
+    """단건 detail/cancel의 기존 실행 표현."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -148,12 +149,97 @@ class PipelineExecutionRecord(BaseModel):
     detail_url: str
 
 
+class PipelineProjectedJobRecord(BaseModel):
+    """root branch/partition에서 대표로 고른 import job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    job_kind: str
+    status: str
+    progress: int
+    current_stage: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    dagster_run_id: str | None = None
+    load_batch_id: str | None = None
+    parent_job_id: str | None = None
+    depth: int
+    detail_url: str
+
+
+class PipelineProviderDatasetIdentityRecord(BaseModel):
+    """``provider_dataset`` request의 pair identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    dataset_key: str
+    sync_scope: str | None = None
+
+
+class PipelineExecutionRootRecord(BaseModel):
+    """실행 목록의 request branch 또는 standalone partition root."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ExecutionKind
+    id: str
+    status: str
+    created_at: datetime
+    providers: list[str] = Field(
+        description=(
+            "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 "
+            "끝에 보완한 effective provider identity."
+        )
+    )
+    dataset_keys: list[str] = Field(
+        description=(
+            "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 "
+            "끝에 보완한 effective dataset identity."
+        )
+    )
+    provider_dataset: PipelineProviderDatasetIdentityRecord | None = Field(
+        default=None,
+        description=(
+            "scope_type=provider_dataset request의 provider/dataset/sync_scope pair. "
+            "두 effective 배열은 독립 identity 목록이므로 pair 복원에는 이 필드를 쓴다."
+        ),
+    )
+    progress: int | None = None
+    current_stage: str | None = None
+    scope_type: str | None = None
+    priority: int | None = None
+    run_mode: str | None = None
+    operator: str | None = None
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    dagster_run_id: str | None = None
+    requested_job_id: str | None = Field(
+        default=None,
+        description="update request가 원래 가리킨 import job id.",
+    )
+    lineage_owner: bool | None = Field(
+        default=None,
+        description=(
+            "request가 자기 anchor branch를 소유하면 true, 같은 anchor의 다중 request "
+            "경쟁에서 탈락했거나 연결 job이 없으면 false. standalone import root는 null."
+        ),
+    )
+    linked_job_count: int = Field(ge=0)
+    projected_job: PipelineProjectedJobRecord | None = None
+    detail_url: str
+
+
 class PipelineExecutionsData(BaseModel):
     """실행 타임라인 목록 data."""
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[PipelineExecutionRecord]
+    items: list[PipelineExecutionRootRecord]
 
 
 class PipelineExecutionsListResponse(BaseModel):
@@ -579,15 +665,48 @@ def _is_uuid(value: str) -> bool:
     return True
 
 
-def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRecord:
-    return PipelineExecutionRecord(
+def _projected_job_record(row: PipelineProjectedJob) -> PipelineProjectedJobRecord:
+    return PipelineProjectedJobRecord(
+        id=row.id,
+        job_kind=row.job_kind,
+        status=row.status,
+        progress=row.progress,
+        current_stage=row.current_stage,
+        error_message=row.error_message,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        dagster_run_id=row.dagster_run_id,
+        load_batch_id=row.load_batch_id,
+        parent_job_id=row.parent_job_id,
+        depth=row.depth,
+        detail_url=_execution_detail_url("import_job", row.id),
+    )
+
+
+def _provider_dataset_record(
+    row: PipelineProviderDatasetIdentity,
+) -> PipelineProviderDatasetIdentityRecord:
+    return PipelineProviderDatasetIdentityRecord(
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        sync_scope=row.sync_scope,
+    )
+
+
+def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecord:
+    return PipelineExecutionRootRecord(
         kind=row.kind,
         id=row.id,
         status=row.status,
         created_at=row.created_at,
-        job_kind=row.job_kind,
-        provider=row.provider,
-        dataset_key=row.dataset_key,
+        providers=list(row.providers),
+        dataset_keys=list(row.dataset_keys),
+        provider_dataset=(
+            _provider_dataset_record(row.provider_dataset)
+            if row.provider_dataset is not None
+            else None
+        ),
         progress=row.progress,
         current_stage=row.current_stage,
         scope_type=row.scope_type,
@@ -598,10 +717,12 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRecord:
         started_at=row.started_at,
         finished_at=row.finished_at,
         dagster_run_id=row.dagster_run_id,
-        job_id=row.job_id,
-        request_id=row.request_id,
-        load_batch_id=row.load_batch_id,
-        parent_job_id=row.parent_job_id,
+        requested_job_id=row.requested_job_id,
+        lineage_owner=row.lineage_owner,
+        linked_job_count=row.linked_job_count,
+        projected_job=(
+            _projected_job_record(row.projected_job) if row.projected_job is not None else None
+        ),
         detail_url=_execution_detail_url(row.kind, row.id),
     )
 
@@ -707,9 +828,9 @@ def _active_count(counts: dict[str, int]) -> int:
     return sum(count for state, count in counts.items() if state in {"queued", "running"})
 
 
-_COMMAND_NAME_MAP: dict[str, Literal[
-    "update", "clear_override", "run", "start", "stop", "reset"
-]] = {
+_COMMAND_NAME_MAP: dict[
+    str, Literal["update", "clear_override", "run", "start", "stop", "reset"]
+] = {
     "update": "update",
     "default": "clear_override",
     "run": "run",
@@ -822,10 +943,7 @@ def _parse_dagster_overview(
             status="error",
             dagster_url=dagster_urls.dagster_url,
             graphql_url=dagster_urls.graphql_url,
-            errors=[
-                dagster_graphql.graphql_error_message(error)
-                for error in graphql_errors
-            ],
+            errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
         )
     data = dagster_graphql.as_dict(payload.get("data"))
     repositories, repository_errors = dagster_graphql.parse_repositories(
@@ -835,9 +953,7 @@ def _parse_dagster_overview(
         dagster_graphql.as_dict(data.get("runsOrError")),
     )
     errors = [*repository_errors, *run_errors]
-    sensors = [
-        sensor for repository in repositories for sensor in repository.sensors
-    ]
+    sensors = [sensor for repository in repositories for sensor in repository.sensors]
     return PipelineDagsterOverview(
         status="error" if errors else "ok",
         dagster_url=dagster_urls.dagster_url,
@@ -845,9 +961,7 @@ def _parse_dagster_overview(
         version=dagster_graphql.optional_string(data.get("version")),
         run_counts=run_counts,
         recent_runs=recent_runs,
-        schedule_count=sum(
-            len(repository.schedules) for repository in repositories
-        ),
+        schedule_count=sum(len(repository.schedules) for repository in repositories),
         sensor_count=len(sensors),
         sensors=sensors,
         errors=errors,
@@ -857,12 +971,12 @@ def _parse_dagster_overview(
 @router.get(
     "/executions",
     response_model=PipelineExecutionsListResponse,
-    summary="실행 타임라인 (DB-only UNION)",
+    summary="root 실행 타임라인",
     description=(
-        "`ops.import_jobs` ∪ `ops.feature_update_requests`를 공유 keyset cursor "
-        "`(created_at DESC, id DESC)` + kind discriminator로 병합한 실행 목록. "
-        "Dagster run은 목록 cursor에 섞지 않는다 — 연결된 run은 각 행의 "
-        "`dagster_run_id` 속성으로만 노출한다(ADR-064)."
+        "import job hierarchy를 job별 nearest request anchor branch와 standalone "
+        "partition으로 접어 root만 반환한다. keyset total order는 "
+        "`(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 "
+        "`dagster_run_id`로만 연결한다."
     ),
 )
 async def list_executions(
@@ -870,6 +984,7 @@ async def list_executions(
     kind: Annotated[ExecutionKind | None, Query()] = None,
     status_filter: Annotated[ExecutionState | None, Query(alias="status")] = None,
     provider: Annotated[str | None, Query()] = None,
+    dataset_key: Annotated[str | None, Query()] = None,
     created_from: Annotated[datetime | None, Query()] = None,
     created_to: Annotated[datetime | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -882,6 +997,7 @@ async def list_executions(
             kind=kind,
             status=status_filter,
             provider=provider,
+            dataset_key=dataset_key,
             created_from=created_from,
             created_to=created_to,
             limit=page_size,
@@ -956,9 +1072,7 @@ async def _load_execution_detail(
         execution=execution,
         import_job=_import_job_record(job) if job is not None else None,
         update_request=(
-            _update_request_record(update_request)
-            if update_request is not None
-            else None
+            _update_request_record(update_request) if update_request is not None else None
         ),
         events=events,
         events_next_cursor=events_next_cursor,
@@ -1057,9 +1171,7 @@ async def _cancel_import_job_execution(
         )
         if cancelled is None:
             refreshed = await get_ops_import_job(session, job_id)
-            detail_status = (
-                refreshed.status if refreshed is not None else existing.status
-            )
+            detail_status = refreshed.status if refreshed is not None else existing.status
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"cannot cancel import job in status: {detail_status}",
@@ -1076,9 +1188,7 @@ async def _cancel_update_request_execution(
 ) -> PipelineExecutionRecord:
     error_message = reason or "cancelled by admin API"
     async with session.begin():
-        cancelled = await cancel_update_request(
-            session, request_id, error_message=error_message
-        )
+        cancelled = await cancel_update_request(session, request_id, error_message=error_message)
         if cancelled is None:
             existing = await get_update_request(session, request_id)
             if existing is None:
@@ -1200,10 +1310,7 @@ async def list_dagster_runs(
                 dagster_url=dagster_urls.dagster_url,
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
-                errors=[
-                    dagster_graphql.graphql_error_message(error)
-                    for error in graphql_errors
-                ],
+                errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
             ),
             meta=make_meta(started_at=started_at),
         )
@@ -1284,10 +1391,7 @@ async def list_pipeline_schedules(
                 dagster_url=dagster_urls.dagster_url,
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
-                errors=[
-                    dagster_graphql.graphql_error_message(error)
-                    for error in graphql_errors
-                ],
+                errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
             ),
             meta=make_meta(started_at=started_at),
         )
@@ -1296,9 +1400,7 @@ async def list_pipeline_schedules(
         dagster_graphql.as_dict(data.get("repositoriesOrError")),
         overrides=overrides,
     )
-    schedules = [
-        schedule for repository in repositories for schedule in repository.schedules
-    ]
+    schedules = [schedule for repository in repositories for schedule in repository.schedules]
     sensors = [sensor for repository in repositories for sensor in repository.sensors]
     return PipelineSchedulesResponse(
         data=PipelineSchedulesData(
@@ -1344,8 +1446,7 @@ async def patch_pipeline_schedule(
         # 영속할 자리가 없다 — 계약이 받은 감사 필드를 조용히 버리지 않도록
         # 구조화 로그로 남긴다(영속 감사 테이블 도입은 후속 판단).
         _LOG.info(
-            "schedule cron override 삭제 (schedule=%s, operator=%s, reason=%s, "
-            "status=%s)",
+            "schedule cron override 삭제 (schedule=%s, operator=%s, reason=%s, status=%s)",
             schedule_name,
             body.operator or "unknown",
             body.reason or "-",
@@ -1393,9 +1494,7 @@ async def post_pipeline_schedule_command(
             client=client,
             session=session,
             schedule_name=schedule_name,
-            body=DagsterScheduleCommandRequest(
-                operator=body.operator, reason=body.reason
-            ),
+            body=DagsterScheduleCommandRequest(operator=body.operator, reason=body.reason),
         )
     else:
         response = await dagster_schedule_service.mutate_schedule_state(
@@ -1503,16 +1602,12 @@ async def run_pipeline_update_request_now(
                 update_policy=existing.update_policy,
                 run_mode="now",
                 priority=(
-                    body.priority
-                    if body and body.priority is not None
-                    else existing.priority
+                    body.priority if body and body.priority is not None else existing.priority
                 ),
                 dry_run=False,
                 operator=body.operator if body and body.operator else existing.operator,
                 reason=(
-                    body.reason
-                    if body and body.reason
-                    else f"run-now from {existing.request_id}"
+                    body.reason if body and body.reason else f"run-now from {existing.request_id}"
                 ),
                 settings=KorTravelMapSettings(),
             )
@@ -1537,6 +1632,4 @@ async def run_pipeline_update_request_now(
 async def mark_pipeline_nux_seen(request: Request) -> DagsterNuxSeenResponse:
     settings = _settings_from_request(request)
     client = _http_client_from_request(request, settings)
-    return await dagster_query_service.mark_nux_seen(
-        settings=settings, client=client
-    )
+    return await dagster_query_service.mark_nux_seen(settings=settings, client=client)

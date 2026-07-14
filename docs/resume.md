@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex, agent B) — T-ADM-C3b pipeline root projection (#679)
+
+- **구현 완료**: recursive component와 nearest request anchor로 job을 request branch/
+  standalone partition에 단일 귀속했다. root와 대표 job 상태, 다중 identity,
+  `lineage_owner` loser 진단, 3-field cursor를 REST/OpenAPI에 반영했다.
+- **검증 완료**: root/agent A 적대적 리뷰 2인이 S1/S2 0건으로 승인했다.
+  root unit 1,285건, API 전체 416건, 관련 PostGIS/EXPLAIN integration 10건과
+  Ruff, strict mypy 155파일, import 계약 4/4, OpenAPI/admin types drift가 통과했다.
+- **다음 한 작업**: 보안 감사 후 draft PR을 올리고 원격 diff 재리뷰와
+  CI green을 확인한다. C3b는 PR merge 전까지 진행 중이며 C3e 전에는 C5를
+  시작하지 않는다.
+
 ## 2026-07-15 (codex, agent A) — T-ADM-C2R datasets 차단 계약 보강 (#678)
 
 - **계약 보강**: 명시적 `stale_after_minutes`만 쓰는 server freshness,
@@ -14,8 +26,9 @@
   root unit 1,284건·관련 PostGIS/Alembic integration 20건과 Ruff·strict mypy
   176파일·import-linter 4계약·OpenAPI/admin types drift·단일 migration head를
   통과했다.
-- **다음 한 작업**: 보안 감사 후 #678 draft PR을 열고 원격 diff 적대적 재리뷰와
-  CI green 뒤 merge한다. 그 전에는 T-ADM-C4 frontend를 시작하지 않는다.
+- **완료**: PR #688이 보안 감사, 원격 diff 적대적 재리뷰, CI green을 거쳐
+  merge됐다. 다음 datasets 작업은 `T-ADM-C4R`이며 pipeline은 `T-ADM-C3b`를
+  진행한다.
 
 ## 2026-07-15 (codex, agent B) — T-ADM-C3a pipeline 공용 application 경계 구현 완료 (이슈 #682)
 

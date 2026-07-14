@@ -2091,8 +2091,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 실행 타임라인 (DB-only UNION)
-         * @description `ops.import_jobs` ∪ `ops.feature_update_requests`를 공유 keyset cursor `(created_at DESC, id DESC)` + kind discriminator로 병합한 실행 목록. Dagster run은 목록 cursor에 섞지 않는다 — 연결된 run은 각 행의 `dagster_run_id` 속성으로만 노출한다(ADR-064).
+         * root 실행 타임라인
+         * @description import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다.
          */
         get: operations["list_executions_v1_ops_pipeline_executions_get"];
         put?: never;
@@ -8268,7 +8268,7 @@ export interface components {
         };
         /**
          * PipelineExecutionRecord
-         * @description 실행 타임라인 1행 — import job 또는 feature update request.
+         * @description 단건 detail/cancel의 기존 실행 표현.
          */
         PipelineExecutionRecord: {
             /**
@@ -8329,12 +8329,79 @@ export interface components {
             status: string;
         };
         /**
+         * PipelineExecutionRootRecord
+         * @description 실행 목록의 request branch 또는 standalone partition root.
+         */
+        PipelineExecutionRootRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /**
+             * Dataset Keys
+             * @description 저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective dataset identity.
+             */
+            dataset_keys: string[];
+            /** Detail Url */
+            detail_url: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "import_job" | "update_request";
+            /**
+             * Lineage Owner
+             * @description request가 자기 anchor branch를 소유하면 true, 같은 anchor의 다중 request 경쟁에서 탈락했거나 연결 job이 없으면 false. standalone import root는 null.
+             */
+            lineage_owner?: boolean | null;
+            /** Linked Job Count */
+            linked_job_count: number;
+            /** Operator */
+            operator?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Progress */
+            progress?: number | null;
+            projected_job?: components["schemas"]["PipelineProjectedJobRecord"] | null;
+            /** @description scope_type=provider_dataset request의 provider/dataset/sync_scope pair. 두 effective 배열은 독립 identity 목록이므로 pair 복원에는 이 필드를 쓴다. */
+            provider_dataset?: components["schemas"]["PipelineProviderDatasetIdentityRecord"] | null;
+            /**
+             * Providers
+             * @description 저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective provider identity.
+             */
+            providers: string[];
+            /**
+             * Requested Job Id
+             * @description update request가 원래 가리킨 import job id.
+             */
+            requested_job_id?: string | null;
+            /** Run Mode */
+            run_mode?: string | null;
+            /** Scope Type */
+            scope_type?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
          * PipelineExecutionsData
          * @description 실행 타임라인 목록 data.
          */
         PipelineExecutionsData: {
             /** Items */
-            items: components["schemas"]["PipelineExecutionRecord"][];
+            items: components["schemas"]["PipelineExecutionRootRecord"][];
         };
         /**
          * PipelineExecutionsListResponse
@@ -8453,6 +8520,55 @@ export interface components {
         PipelineOverviewResponse: {
             data: components["schemas"]["PipelineOverviewData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineProjectedJobRecord
+         * @description root branch/partition에서 대표로 고른 import job.
+         */
+        PipelineProjectedJobRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /** Depth */
+            depth: number;
+            /** Detail Url */
+            detail_url: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: string;
+            /** Job Kind */
+            job_kind: string;
+            /** Load Batch Id */
+            load_batch_id?: string | null;
+            /** Parent Job Id */
+            parent_job_id?: string | null;
+            /** Progress */
+            progress: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * PipelineProviderDatasetIdentityRecord
+         * @description ``provider_dataset`` request의 pair identity.
+         */
+        PipelineProviderDatasetIdentityRecord: {
+            /** Dataset Key */
+            dataset_key: string;
+            /** Provider */
+            provider: string;
+            /** Sync Scope */
+            sync_scope?: string | null;
         };
         /**
          * PipelineScheduleCommandData
@@ -16505,6 +16621,7 @@ export interface operations {
                 kind?: ("import_job" | "update_request") | null;
                 status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
                 provider?: string | null;
+                dataset_key?: string | null;
                 created_from?: string | null;
                 created_to?: string | null;
                 page_size?: number;

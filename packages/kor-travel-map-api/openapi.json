@@ -16568,7 +16568,7 @@
       },
       "PipelineExecutionRecord": {
         "additionalProperties": false,
-        "description": "실행 타임라인 1행 — import job 또는 feature update request.",
+        "description": "단건 detail/cancel의 기존 실행 표현.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -16797,13 +16797,234 @@
         "title": "PipelineExecutionRecord",
         "type": "object"
       },
+      "PipelineExecutionRootRecord": {
+        "additionalProperties": false,
+        "description": "실행 목록의 request branch 또는 standalone partition root.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "dataset_keys": {
+            "description": "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective dataset identity.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Dataset Keys",
+            "type": "array"
+          },
+          "detail_url": {
+            "title": "Detail Url",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "import_job",
+              "update_request"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lineage_owner": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "request가 자기 anchor branch를 소유하면 true, 같은 anchor의 다중 request 경쟁에서 탈락했거나 연결 job이 없으면 false. standalone import root는 null.",
+            "title": "Lineage Owner"
+          },
+          "linked_job_count": {
+            "minimum": 0.0,
+            "title": "Linked Job Count",
+            "type": "integer"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "projected_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineProjectedJobRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_dataset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineProviderDatasetIdentityRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "scope_type=provider_dataset request의 provider/dataset/sync_scope pair. 두 effective 배열은 독립 identity 목록이므로 pair 복원에는 이 필드를 쓴다."
+          },
+          "providers": {
+            "description": "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective provider identity.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "requested_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "update request가 원래 가리킨 import job id.",
+            "title": "Requested Job Id"
+          },
+          "run_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Mode"
+          },
+          "scope_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Type"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "status",
+          "created_at",
+          "providers",
+          "dataset_keys",
+          "linked_job_count",
+          "detail_url"
+        ],
+        "title": "PipelineExecutionRootRecord",
+        "type": "object"
+      },
       "PipelineExecutionsData": {
         "additionalProperties": false,
         "description": "실행 타임라인 목록 data.",
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/PipelineExecutionRecord"
+              "$ref": "#/components/schemas/PipelineExecutionRootRecord"
             },
             "title": "Items",
             "type": "array"
@@ -17146,6 +17367,162 @@
           "meta"
         ],
         "title": "PipelineOverviewResponse",
+        "type": "object"
+      },
+      "PipelineProjectedJobRecord": {
+        "additionalProperties": false,
+        "description": "root branch/partition에서 대표로 고른 import job.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "detail_url": {
+            "title": "Detail Url",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "job_kind": {
+            "title": "Job Kind",
+            "type": "string"
+          },
+          "load_batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Batch Id"
+          },
+          "parent_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Job Id"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_kind",
+          "status",
+          "progress",
+          "created_at",
+          "depth",
+          "detail_url"
+        ],
+        "title": "PipelineProjectedJobRecord",
+        "type": "object"
+      },
+      "PipelineProviderDatasetIdentityRecord": {
+        "additionalProperties": false,
+        "description": "``provider_dataset`` request의 pair identity.",
+        "properties": {
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key"
+        ],
+        "title": "PipelineProviderDatasetIdentityRecord",
         "type": "object"
       },
       "PipelineScheduleCommandData": {
@@ -34454,7 +34831,7 @@
     },
     "/v1/ops/pipeline/executions": {
       "get": {
-        "description": "`ops.import_jobs` ∪ `ops.feature_update_requests`를 공유 keyset cursor `(created_at DESC, id DESC)` + kind discriminator로 병합한 실행 목록. Dagster run은 목록 cursor에 섞지 않는다 — 연결된 run은 각 행의 `dagster_run_id` 속성으로만 노출한다(ADR-064).",
+        "description": "import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다.",
         "operationId": "list_executions_v1_ops_pipeline_executions_get",
         "parameters": [
           {
@@ -34514,6 +34891,22 @@
                 }
               ],
               "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
             }
           },
           {
@@ -34611,7 +35004,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "실행 타임라인 (DB-only UNION)",
+        "summary": "root 실행 타임라인",
         "tags": [
           "ops-pipeline"
         ]
