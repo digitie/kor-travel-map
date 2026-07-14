@@ -75,9 +75,11 @@ async def fetch_kor_travel_concierge_youtube_features(
 ) -> AsyncIterator[Any]:
     """kor-travel-concierge YouTube 장소 후보 export를 REST API로 stream한다.
 
-    ``kor_travel_concierge_feature_sync_endpoint``가 ``snapshot``이면 full snapshot,
-    ``changes``이면 incremental changes endpoint를 호출한다. Cursor는 opaque
-    string으로 취급하며 응답의 ``next_cursor``를 다음 요청에 그대로 넘긴다.
+    ``kor_travel_concierge_feature_sync_endpoint`` 기본 ``changes``는 cursor 없이
+    시작하면 후보당 1행으로 압축된 export ledger 전체(upsert/reject/tombstone)를
+    재생해 full sync와 철회(제거 목록·검수 회수) 전파를 동시에 만족한다.
+    ``snapshot``은 active upsert만 반환하는 opt-in(초기 적재 검증용)이다. Cursor는
+    opaque string으로 취급하며 응답의 ``next_cursor``를 다음 요청에 그대로 넘긴다.
     """
     base_url = settings.kor_travel_concierge_base_url
     secret = settings.kor_travel_concierge_api_key

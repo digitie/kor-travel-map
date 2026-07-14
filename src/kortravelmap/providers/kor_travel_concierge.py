@@ -417,6 +417,15 @@ def _facility_info(
         "youtube_channel_title": _text(youtube, "channel_title"),
         "youtube_playlist_id": _text(youtube, "playlist_id"),
         "youtube_playlist_title": _text(youtube, "playlist_title"),
+        # 2026-06-25 producer provenance 확장(concierge 8720dda) — 이 영상이 어떤 수집
+        # 대상(keyword 검색어/channel/playlist)에서 나왔는지의 평면 미러. nested
+        # ``detail.payload.kor_travel_concierge.youtube``에도 그대로 실리지만, 출처 UX는
+        # facility_info 평면 key를 우선 읽는다(§4).
+        "youtube_source_type": _text(youtube, "source_type"),
+        "youtube_source_value": _text(youtube, "source_value"),
+        "youtube_source_title": _text(youtube, "source_title"),
+        "youtube_source_search_query": _text(youtube, "source_search_query"),
+        "youtube_corrected_search_query": _text(youtube, "corrected_search_query"),
         "timestamp_start": _text(evidence, "timestamp_start"),
         "timestamp_end": _text(evidence, "timestamp_end"),
         "transcript_excerpt": _text(evidence, "transcript_excerpt"),

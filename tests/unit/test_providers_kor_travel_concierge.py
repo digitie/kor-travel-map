@@ -50,6 +50,13 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "video_id": "video-1",
             "video_url": "https://www.youtube.com/watch?v=video-1",
             "video_title": "제주 동쪽 여행",
+            # producer 8720dda(2026-06-25) — 수집 대상 provenance. keyword 수집이면
+            # source_search_query/corrected_search_query가 채워진다.
+            "source_type": "keyword",
+            "source_value": "제주 동쪽 여행",
+            "source_title": "검색: 제주 동쪽 여행",
+            "source_search_query": "제주 동쪽 여행 브이로그",
+            "corrected_search_query": "제주 동쪽 여행 브이로그",
             "channel_id": "channel-1",
             "channel_title": "여행 채널",
             "playlist_id": "playlist-1",
@@ -94,7 +101,20 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.facility_info["timestamp_start"] == "00:03:12"  # type: ignore[union-attr]
     # T-217f/ADR-053 — 출처 배지 UX가 detail.facility_info만으로 confidence를 얻는다.
     assert feature.detail.facility_info["confidence_score"] == 86  # type: ignore[union-attr]
+    # producer provenance(8720dda) — 출처 UX가 읽는 평면 미러(§4).
+    assert feature.detail.facility_info["youtube_source_type"] == "keyword"  # type: ignore[union-attr]
+    assert feature.detail.facility_info["youtube_source_title"] == "검색: 제주 동쪽 여행"  # type: ignore[union-attr]
+    assert (  # type: ignore[union-attr]
+        feature.detail.facility_info["youtube_source_search_query"]
+        == "제주 동쪽 여행 브이로그"
+    )
     assert feature.detail.payload["kor_travel_concierge"]["youtube"]["video_id"] == "video-1"  # type: ignore[union-attr]
+    # nested pass-through — curated source rule이 읽는 경로
+    # (detail #>> '{payload,kor_travel_concierge,youtube,source_title}').
+    assert (  # type: ignore[union-attr]
+        feature.detail.payload["kor_travel_concierge"]["youtube"]["source_title"]
+        == "검색: 제주 동쪽 여행"
+    )
 
     source_record = bundle.source_record
     assert source_record.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
@@ -108,6 +128,26 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert bundle.source_link.match_method == "kor_travel_concierge_export"
     assert bundle.source_link.confidence == 86
     assert feature.raw_refs[0].source_entity_id == "123"
+
+
+async def test_kor_travel_concierge_provenance_absent_keys_are_omitted() -> None:
+    """provenance 미포함(구 payload 또는 channel/playlist 수집) item은 facility_info에
+    해당 평면 key를 만들지 않는다 — None 필터 계약(§4)."""
+    youtube = {
+        key: value
+        for key, value in _item()["youtube"].items()
+        if not key.startswith("source_") and key != "corrected_search_query"
+    }
+
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [_item(youtube=youtube)], fetched_at=_FETCHED
+    )
+
+    facility_info = bundle.feature.detail.facility_info  # type: ignore[union-attr]
+    assert "youtube_source_type" not in facility_info
+    assert "youtube_source_search_query" not in facility_info
+    assert "youtube_corrected_search_query" not in facility_info
+    assert facility_info["youtube_video_id"] == "video-1"
 
 
 async def test_kor_travel_concierge_skips_reject_and_tombstone() -> None:

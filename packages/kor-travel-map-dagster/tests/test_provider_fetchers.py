@@ -184,9 +184,33 @@ async def test_kor_travel_concierge_youtube_fetch_paginates_and_closes(
     assert client.base_url == "https://kor-travel-concierge.example"
     assert client.headers == {"X-API-Key": "concierge-read-key"}
     assert client.closed is True
+    # 기본 endpoint는 ``changes`` — cursor 없이 시작하면 후보당 1행 ledger 전체
+    # (upsert/reject/tombstone)를 재생해 철회 전파까지 포함한 full sync가 된다.
+    # ``snapshot``은 active upsert만 반환해 reject/tombstone이 영구 미전파된다.
     assert client.calls == [
+        ("/api/v1/features/changes", {"limit": 200}),
+        ("/api/v1/features/changes", {"limit": 200, "cursor": "c2"}),
+    ]
+
+
+async def test_kor_travel_concierge_youtube_fetch_snapshot_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``snapshot``은 opt-in — 철회 전파가 필요 없는 일회성 초기 적재 검증용."""
+    fake = _install_fake_kor_travel_concierge_httpx(
+        monkeypatch,
+        [{"items": [], "next_cursor": None, "has_more": False}],
+    )
+    settings = KorTravelMapSettings(
+        kor_travel_concierge_base_url="https://kor-travel-concierge.example",
+        kor_travel_concierge_api_key=SecretStr("concierge-read-key"),
+        kor_travel_concierge_feature_sync_endpoint="snapshot",
+    )
+
+    _ = [item async for item in fetch_kor_travel_concierge_youtube_features(settings)]
+
+    assert fake.instances[0].calls == [
         ("/api/v1/features/snapshot", {"limit": 200}),
-        ("/api/v1/features/snapshot", {"limit": 200, "cursor": "c2"}),
     ]
 
 

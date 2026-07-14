@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### Concierge export 소비 계약 정렬 (2026-07-14)
+
+- **CHANGED**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT` 기본값을
+  `snapshot`에서 `changes`로 전환했다. producer(kor-travel-concierge)의 2026-07
+  검수 개편(soft-delete 제거 목록·되돌리기·검수 회수·bulk 처리)으로 `reject`/
+  `tombstone` 발행이 일상 흐름이 됐는데, `snapshot`은 active upsert만 반환해 철회가
+  소비자에 영구 미전파된다. `changes`는 cursor 없이 시작하면 후보당 1행으로 압축된
+  export ledger 전체를 재생해 full sync와 철회 전파를 동시에 만족한다.
+- **ADDED**: concierge YouTube 수집 provenance(`youtube.source_type`/`source_value`/
+  `source_title`/`source_search_query`/`corrected_search_query`)를 출처 UX 평면 키
+  `detail.facility_info.youtube_source_*`로 노출한다(값 없으면 키 생략). nested
+  `detail.payload.kor_travel_concierge.youtube` 경로는 기존대로 전체 pass-through.
+- **VERIFIED**: 되돌리기(tombstone→inactive→재-upsert) 시 provider self-heal 복구가
+  동일 payload fast-path·변경 payload 경로 모두에서 성립하고
+  `prevent_provider_reactivation` override가 이를 차단함을 concierge 경로 통합
+  테스트로 고정했다.
+
 ### Notice 계보 수명주기 원자화 (2026-07-14)
 
 - **FIXED**: 대량 적재 뒤 `feature.features` planner 통계가 생성되지 않아 실제 약 102만 행을

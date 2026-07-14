@@ -43,8 +43,8 @@ facade가 아니라 **fetcher resource + 순수 변환 함수**만 둔다. expor
 kor-travel-map fetcher가 소비하는 외부 경계 표면:
 
 ```
-GET /api/v1/features/snapshot   # full 재동기화
-GET /api/v1/features/changes    # incremental
+GET /api/v1/features/changes    # 기본 — ledger 재생(철회 전파 포함)
+GET /api/v1/features/snapshot   # opt-in — active upsert만(철회 미전파)
 ```
 
 소비 측 기대치(정본은 공급 측 문서, 본 repo는 미러만):
@@ -58,8 +58,19 @@ GET /api/v1/features/changes    # incremental
 - export 경로에 downstream(소비자) 이름을 넣지 않는다 — 중립적
   `/api/v1/features/{snapshot,changes}`.
 
-full snapshot과 incremental changes를 모두 pull할 수 있어 재동기화와 운영 효율을
-분리한다.
+**endpoint 선택(2026-07-14 기본값 전환)** —
+`KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT`:
+
+- `changes`(기본): producer export ledger는 **후보당 1행**(최신 operation)으로
+  압축돼 있어, cursor 없이 시작하면 전체 ledger(upsert/reject/tombstone)를
+  sequence 순으로 재생한다 → full sync와 철회 전파를 한 번에 만족하며 매 실행
+  멱등이다.
+- `snapshot`(opt-in): **active `upsert`만** 반환한다. producer의 제거 목록/
+  soft-delete(→tombstone)·검수 회수(→tombstone)가 소비되지 않아 철회된 후보가
+  지도에 영구 잔존한다. 철회 전파가 무의미한 일회성 초기 적재 검증에만 쓴다.
+- producer는 2026-07-14(T-171)부터 공급 GET을 순수 읽기(durable dirty outbox
+  동기화)로 바꿨다 — 소비 폴링 비용이 후보 수와 무관해졌고, 응답 스키마·cursor·
+  operation 계약은 불변이다.
 
 ## 4. export item → FeatureBundle 변환
 
@@ -81,24 +92,45 @@ bundles = await kor_travel_concierge_items_to_bundles(
   보내며 후보 수명 동안 불변. 이 키가 inactive 매칭·feature_id anchoring의 기준이다.
 - producer는 `place.address.{legal_dong_code,sido_code,sigungu_code}`를 **항상
   None**으로 보낸다 — bjd는 소비자(kor-travel-map)가 좌표 reverse geocoding으로
-  채운다.
+  채운다. (producer 로드맵에 place 실데이터 주입 계획이 있다 — 적용되면 전 item
+  payload_hash가 재발급되며, 소비자는 재수신하면 된다.)
 - Feature detail 원본 payload는 `detail.payload.kor_travel_concierge`에 저장한다.
   출처 UX가 읽는 평면 key는 계속 `detail.facility_info`를 우선한다.
+- **YouTube 수집 provenance(producer 2026-06-25 확장)**: `youtube.source_type`/
+  `source_value`/`source_title`/`source_search_query`/`corrected_search_query`는
+  nested payload로 그대로 실리고(curated source rule이
+  `{payload,kor_travel_concierge,youtube,source_title}` 등을 직접 읽음), 출처 UX용
+  평면 미러 `facility_info.youtube_source_*` key로도 노출한다(값 없으면 key 생략).
 
 ## 5. operation 라이프사이클
 
 | operation | 처리 |
 |-----------|------|
-| `upsert` | 즉시 `FeatureBundle`로 적재(검수 통과 후보 또는 payload 변경 후보) |
-| `reject` / `tombstone` | 해당 feature **inactive 전환**(+사유 기록) — skip으로 끝내지 않음 |
+| `upsert` | 즉시 `FeatureBundle`로 적재(검수 통과 후보 또는 payload 변경 후보). **기존 feature가 provider 소유 inactive면 복구(재활성화)** |
+| `reject` / `tombstone` | 해당 feature **inactive 전환** — skip으로 끝내지 않음 |
 
 - `reject`/`tombstone`을 skip-only로 처리하면 철회된 후보가 feature로 영구 잔존해
   데이터 품질을 해친다. 따라서 MOIS Step C(폐업→inactive)와 **동형**으로 inactive
   전환한다. `kor_travel_concierge_inactive_entity_ids`가 inactive 대상
   `source_entity_id`를 모은다.
+- **되돌리기 재활성화(producer #202, 2026-07-14 반영)**: concierge 검수 UI의
+  soft-delete/제거 목록·검수 회수(needs_review 재전환, grounding 실패 재판정)는
+  `tombstone`/`reject`를, **되돌리기·재확정은 같은 후보의 `upsert` 재발행**을
+  만든다. 소비 측은 이 재-upsert에서 `load_bundle`의 provider self-heal(동일
+  payload fast-path·변경 payload upsert 경로 모두)로 feature를 active로 복구한다.
+  `user_request` feature와 `prevent_provider_reactivation` override는 복구하지
+  않는다. 회귀:
+  `tests/integration/test_feature_repo_load.py::test_kor_travel_concierge_revert_*`.
+- reject/tombstone item의 `rejection_reason`(검수 note)은 현재 raw_data
+  (`SourceRecord.raw_data`)에만 보존된다 — inactive 전환 자체에 사유 컬럼을 쓰는
+  구조화 기록은 미구현(후속 결정 필요 시 producer `rejection_reason` 소비).
 - inactive 전환된 feature의 외부 경계(OpenAPI) 응답: batch/단건 read에서 `found`에
   **포함하되 status(inactive)를 노출**한다 — `missing` 처리하면 "삭제됨"과
   "철회됨"을 구분할 수 없다. 기존 admin deactivate read 정책과 동일하다.
+- producer 측 export 게이트(미러): `upsert`는 검수 확정(`matched`/`user_corrected`)
+  + 장소 매칭 + grounding 통과 후보만 나온다. `needs_review`로 되돌아가거나
+  grounding 실패(unverified/missing)로 재판정된 기노출 후보는 `tombstone`으로
+  회수된다(T-165/#202). 소비 측 분기는 operation 3종으로 불변이다.
 
 ## 6. feature_id 결정성
 
@@ -126,8 +158,13 @@ in-place 갱신한다. (구 ADR-057에서 결정 — 정본 구현 `_item_to_bun
 - producer export API 배포 후 n150 live 환경에서 DB `read` 키로 snapshot/changes를 각각
   다중 page 소비하고 cursor 비반복·export ID 비중복·내부/write 403을 확인한다. fake response와
   계약 테스트는 배포 전 회귀 게이트이며 live smoke를 대체하지 않는다.
-- 회귀: geocoder 유무 동일 feature_id, category None↔8자리 동일 feature_id
-  (`tests/unit/test_providers_kor_travel_concierge.py`).
+- 회귀: geocoder 유무 동일 feature_id, category None↔8자리 동일 feature_id,
+  provenance 평면 key 유/무 (`tests/unit/test_providers_kor_travel_concierge.py`).
+- 라이프사이클 회귀: tombstone→inactive→재-upsert 복구(동일/변경 payload)와
+  `prevent_provider_reactivation` 차단
+  (`tests/integration/test_feature_repo_load.py::test_kor_travel_concierge_revert_*`).
+- fetcher 회귀: 기본 `changes` 소비·`snapshot` opt-in·cursor 전진
+  (`packages/kor-travel-map-dagster/tests/test_provider_fetchers.py`).
 
 ## 9. 이행 노트 (clean cut)
 

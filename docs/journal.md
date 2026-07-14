@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (claude) — concierge export 소비 계약 정렬 (endpoint 기본 changes·provenance 평면 키·되돌리기 회귀)
+
+사용자 지시 "concierge api 수정내용반영"으로, producer(kor-travel-concierge)의
+2026-06-25~07-14 export 변경을 소비 측에 정렬했다. producer 7월 검수 개편
+(T-160 soft-delete·T-165 grounding 회수·#202 되돌리기/제거 목록·#205 bulk)으로
+`reject`/`tombstone` 발행과 **같은 후보의 upsert 재발행(되돌리기)**이 일상 흐름이
+됐다. wire 계약(envelope·cursor·operation 3종)은 불변임을 producer diff
+(`bec63ad..15cd214`)로 확인했다.
+
+- **소비 갭 수정(핵심)**: 기본 sync endpoint `snapshot` → `changes`
+  (`settings.kor_travel_concierge_feature_sync_endpoint`). `snapshot`은 active
+  upsert만 반환해 제거 목록/검수 회수가 소비자에 영구 미전파 — 철회된 후보가
+  공개 지도에 잔존한다. `changes`는 cursor 없이 시작하면 후보당 1행으로 압축된
+  ledger 전체(upsert/reject/tombstone)를 sequence 순 재생 → full sync + 철회
+  전파를 매 실행 멱등으로 만족. `snapshot`은 opt-in으로 유지(일회성 초기 적재
+  검증용). n150은 endpoint override 미설정이므로 재배포만으로 전환된다.
+- **provenance 평면 키**: producer 8720dda(6/25)의 `youtube.source_type`/
+  `source_value`/`source_title`/`source_search_query`/`corrected_search_query`를
+  `facility_info.youtube_source_*`로 노출(None이면 키 생략). nested pass-through와
+  curated source rule(`{payload,kor_travel_concierge,youtube,source_title}`)은
+  기존 동작 그대로.
+- **되돌리기 라이프사이클 회귀 고정**: tombstone→`inactivate_features_by_source_entity_ids`
+  →inactive 후 재-upsert가 provider self-heal(generic loader 복구)로 active
+  복원됨을 concierge 경로 통합 테스트 3건으로 고정 — 동일 payload fast-path,
+  변경 payload(새 source_record_key) 경로, `prevent_provider_reactivation` 차단.
+  코드 수정은 불필요했다(generic loader가 이미 처리).
+- **문서 미러**: `docs/etl/concierge-feature-etl.md` §3(endpoint 선택 기준),
+  §4(provenance), §5(되돌리기 재활성화·producer 게이트 미러·rejection_reason은
+  raw_data 보존만 — 구조화 기록은 미구현 명시), §8(회귀 목록);
+  `docs/external-apis.md` §3.13. producer GET 순수 읽기(T-171 outbox)는 소비
+  폴링 비용 노트로 반영.
+
 ## 2026-07-14 (codex) — notice reconcile 제곱 비용 운영 재현·제거
 
 - **운영 재현**: 0046 배포 후 KREX 실수집에서 asset step이 6분 넘게 진행되지 않았다. DB wait
