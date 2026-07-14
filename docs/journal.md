@@ -32,6 +32,13 @@ ADR-064 페이지 ②(`/ops/datasets`)의 백엔드 리소스 그룹을 신설�
   확인(admin 표면 한정 — PinVi read 계약 무변).
 - 게이트(throwaway python:3.13 Docker, WSL): ruff 6트리 / mypy --strict 3패키지 /
   lint-imports 4계약 / pytest unit+lint 1274 · api 377 · 신규 integration 2 전부 green.
+- **적대적 리뷰 2인 반영(PR #676)**: refresh-policy PUT의 begin 밖 존재 검증
+  SELECT(autobegin)가 이후 `session.begin()`을 500으로 터뜨리던 S2를 단일
+  transaction 구조로 수정 + 실세션(fresh AsyncSession) integration 회귀
+  (`test_ops_datasets_refresh_policy.py` 4건 — `_FakeSession` unit은 이 결함
+  계급을 못 잡는다는 한계 명주석). PUT 허용 집합을 카탈로그∪잔존 sync∪기존
+  policy로 확장(S3 — policy-only 잔존 행의 read/write 자기모순 해소),
+  `.env.example`에 `..._ETL_LIVE_PREVIEW_ENABLED=false` 항목 추가(S3).
 
 ## 2026-07-14 (claude) — admin ops 통합 재작성 플랜 확정(ADR-064) + concierge #672 n150 live 검증
 

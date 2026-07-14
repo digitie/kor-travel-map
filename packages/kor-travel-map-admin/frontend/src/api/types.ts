@@ -1906,8 +1906,11 @@ export interface paths {
          * @description ``{provider}/{dataset}`` 2원 refresh policy를 full upsert한다.
          *
          *     그리드/상세의 3원(scope 포함) 행이라도 정책은 2원 1건에 매핑된다. 오타로
-         *     유령 정책 row가 생기지 않게 카탈로그(또는 잔존 sync state)에 있는 조합만
-         *     허용하고, 그 외는 404.
+         *     유령 정책 row가 생기지 않게 카탈로그·잔존 sync state·기존 policy 중 하나에
+         *     있는 조합만 허용하고, 그 외는 404. 존재 검증 SELECT와 upsert는 **하나의
+         *     ``session.begin()`` transaction 안**에서 실행한다 — begin 밖 SELECT는 세션을
+         *     autobegin시켜 이후 ``begin()``이 500으로 터진다(리뷰 S2). 실세션 회귀는
+         *     ``tests/integration/test_ops_datasets_refresh_policy.py``가 고정한다.
          */
         put: operations["upsert_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put"];
         post?: never;
@@ -15272,7 +15275,7 @@ export interface operations {
                     "application/json": components["schemas"]["OpsDatasetRefreshPolicyResponse"];
                 };
             };
-            /** @description 카탈로그·sync state 어디에도 없는 조합 */
+            /** @description 카탈로그·sync state·기존 policy 어디에도 없는 조합 */
             404: {
                 headers: {
                     [name: string]: unknown;

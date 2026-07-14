@@ -603,11 +603,38 @@ async def get_dataset_detail(
     )
 
 
+async def _refresh_policy_target_exists(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+) -> bool:
+    """refresh-policy PUT 허용 집합 — 카탈로그 ∪ 잔존 sync state ∪ 기존 policy row.
+
+    read 표면(그리드의 잔존 sync 행·policy-only 행·상세)이 노출하는 모든 조합을
+    편집 가능하게 유지하면서, 어디에도 없는 오타 조합의 유령 정책 row 생성만
+    막는다. 호출자는 이미 시작된 transaction 안에서 부른다 — SELECT가 세션을
+    autobegin한 뒤 ``session.begin()``을 부르면 ``InvalidRequestError``가 나는
+    순서 결함(리뷰 S2) 방지.
+    """
+    if find_catalog_entry(provider, dataset_key) is not None:
+        return True
+    states = await sync_state_repo.list_sync_states(
+        session, provider=provider, dataset_key=dataset_key
+    )
+    if states:
+        return True
+    existing = await get_provider_refresh_policy(
+        session, provider=provider, dataset_key=dataset_key
+    )
+    return existing is not None
+
+
 @router.put(
     "/{provider}/{dataset}/refresh-policy",
     response_model=OpsDatasetRefreshPolicyResponse,
     summary="dataset refresh policy upsert (2원)",
-    responses={404: {"description": "카탈로그·sync state 어디에도 없는 조합"}},
+    responses={404: {"description": "카탈로그·sync state·기존 policy 어디에도 없는 조합"}},
 )
 async def upsert_dataset_refresh_policy(
     provider: str,
@@ -618,21 +645,22 @@ async def upsert_dataset_refresh_policy(
     """``{provider}/{dataset}`` 2원 refresh policy를 full upsert한다.
 
     그리드/상세의 3원(scope 포함) 행이라도 정책은 2원 1건에 매핑된다. 오타로
-    유령 정책 row가 생기지 않게 카탈로그(또는 잔존 sync state)에 있는 조합만
-    허용하고, 그 외는 404.
+    유령 정책 row가 생기지 않게 카탈로그·잔존 sync state·기존 policy 중 하나에
+    있는 조합만 허용하고, 그 외는 404. 존재 검증 SELECT와 upsert는 **하나의
+    ``session.begin()`` transaction 안**에서 실행한다 — begin 밖 SELECT는 세션을
+    autobegin시켜 이후 ``begin()``이 500으로 터진다(리뷰 S2). 실세션 회귀는
+    ``tests/integration/test_ops_datasets_refresh_policy.py``가 고정한다.
     """
     started_at = perf_counter()
-    if find_catalog_entry(provider, dataset) is None:
-        states = await sync_state_repo.list_sync_states(
-            session, provider=provider, dataset_key=dataset
-        )
-        if not states:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ops dataset 없음: {provider!r}/{dataset!r}",
-            )
     try:
         async with session.begin():
+            if not await _refresh_policy_target_exists(
+                session, provider=provider, dataset_key=dataset
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"ops dataset 없음: {provider!r}/{dataset!r}",
+                )
             policy = await upsert_provider_refresh_policy(
                 session,
                 provider=provider,

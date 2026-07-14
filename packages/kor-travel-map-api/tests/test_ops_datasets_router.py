@@ -547,12 +547,21 @@ def test_refresh_policy_404_for_unknown_dataset(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """카탈로그·sync state·기존 policy 어디에도 없는 조합은 404.
+
+    존재 검증이 transaction 안으로 들어갔으므로(리뷰 S2) begin은 1회 열리고
+    HTTPException으로 롤백된다.
+    """
     from kortravelmap.api.routers import ops_datasets as mod
 
     async def _no_states(_s: Any, **_kw: Any) -> list[SyncState]:
         return []
 
+    async def _no_policy(_s: Any, **_kw: Any) -> ProviderRefreshPolicy | None:
+        return None
+
     monkeypatch.setattr(mod.sync_state_repo, "list_sync_states", _no_states)
+    monkeypatch.setattr(mod, "get_provider_refresh_policy", _no_policy)
 
     response = client.put(
         "/v1/ops/datasets/unknown-provider/unknown_dataset/refresh-policy",
@@ -560,7 +569,14 @@ def test_refresh_policy_404_for_unknown_dataset(
     )
 
     assert response.status_code == 404
-    assert session.begin_count == 0
+    assert session.begin_count == 1
+
+
+# NOTE(리뷰 S2): 아래 두 성공-경로 unit 테스트는 허용 집합 **분기 로직만**
+# 고정한다. `_FakeSession`은 SQLAlchemy autobegin("SELECT가 시작한 transaction
+# 위에서 begin() 금지")을 흉내내지 못해 transaction 순서 결함(500)을 잡을 수
+# 없다 — 실세션(fresh AsyncSession) 회귀는
+# `tests/integration/test_ops_datasets_refresh_policy.py`가 고정한다.
 
 
 @pytest.mark.unit
@@ -589,6 +605,43 @@ def test_refresh_policy_allows_leftover_sync_state_dataset(
 
     assert response.status_code == 200
     assert response.json()["data"]["dataset_key"] == "legacy_dataset"
+
+
+@pytest.mark.unit
+def test_refresh_policy_allows_existing_policy_only_dataset(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """카탈로그·sync state 없이 기존 policy row만 있어도 편집을 허용한다(리뷰 S3).
+
+    그리드(policy-only 잔존 행)/상세가 노출하는 행의 정책 저장(예: enabled
+    끄기)이 404가 되면 read 표면과 자기모순 — C6b에서 구 라우터가 삭제되면
+    해당 정책을 수정할 API가 사라진다.
+    """
+    from kortravelmap.api.routers import ops_datasets as mod
+
+    async def _no_states(_s: Any, **_kw: Any) -> list[SyncState]:
+        return []
+
+    async def _existing_policy(_s: Any, **_kw: Any) -> ProviderRefreshPolicy:
+        return _policy(provider="python-old-api", dataset_key="old_dataset")
+
+    async def _upsert(_s: Any, **kwargs: Any) -> ProviderRefreshPolicy:
+        return _policy(
+            provider=kwargs["provider"], dataset_key=kwargs["dataset_key"]
+        )
+
+    monkeypatch.setattr(mod.sync_state_repo, "list_sync_states", _no_states)
+    monkeypatch.setattr(mod, "get_provider_refresh_policy", _existing_policy)
+    monkeypatch.setattr(mod, "upsert_provider_refresh_policy", _upsert)
+
+    response = client.put(
+        "/v1/ops/datasets/python-old-api/old_dataset/refresh-policy",
+        json=_POLICY_BODY,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["provider"] == "python-old-api"
 
 
 @pytest.mark.unit
