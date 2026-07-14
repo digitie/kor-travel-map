@@ -32,6 +32,15 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
         command.upgrade(config, revision)
 
 
+def _alembic_heads() -> list[str]:
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    return list(ScriptDirectory.from_config(config).get_heads())
+
+
 async def test_dagster_run_id_backfill_upgrade_and_downgrade(
     pg_container: Any,
 ) -> None:
@@ -120,13 +129,7 @@ async def test_dagster_run_id_backfill_upgrade_and_downgrade(
         assert revision == _TARGET_REVISION
 
         # 단일 head — 0048이 0047 위의 유일한 head여야 한다.
-        root = Path(__file__).resolve().parents[2]
-        from alembic.script import ScriptDirectory
-
-        config = Config(str(root / "alembic.ini"))
-        config.set_main_option("script_location", str(root / "alembic"))
-        heads = ScriptDirectory.from_config(config).get_heads()
-        assert heads == [_TARGET_REVISION]
+        assert _alembic_heads() == [_TARGET_REVISION]
 
         await target_engine.dispose()
         await asyncio.to_thread(
