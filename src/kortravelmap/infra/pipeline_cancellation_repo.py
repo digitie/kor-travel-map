@@ -776,6 +776,10 @@ async def set_pipeline_cancellation_member_result(
     )
     if member is None or member.result not in set(expected_results):
         return False
+    if member.initial_status != "running":
+        raise PipelineCancellationInvariantError(
+            "cancel_failed is restricted to frozen running members"
+        )
     run = None
     if member.dagster_run_id is not None:
         run = await _lock_run(
@@ -805,7 +809,7 @@ async def set_pipeline_cancellation_member_result(
         and base.dagster_run_id == member.dagster_run_id
     )
     if error_code in _RETRYABLE_ERROR_CODES:
-        if member.initial_status != "running" or not base_matches:
+        if not base_matches:
             raise PipelineCancellationConflict(
                 "retryable member failure requires the exact frozen running base"
             )
@@ -814,19 +818,12 @@ async def set_pipeline_cancellation_member_result(
                 "retryable member failure requires the matching run failure first"
             )
     elif error_code in _FAILED_ERROR_CODES:
-        terminal_run = (
-            run is not None
-            and run.result == "already_terminal"
-            and run.terminal_status in {"SUCCESS", "FAILURE"}
-        )
-        if member.dagster_run_id is not None and not terminal_run and base_matches:
-            raise PipelineCancellationInvariantError(
-                "definitive failure requires a terminal run or observed base mismatch"
-            )
-        if member.dagster_run_id is None and member.initial_status != "running":
-            raise PipelineCancellationInvariantError(
-                "only a frozen running member may fail without a run mapping"
-            )
+        if member.dagster_run_id is not None and base_matches:
+            if run is None or run.result != "cancel_failed":
+                raise PipelineCancellationInvariantError(
+                    "exact definitive failure requires an authoritative run failure"
+                )
+            _structured_error_code(run.error, allowed_codes=_FAILED_ERROR_CODES)
     else:
         raise PipelineCancellationInvariantError(
             "member failure code does not match retryable or definitive policy"

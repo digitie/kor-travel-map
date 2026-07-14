@@ -219,6 +219,30 @@ async def _scope(
     return scope
 
 
+async def _force_member_failure(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    member_id: str,
+    error: dict[str, str],
+) -> None:
+    """finish 방어를 검증하기 위해 setter를 우회한 normalized failure fixture."""
+    await session.execute(
+        text(
+            "UPDATE ops.pipeline_cancellation_members "
+            "SET result='cancel_failed', terminal_status=NULL, "
+            "error=CAST(:error AS jsonb) "
+            "WHERE cancellation_id=CAST(:cancellation_id AS uuid) "
+            "AND member_kind='import_job' AND member_id=CAST(:member_id AS uuid)"
+        ),
+        {
+            "cancellation_id": cancellation_id,
+            "member_id": member_id,
+            "error": json.dumps(error),
+        },
+    )
+
+
 async def test_scope_matches_owner_duplicate_nested_and_standalone_boundaries(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1096,6 +1120,169 @@ async def test_definitive_base_run_mismatch_preserves_terminal_run_and_base(
     assert [(run.result, run.terminal_status) for run in finished.runs] == [
         ("already_terminal", terminal_status)
     ]
+
+
+async def test_queued_member_cannot_use_definitive_failure_with_terminal_shared_run(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(
+        migrated_session,
+        _ROOT,
+        status="queued",
+        dagster_run_id="run-queued-terminal",
+    )
+    await _job(
+        migrated_session,
+        _CHILD,
+        parent_job_id=_ROOT,
+        status="running",
+        dagster_run_id="run-queued-terminal",
+    )
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    cancellation_id = detail.attempt.cancellation_id
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id="run-queued-terminal",
+        result="already_terminal",
+        initial_status="STARTED",
+        terminal_status="SUCCESS",
+        error=None,
+    ) is True
+    assert await transition_pipeline_cancellation_member(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_kind="import_job",
+        member_id=_CHILD,
+        dagster_run_id="run-queued-terminal",
+        expected_status="running",
+        target_status="done",
+        result="already_terminal",
+    ) is True
+    error = {
+        "code": "PIPELINE_CANCELLATION_UNSAFE",
+        "message": "queued member cannot be a failure target",
+    }
+    with pytest.raises(
+        PipelineCancellationInvariantError,
+        match="restricted to frozen running",
+    ):
+        await set_pipeline_cancellation_member_result(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            member_kind="import_job",
+            member_id=_ROOT,
+            result="cancel_failed",
+            terminal_status=None,
+            error=error,
+        )
+    await _force_member_failure(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_id=_ROOT,
+        error=error,
+    )
+    with pytest.raises(
+        PipelineCancellationInvariantError,
+        match="restricted to frozen running",
+    ):
+        await finish_pipeline_cancellation_attempt(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            status="failed",
+            error=error,
+        )
+
+
+@pytest.mark.parametrize("authoritative_failure", [False, True])
+async def test_exact_running_definitive_requires_authoritative_run_failure(
+    migrated_session: AsyncSession,
+    authoritative_failure: bool,
+) -> None:
+    run_id = "run-exact-definitive"
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id=run_id)
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    cancellation_id = detail.attempt.cancellation_id
+    error = {
+        "code": "DAGSTER_RECONCILE_FAILED",
+        "message": "authoritative reconcile failed",
+    }
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id=run_id,
+        result="cancel_failed" if authoritative_failure else "already_terminal",
+        initial_status="STARTED",
+        terminal_status=None if authoritative_failure else "SUCCESS",
+        error=error if authoritative_failure else None,
+    ) is True
+    if authoritative_failure:
+        assert await set_pipeline_cancellation_member_result(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            member_kind="import_job",
+            member_id=_ROOT,
+            result="cancel_failed",
+            terminal_status=None,
+            error=error,
+        ) is True
+        finished = await finish_pipeline_cancellation_attempt(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            status="failed",
+            error=error,
+        )
+        assert finished is not None
+        assert finished.attempt.status == "failed"
+        return
+
+    with pytest.raises(
+        PipelineCancellationInvariantError,
+        match="authoritative run failure",
+    ):
+        await set_pipeline_cancellation_member_result(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            member_kind="import_job",
+            member_id=_ROOT,
+            result="cancel_failed",
+            terminal_status=None,
+            error=error,
+        )
+    await _force_member_failure(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_id=_ROOT,
+        error=error,
+    )
+    with pytest.raises(
+        PipelineCancellationInvariantError,
+        match="definitive member mismatch",
+    ):
+        await finish_pipeline_cancellation_attempt(
+            migrated_session,
+            cancellation_id=cancellation_id,
+            status="failed",
+            error=error,
+        )
 
 
 @pytest.mark.parametrize(

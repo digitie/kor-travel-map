@@ -172,7 +172,12 @@ async def _run_phases(
     prepared = await prepare_batch_dag(session, request)
     if isinstance(prepared, BatchDagRunResult):
         return prepared
-    report = await run_batch_consistency_phase(session, prepared)
+    consistency = await run_batch_consistency_phase(session, prepared)
+    if isinstance(consistency, BatchDagRunResult):
+        return consistency
+    if not isinstance(consistency, ConsistencyReport):
+        raise AssertionError("consistency phase returned an invalid result")
+    report = consistency
     mv_phase = await start_batch_mv_phase(session, prepared, report)
     if isinstance(mv_phase, BatchDagRunResult):
         return mv_phase
@@ -190,6 +195,7 @@ def _install_fakes(
         "updates": {},
         "consistency": [],
         "refresh": [],
+        "locks": [],
     }
 
     async def fake_start(
@@ -294,12 +300,24 @@ def _install_fakes(
             for view in materialized_views
         )
 
+    async def fake_get(_session: object, job_id: str) -> ImportJob | None:
+        return cast(ImportJob | None, calls["jobs"].get(job_id))
+
+    async def fake_lock(
+        _session: object,
+        job_ids: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        calls["locks"].append(job_ids)
+        return ()
+
     monkeypatch.setattr(batch_dag, "start_import_job", fake_start)
     monkeypatch.setattr(batch_dag, "attach_import_jobs_to_batch", fake_attach)
     monkeypatch.setattr(batch_dag, "update_import_job_payload", fake_update)
     monkeypatch.setattr(batch_dag, "finish_import_job", fake_finish)
     monkeypatch.setattr(batch_dag, "run_consistency_checks", fake_consistency)
     monkeypatch.setattr(batch_dag, "refresh_materialized_views", fake_refresh)
+    monkeypatch.setattr(batch_dag, "get_import_job", fake_get)
+    monkeypatch.setattr(batch_dag, "lock_pipeline_hierarchy_for_jobs", fake_lock)
     return calls
 
 

@@ -16,12 +16,16 @@
 
 - **진행 중**: queued shared-run 독립 취소, running-only retry, exact retryable과 definitive
   mismatch 실패 분리, 최초 Dagster status 보존, normalized JSON error NULL 차단을 수정했다.
+  `cancel_failed`는 frozen running으로 한정하고 exact terminal run의 failure 우회를 막으며,
+  definitive run failure는 FAILED 코드가 기록된 `run=cancel_failed`만 인정한다.
 - **batch transaction 재수정**: consistency report와 MV side effect는 장기 transaction 안에서
   만들되 종료 직전에만 lineage-global→canonical root lock을 잡고 marker CAS/finalize한다.
   CAS 패배는 내부 sentinel로 장기 transaction 전체를 rollback한 뒤 별도 짧은 read
   transaction에서 cancellation 결과를 reload한다. Tx3/failure는 첫 mutation 전에 잠근다.
 - **검증 상태**: 실제 report/side-effect rollback, exact terminal mapping, SQL NULL
-  `IntegrityError`, queued/running shared run, 반대 row-lock 순서 회귀를 테스트로 정의했다.
+  `IntegrityError`, queued/running shared run, authoritative reconcile failure, 반대 row-lock
+  순서 회귀를 테스트로 정의했다. MV rollback은 refresh 내부 write와 별도 cancellation
+  commit 뒤 post-refresh guard가 전체 write를 되돌리는 경로를 고정한다.
   사용자 지시에 따라 test/Ruff/mypy/import/compile은 실행하지 않았고 재리뷰·게이트도
   남아 있으므로 완료 상태가 아니다.
 - **다음 한 작업**: 2차 적대 재리뷰를 통과시키고 허용된 실행 게이트 뒤 C3d 다음 phase로

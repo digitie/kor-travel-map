@@ -208,19 +208,25 @@ def _definitive_failure_member(
     base: PipelineCancellationScopeMember,
     run_by_id: Mapping[str, PipelineCancellationRun],
 ) -> bool:
+    if member.initial_status != "running":
+        return False
     try:
         _structured_error_code(member.error, allowed_codes=_FAILED_ERROR_CODES)
     except PipelineCancellationInvariantError:
         return False
     base_mismatch = not _base_matches_frozen_member(detail, member, base)
     if member.dagster_run_id is None:
-        return member.initial_status == "running"
+        return True
+    if base_mismatch:
+        return True
     run = run_by_id[member.dagster_run_id]
-    terminal_run = (
-        run.result == "already_terminal"
-        and run.terminal_status in {"SUCCESS", "FAILURE"}
-    )
-    return terminal_run or base_mismatch
+    if run.result != "cancel_failed":
+        return False
+    try:
+        _structured_error_code(run.error, allowed_codes=_FAILED_ERROR_CODES)
+    except PipelineCancellationInvariantError:
+        return False
+    return True
 
 
 def _validate_finish_invariants(
@@ -280,6 +286,10 @@ def _validate_finish_invariants(
         raise PipelineCancellationInvariantError(
             "retryable/failed cancellation requires unresolved members"
         )
+    if any(member.initial_status != "running" for member in failed_members):
+        raise PipelineCancellationInvariantError(
+            "cancel_failed is restricted to frozen running members"
+        )
     failed_run_ids = {run.dagster_run_id for run in failed_runs}
     referenced_failed_run_ids = {
         member.dagster_run_id
@@ -299,7 +309,6 @@ def _validate_finish_invariants(
                 member,
                 base_by_key[(member.member_kind, member.member_id)],
             )
-            and member.initial_status == "running"
             and _retry_capable_member(member, run_by_id)
             for member in failed_members
         ):

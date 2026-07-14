@@ -1457,21 +1457,25 @@ terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인�
   `cancellation_id`를 가리키며, base row가 아직 active이고, terminal 조회가 권위 있는
   경우에만 각각 `done`/`failed`로 reconcile한다. update request와 연결 job의 frozen
   member/run 대응이 불완전하면 안전하게 reconcile할 수 없는 경우다.
-- run id 없음, run id 교체/불일치, frozen scope 밖 member, marker 변경, 권위 있는 terminal
-  상태 부재는 definitive `cancel_failed`다. 이 경로는 관측한 terminal run 또는
-  marker/status/run mismatch를 오류에 기록하고 base와 run을 절대 변경하지 않는다. 특히
+- `cancel_failed`는 frozen `initial_status='running'` member에만 허용한다. queued member는
+  공유 run의 결과와 무관하게 전용 DB 취소 경로만 사용하며 failure로 우회할 수 없다.
+  definitive `cancel_failed`는 run id가 없거나, 관측한 marker/status/run이 frozen base와
+  다르거나, exact base에 대응하는 run 자체가 definitive 오류 코드와 함께
+  `cancel_failed`인 경우만 허용한다. 이 경로는 base와 run을 절대 변경하지 않는다. 특히
   Dagster run id 없는 local/standalone `running` job은
   정지 여부를 증명할 수 없으므로 base 상태를 `running`으로 보존하고 marker도 유지한다.
 - GraphQL/HTTP 오류·timeout·`TerminateRunFailure`·`RunNotFound`는 먼저 `cancelled`로 쓰지
-  않는다. attempt를 `retryable`, 해당 member/run을 `cancel_failed`로 기록하고 marker를
-  유지한다.
+  않는다. attempt를 `retryable`, 해당 running member/run을 `cancel_failed`로 기록하고
+  marker를 유지한다.
 
 일반 coordinator writer는 attempt 행을 `FOR UPDATE`로 먼저 잠그고
 `status='in_progress'`를 확인한 뒤 member→해당 run→request/job base 행 순서로 잠근다.
 성공 결과를 쓰는 범용 member setter는 두지 않는다. running member는 먼저 run 행이
 `CANCELED`/`SUCCESS`/`FAILURE`로 종결된 뒤에만 각각
 `cancelled`/`done`/`failed`로 전이한다. queued member는 외부 terminate 호출이 없는 전용
-DB 경로로만 `cancelled`가 된다. 예외적으로 계층 전체를 다루는 attempt 종결/retry와
+DB 경로로만 `cancelled`가 된다. exact running base와 terminal `SUCCESS`/`FAILURE`가 있으면
+안전 전이가 가능하므로 definitive failure로 닫지 않는다. 예외적으로 계층 전체를 다루는
+attempt 종결/retry와
 batch phase writer는 교착 방지를 위해
 lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail reload→정렬 base
 행 순서를 사용한다. 이미 닫힌 예전 attempt writer는 상태를 바꾸지 않고 CAS 실패를
@@ -1480,9 +1484,9 @@ lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail re
 `completed`는 marker·base·member·run 전체 대응이 정확하고 pending/cancel_failed가 0일
 때만 허용한다. `retryable`은 pending이 없고 exact marker/status/run을 유지한 `running`
 미해결 member가 하나 이상이며 모든 대응 run/member의 구조화 오류 코드가 재시도 허용
-집합일 때만 허용한다. `failed`는 모든 미해결 member에 definitive 정책 오류와 terminal
-run 또는 관측 base mismatch 증거를 요구한다. 이때 pending/terminal run을 거짓
-`cancel_failed`로 덮어쓰지 않는다.
+집합일 때만 허용한다. `failed`는 모든 미해결 member가 frozen running이어야 하며,
+각 member에 definitive 정책 오류와 run 없음·관측 base mismatch·definitive run failure 중
+하나를 요구한다. pending/terminal run을 거짓 `cancel_failed`로 덮어쓰지 않는다.
 
 재시도는 `previous_cancellation_id`가 가리키는 이전 시도의 frozen member 중
 `initial_status='running' AND result='cancel_failed'`인 행만

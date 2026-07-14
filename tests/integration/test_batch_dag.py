@@ -20,6 +20,7 @@ from kortravelmap.infra.batch_dag import (
     BatchDagPrepared,
     BatchDagRequest,
     BatchDagRunResult,
+    MaterializedViewRefreshResult,
     fail_batch_dag_phase,
     make_batch_dag_request,
     prepare_batch_dag,
@@ -399,11 +400,16 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
     async with AsyncSession(migrated_engine) as setup, setup.begin():
         child = await start_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
-    original_finish = client_module.finish_batch_mv_phase
+    batch_id = "aaaaaaaa-0000-0000-0000-000000000008"
+    refresh_calls: list[tuple[tuple[str, ...], str]] = []
 
-    async def cancel_then_finish(
-        session: AsyncSession, phase: BatchDagMvPrepared
-    ) -> BatchDagRunResult:
+    async def refresh_then_cancel(
+        session: AsyncSession,
+        materialized_views: tuple[str, ...],
+        *,
+        strategy: str,
+    ) -> tuple[MaterializedViewRefreshResult, ...]:
+        refresh_calls.append((materialized_views, strategy))
         await session.execute(
             text(
                 "INSERT INTO ops.system_log "
@@ -411,12 +417,18 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
                 "('info','pytest','batch.mv.transient','must rollback','{}'::jsonb)"
             )
         )
-        root_id = phase.prepared.root_job.job_id
         async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+            root_id = await cancellation.scalar(
+                text(
+                    "SELECT job_id FROM ops.import_jobs "
+                    "WHERE load_batch_id = CAST(:batch_id AS uuid) "
+                    "AND kind = 'full_load_batch'"
+                ),
+                {"batch_id": batch_id},
+            )
+            assert root_id is not None
             scope = await resolve_pipeline_cancellation_scope(
-                cancellation,
-                kind="import_job",
-                execution_id=root_id,
+                cancellation, kind="import_job", execution_id=str(root_id)
             )
             assert scope is not None
             await create_pipeline_cancellation_attempt(
@@ -425,18 +437,26 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
                 requested_by="admin:test",
                 reason="batch phase race",
             )
-        return await original_finish(session, phase)
+        return (
+            MaterializedViewRefreshResult(
+                view_name="",
+                strategy=strategy,
+                state="sentinel:must_rollback",
+            ),
+        )
 
-    monkeypatch.setattr(client_module, "finish_batch_mv_phase", cancel_then_finish)
+    monkeypatch.setattr(batch_module, "refresh_materialized_views", refresh_then_cancel)
     result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
         child_job_ids=[child.job_id],
-        load_batch_id="aaaaaaaa-0000-0000-0000-000000000008",
+        load_batch_id=batch_id,
     )
 
     assert result.state == "cancelled"
     assert result.root_job is not None
     assert result.root_job.status == "running"
     assert result.root_job.cancellation_id is not None
+    assert refresh_calls == [((), "swap")]
+    assert result.mv_refreshes == ()
     async with AsyncSession(migrated_engine) as verify:
         transient = await verify.scalar(
             text(

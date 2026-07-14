@@ -40,6 +40,9 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
   부분 상태, cancellation marker 덮어쓰기를 막는 회귀 테스트를 정의했다.
 - 2차 리뷰의 S1/S2 지적에 따라 queued shared-run, definitive mismatch, batch sentinel
   rollback, JSON error NULL 제약과 실제 side-effect 부재 테스트를 다시 보강 중이다.
+  최종 read-only 리뷰에서는 `cancel_failed`를 frozen running으로 제한하고 exact terminal
+  run의 failure 우회를 차단했으며, unit phase fake와 post-refresh MV rollback 회귀를
+  실제 guard/lock 의미에 맞게 교정했다.
   사용자 지시에 따라 test/ruff/mypy/import/compile은 실행하지 않았으며, 재리뷰·게이트 전
   완료로 표시하지 않는다.
 
