@@ -420,10 +420,13 @@ class KorTravelMapSettings(BaseSettings):
         ),
     )
     kor_travel_concierge_feature_sync_endpoint: Literal["snapshot", "changes"] = Field(
-        default="snapshot",
+        default="changes",
         description=(
-            "kor-travel-concierge feature pull endpoint 선택. ``snapshot``은 full sync, "
-            "``changes``는 incremental cursor sync."
+            "kor-travel-concierge feature pull endpoint 선택. 기본 ``changes``: cursor 없이 "
+            "시작하면 후보당 1행으로 압축된 export ledger 전체(upsert/reject/tombstone)를 "
+            "sequence 순으로 재생하므로 full sync와 철회(제거 목록·검수 회수) 전파를 동시에 "
+            "만족한다. ``snapshot``은 **active upsert만** 반환해 reject/tombstone이 소비되지 "
+            "않는다 — 철회 전파가 필요 없는 일회성 초기 적재 검증 용도로만 쓴다."
         ),
     )
     kor_travel_concierge_feature_cursor: str | None = Field(

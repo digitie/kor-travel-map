@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy import text
@@ -30,6 +30,13 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.infra import admin_feature_repo, feature_repo
+from kortravelmap.providers.kor_travel_concierge import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+    KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
+    kor_travel_concierge_inactive_entity_ids,
+    kor_travel_concierge_items_to_bundles,
+)
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
@@ -417,6 +424,202 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
     ).one()
     assert row.status == "inactive"
     assert row.deleted_at is not None
+
+
+def _concierge_item(
+    *, candidate_id: int = 9101, description: str = "성산 일출 명소"
+) -> dict[str, Any]:
+    """concierge feature export 현행 계약(2026-07-14, #202 이후) 미러 item."""
+    return {
+        "export_id": f"ytpc_{candidate_id}",
+        "candidate_id": candidate_id,
+        "operation": "upsert",
+        "schema_version": 1,
+        "place": {
+            "name": "성산일출봉",
+            "description": description,
+            "gemini_enriched_description": None,
+            "category_label": "관광지",
+            "category_code_suggestion": "01010100",
+            "longitude": 126.9410,
+            "latitude": 33.4580,
+            "address": {
+                "official_address": "제주특별자치도 서귀포시 성산읍",
+                "road_address": None,
+                "legal_dong_code": None,
+                "sido_code": None,
+                "sigungu_code": None,
+            },
+        },
+        "youtube": {
+            "video_id": "video-revert-1",
+            "video_url": "https://www.youtube.com/watch?v=video-revert-1",
+            "video_title": "제주 동부 여행",
+            "source_type": "keyword",
+            "source_value": "제주 동부 여행",
+            # keyword 수집의 source_title은 접두사 없는 검색어 원문(producer _source_title).
+            "source_title": "제주 동부 여행 코스",
+            "source_search_query": "제주 동부 여행 코스",
+            "corrected_search_query": "제주 동부 여행 코스",
+            "channel_id": "channel-revert-1",
+            "channel_title": "여행 채널",
+            "channel_summary": None,
+            "playlist_id": None,
+            "playlist_title": None,
+            "video_summary": "성산 일출 명소 소개",
+        },
+        "evidence": {
+            "timestamp_start": "00:01:00",
+            "timestamp_end": "00:02:00",
+            "transcript_excerpt": "성산일출봉에 도착했습니다.",
+            "gemini_url_evidence": None,
+            "confidence_score": 0.9,
+            "providers": {"kakao": {}},
+        },
+        "source_record": {
+            "provider": KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+            "source_entity_type": KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
+            "source_entity_id": str(candidate_id),
+        },
+        "updated_at": "2026-07-14T00:00:00Z",
+    }
+
+
+async def _inactivate_concierge_items(
+    session: AsyncSession, items: list[dict[str, Any]]
+) -> int:
+    """Dagster asset과 동일 경로 — reject/tombstone item → feature inactive 전환."""
+    return await feature_repo.inactivate_features_by_source_entity_ids(
+        session,
+        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
+        source_entity_ids=kor_travel_concierge_inactive_entity_ids(items),
+    )
+
+
+async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    """concierge #202 되돌리기 — tombstone→inactive 후 같은 payload 재-upsert가 복구한다.
+
+    concierge 검수 UI의 제거 목록/soft-delete와 되돌리기(reopen) 자체는 tombstone을
+    발행하고, 재검수 **재확정 시** 같은 후보의 upsert가 재발행된다(export ledger는
+    후보당 1행 최신 operation). 소비 측은 tombstone에서 inactive 전환, 재확정
+    재-upsert에서 provider self-heal 복구가 성립해야 복원된 후보가 지도에 다시
+    보인다(ADR-050 #4 확장).
+    """
+    item = _concierge_item(candidate_id=9101)
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    loaded = await feature_repo.load_bundle(migrated_session, bundle)
+    assert loaded.features_inserted == 1
+
+    assert await _inactivate_concierge_items(
+        migrated_session, [{**item, "operation": "tombstone"}]
+    ) == 1
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at FROM feature.features"
+                " WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "inactive"
+    assert row.deleted_at is not None
+
+    # 되돌리기: 같은 payload의 재-upsert(동일 source_record_key) → fast-path 복구.
+    recovered = await feature_repo.load_bundle(migrated_session, bundle)
+    assert recovered.features_updated == 1
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at FROM feature.features"
+                " WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "active"
+    assert row.deleted_at is None
+
+
+async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
+    migrated_session: AsyncSession,
+) -> None:
+    """되돌리기 + 재검수 수정 — payload가 바뀐 재-upsert도 복구·갱신한다.
+
+    변경 payload는 새 source_record_key(became_current) 경로로 upsert_feature를 타므로,
+    동일 payload fast-path와는 다른 복구 분기를 별도로 고정한다. feature_id는 안정
+    candidate.id에만 고정되어(ADR-057) 두 payload가 같은 feature로 수렴해야 한다.
+    """
+    item = _concierge_item(candidate_id=9102)
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    await feature_repo.load_bundle(migrated_session, bundle)
+
+    assert await _inactivate_concierge_items(
+        migrated_session, [{**item, "operation": "reject"}]
+    ) == 1
+
+    changed_item = _concierge_item(candidate_id=9102, description="재검수로 수정된 설명")
+    [changed_bundle] = await kor_travel_concierge_items_to_bundles(
+        [changed_item], fetched_at=_FETCHED + timedelta(hours=1)
+    )
+    assert changed_bundle.feature.feature_id == bundle.feature.feature_id
+    assert (
+        changed_bundle.source_record.raw_payload_hash
+        != bundle.source_record.raw_payload_hash
+    )
+
+    recovered = await feature_repo.load_bundle(migrated_session, changed_bundle)
+    assert recovered.features_updated == 1
+    assert recovered.source_records_inserted == 1
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, deleted_at,"
+                " detail #>> '{facility_info,description}' AS description"
+                " FROM feature.features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "active"
+    assert row.deleted_at is None
+    assert row.description == "재검수로 수정된 설명"
+
+
+async def test_kor_travel_concierge_revert_respects_admin_prevention(
+    migrated_session: AsyncSession,
+) -> None:
+    """운영자가 prevent_provider_reactivation으로 잠근 feature는 되돌리기도 못 살린다."""
+    item = _concierge_item(candidate_id=9103)
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    await feature_repo.load_bundle(migrated_session, bundle)
+
+    deactivated = await admin_feature_repo.deactivate_feature(
+        migrated_session,
+        bundle.feature.feature_id,
+        reason="운영 판단 비노출",
+        operator="integration-test",
+        prevent_provider_reactivation=True,
+    )
+    assert deactivated is not None
+    assert deactivated.override_created is True
+
+    protected = await feature_repo.load_bundle(migrated_session, bundle)
+    assert protected.features_updated == 0
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT status FROM feature.features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.status == "inactive"
 
 
 async def test_notice_first_probe_start_time_is_preserved_on_payload_update(

@@ -17,6 +17,7 @@ from kortravelmap.providers.kor_travel_concierge import (
     KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK,
     kor_travel_concierge_inactive_entity_ids,
     kor_travel_concierge_items_to_bundles,
+    kor_travel_concierge_latest_items,
 )
 
 _KST = timezone(timedelta(hours=9))
@@ -36,8 +37,10 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "category_code_suggestion": "01020300",
             "longitude": 126.7958,
             "latitude": 33.5563,
-            # ADR-057/C-03 — producer(feature_export_service)는 admin 코드를 항상 None으로
-            # 보낸다(feature_id/bjd는 소비자 책임). 픽스처도 동일하게 맞춘다.
+            # producer T-189(2026-07-14)부터 장소 매칭 시 실 행정코드를 보낸다. 미매칭·
+            # 미보강 후보는 여전히 None — 본 픽스처는 None 케이스를 유지하고 실코드
+            # 케이스는 test_..._producer_admin_codes_flow_to_address가 고정한다.
+            # feature_id는 어느 쪽이든 candidate.id에만 고정된다(ADR-057).
             "address": {
                 "official_address": "제주특별자치도 제주시 구좌읍 월정리",
                 "road_address": "제주특별자치도 제주시 구좌읍 해맞이해안로",
@@ -50,6 +53,14 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "video_id": "video-1",
             "video_url": "https://www.youtube.com/watch?v=video-1",
             "video_title": "제주 동쪽 여행",
+            # producer 8720dda(2026-06-25) — 수집 대상 provenance. keyword 수집이면
+            # source_search_query/corrected_search_query가 채워지고, source_title은
+            # 접두사 없는 검색어 원문이다(producer _source_title).
+            "source_type": "keyword",
+            "source_value": "제주 동쪽 여행",
+            "source_title": "제주 동쪽 여행 브이로그",
+            "source_search_query": "제주 동쪽 여행 브이로그",
+            "corrected_search_query": "제주 동쪽 여행 브이로그",
             "channel_id": "channel-1",
             "channel_title": "여행 채널",
             "playlist_id": "playlist-1",
@@ -94,7 +105,15 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.facility_info["timestamp_start"] == "00:03:12"  # type: ignore[union-attr]
     # T-217f/ADR-053 — 출처 배지 UX가 detail.facility_info만으로 confidence를 얻는다.
     assert feature.detail.facility_info["confidence_score"] == 86  # type: ignore[union-attr]
+    # producer provenance(8720dda) — 출처 UX가 읽는 평면 미러(§4).
+    assert feature.detail.facility_info["youtube_source_type"] == "keyword"  # type: ignore[union-attr]
+    assert feature.detail.facility_info["youtube_source_title"] == "제주 동쪽 여행 브이로그"  # type: ignore[union-attr]
+    assert feature.detail.facility_info["youtube_source_search_query"] == "제주 동쪽 여행 브이로그"  # type: ignore[union-attr]
     assert feature.detail.payload["kor_travel_concierge"]["youtube"]["video_id"] == "video-1"  # type: ignore[union-attr]
+    # nested pass-through — curated source rule이 읽는 경로
+    # (detail #>> '{payload,kor_travel_concierge,youtube,source_title}').
+    nested_youtube = feature.detail.payload["kor_travel_concierge"]["youtube"]  # type: ignore[union-attr]
+    assert nested_youtube["source_title"] == "제주 동쪽 여행 브이로그"
 
     source_record = bundle.source_record
     assert source_record.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
@@ -108,6 +127,93 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert bundle.source_link.match_method == "kor_travel_concierge_export"
     assert bundle.source_link.confidence == 86
     assert feature.raw_refs[0].source_entity_id == "123"
+
+
+async def test_kor_travel_concierge_latest_items_keeps_last_observation_per_candidate() -> None:
+    """mid-run 검수 전이 수렴 — 같은 후보가 한 스트림에 두 번 관측되면 마지막이 이긴다.
+
+    changes 페이지네이션 도중 producer가 ledger 행을 새 sequence로 전진시키면(되돌리기
+    등) 같은 후보가 구/신 operation으로 두 번 관측될 수 있다. 압축 없이 '적재 후
+    일괄 inactivate' 순서로 처리하면 구 reject가 신 upsert를 덮는다.
+    """
+    revert_flow = [
+        _item(operation="reject"),  # 구 sequence 관측
+        _item(operation="upsert"),  # 신 sequence 관측(되돌리기 재확정)
+    ]
+    latest = kor_travel_concierge_latest_items(revert_flow)
+    assert [item["operation"] for item in latest] == ["upsert"]
+    assert len(await kor_travel_concierge_items_to_bundles(latest, fetched_at=_FETCHED)) == 1
+    assert kor_travel_concierge_inactive_entity_ids(latest) == set()
+
+    removal_flow = [
+        _item(operation="upsert"),
+        _item(operation="tombstone"),  # 제거 목록 이동이 나중 관측
+    ]
+    latest = kor_travel_concierge_latest_items(removal_flow)
+    assert [item["operation"] for item in latest] == ["tombstone"]
+    assert await kor_travel_concierge_items_to_bundles(latest, fetched_at=_FETCHED) == []
+    assert kor_travel_concierge_inactive_entity_ids(latest) == {"123"}
+
+
+def test_kor_travel_concierge_latest_items_passes_through_unidentifiable() -> None:
+    """entity id가 없는 item은 압축 대상이 아니라 그대로 통과한다(후속 단계가 skip)."""
+    unidentifiable = _item(candidate_id=None, export_id=None, source_record={})
+    other = _item(
+        source_record={**_item()["source_record"], "source_entity_id": "777"},
+    )
+
+    latest = kor_travel_concierge_latest_items([unidentifiable, other, other])
+
+    assert latest == [unidentifiable, other]
+
+
+async def test_kor_travel_concierge_producer_admin_codes_flow_to_address() -> None:
+    """producer T-189 — 실 행정코드가 오면 Address로 싣되 feature_id는 불변(ADR-057)."""
+    coded = _item(
+        place={
+            **_item()["place"],
+            "address": {
+                **_item()["place"]["address"],
+                "legal_dong_code": "5011025624",
+                "sido_code": "50",
+                "sigungu_code": "50110",
+            },
+        },
+        schema_version=1,
+    )
+
+    [with_codes] = await kor_travel_concierge_items_to_bundles([coded], fetched_at=_FETCHED)
+    [without_codes] = await kor_travel_concierge_items_to_bundles(
+        [_item()], fetched_at=_FETCHED
+    )
+
+    assert with_codes.feature.address.bjd_code == "5011025624"
+    assert with_codes.feature.address.sido_code == "50"
+    assert with_codes.feature.address.sigungu_code == "50110"
+    # 상위 additive 필드(schema_version)는 raw_data에 보존된다.
+    assert with_codes.source_record.raw_data["schema_version"] == 1
+    # 행정코드 유무와 무관하게 feature_id는 candidate.id에만 고정(ADR-057).
+    assert with_codes.feature.feature_id == without_codes.feature.feature_id
+
+
+async def test_kor_travel_concierge_provenance_absent_keys_are_omitted() -> None:
+    """provenance 미포함(구 payload 또는 channel/playlist 수집) item은 facility_info에
+    해당 평면 key를 만들지 않는다 — None 필터 계약(§4)."""
+    youtube = {
+        key: value
+        for key, value in _item()["youtube"].items()
+        if not key.startswith("source_") and key != "corrected_search_query"
+    }
+
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [_item(youtube=youtube)], fetched_at=_FETCHED
+    )
+
+    facility_info = bundle.feature.detail.facility_info  # type: ignore[union-attr]
+    assert "youtube_source_type" not in facility_info
+    assert "youtube_source_search_query" not in facility_info
+    assert "youtube_corrected_search_query" not in facility_info
+    assert facility_info["youtube_video_id"] == "video-1"
 
 
 async def test_kor_travel_concierge_skips_reject_and_tombstone() -> None:

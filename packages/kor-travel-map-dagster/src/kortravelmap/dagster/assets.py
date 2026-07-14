@@ -51,6 +51,7 @@ from kortravelmap.providers.kor_travel_concierge import (
     KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
     kor_travel_concierge_inactive_entity_ids,
     kor_travel_concierge_items_to_bundles,
+    kor_travel_concierge_latest_items,
 )
 from kortravelmap.providers.krairport import (
     DATASET_KEY_AIRPORTS,
@@ -1219,8 +1220,12 @@ async def run_feature_place_kor_travel_concierge_youtube(
 
     ``operation=upsert``는 bundle 적재, ``reject``/``tombstone``은 대응 feature를
     ``status='inactive'``로 전환한다(ADR-050 #4, T-217b — MOIS Step C 동형).
+    적재 후 inactivate 순서가 mid-run 검수 전이(되돌리기)의 구 operation으로 신
+    상태를 덮지 않도록, 후보별 마지막 관측 item으로 먼저 압축한다.
     """
-    records = await _record_list(context, "kor_travel_concierge_youtube_features")
+    records = kor_travel_concierge_latest_items(
+        await _record_list(context, "kor_travel_concierge_youtube_features")
+    )
     fetched_at = await _fetched_at(context)
     bundles = await kor_travel_concierge_items_to_bundles(
         records,

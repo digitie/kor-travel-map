@@ -53,6 +53,7 @@ __all__ = [
     "KorTravelConciergeFeatureItem",
     "kor_travel_concierge_inactive_entity_ids",
     "kor_travel_concierge_items_to_bundles",
+    "kor_travel_concierge_latest_items",
 ]
 
 
@@ -246,6 +247,33 @@ async def _item_to_bundle(
     )
 
 
+def kor_travel_concierge_latest_items(
+    items: Iterable[KorTravelConciergeFeatureItem],
+) -> list[KorTravelConciergeFeatureItem]:
+    """후보(``source_entity_id``)별 **마지막 관측 item**만 남긴다 — ledger 압축 미러.
+
+    producer export ledger는 후보당 1행이지만, ``changes`` 페이지네이션 **도중**
+    검수 전이(되돌리기 등)가 일어나면 producer가 그 행을 새 sequence로 전진시켜
+    같은 후보가 한 스트림에 구 operation(예: reject)과 신 operation(예: upsert)
+    으로 두 번 관측될 수 있다. 스트림 순서 = sequence 순서이므로 **마지막 관측이
+    ledger 최신 상태**다. asset은 적재(upsert)와 inactive 전환을 operation 종류
+    순서로 나눠 처리하므로, 압축 없이는 같은 run의 구 reject가 신 upsert를 덮어
+    다음 run까지 잘못 inactive로 남는다. entity id를 뽑을 수 없는 item은 그대로
+    통과시킨다(후속 단계가 각자 skip).
+    """
+    latest: dict[str, KorTravelConciergeFeatureItem] = {}
+    passthrough: list[KorTravelConciergeFeatureItem] = []
+    for item in items:
+        entity_id = _source_entity_id(item, _mapping(item.get("source_record")))
+        if entity_id is None:
+            passthrough.append(item)
+            continue
+        # 재관측 시 뒤로 이동시켜 최종 관측 순서를 유지한다.
+        latest.pop(entity_id, None)
+        latest[entity_id] = item
+    return [*passthrough, *latest.values()]
+
+
 def kor_travel_concierge_inactive_entity_ids(
     items: Iterable[KorTravelConciergeFeatureItem],
 ) -> set[str]:
@@ -417,6 +445,15 @@ def _facility_info(
         "youtube_channel_title": _text(youtube, "channel_title"),
         "youtube_playlist_id": _text(youtube, "playlist_id"),
         "youtube_playlist_title": _text(youtube, "playlist_title"),
+        # 2026-06-25 producer provenance 확장(concierge 8720dda) — 이 영상이 어떤 수집
+        # 대상(keyword 검색어/channel/playlist)에서 나왔는지의 평면 미러. nested
+        # ``detail.payload.kor_travel_concierge.youtube``에도 그대로 실리지만, 출처 UX는
+        # facility_info 평면 key를 우선 읽는다(§4).
+        "youtube_source_type": _text(youtube, "source_type"),
+        "youtube_source_value": _text(youtube, "source_value"),
+        "youtube_source_title": _text(youtube, "source_title"),
+        "youtube_source_search_query": _text(youtube, "source_search_query"),
+        "youtube_corrected_search_query": _text(youtube, "corrected_search_query"),
         "timestamp_start": _text(evidence, "timestamp_start"),
         "timestamp_end": _text(evidence, "timestamp_end"),
         "transcript_excerpt": _text(evidence, "transcript_excerpt"),

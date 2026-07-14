@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (claude) — concierge export 소비 계약 정렬 완료 (로컬)
+
+- **완료(코드)**: producer(kor-travel-concierge) 7월 검수 개편(soft-delete 제거
+  목록·되돌리기·검수 회수·bulk) 반영 — 기본 sync endpoint `snapshot`→`changes`
+  (철회 전파 갭 수정), provenance 평면 키 `facility_info.youtube_source_*` 추가,
+  되돌리기(tombstone→재-upsert) 재활성화 concierge 경로 통합 테스트 3건 고정.
+  wire 계약(envelope·cursor·operation 3종)은 producer diff로 불변 확인. 자세한
+  내용은 journal 2026-07-14 (claude).
+- **적대적 리뷰 1차 반영**: mid-run 되돌리기 역전 수정
+  (`kor_travel_concierge_latest_items` 압축), rejection_reason 문서 오류 정정,
+  producer T-189(행정코드 실데이터·schema_version) 미러 반영, cursor 전제 명시.
+- **적대적 리뷰 2차(리뷰어 2명) 반영**: S1/S2 0 · S3 6건 반영 — asset 압축 배선
+  테스트 2건 신설, 되돌리기 문구 정정(reopen 즉시 tombstone·재확정 시 upsert),
+  sido 유도 규칙 legal_dong fallback 병기, 픽스처 schema_version·source_title
+  원문화, 배포 체크에 cursor 확인 병기.
+- **다음 한 작업**: CI green → PR 머지 → n150 dagster/API 재배포(배포 시 prod
+  env의 `..._FEATURE_SYNC_ENDPOINT` override와 `..._FEATURE_CURSOR` **부재**를
+  함께 확인 — cursor가 남아 있으면 철회 backfill이 조용히 누락된다) →
+  `feature_place_kor_travel_concierge_youtube` materialize로 철회 전파·재활성화
+  live 확인 → live UI e2e(저부하 per-file) 완료.
+
 ## 2026-07-14 (codex) — notice reconcile 운영 제곱 비용 제거
 
 - **운영 원인**: 0046 첫 KREX 실수집에서 lock 대기가 아닌 reconcile SQL 자체가 6분 이상
