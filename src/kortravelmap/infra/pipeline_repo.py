@@ -1,14 +1,9 @@
-"""``kortravelmap.infra.pipeline_repo`` — 파이프라인 실행 타임라인 UNION 조회 (ADR-064).
+"""``kortravelmap.infra.pipeline_repo`` — 파이프라인 root 실행 read model.
 
-``/v1/ops/pipeline/executions``가 쓰는 **DB-only UNION** 조회다:
-``ops.import_jobs`` ∪ ``ops.feature_update_requests``를 공유 keyset cursor
-``(created_at DESC, id DESC)`` + ``kind`` discriminator(``import_job`` /
-``update_request``)로 병합한다. Dagster run(GraphQL, 휘발·cursor 없음)은 이 목록에
-**섞지 않는다** — 연결은 실컬럼 ``dagster_run_id`` 속성으로만 노출한다(ADR-064 §2).
-
-성능: 두 branch 각각 자신의 ``(created_at DESC, id DESC)`` 인덱스로 사전
-정렬·제한(limit+1)한 뒤 병합-재정렬한다. cursor 술어는 branch 안쪽에 두어
-인덱스 range scan을 유지한다.
+``/v1/ops/pipeline/executions``가 쓰는 DB-only projection이다. import job hierarchy를
+recursive SQL로 component에 귀속하고, 각 job의 가장 가까운 update request anchor로
+branch를 나눈다. request branch와 owner 없는 standalone partition만 root로 노출한다.
+Dagster run은 목록 cursor에 섞지 않고 실컬럼 ``dagster_run_id``로만 연결한다.
 """
 
 from __future__ import annotations
@@ -30,14 +25,14 @@ __all__ = [
     "PIPELINE_EXECUTION_KINDS",
     "PipelineExecution",
     "PipelineExecutionPage",
+    "PipelineProviderDatasetIdentity",
+    "PipelineProjectedJob",
     "PipelineStatusCounts",
     "get_pipeline_status_counts",
     "list_pipeline_executions",
 ]
 
-PIPELINE_EXECUTION_KINDS: Final[frozenset[str]] = frozenset(
-    {"import_job", "update_request"}
-)
+PIPELINE_EXECUTION_KINDS: Final[frozenset[str]] = frozenset({"import_job", "update_request"})
 
 _MAX_PAGE_SIZE: Final[int] = 200
 _CURSOR_KIND: Final[str] = "pipeline_executions"
@@ -45,15 +40,15 @@ _CURSOR_KIND: Final[str] = "pipeline_executions"
 
 @dataclass(frozen=True)
 class PipelineExecution:
-    """실행 타임라인 1행 — import job 또는 feature update request."""
+    """실행 타임라인 root 1행."""
 
     kind: str
     id: str
     status: str
     created_at: datetime
-    job_kind: str | None
-    provider: str | None
-    dataset_key: str | None
+    providers: tuple[str, ...]
+    dataset_keys: tuple[str, ...]
+    provider_dataset: PipelineProviderDatasetIdentity | None
     progress: int | None
     current_stage: str | None
     scope_type: str | None
@@ -64,10 +59,38 @@ class PipelineExecution:
     started_at: datetime | None
     finished_at: datetime | None
     dagster_run_id: str | None
-    job_id: str | None
-    request_id: str | None
+    requested_job_id: str | None
+    lineage_owner: bool | None
+    linked_job_count: int
+    projected_job: PipelineProjectedJob | None
+
+
+@dataclass(frozen=True)
+class PipelineProviderDatasetIdentity:
+    """``provider_dataset`` request의 pair identity."""
+
+    provider: str
+    dataset_key: str
+    sync_scope: str | None
+
+
+@dataclass(frozen=True)
+class PipelineProjectedJob:
+    """root branch 또는 standalone partition에서 대표로 노출할 import job."""
+
+    id: str
+    job_kind: str
+    status: str
+    progress: int
+    current_stage: str | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    dagster_run_id: str | None
     load_batch_id: str | None
     parent_job_id: str | None
+    depth: int
 
 
 @dataclass(frozen=True)
@@ -100,17 +123,31 @@ def _json_dict(value: Any) -> dict[str, Any]:
     return dict(value) if value else {}
 
 
-def _encode_cursor(*, at: datetime, key: str) -> str:
+def _encode_cursor(*, at: datetime, key: str, item_kind: str) -> str:
+    if item_kind not in PIPELINE_EXECUTION_KINDS:
+        raise ValueError(f"invalid {_CURSOR_KIND} cursor")
+    try:
+        cursor_id = str(UUID(key))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
     raw = json.dumps(
-        {"v": 1, "kind": _CURSOR_KIND, "at": at.isoformat(), "key": key},
+        {
+            "v": 2,
+            "cursor": _CURSOR_KIND,
+            "at": at.isoformat(),
+            "id": cursor_id,
+            "item_kind": item_kind,
+        },
         separators=(",", ":"),
     ).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
+def _decode_cursor(
+    cursor: str | None,
+) -> tuple[datetime | None, str | None, str | None]:
     if cursor is None:
-        return None, None
+        return None, None, None
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
         payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
@@ -118,126 +155,495 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
-    if payload.get("v") != 1 or payload.get("kind") != _CURSOR_KIND:
+    if payload.get("v") != 2 or payload.get("cursor") != _CURSOR_KIND:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
     try:
         at = datetime.fromisoformat(str(payload["at"]))
-        # key는 SQL에서 uuid로 CAST된다 — 여기서 UUID 형식을 강제해 비정형 값이
+        if at.utcoffset() is None:
+            raise ValueError("cursor datetime must include a timezone")
+        # id는 SQL에서 uuid로 CAST된다 — 여기서 UUID 형식을 강제해 비정형 값이
         # DB 오류(500)로 새지 않고 ValueError(라우터 422)로 떨어지게 한다.
-        key = str(UUID(str(payload["key"])))
+        key = str(UUID(str(payload["id"])))
+        item_kind = str(payload["item_kind"])
+        if item_kind not in PIPELINE_EXECUTION_KINDS:
+            raise ValueError("invalid item kind")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
-    return at, key
+    return at, key, item_kind
 
 
-# 두 branch 모두 동일 컬럼 시그니처를 갖는다. 각 branch에서 인덱스 정렬 + limit+1
-# 사전 제한 후 바깥에서 병합-재정렬한다. cursor/필터 술어는 branch 안에 둔다.
+# hierarchy를 component로 완전히 접은 다음 root filter/keyset을 적용한다. event identity
+# 집계는 page에 실제 포함된 standalone root에만 lateral로 수행한다.
 _LIST_EXECUTIONS_SQL: Final[str] = """
-WITH import_job_rows AS (
+WITH RECURSIVE job_ancestry AS (
+    SELECT
+        job_id AS leaf_job_id,
+        job_id AS ancestor_job_id,
+        parent_job_id,
+        0 AS depth,
+        ARRAY[job_id]::uuid[] AS path,
+        false AS cycle
+    FROM ops.import_jobs
+    UNION ALL
+    SELECT
+        walk.leaf_job_id,
+        parent.job_id,
+        parent.parent_job_id,
+        walk.depth + 1,
+        walk.path || parent.job_id,
+        parent.job_id = ANY(walk.path)
+    FROM job_ancestry AS walk
+    JOIN ops.import_jobs AS parent ON parent.job_id = walk.parent_job_id
+    WHERE NOT walk.cycle
+),
+cycle_roots AS (
+    SELECT DISTINCT ON (cycle_row.leaf_job_id)
+        cycle_row.leaf_job_id,
+        member AS component_root_id
+    FROM job_ancestry AS cycle_row
+    CROSS JOIN LATERAL unnest(
+        cycle_row.path[
+            array_position(cycle_row.path, cycle_row.ancestor_job_id)
+            : array_length(cycle_row.path, 1) - 1
+        ]
+    ) AS cycle_members(member)
+    WHERE cycle_row.cycle
+    ORDER BY cycle_row.leaf_job_id, member
+),
+terminal_roots AS (
+    SELECT DISTINCT ON (walk.leaf_job_id)
+        walk.leaf_job_id,
+        walk.ancestor_job_id AS component_root_id
+    FROM job_ancestry AS walk
+    LEFT JOIN ops.import_jobs AS parent ON parent.job_id = walk.parent_job_id
+    WHERE NOT walk.cycle
+      AND parent.job_id IS NULL
+    ORDER BY walk.leaf_job_id, walk.depth DESC
+),
+job_component_roots AS (
+    SELECT
+        job.job_id,
+        COALESCE(cycle.component_root_id, terminal.component_root_id, job.job_id)
+            AS component_root_id
+    FROM ops.import_jobs AS job
+    LEFT JOIN cycle_roots AS cycle ON cycle.leaf_job_id = job.job_id
+    LEFT JOIN terminal_roots AS terminal ON terminal.leaf_job_id = job.job_id
+),
+job_components AS (
+    SELECT
+        root.job_id,
+        root.component_root_id,
+        MIN(walk.depth)::integer AS depth
+    FROM job_component_roots AS root
+    JOIN job_ancestry AS walk
+      ON walk.leaf_job_id = root.job_id
+     AND walk.ancestor_job_id = root.component_root_id
+    GROUP BY root.job_id, root.component_root_id
+),
+anchor_request_candidates AS (
+    SELECT
+        request.request_id,
+        request.job_id AS anchor_job_id,
+        component.component_root_id,
+        request.created_at,
+        ROW_NUMBER() OVER (
+            PARTITION BY request.job_id
+            ORDER BY request.created_at ASC, request.request_id ASC
+        ) AS owner_rank
+    FROM ops.feature_update_requests AS request
+    JOIN job_components AS component ON component.job_id = request.job_id
+),
+anchor_requests AS (
+    SELECT request_id, anchor_job_id, component_root_id, created_at
+    FROM anchor_request_candidates
+    WHERE owner_rank = 1
+),
+job_anchor_candidates AS (
+    SELECT
+        walk.leaf_job_id AS job_id,
+        anchor.request_id AS owner_request_id,
+        anchor.anchor_job_id,
+        anchor.component_root_id,
+        walk.depth::integer AS anchor_depth,
+        ROW_NUMBER() OVER (
+            PARTITION BY walk.leaf_job_id
+            ORDER BY
+                walk.depth ASC,
+                anchor.created_at ASC,
+                anchor.request_id ASC
+        ) AS ownership_rank
+    FROM job_ancestry AS walk
+    JOIN anchor_requests AS anchor
+      ON anchor.anchor_job_id = walk.ancestor_job_id
+),
+job_owners AS (
+    SELECT
+        job_id,
+        owner_request_id,
+        anchor_job_id,
+        component_root_id,
+        anchor_depth
+    FROM job_anchor_candidates
+    WHERE ownership_rank = 1
+),
+ranked_request_jobs AS (
+    SELECT
+        owner.owner_request_id,
+        owner.anchor_depth AS depth,
+        job.*,
+        COUNT(*) OVER (PARTITION BY owner.owner_request_id)::integer
+            AS linked_job_count,
+        ROW_NUMBER() OVER (
+            PARTITION BY owner.owner_request_id
+            ORDER BY owner.anchor_depth DESC, job.created_at DESC, job.job_id DESC
+        ) AS projection_rank
+    FROM job_owners AS owner
+    JOIN ops.import_jobs AS job ON job.job_id = owner.job_id
+),
+request_summaries AS (
+    SELECT
+        ranked.owner_request_id,
+        ranked.linked_job_count,
+        ranked.job_id AS projected_job_id,
+        ranked.kind AS projected_job_kind,
+        ranked.status AS projected_status,
+        ranked.progress AS projected_progress,
+        ranked.current_stage AS projected_current_stage,
+        ranked.error_message AS projected_error_message,
+        ranked.created_at AS projected_created_at,
+        ranked.started_at AS projected_started_at,
+        ranked.finished_at AS projected_finished_at,
+        ranked.dagster_run_id AS projected_dagster_run_id,
+        ranked.load_batch_id AS projected_load_batch_id,
+        ranked.parent_job_id AS projected_parent_job_id,
+        ranked.depth AS projected_depth
+    FROM ranked_request_jobs AS ranked
+    WHERE ranked.projection_rank = 1
+),
+standalone_jobs AS (
+    SELECT
+        component.job_id,
+        component.component_root_id,
+        component.depth,
+        job.kind,
+        job.status,
+        job.progress,
+        job.current_stage,
+        job.error_message,
+        job.created_at,
+        job.started_at,
+        job.finished_at,
+        job.dagster_run_id,
+        job.load_batch_id,
+        job.parent_job_id
+    FROM job_components AS component
+    JOIN ops.import_jobs AS job ON job.job_id = component.job_id
+    LEFT JOIN job_owners AS owner ON owner.job_id = component.job_id
+    WHERE owner.job_id IS NULL
+),
+ranked_standalone_jobs AS (
+    SELECT
+        standalone.*,
+        COUNT(*) OVER (PARTITION BY standalone.component_root_id)::integer
+            AS linked_job_count,
+        ROW_NUMBER() OVER (
+            PARTITION BY standalone.component_root_id
+            ORDER BY
+                standalone.depth DESC,
+                standalone.created_at DESC,
+                standalone.job_id DESC
+        ) AS projection_rank
+    FROM standalone_jobs AS standalone
+),
+standalone_summaries AS (
+    SELECT
+        ranked.component_root_id,
+        ranked.linked_job_count,
+        ranked.job_id AS projected_job_id,
+        ranked.kind AS projected_job_kind,
+        ranked.status AS projected_status,
+        ranked.progress AS projected_progress,
+        ranked.current_stage AS projected_current_stage,
+        ranked.error_message AS projected_error_message,
+        ranked.created_at AS projected_created_at,
+        ranked.started_at AS projected_started_at,
+        ranked.finished_at AS projected_finished_at,
+        ranked.dagster_run_id AS projected_dagster_run_id,
+        ranked.load_batch_id AS projected_load_batch_id,
+        ranked.parent_job_id AS projected_parent_job_id,
+        ranked.depth AS projected_depth
+    FROM ranked_standalone_jobs AS ranked
+    WHERE ranked.projection_rank = 1
+),
+request_roots AS (
+    SELECT
+        'update_request'::text AS kind,
+        request.request_id AS id,
+        request.status,
+        request.created_at,
+        stored.providers
+          || CASE
+            WHEN request.scope_type = 'provider_dataset'
+             AND NULLIF(request.scope->>'provider', '') IS NOT NULL
+             AND NOT (request.scope->>'provider' = ANY(stored.providers))
+            THEN ARRAY[request.scope->>'provider']
+            ELSE '{}'::text[]
+          END AS providers,
+        stored.dataset_keys
+          || CASE
+            WHEN request.scope_type = 'provider_dataset'
+             AND NULLIF(request.scope->>'dataset_key', '') IS NOT NULL
+             AND NOT (request.scope->>'dataset_key' = ANY(stored.dataset_keys))
+            THEN ARRAY[request.scope->>'dataset_key']
+            ELSE '{}'::text[]
+          END AS dataset_keys,
+        NULL::integer AS progress,
+        NULL::text AS current_stage,
+        request.scope_type,
+        request.priority,
+        request.run_mode,
+        request.operator,
+        request.error_message,
+        request.started_at,
+        request.finished_at,
+        request.dagster_run_id,
+        request.job_id AS requested_job_id,
+        (anchor.request_id IS NOT NULL) AS lineage_owner,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.linked_job_count ELSE 0 END AS linked_job_count,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_job_id END AS projected_job_id,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_job_kind END AS projected_job_kind,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_status END AS projected_status,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_progress END AS projected_progress,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_current_stage END AS projected_current_stage,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_error_message END AS projected_error_message,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_created_at END AS projected_created_at,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_started_at END AS projected_started_at,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_finished_at END AS projected_finished_at,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_dagster_run_id END AS projected_dagster_run_id,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_load_batch_id END AS projected_load_batch_id,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_parent_job_id END AS projected_parent_job_id,
+        CASE WHEN anchor.request_id IS NOT NULL
+            THEN summary.projected_depth END AS projected_depth,
+        request.scope->>'provider' AS scope_provider,
+        request.scope->>'dataset_key' AS scope_dataset,
+        request.scope->>'sync_scope' AS scope_sync_scope,
+        anchor.component_root_id
+    FROM ops.feature_update_requests AS request
+    CROSS JOIN LATERAL (
+      SELECT
+        ARRAY(SELECT jsonb_array_elements_text(request.providers)) AS providers,
+        ARRAY(SELECT jsonb_array_elements_text(request.dataset_keys)) AS dataset_keys
+    ) AS stored
+    LEFT JOIN anchor_requests AS anchor ON anchor.request_id = request.request_id
+    LEFT JOIN request_summaries AS summary
+      ON summary.owner_request_id = anchor.request_id
+),
+standalone_roots AS (
     SELECT
         'import_job'::text AS kind,
-        job_id AS id,
-        status,
-        created_at,
-        kind AS job_kind,
-        payload->>'provider' AS provider,
-        payload->>'dataset_key' AS dataset_key,
-        progress,
-        current_stage,
+        root.job_id AS id,
+        root.status,
+        root.created_at,
+        '{}'::text[] AS providers,
+        '{}'::text[] AS dataset_keys,
+        root.progress,
+        root.current_stage,
         NULL::text AS scope_type,
         NULL::integer AS priority,
         NULL::text AS run_mode,
         NULL::text AS operator,
-        error_message,
-        started_at,
-        finished_at,
-        dagster_run_id,
-        NULL::uuid AS linked_job_id,
-        payload->>'request_id' AS linked_request_id,
-        load_batch_id,
-        parent_job_id
-    FROM ops.import_jobs
-    WHERE CAST(:include_import_jobs AS boolean)
-      AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-      AND (
-        CAST(:provider AS text) IS NULL
-        OR payload->>'provider' = CAST(:provider AS text)
-      )
-      AND (
-        CAST(:created_from AS timestamptz) IS NULL
-        OR created_at >= CAST(:created_from AS timestamptz)
-      )
-      AND (
-        CAST(:created_to AS timestamptz) IS NULL
-        OR created_at <= CAST(:created_to AS timestamptz)
-      )
-      AND (
-        CAST(:cursor_created_at AS timestamptz) IS NULL
-        OR (created_at, job_id) < (
-            CAST(:cursor_created_at AS timestamptz),
-            CAST(:cursor_id AS uuid)
-        )
-      )
-    ORDER BY created_at DESC, job_id DESC
-    LIMIT :branch_limit
+        root.error_message,
+        root.started_at,
+        root.finished_at,
+        root.dagster_run_id,
+        NULL::uuid AS requested_job_id,
+        NULL::boolean AS lineage_owner,
+        summary.linked_job_count,
+        summary.projected_job_id,
+        summary.projected_job_kind,
+        summary.projected_status,
+        summary.projected_progress,
+        summary.projected_current_stage,
+        summary.projected_error_message,
+        summary.projected_created_at,
+        summary.projected_started_at,
+        summary.projected_finished_at,
+        summary.projected_dagster_run_id,
+        summary.projected_load_batch_id,
+        summary.projected_parent_job_id,
+        summary.projected_depth,
+        NULL::text AS scope_provider,
+        NULL::text AS scope_dataset,
+        NULL::text AS scope_sync_scope,
+        summary.component_root_id
+    FROM standalone_summaries AS summary
+    JOIN ops.import_jobs AS root ON root.job_id = summary.component_root_id
 ),
-update_request_rows AS (
-    SELECT
-        'update_request'::text AS kind,
-        request_id AS id,
-        status,
-        created_at,
-        NULL::text AS job_kind,
-        COALESCE(scope->>'provider', providers->>0) AS provider,
-        COALESCE(scope->>'dataset_key', dataset_keys->>0) AS dataset_key,
-        NULL::integer AS progress,
-        NULL::text AS current_stage,
-        scope_type,
-        priority,
-        run_mode,
-        operator,
-        error_message,
-        started_at,
-        finished_at,
-        dagster_run_id,
-        job_id AS linked_job_id,
-        NULL::text AS linked_request_id,
-        NULL::uuid AS load_batch_id,
-        NULL::uuid AS parent_job_id
-    FROM ops.feature_update_requests
-    WHERE CAST(:include_update_requests AS boolean)
-      AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
+all_roots AS (
+    SELECT * FROM request_roots
+    UNION ALL
+    SELECT * FROM standalone_roots
+),
+filtered_roots AS (
+    SELECT root.*
+    FROM all_roots AS root
+    WHERE (CAST(:kind AS text) IS NULL OR root.kind = CAST(:kind AS text))
+      AND (CAST(:status AS text) IS NULL OR root.status = CAST(:status AS text))
       AND (
         CAST(:provider AS text) IS NULL
-        OR providers @> CAST(:provider_filter AS jsonb)
-        OR scope->>'provider' = CAST(:provider AS text)
+        OR (
+          root.kind = 'update_request'
+          AND (
+            CAST(:provider AS text) = ANY(root.providers)
+            OR (
+              root.scope_type = 'provider_dataset'
+              AND root.scope_provider = CAST(:provider AS text)
+            )
+          )
+        )
+        OR (
+          root.kind = 'import_job'
+          AND EXISTS (
+            SELECT 1
+            FROM standalone_jobs AS component
+            CROSS JOIN LATERAL (
+              SELECT 1
+              FROM ops.import_job_events AS event
+              WHERE event.job_id = component.job_id
+                AND NULLIF(event.provider, '') = CAST(:provider AS text)
+              LIMIT 1
+            ) AS matched_provider
+            WHERE component.component_root_id = root.component_root_id
+          )
+        )
+      )
+      AND (
+        CAST(:dataset_key AS text) IS NULL
+        OR (
+          root.kind = 'update_request'
+          AND (
+            CAST(:dataset_key AS text) = ANY(root.dataset_keys)
+            OR (
+              root.scope_type = 'provider_dataset'
+              AND root.scope_dataset = CAST(:dataset_key AS text)
+            )
+          )
+        )
+        OR (
+          root.kind = 'import_job'
+          AND EXISTS (
+            SELECT 1
+            FROM standalone_jobs AS component
+            CROSS JOIN LATERAL (
+              SELECT 1
+              FROM ops.import_job_events AS event
+              WHERE event.job_id = component.job_id
+                AND NULLIF(event.dataset_key, '') = CAST(:dataset_key AS text)
+              LIMIT 1
+            ) AS matched_dataset
+            WHERE component.component_root_id = root.component_root_id
+          )
+        )
       )
       AND (
         CAST(:created_from AS timestamptz) IS NULL
-        OR created_at >= CAST(:created_from AS timestamptz)
+        OR root.created_at >= CAST(:created_from AS timestamptz)
       )
       AND (
         CAST(:created_to AS timestamptz) IS NULL
-        OR created_at <= CAST(:created_to AS timestamptz)
+        OR root.created_at <= CAST(:created_to AS timestamptz)
       )
       AND (
         CAST(:cursor_created_at AS timestamptz) IS NULL
-        OR (created_at, request_id) < (
-            CAST(:cursor_created_at AS timestamptz),
-            CAST(:cursor_id AS uuid)
+        OR (root.created_at, root.id, root.kind) < (
+          CAST(:cursor_created_at AS timestamptz),
+          CAST(:cursor_id AS uuid),
+          CAST(:cursor_item_kind AS text)
         )
       )
-    ORDER BY created_at DESC, request_id DESC
-    LIMIT :branch_limit
+),
+page_roots AS (
+    SELECT *
+    FROM filtered_roots
+    ORDER BY created_at DESC, id DESC, kind DESC
+    LIMIT :page_limit
 )
-SELECT *
-FROM (
-    SELECT * FROM import_job_rows
-    UNION ALL
-    SELECT * FROM update_request_rows
-) AS united
-ORDER BY created_at DESC, id DESC
-LIMIT :branch_limit
+SELECT
+    page.kind,
+    page.id,
+    page.status,
+    page.created_at,
+    CASE WHEN page.kind = 'import_job'
+      THEN COALESCE(identity.providers, '{}'::text[])
+      ELSE page.providers
+    END AS providers,
+    CASE WHEN page.kind = 'import_job'
+      THEN COALESCE(identity.dataset_keys, '{}'::text[])
+      ELSE page.dataset_keys
+    END AS dataset_keys,
+    page.scope_provider,
+    page.scope_dataset,
+    page.scope_sync_scope,
+    page.progress,
+    page.current_stage,
+    page.scope_type,
+    page.priority,
+    page.run_mode,
+    page.operator,
+    page.error_message,
+    page.started_at,
+    page.finished_at,
+    page.dagster_run_id,
+    page.requested_job_id,
+    page.lineage_owner,
+    page.linked_job_count,
+    page.projected_job_id,
+    page.projected_job_kind,
+    page.projected_status,
+    page.projected_progress,
+    page.projected_current_stage,
+    page.projected_error_message,
+    page.projected_created_at,
+    page.projected_started_at,
+    page.projected_finished_at,
+    page.projected_dagster_run_id,
+    page.projected_load_batch_id,
+    page.projected_parent_job_id,
+    page.projected_depth
+FROM page_roots AS page
+LEFT JOIN LATERAL (
+    SELECT
+        COALESCE(
+          array_agg(DISTINCT NULLIF(event.provider, '')
+                    ORDER BY NULLIF(event.provider, ''))
+            FILTER (WHERE NULLIF(event.provider, '') IS NOT NULL),
+          '{}'::text[]
+        ) AS providers,
+        COALESCE(
+          array_agg(DISTINCT NULLIF(event.dataset_key, '')
+                    ORDER BY NULLIF(event.dataset_key, ''))
+            FILTER (WHERE NULLIF(event.dataset_key, '') IS NOT NULL),
+          '{}'::text[]
+        ) AS dataset_keys
+    FROM standalone_jobs AS component
+    JOIN ops.import_job_events AS event ON event.job_id = component.job_id
+    WHERE page.kind = 'import_job'
+      AND component.component_root_id = page.component_root_id
+) AS identity ON page.kind = 'import_job'
+ORDER BY page.created_at DESC, page.id DESC, page.kind DESC
 """
 
 _STATUS_COUNTS_SQL: Final[str] = """
@@ -274,14 +680,51 @@ SELECT
 
 
 def _row_to_execution(row: Any) -> PipelineExecution:
+    provider_dataset = None
+    if (
+        row.kind == "update_request"
+        and row.scope_type == "provider_dataset"
+        and row.scope_provider
+        and row.scope_dataset
+    ):
+        provider_dataset = PipelineProviderDatasetIdentity(
+            provider=str(row.scope_provider),
+            dataset_key=str(row.scope_dataset),
+            sync_scope=(str(row.scope_sync_scope) if row.scope_sync_scope is not None else None),
+        )
+    projected_job = None
+    if row.projected_job_id is not None:
+        projected_job = PipelineProjectedJob(
+            id=str(row.projected_job_id),
+            job_kind=str(row.projected_job_kind),
+            status=str(row.projected_status),
+            progress=int(row.projected_progress),
+            current_stage=row.projected_current_stage,
+            error_message=row.projected_error_message,
+            created_at=row.projected_created_at,
+            started_at=row.projected_started_at,
+            finished_at=row.projected_finished_at,
+            dagster_run_id=row.projected_dagster_run_id,
+            load_batch_id=(
+                str(row.projected_load_batch_id)
+                if row.projected_load_batch_id is not None
+                else None
+            ),
+            parent_job_id=(
+                str(row.projected_parent_job_id)
+                if row.projected_parent_job_id is not None
+                else None
+            ),
+            depth=int(row.projected_depth),
+        )
     return PipelineExecution(
         kind=str(row.kind),
         id=str(row.id),
         status=str(row.status),
         created_at=row.created_at,
-        job_kind=row.job_kind,
-        provider=row.provider,
-        dataset_key=row.dataset_key,
+        providers=tuple(str(value) for value in row.providers),
+        dataset_keys=tuple(str(value) for value in row.dataset_keys),
+        provider_dataset=provider_dataset,
         progress=int(row.progress) if row.progress is not None else None,
         current_stage=row.current_stage,
         scope_type=row.scope_type,
@@ -292,12 +735,10 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         started_at=row.started_at,
         finished_at=row.finished_at,
         dagster_run_id=row.dagster_run_id,
-        job_id=str(row.linked_job_id) if row.linked_job_id is not None else None,
-        request_id=row.linked_request_id,
-        load_batch_id=str(row.load_batch_id) if row.load_batch_id is not None else None,
-        parent_job_id=(
-            str(row.parent_job_id) if row.parent_job_id is not None else None
-        ),
+        requested_job_id=(str(row.requested_job_id) if row.requested_job_id is not None else None),
+        lineage_owner=(bool(row.lineage_owner) if row.lineage_owner is not None else None),
+        linked_job_count=int(row.linked_job_count),
+        projected_job=projected_job,
     )
 
 
@@ -307,46 +748,41 @@ async def list_pipeline_executions(
     kind: str | None = None,
     status: str | None = None,
     provider: str | None = None,
+    dataset_key: str | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> PipelineExecutionPage:
-    """실행 타임라인 UNION 목록 — ``(created_at DESC, id DESC)`` keyset cursor.
-
-    ``kind``가 ``None``이면 두 branch를 모두 병합하고, ``import_job`` /
-    ``update_request``면 해당 branch만 조회한다. provider 필터는 import job의
-    ``payload->>'provider'``와 update request의 ``providers`` 배열/
-    ``provider_dataset`` scope를 함께 본다.
-    """
+    """root 실행 목록 — ``(created_at DESC, id DESC, kind DESC)`` cursor."""
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
-        raise ValueError(
-            f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}"
-        )
+        raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
     page_size = _limit(limit)
-    cursor_created_at, cursor_id = _decode_cursor(cursor)
+    cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(cursor)
     rows = (
         await session.execute(
             text(_LIST_EXECUTIONS_SQL),
             {
-                "include_import_jobs": kind in (None, "import_job"),
-                "include_update_requests": kind in (None, "update_request"),
+                "kind": kind,
                 "status": status,
                 "provider": provider,
-                "provider_filter": (
-                    json.dumps([provider]) if provider is not None else None
-                ),
+                "dataset_key": dataset_key,
                 "created_from": created_from,
                 "created_to": created_to,
                 "cursor_created_at": cursor_created_at,
                 "cursor_id": cursor_id,
-                "branch_limit": page_size + 1,
+                "cursor_item_kind": cursor_item_kind,
+                "page_limit": page_size + 1,
             },
         )
     ).all()
     items = tuple(_row_to_execution(row) for row in rows[:page_size])
     next_cursor = (
-        _encode_cursor(at=items[-1].created_at, key=items[-1].id)
+        _encode_cursor(
+            at=items[-1].created_at,
+            key=items[-1].id,
+            item_kind=items[-1].kind,
+        )
         if len(rows) > page_size and items
         else None
     )
@@ -361,8 +797,7 @@ async def get_pipeline_status_counts(session: AsyncSession) -> PipelineStatusCou
             str(k): int(v) for k, v in _json_dict(row.import_jobs_by_status).items()
         },
         update_requests_by_status={
-            str(k): int(v)
-            for k, v in _json_dict(row.update_requests_by_status).items()
+            str(k): int(v) for k, v in _json_dict(row.update_requests_by_status).items()
         },
         failed_import_jobs_24h=int(row.failed_import_jobs_24h),
         failed_update_requests_24h=int(row.failed_update_requests_24h),

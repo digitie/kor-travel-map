@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### admin ops pipeline root projection (2026-07-15, ADR-064 T-ADM-C3b)
+
+- **CHANGED**: `GET /v1/ops/pipeline/executions`가 import job hierarchy를 job별
+  가장 가까운 update request anchor branch와 standalone partition으로 접는다.
+  batch root 아래 서로 다른 request sibling, nested request anchor, 같은 anchor의
+  중복 request를 섞지 않고 각 job을 정확히 한 partition에 귀속한다.
+- **CHANGED**: 목록 item은 저장 순서·중복을 유지하면서 direct scope 누락값을 보완한
+  `providers[]`/`dataset_keys[]`, provider/dataset/sync_scope pair를 보존하는
+  `provider_dataset`,
+  `linked_job_count`, `requested_job_id`, `lineage_owner`, root와 상태를 분리한
+  `projected_job`을 반환한다. standalone identity는 자유 payload가 아니라 해당
+  미소유 partition의 import job event 실컬럼만 사용한다.
+- **CHANGED**: 실행 목록 cursor를
+  `(created_at DESC, id DESC, kind DESC)` v2로 교체하고 `dataset_key` filter를
+  추가했다. 잘못된 cursor item kind와 UUID는 DB 조회 전 422로 거부한다.
+- **TEST**: root unit 1,285건, API 전체 416건, 관련 PostGIS/EXPLAIN
+  integration 10건, Ruff, strict mypy 155파일, import 계약 4/4,
+  OpenAPI/admin types drift를 통과했다.
+
 ### admin ops datasets 계약 보강 (2026-07-15, ADR-064 T-ADM-C2R)
 
 - **CHANGED**: `/v1/ops/datasets`가 provider 호출 가능 시각 `eligible_after`, Dagster

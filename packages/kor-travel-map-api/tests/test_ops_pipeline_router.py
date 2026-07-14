@@ -22,6 +22,8 @@ from kortravelmap.infra.ops_repo import (
 from kortravelmap.infra.pipeline_repo import (
     PipelineExecution,
     PipelineExecutionPage,
+    PipelineProjectedJob,
+    PipelineProviderDatasetIdentity,
     PipelineStatusCounts,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK
@@ -189,9 +191,17 @@ def _execution(
         id=execution_id,
         status="running",
         created_at=_NOW,
-        job_kind="feature_update_request" if kind == "import_job" else None,
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_BULK,
+        providers=(MOIS_PROVIDER_NAME,),
+        dataset_keys=(DATASET_KEY_BULK,),
+        provider_dataset=(
+            None
+            if kind == "import_job"
+            else PipelineProviderDatasetIdentity(
+                provider=MOIS_PROVIDER_NAME,
+                dataset_key=DATASET_KEY_BULK,
+                sync_scope="default",
+            )
+        ),
         progress=40 if kind == "import_job" else None,
         current_stage="loading" if kind == "import_job" else None,
         scope_type=None if kind == "import_job" else "provider_dataset",
@@ -202,12 +212,24 @@ def _execution(
         started_at=_NOW,
         finished_at=None,
         dagster_run_id="run-1",
-        job_id=None if kind == "import_job" else "11111111-1111-1111-1111-111111111111",
-        request_id=(
-            "22222222-2222-2222-2222-222222222222" if kind == "import_job" else None
+        requested_job_id=(None if kind == "import_job" else "11111111-1111-1111-1111-111111111111"),
+        lineage_owner=None if kind == "import_job" else True,
+        linked_job_count=1,
+        projected_job=PipelineProjectedJob(
+            id="11111111-1111-1111-1111-111111111111",
+            job_kind="feature_update_request",
+            status="running",
+            progress=40,
+            current_stage="loading",
+            error_message=None,
+            created_at=_NOW,
+            started_at=_NOW,
+            finished_at=None,
+            dagster_run_id="run-1",
+            load_batch_id=None,
+            parent_job_id=None,
+            depth=0,
         ),
-        load_batch_id=None,
-        parent_job_id=None,
     )
 
 
@@ -230,9 +252,7 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
                     "location": {"name": "kortravelmap.dagster.definitions"},
                     "schedules": [
                         {
-                            "name": (
-                                "feature_weather_kma_short_forecast_hourly_schedule"
-                            ),
+                            "name": ("feature_weather_kma_short_forecast_hourly_schedule"),
                             "cronSchedule": "20 * * * *",
                             "pipelineName": "kma_short_forecast_job",
                             "mode": "default",
@@ -244,9 +264,7 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
                                 "selectorId": "sel-1",
                                 "status": "RUNNING",
                                 "repositoryName": "__repository__",
-                                "repositoryLocationName": (
-                                    "kortravelmap.dagster.definitions"
-                                ),
+                                "repositoryLocationName": ("kortravelmap.dagster.definitions"),
                                 "ticks": [],
                             },
                         }
@@ -270,9 +288,7 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
 _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
     "data": {
         "version": "1.13.7",
-        "repositoriesOrError": _SCHEDULES_GRAPHQL_PAYLOAD["data"][
-            "repositoriesOrError"
-        ],
+        "repositoriesOrError": _SCHEDULES_GRAPHQL_PAYLOAD["data"]["repositoriesOrError"],
         "runsOrError": {
             "__typename": "Runs",
             "results": [
@@ -306,15 +322,13 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     for path in _PIPELINE_PATHS:
         assert path in spec["paths"], path
     # kind는 enum 경로 파라미터다 (import_job|update_request).
-    detail_params = spec["paths"][
-        "/v1/ops/pipeline/executions/{kind}/{execution_id}"
-    ]["get"]["parameters"]
+    detail_params = spec["paths"]["/v1/ops/pipeline/executions/{kind}/{execution_id}"]["get"][
+        "parameters"
+    ]
     kind_param = next(p for p in detail_params if p["name"] == "kind")
     assert kind_param["schema"]["enum"] == ["import_job", "update_request"]
     # 갱신 요청 생성은 기존 6-type scope union 계약을 그대로 공유한다.
-    request_schema = spec["components"]["schemas"][
-        "FeatureUpdateRequestCreateRequest"
-    ]
+    request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert len(request_schema["properties"]["scope"]["oneOf"]) == 6
     # commands body는 4종 enum이다.
     command_schema = spec["components"]["schemas"]["PipelineScheduleCommandRequest"]
@@ -379,9 +393,7 @@ def test_overview_combines_db_counts_and_dagster(
     assert dagster["run_counts"] == {"FAILURE": 1, "SUCCESS": 1}
     assert dagster["schedule_count"] == 1
     assert dagster["sensor_count"] == 2
-    sensor_status = {
-        sensor["name"]: sensor["status"] for sensor in dagster["sensors"]
-    }
+    sensor_status = {sensor["name"]: sensor["status"] for sensor in dagster["sensors"]}
     assert sensor_status == {
         "feature_update_request_queue_sensor": "RUNNING",
         "feature_update_request_failure_sensor": "STOPPED",
@@ -437,6 +449,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "kind": "import_job",
             "status": "running",
             "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
             "created_from": "2026-07-01T00:00:00Z",
             "page_size": 2,
         },
@@ -446,17 +459,27 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert captured["kind"] == "import_job"
     assert captured["status"] == "running"
     assert captured["provider"] == MOIS_PROVIDER_NAME
+    assert captured["dataset_key"] == DATASET_KEY_BULK
     assert captured["limit"] == 2
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "cursor-next"
     items = body["data"]["items"]
     assert [item["kind"] for item in items] == ["import_job", "update_request"]
     assert items[0]["detail_url"] == (
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111"
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
     )
-    assert items[0]["request_id"] == "22222222-2222-2222-2222-222222222222"
-    assert items[1]["job_id"] == "11111111-1111-1111-1111-111111111111"
+    assert items[0]["providers"] == [MOIS_PROVIDER_NAME]
+    assert items[0]["linked_job_count"] == 1
+    assert items[0]["projected_job"]["detail_url"] == (
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
+    )
+    assert items[1]["requested_job_id"] == ("11111111-1111-1111-1111-111111111111")
+    assert items[1]["provider_dataset"] == {
+        "provider": MOIS_PROVIDER_NAME,
+        "dataset_key": DATASET_KEY_BULK,
+        "sync_scope": "default",
+    }
+    assert items[1]["lineage_owner"] is True
     assert items[1]["dagster_run_id"] == "run-1"
 
 
@@ -482,9 +505,7 @@ def test_execution_detail_import_job_links_request_and_events(
         assert job_id == "11111111-1111-1111-1111-111111111111"
         return _job()
 
-    async def _get_request(
-        _session: Any, request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, request_id: str) -> FeatureUpdateRequest | None:
         assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request()
 
@@ -500,8 +521,7 @@ def test_execution_detail_import_job_links_request_and_events(
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
 
     response = client.get(
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111?level=error"
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111?level=error"
     )
 
     assert response.status_code == 200
@@ -510,13 +530,9 @@ def test_execution_detail_import_job_links_request_and_events(
     assert data["execution"]["dagster_run_id"] == "run-1"
     assert data["import_job"]["job_id"] == "11111111-1111-1111-1111-111111111111"
     assert data["import_job"]["dagster_run_id"] == "run-1"
-    assert (
-        data["update_request"]["request_id"]
-        == "22222222-2222-2222-2222-222222222222"
-    )
+    assert data["update_request"]["request_id"] == "22222222-2222-2222-2222-222222222222"
     assert data["update_request"]["status_url"] == (
-        "/v1/ops/pipeline/executions/update_request/"
-        "22222222-2222-2222-2222-222222222222"
+        "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
     )
     assert [event["event_id"] for event in data["events"]] == [
         "55555555-5555-5555-5555-555555555555"
@@ -528,9 +544,7 @@ def test_execution_detail_import_job_links_request_and_events(
 def test_execution_detail_update_request_links_job(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _get_request(
-        _session: Any, request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, request_id: str) -> FeatureUpdateRequest | None:
         assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request()
 
@@ -548,8 +562,7 @@ def test_execution_detail_update_request_links_job(
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
 
     response = client.get(
-        "/v1/ops/pipeline/executions/update_request/"
-        "22222222-2222-2222-2222-222222222222"
+        "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
     )
 
     assert response.status_code == 200
@@ -577,8 +590,7 @@ def test_execution_detail_missing_import_job_404(
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
 
     response = client.get(
-        "/v1/ops/pipeline/executions/import_job/"
-        "aaaaaaaa-0000-4000-8000-000000000000"
+        "/v1/ops/pipeline/executions/import_job/aaaaaaaa-0000-4000-8000-000000000000"
     )
 
     assert response.status_code == 404
@@ -630,8 +642,7 @@ def test_cancel_import_job_running(
     monkeypatch.setattr(pipeline_mod, "cancel_import_job", _cancel)
 
     response = client.post(
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111/cancel",
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
         json={"operator": "tester", "reason": "혼잡 시간대 회피"},
     )
 
@@ -650,8 +661,7 @@ def test_cancel_import_job_terminal_conflict(
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
 
     response = client.post(
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111/cancel",
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
         json={},
     )
 
@@ -667,17 +677,14 @@ def test_cancel_update_request_not_found(
     ) -> FeatureUpdateRequest | None:
         return None
 
-    async def _get_request(
-        _session: Any, _request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return None
 
     monkeypatch.setattr(pipeline_mod, "cancel_update_request", _cancel)
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
 
     response = client.post(
-        "/v1/ops/pipeline/executions/update_request/"
-        "aaaaaaaa-0000-4000-8000-000000000000/cancel",
+        "/v1/ops/pipeline/executions/update_request/aaaaaaaa-0000-4000-8000-000000000000/cancel",
         json={},
     )
 
@@ -690,9 +697,7 @@ def test_cancel_update_request_returns_record_and_logs_operator(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    async def _cancel(
-        _session: Any, request_id: str, **kwargs: Any
-    ) -> FeatureUpdateRequest:
+    async def _cancel(_session: Any, request_id: str, **kwargs: Any) -> FeatureUpdateRequest:
         assert request_id == "22222222-2222-2222-2222-222222222222"
         assert kwargs["error_message"] == "잘못된 scope"
         return _update_request(status="cancelled")
@@ -759,9 +764,7 @@ def test_events_global_list_passes_filters(
 
 @pytest.mark.unit
 def test_events_non_uuid_job_id_is_422(client: TestClient) -> None:
-    response = client.get(
-        "/v1/ops/pipeline/events", params={"job_id": "not-a-uuid"}
-    )
+    response = client.get("/v1/ops/pipeline/events", params={"job_id": "not-a-uuid"})
 
     assert response.status_code == 422
 
@@ -859,8 +862,7 @@ def test_patch_schedule_upserts_override(
     monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/"
-        "feature_weather_kma_short_forecast_hourly_schedule",
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule",
         json={
             "cron_schedule": "40 * * * *",
             "operator": "tester",
@@ -913,8 +915,7 @@ def test_patch_schedule_null_cron_clears_override(
 
     with caplog.at_level("INFO", logger=pipeline_mod.__name__):
         response = client.patch(
-            "/v1/ops/pipeline/schedules/"
-            "feature_weather_kma_short_forecast_hourly_schedule",
+            "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule",
             json={
                 "cron_schedule": None,
                 "operator": "tester",
@@ -948,8 +949,7 @@ def test_patch_schedule_rejects_high_frequency_cron(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/"
-        "feature_weather_kma_short_forecast_hourly_schedule",
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule",
         json={"cron_schedule": "*/5 * * * *"},
     )
 
@@ -986,9 +986,7 @@ def test_schedule_command_start_mutates_state(
                         "selectorId": "sel-1",
                         "status": "RUNNING",
                         "repositoryName": "__repository__",
-                        "repositoryLocationName": (
-                            "kortravelmap.dagster.definitions"
-                        ),
+                        "repositoryLocationName": ("kortravelmap.dagster.definitions"),
                     },
                 }
             }
@@ -997,8 +995,7 @@ def test_schedule_command_start_mutates_state(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/"
-        "feature_weather_kma_short_forecast_hourly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule/commands",
         json={"command": "start"},
     )
 
@@ -1040,8 +1037,7 @@ def test_schedule_command_run_launches_job(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/"
-        "feature_weather_kma_short_forecast_hourly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule/commands",
         json={"command": "run", "operator": "tester", "reason": "재적재"},
     )
 
@@ -1060,9 +1056,7 @@ def test_create_request_dry_run_returns_preview(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _enqueue(
-        _session: Any, **kwargs: Any
-    ) -> FeatureUpdateRequestPreview:
+    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPreview:
         assert kwargs["dry_run"] is True
         return FeatureUpdateRequestPreview(
             scope_type="provider_dataset",
@@ -1130,8 +1124,7 @@ def test_create_request_persists_with_new_status_url(
     assert response.status_code == 201
     body = response.json()
     assert body["data"]["status_url"] == (
-        "/v1/ops/pipeline/executions/update_request/"
-        "22222222-2222-2222-2222-222222222222"
+        "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
     )
     assert session.begin_count == 1
 
@@ -1184,25 +1177,20 @@ def test_run_now_requeues_as_new_request(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _get_request(
-        _session: Any, request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, request_id: str) -> FeatureUpdateRequest | None:
         assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request()
 
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
         assert kwargs["run_mode"] == "now"
-        assert kwargs["reason"] == (
-            "run-now from 22222222-2222-2222-2222-222222222222"
-        )
+        assert kwargs["reason"] == ("run-now from 22222222-2222-2222-2222-222222222222")
         return _update_request(request_id="33333333-3333-3333-3333-333333333333")
 
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
     monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/ops/pipeline/requests/"
-        "22222222-2222-2222-2222-222222222222/run-now",
+        "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
         json={},
     )
 
@@ -1210,8 +1198,7 @@ def test_run_now_requeues_as_new_request(
     body = response.json()
     assert body["data"]["request_id"] == "33333333-3333-3333-3333-333333333333"
     assert body["data"]["status_url"] == (
-        "/v1/ops/pipeline/executions/update_request/"
-        "33333333-3333-3333-3333-333333333333"
+        "/v1/ops/pipeline/executions/update_request/33333333-3333-3333-3333-333333333333"
     )
     assert session.begin_count == 1
 
@@ -1220,16 +1207,13 @@ def test_run_now_requeues_as_new_request(
 def test_run_now_conflicts_for_running_request(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _get_request(
-        _session: Any, _request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return _update_request(status="running")
 
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
 
     response = client.post(
-        "/v1/ops/pipeline/requests/"
-        "22222222-2222-2222-2222-222222222222/run-now",
+        "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
         json={},
     )
 
@@ -1237,19 +1221,14 @@ def test_run_now_conflicts_for_running_request(
 
 
 @pytest.mark.unit
-def test_run_now_missing_request_404(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _get_request(
-        _session: Any, _request_id: str
-    ) -> FeatureUpdateRequest | None:
+def test_run_now_missing_request_404(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return None
 
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
 
     response = client.post(
-        "/v1/ops/pipeline/requests/"
-        "aaaaaaaa-0000-4000-8000-000000000000/run-now",
+        "/v1/ops/pipeline/requests/aaaaaaaa-0000-4000-8000-000000000000/run-now",
         json={},
     )
 
@@ -1258,9 +1237,7 @@ def test_run_now_missing_request_404(
 
 @pytest.mark.unit
 def test_run_now_non_uuid_request_id_is_422(client: TestClient) -> None:
-    response = client.post(
-        "/v1/ops/pipeline/requests/not-a-uuid/run-now", json={}
-    )
+    response = client.post("/v1/ops/pipeline/requests/not-a-uuid/run-now", json={})
 
     assert response.status_code == 422
 

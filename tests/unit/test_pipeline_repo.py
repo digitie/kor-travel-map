@@ -42,9 +42,7 @@ class _Session:
         self._results = list(results)
         self.params: list[dict[str, Any]] = []
 
-    async def execute(
-        self, _statement: Any, params: dict[str, Any] | None = None
-    ) -> _Result:
+    async def execute(self, _statement: Any, params: dict[str, Any] | None = None) -> _Result:
         self.params.append(dict(params or {}))
         return self._results.pop(0)
 
@@ -55,9 +53,11 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         id=job_id,
         status="running",
         created_at=at,
-        job_kind="provider_load",
-        provider="python-kma-api",
-        dataset_key="kma_short_forecast",
+        providers=["python-kma-api"],
+        dataset_keys=["kma_short_forecast"],
+        scope_provider=None,
+        scope_dataset=None,
+        scope_sync_scope=None,
         progress=40,
         current_stage="loading",
         scope_type=None,
@@ -68,10 +68,22 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         started_at=at,
         finished_at=None,
         dagster_run_id="run-1",
-        linked_job_id=None,
-        linked_request_id="22222222-2222-2222-2222-222222222222",
-        load_batch_id="33333333-3333-3333-3333-333333333333",
-        parent_job_id=None,
+        requested_job_id=None,
+        lineage_owner=None,
+        linked_job_count=2,
+        projected_job_id="77777777-7777-4777-8777-777777777777",
+        projected_job_kind="provider_load",
+        projected_status="running",
+        projected_progress=40,
+        projected_current_stage="loading",
+        projected_error_message=None,
+        projected_created_at=at,
+        projected_started_at=at,
+        projected_finished_at=None,
+        projected_dagster_run_id="run-child",
+        projected_load_batch_id="33333333-3333-3333-3333-333333333333",
+        projected_parent_job_id=job_id,
+        projected_depth=1,
     )
 
 
@@ -82,17 +94,20 @@ def test_execution_kinds_match_contract() -> None:
 def test_cursor_round_trip_preserves_keyset() -> None:
     at = datetime(2026, 7, 14, 12, 34, 56, 789000, tzinfo=UTC)
     cursor = pipeline_repo._encode_cursor(
-        at=at, key="11111111-1111-1111-1111-111111111111"
+        at=at,
+        key="11111111-1111-1111-1111-111111111111",
+        item_kind="update_request",
     )
 
-    decoded_at, decoded_key = pipeline_repo._decode_cursor(cursor)
+    decoded_at, decoded_key, decoded_kind = pipeline_repo._decode_cursor(cursor)
 
     assert decoded_at == at
     assert decoded_key == "11111111-1111-1111-1111-111111111111"
+    assert decoded_kind == "update_request"
 
 
 def test_decode_cursor_none_returns_empty_keyset() -> None:
-    assert pipeline_repo._decode_cursor(None) == (None, None)
+    assert pipeline_repo._decode_cursor(None) == (None, None, None)
 
 
 @pytest.mark.parametrize(
@@ -107,15 +122,13 @@ def test_decode_cursor_rejects_malformed_values(cursor: str) -> None:
         pipeline_repo._decode_cursor(cursor)
 
 
-def test_decode_cursor_rejects_non_uuid_key() -> None:
-    # kind/포맷은 정상이지만 key가 UUID가 아니면 SQL uuid CAST(500 유출) 전에
-    # ValueError(라우터 422)로 거른다.
-    cursor = pipeline_repo._encode_cursor(
-        at=datetime(2026, 7, 14, tzinfo=UTC), key="not-a-uuid"
-    )
-
+def test_encode_cursor_rejects_non_uuid_key() -> None:
     with pytest.raises(ValueError, match="pipeline_executions cursor"):
-        pipeline_repo._decode_cursor(cursor)
+        pipeline_repo._encode_cursor(
+            at=datetime(2026, 7, 14, tzinfo=UTC),
+            key="not-a-uuid",
+            item_kind="import_job",
+        )
 
 
 def test_decode_cursor_rejects_foreign_kind() -> None:
@@ -124,13 +137,39 @@ def test_decode_cursor_rejects_foreign_kind() -> None:
     import json
 
     raw = json.dumps(
-        {"v": 1, "kind": "import_jobs", "at": "2026-07-14T00:00:00+00:00", "key": "k"},
+        {
+            "v": 2,
+            "cursor": "import_jobs",
+            "at": "2026-07-14T00:00:00+00:00",
+            "id": "11111111-1111-1111-1111-111111111111",
+            "item_kind": "import_job",
+        },
         separators=(",", ":"),
     ).encode("utf-8")
     foreign = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
     with pytest.raises(ValueError, match="pipeline_executions cursor"):
         pipeline_repo._decode_cursor(foreign)
+
+
+def test_decode_cursor_rejects_unknown_item_kind() -> None:
+    import base64
+    import json
+
+    raw = json.dumps(
+        {
+            "v": 2,
+            "cursor": "pipeline_executions",
+            "at": "2026-07-14T00:00:00+00:00",
+            "id": "11111111-1111-1111-1111-111111111111",
+            "item_kind": "dagster_run",
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    cursor = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    with pytest.raises(ValueError, match="pipeline_executions cursor"):
+        pipeline_repo._decode_cursor(cursor)
 
 
 async def test_list_maps_rows_filters_and_next_cursor() -> None:
@@ -156,21 +195,26 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     item = page.items[0]
     assert isinstance(item, PipelineExecution)
     assert item.kind == "import_job"
-    assert item.job_kind == "provider_load"
-    assert item.request_id == "22222222-2222-2222-2222-222222222222"
+    assert item.providers == ("python-kma-api",)
     assert item.dagster_run_id == "run-1"
-    assert item.load_batch_id == "33333333-3333-3333-3333-333333333333"
+    assert item.linked_job_count == 2
+    assert item.projected_job is not None
+    assert item.projected_job.job_kind == "provider_load"
+    assert item.projected_job.load_batch_id == ("33333333-3333-3333-3333-333333333333")
     assert page.next_cursor is not None
     decoded = pipeline_repo._decode_cursor(page.next_cursor)
-    assert decoded == (at, "11111111-1111-1111-1111-111111111111")
+    assert decoded == (
+        at,
+        "11111111-1111-1111-1111-111111111111",
+        "import_job",
+    )
 
     params = session.params[0]
-    assert params["include_import_jobs"] is True
-    assert params["include_update_requests"] is False
+    assert params["kind"] == "import_job"
     assert params["status"] == "running"
     assert params["provider"] == "python-kma-api"
-    assert params["provider_filter"] == '["python-kma-api"]'
-    assert params["branch_limit"] == 2
+    assert params["dataset_key"] is None
+    assert params["page_limit"] == 2
 
 
 async def test_status_counts_parses_aggregates() -> None:

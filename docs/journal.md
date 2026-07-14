@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex, agent B) — pipeline root projection (T-ADM-C3b, #679)
+
+- import job `parent_job_id` hierarchy를 recursive SQL에서 cycle-safe component로
+  접고, 각 job의 ancestry에서 가장 가까운 request anchor를 선택해 request branch와
+  standalone partition으로 분리했다. 같은 anchor의 request만 생성 시각·ID로 owner
+  하나를 고르며 loser request는 `lineage_owner=false` 진단 root로 보존한다.
+- root 상태와 대표 job 상태를 덮어쓰지 않고 `projected_job`으로 분리했다. request의
+  저장 providers/dataset_keys 순서·중복을 유지하면서 direct scope 누락값을 보완하고,
+  provider/dataset/sync_scope pair는 typed object로 보존한다. standalone identity/filter는
+  partition 전체 `import_job_events` 실컬럼만 사용한다. payload는 hot path에서 읽지 않는다.
+- cursor는 `(created_at DESC, id DESC, kind DESC)` v2 total order로 바꾸고
+  `dataset_key` filter를 추가했다. detail/cancel과 persistence/migration은 변경하지 않았다.
+- 실 PostGIS 회귀는 batch root 아래 request sibling 2개, nested anchor, 동일 anchor
+  loser, cycle, 부모 누락, event identity, 동일 시각·UUID cursor를 포함한다. root/
+  agent A 적대적 리뷰 2인 승인 후 root unit 1,285건, API 전체 416건,
+  관련 integration 10건, Ruff, strict mypy 155파일, import 계약 4/4,
+  OpenAPI/admin types drift가 통과했다. EXPLAIN은
+  event 접근에 `idx_import_job_events_job_time` 3회와 root PK 2회, temp I/O 0,
+  실행 2.31ms를 확인했다. 나머지 세 후보 index는 소규모 planner 선택을 기록만 했다.
+
 ## 2026-07-15 (codex, agent A) — C2 적대적 리뷰 차단 계약 보강 (T-ADM-C2R, #678)
 
 PR #676의 후속 적대적 리뷰가 C4 frontend의 정본으로 쓰기 어려운 시간·실행·preview

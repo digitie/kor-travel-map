@@ -731,6 +731,14 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   `eupmyeondong` 모두 bbox 후보 단계에서 `idx_features_coord_gist`를 사용한다.
 - consistency F6/F7: F6은 `?| ARRAY[...]`와 partial index로 opening-hours 후보만 읽고,
   F7은 pending dedup 후보를 score keyset CTE로 먼저 고정한다.
+- `/ops/pipeline/executions`: `WITH RECURSIVE`가 `parent_job_id` hierarchy를 component로
+  접고 각 job의 가장 가까운 request anchor를 선택해 branch/standalone partition을
+  만든 뒤 root filter와
+  `(created_at DESC, id DESC, kind DESC)` keyset을 적용한다. recursive walk는
+  `uuid[] path` cycle guard로 반드시 종료한다. standalone provider/dataset identity는
+  request branch가 소유한 job을 제외한 standalone partition에서
+  `import_job_events` 실컬럼만 정렬 DISTINCT 집계하고,
+  `import_jobs.payload` JSONB를 읽지 않는다.
 
 ### 14.3 회귀 테스트
 
@@ -747,6 +755,16 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 - consistency F4/F6/F7/F8
 - `/admin/features` `sort=name`의 `idx_features_lower_name_keyset`
 - dedup/enrichment review cursor 전체 순회 gap/중복 없음
+- pipeline root projection은 전체 partition에서 `job_id`가 정확히 한 번 귀속되는지,
+  batch sibling/nested anchor/cycle/부모 누락/동일 anchor 다중 request에서도 branch가
+  섞이지 않는지 검증한다. EXPLAIN은
+  `idx_import_jobs_parent_created`, `idx_import_jobs_created_keyset`,
+  `idx_feature_update_job`, `idx_import_job_events_job_time` 네 access path의 사용·미사용과
+  recursive/event 비용을 점검한다. 소규모 fixture에서 planner 선택이 흔들리는 앞의
+  세 index는 억지 assert하지 않는다. stable gate는 `Recursive Union`, event의
+  `idx_import_job_events_job_time`, plan 크기·temp I/O·실측 비용이다. 전체 hierarchy/event
+  materialization이 page 크기와 무관하게 커지는 plan이면 구현을 중단하고
+  schema/index 변경을 별도 판단한다.
 
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,
