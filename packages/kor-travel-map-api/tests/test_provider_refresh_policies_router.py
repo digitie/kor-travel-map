@@ -51,6 +51,7 @@ def client(session: _FakeSession) -> TestClient:
 def _policy(
     *,
     enabled: bool = True,
+    stale_after_minutes: int | None = None,
 ) -> ProviderRefreshPolicy:
     now = datetime(2026, 6, 12, tzinfo=UTC)
     return ProviderRefreshPolicy(
@@ -71,6 +72,7 @@ def _policy(
         enabled=enabled,
         created_at=now,
         updated_at=now,
+        stale_after_minutes=stale_after_minutes,
     )
 
 
@@ -143,8 +145,12 @@ def test_upsert_provider_refresh_policy(
         assert kwargs["dataset_key"] == "kma_weather_values"
         assert kwargs["source_kind"] == "openapi"
         assert kwargs["system_interval_seconds"] == 3600
+        assert kwargs["stale_after_minutes"] == 90
         assert kwargs["max_concurrent"] == 2
-        return _policy(enabled=kwargs["enabled"])
+        return _policy(
+            enabled=kwargs["enabled"],
+            stale_after_minutes=kwargs["stale_after_minutes"],
+        )
 
     monkeypatch.setattr(mod, "upsert_provider_refresh_policy", _upsert)
 
@@ -156,6 +162,7 @@ def test_upsert_provider_refresh_policy(
             "system_interval_seconds": 3600,
             "optimal_interval_seconds": 1800,
             "min_interval_seconds": 60,
+            "stale_after_minutes": 90,
             "max_requests_per_minute": 60,
             "max_concurrent": 2,
             "burst_size": 5,
@@ -166,6 +173,7 @@ def test_upsert_provider_refresh_policy(
 
     assert response.status_code == 200
     assert response.json()["data"]["enabled"] is False
+    assert response.json()["data"]["stale_after_minutes"] == 90
     assert session.begin_count == 1
 
 

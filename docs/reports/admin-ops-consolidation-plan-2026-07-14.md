@@ -64,7 +64,8 @@ dagster run↔import job 관계는 외부 Dagster UI 링크로만 연결. 상세
   (실패/오래됨/미실행).
 - **행 상세 drawer**: sync_state·cursor 내역, 최근 실행(→페이지 ① 딥링크), 최근 이벤트,
   갱신 정책 편집(3원 행 → 2원 정책 `{provider}/{dataset}` 매핑 규칙 명시), **ETL 미리보기**
-  (기존 `/etl` 흡수 — fixture는 상시, **live는 별도 opt-in flag**: 실 provider 쿼터 소모),
+  (기존 `/etl`의 fixture만 흡수 — raw live HTTP preview는 ADR-044 위반으로 신규 제품
+  API에서 제거),
   "생성된 Feature 보기"(`/admin/features?provider=&dataset_key=`) 링크, **"지금 갱신" 인라인
   폐루프** — request 생성 후 페이지 이동 없이 drawer에서 `feature_update_request:{id}` WS
   topic으로 상태를 추적하고 완료 시 행 신선도 즉시 갱신(페이지 ①로는 "자세히" 링크만).
@@ -110,10 +111,17 @@ WS는 브라우저 직결(BFF는 WS 프록시 불가)이라 무게이트 유지 
 
 | 경로 | 메서드 | 역할 |
 |---|---|---|
-| `/ops/datasets` | GET | provider×dataset×scope 그리드(신선도+정책+이슈 카운트 join) |
+| `/ops/datasets` | GET | provider×dataset×scope 그리드(서버 freshness+실제 schedule+정책+dataset/provider 이슈+최신 DB 실행 batch join) |
 | `/ops/datasets/{provider}/{dataset}` | GET | 상세 — scope 배열 반환(3원 차원), sync states·cursor·최근 실행/이벤트·정책 |
-| `/ops/datasets/{provider}/{dataset}/refresh-policy` | PUT | 정책 upsert(2원) |
-| `/ops/datasets/{provider}/{dataset}/preview` | POST | ETL dry-run(fixture 상시 / live는 opt-in flag) |
+| `/ops/datasets/{provider}/{dataset}/refresh-policy` | PUT | canonical catalog 정책 upsert(2원, orphan 409) |
+| `/ops/datasets/{provider}/{dataset}/preview` | POST | fixture-only typed ETL dry-run(`max_items`, timeout, 외부 호출 budget 0, `truncated`) |
+
+그리드의 시간 필드는 의미를 합치지 않는다. `eligible_after`는 provider 호출 가능
+시각, `schedule.next_scheduled_at`은 RUNNING Dagster schedule의 실제 future tick,
+`freshness.due_at`은 명시적 정책 `stale_after_minutes`에서 계산한 SLA 시각이다.
+Dagster schedule identity는 definition tag 두 개를 exact match한 뒤 provider alias
+정본으로 canonicalize하며 schedule 이름으로 추론하지 않는다. 전체 schedule은 요청당
+GraphQL 한 번만 읽고 실패 시 DB 그리드는 200을 유지한 채 `unknown`으로 degrade한다.
 
 - "지금 갱신" 별도 숏컷 엔드포인트는 **두지 않는다** — datasets 페이지가
   `POST /ops/pipeline/requests`(provider_dataset scope)를 직접 호출(리소스 생성 중복 제거).

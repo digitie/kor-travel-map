@@ -2143,6 +2143,10 @@ class ProviderRefreshPolicyRow(Base):
             name="ck_provider_refresh_min_interval",
         ),
         CheckConstraint(
+            "stale_after_minutes IS NULL OR stale_after_minutes > 0",
+            name="ck_provider_refresh_stale_after",
+        ),
+        CheckConstraint(
             "max_requests_per_minute IS NULL OR max_requests_per_minute > 0",
             name="ck_provider_refresh_rpm",
         ),
@@ -2177,6 +2181,7 @@ class ProviderRefreshPolicyRow(Base):
     system_interval_seconds: Mapped[int | None] = mapped_column(Integer)
     optimal_interval_seconds: Mapped[int | None] = mapped_column(Integer)
     min_interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    stale_after_minutes: Mapped[int | None] = mapped_column(Integer)
     max_requests_per_minute: Mapped[int | None] = mapped_column(Integer)
     max_requests_per_hour: Mapped[int | None] = mapped_column(Integer)
     max_requests_per_day: Mapped[int | None] = mapped_column(Integer)

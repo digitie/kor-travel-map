@@ -33,6 +33,14 @@ class ProviderRefreshPolicyUpsertRequest(BaseModel):
     system_interval_seconds: int | None = Field(default=None, gt=0)
     optimal_interval_seconds: int | None = Field(default=None, gt=0)
     min_interval_seconds: int | None = Field(default=None, gt=0)
+    stale_after_minutes: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "마지막 성공 이후 stale로 판정할 명시적 운영 SLA(분). "
+            "미설정이면 freshness는 unknown이며 호출 간격/rate-limit에서 추론하지 않는다."
+        ),
+    )
     max_requests_per_minute: int | None = Field(default=None, gt=0)
     max_requests_per_hour: int | None = Field(default=None, gt=0)
     max_requests_per_day: int | None = Field(default=None, gt=0)
@@ -81,6 +89,7 @@ class ProviderRefreshPolicyRecord(BaseModel):
     system_interval_seconds: int | None = None
     optimal_interval_seconds: int | None = None
     min_interval_seconds: int | None = None
+    stale_after_minutes: int | None = None
     max_requests_per_minute: int | None = None
     max_requests_per_hour: int | None = None
     max_requests_per_day: int | None = None
@@ -105,6 +114,7 @@ def provider_refresh_policy_record(
         system_interval_seconds=policy.system_interval_seconds,
         optimal_interval_seconds=policy.optimal_interval_seconds,
         min_interval_seconds=policy.min_interval_seconds,
+        stale_after_minutes=policy.stale_after_minutes,
         max_requests_per_minute=policy.max_requests_per_minute,
         max_requests_per_hour=policy.max_requests_per_hour,
         max_requests_per_day=policy.max_requests_per_day,

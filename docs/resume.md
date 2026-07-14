@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex, agent A) — T-ADM-C2R datasets 차단 계약 보강 (#678)
+
+- **계약 보강**: 명시적 `stale_after_minutes`만 쓰는 server freshness,
+  `eligible_after`와 Dagster 실제 `next_scheduled_at` 분리, 연결 request/job을 root
+  request로 접는 최신 실행 batch projection, provider/dataset 이슈 분리, orphan
+  mutation 409 reason, fixture-only typed preview budget/truncation을 구현했다.
+- **구조 보강**: 800줄대 router를 HTTP router·schema·application service·Dagster
+  schedule projection·fixture preview로 분리했다. Alembic 0049는 기존 정책을 NULL
+  (`freshness=unknown`)로 보존하는 nullable SLA 컬럼과 양수 CHECK만 추가한다.
+  schedule/manual 전체 operation 정본과 원자 취소는 #679로 분리했다.
+- **검증 완료**: root/agent B 적대적 리뷰를 거쳐 API 관련 23건·API 전체 416건·
+  root unit 1,284건·관련 PostGIS/Alembic integration 20건과 Ruff·strict mypy
+  176파일·import-linter 4계약·OpenAPI/admin types drift·단일 migration head를
+  통과했다.
+- **다음 한 작업**: 보안 감사 후 #678 draft PR을 열고 원격 diff 적대적 재리뷰와
+  CI green 뒤 merge한다. 그 전에는 T-ADM-C4 frontend를 시작하지 않는다.
+
 ## 2026-07-15 (codex, agent B) — T-ADM-C3a pipeline 공용 application 경계 구현 완료 (이슈 #682)
 
 - **구현 완료**: `/ops/pipeline`과 legacy router가 함께 쓰는 Dagster schema,
@@ -10,10 +27,8 @@
 - **검증 완료**: 적대적 리뷰 2인과 docstring drift 재리뷰를 통과했다. 관련 API unit
   68건, API 전체 421건, root unit 1,282건, schedule override integration 1건,
   Ruff·strict mypy 3패키지·import-linter·OpenAPI admin/user 무변경 검증이 green이다.
-- **다음 한 작업**: 보안 감사 후 draft PR을 열고 CI green·적대적 리뷰를 거쳐
-  `T-ADM-C3a`를 merge한다. 이후 main을 rebase한 뒤 순서대로 `T-ADM-C3b`
-  (root operation SQL projection, #679)에 착수한다. C3e merge 전에는 C5를 시작하지
-  않는다.
+- **완료**: PR #687이 CI 8개 green과 원격 diff 적대적 재리뷰를 거쳐 merge됐다.
+  다음 pipeline 작업은 `T-ADM-C3b`이며 C3e merge 전에는 C5를 시작하지 않는다.
 
 ## 2026-07-14 (claude, agent B) — T-ADM-C3 backend /ops/pipeline 그룹 완료 (PR #677)
 

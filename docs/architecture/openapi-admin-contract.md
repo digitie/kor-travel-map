@@ -659,7 +659,44 @@ T-221d 구현 상태:
 `providers`/`dataset_keys` JSON array뿐 아니라 `scope.type='provider_dataset'`의
 `scope.provider`/`scope.dataset_key`도 매칭한다.
 
-## 7.1 Ops 조회 API
+## 7.1 통합 datasets 운영 계약 (ADR-064, T-ADM-C2R)
+
+`GET /ops/datasets`와 `GET /ops/datasets/{provider}/{dataset}`은 다음 의미를
+명시적으로 분리한다.
+
+- `eligible_after`: `provider_sync_state.next_run_after`의 backoff/rate-limit상 재호출
+  가능 시각이다. schedule 시각이 아니다.
+- `schedule.next_scheduled_at`: Dagster schedule definition의 canonical
+  provider/dataset tag와 RUNNING `futureTicks`에서 얻은 실제 다음 tick이다. 전체
+  schedule은 HTTP 요청당 GraphQL 한 번으로 읽으며 실패 시 `basis=unknown`,
+  `next_scheduled_at=null`로 degrade해 DB 응답 200을 유지한다.
+- `freshness`: 정책의 명시적 `stale_after_minutes`와 마지막 성공으로 서버가 계산한다.
+  SLA가 없으면 `unknown`, 성공 이력이 없으면 `never_run`, 정책 비활성이면
+  `disabled`다. `system_interval_seconds`나 rate-limit 값에서 SLA를 추론하지 않는다.
+- `latest_execution`: DB에 canonical dataset identity가 남은 import job 또는
+  provider_dataset update request의 root projection이다. 연결 request/job 쌍은 request
+  한 행으로 접고 direct job, `parent_job_id` descendant, 동일 payload `request_id` job은
+  같은 request 계보로 처리한다. 가장 깊은 child job 상태·진척은 별도 속성으로 보존한다.
+  schedule/manual 전체 operation 정본은 #679 범위이므로
+  `latest_execution_coverage=db_recorded`를 함께 준다.
+- integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
+- 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
+  `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
+  `details.mutation_disabled_reason`으로 거부한다.
+
+`POST /ops/datasets/{provider}/{dataset}/preview`는 fixture capability만 제공한다.
+요청은 `source=fixture`, `max_items(1..100)`이며 응답은 `total_items`,
+`returned_items`, `truncated`, timeout과 `external_call_budget=0`을 포함한다. raw live
+HTTP preview는 ADR-044 provider public client/typed model 경계를 만족하지 않으므로 이
+제품 API에서 제공하지 않는다. fixture capability가 없으면
+`409 PREVIEW_NOT_SUPPORTED`와 `details.capability=none`, catalog와 fixture registry가
+어긋나면 `409 PREVIEW_REGISTRY_MISMATCH`와 `details.capability=fixture`를 반환한다.
+
+그리드 조립은 admin 목록 endpoint의 500건 limit을 재사용하지 않고 refresh policy를
+전량 조회한다. 따라서 catalog에서 제거된 501번째 이후 orphan policy도 조용히
+누락되지 않는다.
+
+## 7.2 Ops 조회 API
 
 T-207d 구현 상태: `kor-travel-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을
 `/ops/*`로 제공한다. import job 조회 정본은 `/ops/import-jobs`이며, active job

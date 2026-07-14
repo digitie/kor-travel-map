@@ -37,10 +37,16 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
    분리). "호환성 무시"는 admin 표면 한정이다.
 5. **데이터 모델 보강**: `ops.import_jobs.dagster_run_id` 실컬럼 + payload 백필 +
    인덱스(현 WS hot path의 payload JSONB 풀스캔 제거).
-6. **ETL preview는 datasets 그룹으로 흡수**: 현행 `/v1/debug/etl/*`의 prod 무게이트
-   노출을 admin 게이트 뒤로 옮기는 보안 개선을 겸한다. live preview(실 쿼터 소모)만
-   별도 opt-in flag.
-7. **실행 규율**: PR 단위 task(T-ADM-C2~C7)로 agent A(datasets 축)/B(pipeline 축)
+6. **ETL preview는 datasets 그룹의 fixture-only 기능으로 흡수**: 현행
+   `/v1/debug/etl/*`의 raw live HTTP 경계는 ADR-044의 provider public client/typed
+   model 규칙을 만족하지 않으므로 신규 제품 API에서 제거한다. 요청은
+   `source=fixture`와 `max_items`만 받으며 외부 호출 budget은 0이다.
+7. **datasets 시간·상태 의미를 분리**: provider backoff/rate-limit의
+   `eligible_after`, Dagster definition tag와 RUNNING future tick의
+   `next_scheduled_at`, 명시적 `stale_after_minutes`로 계산한 freshness를 서로
+   추론하지 않는다. SLA 미설정 freshness와 Dagster 조회 실패 schedule은
+   `unknown`으로 노출한다.
+8. **실행 규율**: PR 단위 task(T-ADM-C2~C7)로 agent A(datasets 축)/B(pipeline 축)
    병렬, OpenAPI/types 생성물은 각 백엔드 PR에서 재생성(rebase 충돌은 재생성으로
    해소), 구 표면 제거는 링크 재배선(C6a) 후 삭제(C6b) 순. live e2e는 기존 게이트
    체계(SAFE provider·finally 복원·쿼터-민감 provider 금지)를 승계한다.

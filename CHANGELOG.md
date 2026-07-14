@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+### admin ops datasets 계약 보강 (2026-07-15, ADR-064 T-ADM-C2R)
+
+- **CHANGED**: `/v1/ops/datasets`가 provider 호출 가능 시각 `eligible_after`, Dagster
+  definition tag와 RUNNING future tick 기반 `schedule.next_scheduled_at`, 명시적
+  `stale_after_minutes` 기반 서버 계산 freshness를 서로 다른 필드와 의미로 반환한다.
+  Dagster schedule 조회 실패는 DB 그리드 200을 유지하면서 `unknown`으로 degrade한다.
+- **ADDED**: 그리드에 연결 request/import job 쌍을 root request 하나로 접은
+  `latest_execution` batch projection(direct/parent-child/payload request 계보 포함),
+  분리된 `dataset_issues`/`provider_issues`,
+  `catalog_state`/`mutable`/`orphan_reason`을 추가했다. orphan 정책 변경은 409와
+  `ORPHAN_MUTATION_DISABLED`/`details.mutation_disabled_reason`으로 거부한다.
+- **CHANGED**: dataset preview는 `source=fixture`와 `max_items(1..100)`만 받는 typed
+  계약으로 제한했다. 응답은 `total_items`/`returned_items`/`truncated`와 timeout,
+  `external_call_budget=0`을 포함한다. ADR-044를 위반하던 raw live HTTP preview는
+  신규 ops 제품 API에서 제거했다. 미지원·registry 불일치는 각각
+  `PREVIEW_NOT_SUPPORTED`·`PREVIEW_REGISTRY_MISMATCH` problem code로 구분한다.
+- **ADDED**: Alembic 0049로 `ops.provider_refresh_policies.stale_after_minutes` nullable
+  양수 필드를 추가했다. NULL인 기존 정책은 다른 interval에서 SLA를 추론하지 않는다.
+  신규/구 정책 PUT 모두 이 필드를 full-upsert에 전달하며 datasets grid의 정책 조회는
+  기존 admin 목록 500건 limit과 분리해 전량을 반환한다.
+- **CHANGED**: 800줄대 datasets router를 HTTP router, schema, application service,
+  Dagster schedule projection, fixture preview 모듈로 분리했다.
+
 ### admin ops datasets 그룹 신설 (2026-07-14, ADR-064 T-ADM-C2)
 
 - **ADDED**: `/v1/ops/datasets/*` 신규 REST 그룹(페이지 ② 백엔드) 4 endpoint —

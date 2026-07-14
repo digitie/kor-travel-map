@@ -134,6 +134,7 @@ async def upsert_provider_refresh_policy_route(
                 system_interval_seconds=body.system_interval_seconds,
                 optimal_interval_seconds=body.optimal_interval_seconds,
                 min_interval_seconds=body.min_interval_seconds,
+                stale_after_minutes=body.stale_after_minutes,
                 max_requests_per_minute=body.max_requests_per_minute,
                 max_requests_per_hour=body.max_requests_per_hour,
                 max_requests_per_day=body.max_requests_per_day,

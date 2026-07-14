@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex, agent A) — C2 적대적 리뷰 차단 계약 보강 (T-ADM-C2R, #678)
+
+PR #676의 후속 적대적 리뷰가 C4 frontend의 정본으로 쓰기 어려운 시간·실행·preview
+의미를 발견했다. schedule/manual 전체 operation 정본은 pipeline 축과 겹치므로 #679로
+분리하고, C4를 직접 차단하는 datasets 계약만 수술적으로 보강했다.
+
+- `ops.provider_refresh_policies.stale_after_minutes`를 Alembic 0049 nullable 양수
+  필드로 추가했다. freshness는 disabled 우선, 성공 이력 없음 `never_run`, 명시적
+  SLA 없음 `unknown`, SLA가 있을 때만 `fresh|overdue`를 서버에서 계산한다.
+- `provider_sync_state.next_run_after`를 `eligible_after`로 명확히 하고, Dagster 전체
+  schedule을 GraphQL 한 번으로 읽어 definition tag 두 개와 RUNNING future tick에서
+  실제 `next_scheduled_at`을 계산한다. provider tag alias는 공용 정본으로
+  canonicalize하며 schedule 이름 추론은 하지 않는다. GraphQL 실패는 DB 그리드 200과
+  `unknown` schedule을 유지한다.
+- import job event의 canonical provider/dataset과 `provider_dataset` update request를
+  단일 SQL로 합쳤다. direct job, `parent_job_id` child/grandchild, payload request id
+  연결을 request 계보로 먼저 접어 root 한 행만 남기고 request 상태와 가장 깊은 child
+  job 상태·진척을 분리했다. event 발생 시각이 root 최신 순서를 바꾸지 않으며 자유 JSON
+  request id를 UUID cast하지 않는다.
+- provider-level issue와 dataset-level issue를 별도 집계로 반환한다. 카탈로그에서
+  사라진 sync/policy 잔존 row는 `orphan`, `mutable=false`로 표시하고 정책 mutation은
+  409 `mutation_disabled_reason`으로 금지한다.
+- 신규 ops preview는 fixture capability만 허용하고 typed body, `max_items(1..100)`,
+  cooperative timeout, 외부 호출 budget 0, `truncated` 메타를 반환한다. raw live HTTP
+  adapter는 신규 제품 API에서 제거했다.
+- codegraph `impact ProviderRefreshPolicyRow` 결과 영향 심볼은 해당 ORM row 1개였다.
+  PostgreSQL 변경은 nullable 컬럼+CHECK라 기존 행 rewrite/backfill이 없다.
+- 구/new refresh-policy PUT 모두 SLA 필드를 전달하게 고정했고, grid 전용 정책 전량 조회로
+  admin 목록의 500건 clamp를 재사용해 orphan을 조용히 누락하던 경계를 제거했다.
+- PR #687을 rebase해 schedule transport는 public `dagster_graphql`, request context는
+  `dagster_http`만 사용한다. 테스트 중 generic `HTTP 409 error`로 손실되던 orphan·
+  preview 오류는 중앙 RFC7807 `{code,message,details}` 정본의 세 code로 고정했다.
+- **적대적 리뷰·검증**: root/agent B의 테스트 전·실패 수정 delta 리뷰를 모두 통과했다.
+  API 관련 23건, API 전체 416건, root unit 1,284건, 관련 PostGIS/Alembic integration
+  20건이 통과했다. Ruff 전체, strict mypy 176파일, import-linter 4계약, OpenAPI
+  admin/user와 admin TypeScript drift, Alembic 단일 head, docs redaction도 green이다.
+
 ## 2026-07-15 (codex, agent B) — pipeline 공용 application 경계 추출 (T-ADM-C3a, 이슈 #682)
 
 PR #677 적대적 리뷰에서 확인된 신규 `/ops/pipeline`의 구 라우터 private 심볼
@@ -23,9 +60,10 @@ PR #677 적대적 리뷰에서 확인된 신규 `/ops/pipeline`의 구 라우터
   재분리하고, FastAPI 의존·private alias·테스트 monkeypatch drift·schedule override
   SQL 식별자 손상을 제거했다. 마지막 OpenAPI 검사에서 발견한 DTO class description
   drift는 origin/main 문구를 그대로 복원해 admin/user spec 모두 무변경으로 닫았다.
-- **검증**: 관련 API unit 68건, API 패키지 전체 421건, 저장소 unit 1,282건,
-  schedule override PostGIS integration 1건 통과. Ruff 전체, strict mypy 3패키지,
-  import-linter 4계약, OpenAPI `--profile all --check`, `git diff --check` 통과.
+- **검증·merge**: 관련 API unit 68건, API 패키지 전체 421건, 저장소 unit 1,282건,
+  schedule override PostGIS integration 1건과 CI 8개를 통과해 PR #687로 merge했다.
+  Ruff 전체, strict mypy 3패키지, import-linter 4계약, OpenAPI admin/user 무변경도
+  확인했다.
 
 ## 2026-07-14 (claude, agent B) — backend /ops/pipeline 그룹 신설 (T-ADM-C3)
 

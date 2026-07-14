@@ -1282,12 +1282,15 @@ feature를 계산하고 `ops.poi_cache_target_feature_links`를 재계산한다.
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009)
 
 provider/dataset별 update 주기, targeted update 허용 여부, filedata/openapi 구분,
-rate limit, 최적 기본값, 출처 문서를 저장한다.
+rate limit, 최적 기본값, 출처 문서와 명시적 freshness SLA
+`stale_after_minutes`(alembic 0049)를 저장한다.
 
 핵심 규칙:
 
 - filedata provider는 기본적으로 POI 등록 여부와 무관하게 system schedule을 따른다.
 - admin UI/설정/DB override는 가능하지만 provider rate limit을 넘을 수 없다.
+- `stale_after_minutes`는 호출 주기·rate-limit floor와 다른 운영 SLA다. NULL이면
+  서버는 다른 interval에서 추론하지 않고 freshness를 `unknown`으로 계산한다.
 - rate limit과 최적값은 provider API 프로젝트의 문서/코드(로컬 `F:\dev\python-*-api`
   우선, ADR-044)를 근거로 저장한다.
 

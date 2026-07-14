@@ -19,6 +19,7 @@ pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0047_notice_reconcile_stats"
 _TARGET_REVISION = "0048_import_jobs_dagster_run_id"
+_HEAD_REVISION = "0049_refresh_stale_after"
 
 
 def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
@@ -128,8 +129,8 @@ async def test_dagster_run_id_backfill_upgrade_and_downgrade(
         assert "WHERE (dagster_run_id IS NOT NULL)" in index_definition
         assert revision == _TARGET_REVISION
 
-        # 단일 head — 0048이 0047 위의 유일한 head여야 한다.
-        assert _alembic_heads() == [_TARGET_REVISION]
+        # 단일 head — 후속 migration이 생겨도 0048에서 선형으로 이어져야 한다.
+        assert _alembic_heads() == [_HEAD_REVISION]
 
         await target_engine.dispose()
         await asyncio.to_thread(
