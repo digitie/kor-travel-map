@@ -1936,6 +1936,11 @@ class PipelineCancellationRow(Base):
             "(status <> 'in_progress' AND finished_at IS NOT NULL)",
             name="ck_pipeline_cancellations_finished",
         ),
+        CheckConstraint(
+            "(status IN ('in_progress','completed') AND error IS NULL) OR "
+            "(status IN ('retryable','failed') AND jsonb_typeof(error) = 'object')",
+            name="ck_pipeline_cancellations_error_shape",
+        ),
         Index(
             "uq_pipeline_cancellations_active_root",
             "root_kind",
@@ -1997,6 +2002,16 @@ class PipelineCancellationRunRow(Base):
             f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
             name="ck_pipeline_cancellation_runs_result",
         ),
+        CheckConstraint(
+            "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            "(result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
+            "(result = 'already_terminal' AND "
+            " (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
+            " AND error IS NULL) OR "
+            "(result = 'cancel_failed' AND terminal_status IS NULL "
+            " AND jsonb_typeof(error) = 'object')",
+            name="ck_pipeline_cancellation_runs_shape",
+        ),
         ForeignKeyConstraint(
             ["cancellation_id"],
             ["ops.pipeline_cancellations.cancellation_id"],
@@ -2038,6 +2053,15 @@ class PipelineCancellationMemberRow(Base):
         CheckConstraint(
             f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
             name="ck_pipeline_cancellation_members_result",
+        ),
+        CheckConstraint(
+            "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            "(result = 'cancelled' AND terminal_status = 'cancelled' AND error IS NULL) OR "
+            "(result = 'already_terminal' "
+            " AND terminal_status IN ('done','failed','cancelled') AND error IS NULL) OR "
+            "(result = 'cancel_failed' AND terminal_status IS NULL "
+            " AND jsonb_typeof(error) = 'object')",
+            name="ck_pipeline_cancellation_members_shape",
         ),
         ForeignKeyConstraint(
             ["cancellation_id"],

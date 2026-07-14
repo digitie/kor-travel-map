@@ -12,6 +12,20 @@
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
 
+## 2026-07-15 (codex, agent B) — T-ADM-C3d DB phase 적대적 보강
+
+- **구현 완료**: run-first exact terminal mapping, queued DB-only 취소, attempt-first stale
+  writer 차단, retry/finish lock order와 종결 불변식, normalized JSON shape CHECK를 반영했다.
+  repository는 query/types/invariants/facade 경계로 분리했다.
+- **batch transaction 수정**: 단일 transaction gate를 네 phase로 교체했다. 동일 dedicated
+  connection/backend PID와 batch session mutex는 유지하고 장기 consistency/MV transaction에는
+  lineage-global xact lock을 넘기지 않는다. 예외 rollback 뒤 짧은 실패 기록과 cancellation
+  marker 우선 CAS/reload를 적용했다.
+- **검증 상태**: stale writer, run-first, queued-only, finish 불변식, batch mutex·PID·lineage
+  lock 회귀를 코드로 정의했다. 이번 동결에서는 사용자 지시에 따라 실행형 검증을 하지 않았다.
+- **다음 한 작업**: C3d coordinator/Dagster terminate와 REST/OpenAPI propagation을 이 DB
+  phase 계약 위에 완결한 뒤, 승인된 n150 live UI e2e 단계에서 실제 실행 검증한다.
+
 ## 2026-07-15 (codex, agent B) — T-ADM-C3d 계층형 취소 문서 우선 설계 (#680)
 
 - **계약 고정**: 기존 job/request status CHECK는 유지하고 base marker와 정규화한

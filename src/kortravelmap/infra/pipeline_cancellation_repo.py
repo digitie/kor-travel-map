@@ -8,8 +8,7 @@ C3b와 같은 lineage CTE를 공유해 request branch와 standalone partition을
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID, uuid4
 
@@ -24,490 +23,52 @@ from kortravelmap.core.pipeline_cancellation_states import (
 )
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.log_repo import record_system_log
-from kortravelmap.infra.pipeline_lineage import PIPELINE_LINEAGE_CTES_SQL
+from kortravelmap.infra.pipeline_cancellation_invariants import (
+    _run_base_mapping,
+    _structured_error_code,
+    _validate_finish_invariants,
+)
+from kortravelmap.infra.pipeline_cancellation_queries import (
+    _ATTEMPT_SQL,
+    _CURRENT_ATTEMPT_SQL,
+    _FINISH_ATTEMPT_SQL,
+    _INSERT_ATTEMPT_SQL,
+    _INSERT_MEMBER_SQL,
+    _INSERT_RUN_SQL,
+    _LOCK_ATTEMPT_SQL,
+    _LOCK_JOB_MEMBERS_SQL,
+    _LOCK_MEMBER_SQL,
+    _LOCK_REQUEST_MEMBERS_SQL,
+    _LOCK_RUN_SQL,
+    _MARK_JOBS_SQL,
+    _MARK_REQUESTS_SQL,
+    _MEMBERS_SQL,
+    _RESOLVE_SCOPE_SQL,
+    _RUNS_SQL,
+    _TRANSITION_JOB_MEMBER_SQL,
+    _TRANSITION_REQUEST_MEMBER_SQL,
+    _UPDATE_MEMBER_SQL,
+    _UPDATE_RUN_SQL,
+)
+from kortravelmap.infra.pipeline_cancellation_types import (
+    PipelineCancellationAttempt,
+    PipelineCancellationConflict,
+    PipelineCancellationDetail,
+    PipelineCancellationInvariantError,
+    PipelineCancellationMember,
+    PipelineCancellationRun,
+    PipelineCancellationScope,
+    PipelineCancellationScopeMember,
+    PipelineCancellationSummary,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
 _BASE_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
 _PIPELINE_LINEAGE_MUTATION_LOCK_KEY = "kortravelmap:pipeline-lineage:mutation"
-
-
-@dataclass(frozen=True)
-class PipelineCancellationSummary:
-    """목록 root에 붙는 current cancellation DB overlay."""
-
-    cancellation_id: str
-    status: PipelineCancellationStatus
-    requested_at: datetime
-    requested_by: str
-    reason: str | None
-    retryable: bool
-    unresolved_member_count: int
-
-
-@dataclass(frozen=True)
-class PipelineCancellationAttempt:
-    """``ops.pipeline_cancellations`` attempt 1행."""
-
-    cancellation_id: str
-    previous_cancellation_id: str | None
-    root_kind: PipelineCancellationMemberKind
-    root_id: str
-    status: PipelineCancellationStatus
-    requested_by: str
-    reason: str | None
-    error: dict[str, Any] | None
-    requested_at: datetime
-    updated_at: datetime
-    finished_at: datetime | None
-
-    @property
-    def retryable(self) -> bool:
-        return self.status == "retryable"
-
-
-@dataclass(frozen=True)
-class PipelineCancellationMember:
-    """frozen request/job 대상과 대상별 결과."""
-
-    cancellation_id: str
-    member_kind: PipelineCancellationMemberKind
-    member_id: str
-    dagster_run_id: str | None
-    initial_status: str
-    result: PipelineCancellationResult
-    terminal_status: str | None
-    error: dict[str, Any] | None
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class PipelineCancellationRun:
-    """attempt당 한 번만 처리할 Dagster run."""
-
-    cancellation_id: str
-    dagster_run_id: str
-    initial_status: str | None
-    result: PipelineCancellationResult
-    terminal_status: str | None
-    error: dict[str, Any] | None
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class PipelineCancellationDetail:
-    """reload 가능한 current attempt + member/run 전체 결과."""
-
-    attempt: PipelineCancellationAttempt
-    members: tuple[PipelineCancellationMember, ...]
-    runs: tuple[PipelineCancellationRun, ...]
-
-    @property
-    def unresolved_member_count(self) -> int:
-        return sum(
-            member.result in {"pending", "cancel_failed"}
-            for member in self.members
-        )
-
-
-@dataclass(frozen=True)
-class PipelineCancellationScopeMember:
-    """marker 직전 C3b parity scope의 base row snapshot."""
-
-    member_kind: PipelineCancellationMemberKind
-    member_id: str
-    initial_status: str
-    dagster_run_id: str | None
-    cancellation_id: str | None
-
-    @property
-    def active(self) -> bool:
-        return self.initial_status in {"queued", "running"}
-
-
-@dataclass(frozen=True)
-class PipelineCancellationScope:
-    """canonical root와 deterministic frozen member 목록."""
-
-    root_kind: PipelineCancellationMemberKind
-    root_id: str
-    members: tuple[PipelineCancellationScopeMember, ...]
-
-    @property
-    def active_members(self) -> tuple[PipelineCancellationScopeMember, ...]:
-        return tuple(member for member in self.members if member.active)
-
-
-class PipelineCancellationConflict(RuntimeError):
-    """marker 또는 current attempt CAS가 더 이상 일치하지 않는다."""
-
-
-class PipelineCancellationInvariantError(RuntimeError):
-    """attempt workflow/result 불변식을 만족하지 않는다."""
-
-
-_RESOLVE_SCOPE_SQL = "WITH RECURSIVE\n" + PIPELINE_LINEAGE_CTES_SQL + """,
-input_request AS (
-    SELECT request.request_id
-    FROM ops.feature_update_requests AS request
-    WHERE CAST(:kind AS text) = 'update_request'
-      AND request.request_id = CAST(:execution_id AS uuid)
-),
-input_job AS (
-    SELECT
-        component.job_id,
-        component.component_root_id,
-        owner.owner_request_id
-    FROM job_components AS component
-    LEFT JOIN job_owners AS owner ON owner.job_id = component.job_id
-    WHERE CAST(:kind AS text) = 'import_job'
-      AND component.job_id = CAST(:execution_id AS uuid)
-),
-canonical_root AS (
-    SELECT
-        'update_request'::text AS root_kind,
-        request.request_id AS root_id
-    FROM input_request AS request
-    UNION ALL
-    SELECT
-        CASE WHEN job.owner_request_id IS NULL
-          THEN 'import_job'::text ELSE 'update_request'::text END AS root_kind,
-        COALESCE(job.owner_request_id, job.component_root_id) AS root_id
-    FROM input_job AS job
-),
-scope_members AS (
-    SELECT
-        'update_request'::text AS member_kind,
-        request.request_id AS member_id,
-        request.status AS initial_status,
-        request.dagster_run_id,
-        request.cancellation_id
-    FROM canonical_root AS root
-    JOIN ops.feature_update_requests AS request
-      ON root.root_kind = 'update_request'
-     AND request.request_id = root.root_id
-    UNION ALL
-    SELECT
-        'import_job'::text AS member_kind,
-        job.job_id AS member_id,
-        job.status AS initial_status,
-        job.dagster_run_id,
-        job.cancellation_id
-    FROM canonical_root AS root
-    JOIN job_owners AS owner
-      ON root.root_kind = 'update_request'
-     AND owner.owner_request_id = root.root_id
-    JOIN ops.import_jobs AS job ON job.job_id = owner.job_id
-    UNION ALL
-    SELECT
-        'import_job'::text AS member_kind,
-        job.job_id AS member_id,
-        job.status AS initial_status,
-        job.dagster_run_id,
-        job.cancellation_id
-    FROM canonical_root AS root
-    JOIN standalone_jobs AS standalone
-      ON root.root_kind = 'import_job'
-     AND standalone.component_root_id = root.root_id
-    JOIN ops.import_jobs AS job ON job.job_id = standalone.job_id
-)
-SELECT
-    root.root_kind,
-    root.root_id,
-    member.member_kind,
-    member.member_id,
-    member.initial_status,
-    member.dagster_run_id,
-    member.cancellation_id
-FROM canonical_root AS root
-JOIN scope_members AS member ON true
-ORDER BY member.member_kind, member.member_id
-"""
-
-_CURRENT_ATTEMPT_SQL = """
-SELECT
-    attempt.cancellation_id,
-    attempt.previous_cancellation_id,
-    attempt.root_kind,
-    attempt.root_id,
-    attempt.status,
-    attempt.requested_by,
-    attempt.reason,
-    attempt.error,
-    attempt.requested_at,
-    attempt.updated_at,
-    attempt.finished_at,
-    (
-      SELECT COUNT(*)::integer
-      FROM ops.pipeline_cancellation_members AS member
-      WHERE member.cancellation_id = attempt.cancellation_id
-        AND member.result IN ('pending', 'cancel_failed')
-    ) AS unresolved_member_count
-FROM ops.pipeline_cancellations AS attempt
-WHERE attempt.root_kind = CAST(:root_kind AS text)
-  AND attempt.root_id = CAST(:root_id AS uuid)
-ORDER BY
-    (attempt.status = 'in_progress') DESC,
-    attempt.requested_at DESC,
-    attempt.cancellation_id DESC
-LIMIT 1
-"""
-
-_ATTEMPT_SQL = """
-SELECT
-    cancellation_id,
-    previous_cancellation_id,
-    root_kind,
-    root_id,
-    status,
-    requested_by,
-    reason,
-    error,
-    requested_at,
-    updated_at,
-    finished_at
-FROM ops.pipeline_cancellations
-WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-"""
-
-_MEMBERS_SQL = """
-SELECT
-    cancellation_id,
-    member_kind,
-    member_id,
-    dagster_run_id,
-    initial_status,
-    result,
-    terminal_status,
-    error,
-    updated_at
-FROM ops.pipeline_cancellation_members
-WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-ORDER BY member_kind, member_id
-"""
-
-_RUNS_SQL = """
-SELECT
-    cancellation_id,
-    dagster_run_id,
-    initial_status,
-    result,
-    terminal_status,
-    error,
-    updated_at
-FROM ops.pipeline_cancellation_runs
-WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-ORDER BY dagster_run_id
-"""
-
-_INSERT_ATTEMPT_SQL = """
-INSERT INTO ops.pipeline_cancellations (
-    cancellation_id,
-    previous_cancellation_id,
-    root_kind,
-    root_id,
-    status,
-    requested_by,
-    reason,
-    finished_at
-) VALUES (
-    CAST(:cancellation_id AS uuid),
-    CAST(:previous_cancellation_id AS uuid),
-    :root_kind,
-    CAST(:root_id AS uuid),
-    :status,
-    :requested_by,
-    :reason,
-    CASE WHEN :status = 'in_progress' THEN NULL ELSE now() END
-)
-"""
-
-_INSERT_RUN_SQL = """
-INSERT INTO ops.pipeline_cancellation_runs (
-    cancellation_id,
-    dagster_run_id,
-    result
-) VALUES (
-    CAST(:cancellation_id AS uuid),
-    :dagster_run_id,
-    :result
-)
-"""
-
-_INSERT_MEMBER_SQL = """
-INSERT INTO ops.pipeline_cancellation_members (
-    cancellation_id,
-    member_kind,
-    member_id,
-    dagster_run_id,
-    initial_status,
-    result,
-    terminal_status
-) VALUES (
-    CAST(:cancellation_id AS uuid),
-    :member_kind,
-    CAST(:member_id AS uuid),
-    :dagster_run_id,
-    :initial_status,
-    :result,
-    :terminal_status
-)
-"""
-
-_MARK_JOBS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-UPDATE ops.import_jobs AS job
-SET cancellation_id = CAST(:cancellation_id AS uuid),
-    cancellation_requested_at = now(),
-    cancellation_requested_by = :requested_by,
-    cancellation_reason = :reason
-WHERE job.job_id IN (SELECT member_id FROM members)
-  AND (
-    (CAST(:expected_cancellation_id AS uuid) IS NULL AND job.cancellation_id IS NULL)
-    OR job.cancellation_id = CAST(:expected_cancellation_id AS uuid)
-  )
-RETURNING job.job_id
-"""
-
-_MARK_REQUESTS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-UPDATE ops.feature_update_requests AS request
-SET cancellation_id = CAST(:cancellation_id AS uuid),
-    cancellation_requested_at = now(),
-    cancellation_requested_by = :requested_by,
-    cancellation_reason = :reason
-WHERE request.request_id IN (SELECT member_id FROM members)
-  AND (
-    (CAST(:expected_cancellation_id AS uuid) IS NULL
-      AND request.cancellation_id IS NULL)
-    OR request.cancellation_id = CAST(:expected_cancellation_id AS uuid)
-  )
-RETURNING request.request_id
-"""
-
-_UPDATE_MEMBER_SQL = """
-UPDATE ops.pipeline_cancellation_members
-SET result = :result,
-    terminal_status = :terminal_status,
-    error = CAST(:error AS jsonb),
-    updated_at = now()
-WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-  AND member_kind = :member_kind
-  AND member_id = CAST(:member_id AS uuid)
-  AND result = ANY(CAST(:expected_results AS text[]))
-RETURNING cancellation_id
-"""
-
-_UPDATE_RUN_SQL = """
-UPDATE ops.pipeline_cancellation_runs
-SET initial_status = COALESCE(:initial_status, initial_status),
-    result = :result,
-    terminal_status = :terminal_status,
-    error = CAST(:error AS jsonb),
-    updated_at = now()
-WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-  AND dagster_run_id = :dagster_run_id
-  AND result = ANY(CAST(:expected_results AS text[]))
-RETURNING cancellation_id
-"""
-
-_FINISH_ATTEMPT_SQL = """
-UPDATE ops.pipeline_cancellations AS attempt
-SET status = :status,
-    error = CAST(:error AS jsonb),
-    updated_at = now(),
-    finished_at = now()
-WHERE attempt.cancellation_id = CAST(:cancellation_id AS uuid)
-  AND attempt.status = 'in_progress'
-  AND (
-    :status <> 'completed'
-    OR (
-      NOT EXISTS (
-        SELECT 1
-        FROM ops.pipeline_cancellation_members AS member
-        WHERE member.cancellation_id = attempt.cancellation_id
-          AND member.result NOT IN ('cancelled', 'already_terminal')
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM ops.pipeline_cancellation_runs AS run
-        WHERE run.cancellation_id = attempt.cancellation_id
-          AND run.result NOT IN ('cancelled', 'already_terminal')
-      )
-    )
-  )
-RETURNING attempt.cancellation_id
-"""
-
-_LOCK_REQUEST_MEMBERS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-SELECT
-    'update_request'::text AS member_kind,
-    request.request_id AS member_id,
-    request.status AS initial_status,
-    request.dagster_run_id,
-    request.cancellation_id
-FROM ops.feature_update_requests AS request
-WHERE request.request_id IN (SELECT member_id FROM members)
-ORDER BY request.request_id
-FOR UPDATE
-"""
-
-_LOCK_JOB_MEMBERS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-SELECT
-    'import_job'::text AS member_kind,
-    job.job_id AS member_id,
-    job.status AS initial_status,
-    job.dagster_run_id,
-    job.cancellation_id
-FROM ops.import_jobs AS job
-WHERE job.job_id IN (SELECT member_id FROM members)
-ORDER BY job.job_id
-FOR UPDATE
-"""
-
-_TRANSITION_REQUEST_MEMBER_SQL = """
-UPDATE ops.feature_update_requests
-SET status = :target_status,
-    error_message = COALESCE(:error_message, error_message),
-    finished_at = now(),
-    updated_at = now()
-WHERE request_id = CAST(:member_id AS uuid)
-  AND cancellation_id = CAST(:cancellation_id AS uuid)
-  AND status = :expected_status
-  AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
-RETURNING request_id
-"""
-
-_TRANSITION_JOB_MEMBER_SQL = """
-UPDATE ops.import_jobs
-SET status = :target_status,
-    error_message = COALESCE(:error_message, error_message),
-    finished_at = now(),
-    heartbeat_at = CASE WHEN status = 'running' THEN now() ELSE heartbeat_at END,
-    progress = CASE WHEN :target_status = 'done' THEN 100 ELSE progress END
-WHERE job_id = CAST(:member_id AS uuid)
-  AND cancellation_id = CAST(:cancellation_id AS uuid)
-  AND status = :expected_status
-  AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
-RETURNING job_id
-"""
 
 
 def _validate_kind(value: str) -> PipelineCancellationMemberKind:
@@ -572,6 +133,99 @@ def _run(row: Any) -> PipelineCancellationRun:
         error=_json_dict(row.error),
         updated_at=row.updated_at,
     )
+
+
+async def _lock_attempt(
+    session: AsyncSession,
+    cancellation_id: str,
+) -> PipelineCancellationAttempt | None:
+    """모든 cancellation writer가 가장 먼저 잡는 attempt row lock."""
+    row = (
+        await session.execute(
+            text(_LOCK_ATTEMPT_SQL),
+            {"cancellation_id": _uuid(cancellation_id)},
+        )
+    ).one_or_none()
+    return _attempt(row) if row is not None else None
+
+
+async def _lock_in_progress_attempt(
+    session: AsyncSession,
+    cancellation_id: str,
+) -> PipelineCancellationAttempt | None:
+    attempt = await _lock_attempt(session, cancellation_id)
+    if attempt is None or attempt.status != "in_progress":
+        return None
+    return attempt
+
+
+async def _lock_attempt_after_root(
+    session: AsyncSession,
+    cancellation_id: str,
+) -> PipelineCancellationAttempt | None:
+    """lineage-global→root→attempt 순서로 finish/retry source를 잠근다."""
+    normalized_id = _uuid(cancellation_id)
+    observed_row = (
+        await session.execute(
+            text(_ATTEMPT_SQL),
+            {"cancellation_id": normalized_id},
+        )
+    ).one_or_none()
+    if observed_row is None:
+        return None
+    observed = _attempt(observed_row)
+    await lock_pipeline_lineage_mutation(session)
+    await lock_pipeline_cancellation_root(
+        session,
+        root_kind=observed.root_kind,
+        root_id=observed.root_id,
+    )
+    locked = await _lock_attempt(session, normalized_id)
+    if locked is None:
+        return None
+    if (locked.root_kind, locked.root_id) != (observed.root_kind, observed.root_id):
+        raise PipelineCancellationConflict(
+            "cancellation root changed before ordered attempt lock"
+        )
+    return locked
+
+
+async def _lock_member(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    member_kind: str,
+    member_id: str,
+) -> PipelineCancellationMember | None:
+    row = (
+        await session.execute(
+            text(_LOCK_MEMBER_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "member_kind": _validate_kind(member_kind),
+                "member_id": _uuid(member_id),
+            },
+        )
+    ).one_or_none()
+    return _member(row) if row is not None else None
+
+
+async def _lock_run(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    dagster_run_id: str,
+) -> PipelineCancellationRun | None:
+    row = (
+        await session.execute(
+            text(_LOCK_RUN_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "dagster_run_id": dagster_run_id,
+            },
+        )
+    ).one_or_none()
+    return _run(row) if row is not None else None
 
 
 def pipeline_cancellation_root_lock_key(*, root_kind: str, root_id: str) -> str:
@@ -708,6 +362,31 @@ async def _lock_scope_members(
     return tuple(sorted(locked, key=lambda item: (item.member_kind, item.member_id)))
 
 
+async def _lock_detail_base_members(
+    session: AsyncSession,
+    detail: PipelineCancellationDetail,
+) -> dict[tuple[str, str], PipelineCancellationScopeMember]:
+    requested = tuple(
+        PipelineCancellationScopeMember(
+            member_kind=member.member_kind,
+            member_id=member.member_id,
+            initial_status=member.initial_status,
+            dagster_run_id=member.dagster_run_id,
+            cancellation_id=detail.attempt.cancellation_id,
+        )
+        for member in detail.members
+    )
+    locked = await _lock_scope_members(session, requested)
+    base_by_key = {
+        (member.member_kind, member.member_id): member for member in locked
+    }
+    if len(base_by_key) != len(detail.members):
+        raise PipelineCancellationInvariantError(
+            "frozen cancellation member/base cardinality diverged"
+        )
+    return base_by_key
+
+
 async def get_pipeline_cancellation_detail(
     session: AsyncSession,
     cancellation_id: str,
@@ -840,15 +519,21 @@ async def _insert_pipeline_cancellation_attempt(
         )
         for member in scope.members
     }
-    run_results: dict[str, PipelineCancellationResult] = {}
+    run_has_running_member: dict[str, bool] = {}
     for member in scope.members:
         if member.dagster_run_id is None:
             continue
-        result = member_results[(member.member_kind, member.member_id)]
-        if result == "pending":
-            run_results[member.dagster_run_id] = "pending"
-        else:
-            run_results.setdefault(member.dagster_run_id, "already_terminal")
+        run_has_running_member[member.dagster_run_id] = (
+            run_has_running_member.get(member.dagster_run_id, False)
+            or member.initial_status == "running"
+        )
+    run_results = {
+        dagster_run_id: cast(
+            PipelineCancellationResult,
+            "pending" if has_running_member else "already_terminal",
+        )
+        for dagster_run_id, has_running_member in run_has_running_member.items()
+    }
     for dagster_run_id in sorted(run_results):
         await session.execute(
             text(_INSERT_RUN_SQL),
@@ -983,11 +668,21 @@ async def retry_pipeline_cancellation_attempt(
 ) -> PipelineCancellationDetail:
     """이전 retryable attempt의 미해결 frozen member만 새 attempt로 복사한다."""
     previous_id = _uuid(previous_cancellation_id)
+    locked_attempt = await _lock_attempt_after_root(session, previous_id)
+    if locked_attempt is None:
+        raise PipelineCancellationConflict("retry source cancellation attempt is missing")
+    if locked_attempt.status != "retryable":
+        raise PipelineCancellationConflict("only retryable cancellation can be retried")
     previous = await get_pipeline_cancellation_detail(session, previous_id)
     if previous is None:
         raise PipelineCancellationConflict("retry source cancellation attempt is missing")
-    if previous.attempt.status != "retryable":
-        raise PipelineCancellationConflict("only retryable cancellation can be retried")
+    base_by_key = await _lock_detail_base_members(session, previous)
+    _validate_finish_invariants(
+        previous,
+        base_by_key,
+        status="retryable",
+        error=previous.attempt.error,
+    )
     unresolved = tuple(
         member
         for member in previous.members
@@ -998,12 +693,6 @@ async def retry_pipeline_cancellation_attempt(
             "retryable cancellation has no unresolved members"
         )
 
-    await lock_pipeline_lineage_mutation(session)
-    await lock_pipeline_cancellation_root(
-        session,
-        root_kind=previous.attempt.root_kind,
-        root_id=previous.attempt.root_id,
-    )
     current = await get_current_pipeline_cancellation_summary(
         session,
         root_kind=previous.attempt.root_kind,
@@ -1014,17 +703,9 @@ async def retry_pipeline_cancellation_attempt(
             "retry source is no longer the current cancellation attempt"
         )
 
-    requested_members = tuple(
-        PipelineCancellationScopeMember(
-            member_kind=member.member_kind,
-            member_id=member.member_id,
-            initial_status=member.initial_status,
-            dagster_run_id=member.dagster_run_id,
-            cancellation_id=previous_id,
-        )
-        for member in unresolved
+    locked_members = tuple(
+        base_by_key[(member.member_kind, member.member_id)] for member in unresolved
     )
-    locked_members = await _lock_scope_members(session, requested_members)
     previous_by_key = {
         (member.member_kind, member.member_id): member for member in unresolved
     }
@@ -1070,8 +751,66 @@ async def set_pipeline_cancellation_member_result(
     error: Mapping[str, Any] | None,
     expected_results: Sequence[str] = ("pending", "cancel_failed"),
 ) -> bool:
-    """동일 attempt의 member 결과를 CAS 갱신하고 같은 tx에 감사를 남긴다."""
+    """외부 terminate 실패만 기록한다.
+
+    성공 결과는 base 상태와 Dagster run 결과를 함께 검증해야 하므로 이 setter로
+    기록할 수 없다.
+    """
     normalized_result = _validate_result(result)
+    if normalized_result != "cancel_failed":
+        raise ValueError("member result setter only accepts cancel_failed")
+    if terminal_status is not None:
+        raise ValueError("cancel_failed member cannot have a terminal status")
+    _structured_error_code(error)
+    if set(expected_results) - {"pending", "cancel_failed"}:
+        raise ValueError("member failure CAS only accepts unresolved expected results")
+    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+        return False
+    member = await _lock_member(
+        session,
+        cancellation_id=cancellation_id,
+        member_kind=member_kind,
+        member_id=member_id,
+    )
+    if member is None or member.result not in set(expected_results):
+        return False
+    if member.dagster_run_id is None:
+        if member.initial_status != "running":
+            raise PipelineCancellationInvariantError(
+                "only a running member may fail without a Dagster run mapping"
+            )
+    else:
+        run = await _lock_run(
+            session,
+            cancellation_id=cancellation_id,
+            dagster_run_id=member.dagster_run_id,
+        )
+        if run is None or run.result != "cancel_failed":
+            raise PipelineCancellationInvariantError(
+                "member failure requires the matching run failure first"
+            )
+    base = (
+        await _lock_scope_members(
+            session,
+            (
+                PipelineCancellationScopeMember(
+                    member_kind=member.member_kind,
+                    member_id=member.member_id,
+                    initial_status=member.initial_status,
+                    dagster_run_id=member.dagster_run_id,
+                    cancellation_id=cancellation_id,
+                ),
+            ),
+        )
+    )[0]
+    if (
+        base.cancellation_id != _uuid(cancellation_id)
+        or base.initial_status not in {"queued", "running"}
+        or base.dagster_run_id != member.dagster_run_id
+    ):
+        raise PipelineCancellationConflict(
+            "member failure base marker/status/run mapping diverged"
+        )
     row = (
         await session.execute(
             text(_UPDATE_MEMBER_SQL),
@@ -1118,6 +857,35 @@ async def set_pipeline_cancellation_run_result(
 ) -> bool:
     """attempt/run PK로 terminate 결과를 한 번만 CAS 갱신한다."""
     normalized_result = _validate_result(result)
+    if normalized_result == "pending":
+        raise ValueError("run result setter cannot write pending")
+    if normalized_result == "cancelled":
+        if terminal_status != "CANCELED" or error is not None:
+            raise PipelineCancellationInvariantError(
+                "cancelled run requires Dagster CANCELED and no error"
+            )
+    elif normalized_result == "already_terminal":
+        if terminal_status not in {"SUCCESS", "FAILURE"} or error is not None:
+            raise PipelineCancellationInvariantError(
+                "already_terminal run requires Dagster SUCCESS or FAILURE"
+            )
+    elif normalized_result == "cancel_failed":
+        if terminal_status is not None:
+            raise PipelineCancellationInvariantError(
+                "cancel_failed run cannot have a terminal status"
+            )
+        _structured_error_code(error)
+    if set(expected_results) - {"pending", "cancel_failed"}:
+        raise ValueError("run CAS only accepts unresolved expected results")
+    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+        return False
+    run = await _lock_run(
+        session,
+        cancellation_id=cancellation_id,
+        dagster_run_id=dagster_run_id,
+    )
+    if run is None or run.result not in set(expected_results):
+        return False
     row = (
         await session.execute(
             text(_UPDATE_RUN_SQL),
@@ -1162,17 +930,68 @@ async def transition_pipeline_cancellation_member(
     result: str,
     error_message: str | None = None,
 ) -> bool:
-    """marker/run mapping이 정확할 때만 base terminal 상태와 member 결과를 CAS한다."""
-    if expected_status not in {"queued", "running"}:
-        raise ValueError("expected_status must be queued or running")
-    if target_status not in _BASE_TERMINAL_STATUSES:
-        raise ValueError("target_status must be done, failed, or cancelled")
+    """종결된 Dagster run과 정확히 매핑되는 running base/member를 함께 전이한다."""
+    if expected_status != "running":
+        raise ValueError("run-backed transition only accepts expected_status=running")
     normalized_result = _validate_result(result)
-    if normalized_result not in {"cancelled", "already_terminal"}:
-        raise ValueError(
-            "successful base transition result must be cancelled or already_terminal"
+    if dagster_run_id is None:
+        raise PipelineCancellationInvariantError(
+            "running member transition requires a Dagster run"
         )
     normalized_kind = _validate_kind(member_kind)
+    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+        return False
+    member = await _lock_member(
+        session,
+        cancellation_id=cancellation_id,
+        member_kind=normalized_kind,
+        member_id=member_id,
+    )
+    if member is None or member.result not in {"pending", "cancel_failed"}:
+        return False
+    if member.initial_status != "running" or member.dagster_run_id != dagster_run_id:
+        raise PipelineCancellationConflict(
+            "running member frozen status/run mapping diverged"
+        )
+    run = await _lock_run(
+        session,
+        cancellation_id=cancellation_id,
+        dagster_run_id=dagster_run_id,
+    )
+    if run is None:
+        raise PipelineCancellationInvariantError("matching cancellation run is missing")
+    mapping = _run_base_mapping(run)
+    if mapping is None:
+        raise PipelineCancellationInvariantError(
+            "member cannot transition before its Dagster run is terminal"
+        )
+    expected_target, expected_result = mapping
+    if (target_status, normalized_result) != (expected_target, expected_result):
+        raise PipelineCancellationInvariantError(
+            "requested base/member result does not match Dagster terminal result"
+        )
+    base = (
+        await _lock_scope_members(
+            session,
+            (
+                PipelineCancellationScopeMember(
+                    member_kind=member.member_kind,
+                    member_id=member.member_id,
+                    initial_status=member.initial_status,
+                    dagster_run_id=member.dagster_run_id,
+                    cancellation_id=cancellation_id,
+                ),
+            ),
+        )
+    )[0]
+    if (
+        base.cancellation_id != _uuid(cancellation_id)
+        or base.initial_status != "running"
+        or base.dagster_run_id != dagster_run_id
+    ):
+        raise PipelineCancellationConflict(
+            "running base marker/status/run mapping diverged"
+        )
     statement = (
         _TRANSITION_JOB_MEMBER_SQL
         if normalized_kind == "import_job"
@@ -1193,19 +1012,147 @@ async def transition_pipeline_cancellation_member(
     ).one_or_none()
     if row is None:
         return False
-    updated = await set_pipeline_cancellation_member_result(
+    updated = (
+        await session.execute(
+            text(_UPDATE_MEMBER_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "member_kind": normalized_kind,
+                "member_id": _uuid(member_id),
+                "result": normalized_result,
+                "terminal_status": target_status,
+                "error": None,
+                "expected_results": [member.result],
+            },
+        )
+    ).one_or_none()
+    if updated is None:
+        raise PipelineCancellationInvariantError(
+            "base member transitioned but normalized member result CAS failed"
+        )
+    await record_system_log(
+        session,
+        level="info",
+        source="pipeline_cancellation",
+        event="pipeline.cancellation.member_transitioned",
+        message="Dagster terminal result reconciled to the frozen member",
+        detail={
+            "cancellation_id": cancellation_id,
+            "member_kind": normalized_kind,
+            "member_id": member_id,
+            "dagster_run_id": dagster_run_id,
+            "target_status": target_status,
+            "result": normalized_result,
+        },
+    )
+    return True
+
+
+async def cancel_queued_pipeline_cancellation_member(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    member_kind: str,
+    member_id: str,
+) -> bool:
+    """외부 terminate 호출 없이 queued base/member를 같은 tx에서 취소한다."""
+    normalized_kind = _validate_kind(member_kind)
+    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+        return False
+    member = await _lock_member(
         session,
         cancellation_id=cancellation_id,
         member_kind=normalized_kind,
         member_id=member_id,
-        result=normalized_result,
-        terminal_status=target_status,
-        error=None,
     )
-    if not updated:
+    if member is None or member.result != "pending":
+        return False
+    if member.initial_status != "queued":
         raise PipelineCancellationInvariantError(
-            "base member transitioned but normalized member result CAS failed"
+            "explicit DB-only cancellation only accepts queued members"
         )
+    if member.dagster_run_id is not None:
+        run = await _lock_run(
+            session,
+            cancellation_id=cancellation_id,
+            dagster_run_id=member.dagster_run_id,
+        )
+        if run is None or run.result in {"pending", "cancel_failed"}:
+            raise PipelineCancellationInvariantError(
+                "queued member sharing a running Dagster run must wait for run terminal"
+            )
+    base = (
+        await _lock_scope_members(
+            session,
+            (
+                PipelineCancellationScopeMember(
+                    member_kind=member.member_kind,
+                    member_id=member.member_id,
+                    initial_status=member.initial_status,
+                    dagster_run_id=member.dagster_run_id,
+                    cancellation_id=cancellation_id,
+                ),
+            ),
+        )
+    )[0]
+    if (
+        base.cancellation_id != _uuid(cancellation_id)
+        or base.initial_status != "queued"
+        or base.dagster_run_id != member.dagster_run_id
+    ):
+        raise PipelineCancellationConflict(
+            "queued base marker/status/run mapping diverged"
+        )
+    statement = (
+        _TRANSITION_JOB_MEMBER_SQL
+        if normalized_kind == "import_job"
+        else _TRANSITION_REQUEST_MEMBER_SQL
+    )
+    transitioned = (
+        await session.execute(
+            text(statement),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "member_id": _uuid(member_id),
+                "dagster_run_id": member.dagster_run_id,
+                "expected_status": "queued",
+                "target_status": "cancelled",
+                "error_message": None,
+            },
+        )
+    ).one_or_none()
+    if transitioned is None:
+        return False
+    updated = (
+        await session.execute(
+            text(_UPDATE_MEMBER_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "member_kind": normalized_kind,
+                "member_id": _uuid(member_id),
+                "result": "cancelled",
+                "terminal_status": "cancelled",
+                "error": None,
+                "expected_results": ["pending"],
+            },
+        )
+    ).one_or_none()
+    if updated is None:
+        raise PipelineCancellationInvariantError(
+            "queued base transitioned but normalized member result CAS failed"
+        )
+    await record_system_log(
+        session,
+        level="info",
+        source="pipeline_cancellation",
+        event="pipeline.cancellation.queued_member_cancelled",
+        message="queued frozen member cancelled without an external terminate call",
+        detail={
+            "cancellation_id": cancellation_id,
+            "member_kind": normalized_kind,
+            "member_id": member_id,
+        },
+    )
     return True
 
 
@@ -1215,11 +1162,24 @@ async def finish_pipeline_cancellation_attempt(
     cancellation_id: str,
     status: str,
     error: Mapping[str, Any] | None,
-) -> PipelineCancellationDetail:
-    """attempt를 completed/retryable/failed로 닫고 completed invariant를 DB에서 강제한다."""
+) -> PipelineCancellationDetail | None:
+    """잠근 frozen detail/base 전체를 검증한 뒤 attempt를 종결한다."""
     if status not in PIPELINE_CANCELLATION_STATUS_VALUES or status == "in_progress":
         raise ValueError("terminal attempt status must be retryable, completed, or failed")
     normalized_status = cast(PipelineCancellationStatus, status)
+    locked_attempt = await _lock_attempt_after_root(session, cancellation_id)
+    if locked_attempt is None or locked_attempt.status != "in_progress":
+        return None
+    detail = await get_pipeline_cancellation_detail(session, cancellation_id)
+    if detail is None:
+        raise PipelineCancellationInvariantError("cancellation attempt disappeared")
+    base_by_key = await _lock_detail_base_members(session, detail)
+    _validate_finish_invariants(
+        detail,
+        base_by_key,
+        status=normalized_status,
+        error=error,
+    )
     row = (
         await session.execute(
             text(_FINISH_ATTEMPT_SQL),
@@ -1231,9 +1191,7 @@ async def finish_pipeline_cancellation_attempt(
         )
     ).one_or_none()
     if row is None:
-        raise PipelineCancellationInvariantError(
-            "attempt status CAS failed or completed attempt has unresolved results"
-        )
+        return None
     await record_system_log(
         session,
         level="error" if normalized_status == "failed" else "info",
@@ -1261,6 +1219,7 @@ __all__ = [
     "PipelineCancellationScope",
     "PipelineCancellationScopeMember",
     "PipelineCancellationSummary",
+    "cancel_queued_pipeline_cancellation_member",
     "create_pipeline_cancellation_attempt",
     "finish_pipeline_cancellation_attempt",
     "get_current_pipeline_cancellation_detail",

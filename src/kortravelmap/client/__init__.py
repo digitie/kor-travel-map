@@ -40,6 +40,8 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from kortravelmap.core.dedup import find_dedup_candidates, find_sibling_candidates
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
@@ -49,10 +51,17 @@ from kortravelmap.enrichment import (
 )
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
+    BatchDagMvPrepared,
+    BatchDagPrepared,
     BatchDagRunResult,
-)
-from kortravelmap.infra.batch_dag import (
-    run_batch_dag_consistency_gate as repo_run_batch_dag_consistency_gate,
+    batch_dag_mutex_key,
+    fail_batch_dag_phase,
+    finish_batch_mv_phase,
+    make_batch_dag_request,
+    plan_batch_dag,
+    prepare_batch_dag,
+    run_batch_consistency_phase,
+    start_batch_mv_phase,
 )
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
@@ -1341,22 +1350,104 @@ class AsyncKorTravelMapClient:
         materialized_views: Sequence[str] = (),
         mv_refresh_strategy: str = "swap",
     ) -> BatchDagRunResult:
-        """T-200 root/child import job batch와 consistency gate를 실행한다."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_run_batch_dag_consistency_gate(
-                session,
-                child_job_ids=child_job_ids,
-                load_batch_id=load_batch_id,
-                root_kind=root_kind,
-                root_payload=root_payload,
-                dagster_run_id=dagster_run_id,
-                plan_only=plan_only,
-                consistency_persist=consistency_persist,
-                sample_limit=sample_limit,
-                dedup_pending_threshold=dedup_pending_threshold,
-                materialized_views=materialized_views,
-                mv_refresh_strategy=mv_refresh_strategy,
-            )
+        """같은 connection/mutex에서 batch gate를 네 transaction phase로 실행한다."""
+        request = make_batch_dag_request(
+            child_job_ids=child_job_ids,
+            load_batch_id=load_batch_id,
+            root_kind=root_kind,
+            root_payload=root_payload,
+            dagster_run_id=dagster_run_id,
+            consistency_persist=consistency_persist,
+            sample_limit=sample_limit,
+            dedup_pending_threshold=dedup_pending_threshold,
+            materialized_views=materialized_views,
+            mv_refresh_strategy=mv_refresh_strategy,
+        )
+        if plan_only:
+            async with self._session_factory() as session:
+                return await plan_batch_dag(session, request)
+
+        result: BatchDagRunResult | None = None
+        prepared: BatchDagPrepared | None = None
+        async with self._engine.connect() as connection:
+            async with AsyncSession(bind=connection, expire_on_commit=False) as session:
+                try:
+                    async with advisory_lock(
+                        session, batch_dag_mutex_key(request.load_batch_id)
+                    ):
+                        # session-level lock SELECT의 autobegin을 먼저 닫는다. lock은
+                        # 같은 connection에서 아래 phase commit 사이에도 유지된다.
+                        await session.commit()
+                        async with session.begin():
+                            prepared_or_result = await prepare_batch_dag(session, request)
+                        if isinstance(prepared_or_result, BatchDagRunResult):
+                            result = prepared_or_result
+                        else:
+                            prepared = prepared_or_result
+
+                        report: ConsistencyReport | None = None
+                        if result is None and prepared is not None:
+                            try:
+                                async with session.begin():
+                                    report = await run_batch_consistency_phase(
+                                        session, prepared
+                                    )
+                            except Exception as exc:  # noqa: BLE001
+                                message = f"{exc.__class__.__name__}: {exc}"
+                                async with session.begin():
+                                    result = await fail_batch_dag_phase(
+                                        session, prepared, message=message
+                                    )
+
+                        mv_phase: BatchDagMvPrepared | None = None
+                        if (
+                            result is None
+                            and prepared is not None
+                            and report is not None
+                        ):
+                            try:
+                                async with session.begin():
+                                    mv_or_result = await start_batch_mv_phase(
+                                        session, prepared, report
+                                    )
+                                if isinstance(mv_or_result, BatchDagRunResult):
+                                    result = mv_or_result
+                                else:
+                                    mv_phase = mv_or_result
+                            except Exception as exc:  # noqa: BLE001
+                                message = f"{exc.__class__.__name__}: {exc}"
+                                async with session.begin():
+                                    result = await fail_batch_dag_phase(
+                                        session,
+                                        prepared,
+                                        message=message,
+                                        report=report,
+                                    )
+
+                        if result is None and prepared is not None and mv_phase is not None:
+                            try:
+                                async with session.begin():
+                                    result = await finish_batch_mv_phase(
+                                        session, mv_phase
+                                    )
+                            except Exception as exc:  # noqa: BLE001
+                                message = f"{exc.__class__.__name__}: {exc}"
+                                async with session.begin():
+                                    result = await fail_batch_dag_phase(
+                                        session,
+                                        prepared,
+                                        message=message,
+                                        report=mv_phase.consistency_report,
+                                        mv_job=mv_phase.mv_refresh_job,
+                                    )
+                finally:
+                    # advisory_lock의 unlock SELECT도 autobegin하므로 connection을
+                    # 반환하기 전에 명시적으로 commit한다.
+                    if session.in_transaction():
+                        await session.commit()
+        if result is None:
+            raise RuntimeError("batch DAG phase orchestration produced no result")
+        return result
 
     async def merge_dedup_review(
         self,

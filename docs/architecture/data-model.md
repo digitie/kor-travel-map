@@ -1275,7 +1275,9 @@ CREATE TABLE ops.pipeline_cancellations (
   CHECK (previous_cancellation_id IS NULL OR
          previous_cancellation_id <> cancellation_id),
   CHECK ((status = 'in_progress' AND finished_at IS NULL) OR
-         (status <> 'in_progress' AND finished_at IS NOT NULL))
+         (status <> 'in_progress' AND finished_at IS NOT NULL)),
+  CHECK ((status IN ('in_progress', 'completed') AND error IS NULL) OR
+         (status IN ('retryable', 'failed') AND jsonb_typeof(error) = 'object'))
 );
 
 CREATE UNIQUE INDEX uq_pipeline_cancellations_active_root
@@ -1296,6 +1298,15 @@ CREATE TABLE ops.pipeline_cancellation_runs (
   terminal_status TEXT,
   error           JSONB,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
+    (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR
+    (result = 'already_terminal' AND
+      (terminal_status IS NULL OR terminal_status IN ('SUCCESS', 'FAILURE')) AND
+      error IS NULL) OR
+    (result = 'cancel_failed' AND terminal_status IS NULL AND
+      jsonb_typeof(error) = 'object')
+  ),
   PRIMARY KEY (cancellation_id, dagster_run_id)
 );
 
@@ -1313,6 +1324,14 @@ CREATE TABLE ops.pipeline_cancellation_members (
   terminal_status TEXT,
   error           JSONB,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
+    (result = 'cancelled' AND terminal_status = 'cancelled' AND error IS NULL) OR
+    (result = 'already_terminal' AND
+      terminal_status IN ('done', 'failed', 'cancelled') AND error IS NULL) OR
+    (result = 'cancel_failed' AND terminal_status IS NULL AND
+      jsonb_typeof(error) = 'object')
+  ),
   PRIMARY KEY (cancellation_id, member_kind, member_id),
   FOREIGN KEY (cancellation_id, dagster_run_id)
     REFERENCES ops.pipeline_cancellation_runs(cancellation_id, dagster_run_id)
@@ -1443,6 +1462,22 @@ terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인�
   않는다. attempt를 `retryable`, 해당 member/run을 `cancel_failed`로 기록하고 marker를
   유지한다.
 
+모든 coordinator writer는 attempt 행을 `FOR UPDATE`로 먼저 잠그고
+`status='in_progress'`를 확인한 뒤 member→해당 run→request/job base 행 순서로 잠근다.
+성공 결과를 쓰는 범용 member setter는 두지 않는다. running member는 먼저 run 행이
+`CANCELED`/`SUCCESS`/`FAILURE`로 종결된 뒤에만 각각
+`cancelled`/`done`/`failed`로 전이한다. queued member는 외부 terminate 호출이 없는 전용
+DB 경로로만 `cancelled`가 된다. attempt 종결과 retry는 교착 방지를 위해
+lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail reload→정렬 base
+행 순서를 사용한다. 이미 닫힌 예전 attempt writer는 상태를 바꾸지 않고 CAS 실패를
+반환한다.
+
+`completed`는 marker·base·member·run 전체 대응이 정확하고 pending/cancel_failed가 0일
+때만 허용한다. `retryable`은 pending이 없고 실제 미해결 member가 하나 이상이며, 모든
+미해결 member와 대응 run의 구조화 오류 코드가 재시도 허용 집합일 때만 허용한다.
+`failed`는 definitive 정책 오류 코드를 요구하고, 모든 미해결 대상이 재시도 가능한
+경우에는 거부한다.
+
 재시도는 `previous_cancellation_id`가 가리키는 이전 시도의 frozen member 중 미해결 행만
 새 attempt로 복사한다. hierarchy를 다시 탐색하지 않으며, 복사한 base marker의
 `cancellation_id`만 새 시도로 CAS 전환한다. 이미 `cancelled`/`already_terminal`인 member와
@@ -1458,6 +1493,17 @@ pool에 반환하며, pin하지 않은 pooled `AsyncSession`에서 scope 사이 
 각 scope data transaction은 provider 결과를 쓰기 전에 대상 request/job row를 잠그고 marker
 NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit까지는 취소가 기다리고,
 취소 marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
+
+full-load batch consistency gate도 같은 원칙을 사용한다. 호출별 전용
+`AsyncConnection`에 `AsyncSession(expire_on_commit=False)`을 bind하고
+`load_batch_id`별 session advisory mutex를 gate 전체에 유지한다. prepare(root 생성·child
+attach·consistency child 생성), 장기 consistency, MV child 시작, 장기 MV refresh/finalize는
+각각 독립 transaction이다. prepare commit 뒤 장기 단계에는 lineage-global xact lock이
+남지 않는다. phase 예외는 현재 transaction을 rollback한 뒤 별도 짧은 실패 transaction에
+기록한다. payload/status 종결은 모두 cancellation marker CAS이며 marker가 먼저 이기면
+현재 job을 reload하고 coordinator가 cancellation 상태를 덮어쓰지 않는다. lock과 각 phase는
+같은 PostgreSQL backend PID를 사용하고, unlock SELECT 뒤 commit한 다음 connection을 pool에
+반환한다.
 
 marker/attempt/member/run 전이는 각각 같은 짧은 transaction에서 append-only
 `ops.system_log` 감사 행도 함께 기록한다. 인증 actor가 `requested_by`와

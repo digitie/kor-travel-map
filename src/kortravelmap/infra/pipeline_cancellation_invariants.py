@@ -1,0 +1,292 @@
+"""Pipeline cancellation의 정규화 결과와 attempt 종결 불변식."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from kortravelmap.core.pipeline_cancellation_states import PipelineCancellationStatus
+from kortravelmap.infra.pipeline_cancellation_types import (
+    PipelineCancellationDetail,
+    PipelineCancellationInvariantError,
+    PipelineCancellationMember,
+    PipelineCancellationRun,
+    PipelineCancellationScopeMember,
+)
+
+_BASE_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
+_RETRYABLE_ERROR_CODES = frozenset(
+    {
+        "DAGSTER_TERMINATE_FAILED",
+        "DAGSTER_TERMINATION_TIMEOUT",
+        "DAGSTER_UNAVAILABLE",
+    }
+)
+_FAILED_ERROR_CODES = frozenset(
+    {
+        "DAGSTER_RECONCILE_FAILED",
+        "PIPELINE_CANCELLATION_INVARIANT",
+        "PIPELINE_CANCELLATION_UNSAFE",
+    }
+)
+
+
+def _structured_error_code(
+    error: Mapping[str, Any] | None,
+    *,
+    allowed_codes: frozenset[str] | None = None,
+) -> str:
+    if error is None:
+        raise PipelineCancellationInvariantError("structured error is required")
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not code.strip():
+        raise PipelineCancellationInvariantError(
+            "structured error requires a non-empty code"
+        )
+    if not isinstance(message, str) or not message.strip():
+        raise PipelineCancellationInvariantError(
+            "structured error requires a non-empty message"
+        )
+    if allowed_codes is not None and code not in allowed_codes:
+        raise PipelineCancellationInvariantError(
+            f"error code {code!r} does not match the attempt policy"
+        )
+    details = error.get("details")
+    if details is not None and not isinstance(details, Mapping):
+        raise PipelineCancellationInvariantError(
+            "structured error details must be an object"
+        )
+    return code
+
+
+def _validate_normalized_shapes(detail: PipelineCancellationDetail) -> None:
+    member_run_ids = {
+        member.dagster_run_id
+        for member in detail.members
+        if member.dagster_run_id is not None
+    }
+    run_by_id = {run.dagster_run_id: run for run in detail.runs}
+    if member_run_ids != set(run_by_id):
+        raise PipelineCancellationInvariantError(
+            "normalized cancellation member/run correspondence diverged"
+        )
+    for member in detail.members:
+        if member.result == "pending":
+            if member.terminal_status is not None or member.error is not None:
+                raise PipelineCancellationInvariantError(
+                    "pending member cannot have terminal status or error"
+                )
+        elif member.result == "cancelled":
+            if member.terminal_status != "cancelled" or member.error is not None:
+                raise PipelineCancellationInvariantError(
+                    "cancelled member requires terminal_status=cancelled and no error"
+                )
+        elif member.result == "already_terminal":
+            if (
+                member.terminal_status not in _BASE_TERMINAL_STATUSES
+                or member.error is not None
+            ):
+                raise PipelineCancellationInvariantError(
+                    "already_terminal member requires a base terminal status and no error"
+                )
+        elif member.result == "cancel_failed":
+            if member.terminal_status is not None:
+                raise PipelineCancellationInvariantError(
+                    "cancel_failed member cannot have a terminal status"
+                )
+            _structured_error_code(member.error)
+    for run in detail.runs:
+        if run.result == "pending":
+            if run.terminal_status is not None or run.error is not None:
+                raise PipelineCancellationInvariantError(
+                    "pending run cannot have terminal status or error"
+                )
+        elif run.result == "cancelled":
+            if run.terminal_status != "CANCELED" or run.error is not None:
+                raise PipelineCancellationInvariantError(
+                    "cancelled run requires Dagster CANCELED and no error"
+                )
+        elif run.result == "already_terminal":
+            if run.terminal_status not in {None, "SUCCESS", "FAILURE"} or run.error:
+                raise PipelineCancellationInvariantError(
+                    "already_terminal run has an invalid terminal status/error"
+                )
+        elif run.result == "cancel_failed":
+            if run.terminal_status is not None:
+                raise PipelineCancellationInvariantError(
+                    "cancel_failed run cannot have a terminal status"
+                )
+            _structured_error_code(run.error)
+
+
+def _run_base_mapping(run: PipelineCancellationRun) -> tuple[str, str] | None:
+    mapping = {
+        ("cancelled", "CANCELED"): ("cancelled", "cancelled"),
+        ("already_terminal", "SUCCESS"): ("done", "already_terminal"),
+        ("already_terminal", "FAILURE"): ("failed", "already_terminal"),
+    }
+    return mapping.get((run.result, run.terminal_status))
+
+
+def _validate_resolved_member(
+    member: PipelineCancellationMember,
+    base: PipelineCancellationScopeMember,
+    run_by_id: Mapping[str, PipelineCancellationRun],
+) -> None:
+    if member.result == "cancelled":
+        if base.initial_status != "cancelled" or member.terminal_status != "cancelled":
+            raise PipelineCancellationInvariantError(
+                "cancelled member/base status diverged"
+            )
+    elif member.result == "already_terminal":
+        if base.initial_status != member.terminal_status:
+            raise PipelineCancellationInvariantError(
+                "already_terminal member/base status diverged"
+            )
+    else:
+        raise PipelineCancellationInvariantError("member is not resolved")
+
+    if member.initial_status == "running":
+        if member.dagster_run_id is None:
+            raise PipelineCancellationInvariantError(
+                "resolved running member requires a frozen Dagster run"
+            )
+        run = run_by_id[member.dagster_run_id]
+        mapping = _run_base_mapping(run)
+        if mapping != (base.initial_status, member.result):
+            raise PipelineCancellationInvariantError(
+                "running member/base result does not match Dagster terminal result"
+            )
+    elif member.initial_status == "queued":
+        if member.result != "cancelled":
+            raise PipelineCancellationInvariantError(
+                "queued cancellation requires the explicit no-run DB path"
+            )
+        if member.dagster_run_id is not None:
+            run = run_by_id[member.dagster_run_id]
+            if run.result not in {"cancelled", "already_terminal"}:
+                raise PipelineCancellationInvariantError(
+                    "queued member's shared Dagster run is not terminal"
+                )
+    elif member.initial_status in _BASE_TERMINAL_STATUSES:
+        if (
+            member.result != "already_terminal"
+            or member.terminal_status != member.initial_status
+        ):
+            raise PipelineCancellationInvariantError(
+                "initially terminal member must remain already_terminal"
+            )
+
+
+def _retry_capable_member(
+    member: PipelineCancellationMember,
+    run_by_id: Mapping[str, PipelineCancellationRun],
+) -> bool:
+    if member.dagster_run_id is None:
+        return False
+    run = run_by_id[member.dagster_run_id]
+    if run.result != "cancel_failed":
+        return False
+    try:
+        _structured_error_code(member.error, allowed_codes=_RETRYABLE_ERROR_CODES)
+        _structured_error_code(run.error, allowed_codes=_RETRYABLE_ERROR_CODES)
+    except PipelineCancellationInvariantError:
+        return False
+    return True
+
+
+def _validate_finish_invariants(
+    detail: PipelineCancellationDetail,
+    base_by_key: Mapping[tuple[str, str], PipelineCancellationScopeMember],
+    *,
+    status: PipelineCancellationStatus,
+    error: Mapping[str, Any] | None,
+) -> None:
+    _validate_normalized_shapes(detail)
+    run_by_id = {run.dagster_run_id: run for run in detail.runs}
+    for member in detail.members:
+        key = (member.member_kind, member.member_id)
+        base = base_by_key[key]
+        if base.cancellation_id != detail.attempt.cancellation_id:
+            raise PipelineCancellationInvariantError(
+                "base marker no longer references the active cancellation attempt"
+            )
+        if base.dagster_run_id != member.dagster_run_id:
+            raise PipelineCancellationInvariantError(
+                "base/member Dagster run mapping diverged"
+            )
+
+    pending_members = tuple(
+        member for member in detail.members if member.result == "pending"
+    )
+    failed_members = tuple(
+        member for member in detail.members if member.result == "cancel_failed"
+    )
+    pending_runs = tuple(run for run in detail.runs if run.result == "pending")
+    failed_runs = tuple(run for run in detail.runs if run.result == "cancel_failed")
+    resolved_members = tuple(
+        member
+        for member in detail.members
+        if member.result in {"cancelled", "already_terminal"}
+    )
+    for member in resolved_members:
+        _validate_resolved_member(
+            member,
+            base_by_key[(member.member_kind, member.member_id)],
+            run_by_id,
+        )
+
+    if status == "completed":
+        if error is not None:
+            raise PipelineCancellationInvariantError(
+                "completed cancellation cannot persist an attempt error"
+            )
+        if pending_members or failed_members or pending_runs or failed_runs:
+            raise PipelineCancellationInvariantError(
+                "completed cancellation requires fully terminal member/run results"
+            )
+        return
+
+    if pending_members or pending_runs:
+        raise PipelineCancellationInvariantError(
+            "closed cancellation attempt cannot retain pending results"
+        )
+    if not failed_members:
+        raise PipelineCancellationInvariantError(
+            "retryable/failed cancellation requires unresolved members"
+        )
+    for member in failed_members:
+        base = base_by_key[(member.member_kind, member.member_id)]
+        if base.initial_status not in {"queued", "running"}:
+            raise PipelineCancellationInvariantError(
+                "cancel_failed member must preserve an active base status"
+            )
+    failed_run_ids = {run.dagster_run_id for run in failed_runs}
+    referenced_failed_run_ids = {
+        member.dagster_run_id
+        for member in failed_members
+        if member.dagster_run_id is not None
+    }
+    if not failed_run_ids.issubset(referenced_failed_run_ids):
+        raise PipelineCancellationInvariantError(
+            "cancel_failed run has no unresolved member"
+        )
+
+    if status == "retryable":
+        _structured_error_code(error, allowed_codes=_RETRYABLE_ERROR_CODES)
+        if not all(_retry_capable_member(member, run_by_id) for member in failed_members):
+            raise PipelineCancellationInvariantError(
+                "retryable cancellation contains a member that cannot be retried"
+            )
+        return
+
+    if status == "failed":
+        _structured_error_code(error, allowed_codes=_FAILED_ERROR_CODES)
+        if all(_retry_capable_member(member, run_by_id) for member in failed_members):
+            raise PipelineCancellationInvariantError(
+                "retry-capable unresolved members cannot be closed as failed"
+            )
+        return
+
+    raise PipelineCancellationInvariantError("attempt must close to a terminal workflow status")
