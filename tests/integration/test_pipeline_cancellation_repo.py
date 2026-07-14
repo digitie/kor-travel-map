@@ -725,7 +725,7 @@ async def test_member_success_setter_is_forbidden_and_closed_attempt_is_immutabl
         requested_by="admin:test",
         reason=None,
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="only accepts cancel_failed"):
         await set_pipeline_cancellation_member_result(
             migrated_session,
             cancellation_id=detail.attempt.cancellation_id,
@@ -1565,9 +1565,11 @@ async def test_lineage_mutations_share_one_transaction_lock(
     from sqlalchemy.ext.asyncio import AsyncSession
 
     parent_id = "88888888-8888-4888-8888-888888888888"
-    async with AsyncSession(migrated_engine, expire_on_commit=False) as setup:
-        async with setup.begin():
-            await _job(setup, parent_id)
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as setup,
+        setup.begin(),
+    ):
+        await _job(setup, parent_id)
 
     async with (
         AsyncSession(migrated_engine, expire_on_commit=False) as locker,
@@ -1586,9 +1588,11 @@ async def test_lineage_mutations_share_one_transaction_lock(
         await writer.rollback()
         await locker.rollback()
 
-    async with AsyncSession(migrated_engine, expire_on_commit=False) as cleanup:
-        async with cleanup.begin():
-            await cleanup.execute(
-                text("DELETE FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"),
-                {"job_id": parent_id},
-            )
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as cleanup,
+        cleanup.begin(),
+    ):
+        await cleanup.execute(
+            text("DELETE FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"),
+            {"job_id": parent_id},
+        )

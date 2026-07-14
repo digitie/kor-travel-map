@@ -124,19 +124,20 @@ async def _cleanup_committed_batch_state(
             )
             await cleanup.execute(
                 text(
-                    "UPDATE feature.source_entities SET current_source_record_key = NULL "
+                    "UPDATE provider_sync.source_entities "
+                    "SET current_source_record_key = NULL "
                     "WHERE source_entity_key = 'batch-gate-orphan-entity'"
                 )
             )
             await cleanup.execute(
                 text(
-                    "DELETE FROM feature.source_records "
+                    "DELETE FROM provider_sync.source_records "
                     "WHERE source_entity_key = 'batch-gate-orphan-entity'"
                 )
             )
             await cleanup.execute(
                 text(
-                    "DELETE FROM feature.source_entities "
+                    "DELETE FROM provider_sync.source_entities "
                     "WHERE source_entity_key = 'batch-gate-orphan-entity'"
                 )
             )

@@ -379,7 +379,7 @@ async def _lock_detail_base_members(
         for member in detail.members
     )
     locked = await _lock_scope_members(session, requested)
-    base_by_key = {
+    base_by_key: dict[tuple[str, str], PipelineCancellationScopeMember] = {
         (member.member_kind, member.member_id): member for member in locked
     }
     if len(base_by_key) != len(detail.members):
@@ -512,12 +512,11 @@ async def _insert_pipeline_cancellation_attempt(
         },
     )
 
-    member_results = {
-        (member.member_kind, member.member_id): cast(
-            PipelineCancellationResult,
+    member_results: dict[tuple[str, str], PipelineCancellationResult] = {
+        (member.member_kind, member.member_id): (
             "already_terminal"
             if member.initial_status in _BASE_TERMINAL_STATUSES
-            else "pending",
+            else "pending"
         )
         for member in scope.members
     }
@@ -529,11 +528,8 @@ async def _insert_pipeline_cancellation_attempt(
             run_has_running_member.get(member.dagster_run_id, False)
             or member.initial_status == "running"
         )
-    run_results = {
-        dagster_run_id: cast(
-            PipelineCancellationResult,
-            "pending" if has_running_member else "already_terminal",
-        )
+    run_results: dict[str, PipelineCancellationResult] = {
+        dagster_run_id: "pending" if has_running_member else "already_terminal"
         for dagster_run_id, has_running_member in run_has_running_member.items()
     }
     for dagster_run_id in sorted(run_results):
@@ -739,7 +735,7 @@ async def retry_pipeline_cancellation_attempt(
 def _validate_result(result: str) -> PipelineCancellationResult:
     if result not in PIPELINE_CANCELLATION_RESULT_VALUES:
         raise ValueError(f"invalid pipeline cancellation result: {result}")
-    return cast(PipelineCancellationResult, result)
+    return result
 
 
 async def set_pipeline_cancellation_member_result(

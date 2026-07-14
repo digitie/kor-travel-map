@@ -121,7 +121,7 @@ def _validate_normalized_shapes(detail: PipelineCancellationDetail) -> None:
 
 
 def _run_base_mapping(run: PipelineCancellationRun) -> tuple[str, str] | None:
-    mapping = {
+    mapping: dict[tuple[str, str | None], tuple[str, str]] = {
         ("cancelled", "CANCELED"): ("cancelled", "cancelled"),
         ("already_terminal", "SUCCESS"): ("done", "already_terminal"),
         ("already_terminal", "FAILURE"): ("failed", "already_terminal"),
@@ -277,11 +277,10 @@ def _validate_finish_invariants(
             )
         return
 
-    if pending_members or pending_runs:
-        if status != "failed" or pending_members:
-            raise PipelineCancellationInvariantError(
-                "completed/retryable cancellation cannot retain pending results"
-            )
+    if (pending_members or pending_runs) and (status != "failed" or pending_members):
+        raise PipelineCancellationInvariantError(
+            "completed/retryable cancellation cannot retain pending results"
+        )
     if not failed_members:
         raise PipelineCancellationInvariantError(
             "retryable/failed cancellation requires unresolved members"
