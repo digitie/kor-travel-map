@@ -33796,6 +33796,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -34114,6 +34115,7 @@
             "name": "execution_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Execution Id",
               "type": "string"
             }
@@ -34240,6 +34242,7 @@
             "name": "execution_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Execution Id",
               "type": "string"
             }
@@ -34451,7 +34454,15 @@
                 }
               }
             },
-            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합",
+            "headers": {
+              "Retry-After": {
+                "description": "동일 scope lock 경합 시 재시도 대기 초.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -34490,6 +34501,7 @@
             "name": "request_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Request Id",
               "type": "string"
             }
@@ -34541,7 +34553,15 @@
                 }
               }
             },
-            "description": "이미 running 상태 또는 동일 scope lock 경합"
+            "description": "이미 running 상태 또는 동일 scope lock 경합",
+            "headers": {
+              "Retry-After": {
+                "description": "동일 scope lock 경합 시 재시도 대기 초.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {

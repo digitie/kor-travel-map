@@ -559,6 +559,14 @@ def _payload_text(payload: dict[str, Any], key: str) -> str | None:
     return None
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRecord:
     return PipelineExecutionRecord(
         kind=row.kind,
@@ -900,7 +908,9 @@ async def _load_execution_detail(
                 detail=f"import job not found: {execution_id}",
             )
         request_id = _payload_text(job.payload, "request_id")
-        if request_id:
+        if request_id and _is_uuid(request_id):
+            # payload는 자유 JSONB다 — 비-UUID 값이 DB uuid 비교 오류(500)로
+            # 새지 않게 형식이 맞을 때만 연결 request를 조회한다.
             update_request = await get_update_request(session, request_id)
         execution = _execution_from_job(job)
     else:

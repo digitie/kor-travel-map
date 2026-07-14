@@ -16619,6 +16619,8 @@ export interface operations {
             /** @description run_mode=now 요청의 동일 scope advisory lock 경합 */
             409: {
                 headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16681,6 +16683,8 @@ export interface operations {
             /** @description 이미 running 상태 또는 동일 scope lock 경합 */
             409: {
                 headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
