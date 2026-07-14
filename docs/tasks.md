@@ -11,6 +11,11 @@
   - [x] `T-ADM-C1` — 플랜 확정 + ADR-064 + tasks 등록 (본 문서 PR)
   - [x] `T-ADM-C2` — backend `/ops/datasets/*` (agent A, PR #676)
   - [x] `T-ADM-C3` — backend `/ops/pipeline/*` + alembic (agent B, PR #677)
+  - [ ] `T-ADM-C3a` — pipeline 공용 application service/schema 추출 (#682)
+  - [ ] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679)
+  - [ ] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681)
+  - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
+  - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
   - [ ] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
   - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
   - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
@@ -52,6 +57,35 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   cursor/식별자 UUID 검증(500→422), 감사 필드(override 삭제·request cancel) 구조화
   로그, 409 Retry-After 헤더 명문화, datasets `dataset_status_repo`에
   `dagster_run_id` 전파.
+- [ ] `T-ADM-C3a` — **pipeline 공용 application service/schema 추출**
+  (agent **B**, 이슈 **#682**, C3 후속 1/5): `ops_pipeline.py`가 삭제 예정인
+  `routers/dagster.py`·`routers/feature_update_requests.py` private 심볼을 직접
+  import하지 않도록 Dagster 외부 I/O/transaction application service와 순수
+  schema/parser를 분리한다. legacy/new router가 전환 기간 같은 public 모듈을
+  사용한다. **동작·HTTP 의미·OpenAPI는 보존**하고 schedule capability/actor/
+  problem+json 변경은 이 PR에 섞지 않는다.
+- [ ] `T-ADM-C3b` — **root operation SQL projection** (agent **B**, 이슈 **#679**,
+  C3 후속 2/5, C3a 뒤): request를 root로 삼아 연결 import job의 상태·진행을
+  child로 JOIN하고, request 없는 import job만 독립 root로 남긴다. Python 후접기
+  금지. keyset total order는 `(created_at, id, kind)`, `providers[]`/
+  `dataset_keys[]` 원형과 dataset membership filter를 포함한다. root/child 상태는
+  덮어쓰지 않고 각각 노출한다.
+- [ ] `T-ADM-C3c` — **pipeline Dagster run 상세/failure 조회 이식** (agent **B**,
+  이슈 **#681**, C3 후속 3/5, C3b 뒤): event cursor와 failure 구조를 신규 그룹에
+  이식하고 순수 run not-found와 Dagster unavailable을 구분한다. GraphQL run은
+  DB cursor 정본에 섞지 않으며 외부 Dagster 링크를 fallback으로 유지한다. iframe
+  미사용 새 UI의 `nux-seen`은 제거한다.
+- [ ] `T-ADM-C3d` — **실제 계층형 취소** (agent **B**, 이슈 **#680**, C3 후속
+  4/5, C3c 뒤): root CAS `cancellation_requested` commit → worker claim/write 경로가
+  중단 상태를 존중 → running Dagster run terminate → terminal 재확인 →
+  `cancelled|cancel_failed` 확정. GraphQL 호출을 DB transaction 안에서 하지 않고,
+  종료 확인 전 허위 `cancelled`를 금지한다. 인증/BFF actor를 서버에서 파생하고
+  durable audit와 이미 commit된 데이터 비롤백 의미를 계약화한다.
+- [ ] `T-ADM-C3e` — **schedule/manual canonical operation 영속화** (agent **B**,
+  이슈 **#679**, C3 후속 5/5, C3d 뒤): schedule tick/manual launch/update request/
+  import 실행이 같은 canonical operation 정본과 provider/dataset identity를 사용하고,
+  stable correlation id·Dagster run id·최종 상태를 기록한다. mixed-version 백필·
+  인덱스·datasets recent execution 연결까지 포함한다.
 - [ ] `T-ADM-C4` — **frontend `/ops/datasets`** (agent **A**, 의존 C2): 그리드(3원
   행·never_run/stale 구분·이슈 배지)+drawer(정책 편집·ETL preview·지금 갱신 인라인
   폐루프·Feature 보기)+mock e2e.
@@ -86,6 +120,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전
 적대적 리뷰어 2명.
+
+`T-ADM-C3a`~`C3e`는 PR #677 병합 후 적대적 리뷰에서 확인된 C5 차단 후속이다.
+순서를 바꾸거나 한 PR로 합치지 않으며, **C3e까지 merge·CI green 전에는 C5를
+시작하지 않는다.**
 
 ## T-101 — Materialized View 도입 검토
 

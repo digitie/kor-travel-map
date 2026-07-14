@@ -8,8 +8,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from kortravelmap.api import dagster_graphql as dagster_mod
+from kortravelmap.api import dagster_query_service as dagster_query
 from kortravelmap.api.app import create_app
-from kortravelmap.api.routers import dagster as dagster_mod
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -36,11 +37,11 @@ def test_dagster_summary_parses_graphql_response(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
-        assert query == dagster_mod._DAGSTER_SUMMARY_QUERY
+        assert query == dagster_query._DAGSTER_SUMMARY_QUERY
         assert variables == {"limit": 3}
         return {
             "data": {
@@ -140,7 +141,7 @@ def test_dagster_summary_parses_graphql_response(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/dagster/summary?page_size=3")
 
@@ -203,7 +204,7 @@ def test_dagster_summary_parses_graphql_response(
     ]
     assert data["recent_runs"][0]["run_id"] == "run-1"
     assert calls == [
-        {"query": dagster_mod._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
+        {"query": dagster_query._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
     ]
 
 
@@ -217,11 +218,11 @@ def test_dagster_run_detail_parses_graphql_response(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
-        assert query == dagster_mod._DAGSTER_RUN_DETAIL_QUERY
+        assert query == dagster_query._DAGSTER_RUN_DETAIL_QUERY
         assert variables == {
             "runId": "run-1",
             "eventLimit": 5,
@@ -269,7 +270,7 @@ def test_dagster_run_detail_parses_graphql_response(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/dagster/runs/run-1?page_size=5")
 
@@ -308,7 +309,7 @@ def test_dagster_run_detail_parses_graphql_response(
     ]
     assert calls == [
         {
-            "query": dagster_mod._DAGSTER_RUN_DETAIL_QUERY,
+            "query": dagster_query._DAGSTER_RUN_DETAIL_QUERY,
             "variables": {"runId": "run-1", "eventLimit": 5, "afterCursor": None},
         },
     ]
@@ -322,7 +323,7 @@ def test_dagster_run_detail_returns_not_found(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         return {
             "data": {
@@ -334,7 +335,7 @@ def test_dagster_run_detail_returns_not_found(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/dagster/runs/missing-run")
 
@@ -358,7 +359,7 @@ def test_dagster_run_detail_passes_after_cursor(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         seen.append(variables)
         return {
@@ -373,7 +374,7 @@ def test_dagster_run_detail_passes_after_cursor(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/dagster/runs/run-1?page_size=5&after=ev-cursor-80")
 
@@ -391,7 +392,7 @@ def test_dagster_run_detail_graphql_error_extracts_message(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         return {
             "errors": [
@@ -403,7 +404,7 @@ def test_dagster_run_detail_graphql_error_extracts_message(
             ]
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/dagster/runs/run-1")
 
@@ -425,15 +426,15 @@ def test_mark_dagster_nux_seen_posts_mutation(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
-        assert query == dagster_mod._DAGSTER_SET_NUX_SEEN_MUTATION
+        assert query == dagster_query._DAGSTER_SET_NUX_SEEN_MUTATION
         assert variables == {}
         return {"data": {"setNuxSeen": True}}
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post("/v1/ops/dagster/nux-seen")
 
@@ -445,7 +446,7 @@ def test_mark_dagster_nux_seen_posts_mutation(
     assert data["seen"] is True
     assert data["errors"] == []
     assert calls == [
-        {"query": dagster_mod._DAGSTER_SET_NUX_SEEN_MUTATION, "variables": {}}
+        {"query": dagster_query._DAGSTER_SET_NUX_SEEN_MUTATION, "variables": {}}
     ]
 
 
@@ -457,11 +458,11 @@ def test_dagster_summary_returns_unavailable_when_graphql_fails(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _raise_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _raise_post_graphql)
 
     response = client.get("/v1/ops/dagster/summary")
 
@@ -489,11 +490,11 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         raise AssertionError("disallowed Dagster URL must not be requested")
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _unexpected_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _unexpected_post_graphql)
 
     with TestClient(app) as test_client:
         response = test_client.get("/v1/ops/dagster/summary")
@@ -522,11 +523,11 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
         client: httpx.AsyncClient,
         graphql_url: str,
         variables: dict[str, object],
-        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+        query: str = dagster_query._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
         raise AssertionError("invalid GraphQL URL must not be requested")
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _unexpected_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _unexpected_post_graphql)
 
     with TestClient(app) as test_client:
         response = test_client.post("/v1/ops/dagster/nux-seen")

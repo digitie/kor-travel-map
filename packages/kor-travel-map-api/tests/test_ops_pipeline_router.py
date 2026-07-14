@@ -27,10 +27,12 @@ from kortravelmap.infra.pipeline_repo import (
 from kortravelmap.providers.mois import DATASET_KEY_BULK
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
+from kortravelmap.api import dagster_graphql as dagster_mod
+from kortravelmap.api import dagster_query_service as dagster_query
+from kortravelmap.api import dagster_schedule_service as dagster_schedule
+from kortravelmap.api import feature_update_service as fur_mod
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
-from kortravelmap.api.routers import dagster as dagster_mod
-from kortravelmap.api.routers import feature_update_requests as fur_mod
 from kortravelmap.api.routers import ops_pipeline as pipeline_mod
 from kortravelmap.api.settings import ApiSettings
 
@@ -360,7 +362,7 @@ def test_overview_combines_db_counts_and_dagster(
         return _RUNS_GRAPHQL_PAYLOAD
 
     monkeypatch.setattr(pipeline_mod, "get_pipeline_status_counts", _fake_counts)
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/pipeline/overview?run_limit=5")
 
@@ -397,7 +399,7 @@ def test_overview_dagster_unavailable_keeps_db_counts(
         raise httpx.ConnectError("dagster down")
 
     monkeypatch.setattr(pipeline_mod, "get_pipeline_status_counts", _fake_counts)
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/pipeline/overview")
 
@@ -773,7 +775,7 @@ def test_dagster_runs_panel_parses_runs(
         assert kwargs["variables"] == {"limit": 5}
         return {"data": {"runsOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["runsOrError"]}}
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/pipeline/dagster-runs?limit=5")
 
@@ -791,7 +793,7 @@ def test_dagster_runs_panel_degrades_to_unavailable(
     async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
         raise httpx.ConnectError("dagster down")
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.get("/v1/ops/pipeline/dagster-runs")
 
@@ -812,8 +814,8 @@ def test_schedules_merges_overrides_and_returns_sensors(
     async def _overrides(_session: Any) -> dict[str, str]:
         return {"feature_weather_kma_short_forecast_hourly_schedule": "40 * * * *"}
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
-    monkeypatch.setattr(dagster_mod, "_schedule_overrides", _overrides)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_schedule, "schedule_overrides", _overrides)
 
     response = client.get("/v1/ops/pipeline/schedules")
 
@@ -837,9 +839,9 @@ def test_patch_schedule_upserts_override(
     upserts: list[dict[str, Any]] = []
 
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        if kwargs["query"] == dagster_mod._DAGSTER_SCHEDULES_QUERY:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
             return _SCHEDULES_GRAPHQL_PAYLOAD
-        assert kwargs["query"] == dagster_mod._DAGSTER_RELOAD_LOCATION_MUTATION
+        assert kwargs["query"] == dagster_schedule._DAGSTER_RELOAD_LOCATION_MUTATION
         return {
             "data": {
                 "reloadRepositoryLocation": {
@@ -853,8 +855,8 @@ def test_patch_schedule_upserts_override(
     async def _upsert(_session: Any, **kwargs: Any) -> None:
         upserts.append(kwargs)
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
-    monkeypatch.setattr(dagster_mod, "_upsert_schedule_override", _upsert)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
         "/v1/ops/pipeline/schedules/"
@@ -891,7 +893,7 @@ def test_patch_schedule_null_cron_clears_override(
     deletes: list[str] = []
 
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        if kwargs["query"] == dagster_mod._DAGSTER_SCHEDULES_QUERY:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
             return _SCHEDULES_GRAPHQL_PAYLOAD
         return {
             "data": {
@@ -906,8 +908,8 @@ def test_patch_schedule_null_cron_clears_override(
     async def _delete(_session: Any, *, schedule_name: str) -> None:
         deletes.append(schedule_name)
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
-    monkeypatch.setattr(dagster_mod, "_delete_schedule_override", _delete)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_schedule, "delete_schedule_override", _delete)
 
     with caplog.at_level("INFO", logger=pipeline_mod.__name__):
         response = client.patch(
@@ -943,7 +945,7 @@ def test_patch_schedule_rejects_high_frequency_cron(
     async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
         return _SCHEDULES_GRAPHQL_PAYLOAD
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.patch(
         "/v1/ops/pipeline/schedules/"
@@ -972,9 +974,9 @@ def test_schedule_command_start_mutates_state(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        if kwargs["query"] == dagster_mod._DAGSTER_SCHEDULES_QUERY:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
             return _SCHEDULES_GRAPHQL_PAYLOAD
-        assert kwargs["query"] == dagster_mod._DAGSTER_START_SCHEDULE_MUTATION
+        assert kwargs["query"] == dagster_schedule._DAGSTER_START_SCHEDULE_MUTATION
         return {
             "data": {
                 "startSchedule": {
@@ -992,7 +994,7 @@ def test_schedule_command_start_mutates_state(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
         "/v1/ops/pipeline/schedules/"
@@ -1014,9 +1016,9 @@ def test_schedule_command_run_launches_job(
     launches: list[dict[str, Any]] = []
 
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        if kwargs["query"] == dagster_mod._DAGSTER_SCHEDULES_QUERY:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
             return _SCHEDULES_GRAPHQL_PAYLOAD
-        assert kwargs["query"] == dagster_mod._DAGSTER_LAUNCH_RUN_MUTATION
+        assert kwargs["query"] == dagster_schedule._DAGSTER_LAUNCH_RUN_MUTATION
         launches.append(kwargs["variables"])
         return {
             "data": {
@@ -1035,7 +1037,7 @@ def test_schedule_command_run_launches_job(
             }
         }
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
         "/v1/ops/pipeline/schedules/"
@@ -1268,10 +1270,10 @@ def test_nux_seen_delegates_to_dagster_mutation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
-        assert kwargs["query"] == dagster_mod._DAGSTER_SET_NUX_SEEN_MUTATION
+        assert kwargs["query"] == dagster_query._DAGSTER_SET_NUX_SEEN_MUTATION
         return {"data": {"setNuxSeen": True}}
 
-    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post("/v1/ops/pipeline/nux-seen")
 

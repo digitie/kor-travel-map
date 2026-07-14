@@ -7,11 +7,11 @@ admin ops 통합 재작성 페이지 ①(`/ops/pipeline`)의 백엔드 리소스
   DB-only UNION(공유 keyset cursor ``(created_at DESC, id DESC)`` + ``kind``
   discriminator). Dagster run(GraphQL, 휘발·cursor 없음)은 목록 cursor에 섞지
   않고 실컬럼 ``dagster_run_id`` 속성 + 보조 패널(`/dagster-runs`)로만 노출한다.
-- **Dagster 조립 재사용**: GraphQL URL 검증·조립·schedule override 병합·명령
-  mutation은 기존 ``routers/dagster.py`` 구현을 재사용한다(구 라우터 삭제
-  시점(T-ADM-C6b)에 본 그룹으로 이식). 갱신 요청 생성은
-  ``routers/feature_update_requests.py``의 6-type scope union·카탈로그 검증·
-  geo resolver·advisory lock 계약을 전량 승계한다.
+- **공개 application 경계**: Dagster transport/parser는 ``dagster_graphql``,
+  조회와 schedule 조작은 각각 ``dagster_query_service``와
+  ``dagster_schedule_service``를 사용한다. 갱신 요청은
+  ``feature_update_schema``·``feature_update_service``의 6-type scope union,
+  카탈로그 검증, geo resolver, advisory lock 계약을 공유한다.
 - 게이트: ``app.py``에서 ``ops_routes_enabled`` + ``require_admin_frontend``
   의존성으로 마운트한다(조작 포함 — 무인증 ops 패턴 금지, ADR-064 §2).
 """
@@ -43,14 +43,24 @@ from kortravelmap.infra.pipeline_repo import (
     get_pipeline_status_counts,
     list_pipeline_executions,
 )
+from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
-from kortravelmap.api.routers import dagster as dagster_support
-from kortravelmap.api.routers import feature_update_requests as update_request_support
-from kortravelmap.api.routers.dagster import (
+from kortravelmap.api import (
+    dagster_graphql,
+    dagster_query_service,
+    dagster_schedule_service,
+    feature_update_service,
+)
+from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError, DagsterUrls
+from kortravelmap.api.dagster_http import (
+    http_client_from_request as _http_client_from_request,
+)
+from kortravelmap.api.dagster_http import (
+    settings_from_request as _settings_from_request,
+)
+from kortravelmap.api.dagster_schema import (
     DagsterNuxSeenResponse,
     DagsterRunSummary,
     DagsterSchedule,
@@ -58,14 +68,16 @@ from kortravelmap.api.routers.dagster import (
     DagsterScheduleCommandRequest,
     DagsterScheduleOverrideRequest,
     DagsterSensor,
-    DagsterUrlConfigurationError,
 )
-from kortravelmap.api.routers.feature_update_requests import (
+from kortravelmap.api.db import get_session
+from kortravelmap.api.feature_update_http import to_http_exception
+from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
     FeatureUpdateRequestRecord,
     FeatureUpdateRequestRunNowRequest,
 )
+from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -686,7 +698,7 @@ def _event_record(event: OpsImportJobEvent) -> PipelineJobEventRecord:
 
 
 def _update_request_record(row: FeatureUpdateRequest) -> FeatureUpdateRequestRecord:
-    return update_request_support._record_from_request(
+    return feature_update_service.record_from_request(
         row, status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX
     )
 
@@ -753,11 +765,11 @@ async def get_pipeline_overview(
     checked_at = datetime.now(UTC)
     counts = await get_pipeline_status_counts(session)
 
-    settings = dagster_support._settings_from_request(request)
-    raw_graphql_url = dagster_support._candidate_graphql_url(settings)
+    settings = _settings_from_request(request)
+    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     dagster_part: PipelineDagsterOverview
     try:
-        dagster_urls = dagster_support._dagster_urls(settings)
+        dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         dagster_part = PipelineDagsterOverview(
             status="error",
@@ -766,9 +778,9 @@ async def get_pipeline_overview(
             errors=[str(exc)],
         )
     else:
-        client = dagster_support._http_client_from_request(request, settings)
+        client = _http_client_from_request(request, settings)
         try:
-            payload = await dagster_support._post_graphql(
+            payload = await dagster_graphql.post_graphql(
                 client=client,
                 graphql_url=dagster_urls.graphql_url,
                 variables={"limit": run_limit},
@@ -802,7 +814,7 @@ async def get_pipeline_overview(
 def _parse_dagster_overview(
     payload: dict[str, Any],
     *,
-    dagster_urls: dagster_support._DagsterUrls,
+    dagster_urls: DagsterUrls,
 ) -> PipelineDagsterOverview:
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
@@ -811,16 +823,16 @@ def _parse_dagster_overview(
             dagster_url=dagster_urls.dagster_url,
             graphql_url=dagster_urls.graphql_url,
             errors=[
-                dagster_support._graphql_error_message(error)
+                dagster_graphql.graphql_error_message(error)
                 for error in graphql_errors
             ],
         )
-    data = dagster_support._dict(payload.get("data"))
-    repositories, repository_errors = dagster_support._parse_repositories(
-        dagster_support._dict(data.get("repositoriesOrError")),
+    data = dagster_graphql.as_dict(payload.get("data"))
+    repositories, repository_errors = dagster_graphql.parse_repositories(
+        dagster_graphql.as_dict(data.get("repositoriesOrError")),
     )
-    recent_runs, run_counts, run_errors = dagster_support._parse_runs(
-        dagster_support._dict(data.get("runsOrError")),
+    recent_runs, run_counts, run_errors = dagster_graphql.parse_runs(
+        dagster_graphql.as_dict(data.get("runsOrError")),
     )
     errors = [*repository_errors, *run_errors]
     sensors = [
@@ -830,7 +842,7 @@ def _parse_dagster_overview(
         status="error" if errors else "ok",
         dagster_url=dagster_urls.dagster_url,
         graphql_url=dagster_urls.graphql_url,
-        version=dagster_support._optional_string(data.get("version")),
+        version=dagster_graphql.optional_string(data.get("version")),
         run_counts=run_counts,
         recent_runs=recent_runs,
         schedule_count=sum(
@@ -1146,10 +1158,10 @@ async def list_dagster_runs(
 ) -> PipelineDagsterRunsResponse:
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
-    settings = dagster_support._settings_from_request(request)
-    raw_graphql_url = dagster_support._candidate_graphql_url(settings)
+    settings = _settings_from_request(request)
+    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     try:
-        dagster_urls = dagster_support._dagster_urls(settings)
+        dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         return PipelineDagsterRunsResponse(
             data=PipelineDagsterRunsData(
@@ -1161,9 +1173,9 @@ async def list_dagster_runs(
             ),
             meta=make_meta(started_at=started_at),
         )
-    client = dagster_support._http_client_from_request(request, settings)
+    client = _http_client_from_request(request, settings)
     try:
-        payload = await dagster_support._post_graphql(
+        payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
             variables={"limit": limit},
@@ -1189,15 +1201,15 @@ async def list_dagster_runs(
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
                 errors=[
-                    dagster_support._graphql_error_message(error)
+                    dagster_graphql.graphql_error_message(error)
                     for error in graphql_errors
                 ],
             ),
             meta=make_meta(started_at=started_at),
         )
-    data = dagster_support._dict(payload.get("data"))
-    runs, run_counts, run_errors = dagster_support._parse_runs(
-        dagster_support._dict(data.get("runsOrError")),
+    data = dagster_graphql.as_dict(payload.get("data"))
+    runs, run_counts, run_errors = dagster_graphql.parse_runs(
+        dagster_graphql.as_dict(data.get("runsOrError")),
     )
     return PipelineDagsterRunsResponse(
         data=PipelineDagsterRunsData(
@@ -1229,10 +1241,10 @@ async def list_pipeline_schedules(
 ) -> PipelineSchedulesResponse:
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
-    settings = dagster_support._settings_from_request(request)
-    raw_graphql_url = dagster_support._candidate_graphql_url(settings)
+    settings = _settings_from_request(request)
+    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     try:
-        dagster_urls = dagster_support._dagster_urls(settings)
+        dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         return PipelineSchedulesResponse(
             data=PipelineSchedulesData(
@@ -1244,10 +1256,10 @@ async def list_pipeline_schedules(
             ),
             meta=make_meta(started_at=started_at),
         )
-    client = dagster_support._http_client_from_request(request, settings)
-    overrides = await dagster_support._schedule_overrides(session)
+    client = _http_client_from_request(request, settings)
+    overrides = await dagster_schedule_service.schedule_overrides(session)
     try:
-        payload = await dagster_support._post_graphql(
+        payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
             variables={},
@@ -1273,15 +1285,15 @@ async def list_pipeline_schedules(
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
                 errors=[
-                    dagster_support._graphql_error_message(error)
+                    dagster_graphql.graphql_error_message(error)
                     for error in graphql_errors
                 ],
             ),
             meta=make_meta(started_at=started_at),
         )
-    data = dagster_support._dict(payload.get("data"))
-    repositories, errors = dagster_support._parse_repositories(
-        dagster_support._dict(data.get("repositoriesOrError")),
+    data = dagster_graphql.as_dict(payload.get("data"))
+    repositories, errors = dagster_graphql.parse_repositories(
+        dagster_graphql.as_dict(data.get("repositoriesOrError")),
         overrides=overrides,
     )
     schedules = [
@@ -1319,14 +1331,14 @@ async def patch_pipeline_schedule(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
+    settings = _settings_from_request(request)
+    client = _http_client_from_request(request, settings)
     if body.cron_schedule is None:
-        response = await dagster_support.reset_dagster_schedule_default(
-            request,
-            schedule_name,
-            session,
-            DagsterScheduleCommandRequest(
-                operator=body.operator, reason=body.reason
-            ),
+        response = await dagster_schedule_service.reset_schedule_default(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
         )
         # 감사: override 삭제는 override 행 자체가 사라져 updated_by/reason을
         # 영속할 자리가 없다 — 계약이 받은 감사 필드를 조용히 버리지 않도록
@@ -1340,15 +1352,16 @@ async def patch_pipeline_schedule(
             response.data.status,
         )
     else:
-        response = await dagster_support.update_dagster_schedule(
-            request,
-            schedule_name,
-            DagsterScheduleOverrideRequest(
+        response = await dagster_schedule_service.update_schedule(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
+            body=DagsterScheduleOverrideRequest(
                 cron_schedule=body.cron_schedule,
                 operator=body.operator,
                 reason=body.reason,
             ),
-            session,
         )
     return PipelineScheduleCommandResponse(
         data=_pipeline_command_data(response.data),
@@ -1372,18 +1385,22 @@ async def post_pipeline_schedule_command(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
+    settings = _settings_from_request(request)
+    client = _http_client_from_request(request, settings)
     if body.command == "run":
-        response = await dagster_support.run_dagster_schedule_now(
-            request,
-            schedule_name,
-            session,
-            DagsterScheduleCommandRequest(
+        response = await dagster_schedule_service.run_schedule_now(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
+            body=DagsterScheduleCommandRequest(
                 operator=body.operator, reason=body.reason
             ),
         )
     else:
-        response = await dagster_support._mutate_schedule_state(
-            request=request,
+        response = await dagster_schedule_service.mutate_schedule_state(
+            settings=settings,
+            client=client,
             schedule_name=schedule_name,
             command=body.command,
             session=session,
@@ -1426,11 +1443,15 @@ async def create_pipeline_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureUpdateRequestCreateResponse:
-    return await update_request_support._create_feature_update_request_response(
-        body,
-        session,
-        status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
-    )
+    try:
+        return await feature_update_service.create_feature_update_request(
+            body,
+            session,
+            status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
+            settings=KorTravelMapSettings(),
+        )
+    except feature_update_service.FeatureUpdateServiceError as exc:
+        raise to_http_exception(exc) from exc
 
 
 @router.post(
@@ -1473,27 +1494,31 @@ async def run_pipeline_update_request_now(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="이미 running 상태인 request는 run-now 재요청할 수 없습니다.",
             )
-        result = await update_request_support._enqueue(
-            session,
-            scope=existing.scope,
-            providers=existing.providers,
-            dataset_keys=existing.dataset_keys,
-            update_policy=existing.update_policy,
-            run_mode="now",
-            priority=(
-                body.priority
-                if body and body.priority is not None
-                else existing.priority
-            ),
-            dry_run=False,
-            operator=body.operator if body and body.operator else existing.operator,
-            reason=(
-                body.reason
-                if body and body.reason
-                else f"run-now from {existing.request_id}"
-            ),
-        )
-    return update_request_support._create_response(
+        try:
+            result = await feature_update_service.enqueue_update_request(
+                session,
+                scope=existing.scope,
+                providers=existing.providers,
+                dataset_keys=existing.dataset_keys,
+                update_policy=existing.update_policy,
+                run_mode="now",
+                priority=(
+                    body.priority
+                    if body and body.priority is not None
+                    else existing.priority
+                ),
+                dry_run=False,
+                operator=body.operator if body and body.operator else existing.operator,
+                reason=(
+                    body.reason
+                    if body and body.reason
+                    else f"run-now from {existing.request_id}"
+                ),
+                settings=KorTravelMapSettings(),
+            )
+        except feature_update_service.FeatureUpdateServiceError as exc:
+            raise to_http_exception(exc) from exc
+    return feature_update_service.create_response(
         result,
         started_at=started_at,
         status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
@@ -1510,4 +1535,8 @@ async def run_pipeline_update_request_now(
     ),
 )
 async def mark_pipeline_nux_seen(request: Request) -> DagsterNuxSeenResponse:
-    return await dagster_support.mark_dagster_nux_seen(request)
+    settings = _settings_from_request(request)
+    client = _http_client_from_request(request, settings)
+    return await dagster_query_service.mark_nux_seen(
+        settings=settings, client=client
+    )
