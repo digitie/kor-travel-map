@@ -59,6 +59,7 @@ class OpsImportJob:
     started_at: datetime | None
     finished_at: datetime | None
     heartbeat_at: datetime | None
+    dagster_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -200,8 +201,8 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
 
 _IMPORT_JOB_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, created_at, started_at, "
-    "finished_at, heartbeat_at"
+    "current_stage, source_checksum, error_message, dagster_run_id, created_at, "
+    "started_at, finished_at, heartbeat_at"
 )
 
 _LIST_IMPORT_JOBS_SQL: Final[str] = f"""
@@ -391,6 +392,7 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
         started_at=row.started_at,
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
+        dagster_run_id=row.dagster_run_id,
     )
 
 

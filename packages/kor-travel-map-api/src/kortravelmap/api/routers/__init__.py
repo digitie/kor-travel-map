@@ -51,6 +51,7 @@ from kortravelmap.api.routers.ops import router as ops_router
 from kortravelmap.api.routers.ops_datasets import router as ops_datasets_router
 from kortravelmap.api.routers.ops_live import router as ops_live_router
 from kortravelmap.api.routers.ops_logs import router as ops_logs_router
+from kortravelmap.api.routers.ops_pipeline import router as ops_pipeline_router
 from kortravelmap.api.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
@@ -88,6 +89,7 @@ __all__ = [
     "ops_datasets_router",
     "ops_live_router",
     "ops_logs_router",
+    "ops_pipeline_router",
     "dagster_router",
     "public_status_router",
     "providers_router",

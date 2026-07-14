@@ -84,7 +84,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at |
+| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at, `dagster_run_id`(연결 Dagster run 실컬럼 — alembic 0048, payload 키에서 백필/승격) |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
@@ -197,6 +197,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_import_jobs_heartbeat` | (heartbeat_at) | partial status='running' |
 | `idx_import_jobs_load_batch_created` | (load_batch_id, created_at DESC, job_id DESC) | partial `load_batch_id IS NOT NULL`, T-200 batch 조회 |
 | `idx_import_jobs_parent_created` | (parent_job_id, created_at DESC, job_id DESC) | partial `parent_job_id IS NOT NULL`, root/child 조회 |
+| `idx_import_jobs_dagster_run_id` | (dagster_run_id) | partial `dagster_run_id IS NOT NULL`, `/ops/live` dagster run 연결 조회 (alembic 0048) |
 | `idx_dedup_status_score` | (status, total_score DESC) | partial pending |
 | `idx_overrides_feature` | (feature_id, status) | |
 | `idx_overrides_field` | (field_path) | |

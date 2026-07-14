@@ -65,6 +65,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         started_at=at,
         finished_at=None,
         heartbeat_at=at,
+        dagster_run_id="run-1",
     )
 
 

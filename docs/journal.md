@@ -2,6 +2,49 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-14 (claude, agent B) — backend /ops/pipeline 그룹 신설 (T-ADM-C3)
+
+ADR-064 페이지 ①(`/ops/pipeline`)의 백엔드 리소스 그룹 12 endpoint를 신설했다
+(구 라우터 삭제는 T-ADM-C6b 범위 — 추가만). PR #677.
+
+- **신규 라우터 `routers/ops_pipeline.py`**: overview(Dagster 요약+큐/failure
+  sensor 상태+DB 작업/요청 카운트 — Dagster 다운 시 200 `unavailable`로 DB
+  카운트는 유지) · executions(**DB-only UNION**: `ops.import_jobs` ∪
+  `ops.feature_update_requests`, 공유 keyset cursor `(created_at DESC, id DESC)`
+  + kind discriminator, kind/상태/provider/기간 필터 — Dagster run은 cursor에
+  섞지 않고 실컬럼 속성으로만 연결) · `/{kind}/{id}`(+cancel) · events(전역
+  스트림 이식) · dagster-runs(보조 패널, degrade 유지) · schedules(override
+  병합+sensor) + PATCH(**`cron_schedule: null`=override 삭제** — 구 default 명령
+  대체) + commands(4종 enum) · requests(6-type scope union·카탈로그 검증·geo
+  resolver·advisory lock 409/Retry-After·operator/reason 전량 승계) ·
+  run-now(201+새 request) · nux-seen. UNION 조회는 신규
+  `infra/pipeline_repo.py`(strict+coverage). 마운트는 `ops_routes_enabled` +
+  `require_admin_frontend`의 자체 include 블록.
+- **alembic 0048**: `ops.import_jobs.dagster_run_id` 실컬럼 + payload
+  (`dagster_run_id`/레거시 `run_id`) 백필 + 부분 인덱스. jobs_repo INSERT/UPDATE
+  경로가 payload run id를 실컬럼으로 승격. 통합 테스트가 0047 파일명↔revision id
+  불일치(`0047_notice_reconcile_stats`)로 끊긴 down_revision을 검출·수정.
+- **Dagster 조립·갱신요청 계약은 구 라우터에서 import 재사용**(대량 복제 대신
+  계약 동일성 보장 + OpenAPI 스키마 이름 충돌 회피) — C6b가 구 라우터 삭제 전
+  중립 모듈로 이식해야 한다(tasks.md C6b 전제로 명문).
+- **적대적 리뷰 2인 반영(PR #677, S3 9건)**: ① ops_live dagster 스냅샷을
+  실컬럼 우선 + payload COALESCE 폴백으로 견고화 — migration runner가
+  api-entrypoint뿐이라 생기는 mixed-version 배포 창(구 dagster 이미지가 백필
+  이후 payload-only row 기록)을 정확성 우선으로 흡수, 0048 docstring에 배포
+  순서(api 먼저)와 백필 재실행 SQL 명기. ② cursor key·`{kind}/{id}`·events
+  job_id·run-now request_id에 UUID 검증(비정형 입력 500→422). ③ 감사 필드 유령
+  수용 2건 해소 — PATCH override 삭제와 update request cancel의 operator/reason을
+  구조화 로그로 남기고 테스트로 고정. ④ 409 응답의 `Retry-After` 헤더 OpenAPI
+  명문화. ⑤ A의 `dataset_status_repo`에 `dagster_run_id` 컬럼/매퍼 전파(누락 시
+  datasets 상세 최근 실행에서 항상 None). ⑥ postgres-schema.md에 컬럼·부분
+  인덱스 기재, tasks.md에 C5 소비 전제(이중 행 접기·provider 필터 탈락·progress
+  취득처)와 C6b 이식 전제 명문.
+- **생성물**: `openapi.json`(+12 path·+22 스키마, 순수 additive) + admin
+  `types.ts` 재생성, `openapi.user.json` 불변 확인(PinVi read 표면 무변).
+- 게이트(throwaway python:3.13 Docker, WSL): ruff 6트리 / mypy --strict 3패키지 /
+  lint-imports 4계약 / openapi --check / alembic 단일 head / pytest unit+lint
+  1,281(+coverage 80.16%) · api 387 · dagster 264 · 통합 신규 13+영향 55 green.
+
 ## 2026-07-14 (claude, agent A) — backend /ops/datasets 그룹 신설 (T-ADM-C2)
 
 ADR-064 페이지 ②(`/ops/datasets`)의 백엔드 리소스 그룹을 신설했다(구 라우터

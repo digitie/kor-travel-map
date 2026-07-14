@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-14 (claude, agent B) — T-ADM-C3 backend /ops/pipeline 그룹 완료 (PR #677)
+
+- **T-ADM-C3 완료**: `/v1/ops/pipeline/*` 12 endpoint(overview+sensor · executions
+  DB-only UNION keyset · `/{kind}/{id}`+cancel · events · dagster-runs ·
+  schedules PATCH(cron null=override 삭제)/commands 4종 · requests 6-type scope
+  union 승계 · run-now · nux-seen) + `kortravelmap.infra.pipeline_repo` + alembic
+  0048(`import_jobs.dagster_run_id` 실컬럼+백필+부분 인덱스) + ops_live 스냅샷
+  실컬럼 전환. OpenAPI/admin types 재생성(`openapi.user.json` 불변). **적대적
+  리뷰 2인(S3 9건) 반영 포함** — mixed-version 배포 창 COALESCE 폴백(0048
+  docstring에 배포 순서·백필 재실행 SQL), UUID 검증 500→422, 감사 필드 구조화
+  로그 2건, 409 Retry-After 명문화, A의 `dataset_status_repo`에 `dagster_run_id`
+  전파, C5/C6b 전제 tasks.md 명문.
+- **다음 한 작업**: PR #677 머지(오케스트레이터) 후 `T-ADM-C5`(frontend
+  `/ops/pipeline` 페이지+훅+mock e2e + 홈 위젯 소스 결정, agent B) 착수 —
+  tasks.md의 C5 소비 전제(UNION 이중 행 접기·provider 필터·progress 취득처)
+  준수. 상대 agent 2일치 PR 적대적 리뷰 규율 유지.
+
 ## 2026-07-14 (claude, agent A) — T-ADM-C2 backend /ops/datasets 그룹 완료 (PR #676)
 
 - **T-ADM-C2 완료**: `/v1/ops/datasets/*` 4 endpoint(3원 그리드·scope 배열 상세·

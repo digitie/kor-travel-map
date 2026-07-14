@@ -2060,6 +2060,237 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/pipeline/dagster-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 보조 패널용 최근 Dagster run
+         * @description import job을 만들지 못하고 죽은 순수 Dagster 실패의 가시성을 담당하는 보조 패널 데이터(GraphQL, limit, cursor 없음). Dagster가 내려가도 200(status=unavailable) graceful degrade 계약을 유지한다.
+         */
+        get: operations["list_dagster_runs_v1_ops_pipeline_dagster_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 전역 job 이벤트 스트림
+         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/job 필터.
+         */
+        get: operations["list_pipeline_events_v1_ops_pipeline_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 실행 타임라인 (DB-only UNION)
+         * @description `ops.import_jobs` ∪ `ops.feature_update_requests`를 공유 keyset cursor `(created_at DESC, id DESC)` + kind discriminator로 병합한 실행 목록. Dagster run은 목록 cursor에 섞지 않는다 — 연결된 run은 각 행의 `dagster_run_id` 속성으로만 노출한다(ADR-064).
+         */
+        get: operations["list_executions_v1_ops_pipeline_executions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/executions/{kind}/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 실행 상세 (+이벤트 cursor, 연결 개체) */
+        get: operations["get_execution_detail_v1_ops_pipeline_executions__kind___execution_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 실행 취소 (종류별 위임) */
+        post: operations["cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/nux-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dagster NUX seen 처리 (승계)
+         * @description embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다 — `/ops/dagster/nux-seen` 승계.
+         */
+        post: operations["mark_pipeline_nux_seen_v1_ops_pipeline_nux_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 파이프라인 상태 스트립 집계
+         * @description Dagster 요약(run 카운트·sensor 상태 — 큐 sensor가 꺼지면 갱신요청 큐가 침묵 정지하는 실장애 모드를 상단에 노출)과 DB 작업/요청 카운트를 합친 상태 스트립 데이터. Dagster가 내려가도 200(status=unavailable)으로 DB 카운트는 계속 제공한다.
+         */
+        get: operations["get_pipeline_overview_v1_ops_pipeline_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * feature update request 생성 또는 dry-run
+         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + operator/reason 감사 필드 + dry-run/priority 계약을 전량 승계한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
+         */
+        post: operations["create_pipeline_update_request_v1_ops_pipeline_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/requests/{request_id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 기존 request payload를 run_mode=now로 재큐잉 (201 + 새 request)
+         * @description 원 행은 바뀌지 않고 동일 payload의 **새 request 행**이 생성된다 — 응답의 request_id는 새 행의 id다.
+         */
+        post: operations["run_pipeline_update_request_now_v1_ops_pipeline_requests__request_id__run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 스케줄 목록 (override 병합) + sensor 상태 */
+        get: operations["list_pipeline_schedules_v1_ops_pipeline_schedules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/schedules/{schedule_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 스케줄 cron 수정 (null = override 삭제)
+         * @description `cron_schedule`이 문자열이면 override를 저장하고, 명시적 `null`이면 override를 삭제해 코드 기본값으로 되돌린다(구 `default` 명령 대체). override는 code location reload 이후 반영되므로 지연이 있을 수 있다.
+         */
+        patch: operations["patch_pipeline_schedule_v1_ops_pipeline_schedules__schedule_name__patch"];
+        trace?: never;
+    };
+    "/v1/ops/pipeline/schedules/{schedule_name}/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 스케줄 명령 실행 — {command: run|start|stop|reset}
+         * @description run은 스케줄이 가리키는 job을 현재 설정으로 1회 즉시 실행하고, start/stop은 스케줄 상태를 전환하며, reset은 코드 기본 상태로 되돌린다.
+         */
+        post: operations["post_pipeline_schedule_command_v1_ops_pipeline_schedules__schedule_name__commands_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/providers": {
         parameters: {
             query?: never;
@@ -7755,6 +7986,445 @@ export interface components {
             page_size: number;
             /** Total */
             total?: number | null;
+        };
+        /**
+         * PipelineDagsterOverview
+         * @description overview의 Dagster 요약 부분 — GraphQL degrade 허용.
+         */
+        PipelineDagsterOverview: {
+            /** Dagster Url */
+            dagster_url: string;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Recent Runs */
+            recent_runs?: components["schemas"]["DagsterRunSummary"][];
+            /** Run Counts */
+            run_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Schedule Count
+             * @default 0
+             */
+            schedule_count: number;
+            /**
+             * Sensor Count
+             * @default 0
+             */
+            sensor_count: number;
+            /** Sensors */
+            sensors?: components["schemas"]["DagsterSensor"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+            /** Version */
+            version?: string | null;
+        };
+        /**
+         * PipelineDagsterRunsData
+         * @description ``GET /ops/pipeline/dagster-runs`` data — 보조 패널용 최근 run.
+         */
+        PipelineDagsterRunsData: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Run Counts */
+            run_counts?: {
+                [key: string]: number;
+            };
+            /** Runs */
+            runs?: components["schemas"]["DagsterRunSummary"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+        };
+        /**
+         * PipelineDagsterRunsResponse
+         * @description ``GET /ops/pipeline/dagster-runs`` 응답.
+         */
+        PipelineDagsterRunsResponse: {
+            data: components["schemas"]["PipelineDagsterRunsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineEventsData
+         * @description 전역 job 이벤트 목록 data.
+         */
+        PipelineEventsData: {
+            /** Items */
+            items: components["schemas"]["PipelineJobEventRecord"][];
+        };
+        /**
+         * PipelineEventsListResponse
+         * @description ``GET /ops/pipeline/events`` 응답.
+         */
+        PipelineEventsListResponse: {
+            data: components["schemas"]["PipelineEventsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineExecutionCancelRequest
+         * @description ``POST /ops/pipeline/executions/{kind}/{id}/cancel`` body.
+         */
+        PipelineExecutionCancelRequest: {
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * PipelineExecutionCancelResponse
+         * @description 취소 후 실행 행 응답.
+         */
+        PipelineExecutionCancelResponse: {
+            data: components["schemas"]["PipelineExecutionRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineExecutionDetailData
+         * @description 실행 상세 — 실행 행 + 연결 개체 + 이벤트 페이지.
+         */
+        PipelineExecutionDetailData: {
+            /** Events */
+            events?: components["schemas"]["PipelineJobEventRecord"][];
+            /**
+             * Events Next Cursor
+             * @description 이벤트 로그 전진 페이지네이션 cursor (없으면 마지막 페이지).
+             */
+            events_next_cursor?: string | null;
+            execution: components["schemas"]["PipelineExecutionRecord"];
+            /** @description kind=import_job의 본체 또는 update_request가 연결한 job. */
+            import_job?: components["schemas"]["PipelineImportJobRecord"] | null;
+            /** @description kind=update_request의 본체 또는 import_job이 연결한 request. */
+            update_request?: components["schemas"]["FeatureUpdateRequestRecord"] | null;
+        };
+        /**
+         * PipelineExecutionDetailResponse
+         * @description ``GET /ops/pipeline/executions/{kind}/{id}`` 응답.
+         */
+        PipelineExecutionDetailResponse: {
+            data: components["schemas"]["PipelineExecutionDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineExecutionRecord
+         * @description 실행 타임라인 1행 — import job 또는 feature update request.
+         */
+        PipelineExecutionRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /** Detail Url */
+            detail_url: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Job Id
+             * @description update_request 행이 연결된 import job id.
+             */
+            job_id?: string | null;
+            /** Job Kind */
+            job_kind?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "import_job" | "update_request";
+            /** Load Batch Id */
+            load_batch_id?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Parent Job Id */
+            parent_job_id?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Progress */
+            progress?: number | null;
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Request Id
+             * @description import_job 행이 연결된 feature update request id.
+             */
+            request_id?: string | null;
+            /** Run Mode */
+            run_mode?: string | null;
+            /** Scope Type */
+            scope_type?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * PipelineExecutionsData
+         * @description 실행 타임라인 목록 data.
+         */
+        PipelineExecutionsData: {
+            /** Items */
+            items: components["schemas"]["PipelineExecutionRecord"][];
+        };
+        /**
+         * PipelineExecutionsListResponse
+         * @description ``GET /ops/pipeline/executions`` 응답 (DA-D-03 envelope).
+         */
+        PipelineExecutionsListResponse: {
+            data: components["schemas"]["PipelineExecutionsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineImportJobRecord
+         * @description ``ops.import_jobs`` 상세 표현 (pipeline 그룹 계약).
+         */
+        PipelineImportJobRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Current Stage */
+            current_stage?: string | null;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Heartbeat At */
+            heartbeat_at?: string | null;
+            /** Job Id */
+            job_id: string;
+            /** Kind */
+            kind: string;
+            /** Load Batch Id */
+            load_batch_id?: string | null;
+            /** Parent Job Id */
+            parent_job_id?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Progress */
+            progress: number;
+            /** Source Checksum */
+            source_checksum?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * PipelineJobEventRecord
+         * @description ``ops.import_job_events`` 표현 (pipeline 그룹 계약).
+         */
+        PipelineJobEventRecord: {
+            /** Code */
+            code?: string | null;
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /** Event Id */
+            event_id: string;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Job Id */
+            job_id: string;
+            /** Level */
+            level: string;
+            /** Message */
+            message: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Stage */
+            stage?: string | null;
+        };
+        /**
+         * PipelineOverviewData
+         * @description ``GET /ops/pipeline/overview`` data — 상태 스트립 집계.
+         */
+        PipelineOverviewData: {
+            /** Active Import Jobs */
+            active_import_jobs: number;
+            /** Active Update Requests */
+            active_update_requests: number;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            dagster: components["schemas"]["PipelineDagsterOverview"];
+            /** Failed Import Jobs 24H */
+            failed_import_jobs_24h: number;
+            /** Failed Update Requests 24H */
+            failed_update_requests_24h: number;
+            /** Import Jobs By Status */
+            import_jobs_by_status: {
+                [key: string]: number;
+            };
+            /** Update Requests By Status */
+            update_requests_by_status: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * PipelineOverviewResponse
+         * @description ``GET /ops/pipeline/overview`` 응답 (DA-D-03 envelope).
+         */
+        PipelineOverviewResponse: {
+            data: components["schemas"]["PipelineOverviewData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineScheduleCommandData
+         * @description schedule write(PATCH/commands) 결과.
+         */
+        PipelineScheduleCommandData: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Command
+             * @enum {string}
+             */
+            command: "update" | "clear_override" | "run" | "start" | "stop" | "reset";
+            /** Cron Schedule */
+            cron_schedule?: string | null;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Default Cron Schedule */
+            default_cron_schedule?: string | null;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Override Cron Schedule */
+            override_cron_schedule?: string | null;
+            /**
+             * Reloaded
+             * @default false
+             */
+            reloaded: boolean;
+            /** Run Id */
+            run_id?: string | null;
+            /** Run Status */
+            run_status?: string | null;
+            /** Schedule Name */
+            schedule_name: string;
+            /** Schedule Status */
+            schedule_status?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+        };
+        /**
+         * PipelineScheduleCommandRequest
+         * @description ``POST /ops/pipeline/schedules/{name}/commands`` body — 4종 enum.
+         */
+        PipelineScheduleCommandRequest: {
+            /**
+             * Command
+             * @enum {string}
+             */
+            command: "run" | "start" | "stop" | "reset";
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * PipelineScheduleCommandResponse
+         * @description schedule write 응답.
+         */
+        PipelineScheduleCommandResponse: {
+            data: components["schemas"]["PipelineScheduleCommandData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineScheduleUpdateRequest
+         * @description ``PATCH /ops/pipeline/schedules/{name}`` body.
+         *
+         *     ``cron_schedule``는 필수 키다 — 문자열이면 override 저장,
+         *     **명시적 ``null``이면 override 삭제**(구 ``default`` 명령 대체, ADR-064 §6-5).
+         */
+        PipelineScheduleUpdateRequest: {
+            /** Cron Schedule */
+            cron_schedule: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * PipelineSchedulesData
+         * @description ``GET /ops/pipeline/schedules`` data — override 병합 + sensor 상태.
+         */
+        PipelineSchedulesData: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Schedules */
+            schedules?: components["schemas"]["DagsterSchedule"][];
+            /** Sensors */
+            sensors?: components["schemas"]["DagsterSensor"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+        };
+        /**
+         * PipelineSchedulesResponse
+         * @description ``GET /ops/pipeline/schedules`` 응답.
+         */
+        PipelineSchedulesResponse: {
+            data: components["schemas"]["PipelineSchedulesData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * PlaceSearchHitView
@@ -15585,6 +16255,575 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_dagster_runs_v1_ops_pipeline_dagster_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineDagsterRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_pipeline_events_v1_ops_pipeline_events_get: {
+        parameters: {
+            query?: {
+                job_id?: string | null;
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEventsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_executions_v1_ops_pipeline_executions_get: {
+        parameters: {
+            query?: {
+                kind?: ("import_job" | "update_request") | null;
+                status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
+                provider?: string | null;
+                created_from?: string | null;
+                created_to?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineExecutionsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_execution_detail_v1_ops_pipeline_executions__kind___execution_id__get: {
+        parameters: {
+            query?: {
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                kind: "import_job" | "update_request";
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineExecutionDetailResponse"];
+                };
+            };
+            /** @description 실행 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "import_job" | "update_request";
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PipelineExecutionCancelRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineExecutionCancelResponse"];
+                };
+            };
+            /** @description 실행 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 이미 terminal 상태라 취소 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    mark_pipeline_nux_seen_v1_ops_pipeline_nux_seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterNuxSeenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_pipeline_overview_v1_ops_pipeline_overview_get: {
+        parameters: {
+            query?: {
+                run_limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    create_pipeline_update_request_v1_ops_pipeline_requests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureUpdateRequestCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                };
+            };
+            /** @description run_mode=now 요청의 동일 scope advisory lock 경합 */
+            409: {
+                headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    run_pipeline_update_request_now_v1_ops_pipeline_requests__request_id__run_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FeatureUpdateRequestRunNowRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                };
+            };
+            /** @description request_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 이미 running 상태 또는 동일 scope lock 경합 */
+            409: {
+                headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_pipeline_schedules_v1_ops_pipeline_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineSchedulesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    patch_pipeline_schedule_v1_ops_pipeline_schedules__schedule_name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineScheduleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    post_pipeline_schedule_command_v1_ops_pipeline_schedules__schedule_name__commands_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineScheduleCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */

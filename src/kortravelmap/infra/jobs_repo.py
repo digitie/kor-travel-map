@@ -75,8 +75,15 @@ _EVENT_LEVELS: Final[frozenset[str]] = frozenset(
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, started_at, finished_at, "
-    "heartbeat_at, created_at"
+    "current_stage, source_checksum, error_message, dagster_run_id, started_at, "
+    "finished_at, heartbeat_at, created_at"
+)
+
+# payload에 담겨 들어오는 Dagster run id를 실컬럼으로 승격 (ADR-064/T-ADM-C3).
+# 신규 키 ``dagster_run_id`` 우선 + 레거시 ``run_id`` fallback, 빈 문자열은 NULL.
+_PAYLOAD_DAGSTER_RUN_ID_SQL: Final[str] = (
+    "NULLIF(COALESCE(CAST(:payload AS jsonb)->>'dagster_run_id', "
+    "CAST(:payload AS jsonb)->>'run_id'), '')"
 )
 
 _EVENT_RETURN_COLUMNS: Final[str] = (
@@ -99,6 +106,7 @@ class ImportJob:
     error_message: str | None
     load_batch_id: str | None = None
     parent_job_id: str | None = None
+    dagster_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,7 @@ def _row_to_job(row: Any) -> ImportJob:
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
         error_message=row.error_message,
+        dagster_run_id=row.dagster_run_id,
     )
 
 
@@ -157,11 +166,12 @@ def _row_to_event(row: Any) -> ImportJobEvent:
 
 _INSERT_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
-    kind, payload, source_checksum, load_batch_id, parent_job_id
+    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id
 )
 VALUES (
     :kind, CAST(:payload AS jsonb), :source_checksum,
-    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid)
+    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
+    {_PAYLOAD_DAGSTER_RUN_ID_SQL}
 )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -170,12 +180,13 @@ RETURNING {_RETURN_COLUMNS}
 # 수행하는 inline job, 예: advisory lock 보유 중인 단일 워커 적재).
 _START_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
-    kind, payload, source_checksum, load_batch_id, parent_job_id,
+    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
     status, started_at, heartbeat_at
 )
 VALUES (
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
+    {_PAYLOAD_DAGSTER_RUN_ID_SQL},
     'running', now(), now()
 )
 RETURNING {_RETURN_COLUMNS}
@@ -218,7 +229,8 @@ WHERE job_id IN (SELECT job_id FROM ids)
 
 _UPDATE_PAYLOAD_SQL: Final[str] = f"""
 UPDATE ops.import_jobs
-SET payload = CAST(:payload AS jsonb)
+SET payload = CAST(:payload AS jsonb),
+    dagster_run_id = COALESCE({_PAYLOAD_DAGSTER_RUN_ID_SQL}, dagster_run_id)
 WHERE job_id = CAST(:job_id AS uuid)
 RETURNING {_RETURN_COLUMNS}
 """

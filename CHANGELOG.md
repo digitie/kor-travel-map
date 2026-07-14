@@ -25,6 +25,35 @@
   조회). 구 라우터 삭제는 범위 아님(T-ADM-C6b) — 기존 `/ops/providers`·
   `/admin/provider-refresh-policies`·`/debug/etl`은 그대로 둔다.
 
+### admin ops 통합 — backend `/ops/pipeline` 그룹 신설 (2026-07-14, ADR-064 T-ADM-C3)
+
+- **ADDED**: `/v1/ops/pipeline/*` 12 endpoint를 신설했다 — overview(Dagster 요약+
+  큐/failure sensor 상태+작업/요청 카운트), executions(**DB-only UNION** 실행
+  타임라인: `ops.import_jobs` ∪ `ops.feature_update_requests`, 공유 keyset cursor
+  `(created_at DESC, id DESC)` + kind discriminator, kind/상태/provider/기간 필터),
+  `executions/{kind}/{id}`(+cancel), events(전역 job 이벤트 스트림), dagster-runs
+  (보조 패널, `status=unavailable` graceful degrade), schedules(override 병합+sensor)
+  + `PATCH`(**`cron_schedule: null` = override 삭제** — 구 default 명령 대체) +
+  `commands`(`run|start|stop|reset` 4종 enum), requests(6-type scope union·카탈로그
+  refreshable 검증·kor-travel-geo resolver·advisory lock 409/Retry-After·operator/
+  reason 계약 전량 승계) + `run-now`(201 + 새 request), nux-seen. 신규 그룹은
+  `ops_routes_enabled` + `require_admin_frontend` 게이트로 마운트한다(조작 포함 —
+  무인증 ops 패턴 배제). UNION 조회는 `kortravelmap.infra.pipeline_repo`에 있다.
+- **ADDED**: Alembic 0048 — `ops.import_jobs.dagster_run_id` TEXT 실컬럼 +
+  기존 payload(`dagster_run_id`/레거시 `run_id` 키) 백필 + 부분 인덱스
+  (`WHERE dagster_run_id IS NOT NULL`). jobs_repo의 INSERT/UPDATE 경로가 payload의
+  run id를 실컬럼으로 승격한다.
+- **CHANGED**: `/v1/ops/live`의 `dagster_runs`/`dagster_run:{id}` 스냅샷 SQL을
+  실컬럼 `dagster_run_id` 우선 + payload COALESCE 폴백으로 전환했다(hot path
+  2s poll — 전례 #639). 폴백은 mixed-version 배포 창(구 dagster 이미지가 0048
+  백필 이후 payload-only row 기록) 정확성용이며, 배포 순서(api 먼저)와 백필
+  재실행 SQL은 0048 docstring에 명기했다 — 순수 실컬럼 전환은 T-ADM-C6b 재검토.
+- **FIXED**: 리뷰 반영 — executions/cancel/run-now의 id·cursor key·events job_id
+  UUID 검증(비정형 입력 500→422), PATCH override 삭제·update request cancel의
+  operator/reason 구조화 로그(감사 필드 유령 수용 해소), requests·run-now 409
+  응답의 `Retry-After` 헤더 OpenAPI 명문화, datasets 그룹 `dataset_status_repo`에
+  `dagster_run_id` 전파(최근 실행 요약 None 누락 방지).
+
 ### Concierge export 소비 계약 정렬 (2026-07-14)
 
 - **CHANGED**: `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT` 기본값을
