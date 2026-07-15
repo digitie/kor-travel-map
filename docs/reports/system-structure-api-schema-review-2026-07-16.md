@@ -861,3 +861,292 @@ dual-serve(re-key 없음); 공개 predicate는 기존 status 위에 `public_feat
 즉시 방어적 수정), P0-4(공개 계약 위생), P1-9 중 `alembic upgrade head && alembic check` exit 0을
 CI gate로 만드는 것, §9의 검증 gate(특히 "query 수가 batch item 수에 비례하지 않는지" 검사)는
 **어떤 재설계 경로를 택하든 지금 도입할 가치**가 있다 — 오히려 이 gate가 모든 후속 판정의 기준이 된다.
+
+---
+
+## 12. Codex 재검토 의견 및 최종 보강 (2026-07-16 추가)
+
+> 검토 대상은 PR #703의 §11 전체와 같은 기준의 §1~§10, KTM
+> `main@9ef008b2`, PinVi `main@48085afb`다. §11의 실측·운영 관점은 유용하지만
+> 일부는 원문을 다르게 읽었거나 실제 HTTP 경계와 PostgreSQL 제약 방식을 잘못 판정했다.
+> 이 절은 그 차이를 보존한 채 **사실관계와 최종 실행 판단을 확정**한다. 충돌하는 결론은
+> §12를 우선한다.
+
+### 12.0 최종 의견
+
+- §11이 확증한 공개 상태 불일치, raw observation 노출, notice cast, 중복 GiST,
+  geometry membership, 무조건 count, cursor mismatch, 날씨 미래지식 누수는 그대로 유효하다.
+- §11이 제기한 **재취득 불가 데이터 손실과 cutover 검증 순서 문제도 유효**하다. 다만 사용자가
+  명시한 "개발 단계·계약 유지 불필요"를 무효화할 근거는 아니다. **외부 계약의 clean break**와
+  **기존 데이터의 안전한 이관·롤백**은 별도 결정이다.
+- 목표 구조는 §6을 유지한다. 도달 방식은 장기 legacy dual-serve가 아니라
+  **side-by-side vNext 구축 → DB-to-DB 보존 이관 → 검증 → KTM·PinVi 동시 전환 → 짧은 rollback
+  window 후 legacy 제거**가 적합하다.
+- 즉시 P0는 물리적인 3-app 분리 여부보다 **모든 route의 fail-closed, 공개 predicate, payload 경계,
+  PinVi의 false-broken 제거**다. 별도 listener는 이를 대체하는 전제가 아니라 P0 이후 선택할
+  격리 수단이다.
+
+### 12.1 §11 판정의 정정·수용 범위
+
+| §11 주장 | 최종 판정 | 근거와 보정 |
+|---|---|---|
+| P1-4 current pointer FK가 이미 있어 원 리뷰를 정정 | **원 진단 확증** | 원 P1-4는 current pointer가 아니라 `source_records`에 중복 저장한 provider/dataset/type/id와 연결 entity의 identity 불일치를 지적했다. 현재 deferrable FK는 `(source_entity_key, current_source_record_key)`만 보장하므로 그 반례를 막지 않는다. |
+| P1-8 `coord_5179`는 generated라 정합 | **부분 수용** | `coord ↔ coord_5179`만 보장한다. target의 `lon/lat/coord_key`는 여전히 임의 값이며 모두 canonical `coord`에서 파생해야 한다. |
+| P0-1은 admin 무인증 과장 | **범위 명료화** | admin router에 `require_admin_frontend`가 붙는 것은 맞다. 원문 핵심은 그 dependency가 secret 미설정 시 통과하고 curated/legacy ops가 누락된다는 점이므로 P0는 유지한다. |
+| search에 `include_total` 파라미터가 없음 | **정정** | 파라미터는 이미 있지만 repository로 전달되지 않아 `false`에서도 count SQL을 실행한다. 즉 "부재"가 아니라 **동작하지 않는 옵션**이다. |
+| `@` 절단은 PinVi 자체 snapshot 규약이라 무해 | **반증 철회** | PinVi production writer/schema에는 그 규약이 없고 `@raw`는 테스트 fixture에만 있다. PinVi 정본도 `split("@")` 제거를 backlog로 둔다. 현재 KTM ID에 `@`가 없어 능동 장애는 입증되지 않았으므로 P0에서 P1 계약 결함으로 낮추되, 절단 코드는 제거한다. |
+| KTM batch가 retired와 missing을 이미 구분 | **반증 철회** | repository는 inactive row를 읽지만 service router가 `deleted_at IS NOT NULL`을 public filter로 제거한 뒤 모두 `missing`으로 만든다. admin deactivate와 provider retire도 서로 다르게 보인다. item state 계약이 필요하다. |
+| PinVi 계약 테스트는 path만 검사 | **정정** | path와 선택한 schema field 존재를 모두 검사한다. 다만 `required`, type, enum, item-state 의미와 실제 행동은 검사하지 않는다. |
+| create 멱등성이 이미 있음 | **정정** | `idempotency_key`는 결정적 `feature_id` 재료일 뿐이다. change request는 호출마다 새 UUID row를 insert하므로 검수 모드 중복 pending 또는 즉시 모드 conflict가 발생하며 기존 응답을 replay하지 않는다. |
+| PinVi outbox는 KTM `feature_update_requests`와 중복 | **정정** | outbox는 PinVi POI transaction과 전송 의도를 원자적으로 보존하는 delivery 계층이고, KTM queue는 도착한 요청을 실행하는 orchestration 계층이다. 서로 대체하지 않는다. |
+| weather UNIQUE도 `NOT VALID → VALIDATE` | **정정** | PostgreSQL 16의 `UNIQUE`는 `NOT VALID`를 지원하지 않는다. CHECK/FK와 UNIQUE의 온라인 도입 절차를 나눠야 한다. |
+| generated tuple key가 `UNIQUE NULLS NOT DISTINCT`보다 견고 | **정정** | native 8열 tuple UNIQUE가 `TIMESTAMPTZ` 동등성과 NULL 의미를 직접 강제한다. hash/generated key는 충돌·직렬화·NULL sentinel 위험을 추가한다. |
+| MVT·cursor HMAC·100만 fixture를 즉시 적용하지 않음 | **수용** | 먼저 completeness·fingerprint·planner-default smoke를 고치고, MVT와 대규모 p95는 측정 기반 release gate로 둔다. |
+| §8 big-bang은 무조건 불가 | **조건부 보정** | upstream 전량 재취득과 검증 전 legacy 삭제는 금지한다. 그러나 검증된 shadow schema/backup과 동시 배포가 있으면 호환 layer 없는 clean cut도 가능하다. |
+
+### 12.2 추가 P0 — 무게이트 표면과 감사 주체
+
+§11은 누락 route를 충분히 넓게 세지 않았다. 현재 무게이트 router object는
+`curated_router`, `ops_router`, `ops_live_router`, `ops_logs_router`,
+`dagster_router`의 5개다. 여기에 다음 표면이 더 있다.
+
+- `/metrics`는 기본 활성이고 인증이 없다.
+- `debug_routes_enabled=True`가 기본이라 `/v1/debug/etl`이 인증 없이 mount된다.
+- ETL preview의 `source=live`는 실제 provider를 호출하지만
+  `etl_live_preview_enabled=False` 설정은 코드에서 읽히지 않는다.
+- `/v1/ops/live` WebSocket은 인증 전에 `accept()`한다. 브라우저 WebSocket에는
+  임의 인증 header를 쉽게 붙일 수 없으므로 HTTP dependency 복사만으로 닫히지 않는다.
+
+따라서 P0 완료 조건을 다음처럼 확장한다.
+
+1. production profile은 service/admin/operator secret이 없거나 debug live가 켜진 채 인증 방식이
+   없으면 기동에 실패한다.
+2. 모든 Starlette route와 WebSocket을 public/service/operator/debug/metrics 중 하나로 분류한
+   **route policy matrix**를 코드에서 생성하고, 미분류 route가 있으면 CI를 실패시킨다.
+3. WebSocket은 짧은 수명의 서명 ticket, same-site session cookie, BFF proxy 중 배포 구조에 맞는
+   한 방식을 채택한다.
+4. metrics는 management listener 또는 scrape identity로 제한한다.
+5. `etl_live_preview_enabled`를 실제 live 분기에 연결하고 기본 off를 테스트한다.
+
+감사 actor도 header 위조 가능성보다 직접적인 결함이 있다. admin router의 인증 dependency가
+반환한 `AdminProxyContext.actor`를 사용하지 않고 request body의 `operator`를
+`requested_by/reviewed_by`로 저장한다. body actor를 제거하고 인증 principal에서만
+파생해야 한다. 비동기 검수라면 요청 제출 actor와 승인 actor를 각각 보존한다.
+
+애플리케이션 내부 inbound rate limiter가 없는 것은 사실이나 edge 정책은 이번 검토에서 확인하지
+못했다. "DoS 확정" 대신 **edge 또는 app 중 어디에서 principal·route별 quota를 강제하는지 정본화하고
+`429 + Retry-After` contract test를 둔다**가 완료 기준이다. 정확한 localhost origin만 허용하고
+credential을 쓰지 않는 현재 CORS wildcard method/header는 P0가 아니라 hardening 항목이다.
+
+### 12.3 DB 보강 — collision, online constraint, spatial projection
+
+#### 12.3.1 64-bit Feature hash 설명이 틀렸다
+
+`FEATURE_ID_HASH_LENGTH=16`은 64-bit SHA-1 prefix다. 코드 주석은 Feature가
+`10^9`개여도 충돌 확률이 약 `3e-11`이라고 하지만 birthday bound
+`n(n-1)/(2·2^64)`를 적용하면 약 **2.7%**다. 현재 약 103만 건에서는 약
+`2.9e-8`로 작지만, "10억 건에도 충분"은 성립하지 않는다.
+
+- 외부 정본 PK는 실제 UUID로 전환한다.
+- provider natural tuple은 별도 UNIQUE로 강제한다.
+- 결정적 alias가 필요하면 64-bit prefix를 identity 정본으로 쓰지 말고 충분히 긴 digest와
+  충돌 검출을 둔다.
+
+UUIDv7은 PostgreSQL 16 기본 함수가 아니다. v7을 선택하면 애플리케이션 generator 또는 승인한
+extension을 정본으로 명시해야 하며, 현재 `gen_random_uuid()`는 UUIDv4다.
+
+#### 12.3.2 제약별 안전한 도입 절차
+
+CHECK/FK와 UNIQUE를 한 문장으로 묶지 않는다.
+
+```sql
+-- CHECK/FK: 기존 row 검증을 분리
+ALTER TABLE ... ADD CONSTRAINT ... CHECK (...) NOT VALID;
+ALTER TABLE ... VALIDATE CONSTRAINT ...;
+
+-- UNIQUE: 중복 정리 후 index를 별도 transaction 경계에서 생성
+CREATE UNIQUE INDEX CONCURRENTLY ...
+ON feature.feature_weather_values (...)
+NULLS NOT DISTINCT;
+```
+
+일반 column B-tree index라면 필요 시 `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE USING INDEX ...`로
+constraint에 attach한다. `CREATE/DROP INDEX CONCURRENTLY`는 transaction 안에서 실행할 수
+없으므로 현재 Alembic transaction 밖의 `autocommit_block()` 또는 별도 운영 migration
+runbook이 필요하다.
+
+weather identity는
+`(feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at)`
+native UNIQUE를 정본으로 둔다. 현재 80-bit hash PK는 같은 instant의 timezone 표기가 다르면 다른
+key가 될 수 있어 semantic UNIQUE를 대신하지 못한다.
+
+기존 약 3천만 weather row에 `effective_at STORED`를 바로 추가하면 table rewrite와 WAL을
+유발한다. online 전환은 먼저 동등한 expression index를 concurrently 만들거나 작은 current-summary
+table을 구축하고, 새 baseline/table에서만 generated column을 채택한다.
+
+#### 12.3.3 `coord_5179`는 유지하되 업그레이드 경계를 관리한다
+
+반복 반경 조회를 위해 STORED 5179 projection을 유지하는 편이 낫다. PROJ/PostGIS 변경 후 기존
+stored 값이 자동 재계산되지 않는 문제는 generated column을 버릴 이유가 아니라 다음 운영 gate다.
+
+- Docker image의 PostGIS/PROJ 버전을 pin한다.
+- 버전 변경 전후 허용 오차 기반 drift 검사와 base `coord` touch/rewrite, GiST `REINDEX`를
+  runbook에 둔다.
+- POI target의 `lon`, `lat`, `coord_key`, `coord_5179`는 모두 하나의
+  canonical `coord`에서 직접 파생한다. PostgreSQL 16에서는 generated column끼리 연쇄
+  참조하지 않는다.
+
+대형 table에 STORED generated column을 새로 추가하는 것은 heap rewrite/WAL을 만들 수 있으므로
+"rewrite 비의존 additive"로 분류하지 않는다.
+
+#### 12.3.4 공개 정본과 summary는 대체 관계가 아니다
+
+`public_features`는 공개 membership·상태를 통일하는 논리 정본이고 current weather/price
+summary는 행별 LATERAL을 없애는 enrichment read model이다. 둘은 함께 필요하다.
+
+- 일반 view에는 index를 만들 수 없다.
+- partial-index predicate와 generated expression에는 `now()`나 타 table lookup을 넣을 수 없다.
+- notice 유효기간·lineage처럼 시간·다른 table에 의존하는 공개성은 typed current projection
+  table/materialized view 또는 transactionally maintained base flag로 만들고, immutable predicate에
+  맞춘 index를 둔다.
+
+### 12.4 PinVi·service API 최종 계약
+
+#### 12.4.1 P0 hotfix와 목표 계약을 구분한다
+
+PinVi 즉시 수정은 batch 호출 성공 여부, 응답의 `missing`, cache miss를 서로 분리해 transport
+실패 때 snapshot을 stale로 유지해야 한다. 현재 60초 process cache도 status/tombstone 신선도
+fixture에 포함한다. 그러나 이것만으로 provider-retired가 service router에서 `missing`으로
+바뀌는 KTM 문제는 닫히지 않는다.
+
+목표 batch는 요청 전체 transport 결과와 item 상태를 분리한다.
+
+```json
+{
+  "service_revision": "catalog-20260716-42",
+  "items": [
+    {
+      "requested_feature_id": "opaque-id",
+      "state": "found",
+      "revision": 42,
+      "projection": "trip_card",
+      "feature": {}
+    }
+  ]
+}
+```
+
+- item state는 최소 `found | retired | suppressed | missing | unchanged`를 구분한다.
+- 호출 자체가 실패하면 503이며 item을 `missing`으로 합성하지 않는다.
+- `projection`은 `trip_card` 같은 서버 정의 enum으로 제한하고 raw observation을
+  선택할 수 없게 한다.
+- `service_revision/known_revisions`는 payload 최적화이므로 false-broken P0의 선행 조건은
+  아니지만 vNext cache 계약에는 포함할 가치가 있다.
+- Feature ID는 byte-for-byte 전달하며 `split("@")`을 제거한다. revision/snapshot version은
+  별도 필드다.
+
+#### 12.4.2 날씨는 부모 404와 batch를 모두 고친다
+
+단건 weather의 부모 공개 상태 확인은 정합성 수정일 뿐 N+1을 해결하지 않는다. 활성 날짜의
+Feature POI와 day header에서 중복 호출되고, 한 단건 card도 여러 fallback SQL을 실행한다.
+일반 context batch가 과하면 최소 `POST /v1/features/weather:batch`를 먼저 제공하되 내부 단건
+loop가 아닌 set-based bounded query여야 한다.
+
+- `target_at`: 값을 보여 줄 유효 시각(RFC 3339 instant)
+- `known_at`: 그 시점에 알 수 있었던 발표/수집 cutoff, 기본 request time
+- 한국 전용 local-date 입력이 필요하면 `Asia/Seoul` 변환 규칙을 고정
+- item별 `found | no_data | retired`와 전체 `unavailable`을 분리
+- historical query는 `issued_at <= known_at`을 강제해 미래지식 누수를 막음
+
+#### 12.4.3 지도 completeness가 MVT보다 먼저다
+
+PinVi BFF는 이미 `items/clusters/cluster_unit`을 전달하지만 `TripMapView`만
+`items`을 저장한다. 첫 수정은 TripMap consumer가 cluster를 렌더하거나 drill-down하는 것이다.
+KTM 응답도 다음을 명시한다.
+
+- `mode = items | clusters`
+- `truncated`와 결과가 대표하는 `coverage`
+- deterministic `cluster_key`와 drill-down bbox/filter
+- item mode에만 필요한 안정 cursor
+
+MVT는 route/area geometry byte, 전국 low-zoom p95, pan 빈도 측정이 기준을 넘을 때 도입한다.
+"반드시 필요"와 "과설계" 어느 쪽도 현재 증거로 확정하지 않는다.
+
+#### 12.4.4 target outbox와 refresh queue를 연결한다
+
+REST 경계는 다음처럼 resource와 operation을 분리한다.
+
+```text
+PUT    /v1/service/cache-targets/{external_system}/{target_key}
+DELETE /v1/service/cache-targets/{external_system}/{target_key}
+POST   /v1/service/refresh-requests
+GET    /v1/service/refresh-requests/{request_id}
+```
+
+PinVi는 POI write와 같은 transaction에 outbox event를 넣고 idempotent PUT/DELETE를 재시도한다.
+KTM은 target registry를 갱신한 뒤 필요할 때 기존 `feature_update_requests`에 enqueue한다.
+주기 reconcile은 누락 event를 복구한다. 동기 network dual-write만으로는 PinVi commit 뒤 KTM 실패를
+복구할 수 없다.
+
+현재 target active UNIQUE가 partial이고 delete가 soft-delete라, 지연된 과거 upsert가 delete 뒤
+도착하면 새 active row로 target을 부활시킬 수 있다. target event와 PUT/DELETE에 target별 단조 증가
+`source_generation`(POI version 또는 outbox sequence)을 포함하고 KTM은 저장된 generation보다
+큰 명령만 적용해야 한다. 안정 `target_key`는 PinVi attachment ID로 고정하고, 같은
+`(external_system, target_key, source_generation)`은 같은 결과를 replay한다.
+
+### 12.5 REST write 안전성
+
+`Idempotency-Key`와 `If-Match`는 우선순위를 다투는 대안이 아니라 서로 다른 실패를 막는다.
+
+- command POST: `(principal, route, key)` UNIQUE, canonical request hash, status/response를
+  effect와 같은 transaction에 저장한다. 같은 key·body는 기존 결과를 replay하고 다른 body는 409다.
+- PATCH/DELETE: 요청 생성 때 base revision을 필수로 받아 누락 428, stale 412를 반환한다.
+- 비동기 검수: 승인 시점에도 base revision을 다시 검사해 그 사이 provider ingest가 만든 최신 값을
+  오래된 요청이 덮지 못하게 한다.
+- PinVi는 suggestion/request ID에서 만든 같은 header를 모든 retry에 유지한다.
+
+REST 형태는 resource lifecycle에 맞춘다. catalog read는 `GET /features`와
+`GET /features/{id}`, 장시간 갱신은 위 `refresh-requests` resource로 모델링한다.
+큰 batch body와 projection query는 `feature-context:batch` 같은 명시적 service command를
+예외로 허용하되, 이것을 일반 resource CRUD인 것처럼 섞지 않는다.
+
+### 12.6 안전한 clean-cut 실행 순서
+
+§11.5가 `integration-map.md`를 "PinVi가 prod에서 실제 pull 중"의 근거로 사용한 것은 과하다.
+그 문서는 연동 방향의 정본이지 runtime 배포 증거가 아니다. 반대로 streaming replication이 없다는
+사실도 곧 rollback 불능을 뜻하지 않는다. 이 저장소에는 cold backup, staging restore 검증,
+hot-swap env 전환 경로가 있다.
+
+권장 순서는 다음과 같다.
+
+1. **즉시 차단**: route matrix/fail-closed, ETL live/WebSocket/metrics, 공개 predicate/raw payload,
+   notice cast, no-op option과 PinVi false-broken을 먼저 고친다.
+2. **target freeze**: §6 schema/API와 공개·identity·시간 의미 불변식을 ADR/OpenAPI/DDL test로 고정한다.
+3. **보존 등급 분류**: immutable source records, weather/history, override, curation, 감사 데이터는
+   DB-to-DB 이관 대상으로, 재생 가능한 projection/index만 rebuild 대상으로 표시한다.
+4. **복구 선행 검증**: cold snapshot을 staging restore하고 count/checksum/대표 query를 통과시킨다.
+5. **shadow vNext 구축**: 안정 UUID와 child shadow FK를 batch backfill하고 모든 제약·index를 검증한다.
+   UUID column 하나와 alias만 추가해 text PK를 영구 정본으로 남기지 않는다.
+6. **read/API 검증**: visibility matrix, batch state, weather bitemporal 의미, PinVi commit-pinned contract,
+   planner-default EXPLAIN과 target hardware p95를 새 schema에서 먼저 통과시킨다.
+7. **동시 cutover**: maintenance window에 write를 멈추고 마지막 delta를 반영한 뒤 KTM과 PinVi를
+   함께 전환한다. 구 schema/image와 검증된 snapshot은 짧은 rollback window 동안 보존한다.
+8. **soak 후 제거**: reconciliation과 운영 지표가 통과한 뒤 legacy schema/route/trigger를 삭제한다.
+
+zero-downtime가 별도 요구일 때만 temporary dual-write/dual-serve를 추가한다. 계약 호환성이 불필요한
+현재 요청에서 이를 영구 구조로 만들 이유는 없다. 반대로 upstream API를 다시 호출해 기존 source와
+history를 복원하는 방식도 허용하지 않는다.
+
+### 12.7 최종 우선순위
+
+| 단계 | 포함 항목 |
+|---|---|
+| **P0 즉시** | fail-closed route matrix, ETL live/WebSocket/metrics 보호, actor principal 고정, 공개 상태·notice·raw payload·no-op 수정, PinVi transport/missing 분리와 service batch tombstone item-state |
+| **P1 조기** | true idempotency + base revision/`If-Match`, batch revision/cache 최적화, weather set-based batch, `include_total`/cursor fingerprint, 지도 completeness, weather UNIQUE/CHECK/FK, 중복 GiST 제거 |
+| **구조 전환** | 안정 UUID+natural UNIQUE, typed subtype/range, provider dataset 정본, effective/public projection, target sync+outbox, DB role/OpenAPI surface 분리 |
+| **측정 후** | 별도 listener/process, MVT, cursor HMAC, weather partition/hypertable, 매 PR 100만 fixture |
+
+성능 gate는 계층화한다. 매 PR은 planner 기본 EXPLAIN, query-count, response-shape 회귀를 빠르게
+검사하고, 100만+ fixture의 p95/buffer/byte budget과 N150 실측은 release·schema cutover gate로
+실행한다. 이 순서라면 목표 구조의 정합성을 낮추지 않으면서도 운영 현실 때문에 legacy 계약을
+영구 보존하는 결과를 피할 수 있다.
