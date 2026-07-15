@@ -1174,7 +1174,7 @@ async def test_queued_member_cannot_use_definitive_failure_with_terminal_shared_
     }
     with pytest.raises(
         PipelineCancellationInvariantError,
-        match="restricted to frozen running",
+        match="restricted to running or run-backed active",
     ):
         await set_pipeline_cancellation_member_result(
             migrated_session,
@@ -1193,7 +1193,7 @@ async def test_queued_member_cannot_use_definitive_failure_with_terminal_shared_
     )
     with pytest.raises(
         PipelineCancellationInvariantError,
-        match="restricted to frozen running",
+        match="restricted to running or run-backed active",
     ):
         await finish_pipeline_cancellation_attempt(
             migrated_session,

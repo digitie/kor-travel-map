@@ -43,6 +43,13 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.dedup import find_dedup_candidates, find_sibling_candidates
+from kortravelmap.core.feature_operation import (
+    DagsterFeatureOperationCursor,
+    DagsterFeatureOperationMutation,
+    DagsterFeatureOperationPage,
+    FeatureOperationInvariantConflict,
+    ProviderDatasetOperationKey,
+)
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
     PhoneEnrichmentResult,
@@ -119,6 +126,24 @@ from kortravelmap.infra.enrichment_review_repo import (
 )
 from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    append_dagster_feature_attempt_event as repo_append_dagster_feature_attempt_event,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation as repo_ensure_dagster_feature_operation,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    finish_dagster_feature_pair as repo_finish_dagster_feature_pair,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    list_reconcilable_dagster_feature_runs as repo_list_reconcilable_feature_runs,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    reconcile_dagster_feature_run as repo_reconcile_dagster_feature_run,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    record_feature_operation_invariant_conflict,
 )
 from kortravelmap.infra.feature_repo import (
     AirQualityLoadResult,
@@ -207,6 +232,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
+from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
     list_active_target_coords as repo_list_active_target_coords,
@@ -308,11 +334,16 @@ __all__ = [
     "CuratedFeatureDetailSnapshotMaterializeResult",
     "DedupRefreshResult",
     "DedupSyncResult",
+    "DagsterFeatureOperationCursor",
+    "DagsterFeatureOperationMutation",
+    "DagsterFeatureOperationPage",
+    "FeatureOperationInvariantConflict",
     "FestivalEnrichmentReviewRefreshResult",
     "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
     "OfflineUploadValidationResult",
     "PriceFeatureLoadResult",
+    "ProviderDatasetOperationKey",
 ]
 
 
@@ -442,6 +473,122 @@ class AsyncKorTravelMapClient:
             yield
 
     # ─── write (transaction 소유) ──────────────────────────────────────────
+
+    async def _record_feature_operation_conflict(
+        self, conflict: FeatureOperationInvariantConflict
+    ) -> None:
+        async with self._session_factory() as session, session.begin():
+            await record_feature_operation_invariant_conflict(session, conflict)
+
+    async def ensure_dagster_feature_operation(
+        self,
+        *,
+        dagster_run_id: str,
+        trigger_kind: str,
+        selected_pairs: Sequence[ProviderDatasetOperationKey],
+        registry_version: str,
+        engine_created_at: datetime,
+        engine_started_at: datetime | None,
+        observed_status: str,
+    ) -> DagsterFeatureOperationMutation:
+        """Dagster run root와 exact pair child 전체를 짧은 transaction에 ensure한다."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await repo_ensure_dagster_feature_operation(
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    trigger_kind=trigger_kind,
+                    selected_pairs=selected_pairs,
+                    registry_version=registry_version,
+                    engine_created_at=engine_created_at,
+                    engine_started_at=engine_started_at,
+                    observed_status=observed_status,
+                )
+        except FeatureOperationInvariantConflict as exc:
+            await self._record_feature_operation_conflict(exc)
+            raise
+
+    async def finish_dagster_feature_pair(
+        self,
+        *,
+        dagster_run_id: str,
+        pair: ProviderDatasetOperationKey,
+    ) -> DagsterFeatureOperationMutation:
+        """wrapper가 성공한 exact pair child 하나를 완료한다."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await repo_finish_dagster_feature_pair(
+                    session, dagster_run_id=dagster_run_id, pair=pair
+                )
+        except FeatureOperationInvariantConflict as exc:
+            await self._record_feature_operation_conflict(exc)
+            raise
+
+    async def append_dagster_feature_attempt_event(
+        self,
+        *,
+        dagster_run_id: str,
+        pair: ProviderDatasetOperationKey,
+        attempt_number: int,
+        outcome: str,
+        error: Mapping[str, Any] | None,
+    ) -> ImportJobEvent:
+        """step retry attempt를 lifecycle 변경 없이 append-only event로 남긴다."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await repo_append_dagster_feature_attempt_event(
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    pair=pair,
+                    attempt_number=attempt_number,
+                    outcome=outcome,
+                    error=error,
+                )
+        except FeatureOperationInvariantConflict as exc:
+            await self._record_feature_operation_conflict(exc)
+            raise
+
+    async def reconcile_dagster_feature_run(
+        self,
+        *,
+        dagster_run_id: str,
+        terminal_status: str,
+        selected_pairs: Sequence[ProviderDatasetOperationKey],
+        registry_version: str,
+        engine_created_at: datetime,
+        engine_started_at: datetime | None,
+        engine_finished_at: datetime,
+        error: Mapping[str, Any] | None,
+    ) -> DagsterFeatureOperationMutation:
+        """권위 있는 Dagster terminal을 root와 남은 active child에 반영한다."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await repo_reconcile_dagster_feature_run(
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    terminal_status=terminal_status,
+                    selected_pairs=selected_pairs,
+                    registry_version=registry_version,
+                    engine_created_at=engine_created_at,
+                    engine_started_at=engine_started_at,
+                    engine_finished_at=engine_finished_at,
+                    error=error,
+                )
+        except FeatureOperationInvariantConflict as exc:
+            await self._record_feature_operation_conflict(exc)
+            raise
+
+    async def list_reconcilable_dagster_feature_runs(
+        self,
+        *,
+        cursor: DagsterFeatureOperationCursor | None,
+        page_size: int = 200,
+    ) -> DagsterFeatureOperationPage:
+        """DB→Dagster sweep용 active unmarked root page를 반환한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_list_reconcilable_feature_runs(
+                session, cursor=cursor, page_size=page_size
+            )
 
     async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:
         """``FeatureBundle`` 다수를 한 transaction으로 적재 (commit/rollback).

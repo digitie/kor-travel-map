@@ -206,6 +206,7 @@ def _install_fakes(
         source_checksum: str | None = None,
         load_batch_id: str | None = None,
         parent_job_id: str | None = None,
+        dagster_run_id: str | None = None,
     ) -> ImportJob:
         job_id = {
             "full_load_batch": _ROOT_ID,
@@ -220,6 +221,7 @@ def _install_fakes(
             source_checksum=source_checksum,
             load_batch_id=load_batch_id,
             parent_job_id=parent_job_id,
+            dagster_run_id=dagster_run_id,
         )
         calls["jobs"][job_id] = job
         return job
@@ -330,6 +332,7 @@ def _job(
     source_checksum: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
 ) -> ImportJob:
     return ImportJob(
         job_id=job_id,
@@ -342,6 +345,7 @@ def _job(
         error_message=None,
         load_batch_id=load_batch_id,
         parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
     )
 
 

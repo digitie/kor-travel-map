@@ -33,6 +33,8 @@ from kortravelmap.infra.pipeline_cancellation_invariants import (
 from kortravelmap.infra.pipeline_cancellation_queries import (
     _ATTEMPT_SQL,
     _CURRENT_ATTEMPT_SQL,
+    _FEATURE_RUN_TIMELINE_CONFLICT_SQL,
+    _FILL_CANONICAL_STARTS_SQL,
     _FINISH_ATTEMPT_SQL,
     _INSERT_ATTEMPT_SQL,
     _INSERT_MEMBER_SQL,
@@ -63,10 +65,12 @@ from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationScope,
     PipelineCancellationScopeMember,
     PipelineCancellationSummary,
+    PipelineCancellationTimelineConflict,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -118,6 +122,8 @@ def _member(row: Any) -> PipelineCancellationMember:
         member_kind=_validate_kind(str(row.member_kind)),
         member_id=str(row.member_id),
         dagster_run_id=row.dagster_run_id,
+        operation_kind=row.operation_kind,
+        requires_run_termination=bool(row.requires_run_termination),
         initial_status=str(row.initial_status),
         result=cast(PipelineCancellationResult, str(row.result)),
         terminal_status=row.terminal_status,
@@ -136,6 +142,8 @@ def _run(row: Any) -> PipelineCancellationRun:
         terminal_status=row.terminal_status,
         error=_json_dict(row.error),
         updated_at=row.updated_at,
+        engine_started_at=row.engine_started_at,
+        engine_finished_at=row.engine_finished_at,
     )
 
 
@@ -285,6 +293,7 @@ async def resolve_pipeline_cancellation_scope(
             member_id=str(row.member_id),
             initial_status=str(row.initial_status),
             dagster_run_id=row.dagster_run_id,
+            operation_kind=row.operation_kind,
             cancellation_id=(
                 str(row.cancellation_id) if row.cancellation_id is not None else None
             ),
@@ -355,6 +364,7 @@ async def _lock_scope_members(
                 member_id=str(row.member_id),
                 initial_status=str(row.initial_status),
                 dagster_run_id=row.dagster_run_id,
+                operation_kind=row.operation_kind,
                 cancellation_id=(
                     str(row.cancellation_id)
                     if row.cancellation_id is not None
@@ -376,6 +386,7 @@ async def _lock_detail_base_members(
             member_id=member.member_id,
             initial_status=member.initial_status,
             dagster_run_id=member.dagster_run_id,
+            operation_kind=member.operation_kind,
             cancellation_id=detail.attempt.cancellation_id,
         )
         for member in detail.members
@@ -522,17 +533,17 @@ async def _insert_pipeline_cancellation_attempt(
         )
         for member in scope.members
     }
-    run_has_running_member: dict[str, bool] = {}
+    run_has_active_member: dict[str, bool] = {}
     for member in scope.members:
         if member.dagster_run_id is None:
             continue
-        run_has_running_member[member.dagster_run_id] = (
-            run_has_running_member.get(member.dagster_run_id, False)
-            or member.initial_status == "running"
+        run_has_active_member[member.dagster_run_id] = (
+            run_has_active_member.get(member.dagster_run_id, False)
+            or member.requires_run_termination
         )
     run_results: dict[str, PipelineCancellationResult] = {
-        dagster_run_id: "pending" if has_running_member else "already_terminal"
-        for dagster_run_id, has_running_member in run_has_running_member.items()
+        dagster_run_id: "pending" if has_active_member else "already_terminal"
+        for dagster_run_id, has_active_member in run_has_active_member.items()
     }
     for dagster_run_id in sorted(run_results):
         await session.execute(
@@ -552,7 +563,9 @@ async def _insert_pipeline_cancellation_attempt(
                 "member_kind": member.member_kind,
                 "member_id": member.member_id,
                 "dagster_run_id": member.dagster_run_id,
+                "operation_kind": member.operation_kind,
                 "initial_status": member.initial_status,
+                "requires_run_termination": member.requires_run_termination,
                 "result": result,
                 "terminal_status": (
                     member.initial_status if result == "already_terminal" else None
@@ -686,7 +699,7 @@ async def retry_pipeline_cancellation_attempt(
     unresolved = tuple(
         member
         for member in previous.members
-        if member.initial_status == "running" and member.result == "cancel_failed"
+        if member.requires_run_termination and member.result == "cancel_failed"
     )
     if not unresolved:
         raise PipelineCancellationInvariantError(
@@ -703,27 +716,32 @@ async def retry_pipeline_cancellation_attempt(
             "retry source is no longer the current cancellation attempt"
         )
 
-    locked_members = tuple(
-        base_by_key[(member.member_kind, member.member_id)] for member in unresolved
-    )
-    previous_by_key = {
-        (member.member_kind, member.member_id): member for member in unresolved
-    }
-    for member in locked_members:
-        prior = previous_by_key[(member.member_kind, member.member_id)]
-        if member.cancellation_id != previous_id:
+    locked_members: list[PipelineCancellationScopeMember] = []
+    for prior in unresolved:
+        base = base_by_key[(prior.member_kind, prior.member_id)]
+        if base.cancellation_id != previous_id:
             raise PipelineCancellationConflict(
                 "retry member marker no longer references the source attempt"
             )
-        if member.dagster_run_id != prior.dagster_run_id:
+        if base.dagster_run_id != prior.dagster_run_id:
             raise PipelineCancellationConflict(
                 "retry member Dagster run mapping changed after scope freeze"
             )
+        locked_members.append(
+            PipelineCancellationScopeMember(
+                member_kind=prior.member_kind,
+                member_id=prior.member_id,
+                initial_status=prior.initial_status,
+                dagster_run_id=prior.dagster_run_id,
+                operation_kind=prior.operation_kind,
+                cancellation_id=previous_id,
+            )
+        )
 
     frozen_scope = PipelineCancellationScope(
         root_kind=previous.attempt.root_kind,
         root_id=previous.attempt.root_id,
-        members=locked_members,
+        members=tuple(locked_members),
     )
     return await _insert_pipeline_cancellation_attempt(
         session,
@@ -774,9 +792,9 @@ async def set_pipeline_cancellation_member_result(
     )
     if member is None or member.result not in set(expected_results):
         return False
-    if member.initial_status != "running":
+    if member.initial_status != "running" and not member.requires_run_termination:
         raise PipelineCancellationInvariantError(
-            "cancel_failed is restricted to frozen running members"
+            "cancel_failed is restricted to running or run-backed active members"
         )
     run = None
     if member.dagster_run_id is not None:
@@ -796,17 +814,28 @@ async def set_pipeline_cancellation_member_result(
                     member_id=member.member_id,
                     initial_status=member.initial_status,
                     dagster_run_id=member.dagster_run_id,
+                    operation_kind=member.operation_kind,
                     cancellation_id=cancellation_id,
                 ),
             ),
         )
     )[0]
+    expected_base_statuses = (
+        {"queued", "running"}
+        if member.initial_status == "queued"
+        else {member.initial_status}
+    )
     base_matches = (
         base.cancellation_id == _uuid(cancellation_id)
-        and base.initial_status == member.initial_status
+        and base.initial_status in expected_base_statuses
         and base.dagster_run_id == member.dagster_run_id
+        and base.operation_kind == member.operation_kind
     )
     if error_code in _RETRYABLE_ERROR_CODES:
+        if not member.requires_run_termination:
+            raise PipelineCancellationInvariantError(
+                "retryable member failure requires a frozen Dagster run"
+            )
         if not base_matches:
             raise PipelineCancellationConflict(
                 "retryable member failure requires the exact frozen running base"
@@ -868,6 +897,8 @@ async def set_pipeline_cancellation_run_result(
     initial_status: str | None,
     terminal_status: str | None,
     error: Mapping[str, Any] | None,
+    engine_started_at: datetime | None = None,
+    engine_finished_at: datetime | None = None,
     expected_results: Sequence[str] = ("pending", "cancel_failed"),
 ) -> bool:
     """attempt/run PK로 terminate 결과를 한 번만 CAS 갱신한다."""
@@ -890,6 +921,30 @@ async def set_pipeline_cancellation_run_result(
                 "cancel_failed run cannot have a terminal status"
             )
         _structured_error_code(error)
+    if normalized_result == "cancel_failed" and (
+        engine_started_at is not None or engine_finished_at is not None
+    ):
+        raise PipelineCancellationInvariantError(
+            "failed run cannot persist authoritative terminal timestamps"
+        )
+    if engine_started_at is not None and engine_finished_at is None:
+        raise PipelineCancellationInvariantError(
+            "engine_started_at requires an authoritative engine_finished_at"
+        )
+    if engine_started_at is not None and (
+        engine_started_at.tzinfo is None or engine_started_at.utcoffset() is None
+    ):
+        raise ValueError("engine_started_at must be timezone-aware")
+    if engine_finished_at is not None and (
+        engine_finished_at.tzinfo is None or engine_finished_at.utcoffset() is None
+    ):
+        raise ValueError("engine_finished_at must be timezone-aware")
+    if (
+        engine_started_at is not None
+        and engine_finished_at is not None
+        and engine_started_at > engine_finished_at
+    ):
+        raise ValueError("engine_started_at must not follow engine_finished_at")
     if set(expected_results) - {"pending", "cancel_failed"}:
         raise ValueError("run CAS only accepts unresolved expected results")
     if await _lock_in_progress_attempt(session, cancellation_id) is None:
@@ -901,6 +956,27 @@ async def set_pipeline_cancellation_run_result(
     )
     if run is None or run.result not in set(expected_results):
         return False
+    if normalized_result in {"cancelled", "already_terminal"}:
+        timeline = (
+            await session.execute(
+                text(_FEATURE_RUN_TIMELINE_CONFLICT_SQL),
+                {
+                    "cancellation_id": _uuid(cancellation_id),
+                    "dagster_run_id": dagster_run_id,
+                    "engine_started_at": engine_started_at,
+                    "engine_finished_at": engine_finished_at,
+                },
+            )
+        ).one()
+        if int(timeline.expected_count) != int(timeline.owned_count):
+            raise PipelineCancellationConflict(
+                "canonical terminal run lost the frozen cancellation marker"
+            )
+        if timeline.has_conflict:
+            raise PipelineCancellationTimelineConflict(
+                "canonical feature terminal time precedes its frozen DB timeline"
+            )
+        engine_started_at = timeline.effective_started_at
     row = (
         await session.execute(
             text(_UPDATE_RUN_SQL),
@@ -911,6 +987,8 @@ async def set_pipeline_cancellation_run_result(
                 "initial_status": initial_status,
                 "terminal_status": terminal_status,
                 "error": json.dumps(dict(error)) if error is not None else None,
+                "engine_started_at": engine_started_at,
+                "engine_finished_at": engine_finished_at,
                 "expected_results": list(expected_results),
             },
         )
@@ -984,6 +1062,33 @@ async def mark_pipeline_cancellation_run_termination_reserved(
     return True
 
 
+async def fill_pipeline_cancellation_canonical_starts(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    dagster_run_id: str,
+    engine_started_at: datetime,
+) -> tuple[str, ...]:
+    """frozen canonical member의 누락 start를 권위 있는 run start로 보충한다."""
+    if engine_started_at.tzinfo is None or engine_started_at.utcoffset() is None:
+        raise ValueError("engine_started_at must be timezone-aware")
+    row = (
+        await session.execute(
+            text(_FILL_CANONICAL_STARTS_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "dagster_run_id": dagster_run_id,
+                "engine_started_at": engine_started_at,
+            },
+        )
+    ).one()
+    if int(row.expected_count) != int(row.owned_count):
+        raise PipelineCancellationConflict(
+            "canonical start fill lost the frozen cancellation marker"
+        )
+    return tuple(str(job_id) for job_id in row.updated_job_ids)
+
+
 async def transition_pipeline_cancellation_member(
     session: AsyncSession,
     *,
@@ -995,10 +1100,14 @@ async def transition_pipeline_cancellation_member(
     target_status: str,
     result: str,
     error_message: str | None = None,
+    dagster_terminal_status: str | None = None,
+    engine_started_at: datetime | None = None,
+    engine_finished_at: datetime | None = None,
+    success_tracking_invariant: bool = False,
 ) -> bool:
     """종결된 Dagster run과 정확히 매핑되는 running base/member를 함께 전이한다."""
-    if expected_status != "running":
-        raise ValueError("run-backed transition only accepts expected_status=running")
+    if expected_status not in {"queued", "running"}:
+        raise ValueError("run-backed transition requires queued or running status")
     normalized_result = _validate_result(result)
     if dagster_run_id is None:
         raise PipelineCancellationInvariantError(
@@ -1015,9 +1124,36 @@ async def transition_pipeline_cancellation_member(
     )
     if member is None or member.result not in {"pending", "cancel_failed"}:
         return False
-    if member.initial_status != "running" or member.dagster_run_id != dagster_run_id:
+    if not member.requires_run_termination or member.dagster_run_id != dagster_run_id:
         raise PipelineCancellationConflict(
-            "running member frozen status/run mapping diverged"
+            "run-backed member frozen status/run mapping diverged"
+        )
+    if member.operation_kind in {
+        "provider_feature_load_run",
+        "provider_feature_load",
+    }:
+        if engine_finished_at is None:
+            raise PipelineCancellationInvariantError(
+                "canonical feature terminal transition requires engine_finished_at"
+            )
+        if (
+            engine_finished_at.tzinfo is None
+            or engine_finished_at.utcoffset() is None
+        ):
+            raise ValueError("engine_finished_at must be timezone-aware")
+        if engine_started_at is not None and (
+            engine_started_at.tzinfo is None
+            or engine_started_at.utcoffset() is None
+        ):
+            raise ValueError("engine_started_at must be timezone-aware")
+        if (
+            engine_started_at is not None
+            and engine_started_at > engine_finished_at
+        ):
+            raise ValueError("engine_started_at must not follow engine_finished_at")
+    if member.initial_status != expected_status:
+        raise PipelineCancellationConflict(
+            "run-backed member frozen status changed before transition"
         )
     run = await _lock_run(
         session,
@@ -1032,6 +1168,41 @@ async def transition_pipeline_cancellation_member(
             "member cannot transition before its Dagster run is terminal"
         )
     expected_target, expected_result = mapping
+    if success_tracking_invariant:
+        frozen_non_done_pair_exists = bool(
+            await session.scalar(
+                text(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1
+                      FROM ops.pipeline_cancellation_members
+                      WHERE cancellation_id = CAST(:cancellation_id AS uuid)
+                        AND dagster_run_id = :dagster_run_id
+                        AND operation_kind = 'provider_feature_load'
+                        AND initial_status <> 'done'
+                    )
+                    """
+                ),
+                {
+                    "cancellation_id": _uuid(cancellation_id),
+                    "dagster_run_id": dagster_run_id,
+                },
+            )
+        )
+        if not (
+            normalized_kind == "import_job"
+            and member.operation_kind
+            in {"provider_feature_load_run", "provider_feature_load"}
+            and run.result == "already_terminal"
+            and run.terminal_status == "SUCCESS"
+            and target_status == "failed"
+            and normalized_result == "already_terminal"
+            and frozen_non_done_pair_exists
+        ):
+            raise PipelineCancellationInvariantError(
+                "SUCCESS tracking invariant override requires a canonical active member"
+            )
+        expected_target = "failed"
     if (target_status, normalized_result) != (expected_target, expected_result):
         raise PipelineCancellationInvariantError(
             "requested base/member result does not match Dagster terminal result"
@@ -1045,15 +1216,22 @@ async def transition_pipeline_cancellation_member(
                     member_id=member.member_id,
                     initial_status=member.initial_status,
                     dagster_run_id=member.dagster_run_id,
+                    operation_kind=member.operation_kind,
                     cancellation_id=cancellation_id,
                 ),
             ),
         )
     )[0]
+    expected_statuses = (
+        ("queued", "running")
+        if member.initial_status == "queued"
+        else ("running",)
+    )
     if (
         base.cancellation_id != _uuid(cancellation_id)
-        or base.initial_status != "running"
+        or base.initial_status not in expected_statuses
         or base.dagster_run_id != dagster_run_id
+        or base.operation_kind != member.operation_kind
     ):
         raise PipelineCancellationConflict(
             "running base marker/status/run mapping diverged"
@@ -1070,9 +1248,13 @@ async def transition_pipeline_cancellation_member(
                 "cancellation_id": _uuid(cancellation_id),
                 "member_id": _uuid(member_id),
                 "dagster_run_id": dagster_run_id,
-                "expected_status": expected_status,
+                "expected_statuses": list(expected_statuses),
                 "target_status": target_status,
                 "error_message": error_message,
+                "dagster_terminal_status": dagster_terminal_status,
+                "engine_started_at": engine_started_at,
+                "engine_finished_at": engine_finished_at,
+                "success_tracking_invariant": success_tracking_invariant,
             },
         )
     ).one_or_none()
@@ -1137,6 +1319,10 @@ async def cancel_queued_pipeline_cancellation_member(
         raise PipelineCancellationInvariantError(
             "explicit DB-only cancellation only accepts queued members"
         )
+    if member.requires_run_termination:
+        raise PipelineCancellationInvariantError(
+            "run-backed queued member requires authoritative Dagster termination"
+        )
     base = (
         await _lock_scope_members(
             session,
@@ -1146,6 +1332,7 @@ async def cancel_queued_pipeline_cancellation_member(
                     member_id=member.member_id,
                     initial_status=member.initial_status,
                     dagster_run_id=member.dagster_run_id,
+                    operation_kind=member.operation_kind,
                     cancellation_id=cancellation_id,
                 ),
             ),
@@ -1155,6 +1342,7 @@ async def cancel_queued_pipeline_cancellation_member(
         base.cancellation_id != _uuid(cancellation_id)
         or base.initial_status != "queued"
         or base.dagster_run_id != member.dagster_run_id
+        or base.operation_kind != member.operation_kind
     ):
         raise PipelineCancellationConflict(
             "queued base marker/status/run mapping diverged"
@@ -1171,9 +1359,13 @@ async def cancel_queued_pipeline_cancellation_member(
                 "cancellation_id": _uuid(cancellation_id),
                 "member_id": _uuid(member_id),
                 "dagster_run_id": member.dagster_run_id,
-                "expected_status": "queued",
+                "expected_statuses": ["queued"],
                 "target_status": "cancelled",
                 "error_message": None,
+                "dagster_terminal_status": None,
+                "engine_started_at": None,
+                "engine_finished_at": None,
+                "success_tracking_invariant": False,
             },
         )
     ).one_or_none()
@@ -1270,6 +1462,7 @@ __all__ = [
     "PipelineCancellationConflict",
     "PipelineCancellationDetail",
     "PipelineCancellationInvariantError",
+    "PipelineCancellationTimelineConflict",
     "PipelineCancellationMember",
     "PipelineCancellationRun",
     "PipelineCancellationScope",
@@ -1278,6 +1471,7 @@ __all__ = [
     "cancel_queued_pipeline_cancellation_member",
     "create_pipeline_cancellation_attempt",
     "finish_pipeline_cancellation_attempt",
+    "fill_pipeline_cancellation_canonical_starts",
     "get_current_pipeline_cancellation_detail",
     "get_current_pipeline_cancellation_summary",
     "get_pipeline_cancellation_detail",

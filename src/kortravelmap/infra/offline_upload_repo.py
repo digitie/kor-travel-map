@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
@@ -501,6 +502,10 @@ async def reserve_offline_upload_load(
             "dagster_run_id": None,
         },
         source_checksum=upload.checksum_sha256,
+        provider_dataset=ProviderDatasetOperationKey(
+            upload.provider, upload.dataset_key
+        ),
+        trigger_kind="manual",
     )
     return await mark_offline_upload_loading(
         session,

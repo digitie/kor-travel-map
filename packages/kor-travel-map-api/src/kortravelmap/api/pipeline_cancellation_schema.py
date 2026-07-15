@@ -94,6 +94,8 @@ class PipelineCancellationMemberRecord(BaseModel):
     member_kind: PipelineCancellationMemberKind
     member_id: str
     dagster_run_id: str | None
+    operation_kind: str | None
+    requires_run_termination: bool
     initial_status: str
     result: PipelineCancellationResult
     terminal_status: str | None
@@ -112,6 +114,8 @@ class PipelineCancellationRunRecord(BaseModel):
     result: PipelineCancellationResult
     terminal_status: str | None
     error: PipelineCancellationErrorRecord | None
+    engine_started_at: datetime | None
+    engine_finished_at: datetime | None
     updated_at: datetime
 
 
@@ -219,6 +223,8 @@ def cancellation_detail_record(
                 member_kind=member.member_kind,
                 member_id=member.member_id,
                 dagster_run_id=member.dagster_run_id,
+                operation_kind=member.operation_kind,
+                requires_run_termination=member.requires_run_termination,
                 initial_status=member.initial_status,
                 result=member.result,
                 terminal_status=member.terminal_status,
@@ -235,6 +241,8 @@ def cancellation_detail_record(
                 result=run.result,
                 terminal_status=run.terminal_status,
                 error=_error_record(run.error),
+                engine_started_at=run.engine_started_at,
+                engine_finished_at=run.engine_finished_at,
                 updated_at=run.updated_at,
             )
             for run in detail.runs

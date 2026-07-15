@@ -500,19 +500,19 @@ def mask_sensitive(obj):
 
 | 경계 | 필수 회귀 |
 |------|-----------|
-| migration | 0050→0051 up/down, single head, exact request/event pair backfill, multi/partial/blank identity NULL 보존, cancellation operation kind/run-termination iff backfill, raw run status, root/child CHECK와 partial unique |
+| migration | 0050→0051 up/down, single head, exact-one request/event pair backfill, linked request 우선·multi/partial/blank/non-string identity NULL 보존, cancellation operation kind/run-termination iff backfill, run engine timestamp 컬럼/CHECK up/down, raw run status, root/child CHECK와 partial unique |
 | 동시성 | 같은 run selection 동시 ensure가 root 1행+child N행, pair 누락 0; marker 선점은 ensure/provider I/O 0, ensure 선점은 child 전부 frozen scope, 반대 lock 순서 0 |
 | cross-row | feature-kind constraint trigger의 parent kind/root-child trimmed run/create-time 일치, generic batch 다른 run 허용, root trigger/registry mismatch conflict, root/child identity update·root-first delete 거부, terminal/marked attach 거부 |
 | retry | 첫 2회 exception 뒤 3회 성공은 root/child 각 1행 `done`; 최종 retry 실패는 각 1행 `failed`; attempt는 event로만 기록 |
 | sensor/resource | event-backed QUEUED/STARTING/STARTED/CANCELING sensor와 NOT_STARTED/MANAGED periodic/guard ensure 분리, guard가 provider resource보다 선행, marker 선점 시 fetcher I/O 0, pre-resource failure/queued cancel, terminal duplicate delivery; 등록 job identity drift는 fail-closed/provider I/O·DB load 0, 비등록 arbitrary job만 panel-only |
 | 공유 run | multi-asset와 MCST에서 pipeline root 1개, exact child N개, C3d frozen scope child 전부, Dagster terminate 1회 |
 | partial success | MCST 전반 pair load/empty-skip 성공 뒤 후반 pair 최종 실패는 완료 child `done`, 나머지 `failed`; callback 없는 raw runner tracking 0 |
-| terminal | SUCCESS exact child-set mismatch/set 일치+active child는 done 승격 없이 known active root/child를 `tracking_invariant` failed로 원자 종료하고 active 잔존 0, 전부 done일 때 root만 done; raw status 별도 보존 |
+| terminal | SUCCESS exact child-set mismatch 또는 non-done child는 done 승격 없이 known active root/child를 `tracking_invariant` failed로 원자 종료하고 active 잔존 0, 전부 done일 때 root만 done; same-marker C3d도 같은 run 단위 frozen predicate와 원자 CAS, raw status 별도 보존 |
 | stale recovery | 장시간 feature-load root/child는 generic recovery 제외; active/unavailable/not-found Dagster run을 heartbeat만으로 failed 처리 0 |
 | queue ownership | feature-load queued root/child는 generic claim 제외; canonical API cancel은 run terminate/CANCELED 확인 1회, terminate 실패는 base queued+retryable/cancel_failed 뒤 같은 frozen member retry, QUEUED→STARTED race의 SUCCESS/FAILURE는 status/progress/stage/error/raw status/engine times까지 same-marker CAS로 reconcile, generic queued는 DB-only |
 | writer ownership | reserved feature kind의 generic enqueue/start/finish/heartbeat/cancel/payload/requeue/attach는 fail-closed; append-only event와 same-marker C3d terminal writer만 허용 |
 | event order | STARTED→늦은 QUEUED/STARTING, terminal→QUEUED/STARTED, duplicate delivery는 상태 역전 0과 명시 noop/blocked |
-| engine 관측 | raw Dagster status는 terminal 뒤 불변이고 C3d marker 소유 terminal도 같은 CAS로 갱신; late reconcile은 authoritative create/start/finish 시각을 복구하고 완료 child 시각은 보존 |
+| engine 관측 | raw Dagster status는 terminal 뒤 불변이고 C3d marker 소유 terminal도 같은 CAS로 갱신; late reconcile은 authoritative create/start/finish 시각을 복구하고 완료 child finish는 보존하며 NULL start는 유일한 effective start로 보충; crash resume는 cancellation run에 저장한 동일 시각 재사용, drift/finish-before-start는 tracking conflict |
 | watermark reconcile | QUEUED/STARTED/SUCCESS/CANCELED DB 실패와 run-status cursor 전진 뒤 missing root/terminal 복구, page commit 뒤 cursor 전진, crash page 멱등 재생; DB→Dagster end cursor는 다음 tick beginning으로 wrap해 장기 run의 후속 terminal과 late old-created root 회수 |
 | sensor readiness | tracking sensor 전부 default RUNNING, cutover cursor 명시 초기화, 첫 tick commit/readback 전 launch ingress 0 |
 | terminal CAS | sensor/retry가 `done`/`failed`/`cancelled` 또는 cancellation marker 행을 reopen/overwrite하지 않음 |
@@ -523,7 +523,7 @@ def mask_sensitive(obj):
 | progress/stage | child done=100, root progress=`floor(100*done/total)`; partial failure/cancel은 완료 비율 보존, exact SUCCESS는 100, stage는 고정 lifecycle 어휘 |
 | pagination | detail recent cursor가 pipeline total order와 같고 1,000 root 이상에서 page 누락·중복과 grid latest 누락 0 |
 | filter/index | provider+dataset 같은 pair filter, pair/provider-only/dataset-only 조회 각각 전용 `EXPLAIN` index gate |
-| 계약 drift | base/cancellation/nullable `dagster_run_status`/freshness/trigger status와 engine 시각 분리, pipeline/datasets 양쪽 OpenAPI admin/user drift와 admin generated type drift; cancellation member operation kind/run-termination field 포함 |
+| 계약 drift | base/cancellation/nullable `dagster_run_status`/freshness/trigger status와 engine 시각 분리, pipeline/datasets 양쪽 OpenAPI admin/user drift와 admin generated type drift; cancellation member operation kind/run-termination 및 cancellation run engine start/finish 포함 |
 | writer | offline validate/load/reserve, MOIS 3종, exact update member는 실컬럼+event pair; multi-scope/batch aggregate NULL; event mismatch 거부 |
 | 배포 | API/manual/backfill/schedule/sensor ingress 차단, active 0 drain, 두 번 backfill, Dagster 전 구성 재기동, 신 API/Dagster 정지 후 migration-image downgrade |
 

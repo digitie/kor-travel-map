@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (agent A) — C3e-A1 canonical operation 영속화 구현
+
+- codegraph를 동기화해 `ImportJobRow` 변경 영향 52개 symbol과
+  `AsyncKorTravelMapClient` caller 20개를 확인했다. repository symbol 미탐지는 runtime의 모든
+  `ops.import_jobs` direct-write SQL을 `rg`로 전수해 보완했다.
+- Alembic 0051/ORM에 exact pair·trigger·registry/raw Dagster status와 parent/identity 제약,
+  partial unique/index, payload를 쓰지 않는 보수적 backfill과 fail-closed downgrade를 구현했다.
+  immutable main-package DTO와 operation repository/client에는 전체 selection ensure, 단조 상태,
+  pair progress, attempt event, terminal invariant closure, unmarked active keyset sweep을 고정했다.
+- generic jobs/update-request writer의 reserved kind·parent·target 우회를 차단하고 offline upload,
+  MOIS, exact update request가 canonical identity/trigger 실컬럼을 쓰도록 정렬했다. C3d cancellation
+  snapshot/API/OpenAPI/admin type에는 `operation_kind`와 `requires_run_termination`을 추가해 queued
+  feature run도 at-most-once terminate, frozen retry와 authoritative terminal CAS를 사용한다.
+- migration up/down/backfill, 멱등 lifecycle·역전 방지, generic claim/stale 제외, writer fail-close,
+  active sweep, queued run-backed cancellation/service terminate 회귀를 작성했다. 사용자 지시에 따라
+  테스트/lint/mypy/build/OpenAPI export·drift는 이 단계에서 실행하지 않았다.
+- 테스트 전 적대 리뷰에서 canonical SUCCESS의 non-done terminal child 보존, same-run 동시 ensure,
+  STARTED ensure↔C3d marker 양방향 barrier, cancellation run 시각 NULL 보충·drift 거부, runless
+  running definitive failure, queued canonical terminate 실패 뒤 frozen retry를 추가로 고정했다.
+  terminal engine 시각은 legacy/generic의 both-NULL을 허용하되 부분 start-only 저장은 typed
+  invariant로 즉시 거부하고, feature terminal heartbeat는 queued 출발도 authoritative finish로 맞춘다.
+- 리뷰 반영 뒤 외부 geocoder live 전용 파일을 제외한 전체 1,762건, API 473건,
+  Dagster 270건(1 skip), frontend unit 82건과 focused migration/cancellation 200건을
+  통과했다. 전체 실행에서 분리된 live 5건은 로컬 geocoder의 HTTP 400이며 C3e 관련
+  실패 4건은 fake signature·오류 문구·설정 최소값을 현재 계약에 맞춰 해소했다.
+- Ruff, strict mypy 3패키지, import 계약 4/4, OpenAPI admin/user drift, admin generated
+  type drift와 frontend type/lint/build를 통과했다. production public URL placeholder를
+  명시한 build는 34개 route를 생성했다.
+
 ## 2026-07-15 (codex) — C3d 종결·C3e 문서 계약 재설계
 
 - PR #695는 Python 3.11/3.12/3.13, fixture replay, PostGIS integration, lint,

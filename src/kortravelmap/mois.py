@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -335,6 +336,8 @@ async def run_mois_license_bulk_job(
             kind=_BULK_JOB_KIND,
             payload={"dataset_key": dataset_key},
             source_checksum=source_checksum,
+            provider_dataset=ProviderDatasetOperationKey(PROVIDER_NAME, dataset_key),
+            trigger_kind="system",
         )
         try:
             sync = await sync_mois_license_features_bulk(
@@ -425,6 +428,8 @@ async def run_mois_license_incremental_job(
             kind=_INCREMENTAL_JOB_KIND,
             payload={"dataset_key": dataset_key, "sync_scope": sync_scope},
             source_checksum=source_checksum,
+            provider_dataset=ProviderDatasetOperationKey(PROVIDER_NAME, dataset_key),
+            trigger_kind="system",
         )
         try:
             load = await load_mois_license_features_incremental(
@@ -522,6 +527,10 @@ async def run_mois_license_closed_job(
                 "sync_scope": sync_scope,
             },
             source_checksum=source_checksum,
+            provider_dataset=ProviderDatasetOperationKey(
+                PROVIDER_NAME, DATASET_KEY_CLOSED
+            ),
+            trigger_kind="system",
         )
         try:
             deactivated = await close_mois_license_features(

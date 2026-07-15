@@ -77,6 +77,14 @@ from kortravelmap.infra.dedup_repo import (
     enqueue_dedup_candidates,
     pending_dedup_reviews,
 )
+from kortravelmap.infra.feature_operation_repo import (
+    append_dagster_feature_attempt_event,
+    ensure_dagster_feature_operation,
+    finish_dagster_feature_pair,
+    list_reconcilable_dagster_feature_runs,
+    reconcile_dagster_feature_run,
+    record_feature_operation_invariant_conflict,
+)
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchPage,
@@ -139,6 +147,7 @@ from kortravelmap.infra.integrity_violation_repo import (
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
     ImportJobEvent,
+    bind_import_job_dagster_run,
     cancel_import_job,
     claim_next_import_job,
     enqueue_import_job,
@@ -201,8 +210,10 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationScope,
     PipelineCancellationScopeMember,
     PipelineCancellationSummary,
+    PipelineCancellationTimelineConflict,
     cancel_queued_pipeline_cancellation_member,
     create_pipeline_cancellation_attempt,
+    fill_pipeline_cancellation_canonical_starts,
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_detail,
     get_current_pipeline_cancellation_summary,
@@ -351,6 +362,7 @@ __all__ = [
     "get_import_job",
     "record_import_job_event",
     "update_import_job_payload",
+    "bind_import_job_dagster_run",
     "claim_next_import_job",
     "heartbeat_import_job",
     "cancel_import_job",
@@ -394,6 +406,7 @@ __all__ = [
     "PipelineCancellationConflict",
     "PipelineCancellationDetail",
     "PipelineCancellationInvariantError",
+    "PipelineCancellationTimelineConflict",
     "PipelineCancellationMember",
     "PipelineCancellationRun",
     "PipelineCancellationScope",
@@ -403,6 +416,7 @@ __all__ = [
     "create_pipeline_cancellation_attempt",
     "retry_pipeline_cancellation_attempt",
     "finish_pipeline_cancellation_attempt",
+    "fill_pipeline_cancellation_canonical_starts",
     "get_pipeline_cancellation_detail",
     "get_current_pipeline_cancellation_detail",
     "get_current_pipeline_cancellation_summary",
@@ -424,6 +438,13 @@ __all__ = [
     "build_feature_update_execution_plan",
     "execute_feature_update_request",
     "execute_next_feature_update_request",
+    # feature_operation_repo (ADR-064 T-ADM-C3e-A1)
+    "append_dagster_feature_attempt_event",
+    "ensure_dagster_feature_operation",
+    "finish_dagster_feature_pair",
+    "list_reconcilable_dagster_feature_runs",
+    "reconcile_dagster_feature_run",
+    "record_feature_operation_invariant_conflict",
     # Phase 2 ops repos (ADR-045 T-205c)
     "DataIntegrityViolation",
     "create_data_integrity_violation",

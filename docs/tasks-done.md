@@ -3,6 +3,14 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e canonical operation 문서 gate (2026-07-15, `T-ADM-C3e-D`)
+
+- [x] **T-ADM-C3e-D — canonical provider operation 문서 계약** (#679, PR #696).
+  Claude Code worktree의 설계 기록을 C3d 정본 위에서 복구하고, Dagster run root 한 건과 exact
+  provider/dataset child, retry/terminal 소유권, frozen client 계약, 0051 migration·backfill/down,
+  C3d queued run-backed 취소, 공용 projection·mixed-version 순서를 구현 전에 고정했다. 적대 리뷰
+  2인의 S1/S2 0건 승인과 CI green 뒤 문서 PR을 병합해 C3e-A1/A2/B/C의 compile target으로 삼았다.
+
 ## Pipeline 계층형 취소 완결 (2026-07-15, `T-ADM-C3d`)
 
 - [x] **T-ADM-C3d — 실제 계층형 취소·Dagster terminate** (#680, PR #695).

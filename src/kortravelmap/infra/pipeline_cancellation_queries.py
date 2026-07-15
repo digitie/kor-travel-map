@@ -37,6 +37,7 @@ scope_members AS (
         request.request_id AS member_id,
         request.status AS initial_status,
         request.dagster_run_id,
+        NULL::text AS operation_kind,
         request.cancellation_id
     FROM canonical_root AS root
     JOIN ops.feature_update_requests AS request
@@ -48,6 +49,8 @@ scope_members AS (
         job.job_id AS member_id,
         job.status AS initial_status,
         job.dagster_run_id,
+        CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
+          THEN job.kind ELSE NULL END AS operation_kind,
         job.cancellation_id
     FROM canonical_root AS root
     JOIN job_owners AS owner
@@ -60,6 +63,8 @@ scope_members AS (
         job.job_id AS member_id,
         job.status AS initial_status,
         job.dagster_run_id,
+        CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
+          THEN job.kind ELSE NULL END AS operation_kind,
         job.cancellation_id
     FROM canonical_root AS root
     JOIN standalone_jobs AS standalone
@@ -74,6 +79,7 @@ SELECT
     member.member_id,
     member.initial_status,
     member.dagster_run_id,
+    member.operation_kind,
     member.cancellation_id
 FROM canonical_root AS root
 JOIN scope_members AS member ON true
@@ -134,6 +140,8 @@ SELECT
     member_kind,
     member_id,
     dagster_run_id,
+    operation_kind,
+    requires_run_termination,
     initial_status,
     result,
     terminal_status,
@@ -150,6 +158,8 @@ SELECT
     member_kind,
     member_id,
     dagster_run_id,
+    operation_kind,
+    requires_run_termination,
     initial_status,
     result,
     terminal_status,
@@ -171,6 +181,8 @@ SELECT
     result,
     terminal_status,
     error,
+    engine_started_at,
+    engine_finished_at,
     updated_at
 FROM ops.pipeline_cancellation_runs
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
@@ -186,6 +198,8 @@ SELECT
     result,
     terminal_status,
     error,
+    engine_started_at,
+    engine_finished_at,
     updated_at
 FROM ops.pipeline_cancellation_runs
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
@@ -233,7 +247,9 @@ INSERT INTO ops.pipeline_cancellation_members (
     member_kind,
     member_id,
     dagster_run_id,
+    operation_kind,
     initial_status,
+    requires_run_termination,
     result,
     terminal_status
 ) VALUES (
@@ -241,7 +257,9 @@ INSERT INTO ops.pipeline_cancellation_members (
     :member_kind,
     CAST(:member_id AS uuid),
     :dagster_run_id,
+    :operation_kind,
     :initial_status,
+    :requires_run_termination,
     :result,
     :terminal_status
 )
@@ -303,11 +321,98 @@ SET initial_status = COALESCE(initial_status, :initial_status),
     result = :result,
     terminal_status = :terminal_status,
     error = CAST(:error AS jsonb),
+    engine_started_at = :engine_started_at,
+    engine_finished_at = :engine_finished_at,
     updated_at = now()
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
   AND dagster_run_id = :dagster_run_id
   AND result = ANY(CAST(:expected_results AS text[]))
 RETURNING cancellation_id
+"""
+
+_FEATURE_RUN_TIMELINE_CONFLICT_SQL = """
+WITH canonical_jobs AS (
+  SELECT job.created_at, job.started_at, job.finished_at, job.cancellation_id
+  FROM ops.pipeline_cancellation_members AS member
+  JOIN ops.import_jobs AS job
+    ON member.member_kind = 'import_job'
+   AND job.job_id = member.member_id
+  WHERE member.cancellation_id = CAST(:cancellation_id AS uuid)
+    AND member.dagster_run_id = :dagster_run_id
+    AND member.operation_kind IN (
+      'provider_feature_load_run','provider_feature_load'
+    )
+)
+SELECT
+  count(*) AS expected_count,
+  count(*) FILTER (
+    WHERE cancellation_id = CAST(:cancellation_id AS uuid)
+  ) AS owned_count,
+  COALESCE(
+    CAST(:engine_started_at AS timestamptz), min(started_at)
+  ) AS effective_started_at,
+  count(*) > 0 AND (
+    count(DISTINCT started_at) > 1
+    OR (
+      CAST(:engine_started_at AS timestamptz) IS NOT NULL
+      AND bool_or(
+        started_at IS NOT NULL
+        AND started_at <> CAST(:engine_started_at AS timestamptz)
+      )
+    )
+    OR CAST(:engine_finished_at AS timestamptz) IS NULL
+    OR bool_or(
+      created_at > CAST(:engine_finished_at AS timestamptz)
+      OR started_at > CAST(:engine_finished_at AS timestamptz)
+    )
+    OR bool_or(
+      COALESCE(
+        CAST(:engine_started_at AS timestamptz),
+        (SELECT min(started_at) FROM canonical_jobs)
+      ) IS NOT NULL
+      AND (
+        created_at > COALESCE(
+          CAST(:engine_started_at AS timestamptz),
+          (SELECT min(started_at) FROM canonical_jobs)
+        )
+        OR finished_at < COALESCE(
+          CAST(:engine_started_at AS timestamptz),
+          (SELECT min(started_at) FROM canonical_jobs)
+        )
+      )
+    )
+  ) AS has_conflict
+FROM canonical_jobs
+"""
+
+_FILL_CANONICAL_STARTS_SQL = """
+WITH canonical_jobs AS (
+  SELECT job.job_id, job.cancellation_id, job.started_at
+  FROM ops.pipeline_cancellation_members AS member
+  JOIN ops.import_jobs AS job ON job.job_id = member.member_id
+  WHERE member.cancellation_id = CAST(:cancellation_id AS uuid)
+    AND member.dagster_run_id = :dagster_run_id
+    AND member.member_kind = 'import_job'
+    AND member.operation_kind IN (
+      'provider_feature_load_run','provider_feature_load'
+    )
+),
+updated AS (
+  UPDATE ops.import_jobs AS job
+  SET started_at = CAST(:engine_started_at AS timestamptz)
+  FROM canonical_jobs AS candidate
+  WHERE job.job_id = candidate.job_id
+    AND candidate.cancellation_id = CAST(:cancellation_id AS uuid)
+    AND job.cancellation_id = CAST(:cancellation_id AS uuid)
+    AND job.started_at IS NULL
+  RETURNING job.job_id
+)
+SELECT
+  (SELECT count(*) FROM canonical_jobs) AS expected_count,
+  (SELECT count(*) FROM canonical_jobs
+   WHERE cancellation_id = CAST(:cancellation_id AS uuid)) AS owned_count,
+  COALESCE((SELECT array_agg(job_id::text ORDER BY job_id) FROM updated), '{}')
+    AS updated_job_ids
 """
 
 _RESERVE_RUN_TERMINATION_SQL = """
@@ -343,6 +448,7 @@ SELECT
     request.request_id AS member_id,
     request.status AS initial_status,
     request.dagster_run_id,
+    NULL::text AS operation_kind,
     request.cancellation_id
 FROM ops.feature_update_requests AS request
 WHERE request.request_id IN (SELECT member_id FROM members)
@@ -360,6 +466,8 @@ SELECT
     job.job_id AS member_id,
     job.status AS initial_status,
     job.dagster_run_id,
+    CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
+      THEN job.kind ELSE NULL END AS operation_kind,
     job.cancellation_id
 FROM ops.import_jobs AS job
 WHERE job.job_id IN (SELECT member_id FROM members)
@@ -375,7 +483,7 @@ SET status = :target_status,
     updated_at = now()
 WHERE request_id = CAST(:member_id AS uuid)
   AND cancellation_id = CAST(:cancellation_id AS uuid)
-  AND status = :expected_status
+  AND status = ANY(CAST(:expected_statuses AS text[]))
   AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
 RETURNING request_id
 """
@@ -384,12 +492,56 @@ _TRANSITION_JOB_MEMBER_SQL = """
 UPDATE ops.import_jobs
 SET status = :target_status,
     error_message = COALESCE(:error_message, error_message),
-    finished_at = now(),
-    heartbeat_at = CASE WHEN status = 'running' THEN now() ELSE heartbeat_at END,
-    progress = CASE WHEN :target_status = 'done' THEN 100 ELSE progress END
+    finished_at = CASE
+      WHEN kind IN ('provider_feature_load_run','provider_feature_load') THEN
+        CAST(:engine_finished_at AS timestamptz)
+      ELSE COALESCE(CAST(:engine_finished_at AS timestamptz), now())
+    END,
+    started_at = COALESCE(started_at, CAST(:engine_started_at AS timestamptz)),
+    heartbeat_at = CASE
+      WHEN kind IN ('provider_feature_load_run','provider_feature_load') THEN
+        CAST(:engine_finished_at AS timestamptz)
+      WHEN status = 'running' THEN
+        COALESCE(CAST(:engine_finished_at AS timestamptz), now())
+      ELSE heartbeat_at
+    END,
+    progress = CASE WHEN :target_status = 'done' THEN 100 ELSE progress END,
+    current_stage = CASE
+      WHEN kind IN ('provider_feature_load_run','provider_feature_load') THEN
+        CASE :target_status
+          WHEN 'done' THEN 'completed'
+          WHEN 'failed' THEN
+            CASE WHEN :success_tracking_invariant
+              THEN 'tracking_invariant' ELSE 'failed' END
+          WHEN 'cancelled' THEN 'cancelled'
+          ELSE current_stage
+        END
+      ELSE current_stage
+    END,
+    dagster_run_status = CASE
+      WHEN kind = 'provider_feature_load_run' THEN :dagster_terminal_status
+      ELSE dagster_run_status
+    END
 WHERE job_id = CAST(:member_id AS uuid)
   AND cancellation_id = CAST(:cancellation_id AS uuid)
-  AND status = :expected_status
+  AND status = ANY(CAST(:expected_statuses AS text[]))
   AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
+  AND (
+    kind NOT IN ('provider_feature_load_run','provider_feature_load')
+    OR (
+      CAST(:engine_finished_at AS timestamptz) IS NOT NULL
+      AND created_at <= CAST(:engine_finished_at AS timestamptz)
+      AND (
+        CAST(:engine_started_at AS timestamptz) IS NULL
+        OR created_at <= CAST(:engine_started_at AS timestamptz)
+      )
+      AND (started_at IS NULL OR started_at <= CAST(:engine_finished_at AS timestamptz))
+      AND (
+        CAST(:engine_started_at AS timestamptz) IS NULL
+        OR started_at IS NULL
+        OR started_at = CAST(:engine_started_at AS timestamptz)
+      )
+    )
+  )
 RETURNING job_id
 """

@@ -1575,6 +1575,54 @@ class ImportJobRow(Base):
             "AND cancellation_requested_by IS NOT NULL)",
             name="ck_import_jobs_cancellation_marker",
         ),
+        CheckConstraint(
+            "(provider IS NULL AND dataset_key IS NULL) OR "
+            "(provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' "
+            "AND dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) "
+            "AND dataset_key <> '')",
+            name="ck_import_jobs_provider_dataset_pair",
+        ),
+        CheckConstraint(
+            "trigger_kind IS NULL OR trigger_kind IN "
+            "('schedule','manual','sensor','update_request','backfill','system')",
+            name="ck_import_jobs_trigger_kind",
+        ),
+        CheckConstraint(
+            "operation_registry_version IS NULL "
+            "OR kind = 'provider_feature_load_run'",
+            name="ck_import_jobs_registry_version_owner",
+        ),
+        CheckConstraint(
+            "dagster_run_status IS NULL OR "
+            "(kind = 'provider_feature_load_run' AND dagster_run_status IN "
+            "('QUEUED','NOT_STARTED','MANAGED','STARTING','STARTED','CANCELING',"
+            "'SUCCESS','FAILURE','CANCELED'))",
+            name="ck_import_jobs_dagster_run_status",
+        ),
+        CheckConstraint(
+            "(kind <> 'provider_feature_load_run' OR "
+            "(parent_job_id IS NULL AND provider IS NULL AND dataset_key IS NULL "
+            "AND dagster_run_id IS NOT NULL AND dagster_run_id = btrim(dagster_run_id) "
+            "AND dagster_run_id <> '' AND trigger_kind IS NOT NULL "
+            "AND operation_registry_version IS NOT NULL "
+            "AND operation_registry_version = btrim(operation_registry_version) "
+            "AND operation_registry_version <> '' AND dagster_run_status IS NOT NULL)) "
+            "AND (kind <> 'provider_feature_load' OR "
+            "(parent_job_id IS NOT NULL AND provider IS NOT NULL "
+            "AND dataset_key IS NOT NULL AND dagster_run_id IS NOT NULL "
+            "AND dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '' "
+            "AND trigger_kind IS NULL AND operation_registry_version IS NULL "
+            "AND dagster_run_status IS NULL))",
+            name="ck_import_jobs_feature_tracking_shape",
+        ),
+        CheckConstraint(
+            "kind NOT IN ('provider_feature_load_run','provider_feature_load') OR "
+            "((started_at IS NULL OR created_at <= started_at) AND "
+            "(finished_at IS NULL OR created_at <= finished_at) AND "
+            "(started_at IS NULL OR finished_at IS NULL OR "
+            "started_at <= finished_at))",
+            name="ck_import_jobs_feature_engine_timeline",
+        ),
         Index("idx_import_jobs_created_keyset", text("created_at DESC"), text("job_id DESC")),
         Index("idx_import_jobs_status", "status", "created_at", "queue_sequence"),
         Index(
@@ -1606,6 +1654,48 @@ class ImportJobRow(Base):
             "idx_import_jobs_dagster_run_id",
             "dagster_run_id",
             postgresql_where=text("dagster_run_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_import_jobs_feature_run",
+            "dagster_run_id",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'provider_feature_load_run' AND parent_job_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_import_jobs_feature_run_pair",
+            "parent_job_id",
+            "provider",
+            "dataset_key",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'provider_feature_load' AND parent_job_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "idx_import_jobs_provider_dataset_created",
+            "provider",
+            "dataset_key",
+            text("created_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text(
+                "provider IS NOT NULL AND dataset_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "idx_import_jobs_dataset_created",
+            "dataset_key",
+            text("created_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text("dataset_key IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_jobs_provider_created",
+            "provider",
+            text("created_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text("provider IS NOT NULL"),
         ),
         Index("idx_import_jobs_cancellation_id", "cancellation_id"),
         {"schema": "ops"},
@@ -1641,6 +1731,11 @@ class ImportJobRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     # Dagster run 연결 실컬럼 (ADR-064/T-ADM-C3) — payload JSONB 조회 hot path 제거.
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(Text)
+    dataset_key: Mapped[str | None] = mapped_column(Text)
+    trigger_kind: Mapped[str | None] = mapped_column(Text)
+    operation_registry_version: Mapped[str | None] = mapped_column(Text)
+    dagster_run_status: Mapped[str | None] = mapped_column(Text)
     cancellation_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey(
@@ -2020,6 +2115,14 @@ class PipelineCancellationRunRow(Base):
             "  AND jsonb_typeof(error) = 'object'))",
             name="ck_pipeline_cancellation_runs_shape",
         ),
+        CheckConstraint(
+            "(engine_started_at IS NULL AND engine_finished_at IS NULL) OR "
+            "(result IN ('cancelled','already_terminal') "
+            "AND engine_finished_at IS NOT NULL "
+            "AND (engine_started_at IS NULL OR "
+            "engine_started_at <= engine_finished_at))",
+            name="ck_pipeline_cancellation_runs_engine_times",
+        ),
         ForeignKeyConstraint(
             ["cancellation_id"],
             ["ops.pipeline_cancellations.cancellation_id"],
@@ -2045,6 +2148,12 @@ class PipelineCancellationRunRow(Base):
     )
     terminal_status: Mapped[str | None] = mapped_column(Text)
     error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    engine_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    engine_finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -2073,6 +2182,19 @@ class PipelineCancellationMemberRow(Base):
             "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
             " AND jsonb_typeof(error) = 'object')",
             name="ck_pipeline_cancellation_members_shape",
+        ),
+        CheckConstraint(
+            "operation_kind IS NULL OR "
+            "(member_kind = 'import_job' "
+            "AND operation_kind = btrim(operation_kind) AND operation_kind <> '')",
+            name="ck_pipeline_cancellation_members_operation_kind",
+        ),
+        CheckConstraint(
+            "requires_run_termination = "
+            "(dagster_run_id IS NOT NULL AND (initial_status = 'running' OR "
+            "(initial_status = 'queued' AND COALESCE(operation_kind IN "
+            "('provider_feature_load_run','provider_feature_load'), false))))",
+            name="ck_pipeline_cancellation_members_run_termination",
         ),
         ForeignKeyConstraint(
             ["cancellation_id"],
@@ -2111,6 +2233,12 @@ class PipelineCancellationMemberRow(Base):
     member_kind: Mapped[str] = mapped_column(Text, primary_key=True)
     member_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    operation_kind: Mapped[str | None] = mapped_column(Text)
+    requires_run_termination: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
     initial_status: Mapped[str] = mapped_column(Text, nullable=False)
     result: Mapped[str] = mapped_column(
         Text,

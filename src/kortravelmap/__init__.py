@@ -36,7 +36,16 @@ from __future__ import annotations
 
 from pkgutil import extend_path
 
-from kortravelmap.client import AsyncKorTravelMapClient, DedupSyncResult, OfflineUploadLoadResult
+from kortravelmap.client import (
+    AsyncKorTravelMapClient,
+    DagsterFeatureOperationCursor,
+    DagsterFeatureOperationMutation,
+    DagsterFeatureOperationPage,
+    DedupSyncResult,
+    FeatureOperationInvariantConflict,
+    OfflineUploadLoadResult,
+    ProviderDatasetOperationKey,
+)
 
 # API/Admin/Dagster는 별도 distribution으로 설치되므로 같은 top-level package 아래
 # 하위 패키지를 찾을 수 있게 package path를 확장한다.
@@ -44,8 +53,13 @@ __path__ = extend_path(__path__, __name__)
 
 __all__ = [
     "AsyncKorTravelMapClient",
+    "DagsterFeatureOperationCursor",
+    "DagsterFeatureOperationMutation",
+    "DagsterFeatureOperationPage",
     "DedupSyncResult",
+    "FeatureOperationInvariantConflict",
     "OfflineUploadLoadResult",
+    "ProviderDatasetOperationKey",
     "__version__",
 ]
 

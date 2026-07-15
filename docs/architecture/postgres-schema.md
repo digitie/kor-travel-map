@@ -86,6 +86,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 |--------|----|---------------|
 | `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair, trigger, registry version, root raw Dagster status를 실컬럼으로 추가하고 feature run root/pair child shape를 강제 |
 | `pipeline_cancellation_members` | `(cancellation_id, member_kind, member_id)` | 0050 frozen member 결과; 0051은 import `operation_kind`와 `requires_run_termination`을 백필·영속해 run-backed queued와 generic queued를 구분 |
+| `pipeline_cancellation_runs` | `(cancellation_id, dagster_run_id)` | run terminate reservation/result 정본; 0051은 authoritative nullable `engine_started_at`/`engine_finished_at`을 terminal observation과 함께 영속 |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
@@ -262,9 +263,12 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
 | `import_jobs` | `ck_import_jobs_provider_dataset_pair` | provider/dataset 둘 다 NULL 또는 trim된 non-empty exact pair |
 | `import_jobs` | `ck_import_jobs_feature_tracking_shape` | feature run root와 pair child의 parent/pair/trigger/registry/raw status shape |
+| `import_jobs` | `ck_import_jobs_feature_engine_timeline` | feature root/child의 create ≤ start ≤ finish 순서(NULL 허용) |
 | `import_jobs` | `ck_import_jobs_dagster_run_status` | feature run root의 raw Dagster status 허용값 |
 | `import_jobs` | feature operation trigger 2종 | child parent kind/run 일치와 root/child identity update 금지 |
+| `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_operation_kind` | import member만 trimmed non-empty operation kind, 그 외 member는 NULL |
 | `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_run_termination` | frozen boolean = running+run-id 또는 queued feature kind+run-id |
+| `pipeline_cancellation_runs` | `ck_pipeline_cancellation_runs_engine_times` | legacy/generic의 두 시각 NULL은 허용; 하나라도 저장하면 terminal 성공 결과+finish가 필수이고 start가 있으면 start ≤ finish |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
 | `dedup_review_queue` | `ck_dedup_pair_order` | feature_id_a < feature_id_b |
 | `dedup_review_queue` | `ck_dedup_scores` | 각 점수 0-100 |

@@ -32,10 +32,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import (
+    FEATURE_OPERATION_RESERVED_KINDS,
+    TRIGGER_KIND_VALUES,
+    FeatureOperationInvariantConflict,
+    ProviderDatasetOperationKey,
+    TriggerKind,
+)
 from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationConflict,
@@ -57,6 +64,8 @@ __all__ = [
     "get_import_job",
     "record_import_job_event",
     "update_import_job_payload",
+    "bind_import_job_dagster_run",
+    "assert_generic_import_job_targets",
     "claim_next_import_job",
     "heartbeat_import_job",
     "attach_import_jobs_to_batch",
@@ -79,16 +88,11 @@ _EVENT_LEVELS: Final[frozenset[str]] = frozenset(
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, dagster_run_id, cancellation_id, "
+    "current_stage, source_checksum, error_message, dagster_run_id, provider, "
+    "dataset_key, trigger_kind, operation_registry_version, dagster_run_status, "
+    "cancellation_id, "
     "cancellation_requested_at, cancellation_requested_by, cancellation_reason, "
     "started_at, finished_at, heartbeat_at, created_at"
-)
-
-# payload에 담겨 들어오는 Dagster run id를 실컬럼으로 승격 (ADR-064/T-ADM-C3).
-# 신규 키 ``dagster_run_id`` 우선 + 레거시 ``run_id`` fallback, 빈 문자열은 NULL.
-_PAYLOAD_DAGSTER_RUN_ID_SQL: Final[str] = (
-    "NULLIF(COALESCE(CAST(:payload AS jsonb)->>'dagster_run_id', "
-    "CAST(:payload AS jsonb)->>'run_id'), '')"
 )
 
 _EVENT_RETURN_COLUMNS: Final[str] = (
@@ -112,6 +116,15 @@ class ImportJob:
     load_batch_id: str | None = None
     parent_job_id: str | None = None
     dagster_run_id: str | None = None
+    provider: str | None = None
+    dataset_key: str | None = None
+    trigger_kind: TriggerKind | None = None
+    operation_registry_version: str | None = None
+    dagster_run_status: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    created_at: datetime | None = None
     cancellation_id: str | None = None
     cancellation_requested_at: datetime | None = None
     cancellation_requested_by: str | None = None
@@ -151,6 +164,19 @@ def _row_to_job(row: Any) -> ImportJob:
         source_checksum=row.source_checksum,
         error_message=row.error_message,
         dagster_run_id=row.dagster_run_id,
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        trigger_kind=(
+            cast(TriggerKind, row.trigger_kind)
+            if row.trigger_kind is not None
+            else None
+        ),
+        operation_registry_version=row.operation_registry_version,
+        dagster_run_status=row.dagster_run_status,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        heartbeat_at=row.heartbeat_at,
+        created_at=row.created_at,
         cancellation_id=(
             str(row.cancellation_id) if row.cancellation_id is not None else None
         ),
@@ -181,12 +207,13 @@ def _row_to_event(row: Any) -> ImportJobEvent:
 
 _INSERT_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
-    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id
+    kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
+    provider, dataset_key, trigger_kind
 )
 SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    {_PAYLOAD_DAGSTER_RUN_ID_SQL}
+    :dagster_run_id, :provider, :dataset_key, :trigger_kind
 WHERE CAST(:parent_job_id AS uuid) IS NULL
    OR EXISTS (
       SELECT 1
@@ -202,12 +229,12 @@ RETURNING {_RETURN_COLUMNS}
 _START_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
-    status, started_at, heartbeat_at
+    provider, dataset_key, trigger_kind, status, started_at, heartbeat_at
 )
 SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    {_PAYLOAD_DAGSTER_RUN_ID_SQL},
+    :dagster_run_id, :provider, :dataset_key, :trigger_kind,
     'running', now(), now()
 WHERE CAST(:parent_job_id AS uuid) IS NULL
    OR EXISTS (
@@ -231,8 +258,8 @@ INSERT INTO ops.import_job_events (
 )
 SELECT
     job_id,
-    COALESCE(CAST(:provider AS text), payload ->> 'provider'),
-    COALESCE(CAST(:dataset_key AS text), payload ->> 'dataset_key'),
+    COALESCE(provider, CAST(:provider AS text)),
+    COALESCE(dataset_key, CAST(:dataset_key AS text)),
     COALESCE(CAST(:feature_id AS text), payload ->> 'feature_id'),
     COALESCE(CAST(:stage AS text), current_stage),
     :level,
@@ -256,10 +283,21 @@ WHERE job_id IN (SELECT job_id FROM ids)
 
 _UPDATE_PAYLOAD_SQL: Final[str] = f"""
 UPDATE ops.import_jobs
-SET payload = CAST(:payload AS jsonb),
-    dagster_run_id = COALESCE({_PAYLOAD_DAGSTER_RUN_ID_SQL}, dagster_run_id)
+SET payload = CAST(:payload AS jsonb)
 WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_BIND_DAGSTER_RUN_SQL: Final[str] = f"""
+UPDATE ops.import_jobs
+SET dagster_run_id = :dagster_run_id
+WHERE job_id = CAST(:job_id AS uuid)
+  AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND status IN ('queued','running')
+  AND (dagster_run_id IS NULL OR dagster_run_id = :dagster_run_id)
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -278,11 +316,18 @@ eligible AS (
         WHERE job_id IN (SELECT job_id FROM ids)
           AND cancellation_id IS NOT NULL
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.import_jobs
+        WHERE job_id IN (SELECT job_id FROM ids)
+          AND kind IN ('provider_feature_load_run','provider_feature_load')
+      )
       AND EXISTS (
         SELECT 1
         FROM ops.import_jobs AS parent
         WHERE parent.job_id = CAST(:parent_job_id AS uuid)
           AND parent.cancellation_id IS NULL
+          AND parent.kind NOT IN ('provider_feature_load_run','provider_feature_load')
       ) AS allowed
 )
 UPDATE ops.import_jobs
@@ -301,6 +346,7 @@ WHERE job_id = (
     SELECT job_id FROM ops.import_jobs
     WHERE status = 'queued'
       AND cancellation_id IS NULL
+      AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
     ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -316,6 +362,7 @@ SET heartbeat_at = now(),
 WHERE job_id = :job_id
   AND status = 'running'
   AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -329,6 +376,7 @@ SET status = :status,
 WHERE job_id = :job_id
   AND status = 'running'
   AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -340,6 +388,7 @@ SET status = 'cancelled',
 WHERE job_id = CAST(:job_id AS uuid)
   AND status IN ('queued', 'running')
   AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -353,6 +402,7 @@ SET status = 'failed',
     error_message = COALESCE(error_message, 'recovered: stale running on startup')
 WHERE status = 'running'
   AND cancellation_id IS NULL
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
   AND (
     CAST(:stale_seconds AS double precision) IS NULL
     OR heartbeat_at IS NULL
@@ -361,6 +411,68 @@ WHERE status = 'running'
   )
 RETURNING job_id
 """
+
+_TARGET_KINDS_SQL: Final[str] = """
+WITH ids AS (
+  SELECT value::uuid AS job_id
+  FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
+)
+SELECT job_id, kind
+FROM ops.import_jobs
+WHERE job_id IN (SELECT job_id FROM ids)
+  AND kind IN ('provider_feature_load_run','provider_feature_load')
+LIMIT 1
+"""
+
+
+def _validate_generic_kind(kind: str) -> None:
+    if kind in FEATURE_OPERATION_RESERVED_KINDS:
+        raise FeatureOperationInvariantConflict(
+            "reserved feature operation kind requires the tracking repository",
+            dagster_run_id="unknown",
+            details={"kind": kind},
+        )
+
+
+def _identity_params(
+    *,
+    provider_dataset: ProviderDatasetOperationKey | None,
+    trigger_kind: TriggerKind | None,
+) -> dict[str, str | None]:
+    if trigger_kind is not None and trigger_kind not in TRIGGER_KIND_VALUES:
+        raise ValueError(f"invalid trigger_kind: {trigger_kind}")
+    return {
+        "provider": provider_dataset.provider if provider_dataset else None,
+        "dataset_key": provider_dataset.dataset_key if provider_dataset else None,
+        "trigger_kind": trigger_kind,
+    }
+
+
+def _optional_dagster_run_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not value or value != value.strip():
+        raise ValueError("dagster_run_id must be trimmed and non-empty")
+    return value
+
+
+async def assert_generic_import_job_targets(
+    session: AsyncSession, job_ids: Sequence[str]
+) -> None:
+    if not job_ids:
+        return
+    row = (
+        await session.execute(
+            text(_TARGET_KINDS_SQL), {"job_ids": json.dumps(list(dict.fromkeys(job_ids)))}
+        )
+    ).one_or_none()
+    if row is not None:
+        raise FeatureOperationInvariantConflict(
+            "generic import writer cannot mutate a reserved feature operation",
+            dagster_run_id="unknown",
+            root_job_id=str(row.job_id),
+            details={"kind": str(row.kind)},
+        )
 
 
 async def enqueue_import_job(
@@ -371,9 +483,18 @@ async def enqueue_import_job(
     source_checksum: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+    provider_dataset: ProviderDatasetOperationKey | None = None,
+    trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
     """``status='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
+    _validate_generic_kind(kind)
+    normalized_run_id = _optional_dagster_run_id(dagster_run_id)
+    identity = _identity_params(
+        provider_dataset=provider_dataset, trigger_kind=trigger_kind
+    )
     if parent_job_id is not None:
+        await assert_generic_import_job_targets(session, (parent_job_id,))
         await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
     result = await session.execute(
         text(_INSERT_JOB_SQL),
@@ -383,6 +504,8 @@ async def enqueue_import_job(
             "source_checksum": source_checksum,
             "load_batch_id": load_batch_id,
             "parent_job_id": parent_job_id,
+            "dagster_run_id": normalized_run_id,
+            **identity,
         },
     )
     row = result.one_or_none()
@@ -409,6 +532,9 @@ async def start_import_job(
     source_checksum: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+    provider_dataset: ProviderDatasetOperationKey | None = None,
+    trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
     """곧바로 ``status='running'``인 작업 1건 INSERT (self-driven inline job).
 
@@ -417,7 +543,13 @@ async def start_import_job(
     queue-worker 경로는 ``enqueue_import_job`` + ``claim_next_import_job`` 사용.
     commit은 호출자 책임.
     """
+    _validate_generic_kind(kind)
+    normalized_run_id = _optional_dagster_run_id(dagster_run_id)
+    identity = _identity_params(
+        provider_dataset=provider_dataset, trigger_kind=trigger_kind
+    )
     if parent_job_id is not None:
+        await assert_generic_import_job_targets(session, (parent_job_id,))
         await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
     result = await session.execute(
         text(_START_JOB_SQL),
@@ -427,6 +559,8 @@ async def start_import_job(
             "source_checksum": source_checksum,
             "load_batch_id": load_batch_id,
             "parent_job_id": parent_job_id,
+            "dagster_run_id": normalized_run_id,
+            **identity,
         },
     )
     row = result.one_or_none()
@@ -468,12 +602,47 @@ async def record_import_job_event(
 ) -> ImportJobEvent | None:
     """``ops.import_job_events``에 구조화 event 1건을 기록한다.
 
-    provider/dataset/stage를 넘기지 않으면 연결된 ``ops.import_jobs.payload``와
-    ``current_stage``에서 best-effort로 채운다. 없는 ``job_id``면 ``None``을 반환한다.
+    provider/dataset은 연결된 ``ops.import_jobs``의 typed identity를 상속한다.
+    명시 pair는 저장된 pair와 정확히 같아야 하며, 저장된 pair가 없는 신규 job에
+    event-only identity를 만드는 것도 거부한다. stage를 생략하면 job의
+    ``current_stage``를 사용한다. 없는 ``job_id``면 ``None``을 반환한다.
     commit은 호출자 책임이다.
     """
     if level not in _EVENT_LEVELS:
         raise ValueError(f"level must be one of {sorted(_EVENT_LEVELS)}, got {level!r}.")
+    job = await get_import_job(session, job_id)
+    if job is None:
+        return None
+    explicit_pair = None
+    if provider is not None or dataset_key is not None:
+        if provider is None or dataset_key is None:
+            raise ValueError("event provider and dataset_key must be supplied together")
+        explicit_pair = ProviderDatasetOperationKey(provider, dataset_key)
+    stored_pair = (
+        ProviderDatasetOperationKey(job.provider, job.dataset_key)
+        if job.provider is not None and job.dataset_key is not None
+        else None
+    )
+    if explicit_pair is not None and explicit_pair != stored_pair:
+        raise FeatureOperationInvariantConflict(
+            "event pair requires the same typed import job identity",
+            dagster_run_id=job.dagster_run_id or "unknown",
+            root_job_id=job.job_id,
+            details={
+                "expected": (
+                    {
+                        "provider": stored_pair.provider,
+                        "dataset_key": stored_pair.dataset_key,
+                    }
+                    if stored_pair is not None
+                    else None
+                ),
+                "actual": {
+                    "provider": explicit_pair.provider,
+                    "dataset_key": explicit_pair.dataset_key,
+                },
+            },
+        )
     result = await session.execute(
         text(_INSERT_EVENT_SQL),
         {
@@ -516,12 +685,36 @@ async def update_import_job_payload(
     payload: Mapping[str, Any],
 ) -> ImportJob | None:
     """import job payload를 교체한다. validation summary 보존에 사용한다."""
+    await assert_generic_import_job_targets(session, (job_id,))
     result = await session.execute(
         text(_UPDATE_PAYLOAD_SQL),
         {"job_id": job_id, "payload": json.dumps(dict(payload))},
     )
     row = result.one_or_none()
     return _row_to_job(row) if row is not None else None
+
+
+async def bind_import_job_dagster_run(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    dagster_run_id: str,
+) -> ImportJob:
+    """active generic job에 run id를 연결한다. terminal row는 재결합하지 않는다."""
+    normalized_run_id = _optional_dagster_run_id(dagster_run_id)
+    assert normalized_run_id is not None
+    await assert_generic_import_job_targets(session, (job_id,))
+    row = (
+        await session.execute(
+            text(_BIND_DAGSTER_RUN_SQL),
+            {"job_id": job_id, "dagster_run_id": normalized_run_id},
+        )
+    ).one_or_none()
+    if row is None:
+        raise PipelineCancellationConflict(
+            "import job Dagster run binding was rejected by marker or frozen run id"
+        )
+    return _row_to_job(row)
 
 
 async def attach_import_jobs_to_batch(
@@ -535,6 +728,9 @@ async def attach_import_jobs_to_batch(
     if not job_ids:
         return ()
     normalized_job_ids = tuple(dict.fromkeys(job_ids))
+    await assert_generic_import_job_targets(
+        session, (*normalized_job_ids, parent_job_id)
+    )
     await lock_pipeline_hierarchy_for_jobs(
         session,
         (*normalized_job_ids, parent_job_id),
@@ -584,6 +780,7 @@ async def heartbeat_import_job(
     current_stage: str | None = None,
 ) -> ImportJob | None:
     """running 작업의 ``heartbeat_at``(+ 선택 progress/stage) 갱신. 없으면 ``None``."""
+    await assert_generic_import_job_targets(session, (job_id,))
     result = await session.execute(
         text(_HEARTBEAT_SQL),
         {"job_id": job_id, "progress": progress, "current_stage": current_stage},
@@ -617,6 +814,7 @@ async def cancel_import_job(
     이미 terminal 상태인 행은 건드리지 않고 ``None``을 반환한다. 실행 중인 외부
     프로세스를 강제 종료하지는 못하므로 event payload에 best-effort 한계를 남긴다.
     """
+    await assert_generic_import_job_targets(session, (job_id,))
     result = await session.execute(
         text(_CANCEL_SQL),
         {"job_id": job_id, "error_message": error_message or reason},
@@ -659,6 +857,7 @@ async def finish_import_job(
         raise ValueError(
             f"status must be one of {sorted(_FINISHED_STATES)}, got {status!r}."
         )
+    await assert_generic_import_job_targets(session, (job_id,))
     result = await session.execute(
         text(_FINISH_SQL),
         {"job_id": job_id, "status": status, "error_message": error_message},

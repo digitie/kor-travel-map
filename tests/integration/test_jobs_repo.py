@@ -16,6 +16,10 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import (
+    FeatureOperationInvariantConflict,
+    ProviderDatasetOperationKey,
+)
 from kortravelmap.infra.jobs_repo import (
     attach_import_jobs_to_batch,
     cancel_import_job,
@@ -210,6 +214,10 @@ async def test_record_import_job_event_defaults_context(
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
         },
+        provider_dataset=ProviderDatasetOperationKey(
+            "python-mois-api", "mois_license_features_bulk"
+        ),
+        trigger_kind="manual",
     )
     await heartbeat_import_job(
         migrated_session, job.job_id, progress=12, current_stage="fetching"
@@ -229,6 +237,44 @@ async def test_record_import_job_event_defaults_context(
     assert event.dataset_key == "mois_license_features_bulk"
     assert event.stage == "fetching"
     assert event.payload == {"attempt": 2}
+
+
+async def test_record_event_rejects_identity_on_untyped_job(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await start_import_job(
+        migrated_session,
+        kind="manual_provider_sync",
+        payload={"provider": "legacy-payload", "dataset_key": "legacy-dataset"},
+    )
+
+    with pytest.raises(FeatureOperationInvariantConflict) as raised:
+        await record_import_job_event(
+            migrated_session,
+            job.job_id,
+            provider="event-provider",
+            dataset_key="event-dataset",
+            message="event-only identity must not be created",
+        )
+
+    assert raised.value.details == {
+        "expected": None,
+        "actual": {
+            "provider": "event-provider",
+            "dataset_key": "event-dataset",
+        },
+    }
+    count = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM ops.import_job_events "
+                "WHERE job_id = CAST(:job_id AS uuid) "
+                "AND provider IS NOT NULL"
+            ),
+            {"job_id": job.job_id},
+        )
+    ).scalar_one()
+    assert int(count) == 0
 
 
 async def test_cancel_import_job_transitions_active_job(

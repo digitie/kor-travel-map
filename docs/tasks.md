@@ -16,7 +16,7 @@
   - [x] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679, PR #689)
   - [x] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681 — 감사 결과
     전 항목 #687/#690에서 기충족, 잔여범위 감사 기록 PR)
-  - [ ] `T-ADM-C3e-D` — canonical operation 문서 계약·적대 리뷰 gate (codex)
+  - [x] `T-ADM-C3e-D` — canonical operation 문서 계약·적대 리뷰 gate (PR #696)
   - [ ] `T-ADM-C3e-A1` — 0051·operation 계층·frozen repo/client 계약 (agent A)
   - [ ] `T-ADM-C3e-A2` — 공용 root/exact-pair projection·batch query (agent A)
   - [ ] `T-ADM-C3e-B` — Dagster tracking registry·wrapper·run status sensor (agent B)
@@ -114,14 +114,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   `dagster_query_service` 경계(신/구 라우터 공유)는 #687, OpenAPI/admin types
   고정은 #690 재생성분. UI 소비는 C5(#691)/C4R 범위. 감사 기록은 journal
   2026-07-15 (claude, agent A).
-- [ ] `T-ADM-C3e-D` — **canonical operation 문서 계약** (codex, 이슈 **#679**,
-  C3 후속 5/5, C3d 뒤): Claude Code worktree에는 구현 diff가 없고 설계 기록만 남아 있어
-  C3d 정본 위에서 복구했다. 두 적대 리뷰의 차단 항목을 반영해 Dagster run root 한 건과
-  exact provider/dataset child, `(kind,id)` correlation, retry/sensor terminal ownership,
-  exact pair filter, 공용 root projection, mixed-version 순서를
-  [`C3e 설계 보고서`](reports/admin-ops-c3e-canonical-operations-2026-07-15.md)와
-  architecture/test 문서에 먼저 고정한다. 이 문서 PR이 CI green·merge되기 전 source 수정은
-  금지한다.
 - [ ] `T-ADM-C3e-A1` — **0051·operation repository frozen 계약** (agent **A**,
   의존 C3e-D): `ops.import_jobs` typed identity/trigger/registry 컬럼·trim/shape CHECK·feature-kind
   parent constraint trigger·partial unique/index, raw Dagster status/engine timestamp, writer identity
@@ -129,7 +121,12 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   `operation_kind`/`requires_run_termination` migration·응답/OpenAPI/type과 run-backed queued
   terminate/retry/terminal race를 함께 확장한다. C3d marker/CAS/direct-write inventory, generic
   claim/stale recovery 제외, reserved feature kind의 모든 generic writer fail-closed, migration
-  up/down과 invariant conflict를 포함한다.
+  up/down과 invariant conflict를 포함한다. **구현·로컬 gate 완료, PR/CI 대기** — 테스트 전
+  적대 리뷰 2인이 S1/S2 0건으로 승인했고, 비-live 전체 1,762건·API 473건·Dagster
+  270건(1 skip), frontend unit 82건과 focused migration/cancellation 200건을 통과했다.
+  외부 geocoder live 전용 5건은 로컬 upstream HTTP 400으로 분리했으며 C3e 회귀는 없다.
+  Ruff, strict mypy 3패키지, import 계약 4/4, OpenAPI/admin type drift, frontend
+  type/lint/build도 통과했다. 최종 diff 적대 재리뷰와 원격 CI는 PR 단계가 소유한다.
 - [ ] `T-ADM-C3e-A2` — **공용 root/exact-pair projection** (agent **A**, 의존 C3e-A1):
   C3b lineage CTE를 확장해 pipeline/grid/detail이 같은 deterministic pair member/status source를
   쓰고 전 dataset latest batch query와 pair/dataset-only EXPLAIN을 구현한다. feature run

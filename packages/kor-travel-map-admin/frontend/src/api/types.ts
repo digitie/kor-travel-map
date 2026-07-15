@@ -8205,6 +8205,10 @@ export interface components {
              * @enum {string}
              */
             member_kind: "import_job" | "update_request";
+            /** Operation Kind */
+            operation_kind: string | null;
+            /** Requires Run Termination */
+            requires_run_termination: boolean;
             /**
              * Result
              * @enum {string}
@@ -8254,6 +8258,10 @@ export interface components {
         PipelineCancellationRunRecord: {
             /** Dagster Run Id */
             dagster_run_id: string;
+            /** Engine Finished At */
+            engine_finished_at: string | null;
+            /** Engine Started At */
+            engine_started_at: string | null;
             error: components["schemas"]["PipelineCancellationErrorRecord"] | null;
             /** Initial Status */
             initial_status: string | null;
