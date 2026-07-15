@@ -549,6 +549,36 @@ async def test_cancellation_rolls_back_consistency_report_and_transient_write(
     assert report_count == transient_count == 0
 
 
+async def test_prepare_batch_persists_explicit_dagster_run_identity(
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        child = await start_import_job(session, kind="offline_upload_load")
+        await finish_import_job(session, child.job_id, status="done")
+        prepared = await prepare_batch_dag(
+            session,
+            make_batch_dag_request(
+                child_job_ids=[child.job_id],
+                load_batch_id="aaaaaaaa-0000-0000-0000-000000000011",
+                dagster_run_id="batch-dagster-run-identity",
+            ),
+        )
+        assert isinstance(prepared, BatchDagPrepared)
+        stored = (
+            await session.execute(
+                text(
+                    "SELECT dagster_run_id, payload->>'dagster_run_id' AS payload_run_id "
+                    "FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"
+                ),
+                {"job_id": prepared.root_job.job_id},
+            )
+        ).one()
+
+    assert prepared.root_job.dagster_run_id == "batch-dagster-run-identity"
+    assert stored.dagster_run_id == "batch-dagster-run-identity"
+    assert stored.payload_run_id == "batch-dagster-run-identity"
+
+
 async def test_phase_row_lock_first_can_commit_before_cancellation_progresses(
     migrated_engine: AsyncEngine,
 ) -> None:

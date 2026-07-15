@@ -60,6 +60,8 @@ class PipelineCancellationMember:
     terminal_status: str | None
     error: dict[str, Any] | None
     updated_at: datetime
+    operation_kind: str | None = None
+    requires_run_termination: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,8 @@ class PipelineCancellationRun:
     terminal_status: str | None
     error: dict[str, Any] | None
     updated_at: datetime
+    engine_started_at: datetime | None = None
+    engine_finished_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -101,10 +105,22 @@ class PipelineCancellationScopeMember:
     initial_status: str
     dagster_run_id: str | None
     cancellation_id: str | None
+    operation_kind: str | None = None
 
     @property
     def active(self) -> bool:
         return self.initial_status in {"queued", "running"}
+
+    @property
+    def requires_run_termination(self) -> bool:
+        return self.dagster_run_id is not None and (
+            self.initial_status == "running"
+            or (
+                self.initial_status == "queued"
+                and self.operation_kind
+                in {"provider_feature_load_run", "provider_feature_load"}
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -126,3 +142,7 @@ class PipelineCancellationConflict(RuntimeError):
 
 class PipelineCancellationInvariantError(RuntimeError):
     """attempt workflow/result 불변식을 만족하지 않는다."""
+
+
+class PipelineCancellationTimelineConflict(PipelineCancellationInvariantError):
+    """Dagster terminal 시간이 frozen canonical operation timeline과 충돌한다."""

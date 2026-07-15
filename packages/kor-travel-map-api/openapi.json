@@ -16418,6 +16418,21 @@
             "title": "Member Kind",
             "type": "string"
           },
+          "operation_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Kind"
+          },
+          "requires_run_termination": {
+            "title": "Requires Run Termination",
+            "type": "boolean"
+          },
           "result": {
             "enum": [
               "pending",
@@ -16449,6 +16464,8 @@
           "member_kind",
           "member_id",
           "dagster_run_id",
+          "operation_kind",
+          "requires_run_termination",
           "initial_status",
           "result",
           "terminal_status",
@@ -16528,6 +16545,30 @@
             "title": "Dagster Run Id",
             "type": "string"
           },
+          "engine_finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Finished At"
+          },
+          "engine_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Started At"
+          },
           "error": {
             "anyOf": [
               {
@@ -16595,6 +16636,8 @@
           "result",
           "terminal_status",
           "error",
+          "engine_started_at",
+          "engine_finished_at",
           "updated_at"
         ],
         "title": "PipelineCancellationRunRecord",

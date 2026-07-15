@@ -1,5 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex, agent A) — T-ADM-C3e-A1 구현·로컬 gate 완료
+
+- **문서 선행 완료**: C3e-D 문서 계약 PR #696이 병합되어 `T-ADM-C3e-D`를 완료
+  아카이브했다.
+- **A1 구현**: Alembic 0051과 ORM에 canonical provider/dataset/trigger/registry/raw Dagster
+  상태, partial unique/index와 parent/identity trigger를 추가했다. main package immutable
+  operation DTO와 짧은 transaction client/repository가 ensure, pair 완료, attempt event,
+  terminal reconcile, active keyset sweep을 제공한다.
+- **writer·취소 경계**: generic writer와 feature-update direct SQL은 reserved kind/parent/target을
+  fail-closed하고 offline/MOIS/exact update identity를 실컬럼으로 기록한다. C3d frozen member에
+  `operation_kind`/`requires_run_termination`을 저장해 run-backed queued feature operation을
+  DB-only 취소에서 제외하고 같은 run terminate/retry/terminal CAS로 처리한다. admin OpenAPI와
+  generated type도 같은 계약으로 갱신했다.
+- **영향도·적대 리뷰**: codegraph에서 `ImportJobRow` 52개 영향 symbol과
+  `AsyncKorTravelMapClient` caller 20개를 확인하고 direct SQL inventory를 보완했다. 테스트 전
+  적대 리뷰 2인이 terminal child 보존, same-run 동시 ensure, marker 양방향 barrier,
+  engine timestamp drift, queued run-backed retry를 보강한 뒤 S1/S2 0건으로 승인했다.
+- **로컬 검증 완료**: 외부 geocoder live 전용 파일을 제외한 전체 1,762건, API 전체
+  473건, Dagster 전체 270건(1 skip), frontend unit 82건과 focused
+  migration/cancellation 200건이 통과했다. live 전용 5건은 로컬 geocoder HTTP 400으로
+  분리했으며 나머지 회귀는 0건이다. Ruff, strict mypy 3패키지, import 계약 4/4,
+  OpenAPI/admin type drift, frontend type/lint/build도 통과했다.
+- **다음 한 작업**: 최종 diff를 적대 리뷰 2인에게 다시 넘겨 S1/S2 0건을 확인하고,
+  보안 감사·PR CI·review approval 뒤 A1을 병합한다. 이후 A2와 B를 main 기준 병렬 진행한다.
+
 ## 2026-07-15 (codex) — T-ADM-C3d 종결, T-ADM-C3e 문서 gate 진행
 
 - **C3d 완료**: PR #695가 CI 8/8 green 뒤 merge됐고 이슈 #680도 수용 증거와 함께

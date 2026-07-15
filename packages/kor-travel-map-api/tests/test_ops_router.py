@@ -103,6 +103,8 @@ def _cancellation_detail() -> PipelineCancellationDetailRecord:
                     "member_kind": "import_job",
                     "member_id": job_id,
                     "dagster_run_id": "run-1",
+                    "operation_kind": "provider_feature_load_run",
+                    "requires_run_termination": True,
                     "initial_status": "running",
                     "result": "cancelled",
                     "terminal_status": "cancelled",
@@ -113,6 +115,8 @@ def _cancellation_detail() -> PipelineCancellationDetailRecord:
             "dagster_runs": [
                 {
                     "dagster_run_id": "run-1",
+                    "engine_started_at": now,
+                    "engine_finished_at": now,
                     "initial_status": "STARTED",
                     "termination_reserved_at": now,
                     "result": "cancelled",

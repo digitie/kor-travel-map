@@ -110,6 +110,8 @@ def _cancellation_detail(request_id: str) -> PipelineCancellationDetailRecord:
                     "member_kind": "update_request",
                     "member_id": request_id,
                     "dagster_run_id": None,
+                    "operation_kind": None,
+                    "requires_run_termination": False,
                     "initial_status": "queued",
                     "result": "cancelled",
                     "terminal_status": "cancelled",

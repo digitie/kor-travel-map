@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.dataset_status_repo import (
     count_open_integrity_issues_by_dataset,
     list_latest_dataset_executions,
@@ -199,6 +200,10 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
         migrated_session,
         kind="manual_provider_sync",
         payload={"request_id": "not-a-uuid"},
+        provider_dataset=ProviderDatasetOperationKey(
+            "python-mois-api", "mois_license_features_bulk"
+        ),
+        trigger_kind="manual",
     )
     await record_import_job_event(
         migrated_session,

@@ -254,6 +254,8 @@ def _cancellation_detail(
                     "member_kind": root_kind,
                     "member_id": root_id,
                     "dagster_run_id": "run-1",
+                    "operation_kind": None,
+                    "requires_run_termination": True,
                     "initial_status": "running",
                     "result": "cancelled",
                     "terminal_status": "cancelled",
@@ -264,6 +266,8 @@ def _cancellation_detail(
             "dagster_runs": [
                 {
                     "dagster_run_id": "run-1",
+                    "engine_started_at": _NOW,
+                    "engine_finished_at": _NOW,
                     "initial_status": "STARTED",
                     "termination_reserved_at": _NOW,
                     "result": "cancelled",
@@ -299,6 +303,8 @@ def _cancellation_domain_detail() -> PipelineCancellationDetail:
                 member_kind="import_job",
                 member_id="11111111-1111-1111-1111-111111111111",
                 dagster_run_id="run-1",
+                operation_kind=None,
+                requires_run_termination=True,
                 initial_status="running",
                 result="cancelled",
                 terminal_status="cancelled",

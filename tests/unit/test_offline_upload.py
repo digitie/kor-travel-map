@@ -341,7 +341,8 @@ async def test_run_offline_upload_load_job_uses_preclaimed_loading_job(
     assert result.acquired is True
     assert result.job is not None
     assert result.job.job_id == "job-load-preclaimed"
-    assert calls.updated_payloads[-1]["dagster_run_id"] == "run-preclaimed"
+    assert calls.bound_run_ids == ["run-preclaimed"]
+    assert result.job.dagster_run_id == "run-preclaimed"
     assert result.upload.status == "loaded"
 
 
@@ -474,6 +475,7 @@ class _FakeOfflineUploadCalls:
         self.jobs: dict[str, ImportJob] = {}
         self.validation_payload: dict[str, Any] | None = None
         self.updated_payloads: list[dict[str, Any]] = []
+        self.bound_run_ids: list[str] = []
         self.finished_jobs: list[ImportJob] = []
         self.heartbeats: list[str] = []
         self.validation_state: str | None = None
@@ -512,6 +514,9 @@ def _patch_offline_job_repos(
         kind: str,
         payload: Mapping[str, Any] | None = None,
         source_checksum: str | None = None,
+        dagster_run_id: str | None = None,
+        provider_dataset: object | None = None,
+        trigger_kind: str | None = None,
     ) -> ImportJob:
         job_id = f"job-{len(calls.jobs) + 1}"
         job = ImportJob(
@@ -523,6 +528,18 @@ def _patch_offline_job_repos(
             current_stage=None,
             source_checksum=source_checksum,
             error_message=None,
+            dagster_run_id=dagster_run_id,
+            provider=(
+                provider_dataset.provider
+                if provider_dataset is not None
+                else None
+            ),
+            dataset_key=(
+                provider_dataset.dataset_key
+                if provider_dataset is not None
+                else None
+            ),
+            trigger_kind=trigger_kind,  # type: ignore[arg-type]
         )
         calls.jobs[job_id] = job
         return job
@@ -566,6 +583,17 @@ def _patch_offline_job_repos(
     ) -> ImportJob:
         calls.updated_payloads.append(dict(payload))
         return calls._replace_job(calls.jobs[job_id], payload=dict(payload))
+
+    async def _bind_import_job_dagster_run(
+        _session: object,
+        job_id: str,
+        *,
+        dagster_run_id: str,
+    ) -> ImportJob:
+        calls.bound_run_ids.append(dagster_run_id)
+        return calls._replace_job(
+            calls.jobs[job_id], dagster_run_id=dagster_run_id
+        )
 
     async def _get_import_job(_session: object, job_id: str) -> ImportJob | None:
         if job_id == calls.upload.validation_job_id and calls.validation_payload is not None:
@@ -625,6 +653,11 @@ def _patch_offline_job_repos(
     monkeypatch.setattr(offline_upload_mod, "heartbeat_import_job", _heartbeat_import_job)
     monkeypatch.setattr(offline_upload_mod, "finish_import_job", _finish_import_job)
     monkeypatch.setattr(offline_upload_mod, "update_import_job_payload", _update_import_job_payload)
+    monkeypatch.setattr(
+        offline_upload_mod,
+        "bind_import_job_dagster_run",
+        _bind_import_job_dagster_run,
+    )
     monkeypatch.setattr(offline_upload_mod, "get_import_job", _get_import_job)
     monkeypatch.setattr(offline_upload_mod, "mark_offline_upload_validating", _mark_validating)
     monkeypatch.setattr(offline_upload_mod, "finish_offline_upload_validation", _finish_validation)

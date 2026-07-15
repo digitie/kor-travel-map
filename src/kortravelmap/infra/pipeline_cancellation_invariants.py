@@ -137,6 +137,7 @@ def _validate_resolved_member(
     member: PipelineCancellationMember,
     base: PipelineCancellationScopeMember,
     run_by_id: Mapping[str, PipelineCancellationRun],
+    success_tracking_run_ids: frozenset[str],
 ) -> None:
     if member.result == "cancelled":
         if base.initial_status != "cancelled" or member.terminal_status != "cancelled":
@@ -151,16 +152,25 @@ def _validate_resolved_member(
     else:
         raise PipelineCancellationInvariantError("member is not resolved")
 
-    if member.initial_status == "running":
+    if member.requires_run_termination:
         if member.dagster_run_id is None:
             raise PipelineCancellationInvariantError(
-                "resolved running member requires a frozen Dagster run"
+                "resolved run-backed member requires a frozen Dagster run"
             )
         run = run_by_id[member.dagster_run_id]
         mapping = _run_base_mapping(run)
+        if (
+            run.result == "already_terminal"
+            and run.terminal_status == "SUCCESS"
+            and member.operation_kind
+            in {"provider_feature_load_run", "provider_feature_load"}
+            and member.terminal_status == "failed"
+            and member.dagster_run_id in success_tracking_run_ids
+        ):
+            mapping = ("failed", "already_terminal")
         if mapping != (base.initial_status, member.result):
             raise PipelineCancellationInvariantError(
-                "running member/base result does not match Dagster terminal result"
+                "run-backed member/base result does not match Dagster terminal result"
             )
     elif member.initial_status == "queued":
         if member.result != "cancelled":
@@ -201,8 +211,14 @@ def _base_matches_frozen_member(
 ) -> bool:
     return (
         base.cancellation_id == detail.attempt.cancellation_id
-        and base.initial_status == member.initial_status
+        and base.initial_status
+        in (
+            {"queued", "running"}
+            if member.initial_status == "queued"
+            else {member.initial_status}
+        )
         and base.dagster_run_id == member.dagster_run_id
+        and base.operation_kind == member.operation_kind
     )
 
 
@@ -212,7 +228,7 @@ def _definitive_failure_member(
     base: PipelineCancellationScopeMember,
     run_by_id: Mapping[str, PipelineCancellationRun],
 ) -> bool:
-    if member.initial_status != "running":
+    if member.initial_status != "running" and not member.requires_run_termination:
         return False
     try:
         _structured_error_code(member.error, allowed_codes=_FAILED_ERROR_CODES)
@@ -255,6 +271,13 @@ def _validate_finish_invariants(
         for member in detail.members
         if member.result in {"cancelled", "already_terminal"}
     )
+    success_tracking_run_ids = frozenset(
+        member.dagster_run_id
+        for member in detail.members
+        if member.dagster_run_id is not None
+        and member.operation_kind == "provider_feature_load"
+        and member.initial_status != "done"
+    )
     for member in resolved_members:
         base = base_by_key[(member.member_kind, member.member_id)]
         if (
@@ -268,6 +291,7 @@ def _validate_finish_invariants(
             member,
             base,
             run_by_id,
+            success_tracking_run_ids,
         )
 
     if status == "completed":
@@ -291,9 +315,9 @@ def _validate_finish_invariants(
             raise PipelineCancellationInvariantError(
                 "retryable cancellation requires unresolved members"
             )
-        if any(member.initial_status != "running" for member in failed_members):
+        if any(not member.requires_run_termination for member in failed_members):
             raise PipelineCancellationInvariantError(
-                "cancel_failed is restricted to frozen running members"
+                "cancel_failed is restricted to run-backed active members"
             )
         failed_run_ids = {run.dagster_run_id for run in failed_runs}
         referenced_failed_run_ids = {
@@ -332,9 +356,9 @@ def _validate_finish_invariants(
                     "failed cancellation contains an unknown run failure policy"
                 )
         for member in failed_members:
-            if member.initial_status != "running":
+            if member.initial_status != "running" and not member.requires_run_termination:
                 raise PipelineCancellationInvariantError(
-                    "cancel_failed is restricted to frozen running members"
+                    "cancel_failed is restricted to running or run-backed active members"
                 )
             base = base_by_key[(member.member_kind, member.member_id)]
             if _retry_capable_member(member, run_by_id) and _base_matches_frozen_member(

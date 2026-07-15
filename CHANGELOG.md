@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### canonical provider operation 영속화 (2026-07-15, ADR-064 T-ADM-C3e-A1)
+
+- **ADDED**: Alembic 0051과 immutable Python API로 Dagster feature load를 run root
+  `provider_feature_load_run` 한 건과 exact provider/dataset child
+  `provider_feature_load`로 저장한다. typed identity, trigger, registry, raw Dagster
+  status와 engine timestamp를 자유 payload와 분리했다.
+- **CHANGED**: offline upload, MOIS, exact feature update가 provider/dataset identity를
+  실컬럼으로 기록한다. generic import job writer는 canonical reserved kind·parent·target을
+  fail-closed하고, canonical lifecycle은 멱등 ensure·단조 상태·terminal invariant로 닫힌다.
+- **CHANGED**: 계층형 취소 응답에 frozen `operation_kind`와
+  `requires_run_termination`을 추가했다. queued run-backed feature operation도 DB-only로
+  취소하지 않고 같은 frozen member의 Dagster terminate·retry·authoritative terminal CAS를
+  사용한다.
+- **TEST**: 비-live 전체 1,762건, API 473건, Dagster 270건(1 skip), frontend unit
+  82건과 Ruff, strict mypy 3패키지, import 계약 4/4, OpenAPI/admin type drift,
+  frontend type/lint/build를 통과했다.
+
 ### admin ops pipeline Dagster run 상세 (2026-07-15, ADR-064 T-ADM-C3c)
 
 - **ADDED**: `GET /v1/ops/pipeline/dagster-runs/{run_id}`를 추가했다. Dagster event

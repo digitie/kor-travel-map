@@ -235,6 +235,7 @@ async def prepare_batch_dag(
         kind=request.root_kind,
         payload=payload,
         load_batch_id=request.load_batch_id,
+        dagster_run_id=request.dagster_run_id,
     )
     child_jobs = await attach_import_jobs_to_batch(
         session,

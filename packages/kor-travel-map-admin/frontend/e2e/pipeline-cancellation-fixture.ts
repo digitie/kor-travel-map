@@ -10,6 +10,7 @@ type CancellationFixtureMember = {
   memberId: string;
   initialStatus?: string;
   dagsterRunId?: string | null;
+  operationKind?: string | null;
   terminalStatus?: string | null;
 };
 
@@ -42,14 +43,32 @@ export function makePipelineCancellationResponse({
     member.initialStatus ?? initialStatus;
   const memberRunId = (member: CancellationFixtureMember): string | null =>
     member.dagsterRunId === undefined ? dagsterRunId : member.dagsterRunId;
+  const memberOperationKind = (
+    member: CancellationFixtureMember,
+  ): string | null => member.operationKind ?? null;
+  const requiresRunTermination = (
+    member: CancellationFixtureMember,
+  ): boolean => {
+    const status = memberInitialStatus(member);
+    const operationKind = memberOperationKind(member);
+    return (
+      memberRunId(member) !== null &&
+      (status === "running" ||
+        (status === "queued" &&
+          (operationKind === "provider_feature_load_run" ||
+            operationKind === "provider_feature_load")))
+    );
+  };
   for (const member of memberFixtures) {
     const status = memberInitialStatus(member);
     const runId = memberRunId(member);
     if (status === "running" && runId === null) {
       throw new Error("running cancellation fixture member requires a Dagster run");
     }
-    if (status === "queued" && runId !== null) {
-      throw new Error("queued cancellation fixture member must use the DB-only path");
+    if (status === "queued" && runId !== null && !requiresRunTermination(member)) {
+      throw new Error(
+        "queued cancellation fixture run requires a reserved feature operation kind",
+      );
     }
     if (status !== "queued" && status !== "running") {
       throw new Error(
@@ -60,7 +79,7 @@ export function makePipelineCancellationResponse({
   const runIds = [
     ...new Set(
       memberFixtures
-        .filter((member) => memberInitialStatus(member) === "running")
+        .filter(requiresRunTermination)
         .map(memberRunId)
         .filter((runId): runId is string => runId !== null),
     ),
@@ -72,6 +91,8 @@ export function makePipelineCancellationResponse({
       dagster_runs: runIds.map((runId) => ({
         dagster_run_id: runId,
         error: null,
+        engine_started_at: now,
+        engine_finished_at: now,
         initial_status: "STARTED",
         result: "cancelled",
         terminal_status: "CANCELED",
@@ -86,6 +107,8 @@ export function makePipelineCancellationResponse({
         initial_status: memberInitialStatus(member),
         member_id: member.memberId,
         member_kind: member.memberKind,
+        operation_kind: memberOperationKind(member),
+        requires_run_termination: requiresRunTermination(member),
         result: "cancelled",
         terminal_status:
           member.terminalStatus === undefined

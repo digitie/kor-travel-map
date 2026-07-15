@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.consistency import run_consistency_checks
 from kortravelmap.infra.integrity_violation_repo import create_data_integrity_violation
 from kortravelmap.infra.jobs_repo import (
@@ -56,6 +57,10 @@ async def test_ops_import_jobs_list_detail_and_cursor(
         payload={"request_id": "new"},
         load_batch_id=batch_id,
         parent_job_id=root_job.job_id,
+        provider_dataset=ProviderDatasetOperationKey(
+            "python-mois-api", "mois_license_features_bulk"
+        ),
+        trigger_kind="manual",
     )
     await migrated_session.execute(
         text(

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import BaseModel
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -55,6 +56,7 @@ from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.feature_repo import FeatureLoadResult, load_bundles
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
+    bind_import_job_dagster_run,
     finish_import_job,
     get_import_job,
     heartbeat_import_job,
@@ -69,6 +71,7 @@ from kortravelmap.infra.offline_upload_repo import (
     mark_offline_upload_loading,
     mark_offline_upload_validating,
 )
+from kortravelmap.infra.pipeline_cancellation_types import PipelineCancellationConflict
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -329,6 +332,10 @@ async def run_offline_upload_validation_job(
                 "column_mapping": mapping.as_payload(),
             },
             source_checksum=upload.checksum_sha256,
+            provider_dataset=ProviderDatasetOperationKey(
+                upload.provider, upload.dataset_key
+            ),
+            trigger_kind="manual",
         )
         marked_validation = await mark_offline_upload_validating(
             session,
@@ -466,48 +473,49 @@ async def run_offline_upload_load_job(
     if upload_format in OFFLINE_UPLOAD_TABULAR_FORMATS and upload.validation_job_id is None:
         raise ValueError("CSV/TSV offline upload은 load 전 validation이 필요함.")
 
+    preclaimed_job: ImportJob | None = None
+    if preclaimed:
+        assert upload.load_job_id is not None
+        preclaimed_job = await get_import_job(session, upload.load_job_id)
+        if preclaimed_job is None:
+            raise ValueError(f"offline upload load job 없음: {upload.load_job_id!r}")
+        if preclaimed_job.status != "running":
+            raise PipelineCancellationConflict(
+                "preclaimed offline upload job is not running"
+            )
+        if preclaimed_job.cancellation_id is not None:
+            raise PipelineCancellationConflict(
+                "preclaimed offline upload job is cancellation-marked"
+            )
+        if (
+            dagster_run_id is not None
+            and preclaimed_job.dagster_run_id is not None
+            and preclaimed_job.dagster_run_id != dagster_run_id
+        ):
+            raise PipelineCancellationConflict(
+                "preclaimed offline upload job belongs to another Dagster run"
+            )
+
     async with try_advisory_lock(session, _advisory_key(upload)) as acquired:
         if not acquired:
-            if preclaimed and upload.load_job_id is not None:
-                lock_error_message = "offline upload load advisory lock busy"
-                finished = await finish_import_job(
-                    session,
-                    upload.load_job_id,
-                    status="failed",
-                    error_message=lock_error_message,
-                ) or await get_import_job(session, upload.load_job_id)
-                failed_upload = await finish_offline_upload_load(
-                    session,
-                    upload_id=upload.upload_id,
-                    status="load_failed",
-                )
-                upload = failed_upload or upload
-                return OfflineUploadLoadResult(
-                    acquired=False,
-                    upload=upload,
-                    job=finished,
-                    error_message=lock_error_message,
-                )
             return OfflineUploadLoadResult(
                 acquired=False,
                 upload=upload,
+                job=preclaimed_job,
                 error_message="offline upload load advisory lock busy",
             )
 
         if preclaimed:
-            assert upload.load_job_id is not None
-            job = await get_import_job(session, upload.load_job_id)
-            if job is None:
-                raise ValueError(f"offline upload load job 없음: {upload.load_job_id!r}")
-            if dagster_run_id:
-                job = (
-                    await update_import_job_payload(
-                        session,
-                        job.job_id,
-                        payload={**job.payload, "dagster_run_id": dagster_run_id},
-                    )
-                    or job
+            assert preclaimed_job is not None
+            job = (
+                await bind_import_job_dagster_run(
+                    session,
+                    preclaimed_job.job_id,
+                    dagster_run_id=dagster_run_id,
                 )
+                if dagster_run_id is not None
+                else preclaimed_job
+            )
         else:
             job = await start_import_job(
                 session,
@@ -522,6 +530,11 @@ async def run_offline_upload_load_job(
                     "dagster_run_id": dagster_run_id,
                 },
                 source_checksum=upload.checksum_sha256,
+                dagster_run_id=dagster_run_id,
+                provider_dataset=ProviderDatasetOperationKey(
+                    upload.provider, upload.dataset_key
+                ),
+                trigger_kind="manual",
             )
             marked_load = await mark_offline_upload_loading(
                 session,
@@ -532,6 +545,18 @@ async def run_offline_upload_load_job(
                 raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
             upload = marked_load
 
+        # 첫 marker-guarded UPDATE 성공이 outer transaction 종료까지 job row lock을
+        # 유지한다. preclaimed 조회와 이 지점 사이 C3d marker가 선점하면 None으로
+        # 끝나므로 object/provider I/O 전에 fail-closed 한다.
+        first_heartbeat = await heartbeat_import_job(
+            session, job.job_id, progress=10, current_stage="read_object"
+        )
+        if first_heartbeat is None:
+            raise PipelineCancellationConflict(
+                "offline upload job heartbeat was rejected by cancellation marker"
+            )
+        job = first_heartbeat
+
         body = b""
         checksum_actual: str | None = None
         parsed_format = upload_format
@@ -539,17 +564,18 @@ async def run_offline_upload_load_job(
         error_message: str | None = None
 
         try:
-            await heartbeat_import_job(
-                session, job.job_id, progress=10, current_stage="read_object"
-            )
             body = await store.read_bytes(upload.storage_key)
             _verify_size(upload, body)
             checksum_actual = hashlib.sha256(body).hexdigest()
             _verify_checksum(upload, checksum_actual)
 
-            await heartbeat_import_job(
+            heartbeat = await heartbeat_import_job(
                 session, job.job_id, progress=30, current_stage="parse_feature_bundles"
             )
+            if heartbeat is None:
+                raise PipelineCancellationConflict(
+                    "offline upload job parse heartbeat was rejected"
+                )
             column_mapping = await _load_column_mapping_for_upload(session, upload)
             if parsed_format in OFFLINE_UPLOAD_TABULAR_FORMATS:
                 if column_mapping is None:
@@ -578,22 +604,29 @@ async def run_offline_upload_load_job(
                     column_mapping=column_mapping,
                 )
 
-            await heartbeat_import_job(
+            heartbeat = await heartbeat_import_job(
                 session, job.job_id, progress=70, current_stage="load_feature_bundles"
             )
+            if heartbeat is None:
+                raise PipelineCancellationConflict(
+                    "offline upload job load heartbeat was rejected"
+                )
             async with session.begin_nested():
                 load_result = await load_bundles(session, bundles)
+        except PipelineCancellationConflict:
+            raise
         except Exception as exc:  # noqa: BLE001 - failed job 기록 후 결과로 반환
             error_message = str(exc)
-            finished = (
-                await finish_import_job(
-                    session,
-                    job.job_id,
-                    status="failed",
-                    error_message=error_message,
-                )
-                or job
+            finished = await finish_import_job(
+                session,
+                job.job_id,
+                status="failed",
+                error_message=error_message,
             )
+            if finished is None:
+                raise PipelineCancellationConflict(
+                    "offline upload job failure transition was rejected"
+                ) from exc
             failed_upload = await finish_offline_upload_load(
                 session,
                 upload_id=upload.upload_id,
@@ -613,7 +646,11 @@ async def run_offline_upload_load_job(
                 error_message=error_message,
             )
 
-        finished = await finish_import_job(session, job.job_id, status="done") or job
+        finished = await finish_import_job(session, job.job_id, status="done")
+        if finished is None:
+            raise PipelineCancellationConflict(
+                "offline upload job completion transition was rejected"
+            )
         loaded_upload = await finish_offline_upload_load(
             session,
             upload_id=upload.upload_id,

@@ -27,8 +27,14 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from kortravelmap.core.feature_operation import (
+    ProviderDatasetOperationKey,
+)
 from kortravelmap.infra.advisory_lock import try_advisory_lock
-from kortravelmap.infra.jobs_repo import enqueue_import_job
+from kortravelmap.infra.jobs_repo import (
+    assert_generic_import_job_targets,
+    enqueue_import_job,
+)
 from kortravelmap.infra.scope_repo import (
     SigunguByRadiusResolver,
     count_features_matching_scope,
@@ -440,6 +446,7 @@ SET status = 'running',
     current_stage = COALESCE(:current_stage, current_stage),
     dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id)
 WHERE job_id = :job_id
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
   AND cancellation_id IS NULL
   AND (
     (status = 'queued' AND dagster_run_id IS NULL)
@@ -461,6 +468,7 @@ SET status = :status,
     progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
 WHERE job_id = :job_id
   AND status IN ('queued', 'running')
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
   AND cancellation_id IS NULL
   AND (
     CAST(:expected_dagster_run_id AS text) IS NULL
@@ -482,6 +490,7 @@ SET status = 'queued',
     finished_at = NULL
 WHERE job_id = CAST(:job_id AS uuid)
   AND status IN ('queued', 'running')
+  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
   AND cancellation_id IS NULL
 RETURNING job_id
 """
@@ -556,6 +565,7 @@ async def _start_import_job(
 ) -> bool:
     if job_id is None:
         return True
+    await assert_generic_import_job_targets(session, (job_id,))
     row = (
         await session.execute(
             text(_START_IMPORT_JOB_SQL),
@@ -580,6 +590,7 @@ async def _finish_import_job(
 ) -> bool:
     if job_id is None:
         return True
+    await assert_generic_import_job_targets(session, (job_id,))
     row = (
         await session.execute(
             text(_FINISH_IMPORT_JOB_SQL),
@@ -645,6 +656,13 @@ async def enqueue_feature_update_request(
                 raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
 
     request_id = str(uuid4())
+    provider_dataset = None
+    if scope_type == "provider_dataset":
+        provider = scope_payload.get("provider")
+        dataset_key = scope_payload.get("dataset_key")
+        if not isinstance(provider, str) or not isinstance(dataset_key, str):
+            raise ValueError("provider_dataset scope requires provider and dataset_key")
+        provider_dataset = ProviderDatasetOperationKey(provider, dataset_key)
     job = await enqueue_import_job(
         session,
         kind=FEATURE_UPDATE_JOB_KIND,
@@ -658,6 +676,8 @@ async def enqueue_feature_update_request(
             "run_mode": run_mode,
             "matched_scope": matched_scope,
         },
+        provider_dataset=provider_dataset,
+        trigger_kind="update_request",
     )
     row = (
         await session.execute(
@@ -957,6 +977,7 @@ async def requeue_update_request_after_lock_contention(
         return None
     requeued = _row_to_request(row)
     if requeued.job_id is not None:
+        await assert_generic_import_job_targets(session, (requeued.job_id,))
         job_row = (
             await session.execute(
                 text(_REQUEUE_IMPORT_JOB_SQL),

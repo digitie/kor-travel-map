@@ -1299,7 +1299,15 @@ CREATE TABLE ops.pipeline_cancellation_runs (
                     ('pending', 'cancelled', 'already_terminal', 'cancel_failed')),
   terminal_status TEXT,
   error           JSONB,
+  engine_started_at  TIMESTAMPTZ,
+  engine_finished_at TIMESTAMPTZ,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (engine_started_at IS NULL AND engine_finished_at IS NULL) OR
+    (result IN ('cancelled', 'already_terminal') AND
+     engine_finished_at IS NOT NULL AND
+     (engine_started_at IS NULL OR engine_started_at <= engine_finished_at))
+  ),
   CHECK (
     (termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND (
       (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
@@ -1460,7 +1468,10 @@ terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인�
   Dagster `CANCELED`를 확인한 경우에만 base `status='cancelled'`로 바꾼다.
 - Dagster `SUCCESS`/`FAILURE`는 member의 run id가 정확히 같고, marker가 같은
   `cancellation_id`를 가리키며, base row가 아직 active이고, terminal 조회가 권위 있는
-  경우에만 각각 `done`/`failed`로 reconcile한다. update request와 연결 job의 frozen
+  경우에만 reconcile한다. feature run의 `SUCCESS`는 frozen pair가 모두 `done`일 때만 root를
+  `done`으로 만든다. non-done pair가 하나라도 있으면 이미 terminal인 pair는 보존하고 known active
+  root/pair를 한 transaction에서 `tracking_invariant` failed로 닫으며 raw `SUCCESS`와 engine
+  시각은 run/root에 보존한다. 일반 `FAILURE`는 `failed`로 reconcile한다. update request와 연결 job의 frozen
   member/run 대응이 불완전하면 안전하게 reconcile할 수 없는 경우다.
 - `cancel_failed`는 frozen `initial_status='running'`이거나
   `requires_run_termination=true`인 member에 허용한다. generic queued member는 전용 DB 취소
@@ -1668,7 +1679,22 @@ ALTER TABLE ops.import_jobs
        dataset_key IS NOT NULL AND dagster_run_id IS NOT NULL AND
        dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '' AND
        trigger_kind IS NULL AND operation_registry_version IS NULL AND
-       dagster_run_status IS NULL))
+       dagster_run_status IS NULL))),
+  ADD CONSTRAINT ck_import_jobs_feature_engine_timeline CHECK (
+    kind NOT IN ('provider_feature_load_run', 'provider_feature_load') OR
+    ((started_at IS NULL OR created_at <= started_at) AND
+     (finished_at IS NULL OR created_at <= finished_at) AND
+     (started_at IS NULL OR finished_at IS NULL OR started_at <= finished_at))
+  );
+
+ALTER TABLE ops.pipeline_cancellation_runs
+  ADD COLUMN engine_started_at TIMESTAMPTZ,
+  ADD COLUMN engine_finished_at TIMESTAMPTZ,
+  ADD CONSTRAINT ck_pipeline_cancellation_runs_engine_times CHECK (
+    (engine_started_at IS NULL AND engine_finished_at IS NULL) OR
+    (result IN ('cancelled', 'already_terminal') AND
+     engine_finished_at IS NOT NULL AND
+     (engine_started_at IS NULL OR engine_started_at <= engine_finished_at))
   );
 
 ALTER TABLE ops.pipeline_cancellation_members
@@ -1736,7 +1762,7 @@ BEGIN
 END;
 $$;
 CREATE CONSTRAINT TRIGGER ck_import_jobs_feature_operation_parent
-  AFTER INSERT OR UPDATE OF kind, parent_job_id, dagster_run_id
+  AFTER INSERT OR UPDATE OF kind, parent_job_id, dagster_run_id, created_at
   ON ops.import_jobs
   DEFERRABLE INITIALLY IMMEDIATE
   FOR EACH ROW
@@ -1791,10 +1817,17 @@ CREATE INDEX idx_import_jobs_provider_created
   WHERE provider IS NOT NULL;
 ```
 
+direct request backfill은 연결된 request 전체가 정확히 1건이고 그 행이 string·trimmed non-empty
+`provider_dataset` exact pair일 때만 허용한다. 연결 request가 하나라도 있으면 ambiguous/partial/
+다른 scope 여부와 무관하게 event fallback을 금지한다. event exact fallback은 request linkage가 0인
+legacy job에서 identity-bearing event 전체가 같은 완전 pair일 때만 허용한다.
+
 0051은 malformed legacy import kind를 trim해 다른 identity로 바꾸지 않고 NULL로 남기며 그 건수를
 migration 진단 로그에 기록한다. 신규 cancellation snapshot writer는 trim된 non-empty
 `operation_kind`만 허용한다. running+run-id의 `requires_run_termination=true` 백필은
 `operation_kind`가 NULL이어도 유지된다.
+0051 이전에는 feature-load reserved kind가 없으므로 legacy queued generic+run-id의 false는 migration으로,
+queued feature의 true는 0051 이후 canonical snapshot 경로로 검증한다.
 
 event-backed `QUEUED|STARTING|STARTED|CANCELING` 각각의 run-status sensor 집합이 권위 있는 run selection의
 root와 모든 pair child를 provider resource 초기화와 독립된 한 transaction에서 ensure한다.
@@ -1820,8 +1853,9 @@ run terminal sensor가 모든 retry 뒤 root terminal을 소유한다. `SUCCESS`
 DB child set이 같고 모든 child가 wrapper/callback에 의해 이미 `done`일 때 root만 `done`으로
 바꾼다. child set이 다르면 누락 child를 보정 생성하지 않고 structural conflict를 기록하되
 active root와 알려진 active child를 같은 transaction에서 `tracking_invariant` failed로 닫아
-terminal Dagster run 아래 active DB 행을 남기지 않는다. set은 같지만 queued/running child가
-남은 경우도 root와 active child를 같은 invariant `failed`로 닫고 raw
+terminal Dagster run 아래 active DB 행을 남기지 않는다. set은 같아도 `done`이 아닌
+queued/running/failed/cancelled child가 남은 경우 known active root/child를 같은 invariant
+`failed`로 닫고 이미 terminal인 child는 보존하며 raw
 Dagster `SUCCESS`는 별도 필드에 보존한다. `FAILURE`는 남은 active
 `queued|running` child와 root를 `failed`로 바꾼다. C3d marker 없는 외부 `CANCELED`는 row가
 없으면 selection 전체를 ensure한 뒤 active `queued|running` child/root를 `cancelled`로 바꾸고,
@@ -1891,6 +1925,9 @@ QUEUED→STARTED 경쟁도 같은 reservation/poll 경로가 처리한다. C3e-A
 한 distinct event pair만 사용한다. payload의 scalar/nested identity는 읽지 않는다. 여러 pair,
 부분 identity, 빈 문자열은 provider/dataset을 모두 NULL로 남기고 신뢰할 trigger가 없는 legacy
 row의 `trigger_kind`도 NULL이다.
+기존 `pipeline_cancellation_runs`에는 권위 있는 Dagster 관측 시각 근거가 없으므로
+`engine_started_at`/`engine_finished_at`을 추측해 백필하지 않고 NULL로 유지한다. 0051 이후
+terminal observation을 기록하는 cancellation writer만 실제 관측값을 채운다.
 
 신규 `enqueue_import_job`/`start_import_job`은 payload를 해석하지 않고 optional typed pair와
 trigger를 실컬럼에 쓴다. offline validate/load/reserve, MOIS bulk/incremental/closed, exact
@@ -1909,8 +1946,11 @@ selection·run config/settings와 교차 검증한다. static asset, data.go.kr 
 KNPS catalog 내 resolved dataset을 각각 전수 검증하며 provider resource는 sensor identity 복구에
 사용하지 않는다.
 
-downgrade는 feature index/constraint/trigger와 cancellation member CHECK를 먼저 제거하고
-`operation_kind`/`requires_run_termination`, import identity/raw-status 컬럼 순서로 제거한다.
+downgrade는 feature index/constraint/trigger와 cancellation member CHECK,
+`ck_pipeline_cancellation_runs_engine_times`를 먼저 제거하고 cancellation run의
+`engine_started_at`/`engine_finished_at`, member의 `operation_kind`/
+`requires_run_termination`, import identity/raw-status 컬럼 순서로 제거한다. engine 시각 또는
+신규 member/import 필드가 필요한 감사 이력은 downgrade 전에 별도로 export해야 한다.
 old C3d가 해석하지 못하는 `initial_status='queued' AND result='cancel_failed'`인 run-backed feature
 history가 있으면 export/명시 정리 전 downgrade를 fail-closed한다.
 구 API/Dagster image 기동 뒤 실행하지 않는다. rollback은 신규 launch 차단 →

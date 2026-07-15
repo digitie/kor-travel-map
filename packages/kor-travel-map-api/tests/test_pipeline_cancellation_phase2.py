@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -12,9 +13,11 @@ import pytest
 from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationAttempt,
     PipelineCancellationDetail,
+    PipelineCancellationInvariantError,
     PipelineCancellationMember,
     PipelineCancellationRun,
     PipelineCancellationScope,
+    PipelineCancellationTimelineConflict,
 )
 from pydantic import ValidationError
 
@@ -31,7 +34,9 @@ pytestmark = pytest.mark.unit
 _NOW = datetime(2026, 7, 15, tzinfo=UTC)
 
 
-def _infra_detail(*, reserved: bool = False) -> PipelineCancellationDetail:
+def _infra_detail(
+    *, reserved: bool = False, initial_status: str = "running"
+) -> PipelineCancellationDetail:
     cancellation_id = "11111111-1111-4111-8111-111111111111"
     root_id = "22222222-2222-4222-8222-222222222222"
     return PipelineCancellationDetail(
@@ -54,7 +59,9 @@ def _infra_detail(*, reserved: bool = False) -> PipelineCancellationDetail:
                 member_kind="import_job",
                 member_id=root_id,
                 dagster_run_id="run-1",
-                initial_status="running",
+                operation_kind="provider_feature_load_run",
+                requires_run_termination=True,
+                initial_status=initial_status,
                 result="pending",
                 terminal_status=None,
                 error=None,
@@ -81,6 +88,12 @@ class _NoTransactionSession:
         return False
 
 
+class _TransactionSession:
+    @asynccontextmanager
+    async def begin(self) -> Any:
+        yield
+
+
 def _detail_payload(*, status: str = "completed", result: str = "cancelled") -> dict:
     return {
         "cancellation_id": "11111111-1111-4111-8111-111111111111",
@@ -103,6 +116,8 @@ def _detail_payload(*, status: str = "completed", result: str = "cancelled") -> 
                 "member_kind": "import_job",
                 "member_id": "22222222-2222-4222-8222-222222222222",
                 "dagster_run_id": "run-1",
+                "operation_kind": "provider_feature_load_run",
+                "requires_run_termination": True,
                 "initial_status": "running",
                 "result": result,
                 "terminal_status": "cancelled" if result == "cancelled" else None,
@@ -113,6 +128,8 @@ def _detail_payload(*, status: str = "completed", result: str = "cancelled") -> 
         "dagster_runs": [
             {
                 "dagster_run_id": "run-1",
+                "engine_started_at": _NOW,
+                "engine_finished_at": _NOW,
                 "initial_status": "STARTED",
                 "termination_reserved_at": _NOW,
                 "result": result,
@@ -145,6 +162,8 @@ def test_run_dto_exposes_dispatch_reservation() -> None:
     detail = PipelineCancellationDetailRecord.model_validate(_detail_payload())
 
     assert detail.dagster_runs[0].termination_reserved_at == _NOW
+    assert detail.dagster_runs[0].engine_started_at == _NOW
+    assert detail.dagster_runs[0].engine_finished_at == _NOW
     assert detail.committed_data_rolled_back is False
     assert detail.warnings
 
@@ -379,6 +398,133 @@ async def test_ambiguous_dispatch_preserves_original_cause_when_poll_fails(
 
     assert failure is dispatch_failure
     assert recorded == [dispatch_failure]
+
+
+@pytest.mark.asyncio
+async def test_run_backed_queued_member_uses_single_terminate_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail = _infra_detail(initial_status="queued")
+    started_at = _NOW
+    finished_at = datetime(2026, 7, 15, 0, 0, 3, tzinfo=UTC)
+    calls = {"reserve": 0, "terminate": 0}
+    recorded: dict[str, Any] = {}
+
+    async def query_status(**_kwargs: Any) -> service._RunObservation:
+        return service._RunObservation(run_id="run-1", status="STARTING")
+
+    async def reserve(*_args: Any, **_kwargs: Any) -> bool:
+        calls["reserve"] += 1
+        return True
+
+    async def terminate(**_kwargs: Any) -> None:
+        calls["terminate"] += 1
+
+    async def poll(**_kwargs: Any) -> service._RunObservation:
+        return service._RunObservation(
+            run_id="run-1",
+            status="CANCELED",
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+
+    async def record_terminal(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> tuple[PipelineCancellationDetail, None]:
+        recorded.update(kwargs)
+        return detail, None
+
+    monkeypatch.setattr(service, "_query_run_status", query_status)
+    monkeypatch.setattr(service, "_reserve_run", reserve)
+    monkeypatch.setattr(service, "_terminate_run_once", terminate)
+    monkeypatch.setattr(service, "_poll_terminal_status", poll)
+    monkeypatch.setattr(service, "_record_terminal_run", record_terminal)
+
+    async with httpx.AsyncClient() as client:
+        await service._process_pending_run(
+            _NoTransactionSession(),  # type: ignore[arg-type]
+            detail,
+            run_id="run-1",
+            settings=service.ApiSettings(),
+            http_client=client,
+            graphql_url="http://dagster.example/graphql",
+        )
+
+    assert calls == {"reserve": 1, "terminate": 1}
+    assert recorded["terminal_status"] == "CANCELED"
+    assert recorded["engine_started_at"] == started_at
+    assert recorded["engine_finished_at"] == finished_at
+
+
+@pytest.mark.asyncio
+async def test_terminal_timeline_conflict_routes_to_durable_reconcile_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail = _infra_detail()
+    recorded: list[service._Failure] = []
+
+    async def timeline_conflict(*_args: Any, **_kwargs: Any) -> bool:
+        raise PipelineCancellationTimelineConflict("frozen timeline conflict")
+
+    async def record_failure(
+        *_args: Any,
+        failure: service._Failure,
+        **_kwargs: Any,
+    ) -> PipelineCancellationDetail:
+        recorded.append(failure)
+        return detail
+
+    monkeypatch.setattr(
+        service, "set_pipeline_cancellation_run_result", timeline_conflict
+    )
+    monkeypatch.setattr(service, "_record_run_failure", record_failure)
+
+    updated, failure = await service._record_terminal_run(
+        _TransactionSession(),  # type: ignore[arg-type]
+        detail,
+        run_id="run-1",
+        initial_status="STARTED",
+        terminal_status="CANCELED",
+        engine_started_at=_NOW,
+        engine_finished_at=_NOW,
+    )
+
+    assert updated is detail
+    assert failure is recorded[0]
+    assert failure.code == "DAGSTER_RECONCILE_FAILED"
+    assert failure.details["phase"] == "terminal_timeline"
+
+
+@pytest.mark.asyncio
+async def test_orphan_terminal_identity_drift_remains_invariant_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail = _infra_detail()
+
+    async def programmer_invariant(*_args: Any, **_kwargs: Any) -> bool:
+        raise PipelineCancellationInvariantError("recorded orphan result drift")
+
+    async def unexpected(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("generic invariant must not be reclassified")
+
+    monkeypatch.setattr(
+        service, "set_pipeline_cancellation_run_result", programmer_invariant
+    )
+    monkeypatch.setattr(service, "_record_run_failure", unexpected)
+
+    with pytest.raises(
+        PipelineCancellationInvariantError, match="recorded orphan result drift"
+    ):
+        await service._record_terminal_run(
+            _TransactionSession(),  # type: ignore[arg-type]
+            detail,
+            run_id="run-1",
+            initial_status="STARTED",
+            terminal_status="CANCELED",
+            engine_started_at=_NOW,
+            engine_finished_at=_NOW,
+        )
 
 
 @pytest.mark.asyncio

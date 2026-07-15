@@ -11,18 +11,23 @@ import inspect
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final
 
 import httpx
+from kortravelmap.core.feature_operation import FEATURE_OPERATION_RESERVED_KINDS
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationConflict,
     PipelineCancellationDetail,
     PipelineCancellationInvariantError,
     PipelineCancellationMember,
+    PipelineCancellationTimelineConflict,
     cancel_queued_pipeline_cancellation_member,
     create_pipeline_cancellation_attempt,
+    fill_pipeline_cancellation_canonical_starts,
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_summary,
     get_pipeline_cancellation_detail,
@@ -69,7 +74,7 @@ _RUN_STATUS_QUERY = """
 query KorTravelMapCancellationRunStatus($runId: ID!) {
   runOrError(runId: $runId) {
     __typename
-    ... on Run { runId status }
+    ... on Run { runId status startTime endTime }
     ... on RunNotFoundError { runId message }
     ... on PythonError { message }
   }
@@ -110,6 +115,8 @@ class _Failure:
 class _RunObservation:
     run_id: str
     status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class _DagsterFailure(RuntimeError):
@@ -202,6 +209,7 @@ def _failure(
     dagster_run_id: str | None = None,
     phase: str,
     typename: str | None = None,
+    extra_details: Mapping[str, Any] | None = None,
 ) -> _Failure:
     details: dict[str, Any] = {
         "cancellation_id": cancellation_id,
@@ -211,6 +219,8 @@ def _failure(
         details["dagster_run_id"] = dagster_run_id
     if typename is not None:
         details["typename"] = typename
+    if extra_details is not None:
+        details.update(dict(extra_details))
     return _Failure(code=code, message=message, details=details)
 
 
@@ -557,7 +567,21 @@ async def _query_run_status(
     observed_status = dagster_graphql.optional_string(value.get("status"))
     if observed_id != run_id or observed_status is None:
         raise _DagsterFailure(protocol_failure)
-    return _RunObservation(run_id=observed_id, status=observed_status.upper())
+
+    def timestamp(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(value), tz=UTC)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise _DagsterFailure(protocol_failure) from exc
+
+    return _RunObservation(
+        run_id=observed_id,
+        status=observed_status.upper(),
+        started_at=timestamp(value.get("startTime")),
+        finished_at=timestamp(value.get("endTime")),
+    )
 
 
 async def _terminate_run_once(
@@ -697,7 +721,11 @@ async def _cancel_queued_members(
     detail: PipelineCancellationDetail,
 ) -> PipelineCancellationDetail:
     for member in _ordered_members(detail):
-        if member.initial_status == "queued" and member.result == "pending":
+        if (
+            member.initial_status == "queued"
+            and not member.requires_run_termination
+            and member.result == "pending"
+        ):
             async with session.begin():
                 changed = await cancel_queued_pipeline_cancellation_member(
                     session,
@@ -751,7 +779,7 @@ async def _record_run_failure(
     for member in _ordered_members(detail):
         if (
             member.dagster_run_id == run_id
-            and member.initial_status == "running"
+            and member.requires_run_termination
             and member.result == "pending"
         ):
             async with session.begin():
@@ -781,42 +809,181 @@ async def _record_terminal_run(
     run_id: str,
     initial_status: str | None,
     terminal_status: str,
+    engine_started_at: datetime | None = None,
+    engine_finished_at: datetime | None = None,
 ) -> tuple[PipelineCancellationDetail, _Failure | None]:
     run_result, stored_terminal, target_status, error_message = _terminal_mapping(
         terminal_status
     )
     definitive: _Failure | None = None
     existing_run = next(item for item in detail.runs if item.dagster_run_id == run_id)
-    async with session.begin():
-        if existing_run.result in {"pending", "cancel_failed"}:
-            changed = await set_pipeline_cancellation_run_result(
+    canonical_members = tuple(
+        member
+        for member in detail.members
+        if member.dagster_run_id == run_id
+        and member.requires_run_termination
+        and member.operation_kind in FEATURE_OPERATION_RESERVED_KINDS
+        and member.result in {"pending", "cancel_failed"}
+    )
+    if canonical_members and engine_finished_at is None:
+        failure = _failure(
+            "DAGSTER_RECONCILE_FAILED",
+            "Dagster terminal observation has no authoritative end time",
+            cancellation_id=detail.attempt.cancellation_id,
+            dagster_run_id=run_id,
+            phase="terminal_timestamp",
+            extra_details={"terminal_status": terminal_status},
+        )
+        return (
+            await _record_run_failure(
                 session,
-                cancellation_id=detail.attempt.cancellation_id,
-                dagster_run_id=run_id,
-                result=run_result,
+                detail,
+                run_id=run_id,
                 initial_status=initial_status,
-                terminal_status=stored_terminal,
-                error=None,
-            )
-            _require_cancellation_write(
-                changed,
-                cancellation_id=detail.attempt.cancellation_id,
-                message="Dagster terminal run CAS ownership was lost",
-            )
-        elif (
-            existing_run.result != run_result
-            or existing_run.terminal_status != stored_terminal
-        ):
-            raise PipelineCancellationInvariantError(
-                "recorded Dagster terminal result changed during orphan resume"
-            )
+                failure=failure,
+            ),
+            failure,
+        )
+    stored_engine_started_at = (
+        engine_started_at if engine_finished_at is not None else None
+    )
+    stored_engine_finished_at = engine_finished_at
+    try:
+        async with session.begin():
+            if existing_run.result in {"pending", "cancel_failed"}:
+                changed = await set_pipeline_cancellation_run_result(
+                    session,
+                    cancellation_id=detail.attempt.cancellation_id,
+                    dagster_run_id=run_id,
+                    result=run_result,
+                    initial_status=initial_status,
+                    terminal_status=stored_terminal,
+                    error=None,
+                    engine_started_at=stored_engine_started_at,
+                    engine_finished_at=stored_engine_finished_at,
+                )
+                _require_cancellation_write(
+                    changed,
+                    cancellation_id=detail.attempt.cancellation_id,
+                    message="Dagster terminal run CAS ownership was lost",
+                )
+            elif (
+                existing_run.result != run_result
+                or existing_run.terminal_status != stored_terminal
+                or existing_run.engine_started_at != stored_engine_started_at
+                or existing_run.engine_finished_at != stored_engine_finished_at
+            ):
+                raise PipelineCancellationInvariantError(
+                    "recorded Dagster terminal result changed during orphan resume"
+                )
+    except PipelineCancellationTimelineConflict:
+        failure = _failure(
+            "DAGSTER_RECONCILE_FAILED",
+            "Dagster terminal timeline conflicts with the frozen operation",
+            cancellation_id=detail.attempt.cancellation_id,
+            dagster_run_id=run_id,
+            phase="terminal_timeline",
+            extra_details={"terminal_status": terminal_status},
+        )
+        return (
+            await _record_run_failure(
+                session,
+                detail,
+                run_id=run_id,
+                initial_status=initial_status,
+                failure=failure,
+            ),
+            failure,
+        )
 
     async with session.begin():
         detail = await _reload_attempt(session, detail.attempt.cancellation_id)
+    recorded_run = next(item for item in detail.runs if item.dagster_run_id == run_id)
+    effective_engine_started_at = recorded_run.engine_started_at
+    if effective_engine_started_at is not None and canonical_members:
+        async with session.begin():
+            await fill_pipeline_cancellation_canonical_starts(
+                session,
+                cancellation_id=detail.attempt.cancellation_id,
+                dagster_run_id=run_id,
+                engine_started_at=effective_engine_started_at,
+            )
+        async with session.begin():
+            detail = await _reload_attempt(session, detail.attempt.cancellation_id)
+    success_tracking_invariant = terminal_status == "SUCCESS" and any(
+        member.dagster_run_id == run_id
+        and member.operation_kind == "provider_feature_load"
+        and member.initial_status != "done"
+        for member in detail.members
+    )
+    pending_tracking_invariant = success_tracking_invariant and any(
+        member.dagster_run_id == run_id
+        and member.requires_run_termination
+        and member.operation_kind in FEATURE_OPERATION_RESERVED_KINDS
+        and member.result in {"pending", "cancel_failed"}
+        for member in detail.members
+    )
+    if pending_tracking_invariant:
+        async with session.begin():
+            for member in _ordered_members(detail):
+                if (
+                    member.dagster_run_id != run_id
+                    or not member.requires_run_termination
+                    or member.operation_kind not in FEATURE_OPERATION_RESERVED_KINDS
+                    or member.result not in {"pending", "cancel_failed"}
+                ):
+                    continue
+                changed = await transition_pipeline_cancellation_member(
+                    session,
+                    cancellation_id=detail.attempt.cancellation_id,
+                    member_kind=member.member_kind,
+                    member_id=member.member_id,
+                    dagster_run_id=run_id,
+                    expected_status=member.initial_status,
+                    target_status="failed",
+                    result=run_result,
+                    error_message=(
+                        "provider feature operation tracking invariant failed"
+                    ),
+                    dagster_terminal_status=stored_terminal,
+                    engine_started_at=effective_engine_started_at,
+                    engine_finished_at=engine_finished_at,
+                    success_tracking_invariant=True,
+                )
+                _require_cancellation_write(
+                    changed,
+                    cancellation_id=detail.attempt.cancellation_id,
+                    message="SUCCESS tracking invariant member CAS was lost",
+                )
+            await record_system_log(
+                session,
+                level="error",
+                source="pipeline_cancellation",
+                event="feature_operation.tracking_invariant",
+                message="Dagster SUCCESS observed with unresolved feature pairs",
+                detail={
+                    "cancellation_id": detail.attempt.cancellation_id,
+                    "dagster_run_id": run_id,
+                    "mismatches": {
+                        "non_done_members": {
+                            "expected": 0,
+                            "actual": [
+                                member.member_id
+                                for member in detail.members
+                                if member.dagster_run_id == run_id
+                                and member.operation_kind == "provider_feature_load"
+                                and member.initial_status != "done"
+                            ],
+                        }
+                    },
+                },
+            )
+        async with session.begin():
+            detail = await _reload_attempt(session, detail.attempt.cancellation_id)
     for member in _ordered_members(detail):
         if (
             member.dagster_run_id != run_id
-            or member.initial_status != "running"
+            or not member.requires_run_termination
             or member.result not in {"pending", "cancel_failed"}
         ):
             continue
@@ -828,10 +995,14 @@ async def _record_terminal_run(
                     member_kind=member.member_kind,
                     member_id=member.member_id,
                     dagster_run_id=run_id,
-                    expected_status="running",
+                    expected_status=member.initial_status,
                     target_status=target_status,
                     result=run_result,
                     error_message=error_message,
+                    dagster_terminal_status=stored_terminal,
+                    engine_started_at=effective_engine_started_at,
+                    engine_finished_at=engine_finished_at,
+                    success_tracking_invariant=False,
                 )
             except PipelineCancellationConflict:
                 changed = False
@@ -907,7 +1078,7 @@ async def _propagate_recorded_run(
         if run.terminal_status is None:
             has_unresolved_running_member = any(
                 member.dagster_run_id == run_id
-                and member.initial_status == "running"
+                and member.requires_run_termination
                 and member.result in {"pending", "cancel_failed"}
                 for member in detail.members
             )
@@ -922,6 +1093,8 @@ async def _propagate_recorded_run(
             run_id=run_id,
             initial_status=run.initial_status,
             terminal_status=run.terminal_status,
+            engine_started_at=run.engine_started_at,
+            engine_finished_at=run.engine_finished_at,
         )
     if run.result != "cancel_failed" or run.error is None:
         return detail, None
@@ -1021,6 +1194,8 @@ async def _process_pending_run(
             run_id=run_id,
             initial_status=observation.status,
             terminal_status=observation.status,
+            engine_started_at=observation.started_at,
+            engine_finished_at=observation.finished_at,
         )
 
     run = next(item for item in detail.runs if item.dagster_run_id == run_id)
@@ -1088,6 +1263,8 @@ async def _process_pending_run(
         run_id=run_id,
         initial_status=observation.status,
         terminal_status=terminal.status,
+        engine_started_at=terminal.started_at or observation.started_at,
+        engine_finished_at=terminal.finished_at,
     )
 
 

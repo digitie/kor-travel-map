@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -17,7 +18,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation,
+    finish_dagster_feature_pair,
+)
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     finish_pipeline_cancellation_attempt,
@@ -29,7 +35,11 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     set_pipeline_cancellation_run_result,
     transition_pipeline_cancellation_member,
 )
-from kortravelmap.infra.pipeline_cancellation_types import PipelineCancellationScope
+from kortravelmap.infra.pipeline_cancellation_types import (
+    PipelineCancellationInvariantError,
+    PipelineCancellationScope,
+    PipelineCancellationTimelineConflict,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -125,6 +135,381 @@ async def _create_attempt(
     )
 
 
+@pytest.mark.parametrize(
+    (
+        "terminal_status",
+        "expected_status",
+        "expected_stage",
+        "all_pairs_done",
+        "resume_after_root",
+        "incoming_start_missing",
+    ),
+    [
+        ("CANCELED", "cancelled", "cancelled", False, False, False),
+        ("CANCELED", "cancelled", "cancelled", False, True, False),
+        ("CANCELED", "cancelled", "cancelled", False, False, True),
+        ("FAILURE", "failed", "failed", False, False, False),
+        ("SUCCESS", "failed", "tracking_invariant", False, False, False),
+        ("SUCCESS", "done", "completed", True, False, False),
+    ],
+)
+async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
+    migrated_engine: AsyncEngine,
+    terminal_status: str,
+    expected_status: str,
+    expected_stage: str,
+    all_pairs_done: bool,
+    resume_after_root: bool,
+    incoming_start_missing: bool,
+) -> None:
+    run_id = f"canonical-cancel-{terminal_status.lower()}-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = created_at + timedelta(seconds=5)
+    done_pair = ProviderDatasetOperationKey("provider", "done")
+    active_pair = ProviderDatasetOperationKey("provider", "active")
+    cancellation_id: str | None = None
+    root_id: str | None = None
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        ensured = await ensure_dagster_feature_operation(
+            setup,
+            dagster_run_id=run_id,
+            trigger_kind="manual",
+            selected_pairs=(done_pair, active_pair),
+            registry_version="registry-v1",
+            engine_created_at=created_at,
+            engine_started_at=None if all_pairs_done else started_at,
+            observed_status="QUEUED" if all_pairs_done else "STARTED",
+        )
+        root_id = ensured.operation.root_job_id
+        completed_done = await finish_dagster_feature_pair(
+            setup, dagster_run_id=run_id, pair=done_pair
+        )
+        done_finished_at = next(
+            member.finished_at
+            for member in completed_done.operation.members
+            if member.pair == done_pair
+        )
+        assert done_finished_at is not None
+        if incoming_start_missing:
+            done_id = next(
+                member.job_id
+                for member in completed_done.operation.members
+                if member.pair == done_pair
+            )
+            await setup.execute(
+                text(
+                    "UPDATE ops.import_jobs SET started_at=NULL "
+                    "WHERE job_id=CAST(:job_id AS uuid)"
+                ),
+                {"job_id": done_id},
+            )
+        if all_pairs_done:
+            await finish_dagster_feature_pair(
+                setup, dagster_run_id=run_id, pair=active_pair
+            )
+        attempt = await _create_attempt(setup, job_id=root_id)
+        cancellation_id = attempt.attempt.cancellation_id
+
+    try:
+        async with AsyncSession(migrated_engine) as coordinator:
+            async with coordinator.begin():
+                detail = await get_pipeline_cancellation_detail(
+                    coordinator, cancellation_id
+                )
+            assert detail is not None
+            if resume_after_root:
+                root_member = next(
+                    member
+                    for member in detail.members
+                    if member.operation_kind == "provider_feature_load_run"
+                )
+                async with coordinator.begin():
+                    assert await set_pipeline_cancellation_run_result(
+                        coordinator,
+                        cancellation_id=cancellation_id,
+                        dagster_run_id=run_id,
+                        result="cancelled",
+                        initial_status="STARTED",
+                        terminal_status="CANCELED",
+                        error=None,
+                        engine_started_at=started_at,
+                        engine_finished_at=finished_at,
+                    ) is True
+                async with coordinator.begin():
+                    assert await transition_pipeline_cancellation_member(
+                        coordinator,
+                        cancellation_id=cancellation_id,
+                        member_kind=root_member.member_kind,
+                        member_id=root_member.member_id,
+                        dagster_run_id=run_id,
+                        expected_status=root_member.initial_status,
+                        target_status="cancelled",
+                        result="cancelled",
+                        dagster_terminal_status="CANCELED",
+                        engine_started_at=started_at,
+                        engine_finished_at=finished_at,
+                    ) is True
+                async with coordinator.begin():
+                    detail = await get_pipeline_cancellation_detail(
+                        coordinator, cancellation_id
+                    )
+                assert detail is not None
+                updated, failure = await service._propagate_recorded_run(
+                    coordinator, detail, run_id=run_id
+                )
+            else:
+                updated, failure = await service._record_terminal_run(
+                    coordinator,
+                    detail,
+                    run_id=run_id,
+                    initial_status="STARTED",
+                    terminal_status=terminal_status,
+                    engine_started_at=None if incoming_start_missing else started_at,
+                    engine_finished_at=finished_at,
+                )
+            assert failure is None
+            async with coordinator.begin():
+                completed = await finish_pipeline_cancellation_attempt(
+                    coordinator,
+                    cancellation_id=cancellation_id,
+                    status="completed",
+                    error=None,
+                )
+            assert completed is not None
+            assert updated.runs[0].engine_started_at == started_at
+            assert updated.runs[0].engine_finished_at == finished_at
+
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        """
+                        SELECT kind, provider, dataset_key, status, progress,
+                               current_stage, error_message, dagster_run_status,
+                               cancellation_id, started_at, finished_at, heartbeat_at
+                        FROM ops.import_jobs
+                        WHERE job_id = CAST(:root_id AS uuid)
+                           OR parent_job_id = CAST(:root_id AS uuid)
+                        ORDER BY kind DESC, provider NULLS FIRST, dataset_key NULLS FIRST
+                        """
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+            root = next(row for row in rows if row.kind == "provider_feature_load_run")
+            done = next(row for row in rows if row.dataset_key == "done")
+            active = next(row for row in rows if row.dataset_key == "active")
+            tracking_logs = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM ops.system_log "
+                    "WHERE event='feature_operation.tracking_invariant' "
+                    "AND detail->>'cancellation_id'=:cancellation_id"
+                ),
+                {"cancellation_id": cancellation_id},
+            )
+
+        assert root.status == expected_status
+        assert root.current_stage == expected_stage
+        assert root.progress == (100 if all_pairs_done else 50)
+        assert root.dagster_run_status == terminal_status
+        assert root.started_at == started_at
+        assert root.finished_at == finished_at
+        assert root.heartbeat_at == finished_at
+        assert str(root.cancellation_id) == cancellation_id
+        assert active.status == expected_status
+        assert active.current_stage == expected_stage
+        assert active.started_at == started_at
+        if not all_pairs_done:
+            assert active.finished_at == finished_at
+            assert active.heartbeat_at == finished_at
+        assert str(active.cancellation_id) == cancellation_id
+        assert done.status == "done"
+        assert done.progress == 100
+        assert done.started_at == started_at
+        assert done.finished_at == done_finished_at
+        if terminal_status == "FAILURE":
+            assert root.error_message is not None
+            assert active.error_message is not None
+        elif terminal_status == "SUCCESS" and not all_pairs_done:
+            assert "tracking invariant" in root.error_message
+            assert "tracking invariant" in active.error_message
+            assert tracking_logs == 1
+        else:
+            assert root.error_message is None
+            assert active.error_message is None
+            assert tracking_logs == 0
+    finally:
+        if root_id is not None:
+            async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+                await cleanup.execute(
+                    text(
+                        "UPDATE ops.import_jobs SET cancellation_id=NULL, "
+                        "cancellation_requested_at=NULL, cancellation_requested_by=NULL, "
+                        "cancellation_reason=NULL "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid)"
+                    ),
+                    {"root_id": root_id},
+                )
+                if cancellation_id is not None:
+                    await cleanup.execute(
+                        text(
+                            "DELETE FROM ops.pipeline_cancellation_members "
+                            "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                        ),
+                        {"cancellation_id": cancellation_id},
+                    )
+                    await cleanup.execute(
+                        text(
+                            "DELETE FROM ops.pipeline_cancellation_runs "
+                            "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                        ),
+                        {"cancellation_id": cancellation_id},
+                    )
+                    await cleanup.execute(
+                        text(
+                            "DELETE FROM ops.pipeline_cancellations "
+                            "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                        ),
+                        {"cancellation_id": cancellation_id},
+                    )
+                await cleanup.execute(
+                    text(
+                        "DELETE FROM ops.import_jobs "
+                        "WHERE parent_job_id=CAST(:root_id AS uuid)"
+                    ),
+                    {"root_id": root_id},
+                )
+                await cleanup.execute(
+                    text(
+                        "DELETE FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid)"
+                    ),
+                    {"root_id": root_id},
+                )
+
+
+async def test_canonical_cancellation_rejects_divergent_frozen_start_times(
+    migrated_engine: AsyncEngine,
+) -> None:
+    run_id = f"canonical-cancel-start-drift-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 2, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = created_at + timedelta(seconds=5)
+    pairs = (
+        ProviderDatasetOperationKey("provider", "first"),
+        ProviderDatasetOperationKey("provider", "second"),
+    )
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        ensured = await ensure_dagster_feature_operation(
+            setup,
+            dagster_run_id=run_id,
+            trigger_kind="manual",
+            selected_pairs=pairs,
+            registry_version="registry-v1",
+            engine_created_at=created_at,
+            engine_started_at=started_at,
+            observed_status="STARTED",
+        )
+        root_id = ensured.operation.root_job_id
+        await setup.execute(
+            text(
+                "UPDATE ops.import_jobs SET started_at=:drifted "
+                "WHERE job_id=CAST(:job_id AS uuid)"
+            ),
+            {
+                "job_id": ensured.operation.members[0].job_id,
+                "drifted": started_at + timedelta(seconds=1),
+            },
+        )
+        attempt = await _create_attempt(setup, job_id=root_id)
+        cancellation_id = attempt.attempt.cancellation_id
+
+    try:
+        async with AsyncSession(migrated_engine) as coordinator:
+            with pytest.raises(PipelineCancellationTimelineConflict):
+                async with coordinator.begin():
+                    await set_pipeline_cancellation_run_result(
+                        coordinator,
+                        cancellation_id=cancellation_id,
+                        dagster_run_id=run_id,
+                        result="cancelled",
+                        initial_status="STARTED",
+                        terminal_status="CANCELED",
+                        error=None,
+                        engine_started_at=None,
+                        engine_finished_at=finished_at,
+                    )
+            async with coordinator.begin():
+                unchanged = await get_pipeline_cancellation_detail(
+                    coordinator, cancellation_id
+                )
+            assert unchanged is not None
+            assert unchanged.runs[0].result == "pending"
+            assert unchanged.runs[0].engine_started_at is None
+            assert unchanged.runs[0].engine_finished_at is None
+
+        async with AsyncSession(migrated_engine) as probe:
+            active_count = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM ops.import_jobs "
+                    "WHERE (job_id=CAST(:root_id AS uuid) "
+                    "OR parent_job_id=CAST(:root_id AS uuid)) "
+                    "AND status='running'"
+                ),
+                {"root_id": root_id},
+            )
+            assert int(active_count) == 3
+    finally:
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                text(
+                    "UPDATE ops.import_jobs SET cancellation_id=NULL, "
+                    "cancellation_requested_at=NULL, cancellation_requested_by=NULL, "
+                    "cancellation_reason=NULL "
+                    "WHERE job_id=CAST(:root_id AS uuid) "
+                    "OR parent_job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.pipeline_cancellation_members "
+                    "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                ),
+                {"cancellation_id": cancellation_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.pipeline_cancellation_runs "
+                    "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                ),
+                {"cancellation_id": cancellation_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.pipeline_cancellations "
+                    "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                ),
+                {"cancellation_id": cancellation_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.import_jobs "
+                    "WHERE parent_job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.import_jobs "
+                    "WHERE job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
+
+
 async def test_reservation_is_single_cas_with_first_status_and_audit(
     migrated_engine: AsyncEngine,
     committed_running_job: tuple[str, str],
@@ -163,6 +548,22 @@ async def test_reservation_is_single_cas_with_first_status_and_audit(
             {"cancellation_id": detail.attempt.cancellation_id},
         )
         assert audit_count == 1
+
+        with pytest.raises(
+            PipelineCancellationInvariantError,
+            match="engine_started_at requires",
+        ):
+            await set_pipeline_cancellation_run_result(
+                session,
+                cancellation_id=detail.attempt.cancellation_id,
+                dagster_run_id=run_id,
+                result="cancelled",
+                initial_status="STARTED",
+                terminal_status="CANCELED",
+                error=None,
+                engine_started_at=datetime.now(UTC),
+                engine_finished_at=None,
+            )
 
         with pytest.raises(IntegrityError):
             async with session.begin_nested():
@@ -632,6 +1033,265 @@ async def test_definitive_terminate_http_failure_exposes_reloaded_5xx_detail(
     assert stored.attempt.status == "retryable"
     assert stored.runs[0].error is not None
     assert stored.runs[0].error["code"] == "DAGSTER_TERMINATE_FAILED"
+
+
+async def test_running_member_without_run_id_is_definitive_and_never_calls_dagster(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_id = str(uuid4())
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await setup.execute(
+            text(
+                "INSERT INTO ops.import_jobs "
+                "(job_id, kind, payload, status, progress, current_stage, "
+                "started_at, heartbeat_at) VALUES "
+                "(CAST(:job_id AS uuid), 'runless', '{}'::jsonb, 'running', "
+                "1, 'running', now(), now())"
+            ),
+            {"job_id": job_id},
+        )
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("runless cancellation must not call Dagster")
+
+    settings = ApiSettings(
+        dagster_url="http://dagster.example",
+        dagster_allowed_hosts=["dagster.example"],
+    )
+    cancellation_id: str | None = None
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            with pytest.raises(service.PipelineCancellationUnsafe) as raised:
+                await cancel_pipeline_execution(
+                    engine=migrated_engine,
+                    settings=settings,
+                    http_client=client,
+                    kind="import_job",
+                    execution_id=job_id,
+                    requested_by="admin:test",
+                    reason="runless",
+                )
+        assert raised.value.detail is not None
+        cancellation_id = raised.value.detail.cancellation_id
+        assert raised.value.detail.status == "failed"
+        assert raised.value.detail.dagster_runs == []
+        assert raised.value.detail.members[0].result == "cancel_failed"
+        assert raised.value.detail.members[0].error is not None
+        assert (
+            raised.value.detail.members[0].error.code
+            == "PIPELINE_CANCELLATION_UNSAFE"
+        )
+    finally:
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                text(
+                    "UPDATE ops.import_jobs SET cancellation_id=NULL, "
+                    "cancellation_requested_at=NULL, cancellation_requested_by=NULL, "
+                    "cancellation_reason=NULL WHERE job_id=CAST(:job_id AS uuid)"
+                ),
+                {"job_id": job_id},
+            )
+            if cancellation_id is not None:
+                await cleanup.execute(
+                    text(
+                        "DELETE FROM ops.pipeline_cancellation_members "
+                        "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                    ),
+                    {"cancellation_id": cancellation_id},
+                )
+                await cleanup.execute(
+                    text(
+                        "DELETE FROM ops.pipeline_cancellations "
+                        "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                    ),
+                    {"cancellation_id": cancellation_id},
+                )
+            await cleanup.execute(
+                text("DELETE FROM ops.import_jobs WHERE job_id=CAST(:job_id AS uuid)"),
+                {"job_id": job_id},
+            )
+
+
+async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
+    migrated_engine: AsyncEngine,
+) -> None:
+    run_id = f"canonical-queued-retry-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 4, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = created_at + timedelta(seconds=5)
+    pairs = (
+        ProviderDatasetOperationKey("provider", "first"),
+        ProviderDatasetOperationKey("provider", "second"),
+    )
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        ensured = await ensure_dagster_feature_operation(
+            setup,
+            dagster_run_id=run_id,
+            trigger_kind="manual",
+            selected_pairs=pairs,
+            registry_version="registry-v1",
+            engine_created_at=created_at,
+            engine_started_at=None,
+            observed_status="QUEUED",
+        )
+    root_id = ensured.operation.root_job_id
+    first_cancellation_id: str | None = None
+    second_cancellation_id: str | None = None
+    settings = ApiSettings(
+        dagster_url="http://dagster.example",
+        dagster_allowed_hosts=["dagster.example"],
+        dagster_termination_poll_interval_seconds=0.05,
+        dagster_termination_timeout_seconds=1,
+    )
+
+    async def failed_handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "terminateRun" in str(payload["query"]):
+            return httpx.Response(502, json={"error": "rejected"}, request=request)
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "runOrError": {
+                        "__typename": "Run",
+                        "runId": run_id,
+                        "status": "QUEUED",
+                        "startTime": None,
+                        "endTime": None,
+                    }
+                }
+            },
+        )
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(failed_handler)
+        ) as client:
+            with pytest.raises(service.DagsterTerminateFailed) as raised:
+                await cancel_pipeline_execution(
+                    engine=migrated_engine,
+                    settings=settings,
+                    http_client=client,
+                    kind="import_job",
+                    execution_id=root_id,
+                    requested_by="admin:first",
+                    reason="first failure",
+                )
+        assert raised.value.detail is not None
+        first_cancellation_id = raised.value.detail.cancellation_id
+        first_member_ids = {
+            member.member_id for member in raised.value.detail.members
+        }
+        assert raised.value.detail.status == "retryable"
+        assert len(first_member_ids) == len(pairs) + 1
+        assert {member.result for member in raised.value.detail.members} == {
+            "cancel_failed"
+        }
+
+        status_calls = 0
+
+        async def success_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal status_calls
+            payload = json.loads(request.content)
+            if "terminateRun" in str(payload["query"]):
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "terminateRun": {
+                                "__typename": "TerminateRunSuccess",
+                                "run": {"runId": run_id, "status": "QUEUED"},
+                            }
+                        }
+                    },
+                )
+            status_calls += 1
+            terminal = status_calls > 1
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "runOrError": {
+                            "__typename": "Run",
+                            "runId": run_id,
+                            "status": "CANCELED" if terminal else "QUEUED",
+                            "startTime": started_at.timestamp() if terminal else None,
+                            "endTime": finished_at.timestamp() if terminal else None,
+                        }
+                    }
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(success_handler)
+        ) as client:
+            completed = await cancel_pipeline_execution(
+                engine=migrated_engine,
+                settings=settings,
+                http_client=client,
+                kind="import_job",
+                execution_id=root_id,
+                requested_by="admin:retry",
+                reason="retry",
+            )
+        second_cancellation_id = completed.cancellation_id
+        assert second_cancellation_id != first_cancellation_id
+        assert completed.previous_cancellation_id == first_cancellation_id
+        assert {member.member_id for member in completed.members} == first_member_ids
+        assert {member.result for member in completed.members} == {"cancelled"}
+        assert completed.dagster_runs[0].engine_started_at == started_at
+        assert completed.dagster_runs[0].engine_finished_at == finished_at
+    finally:
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                text(
+                    "UPDATE ops.import_jobs SET cancellation_id=NULL, "
+                    "cancellation_requested_at=NULL, cancellation_requested_by=NULL, "
+                    "cancellation_reason=NULL WHERE job_id=CAST(:root_id AS uuid) "
+                    "OR parent_job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
+            cancellation_ids = [
+                value
+                for value in (first_cancellation_id, second_cancellation_id)
+                if value is not None
+            ]
+            if cancellation_ids:
+                for statement in (
+                    "DELETE FROM ops.pipeline_cancellation_members "
+                    "WHERE cancellation_id=ANY(CAST(:ids AS uuid[]))",
+                    "DELETE FROM ops.pipeline_cancellation_runs "
+                    "WHERE cancellation_id=ANY(CAST(:ids AS uuid[]))",
+                ):
+                    await cleanup.execute(
+                        text(statement),
+                        {"ids": cancellation_ids},
+                    )
+                for cancellation_id in reversed(cancellation_ids):
+                    await cleanup.execute(
+                        text(
+                            "DELETE FROM ops.pipeline_cancellations "
+                            "WHERE cancellation_id=CAST(:cancellation_id AS uuid)"
+                        ),
+                        {"cancellation_id": cancellation_id},
+                    )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.import_jobs "
+                    "WHERE parent_job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.import_jobs "
+                    "WHERE job_id=CAST(:root_id AS uuid)"
+                ),
+                {"root_id": root_id},
+            )
 
 
 async def test_ownership_loss_prefers_canonical_current_over_exact_old_attempt(

@@ -1,6 +1,6 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 구현 전 문서 gate 적대 리뷰 2인 승인(S1/S2 0건)
+> 상태: 문서 gate PR #696 병합, C3e-A1 구현·로컬 검증 완료, PR/CI 대기
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -168,8 +168,9 @@ registry selection과 DB child set이 정확히 같고 모든 child가 wrapper/c
 `done`일 때 root만 `done`으로 끝낸다. running/missing child를 성공으로 승격하지 않는다.
 child set 자체가 다르면 새 child를 보정 생성하지 않고 structural conflict를 기록하되, 이미
 terminal인 Dagster run 아래 active root와 알려진 active child는 한 transaction에서
-`tracking_invariant` failed로 닫아 영구 active 상태를 남기지 않는다. set은 같지만 active child가
-남은 경우도 같은 invariant failure로 닫고 raw Dagster `SUCCESS`는 별도로 보존한다. failure
+`tracking_invariant` failed로 닫아 영구 active 상태를 남기지 않는다. set은 같아도 child가 하나라도
+`done`이 아니면 같은 invariant failure로 active root/child를 닫고, 이미 `failed|cancelled`인 terminal
+child는 덮어쓰지 않으며 raw Dagster `SUCCESS`는 별도로 보존한다. failure
 sensor는 아래 규칙으로 남은 행과 root를 `failed`로
 끝낸다. Dagster UI/CLI에서
 직접 중단해 C3d marker가 없는 `CANCELED` run은 row가 없으면 authoritative selection을 먼저
@@ -230,9 +231,11 @@ active로 분류해 generic queued 즉시 DB cancel 대상에서 제외한다. r
 frozen run, reservation, pending/cancel_failed, unresolved retry 집합에 포함하고 같은 run을 한 번만
 reserve/terminate한다. terminate 실패/응답 불명이면 base queued를 보존하고 attempt를 retryable로
 끝내며, retry는 같은 frozen queued member를 복사하고 hierarchy를 다시 탐색하지 않는다.
-authoritative `CANCELED`만 base cancelled로 확정한다. QUEUED→STARTED 경쟁 뒤 `SUCCESS`/`FAILURE`가
-관측되면 exact frozen member/run mapping으로 done/failed를 기록한다. C3e-A1은 이 C3d 상태기계와
-불변식 검사를 함께 확장한다. C3d terminal writer는 같은 cancellation id marker CAS로 feature
+authoritative `CANCELED`만 active base를 cancelled로 확정한다. QUEUED→STARTED 경쟁 뒤 `SUCCESS`가
+관측되면 frozen provider pair의 `initial_status`가 전부 `done`일 때만 root를 done으로 닫는다. 하나라도
+non-done이면 active root/child를 `tracking_invariant` failed로 닫고 기존 terminal child는 보존한다.
+`FAILURE`는 active root/child만 failed로 닫고 이미 완료·실패·취소된 child를 덮지 않는다. C3e-A1은
+이 C3d 상태기계와 불변식 검사를 함께 확장한다. C3d terminal writer는 같은 cancellation id marker CAS로 feature
 member status와 child/root progress·stage·redacted error, run root의 `dagster_run_status`,
 authoritative engine timestamps를 함께 갱신해 C3e sensor가 marker 때문에 blocked된 뒤 canonical
 필드가 stale하게 남지 않게 한다. cancellation detail member는
@@ -320,7 +323,7 @@ immutable internal type이며 HTTP cursor가 아니다. page 끝의 `next_cursor
 ## 3. migration 0051과 backfill
 
 0051은 import job에 nullable `provider`, `dataset_key`, `trigger_kind`,
-`operation_registry_version`, `dagster_run_status`, pair/trim/shape CHECK와 feature-kind 전용 parent/run constraint
+`operation_registry_version`, `dagster_run_status`, pair/trim/shape/timeline CHECK와 feature-kind 전용 parent/run constraint
 trigger를 추가한다. cancellation member에는 nullable `operation_kind`와
 `requires_run_termination BOOLEAN NOT NULL DEFAULT false`를 추가한다. true는 non-NULL run id이고
 `initial_status='running'`이거나 (`initial_status='queued'`이고 두 feature-load operation kind 중
@@ -356,12 +359,19 @@ CREATE UNIQUE INDEX uq_import_jobs_feature_run_pair
     AND dataset_key IS NOT NULL;
 ```
 
-백필은 payload를 읽지 않는다.
+`pipeline_cancellation_runs`에는 authoritative `engine_started_at`/`engine_finished_at`과 terminal
+result 전용 순서 CHECK를 추가한다. crash resume는 이 두 값을 그대로 재사용하며 API detail/OpenAPI/admin
+type에도 raw terminal status와 분리해 노출한다. 기존 run에는 권위 있는 Dagster 관측 시각 근거가
+없으므로 두 시각을 추측해 백필하지 않고 NULL로 유지하며, 0051 이후 terminal observation만 실제
+관측값을 채운다. identity 백필은 payload를 읽지 않는다.
 
-- `feature_update_requests.job_id`로 직접 연결되고 scope가 `provider_dataset` exact pair인
-  legacy job은 두 identity와 `trigger_kind='update_request'`를 채운다.
-- `ops.import_job_events`에서 NULL/빈 문자열을 제거한 exact
-  `(provider, dataset_key)` pair가 job별 정확히 하나일 때만 두 identity 컬럼을 채운다.
+- 연결 request 전체가 정확히 1건이고 그 행이 string·trimmed non-empty `provider_dataset` exact
+  pair인 legacy job만 두 identity와 `trigger_kind='update_request'`를 채운다.
+- request linkage가 없는 job의 identity-bearing event가 모두 complete·trimmed pair이고 distinct
+  `(provider, dataset_key)`가 정확히 하나일 때만 두 identity 컬럼을 채운다. 양쪽 NULL event만
+  비식별 event로 무시하며 partial/blank가 하나라도 섞이면 NULL을 유지한다.
+- 연결 request가 하나라도 있으면 invalid/ambiguous/다른 scope를 event가 되살리지 못한다. event
+  fallback은 request linkage 0건일 때만 허용한다.
 - pair가 0개 또는 2개 이상이면 두 컬럼을 NULL로 남긴다. provider와 dataset을 따로
   집계해 가짜 조합을 만들지 않는다.
 - provider만 또는 dataset만 확인되는 부분 identity는 둘 다 NULL로 정규화한다. payload
@@ -377,8 +387,8 @@ CREATE UNIQUE INDEX uq_import_jobs_feature_run_pair
 `provider_dataset` feature-update member는 호출 시 canonical pair를 넘긴다. multi-scope update
 request, batch aggregate root, consistency/MV child처럼 단일 pair가 아닌 작업은 NULL이다.
 batch attach는 identity를 추론·덮어쓰지 않고 기존 child 실컬럼을 보존한다. event append는
-기본적으로 job 실컬럼 pair를 상속하며 호출자가 다른 non-NULL pair를 주면 거부한다. event pair
-fallback은 migration 전 legacy row read에만 남긴다.
+기본적으로 job 실컬럼 pair를 상속하며 호출자가 다른 non-NULL pair를 주면 거부한다. stored pair가
+NULL인 신규 job에 explicit event pair를 주는 event-only identity도 거부한다.
 
 신규 feature-load root/child `created_at`은 sensor 처리 시각이 아니라 Dagster run record의
 timezone-aware authoritative create timestamp다. child도 같은 값을 사용한다. STARTED/terminal을
@@ -388,8 +398,10 @@ Dagster authoritative timestamp를 사용한다. wrapper가 이미 완료한 chi
 cursor/timeline은 engine create 시각으로 안정화한다. 필수 engine timestamp가 없거나 유효하지
 않으면 canonical row를 만들지 않고 보조 conflict로 남긴다.
 
-downgrade는 신규 index, feature constraint/identity trigger, cancellation/import CHECK를 먼저
-제거한 뒤 `operation_kind`/`requires_run_termination`과 import 신규 컬럼을 제거한다. downgrade
+downgrade는 신규 index, feature constraint/identity trigger, cancellation member/import CHECK와
+`ck_pipeline_cancellation_runs_engine_times`를 먼저 제거한 뒤 cancellation run의
+`engine_started_at`/`engine_finished_at`, `operation_kind`/`requires_run_termination`, import 신규
+컬럼을 제거한다. 이 필드가 필요한 감사 이력은 먼저 export한다. downgrade
 전에 신 writer를 모두 중지하고 0051을 아는 migration image로 active feature root/child와 active
 cancellation이 0인지 안전성 검사를 거친다는 운영 순서를 명시한다. old C3d가 해석하지 못하는
 queued run-backed `cancel_failed` history가 하나라도 있으면 export/명시 정리 전 downgrade를
@@ -511,10 +523,12 @@ projection과 pipeline overview API/OpenAPI, B가 Dagster package, C가 datasets
   C3d marker 시 base mutation 0
 - canonical API queued feature root 취소는 Dagster CANCELED·provider I/O 0·terminate 1회,
   terminate 실패는 base queued+retryable/cancel_failed 뒤 같은 frozen member retry,
-  QUEUED→STARTED race의 SUCCESS/FAILURE는 done/failed, generic queued job은 기존 DB-only 취소 유지
+  QUEUED→STARTED race의 SUCCESS는 frozen pair 전부 done일 때만 root done, 그 외 tracking invariant,
+  FAILURE는 active root/child failed이며 generic queued job은 기존 DB-only 취소 유지
 - MCST 전반 pair 성공·후반 pair 최종 실패에서 전반 child done, 나머지 failed
-- `SUCCESS`에서 child set mismatch/running child를 done으로 승격하지 않고 active root/known child를
-  `tracking_invariant` failed로 닫아 active 잔존 0
+- `SUCCESS`에서 child set mismatch 또는 queued/running/failed/cancelled child를 done으로 승격하지
+  않고 active root/known active child를 `tracking_invariant` failed로 닫되 기존 terminal child를
+  보존해 active 잔존 0
 - 장시간 run은 generic stale recovery 제외, missed terminal은 authoritative periodic reconcile
 - raw Dagster status는 terminal 뒤 불변이고 C3d marker terminal도 같은 CAS로 갱신하며, late
   reconcile은 engine create/start/finish 시각을 복구하고 완료 pair child 시각은 보존
@@ -539,7 +553,26 @@ projection과 pipeline overview API/OpenAPI, B가 Dagster package, C가 datasets
 - pair/provider-only/dataset-only 조회 index EXPLAIN, OpenAPI admin/user drift, admin generated type drift
 - offline/MOIS/exact update writer 실컬럼+event identity, multi/batch aggregate NULL, event mismatch 거부
 
-## 8. 금지사항
+## 8. C3e-A1 direct-write inventory
+
+`ops.import_jobs`를 쓰는 runtime 경로를 SQL과 호출자 양쪽에서 전수했다. A1 이후 허용 소유자는
+다음 표뿐이며, 신규 writer는 이 표에 identity와 cancellation 소유권을 먼저 추가해야 한다.
+
+| writer | 허용 범위 | A1 경계 |
+|--------|-----------|---------|
+| `feature_operation_repo` | reserved run root/exact-pair child ensure, pair 완료, terminal reconcile | lineage-global→canonical root lock, marker/terminal/identity CAS |
+| `jobs_repo` | generic enqueue/start/payload/run bind/batch attach/claim/lifecycle/stale recovery | reserved kind와 reserved parent/target를 typed conflict로 거부; exact pair·trigger는 실컬럼 기록 |
+| `feature_update_repo` | update request 소유 generic job lifecycle/requeue | reserved target 사전 거부; exact `provider_dataset`만 실컬럼 pair, 그 외 aggregate는 NULL |
+| offline upload/MOIS | validate/load/reserve 및 MOIS 3종 self-driven job | canonical pair와 `manual`/`system` trigger 명시, payload run-id 추론 금지 |
+| `pipeline_cancellation_repo` | scope marker와 same-marker terminal CAS | queued run-backed feature member도 terminate/retry 대상으로 동결; generic queued만 DB-only cancel |
+| Alembic | 0051 backfill/down safety check | request direct pair와 event exact-one-pair만 백필; payload 미사용 |
+
+`batch_dag`의 root/consistency/MV aggregate는 단일 pair가 아니므로 identity를 NULL로 유지한다.
+event append는 저장된 실컬럼 pair를 상속하고 다른 명시 pair를 거부한다. generic claim과 stale
+recovery는 두 reserved kind를 제외한다. `rg` direct SQL inventory에서 위 소유자 외 runtime
+`INSERT/UPDATE/DELETE ops.import_jobs`는 발견되지 않았다.
+
+## 9. 금지사항
 
 제3 operation 테이블, payload identity, `dagster_run_id` 단독 correlation, 모든 job 대상 전역
 unique, 같은 run의 pair별 standalone root, wrapper 아래 `run_feature_*` tracking, body exception

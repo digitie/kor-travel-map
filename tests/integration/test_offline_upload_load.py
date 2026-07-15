@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap import offline_upload as offline_upload_module
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.ids import (
     make_feature_id,
@@ -42,6 +44,11 @@ from kortravelmap.infra.offline_upload_repo import (
     mark_offline_upload_loading,
     reserve_offline_upload_load,
 )
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    create_pipeline_cancellation_attempt,
+    resolve_pipeline_cancellation_scope,
+)
+from kortravelmap.infra.pipeline_cancellation_types import PipelineCancellationConflict
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -61,8 +68,10 @@ _TRUNCATE_SQL = (
 class _MemoryStore:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = objects
+        self.read_count = 0
 
     async def read_bytes(self, storage_key: str) -> bytes:
+        self.read_count += 1
         return self.objects[storage_key]
 
 
@@ -154,9 +163,154 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
     assert result.job is not None
     assert result.job.job_id == job.job_id
     assert result.job.status == "done"
-    assert result.job.payload["dagster_run_id"] == "dagster-run-preclaimed"
+    assert result.job.dagster_run_id == "dagster-run-preclaimed"
+    assert result.job.payload["dagster_run_id"] is None
     assert result.upload is not None
     assert result.upload.status == "loaded"
+
+
+async def test_preclaimed_run_owner_mismatch_stops_before_object_io(
+    migrated_engine: AsyncEngine,
+) -> None:
+    bundle = _bundle("offline-owner-mismatch")
+    body = bundle.model_dump_json().encode("utf-8")
+    storage_key = "offline/offline-owner-mismatch/features.jsonl"
+    upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        job = await start_import_job(
+            session,
+            kind="offline_upload_load",
+            payload={"upload_id": upload_id},
+            source_checksum=hashlib.sha256(body).hexdigest(),
+            dagster_run_id="owner-run",
+        )
+        assert await mark_offline_upload_loading(
+            session,
+            upload_id=upload_id,
+            load_job_id=job.job_id,
+        ) is not None
+
+    store = _MemoryStore({storage_key: body})
+    client = AsyncKorTravelMapClient(migrated_engine)
+    with pytest.raises(PipelineCancellationConflict):
+        await client.run_offline_upload_load_job(
+            upload_id,
+            store=store,
+            dagster_run_id="other-run",
+        )
+
+    assert store.read_count == 0
+    async with AsyncSession(migrated_engine) as session:
+        state = (
+            await session.execute(
+                text(
+                    "SELECT status, dagster_run_id FROM ops.import_jobs "
+                    "WHERE job_id = CAST(:job_id AS uuid)"
+                ),
+                {"job_id": job.job_id},
+            )
+        ).one()
+    assert (state.status, state.dagster_run_id) == ("running", "owner-run")
+
+
+async def test_preclaimed_marker_race_stops_before_object_and_feature_io(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _bundle("offline-marker-race")
+    body = bundle.model_dump_json().encode("utf-8")
+    storage_key = "offline/offline-marker-race/features.jsonl"
+    upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        job = await start_import_job(
+            session,
+            kind="offline_upload_load",
+            payload={"upload_id": upload_id},
+            source_checksum=hashlib.sha256(body).hexdigest(),
+        )
+        assert await mark_offline_upload_loading(
+            session,
+            upload_id=upload_id,
+            load_job_id=job.job_id,
+        ) is not None
+
+    selected = asyncio.Event()
+    marker_committed = asyncio.Event()
+    original_get_import_job = offline_upload_module.get_import_job
+    paused = False
+
+    async def get_import_job_with_barrier(
+        session: AsyncSession, selected_job_id: str
+    ) -> object:
+        nonlocal paused
+        loaded = await original_get_import_job(session, selected_job_id)
+        if selected_job_id == job.job_id and not paused:
+            paused = True
+            selected.set()
+            await marker_committed.wait()
+        return loaded
+
+    monkeypatch.setattr(
+        offline_upload_module, "get_import_job", get_import_job_with_barrier
+    )
+    store = _MemoryStore({storage_key: body})
+    client = AsyncKorTravelMapClient(migrated_engine)
+    load_task = asyncio.create_task(
+        client.run_offline_upload_load_job(upload_id, store=store)
+    )
+    await selected.wait()
+    try:
+        async with AsyncSession(migrated_engine) as marker_session, marker_session.begin():
+            scope = await resolve_pipeline_cancellation_scope(
+                marker_session,
+                kind="import_job",
+                execution_id=job.job_id,
+            )
+            assert scope is not None
+            detail = await create_pipeline_cancellation_attempt(
+                marker_session,
+                scope=scope,
+                requested_by="admin:marker-race",
+                reason="preclaimed marker race",
+            )
+            cancellation_id = detail.attempt.cancellation_id
+    finally:
+        marker_committed.set()
+
+    with pytest.raises(PipelineCancellationConflict):
+        await load_task
+
+    assert store.read_count == 0
+    async with AsyncSession(migrated_engine) as session:
+        state = (
+            await session.execute(
+                text(
+                    "SELECT ij.status AS job_status, ij.cancellation_id, "
+                    "ou.status AS upload_status, ou.load_job_id "
+                    "FROM ops.import_jobs AS ij "
+                    "JOIN ops.offline_uploads AS ou ON ou.load_job_id = ij.job_id "
+                    "WHERE ij.job_id = CAST(:job_id AS uuid)"
+                ),
+                {"job_id": job.job_id},
+            )
+        ).one()
+        feature_count = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM feature.features "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": bundle.feature.feature_id},
+            )
+        ).scalar_one()
+
+    assert state.job_status == "running"
+    assert str(state.cancellation_id) == cancellation_id
+    assert state.upload_status == "loading"
+    assert str(state.load_job_id) == job.job_id
+    assert int(feature_count) == 0
 
 
 async def test_offline_upload_validate_then_load_csv(
