@@ -34,13 +34,20 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     unit_steps = _steps_by_name(unit)
     main_test = unit_steps["Run unit + lint tests"]["run"]
     assert "pytest tests/unit tests/lint -q" in main_test
+    assert "--cov=src/kortravelmap" in main_test
+    assert "--cov-report=xml" in main_test
     assert "--cov-fail-under=0" in main_test
 
     api_test = unit_steps["Run kor-travel-map-api unit tests"]
     assert api_test["env"]["COVERAGE_FILE"] == ".coverage.api"
+    assert "--cov=packages/kor-travel-map-api/src/kortravelmap/api" in api_test["run"]
     assert "--cov-fail-under=70" in api_test["run"]
     dagster_test = unit_steps["Run kor-travel-map-dagster unit tests"]
     assert dagster_test["env"]["COVERAGE_FILE"] == ".coverage.dagster"
+    assert (
+        "--cov=packages/kor-travel-map-dagster/src/kortravelmap/dagster"
+        in dagster_test["run"]
+    )
     assert "--cov-fail-under=80" in dagster_test["run"]
 
     preserve = unit_steps["Preserve unit coverage data (latest Python only)"]
@@ -64,7 +71,9 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
         "Run integration tests (testcontainers PostGIS via Docker)"
     ]["run"]
     assert "pytest tests/integration -q" in integration_test
+    assert "--cov=src/kortravelmap" in integration_test
     assert "--cov-append" in integration_test
+    assert "--cov-report=xml" in integration_test
     assert "--cov-fail-under=0" not in integration_test
     combined_upload = integration_steps["Upload combined coverage XML"]
     assert "!cancelled()" in combined_upload["if"]
