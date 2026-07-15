@@ -1453,31 +1453,36 @@ batch/load-batch attach, legacy cancel/requeue와 feature update의 내부 job s
 terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인해 짧은 transaction으로
 확정한다.
 
-- marker가 commit된 `queued` member는 공유 Dagster run의 pending/cancel_failed/terminal과
-  무관하게 같은 marker를 확인하는 finalize CAS로 즉시 DB `status='cancelled'`를 확정한다.
-  `running` member는
+- marker가 commit된 generic `queued` member(`requires_run_termination=false`)는 같은 marker를
+  확인하는 finalize CAS로 즉시 DB `status='cancelled'`를 확정한다. C3e feature-load kind의
+  `queued + dagster_run_id non-NULL` member는 `requires_run_termination=true`인 run-backed active라
+  이 경로에서 제외한다. 이 member와 `running` member는
   Dagster `CANCELED`를 확인한 경우에만 base `status='cancelled'`로 바꾼다.
 - Dagster `SUCCESS`/`FAILURE`는 member의 run id가 정확히 같고, marker가 같은
   `cancellation_id`를 가리키며, base row가 아직 active이고, terminal 조회가 권위 있는
   경우에만 각각 `done`/`failed`로 reconcile한다. update request와 연결 job의 frozen
   member/run 대응이 불완전하면 안전하게 reconcile할 수 없는 경우다.
-- `cancel_failed`는 frozen `initial_status='running'` member에만 허용한다. queued member는
-  공유 run의 결과와 무관하게 전용 DB 취소 경로만 사용하며 failure로 우회할 수 없다.
+- `cancel_failed`는 frozen `initial_status='running'`이거나
+  `requires_run_termination=true`인 member에 허용한다. generic queued member는 전용 DB 취소
+  경로만 사용하며 failure로 우회할 수 없지만 run-backed feature queued는 terminate 실패/불명
+  응답에서 base queued를 보존한 채 retryable `cancel_failed`가 될 수 있다. running+run-id 또는
+  run-backed feature queued의 transient run 실패만 retryable이고, run-id 없는 running은
+  definitive failed attempt라 retry에 복사하지 않는다.
   definitive `cancel_failed`는 run id가 없거나, 관측한 marker/status/run이 frozen base와
   다르거나, exact base에 대응하는 run 자체가 definitive 오류 코드와 함께
   `cancel_failed`인 경우만 허용한다. 이 경로는 base와 run을 절대 변경하지 않는다. 특히
   Dagster run id 없는 local/standalone `running` job은
   정지 여부를 증명할 수 없으므로 base 상태를 `running`으로 보존하고 marker도 유지한다.
 - GraphQL/HTTP 오류·timeout·`TerminateRunFailure`·`RunNotFound`는 먼저 `cancelled`로 쓰지
-  않는다. attempt를 `retryable`, 해당 running member/run을 `cancel_failed`로 기록하고
+  않는다. attempt를 `retryable`, 해당 run-termination-required member/run을 `cancel_failed`로 기록하고
   marker를 유지한다.
 
 일반 coordinator writer는 attempt 행을 `FOR UPDATE`로 먼저 잠그고
 `status='in_progress'`를 확인한 뒤 member→해당 run→request/job base 행 순서로 잠근다.
-성공 결과를 쓰는 범용 member setter는 두지 않는다. running member는 먼저 run 행이
+성공 결과를 쓰는 범용 member setter는 두지 않는다. run-termination-required member는 먼저 run 행이
 `CANCELED`/`SUCCESS`/`FAILURE`로 종결된 뒤에만 각각
-`cancelled`/`done`/`failed`로 전이한다. queued member는 외부 terminate 호출이 없는 전용
-DB 경로로만 `cancelled`가 된다. exact running base와 terminal `SUCCESS`/`FAILURE`가 있으면
+`cancelled`/`done`/`failed`로 전이한다. generic queued member만 외부 terminate 호출이 없는 전용
+DB 경로로 `cancelled`가 된다. exact frozen base와 terminal `SUCCESS`/`FAILURE`가 있으면
 안전 전이가 가능하므로 definitive failure로 닫지 않는다. 예외적으로 계층 전체를 다루는
 attempt 종결/retry와
 batch phase writer는 교착 방지를 위해
@@ -1486,7 +1491,8 @@ lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail re
 반환한다.
 
 `completed`는 marker·base·member·run 전체 대응이 정확하고 pending/cancel_failed가 0일
-때만 허용한다. `retryable`은 pending이 없고 exact marker/status/run을 유지한 `running`
+때만 허용한다. `retryable`은 pending이 없고 exact marker/status/run을 유지한
+`requires_run_termination=true`
 미해결 member가 하나 이상이며 모든 대응 run/member의 구조화 오류 코드가 재시도 허용
 집합일 때만 허용한다. `failed`는 operator 개입이 필요한 definitive attempt 오류가 있을 때
 사용한다. 이때 다른 run/member에서 이미 관측한 timeout/unavailable 같은 retryable 오류와
@@ -1495,7 +1501,7 @@ lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail re
 unexpected coordinator 오류도 pending/terminal run을 거짓 `cancel_failed`로 만들지 않는다.
 
 재시도는 `previous_cancellation_id`가 가리키는 이전 시도의 frozen member 중
-`initial_status='running' AND result='cancel_failed'`인 행만
+`requires_run_termination=true AND result='cancel_failed'`인 행만
 새 attempt로 복사한다. hierarchy를 다시 탐색하지 않으며, 복사한 base marker의
 `cancellation_id`만 새 시도로 CAS 전환한다. 이미 `cancelled`/`already_terminal`인 member와
 run은 재호출하지 않는다. 이 규칙과 ancestor marker가 최초 snapshot 뒤에 생성된 child가
@@ -1584,6 +1590,338 @@ downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 
 있으면 실패해야 한다. terminal base row와 `completed`/`failed` 시도만 남았을 때 명시적
 운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
 downgrade는 금지한다.
+
+### 9.8.3 Canonical provider operation 계층 (T-ADM-C3e, 이슈 #679, alembic 0051)
+
+schedule, manual, sensor, backfill로 실행한 Dagster provider asset과 update/import 실행은
+제3 operation 테이블을 만들지 않고 기존 `ops.import_jobs` hierarchy와
+`ops.feature_update_requests` root를 사용한다. 외부 correlation 정본은 UUID 단독이 아닌
+`(kind, id)`다. `dagster_run_id`는 실행 엔진 속성이고 목록 cursor는 C3b의
+`(created_at DESC, id DESC, kind DESC)`를 유지한다.
+
+Dagster feature-load run은 다음 두 단계다.
+
+- `kind='provider_feature_load_run'`: Dagster run당 standalone root 한 건. `parent_job_id`,
+  `provider`, `dataset_key`는 NULL이고 `dagster_run_id`와 `trigger_kind`는 non-NULL이다.
+- `kind='provider_feature_load'`: 선택된 exact provider/dataset pair당 child 한 건.
+  `parent_job_id`는 위 root, provider/dataset은 둘 다 non-empty이며 root와 같은
+  `dagster_run_id`를 가진다. `trigger_kind`는 root에서 상속하므로 child에서는 NULL이다.
+
+따라서 한 MCST run의 13 dataset이나 multi-asset manual run도 pipeline root는 하나다.
+`provider_datasets[]`는 선택된 import job member의 `job_id`, exact pair, pair lifecycle status를
+보존하고,
+표시용 `providers[]`/`dataset_keys[]`의 cross-product로 만들지 않는다. C3d 취소는 root와
+모든 child를 같은 frozen scope에 넣고 공유 Dagster run을 한 번 terminate한다. dataset
+하나에서 시작했더라도 같은 run의 다른 pair만 살리는 부분 취소는 지원하지 않는다.
+update request root는 owned import child 실컬럼 pair를 우선하고 direct
+`scope.type='provider_dataset'` pair를 fallback으로 보완한다. 같은 pair는 child 항목 하나로
+접으며 fallback만 남은 항목은 member id가 NULL이고 request root status를 사용한다.
+
+C3b 공용 root projection은 pipeline timeline, datasets grid/detail뿐 아니라 pipeline overview
+status count와 최근 24시간 failure도 소유한다. overview는 raw `import_jobs`를 세지 않고 request
+branch 또는 standalone partition의 canonical root를 한 번만 세며, MCST 13 child도 operation
+1건이다. 기존 import/update 분리 count는 `operations_by_status`, queued+running root 합계
+`active_operations`, `failed_operations_24h` canonical 집계로 교체한다.
+`provider_feature_load_run`의
+`projected_job`은 UUID 순서로 고른 임의 pair child가 아니라 root 자체로 고정하고 pair별 상태는
+`provider_datasets[]`에서만 읽는다.
+
+0051은 다음 nullable 실컬럼과 제약을 추가한다.
+
+```sql
+ALTER TABLE ops.import_jobs
+  ADD COLUMN provider TEXT,
+  ADD COLUMN dataset_key TEXT,
+  ADD COLUMN trigger_kind TEXT,
+  ADD COLUMN operation_registry_version TEXT,
+  ADD COLUMN dagster_run_status TEXT,
+  ADD CONSTRAINT ck_import_jobs_provider_dataset_pair CHECK (
+    (provider IS NULL AND dataset_key IS NULL) OR
+    (provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' AND
+     dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) AND dataset_key <> '')
+  ),
+  ADD CONSTRAINT ck_import_jobs_trigger_kind CHECK (
+    trigger_kind IS NULL OR trigger_kind IN
+      ('schedule', 'manual', 'sensor', 'update_request', 'backfill', 'system')
+  ),
+  ADD CONSTRAINT ck_import_jobs_registry_version_owner CHECK (
+    operation_registry_version IS NULL OR kind = 'provider_feature_load_run'
+  ),
+  ADD CONSTRAINT ck_import_jobs_dagster_run_status CHECK (
+    dagster_run_status IS NULL OR (
+      kind = 'provider_feature_load_run' AND dagster_run_status IN
+      ('QUEUED', 'NOT_STARTED', 'MANAGED', 'STARTING', 'STARTED', 'CANCELING',
+       'SUCCESS', 'FAILURE', 'CANCELED')
+    )
+  ),
+  ADD CONSTRAINT ck_import_jobs_feature_tracking_shape CHECK (
+    (kind <> 'provider_feature_load_run' OR
+      (parent_job_id IS NULL AND provider IS NULL AND dataset_key IS NULL AND
+       dagster_run_id IS NOT NULL AND dagster_run_id = btrim(dagster_run_id) AND
+       dagster_run_id <> '' AND trigger_kind IS NOT NULL AND
+       operation_registry_version IS NOT NULL AND
+       dagster_run_status IS NOT NULL AND
+       operation_registry_version = btrim(operation_registry_version) AND
+       operation_registry_version <> '')) AND
+    (kind <> 'provider_feature_load' OR
+      (parent_job_id IS NOT NULL AND provider IS NOT NULL AND
+       dataset_key IS NOT NULL AND dagster_run_id IS NOT NULL AND
+       dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '' AND
+       trigger_kind IS NULL AND operation_registry_version IS NULL AND
+       dagster_run_status IS NULL))
+  );
+
+ALTER TABLE ops.pipeline_cancellation_members
+  ADD COLUMN operation_kind TEXT,
+  ADD COLUMN requires_run_termination BOOLEAN NOT NULL DEFAULT false;
+
+UPDATE ops.pipeline_cancellation_members AS member
+   SET operation_kind = CASE
+     WHEN job.kind = btrim(job.kind) AND job.kind <> '' THEN job.kind
+     ELSE NULL
+   END
+  FROM ops.import_jobs AS job
+ WHERE member.member_kind = 'import_job'
+   AND member.member_id = job.job_id;
+
+UPDATE ops.pipeline_cancellation_members
+   SET requires_run_termination = true
+ WHERE dagster_run_id IS NOT NULL
+   AND (
+     initial_status = 'running' OR (
+       initial_status = 'queued' AND operation_kind IN
+         ('provider_feature_load_run', 'provider_feature_load')
+     )
+   );
+
+ALTER TABLE ops.pipeline_cancellation_members
+  ADD CONSTRAINT ck_pipeline_cancellation_members_operation_kind CHECK (
+    operation_kind IS NULL OR (
+      member_kind = 'import_job' AND operation_kind = btrim(operation_kind) AND
+      operation_kind <> ''
+    )
+  ),
+  ADD CONSTRAINT ck_pipeline_cancellation_members_run_termination CHECK (
+    requires_run_termination = (
+      dagster_run_id IS NOT NULL AND (
+        initial_status = 'running' OR (
+          initial_status = 'queued' AND COALESCE(
+            operation_kind IN ('provider_feature_load_run', 'provider_feature_load'),
+            false
+          )
+        )
+      )
+    )
+  );
+
+CREATE FUNCTION ops.check_feature_operation_parent() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  parent_kind TEXT;
+  parent_run_id TEXT;
+  parent_created_at TIMESTAMPTZ;
+BEGIN
+  SELECT kind, dagster_run_id, created_at
+    INTO parent_kind, parent_run_id, parent_created_at
+    FROM ops.import_jobs
+   WHERE job_id = NEW.parent_job_id
+   FOR KEY SHARE;
+  IF NOT FOUND OR parent_kind <> 'provider_feature_load_run'
+     OR parent_run_id IS DISTINCT FROM NEW.dagster_run_id
+     OR parent_created_at IS DISTINCT FROM NEW.created_at THEN
+    RAISE EXCEPTION 'invalid provider feature operation parent/run/create time'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER ck_import_jobs_feature_operation_parent
+  AFTER INSERT OR UPDATE OF kind, parent_job_id, dagster_run_id
+  ON ops.import_jobs
+  DEFERRABLE INITIALLY IMMEDIATE
+  FOR EACH ROW
+  WHEN (NEW.kind = 'provider_feature_load')
+  EXECUTE FUNCTION ops.check_feature_operation_parent();
+
+CREATE FUNCTION ops.reject_feature_operation_identity_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.kind IN ('provider_feature_load_run', 'provider_feature_load')
+     OR NEW.kind IN ('provider_feature_load_run', 'provider_feature_load') THEN
+    IF ROW(OLD.kind, OLD.parent_job_id, OLD.dagster_run_id, OLD.provider,
+           OLD.dataset_key, OLD.trigger_kind, OLD.operation_registry_version,
+           OLD.created_at)
+       IS DISTINCT FROM
+       ROW(NEW.kind, NEW.parent_job_id, NEW.dagster_run_id, NEW.provider,
+           NEW.dataset_key, NEW.trigger_kind, NEW.operation_registry_version,
+           NEW.created_at) THEN
+      RAISE EXCEPTION 'provider feature operation identity is immutable'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER ck_import_jobs_feature_operation_identity_immutable
+  BEFORE UPDATE OF kind, parent_job_id, dagster_run_id, provider, dataset_key,
+                   trigger_kind, operation_registry_version, created_at
+  ON ops.import_jobs
+  FOR EACH ROW
+  EXECUTE FUNCTION ops.reject_feature_operation_identity_mutation();
+
+CREATE UNIQUE INDEX uq_import_jobs_feature_run
+  ON ops.import_jobs (dagster_run_id)
+  WHERE kind = 'provider_feature_load_run' AND parent_job_id IS NULL;
+
+CREATE UNIQUE INDEX uq_import_jobs_feature_run_pair
+  ON ops.import_jobs (parent_job_id, provider, dataset_key)
+  WHERE kind = 'provider_feature_load' AND parent_job_id IS NOT NULL;
+
+CREATE INDEX idx_import_jobs_provider_dataset_created
+  ON ops.import_jobs (provider, dataset_key, created_at DESC, job_id DESC)
+  WHERE provider IS NOT NULL AND dataset_key IS NOT NULL;
+
+CREATE INDEX idx_import_jobs_dataset_created
+  ON ops.import_jobs (dataset_key, created_at DESC, job_id DESC)
+  WHERE dataset_key IS NOT NULL;
+
+CREATE INDEX idx_import_jobs_provider_created
+  ON ops.import_jobs (provider, created_at DESC, job_id DESC)
+  WHERE provider IS NOT NULL;
+```
+
+0051은 malformed legacy import kind를 trim해 다른 identity로 바꾸지 않고 NULL로 남기며 그 건수를
+migration 진단 로그에 기록한다. 신규 cancellation snapshot writer는 trim된 non-empty
+`operation_kind`만 허용한다. running+run-id의 `requires_run_termination=true` 백필은
+`operation_kind`가 NULL이어도 유지된다.
+
+event-backed `QUEUED|STARTING|STARTED|CANCELING` 각각의 run-status sensor 집합이 권위 있는 run selection의
+root와 모든 pair child를 provider resource 초기화와 독립된 한 transaction에서 ensure한다.
+Dagster event mapping이 없는 `NOT_STARTED|MANAGED`는 periodic scan/guard가 같은 client에
+queued-like 관측으로 전달한다. `QUEUED|NOT_STARTED|MANAGED|STARTING` 관측은 base `queued`,
+`STARTED|CANCELING` 관측은 marker CAS로 `running`에 전이한다. main package의
+raw status type은 문자열 Literal이고 Dagster package를 import하지 않는다. root
+`dagster_run_status`는 queued-like→STARTED/CANCELING→terminal 방향으로만 CAS 전이하고 terminal
+뒤에는 불변이다. 모든 live provider record
+resource는 DB-only `feature_operation_guard` resource에 의존해 provider resource factory보다
+먼저 같은 ensure/marker 검사를 수행한다. wrapper 호출은 raw runner 직전의 마지막 멱등
+fallback이다. ensure는 `INSERT ... ON CONFLICT`로 동시에 여러 번 호출해도 같은 ID로 수렴한다.
+상태 전이는 absent+queued-like→queued, absent/queued+STARTED/CANCELING→running뿐이다. running에
+늦게 온 queued-like/STARTED는 noop이고 terminal/marker 행은 blocked이므로 sensor delivery
+순서가 뒤집혀도 base 상태가 역전되지 않는다.
+기존 root에 child를 붙일 때는 C3d와 같은 lineage-global→canonical root lock과 marker guard를
+사용하고 parent kind, child/root run id, root trigger/registry version, terminal 상태를
+검증하므로 취소 frozen scope 뒤 새 pair가 빠져나오거나 다른 run parent에 붙지 않는다.
+불일치는 부분 write 없이 durable invariant conflict다. wrapper는 자기 pair child
+성공만 `done`으로 전이하고 body exception은 event만 남긴다. step retry는 같은 running
+child를 재사용한다.
+run terminal sensor가 모든 retry 뒤 root terminal을 소유한다. `SUCCESS`는 registry selection과
+DB child set이 같고 모든 child가 wrapper/callback에 의해 이미 `done`일 때 root만 `done`으로
+바꾼다. child set이 다르면 누락 child를 보정 생성하지 않고 structural conflict를 기록하되
+active root와 알려진 active child를 같은 transaction에서 `tracking_invariant` failed로 닫아
+terminal Dagster run 아래 active DB 행을 남기지 않는다. set은 같지만 queued/running child가
+남은 경우도 root와 active child를 같은 invariant `failed`로 닫고 raw
+Dagster `SUCCESS`는 별도 필드에 보존한다. `FAILURE`는 남은 active
+`queued|running` child와 root를 `failed`로 바꾼다. C3d marker 없는 외부 `CANCELED`는 row가
+없으면 selection 전체를 ensure한 뒤 active `queued|running` child/root를 `cancelled`로 바꾸고,
+marker가 있으면 coordinator 결과를
+기다리며 base row를 수정하지 않는다. 이미 terminal인 행도 sensor/retry가 다시 열거나 덮지
+못한다.
+
+pair child는 queued/running에서 `progress=0`, 성공하면 `progress=100`이다. root progress는 매
+pair 완료와 terminal reconcile transaction에서
+`floor(100 * done_child_count / total_child_count)`로 재계산한다. exact `SUCCESS`는 100이고 partial
+failure/cancel은 완료 pair 비율을 보존한다. `current_stage`는
+`queued|loading|completed|failed|cancelled|tracking_invariant`만 사용한다. failure/cancel은
+root와 대상 active child의 redacted error, stage, authoritative finish time을 같은 CAS에 쓴다.
+
+constraint trigger 함수는 feature child에만 적용해 parent row의
+`kind='provider_feature_load_run'`과 동일한 non-NULL `dagster_run_id`를 검사한다. generic batch
+hierarchy는 서로 다른/NULL Dagster run을 합법적으로 연결할 수 있으므로 전역 composite FK를
+추가하지 않고 기존 `parent_job_id ... ON DELETE SET NULL` 의미도 바꾸지 않는다. trigger와
+함수는 downgrade에서 child/root kind 데이터 안전성 확인 뒤 제거한다. companion identity
+trigger는 feature root/child의 kind, parent, run, pair, trigger, registry version, engine create
+time을 insert 뒤 바꾸지 못하게 해 parent-side update 우회도 막는다. feature root를 child보다
+먼저 삭제하면 기존 `ON DELETE SET NULL`이 child identity trigger에 거부되므로 feature hierarchy
+삭제는 child→root 순서만 가능하고 제품 API는 operation 삭제를 제공하지 않는다.
+
+MCST 같은 multi-pair raw runner에는 wrapper가 nullable async pair-completion callback을
+주입한다. 빈 입력을 정상 확인했거나 pair `_load`가 성공한 직후 child를 `done`으로 전이한다.
+raw runner 자체는 repository를 import하지 않으며 callback 없는 feature-update 경로의 tracking
+side effect는 0이다. 후반 pair 실패 시 완료 child는 done을 유지하고 남은 child만 failure
+sensor가 failed로 끝낸다.
+
+pre-resource failure로 wrapper가 실행되지 않았으면 sensor가 권위 있는 asset selection과
+canonical registry에서 exact pair를 복구할 때만 root/child를 만든다. 복구할 수 없는 비등록
+임의 user-code job은 Dagster 보조 패널-only 실행이다. registry에 등록된 feature-load
+job/selection의 version, resolved snapshot, run config 또는 identity tag가 누락·불일치하면
+guard가 provider resource factory보다 먼저 typed error로 fail-closed한다. 이 경우 provider I/O와
+DB load는 0이고 redacted durable conflict를 남긴다. job definition은 identity tag만 가지며
+schedule/manual/sensor launch가 각각 trigger tag를 넣어 manual 실행을 schedule로 오분류하지
+않는다. actor는 C3d `requested_by`이며 `trigger_kind`와 섞지 않는다.
+
+generic `recover_stale_running_jobs`는 `provider_feature_load_run`과
+`provider_feature_load`를 항상 제외한다. 놓친 terminal event와 daemon 재시작은 주기적
+provider-resource-free reconciliation sensor가 복구한다. Dagster→DB scan은 등록 run을
+`(engine_created_at,run_id)` watermark 뒤부터 읽어 missing root도 ensure/reconcile하고 한 page의
+DB commit 뒤에만 명시 sensor cursor를 전진시킨다. DB→Dagster scan은 기존 queued/running root를
+`(created_at,root_job_id)` keyset page로 다시 조회한다. 마지막 page의 `next_cursor=NULL`이면 다음
+tick은 beginning부터 새 sweep을 시작하므로 장기 active run의 후속 terminal과 scan 도중 과거
+engine create 시각으로 늦게 삽입된 root도 다시 관측한다. active/unavailable/not-found run은 heartbeat 시간만으로 failed 처리하지 않고
+base 상태와 관측 오류를 보존한다.
+generic `claim_next_import_job`도 두 kind를 제외한다. 이 queued/running row의 lifecycle은
+Dagster 관측과 tracking client만 소유한다. tracking/reconciliation sensor는
+`DefaultSensorStatus.RUNNING`이고, 배포 maintenance 중 reconciliation cursor를 cutover 시각으로
+명시 초기화해 첫 tick commit/readback이 끝나기 전에는 feature launch ingress를 열지 않는다.
+
+두 feature-load kind는 tracking client reserved kind다. generic enqueue/start/finish/heartbeat/
+cancel/payload update/requeue/batch·load-batch attach와 모든 generic lifecycle/progress/stage writer는
+대상 kind를 fail-closed로 거부한다. append-only event/audit와 같은 cancellation id marker를
+확인한 C3d terminal writer만 예외다. 0051 구현은 direct-write SQL inventory를 전수한다.
+
+C3d의 generic queued member는 계속 marker 뒤 DB-only cancelled로 끝낸다. 단,
+`kind IN ('provider_feature_load_run','provider_feature_load') AND status='queued' AND
+dagster_run_id IS NOT NULL`인 member는 run-backed active member다. C3d가 같은 run을 한 번
+reserve/terminate하고 authoritative `CANCELED`를 확인한 뒤 base cancelled로 확정한다.
+QUEUED→STARTED 경쟁도 같은 reservation/poll 경로가 처리한다. C3e-A1은 이 C3d scope/run 분류와
+회귀를 함께 확장한다.
+
+백필은 `feature_update_requests.job_id`와 exact `provider_dataset` scope, 또는 job별 정확히
+한 distinct event pair만 사용한다. payload의 scalar/nested identity는 읽지 않는다. 여러 pair,
+부분 identity, 빈 문자열은 provider/dataset을 모두 NULL로 남기고 신뢰할 trigger가 없는 legacy
+row의 `trigger_kind`도 NULL이다.
+
+신규 `enqueue_import_job`/`start_import_job`은 payload를 해석하지 않고 optional typed pair와
+trigger를 실컬럼에 쓴다. offline validate/load/reserve, MOIS bulk/incremental/closed, exact
+provider-dataset update member는 pair를 반드시 넘긴다. multi-scope update, batch aggregate,
+consistency/MV처럼 단일 pair가 아닌 행은 NULL이고 batch attach는 child identity를 추론하거나
+덮지 않는다. event append는 job 실컬럼 pair를 기본 상속하며 다른 non-NULL pair를 거부한다.
+신규 writer는 event-only identity를 만들 수 없다.
+
+feature-load root/child `created_at`은 sensor 기록 시각이 아니라 timezone-aware Dagster run create
+timestamp이고 둘이 같다. 늦은 reconcile도 root와 시각이 아직 없는 child의
+`started_at`/`finished_at`을 Dagster authoritative timestamp로 채우며 wrapper가 이미 완료한
+pair child의 완료 시각은 덮지 않는다. C3d가 marker를 소유한 terminal 경로에서는 cancellation
+writer가 같은 cancellation id CAS로 feature member status, child/root progress·stage·redacted
+error, root raw status와 engine timestamp를 함께 갱신한다. registry version과 해석된 비민감 identity snapshot은 job/asset
+selection·run config/settings와 교차 검증한다. static asset, data.go.kr job별 config, MCST 13 pair,
+KNPS catalog 내 resolved dataset을 각각 전수 검증하며 provider resource는 sensor identity 복구에
+사용하지 않는다.
+
+downgrade는 feature index/constraint/trigger와 cancellation member CHECK를 먼저 제거하고
+`operation_kind`/`requires_run_termination`, import identity/raw-status 컬럼 순서로 제거한다.
+old C3d가 해석하지 못하는 `initial_status='queued' AND result='cancel_failed'`인 run-backed feature
+history가 있으면 export/명시 정리 전 downgrade를 fail-closed한다.
+구 API/Dagster image 기동 뒤 실행하지 않는다. rollback은 신규 launch 차단 →
+신 API/Dagster 모두 정지 →
+0051을 아는 migration image가 active feature root/child와 관련 in-progress/retryable cancellation 0을
+확인하고 downgrade → 구 API → 구 Dagster 순서다. upgrade는 API/admin launch maintenance,
+schedule/sensor 중지, Dagster UI/manual/backfill ingress 차단 → Dagster
+QUEUED/STARTING/STARTED/CANCELING과 DB active feature root/child 0 확인 → 구 webserver/daemon/code
+location 정지 → API/0051 → head/CHECK/index 검증·첫 backfill → 신 Dagster 전 구성 재기동 →
+tracking sensor RUNNING/cutover cursor/첫 tick readiness → backfill 재실행 → API/Dagster readback
+→ UI 재기동·maintenance 해제 순서다.
 
 ### 9.9 `ops.feature_change_requests` (alembic 0021)
 

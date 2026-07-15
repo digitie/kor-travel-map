@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex) — C3d 종결·C3e 문서 계약 재설계
+
+- PR #695는 Python 3.11/3.12/3.13, fixture replay, PostGIS integration, lint,
+  OpenAPI, frontend 8개 check가 모두 green인 상태에서 merge됐다. 이슈 #680에 구현·테스트
+  증거를 남기고 closed/completed로 종결했다.
+- Claude Code 전용 worktree·branch·stash·reflog를 조사했으나 C3e 구현 diff는 없었고 상세
+  설계 기록만 복구했다. 구현을 가져온 것으로 가장하지 않고 C3d merge commit
+  `28dfe224`와 migration head `0050_pipeline_cancellations` 위에서 문서부터 다시 설계했다.
+- 두 적대 리뷰어가 retry 첫 실패 terminal 오기록, datasets 독자 payload 계보 SQL,
+  pre-resource failure, provider alias, exact pair filter, mixed-version 순서와 가장 중요하게
+  같은 run의 pair별 standalone root가 C3d 공유-run 취소 경계를 깨는 문제를 차단했다.
+  최종 계약은 Dagster run root 한 건 + exact provider/dataset child, sensor terminal 소유,
+  공용 C3b lineage projection, `(kind,id)` correlation, C45X의 sync scope 비선점이다.
+- 후속 적대 리뷰에서 registered identity의 panel-only fail-open, terminal child-set mismatch의
+  active 고착, overview child N배 집계, 임의 pair `projected_job`, reconciliation cursor 비순환,
+  queued feature 취소의 running-only C3d 상태기계, raw Dagster status/engine timestamp·root progress
+  누락을 추가 차단했다. 0051 cancellation frozen identity와 raw run 관측, overview canonical DTO,
+  provider 선행 fail-closed, sweep wrap과 downgrade guard까지 문서 정본에 고정했다.
+- codegraph 인덱스가 이 worktree에서 없어 `codegraph init -i`를 실행했으나 157파일 중 Python
+  53파일만 인덱싱해 대상 symbol을 찾지 못했다. 따라서 기존 C3b/C3d lineage SQL,
+  datasets repository, Dagster schedule/assets, API schema의 호출·import를 `rg`로 전수해
+  영향도 평가를 보완했다. source edit은 문서 적대 재승인 전 0으로 유지한다.
+- 두 적대 리뷰어는 registered/unregistered identity, terminal invariant closure, C3d queued
+  retry, raw status/timestamp/progress, overview/home 집계, migration DDL과 PR 독립 CI 경계를
+  반복 재검토한 뒤 최신 문서 diff를 S1/S2 0건으로 승인했다.
+
 ## 2026-07-15 (codex) — C3d CI coverage 측정 경계 수정
 
 - PR #695의 Python 3개 job에서 1,299개 테스트는 모두 통과했지만, unit 측정만으로 DB

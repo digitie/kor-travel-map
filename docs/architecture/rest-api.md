@@ -385,6 +385,25 @@ POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
 ```
 
+- **Canonical provider operation(T-ADM-C3e, #679)**: schedule/manual/sensor/backfill
+  feature-load는 Dagster run당 `import_job` root 한 건과 exact provider/dataset pair child로
+  영속한다. correlation은 `(kind,id)`이고 `dagster_run_id`나 GraphQL 응답을 목록 cursor로
+  쓰지 않는다. pipeline overview/timeline, datasets grid latest, datasets detail recent는 같은 C3b
+  lineage/root projection을 소비한다. overview의 `operations_by_status`, `active_operations`,
+  `failed_operations_24h`도 raw member가 아니라 canonical root를 한 번만 센다. provider와
+  dataset filter를 함께 주면 같은 child pair가
+  두 값을 모두 만족해야 하며 독립 배열의 cross-product는 금지한다.
+- **Execution 응답 어휘**: root와 pair child lifecycle은 각각
+  `queued|running|done|failed|cancelled`, C3d cancellation workflow/result, raw Dagster status,
+  freshness, `trigger_kind`는 별도 필드다. `provider_datasets[]`는 exact pair와 nullable selected
+  member id, status, `status_source=member|root`를 보존한다. feature-load run의
+  `projected_job`은 root 자체로 고정하고 pair별 상태는 이 배열에서만 읽는다. datasets coverage는
+  `db_recorded_canonical_operations`이며 detail은 pipeline과
+  같은 total order의 `recent_runs_next_cursor`와 pair-filtered `pipeline_history_url`을 준다.
+  상세 계약은 `docs/architecture/openapi-admin-contract.md` §7.2.1이다.
+  raw status 필드명은 nullable `dagster_run_status`이며 engine create/start/finish 시각을 응답
+  시각으로 사용한다. root progress는 완료 pair 비율, exact SUCCESS는 100이고 partial
+  failure/cancel은 완료 비율을 보존한다.
 - **Pipeline 계층 취소(T-ADM-C3d, #680)**: body는 최대 500자의 nullable `reason`만 허용한다.
   `operator`/`actor`를 포함한 알 수 없는 필드는 422이며, actor는 admin 인증의
   `AdminProxyContext.actor`에서만 파생한다. `import_job`이 request branch 안에 있으면
@@ -406,7 +425,8 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
 - **응답 정본**: 200 `data`는 `cancellation_id`, `previous_cancellation_id`, canonical
   `root {kind,id}`, attempt `status`, `members[]`, `dagster_runs[]`,
   `committed_data_rolled_back:false`, `warnings[]`를 반환한다. 각 member/run은
-  member는 `member_kind`, `member_id`, nullable `dagster_run_id`, `initial_status`,
+  member는 `member_kind`, `member_id`, nullable `operation_kind`,
+  `requires_run_termination`, nullable `dagster_run_id`, `initial_status`,
   `result`(`pending`/`cancelled`/`already_terminal`/`cancel_failed`), `terminal_status`, nullable
   structured `error`를 갖는다. run은 `dagster_run_id`, nullable `initial_status`, nullable
   `termination_reserved_at`, 같은 `result`/`terminal_status`/`error`를 갖고, Dagster 첫 조회가 실패한 run의
@@ -433,8 +453,11 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   즉시 보존한다. poll까지 실패한 응답 유실도 최초 transport 원인을 detail에 유지한다.
   취소 snapshot과 child attach/enqueue는 같은 canonical root transaction lock을 공유한다.
   terminal 재조회 뒤 같은 attempt/marker/run임을 확인한 짧은 transaction에서만 base
-  상태를 확정한다. marker로 claim이 차단된 queued member는 DB CAS로 `cancelled`, running
-  member는 `CANCELED` 확인 때만 `cancelled`다. 권위 있는 `SUCCESS`/`FAILURE`는 정확한
+  상태를 확정한다. marker로 claim이 차단된 generic queued member는 DB CAS로 `cancelled`다.
+  단, C3e의 feature-load kind이면서 non-NULL `dagster_run_id`를 가진 queued member는 run-backed
+  active로 분류해 같은 run을 한 번 reserve/terminate하고 authoritative `CANCELED` 확인 뒤
+  `cancelled`로 확정한다. QUEUED→STARTED 경쟁도 같은 poll 경로로 처리한다. running member는
+  `CANCELED` 확인 때만 `cancelled`다. 권위 있는 `SUCCESS`/`FAILURE`는 정확한
   member-run mapping일 때만 `done`/`failed`로 reconcile한다. 종료 확인 전이나 terminate
   실패 때 running member를 `cancelled`로 반환하거나 기록하지 않는다.
 - **no-op/멱등성**: terminal root에 active descendant가 없고 취소 이력이 없으면
