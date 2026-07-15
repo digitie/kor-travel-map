@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex) — T-ADM-C3d 종결, T-ADM-C3e 문서 gate 진행
+
+- **C3d 완료**: PR #695가 CI 8/8 green 뒤 merge됐고 이슈 #680도 수용 증거와 함께
+  닫혔다. main 기준 merge commit은 `28dfe224`다.
+- **C3e 복구 결과**: Claude Code worktree에는 구현 diff가 없고 설계 기록만 있었다. 두
+  적대 리뷰에서 C3d 공유-run 취소와 충돌하는 pair별 root, retry 조기 failure,
+  datasets 독자 payload SQL, pre-resource failure 누락을 확인해 원안을 반려했다.
+- **고정 중인 계약**: Dagster run root 한 건 + exact provider/dataset child,
+  `(kind,id)` correlation, QUEUED/STARTED sensor와 provider 선행 guard의 ensure,
+  wrapper/callback의 child 성공, terminal/양방향 watermark sensor의 authoritative reconcile이다.
+  feature-kind parent/identity trigger와 C3d marker guard를 적용하고 generic claim/stale
+  recovery에서 새 kind를 제외한다. registered identity drift는 provider I/O 전 fail-closed하고
+  DB→Dagster scan은 sweep 끝에서 wrap한다. raw Dagster status/engine timestamp와 pair 기반 root
+  progress를 별도로 보존하며, run-backed queued 취소는 frozen termination/retry 상태기계로
+  확장한다. pipeline overview/timeline과 datasets grid/detail은 C3b 공용 lineage projection을
+  사용하며 `sync_scope`는 #686/C45X에 남긴다.
+- **문서 리뷰 gate**: 두 적대 리뷰어가 최신 전체 diff를 S1/S2 0건으로 승인했고
+  `git diff --check`와 prod redaction guard도 통과했다.
+- **다음 한 작업**: C3e 문서 PR을 CI green으로 merge한다. 이후
+  C3e-A1(schema+frozen client)을 먼저 머지하고
+  C3e-A2(projection)와 C3e-B(Dagster)를 병렬 진행한 뒤 C3e-C(API)·C3e-I(통합)로
+  #679를 닫는다.
+
 ## 2026-07-15 (codex) — T-ADM-C3d PR #695 CI 보강 중
 
 - 최신 main rebase 뒤 focused Python 140건, frontend unit 82건, Ruff, strict mypy

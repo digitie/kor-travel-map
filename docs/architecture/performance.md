@@ -739,6 +739,15 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   request branch가 소유한 job을 제외한 standalone partition에서
   `import_job_events` 실컬럼만 정렬 DISTINCT 집계하고,
   `import_jobs.payload` JSONB를 읽지 않는다.
+- C3e canonical provider operation: overview/timeline/datasets grid/detail은 위 root CTE를
+  공유한다. exact pair latest/history는
+  `idx_import_jobs_provider_dataset_created(provider,dataset_key,created_at DESC,job_id DESC)`,
+  dataset-only 조회는 `idx_import_jobs_dataset_created(dataset_key,created_at DESC,job_id DESC)`를
+  사용한다. provider-only history는 composite pair index의 두 번째 key 때문에 정렬축을
+  만족하지 못하므로 `idx_import_jobs_provider_created(provider,created_at DESC,job_id DESC)`를
+  사용한다. provider/dataset 독립 배열의 cross-product와 paginated timeline 첫 page 기반 전
+  dataset latest 계산은 금지한다. overview count/24시간 failure는 raw child가 아니라 canonical
+  root를 집계한다.
 
 ### 14.3 회귀 테스트
 
@@ -765,6 +774,9 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
   `idx_import_job_events_job_time`, plan 크기·temp I/O·실측 비용이다. 전체 hierarchy/event
   materialization이 page 크기와 무관하게 커지는 plan이면 구현을 중단하고
   schema/index 변경을 별도 판단한다.
+- C3e pair/provider-only/dataset-only 조회는 각 전용 index를 EXPLAIN하고, 1,000개
+  이상의 root와 multi-pair child에서도 grid latest 누락 0, overview count의 child fan-out 0,
+  pipeline/detail cursor 누락·중복 0을 검증한다.
 
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,

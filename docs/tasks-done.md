@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Pipeline 계층형 취소 완결 (2026-07-15, `T-ADM-C3d`)
+
+- [x] **T-ADM-C3d — 실제 계층형 취소·Dagster terminate** (#680, PR #695).
+  C3b canonical root의 frozen scope, base marker, 정규화 attempt/member/run, run별
+  at-most-once terminate reservation, crash resume, authenticated audit, marker CAS와
+  `Retry-After`/RFC7807/OpenAPI/admin types를 완결했다. pre-start generation 복구,
+  browser invalidation/live E2E 계약, production bound-client DB 탈출 차단까지 하위
+  `T-ADM-C3d-P1R`·`R2A`·`R2B`·`R2C`로 반영했다. 두 적대 리뷰와 로컬 전체 gate,
+  GitHub Actions 8/8 green 뒤 merge commit
+  `28dfe224dee9c7a09775293b37be6795edb92651`로 main에 반영했고, 수용 증거를 남긴 뒤
+  이슈 #680을 닫았다.
+
 ## 최근 2일 Claude Code PR 사후 적대 리뷰 (2026-07-15, `T-ADM-RV-CLAUDE-2D`)
 
 - [x] **T-ADM-RV-CLAUDE-2D — 닫힘 여부와 무관한 Claude Code PR 상세 리뷰·이슈화.**

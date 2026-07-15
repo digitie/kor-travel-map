@@ -84,7 +84,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at, `dagster_run_id`(연결 Dagster run 실컬럼 — alembic 0048, payload 키에서 백필/승격) |
+| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair, trigger, registry version, root raw Dagster status를 실컬럼으로 추가하고 feature run root/pair child shape를 강제 |
+| `pipeline_cancellation_members` | `(cancellation_id, member_kind, member_id)` | 0050 frozen member 결과; 0051은 import `operation_kind`와 `requires_run_termination`을 백필·영속해 run-backed queued와 generic queued를 구분 |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
@@ -198,6 +199,11 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_import_jobs_load_batch_created` | (load_batch_id, created_at DESC, job_id DESC) | partial `load_batch_id IS NOT NULL`, T-200 batch 조회 |
 | `idx_import_jobs_parent_created` | (parent_job_id, created_at DESC, job_id DESC) | partial `parent_job_id IS NOT NULL`, root/child 조회 |
 | `idx_import_jobs_dagster_run_id` | (dagster_run_id) | partial `dagster_run_id IS NOT NULL`, `/ops/live` dagster run 연결 조회 (alembic 0048) |
+| `uq_import_jobs_feature_run` | UNIQUE (dagster_run_id) | partial feature-load run root, Dagster run 멱등성 (0051) |
+| `uq_import_jobs_feature_run_pair` | UNIQUE (parent_job_id, provider, dataset_key) | partial feature-load pair child 멱등성 (0051) |
+| `idx_import_jobs_provider_dataset_created` | (provider, dataset_key, created_at DESC, job_id DESC) | exact pair timeline/latest (0051) |
+| `idx_import_jobs_dataset_created` | (dataset_key, created_at DESC, job_id DESC) | dataset-only timeline/latest (0051) |
+| `idx_import_jobs_provider_created` | (provider, created_at DESC, job_id DESC) | provider-only timeline/latest (0051) |
 | `idx_dedup_status_score` | (status, total_score DESC) | partial pending |
 | `idx_overrides_feature` | (feature_id, status) | |
 | `idx_overrides_field` | (field_path) | |
@@ -254,6 +260,11 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `feature_price_values` | `uq_price_value_identity` | feature_id/provider/price_domain/product_key/observed_at 중복 방지 |
 | `import_jobs` | `ck_import_jobs_status` | queued/running/done/failed/cancelled |
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
+| `import_jobs` | `ck_import_jobs_provider_dataset_pair` | provider/dataset 둘 다 NULL 또는 trim된 non-empty exact pair |
+| `import_jobs` | `ck_import_jobs_feature_tracking_shape` | feature run root와 pair child의 parent/pair/trigger/registry/raw status shape |
+| `import_jobs` | `ck_import_jobs_dagster_run_status` | feature run root의 raw Dagster status 허용값 |
+| `import_jobs` | feature operation trigger 2종 | child parent kind/run 일치와 root/child identity update 금지 |
+| `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_run_termination` | frozen boolean = running+run-id 또는 queued feature kind+run-id |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
 | `dedup_review_queue` | `ck_dedup_pair_order` | feature_id_a < feature_id_b |
 | `dedup_review_queue` | `ck_dedup_scores` | 각 점수 0-100 |

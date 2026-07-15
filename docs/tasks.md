@@ -16,12 +16,12 @@
   - [x] `T-ADM-C3b` — root operation SQL projection·cursor·다중 식별자 (#679, PR #689)
   - [x] `T-ADM-C3c` — pipeline Dagster run 상세·failure 조회 이식 (#681 — 감사 결과
     전 항목 #687/#690에서 기충족, 잔여범위 감사 기록 PR)
-  - [ ] `T-ADM-C3d` — 실제 계층형 취소·Dagster terminate (#680)
-  - [ ] `T-ADM-C3d-P1R` — 취소 DB phase 2차 적대 리뷰 보강(본 PR, PR·CI 대기)
-  - [ ] `T-ADM-C3d-R2A` — Dagster pre-start generation 실패 복구(agent A, C3d PR 내부)
-  - [ ] `T-ADM-C3d-R2B` — browser 취소 계약·canonical live E2E(agent B, C3d PR 내부)
-  - [ ] `T-ADM-C3d-R2C` — production bound-client DB 탈출 차단(codex, C3d PR 내부)
-  - [ ] `T-ADM-C3e` — schedule/manual canonical operation 영속화 (#679)
+  - [ ] `T-ADM-C3e-D` — canonical operation 문서 계약·적대 리뷰 gate (codex)
+  - [ ] `T-ADM-C3e-A1` — 0051·operation 계층·frozen repo/client 계약 (agent A)
+  - [ ] `T-ADM-C3e-A2` — 공용 root/exact-pair projection·batch query (agent A)
+  - [ ] `T-ADM-C3e-B` — Dagster tracking registry·wrapper·run status sensor (agent B)
+  - [ ] `T-ADM-C3e-C` — datasets REST/OpenAPI/admin types canonical 소비 (agent A)
+  - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
@@ -114,94 +114,47 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   `dagster_query_service` 경계(신/구 라우터 공유)는 #687, OpenAPI/admin types
   고정은 #690 재생성분. UI 소비는 C5(#691)/C4R 범위. 감사 기록은 journal
   2026-07-15 (claude, agent A).
-- [ ] `T-ADM-C3d` — **실제 계층형 취소** (agent **B**, 이슈 **#680**, C3 후속
-  4/5, C3c 뒤): 기존 job/request status CHECK를 늘리지 않고 두 base table에
-  `cancellation_id/requested_at/requested_by/reason` marker를 추가한다. C3b와 같은
-  request-owner branch/duplicate non-owner/standalone partition/nested-request 경계로
-  frozen scope를 만들고, 정규화한 attempt/member/run 행을 대상·결과·재시도 정본으로
-  쓴다. root가 terminal이어도 active descendant는 계속 취소하며, ancestor marker 뒤에는
-  같은 canonical root transaction lock으로 child attach/enqueue를 직렬화하고 worker
-  claim/start/scope write/heartbeat/finish를 marker CAS로 막는다. queued member는 marker 뒤
-  DB CAS로 취소하고 running member만 Dagster terminal 확인을 요구한다.
-  marker·감사 commit → transaction 밖 Dagster terminate → terminal 재확인 순서를 지키고,
-  preliminary canonical resolve 뒤 전용 connection에서 먼저 얻는 canonical root별
-  nonblocking session lease로 동시 coordinator를 막는다. lease 전 attempt/marker 생성과 외부
-  phase의 열린 lease transaction을 금지한다. orphan
-  `in_progress`는 같은 frozen scope에서 재개하고, run별 `termination_reserved_at` NULL CAS를
-  첫 권위 `initial_status`·audit와 함께 외부 호출 전에 commit해 attempt별 at-most-once
-  dispatch와 crash 복구를 함께 보장한다.
-  running은 `CANCELED`만 cancelled, 안전하게 대응되는 `SUCCESS`/`FAILURE`만 done/failed로
-  reconcile한다. run id 없는 active local job, mapping 불일치, terminate 실패에는 base
-  상태를 거짓으로 바꾸지 않고 member `cancel_failed`와 retryable/failed attempt를
-  남긴다. 재시도는 이전 frozen scope의 미해결 member만 복사하며 hierarchy를 재탐색하지
-  않는다. 목록/detail DTO는 base status를 덮지 않는 nullable current cancellation overlay
-  (`cancellation_id/status/requested_at/requested_by/reason/retryable/
-  unresolved_member_count`)를 노출하고 detail은 current
-  member/run 결과까지 reload 가능하게 반환한다. terminal root에 active child가 없으면
-  durable `already_terminal` no-op 200, 이미 완료한 terminal cancellation은 같은 결과 200
-  replay로 Dagster 재호출을 막는다. attempt status는 workflow
-  `in_progress|retryable|completed|failed`, 실제 결과는 member/run
-  `cancelled|already_terminal|cancel_failed`로 분리한다. feature update는 같은 전용
-  `AsyncConnection`에 session advisory lock을 고정해 scope별 짧은 transaction으로 분리하고
-  이미 commit된 데이터는 rollback하지 않는다. production asset의 public client도 executor
-  session의 physical connection에 결합해 scope data와 checkpoint를 같은 transaction에 두며,
-  Dagster failure sensor는 실제 실패 run id를 request/job expected generation CAS로 넘겨
-  재큐잉된 행이나 새 running owner를 닫지 않는다.
-  body는 reason만 받고 actor는 인증 context에서 파생하며, durable audit·RFC7807
-  404/409/502/503·`Retry-After` OpenAPI response header·admin generated type·브라우저 typed
-  problem/retry 정보·0050 strict downgrade를 함께 완결한다. 오류 응답도 durable attempt를
-  만들 수 있으므로 UI query invalidation/reload는 성공 여부와 무관하게 수행한다.
-  marker 수용 테스트는 `update_import_job_payload`, `attach_import_jobs_to_batch`,
-  `recover_stale_running_jobs`, import job enqueue/claim/heartbeat/finish/cancel,
-  feature update claim/start/matched-scope/finish/cancel과 내부 job start/finish, legacy
-  cancel/requeue를 포함한다. marked row의 모든 status/payload/lineage mutation 0건, unmarked
-  기존 동작, cancellation-id 일치 coordinator CAS, event/audit append 허용을 unit+PostGIS
-  concurrency로 검증하고 base table direct-write SQL inventory가 새 우회 mutator를 거부하게
-  한다. 502/503 뒤 GET overlay 복구, no-op 200, 완료 결과 replay 시 attempt/run-call 증가 0도
-  API 회귀로 고정한다. GET in-progress와 5xx details의 member/run result는 `pending`을
-  허용하고, 200 completed 응답에는 `pending`이 0건이라는 DTO/invariant도 검증한다.
-  same-root winner/loser lease와 다른-root 병행, resolve↔lease root 변경, marker·reservation·
-  mutation·partial result·finish 각 crash resume, reservation CAS loser 외부 0회, shared run 1회,
-  lease backend PID/외부 중 no-tx/exact unlock·invalidate를 통합 테스트로 고정한다. 신규 action과
-  legacy import-job/feature-update cancel 세 진입점은 reason-only+인증 actor+동일 coordinator 위임을
-  API 테스트로 검증한다. pre-marker lease loser 409는 bounded reload 뒤에도 attempt가 없으면
-  canonical root와 `cancellation:null`을 반환한다. `termination_reserved_at`은 GET detail·5xx
-  snapshot·OpenAPI·admin generated type에 같은 nullable 필드로 보존한다.
-  **문서 우선 gate**: data model/REST/task/journal/resume 계약을 적대적 재승인받기 전에는
-  source를 수정하지 않는다.
-- [ ] `T-ADM-C3d-P1R` — **취소 DB phase 2차 적대 리뷰 보강** (agent **B**, C3d
-  내부 PR, 로컬 gate 완료·PR 대기): queued shared-run 독립 취소, running-only retry, definitive mismatch
-  비변경 경로, JSON error NULL 차단을 반영한다. batch consistency/MV 장기 transaction은
-  side effect 뒤에만 lineage-global→canonical root lock을 얻어 marker CAS와 finalize를
-  원자화하고, CAS 패배는 sentinel rollback 뒤 별도 read transaction으로 reload한다.
-  실제 report/MV side-effect rollback과 반대 lock 순서 회귀를 정의했다. phase2 적대 리뷰의
-  running 고착·CAS loser·mixed/pending 사실 보존·downgrade TOCTOU·hard invalidation 지적과
-  stale run generation CAS·production asset transaction bind·`Retry-After` 기계 계약·mock/live
-  E2E 원자 전환까지 구현했다. 생성물 포함 적대 재리뷰와 로컬 전체 gate는 통과했으며,
-  C3d PR의 CI green·merge 전이므로 완료로 표시하지 않는다.
-- [ ] `T-ADM-C3d-R2A` — **Dagster pre-start generation 실패 복구** (agent **A**,
-  C3d PR 내부): sensor가 request `updated_at` generation을 run config/tag에 고정하고,
-  executor CAS start 전에 실패한 run의 failure side effect가 `queued + dagster_run_id IS NULL +
-  generation 동일`일 때만 `updated_at`을 전진시켜 새 run key를 만든다. old generation이
-  재큐잉/새 owner를 덮지 않는 기존 expected run CAS와 함께 pre-start resource/lock 실패 뒤
-  다음 sensor run이 실제로 발행되는 회귀를 추가한다. start는 queued 동일 generation 또는
-  running 동일 owner만 허용하고, 연결 import job owner CAS가 실패하면 request 변경도 같은
-  savepoint에서 rollback한다.
-- [ ] `T-ADM-C3d-R2B` — **browser 취소 계약·canonical live E2E** (agent **B**,
-  C3d PR 내부): Next BFF가 upstream `Retry-After`를 allowlist 전달하고 proxy 경계 테스트로
-  고정한다. 409/502/503 뒤에는 연결 member를 알 수 없는 경우까지 포함해 import-job/
-  update-request singular detail·events cache를 실제 key prefix로 invalidate한다. 파괴적 import-job
-  live E2E는 임의 queued child를 standalone root로 가정하지 않고 canonical root와 파괴 범위를
-  먼저 확인한 안전 대상만 취소한다.
-- [ ] `T-ADM-C3d-R2C` — **production bound-client DB 탈출 차단** (codex, C3d PR 내부):
-  executor transaction에 bind한 asset client가 `_session_factory` 외 원본 `_engine.connect()`로
-  별도 commit하지 못하게 fail-closed 경계를 둔다. production asset 적재·sync state·checkpoint
-  전체 rollback과 engine-direct public method 거부를 회귀로 고정한다.
-- [ ] `T-ADM-C3e` — **schedule/manual canonical operation 영속화** (agent **B**,
-  이슈 **#679**, C3 후속 5/5, C3d 뒤): schedule tick/manual launch/update request/
-  import 실행이 같은 canonical operation 정본과 provider/dataset identity를 사용하고,
-  stable correlation id·Dagster run id·최종 상태를 기록한다. mixed-version 백필·
-  인덱스·datasets recent execution 연결까지 포함한다.
+- [ ] `T-ADM-C3e-D` — **canonical operation 문서 계약** (codex, 이슈 **#679**,
+  C3 후속 5/5, C3d 뒤): Claude Code worktree에는 구현 diff가 없고 설계 기록만 남아 있어
+  C3d 정본 위에서 복구했다. 두 적대 리뷰의 차단 항목을 반영해 Dagster run root 한 건과
+  exact provider/dataset child, `(kind,id)` correlation, retry/sensor terminal ownership,
+  exact pair filter, 공용 root projection, mixed-version 순서를
+  [`C3e 설계 보고서`](reports/admin-ops-c3e-canonical-operations-2026-07-15.md)와
+  architecture/test 문서에 먼저 고정한다. 이 문서 PR이 CI green·merge되기 전 source 수정은
+  금지한다.
+- [ ] `T-ADM-C3e-A1` — **0051·operation repository frozen 계약** (agent **A**,
+  의존 C3e-D): `ops.import_jobs` typed identity/trigger/registry 컬럼·trim/shape CHECK·feature-kind
+  parent constraint trigger·partial unique/index, raw Dagster status/engine timestamp, writer identity
+  matrix, idempotent lifecycle와 frozen client DTO/method를 구현한다. C3d cancellation member의
+  `operation_kind`/`requires_run_termination` migration·응답/OpenAPI/type과 run-backed queued
+  terminate/retry/terminal race를 함께 확장한다. C3d marker/CAS/direct-write inventory, generic
+  claim/stale recovery 제외, reserved feature kind의 모든 generic writer fail-closed, migration
+  up/down과 invariant conflict를 포함한다.
+- [ ] `T-ADM-C3e-A2` — **공용 root/exact-pair projection** (agent **A**, 의존 C3e-A1):
+  C3b lineage CTE를 확장해 pipeline/grid/detail이 같은 deterministic pair member/status source를
+  쓰고 전 dataset latest batch query와 pair/dataset-only EXPLAIN을 구현한다. feature run
+  projected job은 root로 고정하고 pipeline overview를 canonical `operations_by_status`/
+  `active_operations`/`failed_operations_24h`로 원자 전환한다. 이 PR이 overview router/schema와 OpenAPI/admin generated
+  type, nullable `dagster_run_status`와 authoritative engine 시각까지 함께 바꿔 독립 CI를
+  green으로 유지한다.
+- [ ] `T-ADM-C3e-B` — **Dagster canonical tracking** (agent **B**, 의존 C3e-A1,
+  C3e-A2와 병렬): 모든 public feature-load wrapper와 KMA/MCST를 immutable registry에 연결하고
+  definition trigger tag 오분류를 제거한다. event-backed QUEUED/STARTING/STARTED/CANCELING 각 sensor가
+  DB-only 1차 ensure하고 NOT_STARTED/MANAGED는 periodic scan/guard가 처리하며,
+  guard resource가 provider fetcher 전 ensure, wrapper가 마지막 fallback/pair success를 소유하고
+  SUCCESS/FAILURE/CANCELED와 periodic reconcile sensor가 run terminal을 소유한다. MCST에는
+  wrapper-owned pair completion callback을 주입한다.
+  등록 identity drift fail-closed와 비등록 arbitrary panel-only, pre-resource/queued cancel,
+  partial success, multi-asset/shared-run, direct Dagster cancel, sensor default/readiness·selection
+  mismatch·중복 delivery와 끝에서 wrap하는 양방향 watermark reconcile을 회귀로 고정한다.
+- [ ] `T-ADM-C3e-C` — **datasets REST/OpenAPI 소비** (agent **A**, 의존 C3e-A2):
+  독자 recursive SQL과 payload 계보를 제거하고 grid latest/detail recent/timeline이 같은 root와
+  pair member status·nullable raw Dagster status·engine 시각을 반환하게 한다. recent cursor/history URL, status vocabulary,
+  `db_recorded_canonical_operations` coverage, 공용 DTO/HATEOAS mapper, OpenAPI/admin types를
+  완결한다.
+- [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B/C): 선행 merge마다
+  origin/main rebase하고 교차 회귀·적대 리뷰 2인·전체 CI를 통과시킨다. 일정/수동/갱신/import
+  실행과 datasets/pipeline 동일 root 증거를 이슈 #679에 남긴 뒤 닫는다.
 - [ ] `T-ADM-C4R` — **C4 UI 소비 계약 수정** (agent **A**, issue **#684**,
   **PR 1개**, 의존 C2R·C3e): freshness/schedule/latest operation/orphan/preview의
   보강 계약을 UI 상태·조작 모델에 반영한다. `T-ADM-C4` 완료 전에 반드시 머지한다.
@@ -220,7 +173,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 - [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
-  홈 위젯 소스(overview vs `/ops/metrics`) 결정 포함. **C3b API 소비 정본**(#689):
+  홈 작업 상태 위젯은 `/v1/ops/pipeline/overview.operations_by_status`를 정본으로 사용한다.
+  `/ops/metrics.import_jobs_by_status` raw physical-row count를 작업 수로 표시하지 않는다.
+  **C3b API 소비 정본**(#689):
   (a) 타임라인은 request branch 또는 standalone root를 행 하나로 노출하며,
   descendant job을 별도 행으로 중복 노출하지 않는다. (b) provider/dataset 필터와
   표시는 effective `providers[]`/`dataset_keys[]`와 typed `provider_dataset` pair를
@@ -243,19 +198,19 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, dry_run 우선, per-file 저부하 실행표 + 검증 리포트.
 
-현재 codex 실행 순서는 사용자 지시로 **C3d merge·#680 종료 → Claude Code worktree의
-C3e 작업 회수·완료 → adm-c5 merge 확인 → C6a → C6b → C7**이다. C4/C5를 이 실행
-흐름에서 새로 구현하지 않으며, C3e는 Claude worktree의 branch/commit/dirty diff를 먼저
-보존적으로 조사해 가져온 뒤 별도 PR로 완결한다. C6 착수 전 원격에서 C4/C5와 관련 차단
-PR의 실제 merge·CI 상태를 확인한다.
+현재 codex 실행 순서는 사용자 지시로 **C3e-D/A1/A2/B/C/I → C45X·C4R 차단 계약 → 기존
+C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
+worktree에는 C3e 구현 diff가 없고 설계 기록만 복구됐으므로 문서 gate부터 다시 진행한다.
+C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다. C6 착수 전 원격에서
+C4/C5와 관련 차단 PR의 실제 merge·CI 상태를 확인한다.
 
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전
 적대적 리뷰어 2명.
 
 `T-ADM-C3a`~`C3e`는 PR #677 병합 후 적대적 리뷰에서 확인된 C5 차단 후속이다.
-순서를 바꾸거나 한 PR로 합치지 않으며, **C3e까지 merge·CI green 전에는 C5를
-시작하지 않는다.**
+순서를 바꾸거나 한 PR로 합치지 않는다. 기존 C5 PR #691은 재작업 대기 상태이며,
+**C3e까지 merge·CI green 전에는 신규 C5 구현이나 #691 merge를 진행하지 않는다.**
 
 ## T-101 — Materialized View 도입 검토
 

@@ -397,6 +397,31 @@ feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
    `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
    payload를 전달한다.
 
+### 9.1 Canonical provider feature-load tracking (T-ADM-C3e)
+
+schedule/manual/sensor/backfill feature-load run은 `ops.import_jobs`에 run root 한 건과 선택한
+exact provider/dataset pair child를 남긴다. immutable operation registry가 job/asset selection,
+registry version, 해석된 비민감 run-config snapshot을 canonical catalog와 교차 검증한다.
+등록 작업의 identity 누락·불일치는 provider resource factory 전 DB-only guard에서 fail-closed하며
+provider I/O와 DB load는 0이다. registry 밖 임의 user-code job만 canonical coverage 없이 Dagster
+보조 패널에 남긴다.
+
+event-backed QUEUED/STARTING/STARTED/CANCELING 각 run-status sensor가 root와 selection 전체 child를
+1차 ensure한다. event mapping이 없는 NOT_STARTED/MANAGED는 periodic scan/guard가 queued-like로
+처리한다. 모든 live
+provider resource가 guard에 의존하며, public asset wrapper가 raw runner 직전 마지막 ensure와 자기
+pair 성공을 기록한다. MCST raw runner는 wrapper-owned pair completion callback만 호출한다.
+`FeatureUpdateAssetRunner`는 raw 함수 경로이므로 standalone tracking을 만들지 않는다. terminal과
+놓친 event는 provider-resource-free run-status/reconciliation sensor가 마무리하며, DB→Dagster
+active-root keyset scan은 매 sweep 끝에서 처음으로 wrap한다. main library는 Dagster enum을 import하지
+않고 자체 문자열 Literal과 짧은-transaction client method만 노출한다.
+
+root raw Dagster status와 engine create/start/finish timestamp는 DB lifecycle과 별도로 보존한다.
+root progress는 완료 pair 비율이고 pair별 결과는 `provider_datasets[]`가 정본이다. C3d marker가
+먼저면 sensor는 base를 덮지 않고 cancellation coordinator가 same-marker CAS로 raw terminal과
+engine timestamp를 기록한다. queued feature-load+run-id는 generic queued DB-only 취소가 아니라
+run-backed active라 shared run을 한 번 terminate하고 authoritative terminal을 reconcile한다.
+
 offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 
 1. Admin API/UI가 원본 파일을 RustFS 등 객체 저장소에 보존하고

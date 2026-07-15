@@ -726,8 +726,10 @@ scope를 함께 보고, standalone import root는 전체 lineage event identity�
 `provider_dataset` 값이 없을 때만 끝에 보완한다. 두 배열은 독립 identity 목록이므로
 provider/dataset/sync_scope pair는 typed `provider_dataset` object가 정본이다.
 다른 request와 standalone root의 `provider_dataset`은 `null`이다.
-`projected_job`은 `depth DESC, created_at DESC, job_id DESC` 규칙으로 고른 대표 job이며
-root와 별도의 status/progress/error/times/Dagster run/detail URL을 가진다.
+`projected_job`은 일반 hierarchy에서 `depth DESC, created_at DESC, job_id DESC` 규칙으로 고른
+대표 job이며 root와 별도의 status/progress/error/times/Dagster run/detail URL을 가진다. 단,
+C3e `provider_feature_load_run`은 임의 pair child를 대표로 고르지 않고 root 자체를
+`projected_job`으로 고정한다.
 `linked_job_count`는 해당 request branch 또는 standalone partition의 job 수다.
 
 request item은 원래 FK인 `requested_job_id`와 `lineage_owner`를 추가로 제공한다. 같은
@@ -738,7 +740,69 @@ job anchor를 여러 request가 가리키면 생성 시각·ID 기준 owner 하�
 job hierarchy의 다중 소유·중복 표시를 막는 명시적 진단 상태다.
 
 단건 detail/cancel 계약은 이 목록 projection으로 바꾸지 않는다. Dagster run 상세는
-T-ADM-C3c, 계층 취소는 C3d, canonical operation 영속화는 C3e 범위다.
+T-ADM-C3c, 계층 취소는 C3d가 소유한다.
+
+## 7.2.1 Canonical operation REST 계약 (T-ADM-C3e)
+
+pipeline overview/timeline, datasets grid latest execution, datasets detail recent runs는 C3b의
+같은 lineage/root CTE와 exact pair projection을 소비한다. grid는 전 dataset을 한 번에 읽는
+batch query를 사용하며 pipeline 첫 page를 최신값 전체로 오인하지 않는다.
+
+`GET /v1/ops/pipeline/overview`는 raw import job과 update request를 따로 세지 않는다. 응답의
+`operations_by_status`, queued+running root 합계 `active_operations`,
+`failed_operations_24h`는 timeline과 같은 canonical root를 한 번만
+세며 MCST/multi-asset child N개가 count를 N배로 부풀리지 않는다. 이 변경은 기존
+`import_jobs_by_status`, `update_requests_by_status`, `failed_import_jobs_24h`,
+`failed_update_requests_24h`, `active_import_jobs`, `active_update_requests`와 호환하지 않는다.
+
+공통 execution identity는 `kind=import_job|update_request`와 UUID `id`의 조합이다. 모든
+표면은 같은 `detail_url`을 반환한다. provider/dataset query를 함께 주면 같은 typed child
+pair가 두 값을 모두 만족해야 하며 다른 event/독립 배열의 교차 조합은 매칭하지 않는다.
+`provider_datasets[]` 각 항목은 다음을 가진다.
+
+- `provider`, `dataset_key`
+- nullable `operation_member_id`: 선택된 import job member UUID
+- `status`: 해당 pair의 `queued|running|done|failed|cancelled`
+- `status_source`: `member|root`
+
+update request root에서는 owned import child의 실컬럼 pair를 우선한다. direct
+`provider_dataset` scope와 같은 pair면 한 항목으로 접고, child가 없는 direct pair fallback은
+`operation_member_id=null`과 request root status를 사용한다. 독립 provider/dataset 배열은
+표시와 단일 필터용일 뿐 exact pair 생성 근거가 아니다.
+
+pair 배열은 `(provider ASC, dataset_key ASC)`로 정렬한다. 같은 pair의 typed member가 여러
+개면 canonical branch의 `depth DESC, created_at DESC, job_id DESC` 첫 행을 선택해
+`status_source=member`로 반환한다. typed member가 없고 direct request scope 또는 legacy exact
+event fallback만 있으면 member id는 NULL, `status_source=root`, status는 canonical root
+status다. 이 선택·정렬은 pipeline/datasets 양쪽에서 같다.
+
+root `status`도 같은 lifecycle 어휘지만 run 전체 결과다. `projected_job.status`, C3d
+cancellation workflow/result, nullable `dagster_run_status`, freshness, `trigger_kind`는 별도 필드이며
+서로 덮어쓰지 않는다. API schema와 application service가 쓰는 canonical operation DTO/
+HATEOAS mapper는 public 모듈에 두고 datasets service가 router private 함수를 import하지
+않는다.
+
+`provider_feature_load_run`의 `projected_job`은 root 자체다. pair child insertion order나 UUID는
+projected status/progress/stage를 바꾸지 않으며 pair별 결과는 `provider_datasets[]`만 정본으로
+사용한다. root progress는 완료 pair 비율이고 exact SUCCESS는 100이다. partial failure/cancel은
+완료 비율을 보존하며 stage는 `queued|loading|completed|failed|cancelled|tracking_invariant`다.
+`created_at`/`started_at`/`finished_at`은 Dagster authoritative engine timestamp를 사용한다.
+
+feature-load root는 identity 진단용 nullable `operation_registry_version`도 반환한다. 다른
+legacy/update root에서는 NULL이며 이 값은 cursor나 correlation key가 아니다.
+
+`GET /v1/ops/datasets`의 `latest_execution_coverage`와
+`GET /v1/ops/datasets/{provider}/{dataset}`의 `recent_runs_coverage`는 모두
+`db_recorded_canonical_operations`다. 이는 0051 이후 DB 기록 범위이며 과거
+GraphQL-only run이나 #686의 requested/effective sync scope를 포함한다고 주장하지 않는다.
+detail의 `recent_runs`는 pipeline과 같은 total order의 첫 page이고
+`recent_runs_next_cursor`와 해당 pair filter가 박힌 `pipeline_history_url`을 함께 반환한다.
+다음 cursor는 누락·중복 없이 이어져야 한다.
+
+Dagster feature-load operation은 run root 하나와 exact pair child들이다. timeline에는 root 한
+행만 보이고 datasets는 같은 `(kind,id)` root와 해당 pair child status를 노출한다. 같은 run의
+dataset 하나에서 취소해도 root 전체가 C3d frozen scope이므로 응답과 UI는 공유 run의 모든
+pair가 영향받는다는 경계를 표시한다.
 
 ### `GET /ops/metrics`
 
@@ -754,6 +818,9 @@ T-ADM-C3c, 계층 취소는 C3d, canonical operation 영속화는 C3e 범위다.
 - `dedup_fp_stats`
 - `data_integrity_issues`
 - `latest_consistency_report`
+
+`import_jobs_by_status`는 `ops.import_jobs` physical row 진단값이며 canonical operation 수가 아니다.
+홈과 pipeline 작업 상태 위젯은 `/v1/ops/pipeline/overview.operations_by_status`를 사용한다.
 
 ### `GET /ops/import-jobs`
 
@@ -880,7 +947,7 @@ Query:
 - `page_size` (`1..200`, 기본 `50`)
 - `cursor`
 
-## 7.2.1 통합 pipeline Dagster run 상세 API
+## 7.2.2 통합 pipeline Dagster run 상세 API
 
 #### `GET /ops/pipeline/dagster-runs/{run_id}`
 
@@ -930,7 +997,7 @@ shape가 잘못됐으면 응답 해석 오류다. `hasMore=true`이면 다음 �
 새 UI는 Dagster iframe을 embed하지 않으므로 `/ops/pipeline/nux-seen` endpoint를 만들지
 않는다. 구 `/ops/dagster/nux-seen`과 그 service/schema는 구 화면 제거 전까지 유지한다.
 
-## 7.2.2 구 Dagster 운영 요약 API
+## 7.2.3 구 Dagster 운영 요약 API
 
 Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
 같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
