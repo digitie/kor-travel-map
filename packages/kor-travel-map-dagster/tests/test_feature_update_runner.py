@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 from kortravelmap.api.provider_catalog import catalog_refreshable_entries
+from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshScope
 from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_STATIONS
 from kortravelmap.providers.datagokr_file_data import (
@@ -142,6 +143,54 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
     assert result.metadata is not None
     assert result.metadata["features_inserted"] == 1
     assert result.metadata["seen"] is True
+
+
+async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    teardown_calls = 0
+
+    async def _run(_context: object) -> _FakeAssetResult:
+        raise AssertionError("transaction bind 실패 뒤 asset을 실행하면 안 된다.")
+
+    def _teardown() -> None:
+        nonlocal teardown_calls
+        teardown_calls += 1
+
+    def _resources(
+        _settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> RunnerResources:
+        return RunnerResources({}, (_teardown,))
+
+    async def _fail_bind(
+        _client: AsyncKorTravelMapClient,
+        _session: object,
+    ) -> AsyncKorTravelMapClient:
+        raise RuntimeError("simulated transaction bind failure")
+
+    monkeypatch.setattr(runner_mod, "_bind_client_to_session", _fail_bind)
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": AsyncKorTravelMapClient(cast(Any, object())),
+        },
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider="demo",
+                dataset_keys=frozenset({"places"}),
+                run=_run,
+                resources=_resources,
+                asset_key="feature_demo_places",
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated transaction bind failure"):
+        await runner(object(), _scope())
+
+    assert teardown_calls == 1
 
 
 async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None:

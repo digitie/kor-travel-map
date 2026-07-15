@@ -9,6 +9,22 @@ import {
 
 const INTERNAL_BASE =
   process.env.KOR_TRAVEL_MAP_API_INTERNAL_URL ?? "http://127.0.0.1:12701";
+const FORWARDED_RESPONSE_HEADERS = [
+  "content-type",
+  "content-disposition",
+  "retry-after",
+] as const;
+
+function forwardedResponseHeaders(source: Headers): Headers {
+  const headers = new Headers();
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = source.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  return headers;
+}
 
 async function proxy(
   request: NextRequest,
@@ -31,12 +47,9 @@ async function proxy(
         request.signal,
       ),
     });
-    const responseHeaders = new Headers({
-      "content-type": response.headers.get("content-type") ?? "application/json",
-    });
-    const contentDisposition = response.headers.get("content-disposition");
-    if (contentDisposition !== null) {
-      responseHeaders.set("content-disposition", contentDisposition);
+    const responseHeaders = forwardedResponseHeaders(response.headers);
+    if (!responseHeaders.has("content-type")) {
+      responseHeaders.set("content-type", "application/json");
     }
     return new Response(response.body, {
       status: response.status,

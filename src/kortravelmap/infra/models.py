@@ -65,6 +65,11 @@ from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_STORAGE_BACKEND_VALUES,
 )
 from kortravelmap.core.offline_upload_states import OFFLINE_UPLOAD_STATE_VALUES
+from kortravelmap.core.pipeline_cancellation_states import (
+    PIPELINE_CANCELLATION_MEMBER_KIND_VALUES,
+    PIPELINE_CANCELLATION_RESULT_VALUES,
+    PIPELINE_CANCELLATION_STATUS_VALUES,
+)
 
 __all__ = [
     "metadata",
@@ -92,6 +97,9 @@ __all__ = [
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
+    "PipelineCancellationRow",
+    "PipelineCancellationRunRow",
+    "PipelineCancellationMemberRow",
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
@@ -1560,6 +1568,13 @@ class ImportJobRow(Base):
             "progress BETWEEN 0 AND 100",
             name="ck_import_jobs_progress",
         ),
+        CheckConstraint(
+            "(cancellation_id IS NULL AND cancellation_requested_at IS NULL "
+            "AND cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR "
+            "(cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL "
+            "AND cancellation_requested_by IS NOT NULL)",
+            name="ck_import_jobs_cancellation_marker",
+        ),
         Index("idx_import_jobs_created_keyset", text("created_at DESC"), text("job_id DESC")),
         Index("idx_import_jobs_status", "status", "created_at", "queue_sequence"),
         Index(
@@ -1592,6 +1607,7 @@ class ImportJobRow(Base):
             "dagster_run_id",
             postgresql_where=text("dagster_run_id IS NOT NULL"),
         ),
+        Index("idx_import_jobs_cancellation_id", "cancellation_id"),
         {"schema": "ops"},
     )
 
@@ -1625,6 +1641,18 @@ class ImportJobRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     # Dagster run 연결 실컬럼 (ADR-064/T-ADM-C3) — payload JSONB 조회 hot path 제거.
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    cancellation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.pipeline_cancellations.cancellation_id",
+            ondelete="RESTRICT",
+        ),
+    )
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    cancellation_requested_by: Mapped[str | None] = mapped_column(Text)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1797,6 +1825,13 @@ class FeatureUpdateRequestRow(Base):
             "status IN ('queued','running','done','failed','cancelled')",
             name="ck_feature_update_status",
         ),
+        CheckConstraint(
+            "(cancellation_id IS NULL AND cancellation_requested_at IS NULL "
+            "AND cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR "
+            "(cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL "
+            "AND cancellation_requested_by IS NOT NULL)",
+            name="ck_feature_update_requests_cancellation_marker",
+        ),
         Index(
             "idx_feature_update_status_priority",
             "status",
@@ -1812,6 +1847,7 @@ class FeatureUpdateRequestRow(Base):
             "job_id",
             postgresql_where=text("job_id IS NOT NULL"),
         ),
+        Index("idx_feature_update_requests_cancellation_id", "cancellation_id"),
         {"schema": "ops"},
     )
 
@@ -1849,6 +1885,18 @@ class FeatureUpdateRequestRow(Base):
         ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
     )
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    cancellation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.pipeline_cancellations.cancellation_id",
+            ondelete="RESTRICT",
+        ),
+    )
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    cancellation_requested_by: Mapped[str | None] = mapped_column(Text)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
     operator: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -1859,6 +1907,222 @@ class FeatureUpdateRequestRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.pipeline_cancellations / members / runs  (ADR-064 T-ADM-C3d)
+# =============================================================================
+
+
+class PipelineCancellationRow(Base):
+    """계층형 취소 workflow attempt."""
+
+    __tablename__ = "pipeline_cancellations"
+    __table_args__ = (
+        CheckConstraint(
+            f"root_kind IN ({_sql_text_literals(PIPELINE_CANCELLATION_MEMBER_KIND_VALUES)})",
+            name="ck_pipeline_cancellations_root_kind",
+        ),
+        CheckConstraint(
+            f"status IN ({_sql_text_literals(PIPELINE_CANCELLATION_STATUS_VALUES)})",
+            name="ck_pipeline_cancellations_status",
+        ),
+        CheckConstraint(
+            "previous_cancellation_id IS NULL "
+            "OR previous_cancellation_id <> cancellation_id",
+            name="ck_pipeline_cancellations_previous",
+        ),
+        CheckConstraint(
+            "(status = 'in_progress' AND finished_at IS NULL) OR "
+            "(status <> 'in_progress' AND finished_at IS NOT NULL)",
+            name="ck_pipeline_cancellations_finished",
+        ),
+        CheckConstraint(
+            "(status IN ('in_progress','completed') AND error IS NULL) OR "
+            "(status IN ('retryable','failed') AND error IS NOT NULL "
+            " AND jsonb_typeof(error) = 'object')",
+            name="ck_pipeline_cancellations_error_shape",
+        ),
+        Index(
+            "uq_pipeline_cancellations_active_root",
+            "root_kind",
+            "root_id",
+            unique=True,
+            postgresql_where=text("status = 'in_progress'"),
+        ),
+        Index(
+            "idx_pipeline_cancellations_root_history",
+            "root_kind",
+            "root_id",
+            text("requested_at DESC"),
+            text("cancellation_id DESC"),
+        ),
+        Index(
+            "idx_pipeline_cancellations_previous",
+            "previous_cancellation_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    cancellation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    previous_cancellation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.pipeline_cancellations.cancellation_id",
+            ondelete="RESTRICT",
+        ),
+    )
+    root_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    root_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'in_progress'"),
+    )
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PipelineCancellationRunRow(Base):
+    """attempt 안에서 한 번만 terminate할 Dagster run."""
+
+    __tablename__ = "pipeline_cancellation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
+            name="ck_pipeline_cancellation_runs_result",
+        ),
+        CheckConstraint(
+            "(termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND ("
+            " (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            " (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
+            " (result = 'already_terminal' AND "
+            "  (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
+            "  AND error IS NULL) OR "
+            " (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
+            "  AND jsonb_typeof(error) = 'object'))",
+            name="ck_pipeline_cancellation_runs_shape",
+        ),
+        ForeignKeyConstraint(
+            ["cancellation_id"],
+            ["ops.pipeline_cancellations.cancellation_id"],
+            ondelete="RESTRICT",
+            name="fk_pipeline_cancellation_runs_attempt",
+        ),
+        {"schema": "ops"},
+    )
+
+    cancellation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+    )
+    dagster_run_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    initial_status: Mapped[str | None] = mapped_column(Text)
+    termination_reserved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    terminal_status: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PipelineCancellationMemberRow(Base):
+    """attempt의 frozen request/job 대상과 대상별 실제 결과."""
+
+    __tablename__ = "pipeline_cancellation_members"
+    __table_args__ = (
+        CheckConstraint(
+            f"member_kind IN ({_sql_text_literals(PIPELINE_CANCELLATION_MEMBER_KIND_VALUES)})",
+            name="ck_pipeline_cancellation_members_kind",
+        ),
+        CheckConstraint(
+            f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
+            name="ck_pipeline_cancellation_members_result",
+        ),
+        CheckConstraint(
+            "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            "(result = 'cancelled' AND terminal_status = 'cancelled' AND error IS NULL) OR "
+            "(result = 'already_terminal' "
+            " AND terminal_status IN ('done','failed','cancelled') AND error IS NULL) OR "
+            "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
+            " AND jsonb_typeof(error) = 'object')",
+            name="ck_pipeline_cancellation_members_shape",
+        ),
+        ForeignKeyConstraint(
+            ["cancellation_id"],
+            ["ops.pipeline_cancellations.cancellation_id"],
+            ondelete="RESTRICT",
+            name="fk_pipeline_cancellation_members_attempt",
+        ),
+        ForeignKeyConstraint(
+            ["cancellation_id", "dagster_run_id"],
+            [
+                "ops.pipeline_cancellation_runs.cancellation_id",
+                "ops.pipeline_cancellation_runs.dagster_run_id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_pipeline_cancellation_members_run",
+        ),
+        Index(
+            "idx_pipeline_cancellation_members_member",
+            "member_kind",
+            "member_id",
+            text("updated_at DESC"),
+            text("cancellation_id DESC"),
+        ),
+        Index(
+            "idx_pipeline_cancellation_members_run",
+            "cancellation_id",
+            "dagster_run_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    cancellation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+    )
+    member_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    member_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    initial_status: Mapped[str] = mapped_column(Text, nullable=False)
+    result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    terminal_status: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 

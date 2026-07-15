@@ -13,16 +13,69 @@ type ClientSchemas = components["schemas"];
 
 export type HealthResponse = ClientSchemas["PublicHealthResponse"];
 export type VersionResponse = ClientSchemas["PublicVersionResponse"];
+export type ProblemDetail = ClientSchemas["ProblemDetail"];
 
 class ApiClientError extends Error {
   constructor(
     message: string,
     public status: number,
     public path: string,
+    public problem: ProblemDetail | null = null,
+    public retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = "ApiClientError";
   }
+}
+
+function parseRetryAfterSeconds(response: Response): number | null {
+  const value = response.headers.get("Retry-After");
+  if (value === null || !/^\d+$/.test(value)) {
+    return null;
+  }
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
+function parseProblemDetail(value: string): ProblemDetail | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "code" in parsed &&
+      "detail" in parsed &&
+      "status" in parsed &&
+      typeof parsed.code === "string" &&
+      typeof parsed.detail === "string" &&
+      typeof parsed.status === "number"
+    ) {
+      return parsed as ProblemDetail;
+    }
+  } catch {
+    // JSON이 아닌 upstream 오류는 원문을 일반 메시지로 보존한다.
+  }
+  return null;
+}
+
+async function apiClientErrorFromResponse(
+  method: string,
+  path: string,
+  response: Response,
+): Promise<ApiClientError> {
+  const rawDetail = await response.text().catch(() => "");
+  const problem = parseProblemDetail(rawDetail);
+  const retryAfterSeconds = parseRetryAfterSeconds(response);
+  const detail = problem?.detail ?? rawDetail;
+  const retry =
+    retryAfterSeconds === null ? "" : ` 재시도: ${retryAfterSeconds}초 후`;
+  return new ApiClientError(
+    `${method} ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}${retry}`,
+    response.status,
+    path,
+    problem,
+    retryAfterSeconds,
+  );
 }
 
 export type QueryParamValue = string | number | boolean | Date | null | undefined;
@@ -87,12 +140,7 @@ async function requestJson<T>(
   });
   if (!response.ok) {
     redirectToLoginOnAuthRequired(response.status);
-    const detail = await response.text().catch(() => "");
-    throw new ApiClientError(
-      `${method} ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
-      response.status,
-      path,
-    );
+    throw await apiClientErrorFromResponse(method, path, response);
   }
   return (await response.json()) as T;
 }
@@ -124,12 +172,7 @@ export async function postFormData<T>(
   });
   if (!response.ok) {
     redirectToLoginOnAuthRequired(response.status);
-    const detail = await response.text().catch(() => "");
-    throw new ApiClientError(
-      `POST ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
-      response.status,
-      path,
-    );
+    throw await apiClientErrorFromResponse("POST", path, response);
   }
   return (await response.json()) as T;
 }

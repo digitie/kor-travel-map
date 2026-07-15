@@ -9,9 +9,15 @@ import pytest
 
 from kortravelmap.infra import batch_dag
 from kortravelmap.infra.batch_dag import (
+    BatchDagRunResult,
     MaterializedViewRefreshResult,
+    finish_batch_mv_phase,
+    make_batch_dag_request,
+    plan_batch_dag,
+    prepare_batch_dag,
     refresh_materialized_views,
-    run_batch_dag_consistency_gate,
+    run_batch_consistency_phase,
+    start_batch_mv_phase,
 )
 from kortravelmap.infra.consistency import ConsistencyReport
 from kortravelmap.infra.jobs_repo import ImportJob
@@ -29,7 +35,7 @@ _CHILD_ID = "10000000-0000-0000-0000-000000000001"
 async def test_batch_gate_success_records_mv_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fakes(monkeypatch, severity="WARN", child_state="done")
 
-    result = await run_batch_dag_consistency_gate(
+    result = await _run_phases(
         _session(),
         child_job_ids=[_CHILD_ID],
         load_batch_id=_BATCH_ID,
@@ -55,7 +61,7 @@ async def test_batch_gate_blocks_mv_refresh_on_error(
 ) -> None:
     calls = _install_fakes(monkeypatch, severity="ERROR", child_state="done")
 
-    result = await run_batch_dag_consistency_gate(
+    result = await _run_phases(
         _session(),
         child_job_ids=[_CHILD_ID],
         load_batch_id=_BATCH_ID,
@@ -74,7 +80,7 @@ async def test_batch_gate_fails_before_consistency_when_child_not_done(
 ) -> None:
     calls = _install_fakes(monkeypatch, severity="OK", child_state="running")
 
-    result = await run_batch_dag_consistency_gate(
+    result = await _run_phases(
         _session(),
         child_job_ids=[_CHILD_ID],
         load_batch_id=_BATCH_ID,
@@ -99,7 +105,7 @@ async def test_batch_gate_plan_only_reads_children_without_writes(
     monkeypatch.setattr(batch_dag, "list_import_jobs_by_ids", fake_list)
     monkeypatch.setattr(batch_dag, "start_import_job", fail_start)
 
-    result = await run_batch_dag_consistency_gate(
+    result = await _run_phases(
         _session(),
         child_job_ids=[_CHILD_ID],
         load_batch_id=_BATCH_ID,
@@ -146,11 +152,36 @@ async def test_refresh_materialized_views_rejects_bad_view_name() -> None:
 
 async def test_batch_gate_rejects_bad_strategy() -> None:
     with pytest.raises(ValueError, match="mv_refresh_strategy"):
-        await run_batch_dag_consistency_gate(
+        await _run_phases(
             _session(),
             load_batch_id=_BATCH_ID,
             mv_refresh_strategy="bad",
         )
+
+
+async def _run_phases(
+    session: AsyncSession,
+    *,
+    plan_only: bool = False,
+    **kwargs: Any,
+) -> BatchDagRunResult:
+    """repo phase 단위 테스트용 명시적 driver(운영 orchestrator가 아님)."""
+    request = make_batch_dag_request(**kwargs)
+    if plan_only:
+        return await plan_batch_dag(session, request)
+    prepared = await prepare_batch_dag(session, request)
+    if isinstance(prepared, BatchDagRunResult):
+        return prepared
+    consistency = await run_batch_consistency_phase(session, prepared)
+    if isinstance(consistency, BatchDagRunResult):
+        return consistency
+    if not isinstance(consistency, ConsistencyReport):
+        raise AssertionError("consistency phase returned an invalid result")
+    report = consistency
+    mv_phase = await start_batch_mv_phase(session, prepared, report)
+    if isinstance(mv_phase, BatchDagRunResult):
+        return mv_phase
+    return await finish_batch_mv_phase(session, mv_phase)
 
 
 def _install_fakes(
@@ -164,6 +195,7 @@ def _install_fakes(
         "updates": {},
         "consistency": [],
         "refresh": [],
+        "locks": [],
     }
 
     async def fake_start(
@@ -268,12 +300,24 @@ def _install_fakes(
             for view in materialized_views
         )
 
+    async def fake_get(_session: object, job_id: str) -> ImportJob | None:
+        return cast(ImportJob | None, calls["jobs"].get(job_id))
+
+    async def fake_lock(
+        _session: object,
+        job_ids: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        calls["locks"].append(job_ids)
+        return ()
+
     monkeypatch.setattr(batch_dag, "start_import_job", fake_start)
     monkeypatch.setattr(batch_dag, "attach_import_jobs_to_batch", fake_attach)
     monkeypatch.setattr(batch_dag, "update_import_job_payload", fake_update)
     monkeypatch.setattr(batch_dag, "finish_import_job", fake_finish)
     monkeypatch.setattr(batch_dag, "run_consistency_checks", fake_consistency)
     monkeypatch.setattr(batch_dag, "refresh_materialized_views", fake_refresh)
+    monkeypatch.setattr(batch_dag, "get_import_job", fake_get)
+    monkeypatch.setattr(batch_dag, "lock_pipeline_hierarchy_for_jobs", fake_lock)
     return calls
 
 

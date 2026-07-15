@@ -10,22 +10,23 @@ from __future__ import annotations
 from datetime import datetime
 from time import perf_counter
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPage,
-    cancel_update_request,
     get_update_request,
     list_update_requests,
 )
 from kortravelmap.settings import KorTravelMapSettings
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from kortravelmap.api import feature_update_service
-from kortravelmap.api.db import get_session
+from kortravelmap.api import feature_update_service, pipeline_cancellation_service
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.dagster_http import dagster_http_dependencies
+from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import to_http_exception
 from kortravelmap.api.feature_update_schema import (
-    FeatureUpdateRequestCancelRequest,
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
     FeatureUpdateRequestDetailResponse,
@@ -34,6 +35,16 @@ from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestRecord,
     FeatureUpdateRequestRunNowRequest,
     FeatureUpdateState,
+)
+from kortravelmap.api.pipeline_cancellation_http import (
+    error_responses as cancellation_error_responses,
+)
+from kortravelmap.api.pipeline_cancellation_http import (
+    to_http_exception as cancellation_to_http_exception,
+)
+from kortravelmap.api.pipeline_cancellation_schema import (
+    PipelineCancellationRequest,
+    PipelineCancellationResponse,
 )
 from kortravelmap.api.response import make_meta
 
@@ -195,45 +206,41 @@ async def get_feature_update_request(
 
 @feature_router.post(
     "/{request_id}/cancel",
-    response_model=FeatureUpdateRequestCreateResponse,
-    summary="feature update request 취소",
-    responses={
-        404: {"description": "request_id 없음"},
-        409: {"description": "이미 terminal 상태라 취소 불가"},
-    },
+    response_model=PipelineCancellationResponse,
+    summary="feature update request 계층 취소",
+    responses=cancellation_error_responses(not_found_description="request_id 없음"),
 )
 @router.post(
     "/{request_id}/cancel",
-    response_model=FeatureUpdateRequestCreateResponse,
-    summary="feature update request 취소",
-    responses={
-        404: {"description": "request_id 없음"},
-        409: {"description": "이미 terminal 상태라 취소 불가"},
-    },
+    response_model=PipelineCancellationResponse,
+    summary="feature update request 계층 취소",
+    responses=cancellation_error_responses(not_found_description="request_id 없음"),
 )
 async def cancel_feature_update_request(
-    request_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    body: FeatureUpdateRequestCancelRequest | None = None,
-) -> FeatureUpdateRequestCreateResponse:
+    request_id: UUID,
+    request: Request,
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    body: PipelineCancellationRequest | None = None,
+) -> PipelineCancellationResponse:
     started_at = perf_counter()
-    error_message = (
-        body.error_message if body is not None and body.error_message else "cancelled by admin API"
+    settings, http_client = dagster_http_dependencies(request)
+    try:
+        detail = await pipeline_cancellation_service.cancel_pipeline_execution(
+            engine=engine,
+            settings=settings,
+            http_client=http_client,
+            kind="update_request",
+            execution_id=str(request_id),
+            requested_by=context.actor,
+            reason=body.reason if body is not None else None,
+        )
+    except pipeline_cancellation_service.PipelineCancellationServiceError as exc:
+        raise cancellation_to_http_exception(exc) from exc
+    return PipelineCancellationResponse(
+        data=detail,
+        meta=make_meta(started_at=started_at),
     )
-    async with session.begin():
-        cancelled = await cancel_update_request(session, request_id, error_message=error_message)
-        if cancelled is None:
-            existing = await get_update_request(session, request_id)
-            if existing is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"feature update request 없음: {request_id!r}",
-                )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"취소할 수 없는 상태: {existing.status}",
-            )
-    return feature_update_service.create_response(cancelled, started_at=started_at)
 
 
 @feature_router.post(

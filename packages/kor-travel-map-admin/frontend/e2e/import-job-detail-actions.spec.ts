@@ -1,13 +1,15 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { makePipelineCancellationResponse } from "./pipeline-cancellation-fixture";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
  * `/ops/import-jobs/[jobId]` 상세 — 깊이(mutation/filter/relation) 보강 spec.
  *
  * 기본 render/cancel-fired/404 smoke는 `import-job-detail.spec.ts`가 이미 커버한다.
- * 본 파일은 그 위에 (1) cancel POST payload(operator/reason) 검증, (2) event
+ * 본 파일은 그 위에 (1) cancel POST reason-only payload 검증, (2) event
  * timeline 멀티-컬럼 render, (3) level 필터 refetch, (4) terminal(failed)
  * error_message Alert + 입력 비활성, (5) terminal 폴링 중단, (6) relation link
  * rel별 분기, (7) link empty state — 7개 시나리오를 추가한다(중복 없음).
@@ -29,11 +31,14 @@ type OpsImportJobEventRecord =
 type OpsImportJobResponse = components["schemas"]["OpsImportJobResponse"];
 type OpsImportJobEventsListResponse =
   components["schemas"]["OpsImportJobEventsListResponse"];
-type OpsImportJobCancelRequest =
-  components["schemas"]["OpsImportJobCancelRequest"];
+type PipelineCancellationRequest =
+  components["schemas"]["PipelineCancellationRequest"];
+type PipelineCancellationResponse =
+  components["schemas"]["PipelineCancellationResponse"];
 
 const JOB_ID = "99999999-9999-4999-8999-999999999999";
 const PARENT_JOB_ID = "77777777-7777-4777-8777-777777777777";
+const OWNER_REQUEST_ID = "88888888-8888-4888-8888-888888888888";
 const DETAIL_PATH = `/v1/ops/import-jobs/${JOB_ID}`;
 const meta = { duration_ms: 1, request_id: "e2e-import-job-detail-actions" };
 
@@ -95,7 +100,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 /**
  * 상세/events/cancel을 한 핸들러로 묶는다. events는 옵션 함수로 받아 level 필터
  * 분기를 시나리오별로 주입한다(미지정 시 고정 목록). cancel POST는 body를 capture해
- * operator/reason 검증을 가능하게 한다.
+ * reason-only 계약 검증을 가능하게 한다.
  */
 async function mockImportJob(
   page: Page,
@@ -107,7 +112,8 @@ async function mockImportJob(
   } = {},
 ) {
   const calls = { detail: 0, events: 0, cancel: 0 };
-  const cancelBodies: OpsImportJobCancelRequest[] = [];
+  const cancelBodies: PipelineCancellationRequest[] = [];
+  const cancellationResponses: PipelineCancellationResponse[] = [];
   const eventsLevels: Array<string | null> = [];
   let status = options.initialStatus ?? "running";
   const baseEvents = options.events ?? [makeEvent()];
@@ -115,27 +121,32 @@ async function mockImportJob(
   await page.route("**/v1/ops/import-jobs/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const pathname = bffApiPath(request.url());
     const method = request.method();
 
-    if (method === "POST" && url.pathname === `${DETAIL_PATH}/cancel`) {
+    if (method === "POST" && pathname === `${DETAIL_PATH}/cancel`) {
       calls.cancel += 1;
       cancelBodies.push(
-        (request.postDataJSON() ?? {}) as OpsImportJobCancelRequest,
+        (request.postDataJSON() ?? {}) as PipelineCancellationRequest,
       );
       status = "cancelled";
-      const body: OpsImportJobResponse = {
-        data: makeJob({
-          ...options.job,
-          status,
-          finished_at: "2026-06-08T00:02:00.000Z",
-        }),
-        meta,
-      };
+      const body = makePipelineCancellationResponse({
+        rootKind: "update_request",
+        rootId: OWNER_REQUEST_ID,
+        initialStatus: options.initialStatus ?? "running",
+        dagsterRunId: DAGSTER_RUN_ID,
+        reason: cancelBodies.at(-1)?.reason ?? null,
+        members: [
+          { memberKind: "update_request", memberId: OWNER_REQUEST_ID },
+          { memberKind: "import_job", memberId: JOB_ID },
+        ],
+      });
+      cancellationResponses.push(body);
       await fulfillJson(route, body);
       return;
     }
 
-    if (method === "GET" && url.pathname === `${DETAIL_PATH}/events`) {
+    if (method === "GET" && pathname === `${DETAIL_PATH}/events`) {
       calls.events += 1;
       const level = url.searchParams.get("level");
       eventsLevels.push(level);
@@ -150,7 +161,7 @@ async function mockImportJob(
       return;
     }
 
-    if (method === "GET" && url.pathname === DETAIL_PATH) {
+    if (method === "GET" && pathname === DETAIL_PATH) {
       calls.detail += 1;
       const body: OpsImportJobResponse = {
         data: makeJob({ ...options.job, status }),
@@ -163,7 +174,7 @@ async function mockImportJob(
     await route.continue();
   });
 
-  return { calls, cancelBodies, eventsLevels };
+  return { calls, cancelBodies, cancellationResponses, eventsLevels };
 }
 
 test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
@@ -176,32 +187,45 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
   test("cancel 폼 — running에서 reason 전송 + POST body 검증 + 성공 Alert", async ({
     page,
   }) => {
-    const { calls, cancelBodies } = await mockImportJob(page, {
-      initialStatus: "running",
-    });
+    const { calls, cancelBodies, cancellationResponses } =
+      await mockImportJob(page, {
+        initialStatus: "running",
+      });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await page.getByPlaceholder("reason").fill("e2e cancel");
-    await page.getByRole("button", { name: "cancel" }).click();
+    await page.getByPlaceholder("중지 사유").fill("e2e cancel");
+    await page.getByRole("button", { name: "중지 요청" }).click();
 
     await expect.poll(() => calls.cancel).toBe(1);
-    // handleCancel은 operator="admin-ui", reason=cancelReason.trim()||undefined로 보낸다.
+    // actor는 인증 context에서 정하고 UI는 reason만 전송한다.
     expect(cancelBodies[0]).toMatchObject({
-      operator: "admin-ui",
       reason: "e2e cancel",
     });
+    expect(cancellationResponses[0]?.data.root).toEqual({
+      kind: "update_request",
+      id: OWNER_REQUEST_ID,
+    });
+    expect(
+      cancellationResponses[0]?.data.members.map((member) => [
+        member.member_kind,
+        member.member_id,
+      ]),
+    ).toEqual([
+      ["update_request", OWNER_REQUEST_ID],
+      ["import_job", JOB_ID],
+    ]);
 
-    // 성공 Alert: title "cancel 요청됨" + 본문 `${status} · ${shortId(job_id)}`.
+    // 성공 Alert: title "중지 처리됨" + 본문 `${status} · ${shortId(root.id)}`.
     // 성공(default variant) Alert는 role=status(polite)다 — destructive만 role=alert.
-    await expect(page.getByText("cancel 요청됨")).toBeVisible();
+    await expect(page.getByText("중지 처리됨")).toBeVisible();
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "cancel 요청됨" });
-    await expect(successAlert).toContainText("cancelled");
-    await expect(successAlert).toContainText(JOB_ID.slice(0, 12));
+      .filter({ hasText: "중지 처리됨" });
+    await expect(successAlert).toContainText("completed");
+    await expect(successAlert).toContainText(OWNER_REQUEST_ID.slice(0, 12));
 
     // cancel 후 detail이 cancelled로 바뀌어 cancel 버튼이 다시 비활성(부수 검증).
-    await expect(page.getByRole("button", { name: "cancel" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "중지 요청" })).toBeDisabled();
   });
 
   test("cancel 폼 — reason 공란이면 reason 미포함으로 전송", async ({ page }) => {
@@ -211,10 +235,10 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     // reason 입력 없이 바로 cancel → cancelReason.trim()||undefined === undefined.
-    await page.getByRole("button", { name: "cancel" }).click();
+    await page.getByRole("button", { name: "중지 요청" }).click();
 
     await expect.poll(() => calls.cancel).toBe(1);
-    expect(cancelBodies[0]).toMatchObject({ operator: "admin-ui" });
+    expect(cancelBodies[0]).toEqual({});
     expect(cancelBodies[0]?.reason ?? undefined).toBeUndefined();
   });
 
@@ -249,7 +273,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     // 6개 컬럼헤더가 모두 렌더(기존 spec은 message 1개만 확인).
-    for (const column of ["time", "level", "stage", "code", "message", "payload"]) {
+    for (const column of ["시각", "레벨", "단계", "코드", "메시지", "세부값"]) {
       await expect(
         page.getByRole("columnheader", { name: column, exact: true }),
       ).toBeVisible();
@@ -260,14 +284,14 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await expect(page.getByText("loaded 10 features")).toBeVisible();
     await expect(page.getByText("row rejected")).toBeVisible();
 
-    // error level event는 StatusBadge(destructive)로 "error" 텍스트 노출.
+    // error level event는 StatusBadge(destructive)로 "오류" 텍스트 노출.
     const errorRow = page.getByRole("row", { name: /row rejected/ });
-    await expect(errorRow.getByText("error", { exact: true })).toBeVisible();
+    await expect(errorRow.getByText("오류", { exact: true })).toBeVisible();
     // stage=null event row는 셀에 "-" 렌더.
     await expect(errorRow.getByText("-", { exact: true })).toBeVisible();
 
     // Events 카드 CardDescription의 row 카운트가 mock 건수와 일치.
-    await expect(page.getByText("3 rows · idle")).toBeVisible();
+    await expect(page.getByText("3건 · 대기")).toBeVisible();
   });
 
   test("event level 필터 — error 선택 시 ?level=error로 refetch", async ({
@@ -298,7 +322,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await expect(page.getByText("loaded 10 features")).toBeVisible();
     await expect.poll(() => eventsLevels.includes(null)).toBe(true);
 
-    await page.getByLabel("event level").selectOption("error");
+    await page.getByLabel("이벤트 레벨").selectOption("error");
 
     // level=error 쿼리로 재호출되고 error 이벤트만 남는다.
     await expect.poll(() => eventsLevels.includes("error")).toBe(true);
@@ -320,17 +344,17 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     // canCancel=false → cancel 버튼 + reason 입력 모두 비활성.
-    await expect(page.getByRole("button", { name: "cancel" })).toBeDisabled();
-    await expect(page.getByPlaceholder("reason")).toBeDisabled();
+    await expect(page.getByRole("button", { name: "중지 요청" })).toBeDisabled();
+    await expect(page.getByPlaceholder("중지 사유")).toBeDisabled();
 
-    // Cancel 카드 CardDescription이 "terminal".
-    await expect(page.getByText("terminal", { exact: true })).toBeVisible();
+    // 중지 카드가 이미 종료된 작업임을 설명한다.
+    await expect(page.getByText("이미 종료된 작업입니다.")).toBeVisible();
 
-    // Payload 카드 하단 error_message Alert: title "error" + description.
+    // 작업 오류 Alert가 원문을 보존한다.
     const errorAlert = page
       .getByRole("alert")
       .filter({ hasText: "provider timeout" });
-    await expect(errorAlert).toContainText("error");
+    await expect(errorAlert).toContainText("작업 오류");
     await expect(errorAlert).toContainText("provider timeout");
   });
 
@@ -343,7 +367,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await expect(page.getByRole("button", { name: "cancel" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "중지 요청" })).toBeDisabled();
     await expect.poll(() => calls.detail).toBeGreaterThanOrEqual(1);
 
     // 안정 윈도우 동안 detail이 추가 폴링되지 않음을 확인(refetchInterval=false).
@@ -365,7 +389,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
         rel: "parent_job",
       },
       {
-        href: "/v1/admin/load-batches/batch-001",
+        href: "/v1/ops/import-jobs?load_batch_id=batch-001",
         label: null,
         rel: "load_batch",
       },
@@ -376,7 +400,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
       },
       { href: `${DETAIL_PATH}/events`, label: null, rel: "events" },
       {
-        href: "/v1/admin/features/update-requests",
+        href: `/v1/admin/features/update-requests/${OWNER_REQUEST_ID}`,
         label: "update request",
         rel: "feature_update_request",
       },
@@ -388,12 +412,12 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await expect(page.getByText("Links", { exact: true })).toBeVisible();
-    // relation 링크는 Links 카드 안에서만 본다. label "update request"는 admin-shell
+    await expect(page.getByText("연결", { exact: true })).toBeVisible();
+    // relation 링크는 연결 카드 안에서만 본다. label "update request"는 admin-shell
     // top-nav "Update requests"와 접근명이 겹치므로(STRICT-MODE) 카드로 범위를 좁힌다.
     const linksCard = page
       .locator('[data-slot="card"]')
-      .filter({ has: page.getByRole("heading", { name: "Links", exact: true }) });
+      .filter({ has: page.getByRole("heading", { name: "연결", exact: true }) });
     // self rel은 visibleLinks에서 제외 → 링크/카드 없음.
     await expect(
       linksCard.getByRole("link", { name: "self", exact: true }),
@@ -403,11 +427,11 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     const parentLink = linksCard.getByRole("link", { name: /parent_job/ });
     await expect(parentLink).toHaveAttribute("href", /\/ops\/import-jobs\//);
 
-    // load_batch: internal Link, /v1 stripped → /admin/load-batches/batch-001.
+    // load_batch: 적재 작업 목록의 batch filter로 연결한다.
     const loadBatchLink = linksCard.getByRole("link", { name: /load_batch/ });
     await expect(loadBatchLink).toHaveAttribute(
       "href",
-      "/admin/load-batches/batch-001",
+      "/ops/import-jobs?load_batch_id=batch-001",
     );
 
     // dagster_run: external anchor(target=_blank, rel=noreferrer), href에 /runs/run-xyz.
@@ -423,7 +447,7 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     const updateLink = linksCard.getByRole("link", { name: "update request" });
     await expect(updateLink).toHaveAttribute(
       "href",
-      "/admin/features/update-requests",
+      `/admin/features/update-requests/${OWNER_REQUEST_ID}`,
     );
 
     // events rel은 plain div(링크 아님) — rel 텍스트는 보이지만 link role 부재.
@@ -432,8 +456,8 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
       linksCard.getByRole("link", { name: /events/ }),
     ).toHaveCount(0);
 
-    // Links CardDescription `${visibleLinks.length} related` = self 제외 5건.
-    await expect(page.getByText("5 related")).toBeVisible();
+    // 연결 CardDescription은 self를 제외한 관계 수를 표시한다.
+    await expect(page.getByText("5개")).toBeVisible();
   });
 
   test("links 없음 — self만 있으면 empty state", async ({ page }) => {
@@ -444,8 +468,8 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await expect(page.getByText("Links", { exact: true })).toBeVisible();
-    await expect(page.getByText("연결 링크가 없습니다.")).toBeVisible();
-    await expect(page.getByText("0 related")).toBeVisible();
+    await expect(page.getByText("연결", { exact: true })).toBeVisible();
+    await expect(page.getByText("연결 링크 없음")).toBeVisible();
+    await expect(page.getByText("0개")).toBeVisible();
   });
 });

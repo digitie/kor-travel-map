@@ -170,7 +170,7 @@ export function FeatureUpdateRequestsClient() {
                   onClick={() =>
                     cancelRequest.mutate({
                       requestId,
-                      body: { error_message: "cancelled from admin ui" },
+                      body: { reason: "cancelled from admin ui" },
                     })
                   }
                 >

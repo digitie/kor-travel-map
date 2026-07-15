@@ -1,25 +1,36 @@
 """Feature update request 실행 본체 (ADR-045 T-206d).
 
-본 모듈은 queued ``ops.feature_update_requests``를 claim하고, scope를 다시 해석한 뒤
-provider/dataset 단위 runner를 호출한다. provider API client나 Dagster는 import하지
-않고, 실제 refresh 구현은 호출자가 ``ProviderDatasetRefreshRunner``로 주입한다.
+본 모듈은 queued ``ops.feature_update_requests``를 상태 변경 없이 peek한 뒤
+request/scope lease 안에서 CAS claim하고 provider/dataset 단위 runner를
+호출한다. provider API client나 Dagster는 import하지 않고, 실제 refresh
+구현은 호출자가 ``ProviderDatasetRefreshRunner``로 주입한다.
 """
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
-from kortravelmap.infra.advisory_lock import try_advisory_lock
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
-    claim_next_update_request,
     feature_update_scope_advisory_key,
     finish_update_request,
+    get_update_request,
+    lock_feature_update_execution_guard,
+    peek_next_update_request,
+    requeue_update_request_after_lock_contention,
     set_update_request_matched_scope,
     start_update_request,
+    touch_queued_update_request_for_lock_retry,
 )
 from kortravelmap.infra.jobs_repo import heartbeat_import_job
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -42,11 +53,18 @@ from kortravelmap.infra.scope_repo import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from collections.abc import Sequence
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from kortravelmap.infra.scope_repo import ScopeType
 
 __all__ = [
     "FeatureUpdateExecutionPlan",
     "FeatureUpdateExecutionResult",
+    "FeatureUpdateConnectionUnsafe",
+    "FeatureUpdateLockReleaseError",
     "ProviderDatasetRefreshResult",
     "ProviderDatasetRefreshRunner",
     "ProviderDatasetRefreshScope",
@@ -55,6 +73,11 @@ __all__ = [
     "execute_feature_update_request",
     "execute_next_feature_update_request",
 ]
+
+_TRY_SCOPE_LOCK_SQL: Final[str] = "SELECT pg_try_advisory_lock(:lock_id)"
+_UNLOCK_SCOPE_SQL: Final[str] = "SELECT pg_advisory_unlock(:lock_id)"
+_REQUEST_EXECUTION_LOCK_PREFIX: Final[str] = "kortravelmap:feature-update:request"
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -163,6 +186,35 @@ class FeatureUpdateExecutionResult:
     results: tuple[ProviderDatasetRefreshResult, ...]
     status: str
     error_message: str | None = None
+
+
+class FeatureUpdateLockReleaseError(RuntimeError):
+    """scope session lock의 exact unlock을 증명하지 못했다."""
+
+
+class FeatureUpdateConnectionUnsafe(RuntimeError):
+    """session lock backend의 pool 복귀 차단을 증명하지 못했다."""
+
+
+class _FeatureUpdateExecutionStopped(RuntimeError):
+    """marker/status guard가 provider 실행보다 먼저 승리했다."""
+
+
+def _unresolved_execution_plan(
+    request: FeatureUpdateRequest,
+) -> FeatureUpdateExecutionPlan:
+    """probe 실패도 lifecycle을 종결할 수 있게 하는 최소 오류 plan."""
+    resolution = ScopeResolution(
+        scope_type=cast("ScopeType", request.scope_type),
+        features=(),
+    )
+    return FeatureUpdateExecutionPlan(
+        request=request,
+        resolution=resolution,
+        refresh_scopes=(),
+        skipped_scopes=(),
+        matched_scope=dict(request.matched_scope),
+    )
 
 
 def _provider_dataset_scopes(
@@ -425,42 +477,299 @@ async def _heartbeat_request_job(
     )
 
 
-async def _run_refresh_scope(
-    session: AsyncSession,
+async def _hard_invalidate_connection(
+    connection: AsyncConnection,
     *,
-    runner: ProviderDatasetRefreshRunner,
-    scope: ProviderDatasetRefreshScope,
-) -> ProviderDatasetRefreshResult:
-    """runner 1회의 DB write를 savepoint 안에 격리한다."""
-    async with session.begin_nested():
-        return await runner(session, scope)
+    cause: BaseException,
+) -> None:
+    """async invalidate 실패에도 pool proxy/driver를 hard terminate한다."""
+    pool_proxy: Any = None
+    try:
+        sync_connection = connection.sync_connection
+        if sync_connection is not None:
+            candidate = sync_connection.connection
+            if candidate is not None:
+                pool_proxy = candidate
+    except Exception:
+        _LOG.warning("failed to capture feature update pool proxy", exc_info=True)
+
+    try:
+        await connection.invalidate(cause)
+        if connection.invalidated:
+            return
+    except BaseException:
+        _LOG.error("async feature update connection invalidation failed", exc_info=True)
+
+    if pool_proxy is not None:
+        try:
+            pool_proxy.invalidate(cause, soft=False)
+            return
+        except BaseException:
+            _LOG.critical("sync feature update hard invalidation failed", exc_info=True)
+
+        try:
+            dbapi_connection = pool_proxy.dbapi_connection
+            driver_connection = getattr(dbapi_connection, "driver_connection", None)
+            terminate = getattr(driver_connection, "terminate", None)
+            if not callable(terminate):
+                raise RuntimeError("physical driver terminate is unavailable")
+            terminated = terminate()
+            if inspect.isawaitable(terminated):
+                await terminated
+            return
+        except Exception as exc:
+            _LOG.critical(
+                "physical feature update backend terminate failed",
+                exc_info=True,
+            )
+            raise FeatureUpdateConnectionUnsafe(
+                "failed to hard-invalidate the feature update execution backend"
+            ) from exc
+
+    raise FeatureUpdateConnectionUnsafe(
+        "failed to hard-invalidate the feature update execution backend"
+    ) from cause
+
+
+async def _acquire_scope_lock(
+    session: AsyncSession,
+    connection: AsyncConnection,
+    *,
+    lock_id: int,
+) -> bool:
+    """session lock acquire의 implicit transaction을 즉시 종결한다."""
+    try:
+        acquired = bool(
+            (
+                await session.execute(
+                    text(_TRY_SCOPE_LOCK_SQL),
+                    {"lock_id": lock_id},
+                )
+            ).scalar_one()
+        )
+        await session.commit()
+        return acquired
+    except BaseException as exc:
+        await _hard_invalidate_connection(connection, cause=exc)
+        raise
+
+
+async def _release_scope_lock(
+    session: AsyncSession,
+    connection: AsyncConnection,
+    *,
+    lock_id: int,
+) -> None:
+    """같은 backend에서 exact unlock=true를 확인하고 transaction을 닫는다."""
+    try:
+        unlocked = bool(
+            (
+                await session.execute(
+                    text(_UNLOCK_SCOPE_SQL),
+                    {"lock_id": lock_id},
+                )
+            ).scalar_one()
+        )
+        await session.commit()
+    except BaseException as exc:
+        await _hard_invalidate_connection(connection, cause=exc)
+        raise
+    if unlocked:
+        return
+    release_error = FeatureUpdateLockReleaseError(
+        "feature update scope advisory lock exact unlock returned false"
+    )
+    await _hard_invalidate_connection(connection, cause=release_error)
+    raise release_error
+
+
+async def _guard_execution_phase(
+    session: AsyncSession,
+    request_id: str,
+) -> FeatureUpdateRequest:
+    request = await lock_feature_update_execution_guard(session, request_id)
+    if request is None:
+        raise _FeatureUpdateExecutionStopped
+    return request
+
+
+async def _reload_stopped_result(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+    *,
+    plan: FeatureUpdateExecutionPlan | None,
+    results: Sequence[ProviderDatasetRefreshResult],
+) -> FeatureUpdateExecutionResult:
+    """guard 패배 transaction과 분리해 cancellation/terminal 상태를 복원한다."""
+    async with session.begin():
+        current = await get_update_request(session, request.request_id) or request
+        current_plan = (
+            _unresolved_execution_plan(current)
+            if plan is None
+            else replace(plan, request=current)
+        )
+    return FeatureUpdateExecutionResult(
+        request=current,
+        plan=current_plan,
+        results=tuple(results),
+        status=current.status,
+        error_message="request cancellation or terminal state took precedence",
+    )
+
+
+async def _finish_failed_execution(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+    *,
+    plan: FeatureUpdateExecutionPlan,
+    results: Sequence[ProviderDatasetRefreshResult],
+    dagster_run_id: str | None,
+    error_message: str,
+) -> FeatureUpdateExecutionResult:
+    target_ids = [target.target_id for target in plan.resolution.cache_targets]
+    try:
+        async with session.begin():
+            await _guard_execution_phase(session, request.request_id)
+            await mark_poi_cache_targets_refresh_failed(session, target_ids)
+            failed = await finish_update_request(
+                session,
+                request.request_id,
+                status="failed",
+                dagster_run_id=dagster_run_id,
+                error_message=error_message,
+            )
+            if failed is None:
+                raise _FeatureUpdateExecutionStopped
+    except _FeatureUpdateExecutionStopped:
+        return await _reload_stopped_result(
+            session,
+            request,
+            plan=plan,
+            results=results,
+        )
+    return FeatureUpdateExecutionResult(
+        request=failed,
+        plan=replace(plan, request=failed),
+        results=tuple(results),
+        status="failed",
+        error_message=error_message,
+    )
 
 
 async def execute_feature_update_request(
-    session: AsyncSession,
+    connection: AsyncConnection,
     request: FeatureUpdateRequest,
     *,
     runner: ProviderDatasetRefreshRunner,
     dagster_run_id: str | None = None,
+    expected_request_updated_at: datetime | None = None,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateExecutionResult:
-    """이미 claim됐거나 queued인 request 1건을 실행한다."""
+    """전용 physical connection에서 request 1건을 phase별 commit으로 실행한다."""
+    if connection.in_transaction():
+        raise ValueError("feature update execution requires an idle connection")
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
         providers=request.providers,
         dataset_keys=request.dataset_keys,
     )
-    async with try_advisory_lock(session, scope_lock_key) as acquired:
-        if not acquired:
-            raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
-        return await _execute_feature_update_request_locked(
+    request_lock_key = f"{_REQUEST_EXECUTION_LOCK_PREFIX}:{request.request_id}"
+    request_lock_id = advisory_lock_key(request_lock_key)
+    lock_id = advisory_lock_key(scope_lock_key)
+    async with AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+    ) as session:
+        request_acquired = await _acquire_scope_lock(
             session,
-            request,
-            runner=runner,
-            dagster_run_id=dagster_run_id,
-            sigungu_resolver=sigungu_resolver,
+            connection,
+            lock_id=request_lock_id,
         )
+        if not request_acquired:
+            async with session.begin():
+                await touch_queued_update_request_for_lock_retry(
+                    session,
+                    request.request_id,
+                )
+            raise FeatureUpdateLockBusy(lock_key=request_lock_key)
+        scope_acquired = False
+        interrupted: asyncio.CancelledError | None = None
+        try:
+            try:
+                scope_acquired = await _acquire_scope_lock(
+                    session,
+                    connection,
+                    lock_id=lock_id,
+                )
+            except BaseException:
+                # acquire 오류는 connection을 invalidate해 request lock도 backend와
+                # 함께 폐기한다. invalid connection에서 unlock을 재시도하지 않는다.
+                request_acquired = False
+                raise
+            if not scope_acquired:
+                async with session.begin():
+                    await requeue_update_request_after_lock_contention(
+                        session,
+                        request.request_id,
+                    )
+                raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
+            return await _execute_feature_update_request_locked(
+                session,
+                request,
+                runner=runner,
+                dagster_run_id=dagster_run_id,
+                expected_request_updated_at=(
+                    expected_request_updated_at or request.updated_at
+                ),
+                sigungu_resolver=sigungu_resolver,
+            )
+        except asyncio.CancelledError as exc:
+            interrupted = exc
+            raise
+        finally:
+            cleanup_error: BaseException | None = None
+            try:
+                if session.in_transaction():
+                    await session.rollback()
+            except BaseException as exc:
+                cleanup_error = exc
+                try:
+                    await _hard_invalidate_connection(connection, cause=exc)
+                except BaseException as hard_error:
+                    cleanup_error = hard_error
+            if cleanup_error is None and scope_acquired:
+                try:
+                    await _release_scope_lock(
+                        session,
+                        connection,
+                        lock_id=lock_id,
+                    )
+                except BaseException as exc:
+                    cleanup_error = exc
+            if cleanup_error is None and request_acquired:
+                try:
+                    await _release_scope_lock(
+                        session,
+                        connection,
+                        lock_id=request_lock_id,
+                    )
+                except BaseException as exc:
+                    cleanup_error = exc
+            if cleanup_error is not None:
+                if isinstance(cleanup_error, FeatureUpdateConnectionUnsafe):
+                    if interrupted is not None:
+                        raise cleanup_error from interrupted
+                    raise cleanup_error
+                if interrupted is not None:
+                    _LOG.error(
+                        "feature update cleanup failed after interruption: "
+                        "request_id=%s error=%r",
+                        request.request_id,
+                        cleanup_error,
+                    )
+                else:
+                    raise cleanup_error
 
 
 async def _execute_feature_update_request_locked(
@@ -469,78 +778,117 @@ async def _execute_feature_update_request_locked(
     *,
     runner: ProviderDatasetRefreshRunner,
     dagster_run_id: str | None,
+    expected_request_updated_at: datetime,
     sigungu_resolver: SigunguByRadiusResolver | None,
 ) -> FeatureUpdateExecutionResult:
-    started = await start_update_request(
-        session, request.request_id, dagster_run_id=dagster_run_id
-    )
-    if started is None:
-        plan = await build_feature_update_execution_plan(
-            session, request, sigungu_resolver=sigungu_resolver
-        )
-        return FeatureUpdateExecutionResult(
-            request=request,
-            plan=plan,
-            results=(),
-            status=request.status,
-            error_message="request is not executable",
-        )
-
-    plan = await build_feature_update_execution_plan(
-        session, started, sigungu_resolver=sigungu_resolver
-    )
-    await set_update_request_matched_scope(
-        session, started.request_id, matched_scope=plan.matched_scope
-    )
-    await _heartbeat_request_job(
-        session,
-        started,
-        progress=10,
-        current_stage="resolved_scope",
-    )
-    target_ids = [target.target_id for target in plan.resolution.cache_targets]
-    await mark_poi_cache_targets_refresh_requested(session, target_ids)
-
+    started = request
+    plan: FeatureUpdateExecutionPlan | None = None
+    target_ids: list[str] = []
     results: list[ProviderDatasetRefreshResult] = []
     try:
-        total = max(len(plan.refresh_scopes), 1)
-        for index, scope in enumerate(plan.refresh_scopes, start=1):
+        async with session.begin():
+            await _guard_execution_phase(session, request.request_id)
+            claimed = await start_update_request(
+                session,
+                request.request_id,
+                dagster_run_id=dagster_run_id,
+                expected_updated_at=expected_request_updated_at,
+            )
+            if claimed is None:
+                raise _FeatureUpdateExecutionStopped
+            started = claimed
+
+        async with session.begin():
+            await _guard_execution_phase(session, started.request_id)
+            plan = await build_feature_update_execution_plan(
+                session,
+                started,
+                sigungu_resolver=sigungu_resolver,
+            )
+            updated = await set_update_request_matched_scope(
+                session,
+                started.request_id,
+                matched_scope=plan.matched_scope,
+            )
+            if updated is None:
+                raise _FeatureUpdateExecutionStopped
             await _heartbeat_request_job(
                 session,
                 started,
-                progress=10 + int((index - 1) * 80 / total),
-                current_stage=f"refreshing:{scope.provider}:{scope.dataset_key}",
+                progress=10,
+                current_stage="resolved_scope",
             )
-            results.append(
-                await _run_refresh_scope(session, runner=runner, scope=scope)
-            )
+            target_ids = [
+                target.target_id for target in plan.resolution.cache_targets
+            ]
+            await mark_poi_cache_targets_refresh_requested(session, target_ids)
 
-        final_resolution = plan.resolution
-        if started.scope_type == "cache_target_keys":
-            final_resolution = await _final_resolution(
-                session, started, sigungu_resolver=sigungu_resolver
-            )
-            await _sync_cache_target_links(session, final_resolution)
+        assert plan is not None
+        total = max(len(plan.refresh_scopes), 1)
+        for index, scope in enumerate(plan.refresh_scopes, start=1):
+            async with session.begin():
+                await _guard_execution_phase(session, started.request_id)
+                await _heartbeat_request_job(
+                    session,
+                    started,
+                    progress=10 + int((index - 1) * 80 / total),
+                    current_stage=(
+                        f"refreshing:{scope.provider}:{scope.dataset_key}"
+                    ),
+                )
+                result = await runner(session, scope)
+                checkpoint_results = (*results, result)
+                checkpoint = _matched_scope(
+                    plan.resolution,
+                    plan.refresh_scopes,
+                    plan.skipped_scopes,
+                    checkpoint_results,
+                )
+                updated = await set_update_request_matched_scope(
+                    session,
+                    started.request_id,
+                    matched_scope=checkpoint,
+                )
+                if updated is None:
+                    raise _FeatureUpdateExecutionStopped
+            results.append(result)
 
-        final_matched_scope = _matched_scope(
-            final_resolution,
-            plan.refresh_scopes,
-            plan.skipped_scopes,
-            tuple(results),
-        )
-        await set_update_request_matched_scope(
-            session, started.request_id, matched_scope=final_matched_scope
-        )
-        # runner가 scope를 실제 호출하지 못해 ``skipped``로 돌려준 경우(예:
-        # request 범위를 적용할 수 없는 OpiNet global fetch)는 target freshness를
-        # 전진시키면 안 된다. 적어도 한 provider scope가 실제 완료된 경우만 갱신한다.
-        if any(result.status == "done" for result in results):
-            await mark_poi_cache_targets_refreshed(session, target_ids)
-        done = await finish_update_request(
-            session, started.request_id, status="done", dagster_run_id=dagster_run_id
-        )
-        if done is None:
-            done = started
+        async with session.begin():
+            await _guard_execution_phase(session, started.request_id)
+            final_resolution = plan.resolution
+            if started.scope_type == "cache_target_keys":
+                final_resolution = await _final_resolution(
+                    session,
+                    started,
+                    sigungu_resolver=sigungu_resolver,
+                )
+                await _sync_cache_target_links(session, final_resolution)
+
+            final_matched_scope = _matched_scope(
+                final_resolution,
+                plan.refresh_scopes,
+                plan.skipped_scopes,
+                tuple(results),
+            )
+            updated = await set_update_request_matched_scope(
+                session,
+                started.request_id,
+                matched_scope=final_matched_scope,
+            )
+            if updated is None:
+                raise _FeatureUpdateExecutionStopped
+            # runner가 scope를 실제 호출하지 못해 ``skipped``로 돌려준 경우만 있으면
+            # target freshness를 전진시키지 않는다.
+            if any(result.status == "done" for result in results):
+                await mark_poi_cache_targets_refreshed(session, target_ids)
+            done = await finish_update_request(
+                session,
+                started.request_id,
+                status="done",
+                dagster_run_id=dagster_run_id,
+            )
+            if done is None:
+                raise _FeatureUpdateExecutionStopped
         return FeatureUpdateExecutionResult(
             request=done,
             plan=FeatureUpdateExecutionPlan(
@@ -553,38 +901,66 @@ async def _execute_feature_update_request_locked(
             results=tuple(results),
             status="done",
         )
+    except _FeatureUpdateExecutionStopped:
+        return await _reload_stopped_result(
+            session,
+            started,
+            plan=plan,
+            results=results,
+        )
+    except asyncio.CancelledError:
+        if plan is None:
+            plan = _unresolved_execution_plan(started)
+        try:
+            await _finish_failed_execution(
+                session,
+                started,
+                plan=plan,
+                results=results,
+                dagster_run_id=dagster_run_id,
+                error_message=(
+                    "CancelledError: feature update execution was interrupted"
+                ),
+            )
+        except Exception:
+            _LOG.exception(
+                "failed to persist interrupted feature update: request_id=%s",
+                started.request_id,
+            )
+        raise
     except Exception as exc:
         error_message = f"{exc.__class__.__name__}: {exc}"
-        await mark_poi_cache_targets_refresh_failed(session, target_ids)
-        failed = await finish_update_request(
+        if plan is None:
+            plan = _unresolved_execution_plan(started)
+        return await _finish_failed_execution(
             session,
-            started.request_id,
-            status="failed",
-            dagster_run_id=dagster_run_id,
-            error_message=error_message,
-        )
-        return FeatureUpdateExecutionResult(
-            request=failed or started,
+            started,
             plan=plan,
-            results=tuple(results),
-            status="failed",
+            results=results,
+            dagster_run_id=dagster_run_id,
             error_message=error_message,
         )
 
 
 async def execute_next_feature_update_request(
-    session: AsyncSession,
+    connection: AsyncConnection,
     *,
     runner: ProviderDatasetRefreshRunner,
     dagster_run_id: str | None = None,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateExecutionResult | None:
-    """queued request 1건을 claim한 뒤 실행한다. 큐가 비어 있으면 ``None``."""
-    request = await claim_next_update_request(session)
+    """queued request를 peek한 뒤 scope lock 아래 CAS claim해 실행한다."""
+    if connection.in_transaction():
+        raise ValueError("feature update execution requires an idle connection")
+    async with AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+    ) as session, session.begin():
+        request = await peek_next_update_request(session)
     if request is None:
         return None
     return await execute_feature_update_request(
-        session,
+        connection,
         request,
         runner=runner,
         dagster_run_id=dagster_run_id,

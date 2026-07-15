@@ -1246,6 +1246,345 @@ sensor는 T-207/T-208에서 연결했다.
 이 projection은 read contract만 정의한다. schedule/manual/update/import 실행을 같은
 영속 operation row에 기록하는 모델·백필·migration은 T-ADM-C3e 범위다.
 
+#### 9.8.2 Pipeline 계층형 취소 정본 (T-ADM-C3d, 이슈 #680, alembic 0050)
+
+Pipeline 취소는 기존 lifecycle `status`에 중간 상태를 추가하지 않는다. 취소 요청을
+base row의 **marker**로 먼저 차단하고, 시도·대상·Dagster run 결과는 정규화한 별도
+테이블에 영속한다. 따라서 `ops.import_jobs.status`와
+`ops.feature_update_requests.status`의 기존 CHECK
+(`queued`/`running`/`done`/`failed`/`cancelled`)는 그대로 유지한다.
+
+```sql
+CREATE TABLE ops.pipeline_cancellations (
+  cancellation_id          UUID PRIMARY KEY
+                           DEFAULT x_extension.gen_random_uuid(),
+  previous_cancellation_id UUID REFERENCES ops.pipeline_cancellations(cancellation_id)
+                           ON DELETE RESTRICT,
+  root_kind                TEXT NOT NULL
+                           CHECK (root_kind IN ('import_job', 'update_request')),
+  root_id                  UUID NOT NULL,
+  status                   TEXT NOT NULL DEFAULT 'in_progress'
+                           CHECK (status IN
+                             ('in_progress', 'retryable', 'completed', 'failed')),
+  requested_by             TEXT NOT NULL,
+  reason                   TEXT,
+  error                    JSONB,
+  requested_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at              TIMESTAMPTZ,
+  CHECK (previous_cancellation_id IS NULL OR
+         previous_cancellation_id <> cancellation_id),
+  CHECK ((status = 'in_progress' AND finished_at IS NULL) OR
+         (status <> 'in_progress' AND finished_at IS NOT NULL)),
+  CHECK ((status IN ('in_progress', 'completed') AND error IS NULL) OR
+         (status IN ('retryable', 'failed') AND error IS NOT NULL AND
+          jsonb_typeof(error) = 'object'))
+);
+
+CREATE UNIQUE INDEX uq_pipeline_cancellations_active_root
+  ON ops.pipeline_cancellations (root_kind, root_id)
+  WHERE status = 'in_progress';
+CREATE INDEX idx_pipeline_cancellations_root_history
+  ON ops.pipeline_cancellations
+     (root_kind, root_id, requested_at DESC, cancellation_id DESC);
+
+CREATE TABLE ops.pipeline_cancellation_runs (
+  cancellation_id UUID NOT NULL REFERENCES ops.pipeline_cancellations(cancellation_id)
+                  ON DELETE RESTRICT,
+  dagster_run_id  TEXT NOT NULL,
+  initial_status  TEXT,
+  termination_reserved_at TIMESTAMPTZ,
+  result          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (result IN
+                    ('pending', 'cancelled', 'already_terminal', 'cancel_failed')),
+  terminal_status TEXT,
+  error           JSONB,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND (
+      (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
+      (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR
+      (result = 'already_terminal' AND
+        (terminal_status IS NULL OR terminal_status IN ('SUCCESS', 'FAILURE')) AND
+        error IS NULL) OR
+      (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL AND
+        jsonb_typeof(error) = 'object')
+    )
+  ),
+  PRIMARY KEY (cancellation_id, dagster_run_id)
+);
+
+CREATE TABLE ops.pipeline_cancellation_members (
+  cancellation_id UUID NOT NULL REFERENCES ops.pipeline_cancellations(cancellation_id)
+                  ON DELETE RESTRICT,
+  member_kind     TEXT NOT NULL
+                  CHECK (member_kind IN ('import_job', 'update_request')),
+  member_id       UUID NOT NULL,
+  dagster_run_id  TEXT,
+  initial_status  TEXT NOT NULL,
+  result          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (result IN
+                    ('pending', 'cancelled', 'already_terminal', 'cancel_failed')),
+  terminal_status TEXT,
+  error           JSONB,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (
+    (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR
+    (result = 'cancelled' AND terminal_status = 'cancelled' AND error IS NULL) OR
+    (result = 'already_terminal' AND
+      terminal_status IN ('done', 'failed', 'cancelled') AND error IS NULL) OR
+    (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL AND
+      jsonb_typeof(error) = 'object')
+  ),
+  PRIMARY KEY (cancellation_id, member_kind, member_id),
+  FOREIGN KEY (cancellation_id, dagster_run_id)
+    REFERENCES ops.pipeline_cancellation_runs(cancellation_id, dagster_run_id)
+    ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_pipeline_cancellation_members_member
+  ON ops.pipeline_cancellation_members
+     (member_kind, member_id, updated_at DESC, cancellation_id DESC);
+
+ALTER TABLE ops.import_jobs
+  ADD COLUMN cancellation_id UUID
+    REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
+  ADD COLUMN cancellation_requested_at TIMESTAMPTZ,
+  ADD COLUMN cancellation_requested_by TEXT,
+  ADD COLUMN cancellation_reason TEXT,
+  ADD CONSTRAINT ck_import_jobs_cancellation_marker CHECK (
+    (cancellation_id IS NULL AND cancellation_requested_at IS NULL AND
+     cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR
+    (cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL AND
+     cancellation_requested_by IS NOT NULL)
+  );
+
+ALTER TABLE ops.feature_update_requests
+  ADD COLUMN cancellation_id UUID
+    REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
+  ADD COLUMN cancellation_requested_at TIMESTAMPTZ,
+  ADD COLUMN cancellation_requested_by TEXT,
+  ADD COLUMN cancellation_reason TEXT,
+  ADD CONSTRAINT ck_feature_update_requests_cancellation_marker CHECK (
+    (cancellation_id IS NULL AND cancellation_requested_at IS NULL AND
+     cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR
+    (cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL AND
+     cancellation_requested_by IS NOT NULL)
+  );
+```
+
+`pipeline_cancellation_members`가 취소 대상과 대상별 결과의 정본이고,
+`pipeline_cancellation_runs`가 실제 terminate 호출과 run별 결과의 정본이다. 같은
+`dagster_run_id`를 여러 member가 공유해도 run 행과 terminate 호출은 시도당 하나이며,
+그 결과를 연결된 member에 전파한다. 응답용 summary/JSON snapshot은 이 정규화 행에서
+계산하는 보조 표현일 뿐 대상 목록이나 결과의 정본으로 저장하지 않는다. member의
+`initial_status`는 marker 직전 DB 상태이고, run의 nullable `initial_status`는 marker commit
+뒤 첫 권위 있는 Dagster 조회가 성공했을 때 채운다. `error`는 code/message/details만 가진
+비밀 제거 구조체이며 upstream raw body를 저장하지 않는다.
+
+목록과 상세 조회는 base lifecycle 상태를 덮어쓰지 않고 다음 **current cancellation
+overlay**를 별도 투영한다. current attempt는 같은 canonical root의 `in_progress` 행이 있으면
+그 행, 아니면 `(requested_at DESC, cancellation_id DESC)` 최신 행이다. 시도 이력이 없으면
+overlay는 `NULL`이다.
+
+| 필드 | 의미 |
+|------|------|
+| `cancellation_id` | current attempt UUID |
+| `status` | attempt workflow `in_progress`/`retryable`/`completed`/`failed` |
+| `requested_at` / `requested_by` / `reason` | 인증 actor 기반 요청 감사 정보 |
+| `retryable` | attempt `status='retryable'`일 때만 `true` |
+| `unresolved_member_count` | current member 중 `pending` 또는 `cancel_failed` 수 |
+
+attempt status는 결과 aggregate가 아니라 coordinator workflow 상태다. 처리 중이면
+`in_progress`, 모든 member/run이 `cancelled`/`already_terminal`이면 `completed`, transient
+외부 실패로 미해결 member를 다시 호출할 수 있으면 `retryable`, 권위 있는 reconcile
+불가처럼 자동 재시도가 안전하지 않으면 `failed`다. 실제 결과는 member/run `result`에만 둔다.
+
+`GET /v1/ops/pipeline/executions`의 각 root는 이 summary overlay를 반환한다. execution
+detail은 같은 current attempt의 member/run 행도 함께 읽어 POST 응답을 잃은 reload 뒤에도
+대상별 `result`/`terminal_status`/`error`를 복원한다. base `status`와 projected job
+`status`는 overlay status로 대체하지 않는다. transient external 실패와 권위 있는
+SUCCESS/FAILURE reconcile 불가 모두 member `cancel_failed`일 수 있지만, 전자는 attempt
+`retryable`, 후자는 `failed`이므로 UI는 overlay의 `retryable`로 재시도 가능 여부를
+판단한다.
+
+취소 scope는 9.8.1의 root projection과 정확히 같다.
+
+- owner update request는 가장 가까운 anchor branch만 소유하고 nested request branch를
+  포함하지 않는다. 같은 anchor의 non-owner request는 자기 request 행만 대상이다.
+- standalone import root는 component의 미소유 partition만 포함한다. request branch의
+  import job에서 취소하면 해당 owner request root로 canonicalize한다.
+- cycle은 member 최소 UUID, 부모 누락은 self-root 규칙을 그대로 쓴다. root가 이미
+  `done`/`failed`여도 active descendant가 있으면 root member만 `already_terminal`로
+  기록하고 descendant 취소를 계속한다.
+
+terminal/no-op은 durable하고 멱등적이다.
+
+- root가 `done`/`failed`이고 active descendant가 없으며 이전 취소가 없다면 frozen terminal
+  member를 `already_terminal`, attempt를 `completed`로 기록해 새로 남기고 200을 반환한다.
+  외부 Dagster 호출은 없다.
+- 같은 canonical root에 marker와 `status='completed'`인 최신 완료 attempt가 있으면 새
+  attempt/audit/member를 만들지 않고 그 attempt의 member/run 결과를 그대로 200으로
+  재현한다. Dagster terminate도 다시 호출하지 않는다.
+- 최신 attempt가 `retryable`이면 no-op 재판정 대신 그 frozen scope의 미해결 member만
+  재시도한다. lease 획득 실패만 동시 실행 409이며, lease를 얻은 뒤 발견한 `in_progress`는
+  orphan으로 재개한다. definitive `failed`는 안전 조치 전까지 409를 유지한다. terminal root
+  아래 active descendant가 있으면 일반 취소 절차를 계속한다.
+
+최초 시도 transaction은 canonical root 키의 transaction advisory lock을 잡고 scope를 한 번만
+계산한 뒤 frozen base row를 kind/UUID 순서로 잠근다. attempt, run, member와 terminal root를
+포함한 모든 frozen base row marker를 함께 commit한다. child attach/enqueue도 같은 canonical
+root lock을 먼저 잡고 ancestor marker를 확인해야 하므로 snapshot 직전·직후 child가 빠지는
+창이 없다. ancestor에 marker가 있으면 새 child attach, enqueue, claim을 금지한다. worker의
+claim/start/scope write/heartbeat/finish SQL도 모두 `cancellation_requested_at IS NULL` CAS를
+요구한다. marker commit 뒤에만 외부 Dagster terminate를 호출하며, 외부 호출 동안 DB
+transaction을 열어 두지 않는다.
+
+marker guard는 위 lifecycle 함수 목록에 한정하지 않는다. `ops.import_jobs`와
+`ops.feature_update_requests`의 **모든 status/progress/stage/heartbeat/payload/run-id/
+matched-scope/lineage(`parent_job_id`, `load_batch_id`, `job_id`) mutation**은 marker NULL 또는
+취소 coordinator가 소유한 동일 `cancellation_id` CAS를 요구한다. 여기에는
+`update_import_job_payload`, `attach_import_jobs_to_batch`, stale recovery,
+batch/load-batch attach, legacy cancel/requeue와 feature update의 내부 job start/finish가
+포함된다. legacy REST cancel은 계층형 coordinator에 위임하고 직접 base status를 바꿀 수
+없다. `ops.import_job_events` append와 cancellation/system audit append는 실행 제어 상태를
+바꾸지 않으므로 marker 뒤에도 허용한다.
+
+terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인해 짧은 transaction으로
+확정한다.
+
+- marker가 commit된 `queued` member는 공유 Dagster run의 pending/cancel_failed/terminal과
+  무관하게 같은 marker를 확인하는 finalize CAS로 즉시 DB `status='cancelled'`를 확정한다.
+  `running` member는
+  Dagster `CANCELED`를 확인한 경우에만 base `status='cancelled'`로 바꾼다.
+- Dagster `SUCCESS`/`FAILURE`는 member의 run id가 정확히 같고, marker가 같은
+  `cancellation_id`를 가리키며, base row가 아직 active이고, terminal 조회가 권위 있는
+  경우에만 각각 `done`/`failed`로 reconcile한다. update request와 연결 job의 frozen
+  member/run 대응이 불완전하면 안전하게 reconcile할 수 없는 경우다.
+- `cancel_failed`는 frozen `initial_status='running'` member에만 허용한다. queued member는
+  공유 run의 결과와 무관하게 전용 DB 취소 경로만 사용하며 failure로 우회할 수 없다.
+  definitive `cancel_failed`는 run id가 없거나, 관측한 marker/status/run이 frozen base와
+  다르거나, exact base에 대응하는 run 자체가 definitive 오류 코드와 함께
+  `cancel_failed`인 경우만 허용한다. 이 경로는 base와 run을 절대 변경하지 않는다. 특히
+  Dagster run id 없는 local/standalone `running` job은
+  정지 여부를 증명할 수 없으므로 base 상태를 `running`으로 보존하고 marker도 유지한다.
+- GraphQL/HTTP 오류·timeout·`TerminateRunFailure`·`RunNotFound`는 먼저 `cancelled`로 쓰지
+  않는다. attempt를 `retryable`, 해당 running member/run을 `cancel_failed`로 기록하고
+  marker를 유지한다.
+
+일반 coordinator writer는 attempt 행을 `FOR UPDATE`로 먼저 잠그고
+`status='in_progress'`를 확인한 뒤 member→해당 run→request/job base 행 순서로 잠근다.
+성공 결과를 쓰는 범용 member setter는 두지 않는다. running member는 먼저 run 행이
+`CANCELED`/`SUCCESS`/`FAILURE`로 종결된 뒤에만 각각
+`cancelled`/`done`/`failed`로 전이한다. queued member는 외부 terminate 호출이 없는 전용
+DB 경로로만 `cancelled`가 된다. exact running base와 terminal `SUCCESS`/`FAILURE`가 있으면
+안전 전이가 가능하므로 definitive failure로 닫지 않는다. 예외적으로 계층 전체를 다루는
+attempt 종결/retry와
+batch phase writer는 교착 방지를 위해
+lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail reload→정렬 base
+행 순서를 사용한다. 이미 닫힌 예전 attempt writer는 상태를 바꾸지 않고 CAS 실패를
+반환한다.
+
+`completed`는 marker·base·member·run 전체 대응이 정확하고 pending/cancel_failed가 0일
+때만 허용한다. `retryable`은 pending이 없고 exact marker/status/run을 유지한 `running`
+미해결 member가 하나 이상이며 모든 대응 run/member의 구조화 오류 코드가 재시도 허용
+집합일 때만 허용한다. `failed`는 operator 개입이 필요한 definitive attempt 오류가 있을 때
+사용한다. 이때 다른 run/member에서 이미 관측한 timeout/unavailable 같은 retryable 오류와
+아직 권위 있게 관측하지 못한 pending 결과를 definitive 오류로 덮지 않고 그대로 보존한다.
+알려진 base/run mismatch만 해당 member의 definitive `cancel_failed`로 기록하며,
+unexpected coordinator 오류도 pending/terminal run을 거짓 `cancel_failed`로 만들지 않는다.
+
+재시도는 `previous_cancellation_id`가 가리키는 이전 시도의 frozen member 중
+`initial_status='running' AND result='cancel_failed'`인 행만
+새 attempt로 복사한다. hierarchy를 다시 탐색하지 않으며, 복사한 base marker의
+`cancellation_id`만 새 시도로 CAS 전환한다. 이미 `cancelled`/`already_terminal`인 member와
+run은 재호출하지 않는다. 이 규칙과 ancestor marker가 최초 snapshot 뒤에 생성된 child가
+취소 scope 밖으로 빠지는 경쟁을 막는다. marker는 terminal 확정 뒤에도 durable audit와
+descendant 생성 차단을 위해 지우지 않으며, retry CAS만 새 attempt id로 바꿀 수 있다.
+
+취소 coordinator는 preliminary canonical resolve 뒤 canonical root마다 별도 session-level
+advisory lease(`pipeline-cancellation:coordinator:{root_kind}:{root_id}`)를 non-blocking으로
+먼저 잡고, 획득 transaction을 commit한 다음 prepare transaction을 시작한다. lease 획득 전에는
+attempt/marker를 생성하지 않으며, 순서는 `preliminary resolve → dedicated lease acquire/commit →
+prepare(lineage-global→root→scope/marker/audit) → external → finish → unlock`이다. engine에서
+전용 `AsyncConnection` 하나를 얻고 `AsyncSession(expire_on_commit=False)`을 bind해 lease 획득부터
+exact unlock까지 같은 backend를 물리적으로 pin한다. prepare/queued finalize/reservation/
+run-member reconcile/finish는 각각 명시적인 짧은 transaction이고 phase 사이와 GraphQL/poll 동안
+`session.in_transaction()`은 false여야 한다. acquire SELECT의 autobegin은 성공/실패 직후
+commit/rollback한다. lease 경합만 동시 실행 409이며, lease를 얻은 뒤 발견한
+`in_progress` attempt는 process crash가 남긴 orphan으로 보고 같은 frozen detail을 재개한다.
+running run의 active 상태를 확인한 뒤에는 외부 호출 전에
+`pipeline_cancellation_runs.termination_reserved_at` NULL CAS, 첫 권위 관측 `initial_status`, 감사
+로그를 같은 transaction으로 먼저 commit한다. CAS 패자는 외부 mutation을 호출하지 않고
+reserved query/poll 경로로 전환한다.
+이미 값이 있으면 같은 attempt에서 `terminateRun`을 다시 보내지 않고 terminal poll만 재개한다.
+reservation 뒤 mutation HTTP timeout·응답 유실도 재호출하지 않고 같은 poll 경로로 합류한다.
+CAS commit 직후 실제 HTTP 호출 전 process가 죽은 경우에도 동일 attempt의 중복 dispatch는 없으며,
+poll 미종결을 `DAGSTER_TERMINATION_TIMEOUT` retryable attempt로 닫고 503을 반환한 다음 새
+attempt가 다시 시도한다. 따라서 보장 범위는 외부
+exactly-once가 아니라 **attempt별 at-most-once dispatch**다. 최초 canonical root 조회와 lease
+획득 사이에 root가 바뀌면 lease를 풀고 새 canonical root로 제한된 횟수만 다시 시작하며,
+반복 변경은 409 `PIPELINE_CANCELLATION_UNSAFE`로 닫는다. 기존
+lineage-global/root transaction lock을 lease로 대체하지 않는다.
+lease 해제는 획득한 exact key를 같은 backend에서 `pg_advisory_unlock`하고 true를 확인한 뒤
+commit한다. false/예외이면 성공을 반환하지 않는다. async invalidate가 실패하면 pool proxy의
+hard invalidate, 마지막으로 physical driver terminate를 시도하고, backend 폐기를 증명하지
+못하면 unsafe 오류를 전파한다. lease 상실이나 reservation/base CAS 패배를 감지한 old
+coordinator는 후속 외부 호출·결과 write를 중단하고 fresh session에서 exact 과거 attempt보다
+canonical root의 current detail을 우선 reload한다.
+
+feature update coordinator는 scope별 commit으로 이미 완료된 데이터와 외부 효과를
+rollback하지 않는다. provider scope 동시 실행 창을 만들지 않기 위해 engine에서 얻은 전용
+`AsyncConnection` 하나에 session-level scope advisory lock을 잡고 prepare/probe/scope/finalize의
+짧은 transaction을 모두 같은 물리 connection에 bind한다. 같은 connection에서 unlock한 뒤
+pool에 반환하며, pin하지 않은 pooled `AsyncSession`에서 scope 사이 commit을 반복하지 않는다.
+각 scope data transaction은 provider 결과를 쓰기 전에 대상 request/job row를 잠그고 marker
+NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit까지는 취소가 기다리고,
+취소 marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
+queue sensor는 상태를 바꾸지 않고 peek만 하며, executor가 request별 session lease와 scope
+session lease를 얻은 뒤 request/job을 CAS start한다. scope 경합이면 request/job의 stale run
+identity·progress·timestamp를 같은 transaction에서 초기화해 queued로 돌리고 새 run key를
+만든다. request lease 경합의 queued loser는 run key만 단조 증가시키며 running owner는
+건드리지 않는다. sensor는 request의 timezone-aware `updated_at`을 실행 generation으로 삼아
+run key·op config·run tag에 같은 값을 고정한다. start는 `queued + generation 동일 + run-id
+NULL` 또는 `running + 동일 run owner`만 허용하고, 연결 import job owner CAS가 실패하면
+request start도 savepoint에서 rollback한다. CAS start 전 resource 초기화 실패는
+`queued + run-id NULL + generation 동일 + marker NULL` 행의 `updated_at`만 전진시켜 Dagster
+중복 제거와 다른 새 run key를 만든다. running owner, 더 최신 generation, terminal/marker 행은
+변경하지 않는다. 예전 Dagster run의 지연 failure sensor는 실제 실패 run id를
+`expected_dagster_run_id`로 전달하고 request와 연결 job 모두 같은 generation일 때만 failed로
+닫는다. 어느 한쪽 CAS라도 실패하면 전체 terminal write를 rollback한다. 각 provider scope의
+data write와 `matched_scope.executed_provider_scopes` checkpoint는 같은 transaction에 commit한다.
+production asset이 사용하는 `AsyncKorTravelMapClient`도 executor session의 physical connection에
+bind하고 내부 session은 outer transaction을 commit하지 못하게 한다. bind 뒤 원본 client의
+engine으로 새 connection을 여는 public 경로는 fail-closed로 거부한다. 따라서 asset chunk
+적재·`provider_sync_state`·checkpoint가 하나의 scope transaction이고, checkpoint 전 crash가
+data-only commit을 남기지 않는다. 이후 취소·실패·process 종료에도 이미 반영된 scope를
+식별할 수 있다. marker 없는 `CancelledError`는 request/job을 failed로 닫고 원 예외를
+재전파하며, marker가 있으면 coordinator가 상태 전이를 우선한다.
+
+full-load batch consistency gate도 같은 원칙을 사용한다. 호출별 전용
+`AsyncConnection`에 `AsyncSession(expire_on_commit=False)`을 bind하고
+`load_batch_id`별 session advisory mutex를 gate 전체에 유지한다. prepare(root 생성·child
+attach·consistency child 생성), 장기 consistency+gate finalize, MV child 시작, 장기 MV
+refresh+finalize는 각각 독립 transaction이다. 장기 consistency/MV는 시작 marker guard 뒤
+lineage lock 없이 side effect를 만들고, 종료 직전에만 lineage-global→canonical root lock을
+얻어 marker guard/CAS와 finalize를 같은 transaction에서 수행한다. MV child 시작(Tx3)과
+실패 기록 transaction은 첫 mutation 전에 같은 canonical lock을 얻는다. marker/CAS가
+패배하면 내부 sentinel 예외로 현재 transaction의 report/MV write 전체를 rollback하고,
+별도 짧은 read transaction에서 cancellation 결과를 reload한다. child row를 먼저 잠근 뒤
+global/root lock을 요구하는 순서는 허용하지 않는다. lock과 각 phase는
+같은 PostgreSQL backend PID를 사용하고, unlock SELECT 뒤 commit한 다음 connection을 pool에
+반환한다.
+
+marker/attempt/member/run 전이는 각각 같은 짧은 transaction에서 append-only
+`ops.system_log` 감사 행도 함께 기록한다. 인증 actor가 `requested_by`와
+`cancellation_requested_by`의 유일한 출처이며 요청 payload가 이를 덮어쓸 수 없다. 0050
+downgrade는 queued/running base row의 marker 또는 `in_progress`/`retryable` 시도가 하나라도
+있으면 실패해야 한다. terminal base row와 `completed`/`failed` 시도만 남았을 때 명시적
+운영 확인 후 테이블/컬럼을 제거하며, active marker를 조용히 drop해 worker를 재개시키는
+downgrade는 금지한다.
+
 ### 9.9 `ops.feature_change_requests` (alembic 0021)
 
 사용자/admin 요청으로 들어온 place/event feature 추가·수정·삭제 요청을 저장한다.

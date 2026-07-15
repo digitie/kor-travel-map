@@ -191,6 +191,14 @@ function pathTail(path: string) {
   return clean.slice(clean.lastIndexOf("/") + 1);
 }
 
+function queryParam(path: string, name: string) {
+  try {
+    return new URL(path, "http://localhost").searchParams.get(name);
+  } catch {
+    return null;
+  }
+}
+
 function relationHref(link: OpsImportJobLink) {
   if (link.rel === "self") {
     return `/ops/import-jobs/${encodeURIComponent(pathTail(link.href))}`;
@@ -199,8 +207,10 @@ function relationHref(link: OpsImportJobLink) {
     return `/ops/import-jobs/${encodeURIComponent(pathTail(link.href))}`;
   }
   if (link.rel === "load_batch") {
-    // API href(/v1/...)를 그대로 노출하던 dead link — 배치 필터 목록으로 연결.
-    return `/ops/import-jobs?load_batch_id=${encodeURIComponent(pathTail(link.href))}`;
+    const loadBatchId = queryParam(link.href, "load_batch_id");
+    return loadBatchId
+      ? `/ops/import-jobs?load_batch_id=${encodeURIComponent(loadBatchId)}`
+      : null;
   }
   if (link.rel === "feature_update_request") {
     return `/admin/features/update-requests/${encodeURIComponent(pathTail(link.href))}`;
@@ -427,7 +437,6 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
     cancelJob.mutate({
       jobId,
       body: {
-        operator: "admin-ui",
         reason: cancelReason.trim() || undefined,
       },
     });
@@ -496,9 +505,9 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
         ) : null}
         {cancelJob.isSuccess ? (
           <Alert>
-            <AlertTitle>중지 요청됨</AlertTitle>
+            <AlertTitle>중지 처리됨</AlertTitle>
             <AlertDescription>
-              {cancelJob.data.data.status} · {shortId(cancelJob.data.data.job_id)}
+              {cancelJob.data.data.status} · {shortId(cancelJob.data.data.root.id)}
             </AlertDescription>
           </Alert>
         ) : null}

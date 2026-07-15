@@ -8,6 +8,7 @@ API의 update request는 queue row만 만들고, 실제 provider refresh는 Dags
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Final, cast
 
+from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
@@ -80,6 +82,7 @@ from kortravelmap.providers.standard_data import (
     STANDARD_DATA_PROVIDER_NAME,
 )
 from kortravelmap.settings import KorTravelMapSettings
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from dagster import InitResourceContext, resource
 
@@ -241,7 +244,7 @@ class FeatureUpdateAssetRunner:
 
     async def __call__(
         self,
-        _session: object,
+        session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
@@ -274,20 +277,27 @@ class FeatureUpdateAssetRunner:
         # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를 포함할 수
         # 있으므로 이벤트 루프를 막지 않게 스레드로 보낸다(#617 리뷰).
         extra = await asyncio.to_thread(spec.resources, settings, scope)
-        context = _DirectAssetContext(
-            resources={**self._common_resources, **dict(extra.values)},
-            log=self._log,
-            asset_key=spec.asset_key,
-        )
         try:
+            resources = {**self._common_resources, **dict(extra.values)}
+            client = resources.get("kor_travel_map_client")
+            if isinstance(client, AsyncKorTravelMapClient):
+                resources["kor_travel_map_client"] = await _bind_client_to_session(
+                    client,
+                    session,
+                )
+            context = _DirectAssetContext(
+                resources=resources,
+                log=self._log,
+                asset_key=spec.asset_key,
+            )
             result = await spec.run(context)
+            return _as_refresh_result(
+                result,
+                scope=scope,
+                output_metadata=context.output_metadata,
+            )
         finally:
             await _close_teardowns(extra.teardowns)
-        return _as_refresh_result(
-            result,
-            scope=scope,
-            output_metadata=context.output_metadata,
-        )
 
     def _spec_for_scope(
         self, scope: ProviderDatasetRefreshScope
@@ -303,6 +313,42 @@ class FeatureUpdateAssetRunner:
         raise RuntimeError(
             "feature update runner가 지원하지 않는 provider/dataset: "
             f"{scope.provider}:{scope.dataset_key}. supported={supported}"
+        )
+
+
+async def _bind_client_to_session(
+    client: AsyncKorTravelMapClient,
+    session: AsyncSession,
+) -> AsyncKorTravelMapClient:
+    """Client DB 호출을 executor가 소유한 transaction에 결합한다.
+
+    Asset은 공개 client 메서드를 계속 사용하되, 각 메서드가 만드는 내부
+    ``AsyncSession``은 executor session의 physical connection에 결합된다.
+    ``rollback_only``는 내부 ``commit``이 외부 transaction을 먼저 commit하지
+    못하게 하고, 적재 실패는 외부 transaction에 rollback을 전파한다.
+    """
+    connection = await session.connection()
+    bound_client = copy.copy(client)
+    bound_client._session_factory = async_sessionmaker(  # noqa: SLF001
+        bind=connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="rollback_only",
+    )
+    bound_client._engine = cast(  # noqa: SLF001
+        "AsyncEngine",
+        _TransactionBoundEngineGuard(),
+    )
+    return bound_client
+
+
+class _TransactionBoundEngineGuard:
+    """Bound asset client가 executor transaction 밖 connection을 열지 못하게 한다."""
+
+    def connect(self) -> None:
+        raise RuntimeError(
+            "transaction-bound feature update asset client cannot open a new DB connection"
         )
 
 

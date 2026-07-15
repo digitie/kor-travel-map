@@ -19,6 +19,13 @@ from kortravelmap.infra.ops_repo import (
     OpsImportJobEvent,
     OpsImportJobEventPage,
 )
+from kortravelmap.infra.pipeline_cancellation_types import (
+    PipelineCancellationAttempt,
+    PipelineCancellationDetail,
+    PipelineCancellationMember,
+    PipelineCancellationRun,
+    PipelineCancellationSummary,
+)
 from kortravelmap.infra.pipeline_repo import (
     PipelineExecution,
     PipelineExecutionPage,
@@ -34,7 +41,12 @@ from kortravelmap.api import dagster_query_service as dagster_query
 from kortravelmap.api import dagster_schedule_service as dagster_schedule
 from kortravelmap.api import feature_update_service as fur_mod
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
+from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.pipeline_cancellation_schema import (
+    PipelineCancellationDetailRecord,
+    PipelineCancellationRootRecord,
+)
 from kortravelmap.api.routers import ops_pipeline as pipeline_mod
 from kortravelmap.api.settings import ApiSettings
 
@@ -79,7 +91,7 @@ def session() -> _FakeSession:
 
 
 @pytest.fixture
-def client(session: _FakeSession) -> TestClient:
+def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = create_app(
         ApiSettings(
             admin_proxy_secret=None,
@@ -92,7 +104,15 @@ def client(session: _FakeSession) -> TestClient:
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
 
+    async def _no_cancellation(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
     app.dependency_overrides[get_session] = _fake_session
+    monkeypatch.setattr(
+        pipeline_mod,
+        "get_current_pipeline_cancellation_detail",
+        _no_cancellation,
+    )
     return TestClient(app)
 
 
@@ -210,6 +230,97 @@ def _update_request(
     )
 
 
+def _cancellation_detail(
+    *,
+    root_kind: str = "import_job",
+    root_id: str = "11111111-1111-1111-1111-111111111111",
+) -> PipelineCancellationDetailRecord:
+    return PipelineCancellationDetailRecord.model_validate(
+        {
+            "cancellation_id": "77777777-7777-4777-8777-777777777777",
+            "previous_cancellation_id": None,
+            "root": {"kind": root_kind, "id": root_id},
+            "status": "completed",
+            "requested_at": _NOW,
+            "requested_by": "local-dev",
+            "reason": "혼잡 시간대 회피",
+            "error": None,
+            "updated_at": _NOW,
+            "finished_at": _NOW,
+            "retryable": False,
+            "unresolved_member_count": 0,
+            "members": [
+                {
+                    "member_kind": root_kind,
+                    "member_id": root_id,
+                    "dagster_run_id": "run-1",
+                    "initial_status": "running",
+                    "result": "cancelled",
+                    "terminal_status": "cancelled",
+                    "error": None,
+                    "updated_at": _NOW,
+                }
+            ],
+            "dagster_runs": [
+                {
+                    "dagster_run_id": "run-1",
+                    "initial_status": "STARTED",
+                    "termination_reserved_at": _NOW,
+                    "result": "cancelled",
+                    "terminal_status": "CANCELED",
+                    "error": None,
+                    "updated_at": _NOW,
+                }
+            ],
+            "committed_data_rolled_back": False,
+            "warnings": ["이미 commit된 scope 데이터는 rollback하지 않습니다."],
+        }
+    )
+
+
+def _cancellation_domain_detail() -> PipelineCancellationDetail:
+    return PipelineCancellationDetail(
+        attempt=PipelineCancellationAttempt(
+            cancellation_id="77777777-7777-4777-8777-777777777777",
+            previous_cancellation_id=None,
+            root_kind="import_job",
+            root_id="11111111-1111-1111-1111-111111111111",
+            status="completed",
+            requested_by="local-dev",
+            reason="혼잡 시간대 회피",
+            error=None,
+            requested_at=_NOW,
+            updated_at=_NOW,
+            finished_at=_NOW,
+        ),
+        members=(
+            PipelineCancellationMember(
+                cancellation_id="77777777-7777-4777-8777-777777777777",
+                member_kind="import_job",
+                member_id="11111111-1111-1111-1111-111111111111",
+                dagster_run_id="run-1",
+                initial_status="running",
+                result="cancelled",
+                terminal_status="cancelled",
+                error=None,
+                updated_at=_NOW,
+            ),
+        ),
+        runs=(
+            PipelineCancellationRun(
+                cancellation_id="77777777-7777-4777-8777-777777777777",
+                dagster_run_id="run-1",
+                initial_status="STARTED",
+                termination_reserved_at=_NOW,
+                result="cancelled",
+                terminal_status="CANCELED",
+                error=None,
+                updated_at=_NOW,
+            ),
+        ),
+    )
+
+
 def _event(
     event_id: str = "55555555-5555-5555-5555-555555555555",
 ) -> OpsImportJobEvent:
@@ -232,6 +343,7 @@ def _execution(
     *,
     kind: str = "import_job",
     execution_id: str = "11111111-1111-1111-1111-111111111111",
+    cancellation: PipelineCancellationSummary | None = None,
 ) -> PipelineExecution:
     return PipelineExecution(
         kind=kind,
@@ -277,6 +389,7 @@ def _execution(
             parent_job_id=None,
             depth=0,
         ),
+        cancellation=cancellation,
     )
 
 
@@ -394,6 +507,20 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     detail_schema = spec["components"]["schemas"]["DagsterRunDetailData"]
     assert "현재 event page" in detail_schema["properties"]["failure_reason"]["description"]
     assert "현재 event page" in detail_schema["properties"]["failure_events"]["description"]
+    cancel_operation = spec["paths"][
+        "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel"
+    ]["post"]
+    assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
+        cancel_operation["responses"]
+    )
+    for status_code in ("409", "502", "503"):
+        assert cancel_operation["responses"][status_code]["headers"][
+            "Retry-After"
+        ]["schema"] == {"type": "integer"}
+    cancel_request = spec["components"]["schemas"]["PipelineCancellationRequest"]
+    assert set(cancel_request["properties"]) == {"reason"}
+    cancel_run = spec["components"]["schemas"]["PipelineCancellationRunRecord"]
+    assert "termination_reserved_at" in cancel_run["properties"]
 
 
 @pytest.mark.unit
@@ -417,6 +544,54 @@ def test_pipeline_routes_require_admin_frontend_when_secret_set(
     response = gated_client.get("/v1/ops/pipeline/executions")
 
     assert response.status_code == 403
+
+
+@pytest.mark.unit
+def test_cancel_execution_uses_authenticated_proxy_actor(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret="pipeline-secret",
+            admin_trusted_proxy_cidrs=["127.0.0.0/8"],
+            dagster_url="http://dagster.example:12302",
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+    captured: dict[str, Any] = {}
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    async def _fake_engine() -> Any:
+        return object()
+
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        captured.update(kwargs)
+        return _cancellation_detail()
+
+    app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_engine] = _fake_engine
+    monkeypatch.setattr(
+        pipeline_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
+    gated_client = TestClient(app, client=("127.0.0.1", 50000))
+
+    response = gated_client.post(
+        "/v1/ops/pipeline/executions/import_job/"
+        "11111111-1111-1111-1111-111111111111/cancel",
+        headers={
+            ADMIN_PROXY_SECRET_HEADER: "pipeline-secret",
+            ADMIN_ACTOR_HEADER: "admin:reviewer",
+        },
+        json={"reason": "operator request"},
+    )
+
+    assert response.status_code == 200
+    assert captured["requested_by"] == "admin:reviewer"
 
 
 @pytest.mark.unit
@@ -488,7 +663,18 @@ def test_executions_list_passes_filters_and_maps_rows(
         captured.update(kwargs)
         return PipelineExecutionPage(
             items=(
-                _execution(kind="import_job"),
+                _execution(
+                    kind="import_job",
+                    cancellation=PipelineCancellationSummary(
+                        cancellation_id="77777777-7777-4777-8777-777777777777",
+                        status="retryable",
+                        requested_at=_NOW,
+                        requested_by="admin:test",
+                        reason="timeout",
+                        retryable=True,
+                        unresolved_member_count=1,
+                    ),
+                ),
                 _execution(
                     kind="update_request",
                     execution_id="22222222-2222-2222-2222-222222222222",
@@ -526,6 +712,9 @@ def test_executions_list_passes_filters_and_maps_rows(
     )
     assert items[0]["providers"] == [MOIS_PROVIDER_NAME]
     assert items[0]["linked_job_count"] == 1
+    assert items[0]["status"] == "running"
+    assert items[0]["cancellation"]["status"] == "retryable"
+    assert items[0]["cancellation"]["unresolved_member_count"] == 1
     assert items[0]["projected_job"]["detail_url"] == (
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
     )
@@ -572,9 +761,24 @@ def test_execution_detail_import_job_links_request_and_events(
         assert kwargs["level"] == "error"
         return OpsImportJobEventPage(items=(_event(),), next_cursor="ev-cursor")
 
+    async def _current_cancellation(
+        _session: Any,
+        **kwargs: Any,
+    ) -> PipelineCancellationDetail:
+        assert kwargs == {
+            "kind": "import_job",
+            "execution_id": "11111111-1111-1111-1111-111111111111",
+        }
+        return _cancellation_domain_detail()
+
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
+    monkeypatch.setattr(
+        pipeline_mod,
+        "get_current_pipeline_cancellation_detail",
+        _current_cancellation,
+    )
 
     response = client.get(
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111?level=error"
@@ -594,6 +798,9 @@ def test_execution_detail_import_job_links_request_and_events(
         "55555555-5555-5555-5555-555555555555"
     ]
     assert data["events_next_cursor"] == "ev-cursor"
+    assert data["execution"]["status"] == "running"
+    assert data["cancellation"]["status"] == "completed"
+    assert data["cancellation"]["dagster_runs"][0]["termination_reserved_at"]
 
 
 @pytest.mark.unit
@@ -626,6 +833,7 @@ def test_execution_detail_update_request_links_job(
     assert data["execution"]["kind"] == "update_request"
     assert data["execution"]["provider"] == MOIS_PROVIDER_NAME
     assert data["import_job"]["status"] == "running"
+    assert data["cancellation"] is None
     assert data["events_next_cursor"] is None
 
 
@@ -678,108 +886,165 @@ def test_cancel_execution_non_uuid_id_is_422(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_cancel_import_job_running(
+def test_cancel_import_job_uses_authenticated_actor_and_coordinator(
     client: TestClient,
-    session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    states = iter(["running", "cancelled", "cancelled"])
+    calls: list[dict[str, Any]] = []
 
-    async def _get_job(_session: Any, _job_id: str) -> OpsImportJob:
-        return _job(status=next(states))
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        calls.append(kwargs)
+        return _cancellation_detail()
 
-    async def _cancel(_session: Any, job_id: str, **kwargs: Any) -> Any:
-        assert job_id == "11111111-1111-1111-1111-111111111111"
-        assert kwargs["error_message"] == "혼잡 시간대 회피"
-        assert kwargs["operator"] == "tester"
-        return object()
-
-    monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
-    monkeypatch.setattr(pipeline_mod, "cancel_import_job", _cancel)
+    monkeypatch.setattr(
+        pipeline_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
 
     response = client.post(
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
-        json={"operator": "tester", "reason": "혼잡 시간대 회피"},
+        json={"reason": "혼잡 시간대 회피"},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "cancelled"
-    assert session.begin_count == 1
+    assert response.json()["data"]["status"] == "completed"
+    assert response.json()["data"]["dagster_runs"][0]["termination_reserved_at"]
+    assert len(calls) == 1
+    assert calls[0]["kind"] == "import_job"
+    assert calls[0]["execution_id"] == "11111111-1111-1111-1111-111111111111"
+    assert calls[0]["requested_by"] == "local-dev"
+    assert calls[0]["reason"] == "혼잡 시간대 회피"
+    assert calls[0]["engine"] is not None
+    assert isinstance(calls[0]["settings"], ApiSettings)
+    assert calls[0]["http_client"] is not None
 
 
 @pytest.mark.unit
-def test_cancel_import_job_terminal_conflict(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _get_job(_session: Any, _job_id: str) -> OpsImportJob:
-        return _job(status="done")
-
-    monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
-
+def test_cancel_execution_rejects_actor_in_body(client: TestClient) -> None:
     response = client.post(
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
-        json={},
+        json={"operator": "spoofed"},
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
-def test_cancel_update_request_not_found(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def _cancel(
-        _session: Any, _request_id: str, **_kwargs: Any
-    ) -> FeatureUpdateRequest | None:
-        return None
-
-    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
-        return None
-
-    monkeypatch.setattr(pipeline_mod, "cancel_update_request", _cancel)
-    monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
-
-    response = client.post(
-        "/v1/ops/pipeline/executions/update_request/aaaaaaaa-0000-4000-8000-000000000000/cancel",
-        json={},
-    )
-
-    assert response.status_code == 404
-
-
-@pytest.mark.unit
-def test_cancel_update_request_returns_record_and_logs_operator(
+def test_cancel_execution_maps_typed_failures_to_problem_details(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    async def _cancel(_session: Any, request_id: str, **kwargs: Any) -> FeatureUpdateRequest:
-        assert request_id == "22222222-2222-2222-2222-222222222222"
-        assert kwargs["error_message"] == "잘못된 scope"
-        return _update_request(status="cancelled")
+    root = PipelineCancellationRootRecord(
+        kind="import_job",
+        id="11111111-1111-1111-1111-111111111111",
+    )
+    detail = _cancellation_detail()
+    cases = (
+        (
+            pipeline_mod.pipeline_cancellation_service.PipelineExecutionNotFound(
+                "missing execution"
+            ),
+            404,
+            "PIPELINE_EXECUTION_NOT_FOUND",
+            None,
+        ),
+        (
+            pipeline_mod.pipeline_cancellation_service.PipelineCancellationInProgress(
+                "coordinator busy",
+                root=root,
+                detail=detail,
+                retry_after_seconds=7,
+            ),
+            409,
+            "PIPELINE_CANCELLATION_IN_PROGRESS",
+            "7",
+        ),
+        (
+            pipeline_mod.pipeline_cancellation_service.DagsterTerminateFailed(
+                "terminate rejected",
+                root=root,
+                detail=detail,
+                retry_after_seconds=7,
+            ),
+            502,
+            "DAGSTER_TERMINATE_FAILED",
+            "7",
+        ),
+        (
+            pipeline_mod.pipeline_cancellation_service.DagsterUnavailable(
+                "dagster unavailable",
+                root=root,
+                detail=detail,
+                retry_after_seconds=7,
+            ),
+            503,
+            "DAGSTER_UNAVAILABLE",
+            "7",
+        ),
+    )
 
-    monkeypatch.setattr(pipeline_mod, "cancel_update_request", _cancel)
+    for error, expected_status, expected_code, retry_after in cases:
+        async def _cancel(
+            _error: Exception = error,
+            **_kwargs: Any,
+        ) -> PipelineCancellationDetailRecord:
+            raise _error
 
-    with caplog.at_level("INFO", logger=pipeline_mod.__name__):
+        monkeypatch.setattr(
+            pipeline_mod.pipeline_cancellation_service,
+            "cancel_pipeline_execution",
+            _cancel,
+        )
         response = client.post(
-            "/v1/ops/pipeline/executions/update_request/"
-            "22222222-2222-2222-2222-222222222222/cancel",
-            json={"operator": "tester", "reason": "잘못된 scope"},
+            "/v1/ops/pipeline/executions/import_job/"
+            "11111111-1111-1111-1111-111111111111/cancel",
+            json={"reason": "operator request"},
         )
 
+        assert response.status_code == expected_status
+        assert response.headers["content-type"].startswith(
+            "application/problem+json"
+        )
+        assert response.json()["code"] == expected_code
+        assert response.headers.get("retry-after") == retry_after
+        if expected_status != 404:
+            assert response.json()["details"]["cancellation_id"] == (
+                detail.cancellation_id
+            )
+
+
+@pytest.mark.unit
+def test_cancel_update_request_uses_same_coordinator(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        calls.append(kwargs)
+        return _cancellation_detail(
+            root_kind="update_request",
+            root_id="22222222-2222-2222-2222-222222222222",
+        )
+
+    monkeypatch.setattr(
+        pipeline_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
+
+    response = client.post(
+        "/v1/ops/pipeline/executions/update_request/"
+        "22222222-2222-2222-2222-222222222222/cancel",
+        json={"reason": "잘못된 scope"},
+    )
+
     assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["kind"] == "update_request"
-    assert data["status"] == "cancelled"
-    # 감사: 계약이 받은 operator/reason이 조용히 버려지지 않는다(구조화 로그).
-    audit = [
-        record.getMessage()
-        for record in caplog.records
-        if "feature update request 취소" in record.getMessage()
-    ]
-    assert len(audit) == 1
-    assert "operator=tester" in audit[0]
-    assert "잘못된 scope" in audit[0]
+    assert calls[0]["kind"] == "update_request"
+    assert calls[0]["execution_id"] == "22222222-2222-2222-2222-222222222222"
+    assert calls[0]["requested_by"] == "local-dev"
+    assert calls[0]["reason"] == "잘못된 scope"
 
 
 @pytest.mark.unit

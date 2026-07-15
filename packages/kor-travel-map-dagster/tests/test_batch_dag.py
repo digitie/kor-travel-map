@@ -72,6 +72,16 @@ def test_full_load_batch_consistency_gate_job_executes_client() -> None:
     assert output["consistency_severity_max"] == "OK"
 
 
+def test_full_load_batch_consistency_gate_job_accepts_plan_only_result() -> None:
+    client = _Client(_result(state="planned"))
+
+    result = full_load_batch_consistency_gate_job.execute_in_process(
+        resources={"kor_travel_map_client": client},
+    )
+
+    assert result.success
+
+
 def test_full_load_batch_consistency_gate_job_fails_on_blocked_gate() -> None:
     client = _Client(
         _result(
@@ -88,6 +98,22 @@ def test_full_load_batch_consistency_gate_job_fails_on_blocked_gate() -> None:
 
     assert not result.success
     assert client.calls[0]["mv_refresh_strategy"] == "swap"
+
+
+def test_full_load_batch_consistency_gate_job_fails_when_cancelled() -> None:
+    client = _Client(
+        _result(
+            state="cancelled",
+            error_message="pipeline cancellation marker won the batch phase CAS",
+        )
+    )
+
+    result = full_load_batch_consistency_gate_job.execute_in_process(
+        resources={"kor_travel_map_client": client},
+        raise_on_error=False,
+    )
+
+    assert not result.success
 
 
 def _result(

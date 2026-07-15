@@ -37,6 +37,10 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 from kortravelmap.infra.advisory_lock import try_advisory_lock
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    PipelineCancellationConflict,
+    lock_pipeline_hierarchy_for_jobs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -75,8 +79,9 @@ _EVENT_LEVELS: Final[frozenset[str]] = frozenset(
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, dagster_run_id, started_at, "
-    "finished_at, heartbeat_at, created_at"
+    "current_stage, source_checksum, error_message, dagster_run_id, cancellation_id, "
+    "cancellation_requested_at, cancellation_requested_by, cancellation_reason, "
+    "started_at, finished_at, heartbeat_at, created_at"
 )
 
 # payload에 담겨 들어오는 Dagster run id를 실컬럼으로 승격 (ADR-064/T-ADM-C3).
@@ -107,6 +112,10 @@ class ImportJob:
     load_batch_id: str | None = None
     parent_job_id: str | None = None
     dagster_run_id: str | None = None
+    cancellation_id: str | None = None
+    cancellation_requested_at: datetime | None = None
+    cancellation_requested_by: str | None = None
+    cancellation_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +151,12 @@ def _row_to_job(row: Any) -> ImportJob:
         source_checksum=row.source_checksum,
         error_message=row.error_message,
         dagster_run_id=row.dagster_run_id,
+        cancellation_id=(
+            str(row.cancellation_id) if row.cancellation_id is not None else None
+        ),
+        cancellation_requested_at=row.cancellation_requested_at,
+        cancellation_requested_by=row.cancellation_requested_by,
+        cancellation_reason=row.cancellation_reason,
     )
 
 
@@ -168,11 +183,17 @@ _INSERT_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id
 )
-VALUES (
+SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
     {_PAYLOAD_DAGSTER_RUN_ID_SQL}
-)
+WHERE CAST(:parent_job_id AS uuid) IS NULL
+   OR EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS parent
+      WHERE parent.job_id = CAST(:parent_job_id AS uuid)
+        AND parent.cancellation_id IS NULL
+   )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -183,12 +204,18 @@ INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
     status, started_at, heartbeat_at
 )
-VALUES (
+SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
     {_PAYLOAD_DAGSTER_RUN_ID_SQL},
     'running', now(), now()
-)
+WHERE CAST(:parent_job_id AS uuid) IS NULL
+   OR EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS parent
+      WHERE parent.job_id = CAST(:parent_job_id AS uuid)
+        AND parent.cancellation_id IS NULL
+   )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -232,6 +259,7 @@ UPDATE ops.import_jobs
 SET payload = CAST(:payload AS jsonb),
     dagster_run_id = COALESCE({_PAYLOAD_DAGSTER_RUN_ID_SQL}, dagster_run_id)
 WHERE job_id = CAST(:job_id AS uuid)
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -239,11 +267,29 @@ _ATTACH_BATCH_SQL: Final[str] = f"""
 WITH ids AS (
     SELECT value::uuid AS job_id
     FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
+),
+eligible AS (
+    SELECT
+      (SELECT COUNT(*) FROM ops.import_jobs WHERE job_id IN (SELECT job_id FROM ids))
+        = (SELECT COUNT(*) FROM ids)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.import_jobs
+        WHERE job_id IN (SELECT job_id FROM ids)
+          AND cancellation_id IS NOT NULL
+      )
+      AND EXISTS (
+        SELECT 1
+        FROM ops.import_jobs AS parent
+        WHERE parent.job_id = CAST(:parent_job_id AS uuid)
+          AND parent.cancellation_id IS NULL
+      ) AS allowed
 )
 UPDATE ops.import_jobs
 SET load_batch_id = CAST(:load_batch_id AS uuid),
     parent_job_id = CAST(:parent_job_id AS uuid)
 WHERE job_id IN (SELECT job_id FROM ids)
+  AND (SELECT allowed FROM eligible)
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -254,6 +300,7 @@ SET status = 'running', started_at = now(), heartbeat_at = now()
 WHERE job_id = (
     SELECT job_id FROM ops.import_jobs
     WHERE status = 'queued'
+      AND cancellation_id IS NULL
     ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -266,7 +313,9 @@ UPDATE ops.import_jobs
 SET heartbeat_at = now(),
     progress = COALESCE(:progress, progress),
     current_stage = COALESCE(:current_stage, current_stage)
-WHERE job_id = :job_id AND status = 'running'
+WHERE job_id = :job_id
+  AND status = 'running'
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -277,7 +326,9 @@ SET status = :status,
     finished_at = now(),
     error_message = :error_message,
     progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
-WHERE job_id = :job_id AND status = 'running'
+WHERE job_id = :job_id
+  AND status = 'running'
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -288,6 +339,7 @@ SET status = 'cancelled',
     error_message = COALESCE(:error_message, error_message, 'cancelled by admin API')
 WHERE job_id = CAST(:job_id AS uuid)
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -300,6 +352,7 @@ SET status = 'failed',
     finished_at = now(),
     error_message = COALESCE(error_message, 'recovered: stale running on startup')
 WHERE status = 'running'
+  AND cancellation_id IS NULL
   AND (
     CAST(:stale_seconds AS double precision) IS NULL
     OR heartbeat_at IS NULL
@@ -320,6 +373,8 @@ async def enqueue_import_job(
     parent_job_id: str | None = None,
 ) -> ImportJob:
     """``status='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
+    if parent_job_id is not None:
+        await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
     result = await session.execute(
         text(_INSERT_JOB_SQL),
         {
@@ -330,7 +385,12 @@ async def enqueue_import_job(
             "parent_job_id": parent_job_id,
         },
     )
-    job = _row_to_job(result.one())
+    row = result.one_or_none()
+    if row is None:
+        raise PipelineCancellationConflict(
+            "cancel-marked parent cannot accept a new import job child"
+        )
+    job = _row_to_job(row)
     await record_import_job_event(
         session,
         job.job_id,
@@ -357,6 +417,8 @@ async def start_import_job(
     queue-worker 경로는 ``enqueue_import_job`` + ``claim_next_import_job`` 사용.
     commit은 호출자 책임.
     """
+    if parent_job_id is not None:
+        await lock_pipeline_hierarchy_for_jobs(session, (parent_job_id,))
     result = await session.execute(
         text(_START_JOB_SQL),
         {
@@ -367,7 +429,12 @@ async def start_import_job(
             "parent_job_id": parent_job_id,
         },
     )
-    job = _row_to_job(result.one())
+    row = result.one_or_none()
+    if row is None:
+        raise PipelineCancellationConflict(
+            "cancel-marked parent cannot accept a new running import job child"
+        )
+    job = _row_to_job(row)
     await record_import_job_event(
         session,
         job.job_id,
@@ -467,10 +534,15 @@ async def attach_import_jobs_to_batch(
     """기존 import job들을 T-200 load batch root 아래 child로 연결한다."""
     if not job_ids:
         return ()
+    normalized_job_ids = tuple(dict.fromkeys(job_ids))
+    await lock_pipeline_hierarchy_for_jobs(
+        session,
+        (*normalized_job_ids, parent_job_id),
+    )
     result = await session.execute(
         text(_ATTACH_BATCH_SQL),
         {
-            "job_ids": json.dumps(list(job_ids)),
+            "job_ids": json.dumps(normalized_job_ids),
             "load_batch_id": load_batch_id,
             "parent_job_id": parent_job_id,
         },

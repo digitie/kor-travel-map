@@ -19,7 +19,6 @@ pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0047_notice_reconcile_stats"
 _TARGET_REVISION = "0048_import_jobs_dagster_run_id"
-_HEAD_REVISION = "0049_refresh_stale_after"
 
 
 def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
@@ -40,6 +39,19 @@ def _alembic_heads() -> list[str]:
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
     return list(ScriptDirectory.from_config(config).get_heads())
+
+
+def _alembic_revision_ids(head: str) -> set[str]:
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    scripts = ScriptDirectory.from_config(config)
+    return {
+        revision.revision
+        for revision in scripts.walk_revisions(base="base", head=head)
+    }
 
 
 async def test_dagster_run_id_backfill_upgrade_and_downgrade(
@@ -129,8 +141,10 @@ async def test_dagster_run_id_backfill_upgrade_and_downgrade(
         assert "WHERE (dagster_run_id IS NOT NULL)" in index_definition
         assert revision == _TARGET_REVISION
 
-        # 단일 head — 후속 migration이 생겨도 0048에서 선형으로 이어져야 한다.
-        assert _alembic_heads() == [_HEAD_REVISION]
+        # 단일 head를 유지하면서 후속 migration 계보에 0048이 포함되어야 한다.
+        heads = _alembic_heads()
+        assert len(heads) == 1
+        assert _TARGET_REVISION in _alembic_revision_ids(heads[0])
 
         await target_engine.dispose()
         await asyncio.to_thread(

@@ -525,6 +525,9 @@ async def test_projection_explain_records_recursive_and_event_access_plan(
         "page_limit": 51,
     }
 
+    # 1행 fixture에서 planner 비용 우연으로 seq scan을 택하지 않게 하고,
+    # 이 테스트의 목적인 event access index의 사용 가능성을 직접 검증한다.
+    await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
     plan = (
         await migrated_session.execute(
             text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {pipeline_repo._LIST_EXECUTIONS_SQL}"),

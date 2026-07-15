@@ -7,8 +7,8 @@ commit은 호출자에게 맡긴다(ADR-004).
 흐름:
 1. ``enqueue_feature_update_request`` — scope dry-run 해석 후, 실제 요청이면
    ``ops.import_jobs``와 ``ops.feature_update_requests``를 같은 transaction에 생성.
-2. ``claim_next_update_request`` — priority/created_at 순서로 queued 요청 1건을
-   ``running`` 전이(``FOR UPDATE SKIP LOCKED`` + advisory lock).
+2. ``peek_next_update_request`` → executor request/scope lease → ``start_update_request``
+   CAS — lock 경합에서 running 행을 소모하지 않는 기본 실행 흐름.
 3. ``start_update_request`` / ``finish_update_request`` — Dagster run id와 terminal
    상태를 request/import job 양쪽에 반영.
 4. ``list_update_requests`` — D-10 keyset cursor(``created_at, request_id``) 기반.
@@ -50,6 +50,8 @@ __all__ = [
     "enqueue_feature_update_request",
     "peek_update_requests",
     "peek_next_update_request",
+    "advance_update_request_generation_after_pre_start_failure",
+    "touch_queued_update_request_for_lock_retry",
     "claim_next_update_request",
     "claim_update_requests",
     "feature_update_scope_advisory_key",
@@ -58,6 +60,8 @@ __all__ = [
     "set_update_request_matched_scope",
     "cancel_update_request",
     "get_update_request",
+    "lock_feature_update_execution_guard",
+    "requeue_update_request_after_lock_contention",
     "list_update_requests",
 ]
 
@@ -75,7 +79,9 @@ _MAX_PEEK_LIMIT: Final[int] = 50
 _RETURN_COLUMNS: Final[str] = (
     "request_id, scope_type, scope, providers, dataset_keys, update_policy, "
     "run_mode, priority, status, dry_run, matched_scope, job_id, dagster_run_id, "
-    "operator, reason, error_message, created_at, started_at, finished_at, updated_at"
+    "cancellation_id, cancellation_requested_at, cancellation_requested_by, "
+    "cancellation_reason, operator, reason, error_message, created_at, started_at, "
+    "finished_at, updated_at"
 )
 
 
@@ -103,6 +109,10 @@ class FeatureUpdateRequest:
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
+    cancellation_id: str | None = None
+    cancellation_requested_at: datetime | None = None
+    cancellation_requested_by: str | None = None
+    cancellation_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +195,12 @@ def _row_to_request(row: Any) -> FeatureUpdateRequest:
         matched_scope=_json_dict(row.matched_scope),
         job_id=str(row.job_id) if row.job_id is not None else None,
         dagster_run_id=row.dagster_run_id,
+        cancellation_id=(
+            str(row.cancellation_id) if row.cancellation_id is not None else None
+        ),
+        cancellation_requested_at=row.cancellation_requested_at,
+        cancellation_requested_by=row.cancellation_requested_by,
+        cancellation_reason=row.cancellation_reason,
         operator=row.operator,
         reason=row.reason,
         error_message=row.error_message,
@@ -288,11 +304,16 @@ _INSERT_REQUEST_SQL: Final[str] = f"""
 INSERT INTO ops.feature_update_requests (
     request_id, scope_type, scope, providers, dataset_keys, update_policy,
     run_mode, priority, status, dry_run, matched_scope, job_id, operator, reason
-) VALUES (
+) SELECT
     :request_id, :scope_type, CAST(:scope AS jsonb), CAST(:providers AS jsonb),
     CAST(:dataset_keys AS jsonb), CAST(:update_policy AS jsonb),
     :run_mode, :priority, 'queued', false, CAST(:matched_scope AS jsonb),
     :job_id, :operator, :reason
+WHERE EXISTS (
+    SELECT 1
+    FROM ops.import_jobs AS job
+    WHERE job.job_id = CAST(:job_id AS uuid)
+      AND job.cancellation_id IS NULL
 )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -303,6 +324,20 @@ FROM ops.feature_update_requests
 WHERE request_id = :request_id
 """
 
+_LOCK_EXECUTION_REQUEST_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.feature_update_requests
+WHERE request_id = :request_id
+FOR UPDATE
+"""
+
+_LOCK_EXECUTION_JOB_SQL: Final[str] = """
+SELECT status, cancellation_id
+FROM ops.import_jobs
+WHERE job_id = CAST(:job_id AS uuid)
+FOR UPDATE
+"""
+
 _CLAIM_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
 SET status = 'running',
@@ -311,7 +346,9 @@ SET status = 'running',
 WHERE request_id = (
     SELECT request_id
     FROM ops.feature_update_requests
-    WHERE status = 'queued' AND dry_run IS false
+    WHERE status = 'queued'
+      AND dry_run IS false
+      AND cancellation_id IS NULL
     ORDER BY priority DESC, created_at, request_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -322,7 +359,9 @@ RETURNING {_RETURN_COLUMNS}
 _PEEK_REQUEST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
-WHERE status = 'queued' AND dry_run IS false
+WHERE status = 'queued'
+  AND dry_run IS false
+  AND cancellation_id IS NULL
 ORDER BY priority DESC, created_at, request_id
 LIMIT :limit
 """
@@ -334,7 +373,35 @@ SET status = 'running',
     dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
     updated_at = now()
 WHERE request_id = :request_id
+  AND cancellation_id IS NULL
+  AND (
+    (
+      status = 'queued'
+      AND dagster_run_id IS NULL
+      AND (
+        CAST(:expected_updated_at AS timestamptz) IS NULL
+        OR updated_at = CAST(:expected_updated_at AS timestamptz)
+      )
+    )
+    OR (
+      status = 'running'
+      AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
+    )
+  )
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_REQUEUE_REQUEST_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET status = 'queued',
+    dagster_run_id = NULL,
+    error_message = NULL,
+    started_at = NULL,
+    finished_at = NULL,
+    updated_at = GREATEST(updated_at + INTERVAL '1 microsecond', clock_timestamp())
+WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -344,6 +411,7 @@ SET matched_scope = CAST(:matched_scope AS jsonb),
     updated_at = now()
 WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -356,6 +424,11 @@ SET status = :status,
     updated_at = now()
 WHERE request_id = :request_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
+  AND (
+    CAST(:expected_dagster_run_id AS text) IS NULL
+    OR dagster_run_id = CAST(:expected_dagster_run_id AS text)
+  )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -364,9 +437,18 @@ UPDATE ops.import_jobs
 SET status = 'running',
     started_at = COALESCE(started_at, now()),
     heartbeat_at = now(),
-    current_stage = COALESCE(:current_stage, current_stage)
+    current_stage = COALESCE(:current_stage, current_stage),
+    dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id)
 WHERE job_id = :job_id
-  AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
+  AND (
+    (status = 'queued' AND dagster_run_id IS NULL)
+    OR (
+      status = 'running'
+      AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
+    )
+  )
+RETURNING job_id
 """
 
 _FINISH_IMPORT_JOB_SQL: Final[str] = """
@@ -374,10 +456,54 @@ UPDATE ops.import_jobs
 SET status = :status,
     finished_at = now(),
     heartbeat_at = now(),
+    dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
     error_message = :error_message,
     progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
 WHERE job_id = :job_id
   AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
+  AND (
+    CAST(:expected_dagster_run_id AS text) IS NULL
+    OR dagster_run_id = CAST(:expected_dagster_run_id AS text)
+  )
+RETURNING job_id
+"""
+
+_REQUEUE_IMPORT_JOB_SQL: Final[str] = """
+UPDATE ops.import_jobs
+SET status = 'queued',
+    payload = payload - 'dagster_run_id' - 'run_id',
+    progress = 0,
+    current_stage = NULL,
+    dagster_run_id = NULL,
+    error_message = NULL,
+    started_at = NULL,
+    heartbeat_at = NULL,
+    finished_at = NULL
+WHERE job_id = CAST(:job_id AS uuid)
+  AND status IN ('queued', 'running')
+  AND cancellation_id IS NULL
+RETURNING job_id
+"""
+
+_TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET updated_at = GREATEST(updated_at + INTERVAL '1 microsecond', clock_timestamp())
+WHERE request_id = :request_id
+  AND status = 'queued'
+  AND cancellation_id IS NULL
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_ADVANCE_PRE_START_FAILURE_GENERATION_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET updated_at = GREATEST(updated_at + INTERVAL '1 microsecond', clock_timestamp())
+WHERE request_id = :request_id
+  AND status = 'queued'
+  AND dagster_run_id IS NULL
+  AND updated_at = CAST(:expected_updated_at AS timestamptz)
+  AND cancellation_id IS NULL
+RETURNING {_RETURN_COLUMNS}
 """
 
 _LIST_REQUESTS_SQL: Final[str] = f"""
@@ -426,13 +552,21 @@ async def _start_import_job(
     *,
     job_id: str | None,
     current_stage: str,
-) -> None:
+    dagster_run_id: str | None = None,
+) -> bool:
     if job_id is None:
-        return
-    await session.execute(
-        text(_START_IMPORT_JOB_SQL),
-        {"job_id": job_id, "current_stage": current_stage},
-    )
+        return True
+    row = (
+        await session.execute(
+            text(_START_IMPORT_JOB_SQL),
+            {
+                "job_id": job_id,
+                "current_stage": current_stage,
+                "dagster_run_id": dagster_run_id,
+            },
+        )
+    ).one_or_none()
+    return row is not None
 
 
 async def _finish_import_job(
@@ -440,14 +574,25 @@ async def _finish_import_job(
     *,
     job_id: str | None,
     status: str,
+    dagster_run_id: str | None,
+    expected_dagster_run_id: str | None,
     error_message: str | None,
-) -> None:
+) -> bool:
     if job_id is None:
-        return
-    await session.execute(
-        text(_FINISH_IMPORT_JOB_SQL),
-        {"job_id": job_id, "status": status, "error_message": error_message},
-    )
+        return True
+    row = (
+        await session.execute(
+            text(_FINISH_IMPORT_JOB_SQL),
+            {
+                "job_id": job_id,
+                "status": status,
+                "dagster_run_id": dagster_run_id,
+                "expected_dagster_run_id": expected_dagster_run_id,
+                "error_message": error_message,
+            },
+        )
+    ).one_or_none()
+    return row is not None
 
 
 async def enqueue_feature_update_request(
@@ -560,7 +705,6 @@ async def peek_next_update_request(
     return requests[0] if requests else None
 
 
-
 async def claim_next_update_request(
     session: AsyncSession,
 ) -> FeatureUpdateRequest | None:
@@ -570,14 +714,19 @@ async def claim_next_update_request(
     ) as acquired:
         if not acquired:
             raise FeatureUpdateQueueLockBusy()
-        row = (await session.execute(text(_CLAIM_REQUEST_SQL))).one_or_none()
-        if row is None:
-            return None
-        request = _row_to_request(row)
-        await _start_import_job(
-            session, job_id=request.job_id, current_stage="claimed"
-        )
-        return request
+        async with session.begin_nested():
+            row = (await session.execute(text(_CLAIM_REQUEST_SQL))).one_or_none()
+            if row is None:
+                return None
+            request = _row_to_request(row)
+            job_started = await _start_import_job(
+                session, job_id=request.job_id, current_stage="claimed"
+            )
+            if not job_started:
+                raise RuntimeError(
+                    "feature update request was claimed but its import job was not"
+                )
+            return request
 
 
 async def claim_update_requests(
@@ -602,21 +751,46 @@ async def start_update_request(
     request_id: str,
     *,
     dagster_run_id: str | None = None,
+    expected_updated_at: datetime | None = None,
 ) -> FeatureUpdateRequest | None:
-    """queued/running 요청을 running으로 만들고 Dagster run id를 기록한다."""
-    row = (
-        await session.execute(
-            text(_START_REQUEST_SQL),
-            {"request_id": request_id, "dagster_run_id": dagster_run_id},
+    """queued generation을 claim하거나 같은 running owner를 멱등 재확인한다.
+
+    다른 ``dagster_run_id``가 소유한 running request는 절대 덮지 않는다. queued
+    transition에는 sensor가 고정한 ``expected_updated_at``을 선택적으로 적용한다.
+    연결 import job start가 실패하면 nested transaction 전체를 rollback한다.
+    """
+    if dagster_run_id == "":
+        raise ValueError("dagster_run_id must not be empty")
+    if expected_updated_at is not None and (
+        expected_updated_at.tzinfo is None
+        or expected_updated_at.utcoffset() is None
+    ):
+        raise ValueError("expected_updated_at must be timezone-aware")
+    async with session.begin_nested():
+        row = (
+            await session.execute(
+                text(_START_REQUEST_SQL),
+                {
+                    "request_id": request_id,
+                    "dagster_run_id": dagster_run_id,
+                    "expected_updated_at": expected_updated_at,
+                },
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        request = _row_to_request(row)
+        job_started = await _start_import_job(
+            session,
+            job_id=request.job_id,
+            current_stage="started",
+            dagster_run_id=dagster_run_id,
         )
-    ).one_or_none()
-    if row is None:
-        return None
-    request = _row_to_request(row)
-    await _start_import_job(
-        session, job_id=request.job_id, current_stage="started"
-    )
-    return request
+        if not job_started:
+            raise RuntimeError(
+                "feature update request was started but its import job was not"
+            )
+        return request
 
 
 async def finish_update_request(
@@ -625,11 +799,22 @@ async def finish_update_request(
     *,
     status: str = "done",
     dagster_run_id: str | None = None,
+    expected_dagster_run_id: str | None = None,
     error_message: str | None = None,
 ) -> FeatureUpdateRequest | None:
-    """queued/running 요청을 terminal 상태로 닫고 import job도 같은 상태로 닫는다."""
+    """요청과 import job을 닫되 지정한 Dagster run 세대가 아니면 건너뛴다."""
     if status not in _TERMINAL_STATES:
         raise ValueError(f"status must be one of {sorted(_TERMINAL_STATES)}")
+    if expected_dagster_run_id == "":
+        raise ValueError("expected_dagster_run_id must not be empty")
+    if (
+        expected_dagster_run_id is not None
+        and dagster_run_id is not None
+        and expected_dagster_run_id != dagster_run_id
+    ):
+        raise ValueError(
+            "dagster_run_id must match expected_dagster_run_id when both are set"
+        )
     row = (
         await session.execute(
             text(_FINISH_REQUEST_SQL),
@@ -637,6 +822,7 @@ async def finish_update_request(
                 "request_id": request_id,
                 "status": status,
                 "dagster_run_id": dagster_run_id,
+                "expected_dagster_run_id": expected_dagster_run_id,
                 "error_message": error_message,
             },
         )
@@ -644,12 +830,19 @@ async def finish_update_request(
     if row is None:
         return None
     request = _row_to_request(row)
-    await _finish_import_job(
+    job_finished = await _finish_import_job(
         session,
         job_id=request.job_id,
         status=status,
+        dagster_run_id=dagster_run_id,
+        expected_dagster_run_id=expected_dagster_run_id,
         error_message=error_message,
     )
+    if expected_dagster_run_id is not None and not job_finished:
+        raise RuntimeError(
+            "feature update request was finished but its import job run generation "
+            "did not match"
+        )
     return request
 
 
@@ -695,6 +888,128 @@ async def get_update_request(
     row = (
         await session.execute(
             text(_GET_REQUEST_SQL), {"request_id": request_id}
+        )
+    ).one_or_none()
+    return _row_to_request(row) if row is not None else None
+
+
+async def lock_feature_update_execution_guard(
+    session: AsyncSession,
+    request_id: str,
+) -> FeatureUpdateRequest | None:
+    """실행 phase 직전에 request→job을 잠그고 marker/status를 검증한다.
+
+    취소 coordinator와 같은 base row 순서를 사용한다. 반환값이 ``None``이면
+    현재 transaction에서 provider runner나 lifecycle write를 시작하면 안 된다.
+    """
+    row = (
+        await session.execute(
+            text(_LOCK_EXECUTION_REQUEST_SQL),
+            {"request_id": request_id},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    request = _row_to_request(row)
+    if (
+        request.status not in {"queued", "running"}
+        or request.cancellation_id is not None
+    ):
+        return None
+    if request.job_id is None:
+        return request
+    job = (
+        await session.execute(
+            text(_LOCK_EXECUTION_JOB_SQL),
+            {"job_id": request.job_id},
+        )
+    ).one_or_none()
+    if (
+        job is None
+        or str(job.status) not in {"queued", "running"}
+        or job.cancellation_id is not None
+    ):
+        return None
+    return request
+
+
+async def requeue_update_request_after_lock_contention(
+    session: AsyncSession,
+    request_id: str,
+) -> FeatureUpdateRequest | None:
+    """request lease를 가진 executor가 scope 경합 대상을 다시 실행 가능하게 둔다.
+
+    request→job row를 먼저 잠가 cancellation marker와 terminal 상태를 확인한다.
+    이미 queued인 행도 ``updated_at``을 전진시켜 Dagster sensor가 새 run key로 다시
+    제출할 수 있게 한다. marker가 있으면 coordinator가 lifecycle을 소유하므로 아무
+    상태도 되돌리지 않는다.
+    """
+    current = await lock_feature_update_execution_guard(session, request_id)
+    if current is None:
+        return None
+    row = (
+        await session.execute(
+            text(_REQUEUE_REQUEST_SQL),
+            {"request_id": request_id},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    requeued = _row_to_request(row)
+    if requeued.job_id is not None:
+        job_row = (
+            await session.execute(
+                text(_REQUEUE_IMPORT_JOB_SQL),
+                {"job_id": requeued.job_id},
+            )
+        ).one_or_none()
+        if job_row is None:
+            raise RuntimeError(
+                "feature update request was requeued but its import job was not"
+            )
+    return requeued
+
+
+async def touch_queued_update_request_for_lock_retry(
+    session: AsyncSession,
+    request_id: str,
+) -> FeatureUpdateRequest | None:
+    """request lease loser가 queued 행의 Dagster run key만 안전하게 전진시킨다.
+
+    running/terminal/marker 행은 절대 건드리지 않는다. 정상 owner가 아직 CAS start 전이면
+    새 sensor run이 예약될 수 있지만 request lease가 중복 실행을 막고, owner가 start한
+    뒤에는 queued 조건이 깨져 추가 run key를 만들지 않는다.
+    """
+    row = (
+        await session.execute(
+            text(_TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL),
+            {"request_id": request_id},
+        )
+    ).one_or_none()
+    return _row_to_request(row) if row is not None else None
+
+
+async def advance_update_request_generation_after_pre_start_failure(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    expected_updated_at: datetime,
+) -> FeatureUpdateRequest | None:
+    """CAS start 전 실패한 queued generation의 sensor run key를 전진시킨다.
+
+    ``queued + dagster_run_id IS NULL``인 동일 ``updated_at`` generation만
+    갱신한다. running owner, 더 최신 generation, cancellation marker, terminal
+    request는 모두 0행 no-op이다.
+    """
+    if expected_updated_at.tzinfo is None or expected_updated_at.utcoffset() is None:
+        raise ValueError("expected_updated_at must be timezone-aware")
+    row = (
+        await session.execute(
+            text(_ADVANCE_PRE_START_FAILURE_GENERATION_SQL),
+            {
+                "request_id": request_id,
+                "expected_updated_at": expected_updated_at,
+            },
         )
     ).one_or_none()
     return _row_to_request(row) if row is not None else None

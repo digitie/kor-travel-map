@@ -1,6 +1,8 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { makePipelineCancellationResponse } from "./pipeline-cancellation-fixture";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -12,10 +14,11 @@ type FeatureUpdateRequestCreateResponse =
   components["schemas"]["FeatureUpdateRequestCreateResponse"];
 type FeatureUpdateRequestCreateRequest =
   components["schemas"]["FeatureUpdateRequestCreateRequest"];
-type FeatureUpdateRequestCancelRequest =
-  components["schemas"]["FeatureUpdateRequestCancelRequest"];
+type PipelineCancellationRequest =
+  components["schemas"]["PipelineCancellationRequest"];
 type FeatureUpdateRequestRunNowRequest =
   components["schemas"]["FeatureUpdateRequestRunNowRequest"];
+type ProvidersResponse = components["schemas"]["ProvidersResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 // detail deeplink truncation을 검증할 수 있게 12자 초과 uuid를 쓴다(shortId는 12자+"...").
@@ -94,7 +97,7 @@ interface FeatureUpdateMocks {
   list: number;
   createBodies: FeatureUpdateRequestCreateRequest[];
   runNowBodies: FeatureUpdateRequestRunNowRequest[];
-  cancelBodies: FeatureUpdateRequestCancelRequest[];
+  cancelBodies: PipelineCancellationRequest[];
 }
 
 /**
@@ -121,6 +124,15 @@ async function mockFeatureUpdateRequests(
     cancelBodies: [],
   };
   const base = "/v1/admin/features/update-requests";
+  const providersResponse: ProvidersResponse = {
+    data: { providers: [] },
+    meta: { duration_ms: 1, request_id: "e2e-feature-update-providers" },
+  };
+
+  await page.route("**/v1/debug/etl/providers**", async (route) => {
+    bffApiPath(route.request().url());
+    await fulfillJson(route, providersResponse);
+  });
 
   await page.route("**/v1/admin/features/update-requests**", async (route) => {
     const request = route.request();
@@ -129,6 +141,7 @@ async function mockFeatureUpdateRequests(
       return;
     }
     const url = new URL(request.url());
+    const pathname = bffApiPath(request.url());
     // Next.js RSC prefetch 요청(?_rsc=...)은 mock하지 않고 흘려보낸다.
     if (url.searchParams.has("_rsc")) {
       await route.continue();
@@ -137,7 +150,7 @@ async function mockFeatureUpdateRequests(
 
     const method = request.method();
 
-    if (method === "GET" && url.pathname === base) {
+    if (method === "GET" && pathname === base) {
       mocks.list += 1;
       // status 파라미터: 없으면(=all) 전체, 있으면 해당 status만.
       const status = url.searchParams.get("status");
@@ -148,7 +161,7 @@ async function mockFeatureUpdateRequests(
       return;
     }
 
-    if (method === "POST" && url.pathname === base) {
+    if (method === "POST" && pathname === base) {
       mocks.create += 1;
       const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
       mocks.createBodies.push(body);
@@ -210,7 +223,7 @@ async function mockFeatureUpdateRequests(
     if (method === "POST" && url.pathname.endsWith("/cancel")) {
       mocks.cancel += 1;
       mocks.cancelBodies.push(
-        request.postDataJSON() as FeatureUpdateRequestCancelRequest,
+        request.postDataJSON() as PipelineCancellationRequest,
       );
       const requestId = url.pathname.split("/").at(-2) ?? "";
       const target =
@@ -224,7 +237,16 @@ async function mockFeatureUpdateRequests(
         cancelled,
         ...items.filter((item) => item.request_id !== requestId),
       ];
-      await fulfillJson(route, createResponse(cancelled));
+      await fulfillJson(
+        route,
+        makePipelineCancellationResponse({
+          rootKind: "update_request",
+          rootId: requestId,
+          initialStatus: target.status,
+          dagsterRunId: target.dagster_run_id,
+          reason: "cancelled from admin ui",
+        }),
+      );
       return;
     }
 
@@ -243,9 +265,9 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await page.goto("/admin/features/update-requests");
 
     // pre-fill 기본값(lon=126.9780, lat=37.5665, radius km=5) 확인.
-    await expect(page.getByLabel("lon")).toHaveValue("126.9780");
-    await expect(page.getByLabel("lat")).toHaveValue("37.5665");
-    await expect(page.getByLabel("radius km")).toHaveValue("5");
+    await expect(page.getByLabel("경도")).toHaveValue("126.9780");
+    await expect(page.getByLabel("위도")).toHaveValue("37.5665");
+    await expect(page.getByLabel("반경(km)")).toHaveValue("5");
 
     // native <input type=checkbox> dry-run을 해제(base-ui Checkbox gotcha 미적용).
     await page.getByLabel("dry-run").uncheck();
@@ -271,11 +293,11 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       .getByRole("status")
       .filter({ hasText: "요청 처리 완료" });
     await expect(successAlert).toBeVisible();
-    await expect(successAlert).toContainText("queued");
+    await expect(successAlert).toContainText("대기");
     await expect(successAlert).toContainText("created-1");
 
     // 생성 후 list refetch가 새 queued 행을 보인다. 'all'로 바꿔도 보이도록 방어.
-    await page.getByLabel("request status").selectOption("all");
+    await page.getByLabel("요청 상태 필터").selectOption("all");
     await expect(
       page.getByRole("row", { name: /created-1/ }),
     ).toBeVisible();
@@ -300,7 +322,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     });
 
     // request_id가 null인 dry-run preview 행은 actions 컬럼에 'dry-run' 텍스트만 렌더.
-    await page.getByLabel("request status").selectOption("all");
+    await page.getByLabel("요청 상태 필터").selectOption("all");
     const dryRunCell = page.getByRole("cell", { name: "dry-run", exact: true });
     await expect(dryRunCell).toBeVisible();
     const dryRunRow = page.getByRole("row").filter({ has: dryRunCell });
@@ -309,7 +331,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
 
     // Branch B — dry-run 해제 + run mode=now 제출.
     await page.getByLabel("dry-run").uncheck();
-    await page.getByLabel("run mode").selectOption("now");
+    await page.getByLabel("실행 모드").selectOption("now");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => mocks.create).toBe(2);
@@ -337,7 +359,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     });
 
     await page.goto("/admin/features/update-requests");
-    await page.getByLabel("request status").selectOption("done");
+    await page.getByLabel("요청 상태 필터").selectOption("done");
 
     const doneRow = page.getByRole("row", {
       name: new RegExp(DONE_REQUEST_ID.slice(0, 12)),
@@ -353,7 +375,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     });
 
     // queued 행은 cancel + run-now 둘 다 노출 + cancel은 /cancel POST.
-    await page.getByLabel("request status").selectOption("queued");
+    await page.getByLabel("요청 상태 필터").selectOption("queued");
     const queuedRow = page.getByRole("row", {
       name: new RegExp(QUEUED_REQUEST_ID.slice(0, 12)),
     });
@@ -363,7 +385,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
 
     await expect.poll(() => mocks.cancel).toBe(1);
     expect(mocks.cancelBodies[0]).toMatchObject({
-      error_message: "cancelled from admin ui",
+      reason: "cancelled from admin ui",
     });
   });
 
@@ -376,12 +398,19 @@ test.describe("admin/feature-update-requests list + create depth", () => {
 
     // 목록 쿼리가 끝나기 전 절대단언 race를 막기 위해 empty 행이 렌더될 때까지 대기.
     await expect(page.getByText("요청이 없습니다.")).toBeVisible();
-    await expect(page.getByText("0 rows")).toBeVisible();
+    await expect(page.getByText("0건")).toBeVisible();
   });
 
   test("list error: GET 500 -> destructive Alert 'request 처리 실패' with HTTP 500 message", async ({
     page,
   }) => {
+    await page.route("**/v1/debug/etl/providers**", async (route) => {
+      bffApiPath(route.request().url());
+      await fulfillJson(route, {
+        data: { providers: [] },
+        meta: { duration_ms: 1, request_id: "e2e-feature-update-providers-error" },
+      } satisfies ProvidersResponse);
+    });
     await page.route(
       "**/v1/admin/features/update-requests**",
       async (route) => {
@@ -404,7 +433,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     // 목록 실패 배너는 role=alert(destructive) + 'request 처리 실패'(CREATE 실패는 '요청 생성 실패').
     const errorAlert = page
       .getByRole("alert")
-      .filter({ hasText: "request 처리 실패" });
+      .filter({ hasText: "요청 처리 실패" });
     await expect(errorAlert).toBeVisible();
     // ApiClientError.message: "GET /v1/... 실패 (HTTP 500) ...".
     await expect(page.getByText(/HTTP 500/)).toBeVisible();
@@ -417,13 +446,17 @@ test.describe("admin/feature-update-requests list + create depth", () => {
 
     await page.goto("/admin/features/update-requests");
 
-    await page.getByLabel("lon").fill("");
-    await page.getByLabel("lat").fill("44");
-    await page.getByLabel("radius km").fill("0.01");
+    await page.getByLabel("경도").fill("");
+    await page.getByLabel("위도").fill("44");
+    await page.getByLabel("반경(km)").fill("0.01");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
-    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
-    await expect(page.getByText("위도는 33~43 범위여야 합니다.")).toBeVisible();
+    await expect(page.getByText("경도를 입력하세요.")).toBeVisible();
+    await expect(
+      page.getByText(
+        "좌표는 대한민국 범위 안의 숫자로 입력하세요. 경도는 124~132, 위도는 33~39.5 사이입니다.",
+      ),
+    ).toBeVisible();
     await expect(page.getByText("반경은 0.1 이상이어야 합니다.")).toBeVisible();
     expect(mocks.create).toBe(0);
   });
@@ -462,7 +495,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     });
 
     await page.goto("/admin/features/update-requests");
-    await page.getByLabel("request status").selectOption("all");
+    await page.getByLabel("요청 상태 필터").selectOption("all");
 
     const row = page.getByRole("row", {
       name: new RegExp(DONE_REQUEST_ID.slice(0, 12)),

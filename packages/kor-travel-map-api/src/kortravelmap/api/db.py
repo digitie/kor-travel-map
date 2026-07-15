@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "configure_prometheus_metrics",
+    "get_engine",
     "get_session",
     "set_engine_for_test",
     "reset_engine",
@@ -54,6 +55,12 @@ def _get_engine() -> AsyncEngine:
         )
     _instrument_engine_if_needed(_engine)
     return _engine
+
+
+async def get_engine() -> AsyncEngine:
+    """장기 phase를 직접 소유하는 application service용 async engine dependency."""
+
+    return _get_engine()
 
 
 def configure_prometheus_metrics(metrics: PrometheusMetrics | None) -> None:

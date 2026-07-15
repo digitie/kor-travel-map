@@ -1,6 +1,8 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { makePipelineCancellationResponse } from "./pipeline-cancellation-fixture";
 
 /**
  * `/admin/features/update-requests/[requestId]` 상세 — ZERO 커버 페이지 spec
@@ -76,20 +78,22 @@ async function mockUpdateRequest(
     "**/v1/admin/features/update-requests/**",
     async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const pathname = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "POST" && url.pathname === `${DETAIL_PATH}/cancel`) {
+      if (method === "POST" && pathname === `${DETAIL_PATH}/cancel`) {
         calls.cancel += 1;
         status = "cancelled";
-        const body: FeatureUpdateRequestCreateResponse = {
-          data: makeUpdateRequest({ status }),
-          meta,
-        };
+        const body = makePipelineCancellationResponse({
+          rootKind: "update_request",
+          rootId: REQUEST_ID,
+          initialStatus: options.initialStatus ?? "queued",
+          reason: "cancelled from feature update request detail",
+        });
         await fulfillJson(route, body);
         return;
       }
-      if (method === "POST" && url.pathname === `${DETAIL_PATH}/run-now`) {
+      if (method === "POST" && pathname === `${DETAIL_PATH}/run-now`) {
         calls.runNow += 1;
         status = "running";
         const body: FeatureUpdateRequestCreateResponse = {
@@ -99,7 +103,7 @@ async function mockUpdateRequest(
         await fulfillJson(route, body, 201);
         return;
       }
-      if (method === "GET" && url.pathname === DETAIL_PATH) {
+      if (method === "GET" && pathname === DETAIL_PATH) {
         calls.detail += 1;
         if (options.detailStatus && options.detailStatus >= 400) {
           await fulfillJson(
@@ -131,18 +135,18 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update request" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
-    await expect(page.getByText("Scope", { exact: true })).toBeVisible();
-    await expect(page.getByText("Matched scope", { exact: true })).toBeVisible();
-    await expect(page.getByText("Policy", { exact: true })).toBeVisible();
+    await expect(page.getByText("스코프", { exact: true })).toBeVisible();
+    await expect(page.getByText("매칭된 스코프", { exact: true })).toBeVisible();
+    await expect(page.getByText("정책", { exact: true })).toBeVisible();
     await expect(page.getByText("dry-run", { exact: true })).toBeVisible();
     // job 셀은 import-job 상세로 deeplink.
     await expect(
       page.getByRole("link", { name: /77777777/ }),
     ).toHaveAttribute("href", `/ops/import-jobs/${JOB_ID}`);
-    await expect(page.getByRole("button", { name: "cancel" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "취소" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
   test("terminal(done) — cancel 숨김, run-now는 유지(재큐잉)", async ({
@@ -152,25 +156,25 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update request" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "cancel" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
   test("running — cancel 노출, run-now 숨김", async ({ page }) => {
     await mockUpdateRequest(page, { initialStatus: "running" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    await expect(page.getByRole("button", { name: "cancel" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "run-now" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "취소" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
   });
 
   test("cancel 액션 → 성공 re-fetch 후 cancel 버튼 사라짐", async ({ page }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const cancel = page.getByRole("button", { name: "cancel" });
+    const cancel = page.getByRole("button", { name: "취소" });
     await expect(cancel).toBeVisible();
     await cancel.click();
     // cancel 성공 → status=cancelled → invalidate → re-fetch → canCancel=false.
@@ -182,7 +186,7 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const runNow = page.getByRole("button", { name: "run-now" });
+    const runNow = page.getByRole("button", { name: "즉시 실행" });
     await expect(runNow).toBeVisible();
     await runNow.click();
     // run-now 성공 → status=running → re-fetch → run-now 숨김(=처리됨).
@@ -194,6 +198,6 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     await mockUpdateRequest(page, { detailStatus: 404 });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    await expect(page.getByText("request 조회 실패")).toBeVisible();
+    await expect(page.getByText("요청 조회 실패")).toBeVisible();
   });
 });

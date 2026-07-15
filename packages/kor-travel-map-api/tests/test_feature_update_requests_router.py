@@ -20,6 +20,7 @@ from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 from kortravelmap.api import feature_update_service as service_mod
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
+from kortravelmap.api.pipeline_cancellation_schema import PipelineCancellationDetailRecord
 from kortravelmap.api.routers import feature_update_requests as router_mod
 from kortravelmap.api.settings import ApiSettings
 
@@ -88,6 +89,39 @@ def _request(
     )
 
 
+def _cancellation_detail(request_id: str) -> PipelineCancellationDetailRecord:
+    now = datetime(2026, 6, 3, tzinfo=UTC)
+    return PipelineCancellationDetailRecord.model_validate(
+        {
+            "cancellation_id": "77777777-7777-4777-8777-777777777777",
+            "previous_cancellation_id": None,
+            "root": {"kind": "update_request", "id": request_id},
+            "status": "completed",
+            "requested_at": now,
+            "requested_by": "local-dev",
+            "reason": "stop",
+            "error": None,
+            "updated_at": now,
+            "finished_at": now,
+            "retryable": False,
+            "unresolved_member_count": 0,
+            "members": [
+                {
+                    "member_kind": "update_request",
+                    "member_id": request_id,
+                    "dagster_run_id": None,
+                    "initial_status": "queued",
+                    "result": "cancelled",
+                    "terminal_status": "cancelled",
+                    "error": None,
+                    "updated_at": now,
+                }
+            ],
+            "dagster_runs": [],
+        }
+    )
+
+
 def _preview() -> FeatureUpdateRequestPreview:
     return FeatureUpdateRequestPreview(
         scope_type="feature_ids",
@@ -121,6 +155,16 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert request_schema["properties"]["providers"]["maxItems"] == 32
     update_policy_schema = spec["components"]["schemas"]["FeatureUpdatePolicy"]
     assert update_policy_schema["additionalProperties"] is False
+    cancel_operation = spec["paths"][
+        "/v1/admin/features/update-requests/{request_id}/cancel"
+    ]["post"]
+    assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
+        cancel_operation["responses"]
+    )
+    for status_code in ("409", "502", "503"):
+        assert cancel_operation["responses"][status_code]["headers"][
+            "Retry-After"
+        ]["schema"] == {"type": "integer"}
 
 
 @pytest.mark.unit
@@ -384,28 +428,56 @@ def test_get_request_404_when_missing(
 
 
 @pytest.mark.unit
-def test_cancel_request_returns_cancelled(
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "/v1/admin/features/update-requests",
+        "/v1/admin/feature-update-requests",
+    ],
+)
+def test_cancel_request_delegates_both_admin_paths(
     client: TestClient,
-    session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
+    prefix: str,
 ) -> None:
-    async def _cancel(
-        _session: Any, request_id: str, *, error_message: str | None
-    ) -> FeatureUpdateRequest:
-        assert request_id == "req-1"
-        assert error_message == "stop"
-        return _request(state="cancelled")
+    request_id = "22222222-2222-4222-8222-222222222222"
+    calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(router_mod, "cancel_update_request", _cancel)
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        calls.append(kwargs)
+        return _cancellation_detail(request_id)
+
+    monkeypatch.setattr(
+        router_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
 
     response = client.post(
-        "/v1/admin/features/update-requests/req-1/cancel",
-        json={"error_message": "stop"},
+        f"{prefix}/{request_id}/cancel",
+        json={"reason": "stop"},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "cancelled"
-    assert session.begin_count == 1
+    assert response.json()["data"]["status"] == "completed"
+    assert calls[0]["kind"] == "update_request"
+    assert calls[0]["execution_id"] == request_id
+    assert calls[0]["requested_by"] == "local-dev"
+    assert calls[0]["reason"] == "stop"
+    assert calls[0]["engine"] is not None
+    assert isinstance(calls[0]["settings"], ApiSettings)
+    assert calls[0]["http_client"] is not None
+
+
+@pytest.mark.unit
+def test_cancel_request_rejects_actor_override(client: TestClient) -> None:
+    request_id = "22222222-2222-4222-8222-222222222222"
+    response = client.post(
+        f"/v1/admin/features/update-requests/{request_id}/cancel",
+        json={"actor": "spoofed"},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

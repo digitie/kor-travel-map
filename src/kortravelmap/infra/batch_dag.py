@@ -25,18 +25,35 @@ from kortravelmap.infra.jobs_repo import (
     ImportJob,
     attach_import_jobs_to_batch,
     finish_import_job,
+    get_import_job,
     list_import_jobs_by_ids,
     start_import_job,
     update_import_job_payload,
+)
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    lock_pipeline_hierarchy_for_jobs,
 )
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "BatchDagMvPrepared",
+    "BatchDagCancellationWon",
+    "BatchDagPrepared",
+    "BatchDagRequest",
     "BatchDagRunResult",
     "MaterializedViewRefreshResult",
-    "run_batch_dag_consistency_gate",
+    "batch_dag_mutex_key",
+    "fail_batch_dag_phase",
+    "finish_batch_mv_phase",
+    "make_batch_dag_request",
+    "plan_batch_dag",
+    "prepare_batch_dag",
+    "refresh_materialized_views",
+    "reload_batch_phase_loss_result",
+    "run_batch_consistency_phase",
+    "start_batch_mv_phase",
 ]
 
 BATCH_ROOT_JOB_KIND: Final[str] = "full_load_batch"
@@ -119,69 +136,118 @@ class BatchDagRunResult:
         }
 
 
-async def run_batch_dag_consistency_gate(
-    session: AsyncSession,
+@dataclass(frozen=True)
+class BatchDagRequest:
+    """여러 transaction phase가 공유하는 정규화 batch 입력."""
+
+    load_batch_id: str
+    child_job_ids: tuple[str, ...]
+    root_kind: str
+    root_payload: dict[str, Any]
+    dagster_run_id: str | None
+    consistency_persist: bool
+    sample_limit: int
+    dedup_pending_threshold: int
+    materialized_views: tuple[str, ...]
+    mv_refresh_strategy: str
+
+
+@dataclass(frozen=True)
+class BatchDagPrepared:
+    """짧은 prepare transaction이 확정한 durable job graph."""
+
+    request: BatchDagRequest
+    root_job: ImportJob
+    child_jobs: tuple[ImportJob, ...]
+    consistency_job: ImportJob
+
+
+@dataclass(frozen=True)
+class BatchDagMvPrepared:
+    """consistency 종결 뒤 MV 장기 phase에 넘기는 snapshot."""
+
+    prepared: BatchDagPrepared
+    consistency_report: ConsistencyReport
+    consistency_job: ImportJob
+    mv_refresh_job: ImportJob
+
+
+class BatchDagCancellationWon(RuntimeError):
+    """현재 phase transaction을 전부 rollback시키는 내부 marker/CAS sentinel."""
+
+
+def make_batch_dag_request(
     *,
     child_job_ids: Sequence[str] = (),
     load_batch_id: str | None = None,
     root_kind: str = BATCH_ROOT_JOB_KIND,
     root_payload: Mapping[str, Any] | None = None,
     dagster_run_id: str | None = None,
-    plan_only: bool = False,
     consistency_persist: bool = True,
     sample_limit: int = 20,
     dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
     materialized_views: Sequence[str] = (),
     mv_refresh_strategy: str = "swap",
+) -> BatchDagRequest:
+    """호출당 한 번만 batch id와 전략을 정규화한다."""
+    return BatchDagRequest(
+        load_batch_id=_normalize_uuid(load_batch_id or str(uuid4())),
+        child_job_ids=_normalize_uuid_list(child_job_ids),
+        root_kind=root_kind,
+        root_payload=dict(root_payload or {}),
+        dagster_run_id=dagster_run_id,
+        consistency_persist=consistency_persist,
+        sample_limit=sample_limit,
+        dedup_pending_threshold=dedup_pending_threshold,
+        materialized_views=tuple(str(view) for view in materialized_views if str(view)),
+        mv_refresh_strategy=_normalize_mv_refresh_strategy(mv_refresh_strategy),
+    )
+
+
+def batch_dag_mutex_key(load_batch_id: str) -> str:
+    """같은 batch gate 전체를 직렬화하는 session advisory-lock key."""
+    return f"kortravelmap:batch-dag:{_normalize_uuid(load_batch_id)}"
+
+
+async def plan_batch_dag(
+    session: AsyncSession,
+    request: BatchDagRequest,
 ) -> BatchDagRunResult:
-    """기존 child import job을 batch로 묶고 consistency gate를 실행한다.
+    """write 없이 child 존재 여부만 읽는다."""
+    child_jobs = await list_import_jobs_by_ids(session, request.child_job_ids)
+    return BatchDagRunResult(
+        load_batch_id=request.load_batch_id,
+        state="planned",
+        child_jobs=_order_jobs(child_jobs, request.child_job_ids),
+        plan_only=True,
+        missing_child_job_ids=_missing_child_ids(child_jobs, request.child_job_ids),
+    )
 
-    ``child_job_ids``의 모든 job이 ``done``이어야 gate가 진행된다. 정합성 리포트의
-    ``severity_max``가 ``ERROR``이면 ``mv_refresh``를 실행하지 않고 root/gate job을
-    ``failed``로 닫는다.
-    """
-    normalized_batch_id = _normalize_uuid(load_batch_id or str(uuid4()))
-    normalized_child_ids = _normalize_uuid_list(child_job_ids)
-    strategy = _normalize_mv_refresh_strategy(mv_refresh_strategy)
-    views = tuple(str(view) for view in materialized_views if str(view))
 
-    if plan_only:
-        child_jobs = await list_import_jobs_by_ids(session, normalized_child_ids)
-        return BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
-            state="planned",
-            child_jobs=_order_jobs(child_jobs, normalized_child_ids),
-            plan_only=True,
-            missing_child_job_ids=_missing_child_ids(child_jobs, normalized_child_ids),
-        )
-
-    payload = {
-        **dict(root_payload or {}),
-        "load_batch_id": normalized_batch_id,
-        "child_job_ids": list(normalized_child_ids),
-        "dagster_run_id": dagster_run_id,
-        "materialized_views": list(views),
-        "mv_refresh_strategy": strategy,
-    }
+async def prepare_batch_dag(
+    session: AsyncSession,
+    request: BatchDagRequest,
+) -> BatchDagPrepared | BatchDagRunResult:
+    """root attach와 consistency child 생성을 짧은 transaction에 고정한다."""
+    payload = _root_payload(request)
     root = await start_import_job(
         session,
-        kind=root_kind,
+        kind=request.root_kind,
         payload=payload,
-        load_batch_id=normalized_batch_id,
+        load_batch_id=request.load_batch_id,
     )
-
     child_jobs = await attach_import_jobs_to_batch(
         session,
-        normalized_child_ids,
-        load_batch_id=normalized_batch_id,
+        request.child_job_ids,
+        load_batch_id=request.load_batch_id,
         parent_job_id=root.job_id,
     )
-    child_jobs = _order_jobs(child_jobs, normalized_child_ids)
-    missing = _missing_child_ids(child_jobs, normalized_child_ids)
+    child_jobs = _order_jobs(child_jobs, request.child_job_ids)
+    missing = _missing_child_ids(child_jobs, request.child_job_ids)
     child_error = _child_error_message(child_jobs, missing)
     if child_error is not None:
-        result = BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
+        provisional = BatchDagRunResult(
+            load_batch_id=request.load_batch_id,
             state="failed",
             root_job=root,
             child_jobs=child_jobs,
@@ -189,157 +255,314 @@ async def run_batch_dag_consistency_gate(
             error_message=child_error,
         )
         await update_import_job_payload(
-            session, root.job_id, payload={**payload, **result.as_metadata()}
+            session,
+            root.job_id,
+            payload={**payload, **provisional.as_metadata()},
         )
-        root = await finish_import_job(
+        failed_root = await finish_import_job(
             session, root.job_id, status="failed", error_message=child_error
-        ) or root
+        )
         return BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
+            load_batch_id=request.load_batch_id,
             state="failed",
-            root_job=root,
+            root_job=failed_root or await _reload_job(session, root.job_id),
             child_jobs=child_jobs,
             missing_child_job_ids=missing,
             error_message=child_error,
         )
-
     consistency_job = await start_import_job(
         session,
         kind=CONSISTENCY_GATE_JOB_KIND,
         payload={
-            "load_batch_id": normalized_batch_id,
-            "persist": consistency_persist,
-            "sample_limit": sample_limit,
-            "dedup_pending_threshold": dedup_pending_threshold,
+            "load_batch_id": request.load_batch_id,
+            "persist": request.consistency_persist,
+            "sample_limit": request.sample_limit,
+            "dedup_pending_threshold": request.dedup_pending_threshold,
         },
-        load_batch_id=normalized_batch_id,
+        load_batch_id=request.load_batch_id,
         parent_job_id=root.job_id,
     )
-    try:
-        report = await run_consistency_checks(
-            session,
-            batch_id=normalized_batch_id,
-            persist=consistency_persist,
-            sample_limit=sample_limit,
-            dedup_pending_threshold=dedup_pending_threshold,
-        )
-    except Exception as exc:  # noqa: BLE001 - gate 실패를 import job에 남긴다.
-        message = f"{exc.__class__.__name__}: {exc}"
-        consistency_job = await finish_import_job(
-            session, consistency_job.job_id, status="failed", error_message=message
-        ) or consistency_job
-        root = await finish_import_job(
-            session, root.job_id, status="failed", error_message=message
-        ) or root
-        return BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
-            state="failed",
-            root_job=root,
-            child_jobs=child_jobs,
-            consistency_job=consistency_job,
-            error_message=message,
-        )
-
-    await update_import_job_payload(
-        session,
-        consistency_job.job_id,
-        payload=_consistency_payload(report),
+    return BatchDagPrepared(
+        request=request,
+        root_job=root,
+        child_jobs=child_jobs,
+        consistency_job=consistency_job,
     )
+
+
+async def run_batch_consistency_phase(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+) -> ConsistencyReport | BatchDagRunResult:
+    """장기 검사 뒤 canonical lock을 잡고 report와 gate 종결을 함께 commit한다."""
+    request = prepared.request
+    await _guard_batch_phase_start(session, prepared, prepared.consistency_job)
+    report = await run_consistency_checks(
+        session,
+        batch_id=request.load_batch_id,
+        persist=request.consistency_persist,
+        sample_limit=request.sample_limit,
+        dedup_pending_threshold=request.dedup_pending_threshold,
+    )
+    await _lock_batch_root(session, prepared)
+    await _guard_batch_phase_start(session, prepared, prepared.consistency_job)
+    updated = await update_import_job_payload(
+        session, prepared.consistency_job.job_id, payload=_consistency_payload(report)
+    )
+    if updated is None:
+        raise BatchDagCancellationWon
     if report.severity_max == "ERROR":
         message = "consistency gate blocked mv_refresh: severity_max=ERROR"
         consistency_job = await finish_import_job(
-            session, consistency_job.job_id, status="failed", error_message=message
-        ) or consistency_job
+            session,
+            prepared.consistency_job.job_id,
+            status="failed",
+            error_message=message,
+        )
         root = await finish_import_job(
-            session, root.job_id, status="failed", error_message=message
-        ) or root
+            session, prepared.root_job.job_id, status="failed", error_message=message
+        )
+        if consistency_job is None or root is None:
+            raise BatchDagCancellationWon
         return BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
+            load_batch_id=request.load_batch_id,
             state="failed",
             root_job=root,
-            child_jobs=child_jobs,
+            child_jobs=prepared.child_jobs,
             consistency_job=consistency_job,
             consistency_report=report,
             blocked_by_gate=True,
             error_message=message,
         )
-
     consistency_job = await finish_import_job(
-        session, consistency_job.job_id, status="done"
-    ) or consistency_job
+        session, prepared.consistency_job.job_id, status="done"
+    )
+    if consistency_job is None:
+        raise BatchDagCancellationWon
+    return report
+
+
+async def start_batch_mv_phase(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+    report: ConsistencyReport,
+) -> BatchDagMvPrepared | BatchDagRunResult:
+    """global/root를 먼저 잠근 짧은 Tx3에서 MV child만 시작한다."""
+    request = prepared.request
+    await _lock_batch_root(session, prepared)
+    root, consistency_job = await _guard_batch_phase_start(
+        session,
+        prepared,
+        prepared.consistency_job,
+        expected_phase_status="done",
+    )
     mv_job = await start_import_job(
         session,
         kind=MV_REFRESH_JOB_KIND,
-        payload={"materialized_views": list(views), "strategy": strategy},
-        load_batch_id=normalized_batch_id,
-        parent_job_id=root.job_id,
-    )
-    try:
-        mv_refreshes = await refresh_materialized_views(
-            session, views, strategy=strategy
-        )
-    except Exception as exc:  # noqa: BLE001 - refresh 실패를 batch 실패로 보존
-        message = f"{exc.__class__.__name__}: {exc}"
-        await update_import_job_payload(
-            session,
-            mv_job.job_id,
-            payload={
-                "materialized_views": list(views),
-                "strategy": strategy,
-                "error_message": message,
-            },
-        )
-        mv_job = await finish_import_job(
-            session, mv_job.job_id, status="failed", error_message=message
-        ) or mv_job
-        root = await finish_import_job(
-            session, root.job_id, status="failed", error_message=message
-        ) or root
-        return BatchDagRunResult(
-            load_batch_id=normalized_batch_id,
-            state="failed",
-            root_job=root,
-            child_jobs=child_jobs,
-            consistency_job=consistency_job,
-            mv_refresh_job=mv_job,
-            consistency_report=report,
-            error_message=message,
-        )
-
-    await update_import_job_payload(
-        session,
-        mv_job.job_id,
         payload={
-            "materialized_views": list(views),
-            "strategy": strategy,
-            "results": [item.as_metadata() for item in mv_refreshes],
+            "materialized_views": list(request.materialized_views),
+            "strategy": request.mv_refresh_strategy,
         },
+        load_batch_id=request.load_batch_id,
+        parent_job_id=prepared.root_job.job_id,
     )
-    mv_job = await finish_import_job(session, mv_job.job_id, status="done") or mv_job
-    result = BatchDagRunResult(
-        load_batch_id=normalized_batch_id,
-        state="done",
-        root_job=root,
-        child_jobs=child_jobs,
+    if root.cancellation_id is not None or mv_job.cancellation_id is not None:
+        raise BatchDagCancellationWon
+    return BatchDagMvPrepared(
+        prepared=prepared,
+        consistency_report=report,
         consistency_job=consistency_job,
         mv_refresh_job=mv_job,
-        consistency_report=report,
-        mv_refreshes=mv_refreshes,
     )
-    await update_import_job_payload(
-        session, root.job_id, payload={**payload, **result.as_metadata()}
+
+
+async def finish_batch_mv_phase(
+    session: AsyncSession,
+    phase: BatchDagMvPrepared,
+) -> BatchDagRunResult:
+    """MV 작업 뒤 canonical lock을 잡고 모든 DB side effect와 종결을 원자화한다."""
+    prepared = phase.prepared
+    request = prepared.request
+    await _guard_batch_phase_start(session, prepared, phase.mv_refresh_job)
+    refreshes = await refresh_materialized_views(
+        session,
+        request.materialized_views,
+        strategy=request.mv_refresh_strategy,
     )
-    root = await finish_import_job(session, root.job_id, status="done") or root
+    mv_payload = {
+        "materialized_views": list(request.materialized_views),
+        "strategy": request.mv_refresh_strategy,
+        "results": [item.as_metadata() for item in refreshes],
+    }
+    await _lock_batch_root(session, prepared)
+    await _guard_batch_phase_start(session, prepared, phase.mv_refresh_job)
+    if await update_import_job_payload(
+        session, phase.mv_refresh_job.job_id, payload=mv_payload
+    ) is None:
+        raise BatchDagCancellationWon
+    mv_job = await finish_import_job(session, phase.mv_refresh_job.job_id, status="done")
+    provisional = BatchDagRunResult(
+        load_batch_id=request.load_batch_id,
+        state="done",
+        root_job=prepared.root_job,
+        child_jobs=prepared.child_jobs,
+        consistency_job=phase.consistency_job,
+        mv_refresh_job=mv_job,
+        consistency_report=phase.consistency_report,
+        mv_refreshes=refreshes,
+    )
+    if mv_job is None or await update_import_job_payload(
+        session,
+        prepared.root_job.job_id,
+        payload={**_root_payload(request), **provisional.as_metadata()},
+    ) is None:
+        raise BatchDagCancellationWon
+    root = await finish_import_job(session, prepared.root_job.job_id, status="done")
+    if root is None:
+        raise BatchDagCancellationWon
     return BatchDagRunResult(
-        load_batch_id=normalized_batch_id,
+        load_batch_id=request.load_batch_id,
         state="done",
         root_job=root,
-        child_jobs=child_jobs,
-        consistency_job=consistency_job,
+        child_jobs=prepared.child_jobs,
+        consistency_job=phase.consistency_job,
         mv_refresh_job=mv_job,
-        consistency_report=report,
-        mv_refreshes=mv_refreshes,
+        consistency_report=phase.consistency_report,
+        mv_refreshes=refreshes,
     )
+
+
+async def fail_batch_dag_phase(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+    *,
+    message: str,
+    report: ConsistencyReport | None = None,
+    mv_job: ImportJob | None = None,
+) -> BatchDagRunResult:
+    """장기 phase rollback 뒤 global/root 선잠금 짧은 transaction에서 실패를 기록한다."""
+    await _lock_batch_root(session, prepared)
+    target = mv_job or prepared.consistency_job
+    root = await _reload_job(session, prepared.root_job.job_id)
+    target_current = await _reload_job(session, target.job_id)
+    if (
+        root is None
+        or target_current is None
+        or root.cancellation_id is not None
+        or target_current.cancellation_id is not None
+        or root.status != "running"
+    ):
+        raise BatchDagCancellationWon
+    if target_current.status == "running":
+        if await update_import_job_payload(
+            session,
+            target.job_id,
+            payload={**target_current.payload, "error_message": message},
+        ) is None:
+            raise BatchDagCancellationWon
+        target_job = await finish_import_job(
+            session, target.job_id, status="failed", error_message=message
+        )
+    elif mv_job is None and report is not None and target_current.status == "done":
+        # Tx3 child start 자체가 실패한 경우 consistency 성공은 보존하고 root만 닫는다.
+        target_job = target_current
+    else:
+        raise BatchDagCancellationWon
+    root = await finish_import_job(
+        session, prepared.root_job.job_id, status="failed", error_message=message
+    )
+    if target_job is None or root is None:
+        raise BatchDagCancellationWon
+    return BatchDagRunResult(
+        load_batch_id=prepared.request.load_batch_id,
+        state="failed",
+        root_job=root,
+        child_jobs=prepared.child_jobs,
+        consistency_job=(
+            target_job if mv_job is None else await _reload_job(
+                session, prepared.consistency_job.job_id
+            )
+        ),
+        mv_refresh_job=target_job if mv_job is not None else None,
+        consistency_report=report,
+        error_message=message,
+    )
+
+
+async def reload_batch_phase_loss_result(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+    *,
+    report: ConsistencyReport | None = None,
+    mv_job: ImportJob | None = None,
+    error_message: str | None = None,
+) -> BatchDagRunResult:
+    """sentinel rollback 뒤 별도 짧은 transaction에서 durable 상태만 reload한다."""
+    root = await _reload_job(session, prepared.root_job.job_id)
+    consistency = await _reload_job(session, prepared.consistency_job.job_id)
+    reloaded_mv = await _reload_job(session, mv_job.job_id) if mv_job is not None else None
+    cancelled = any(
+        job is not None and job.cancellation_id is not None
+        for job in (root, consistency, reloaded_mv)
+    )
+    return BatchDagRunResult(
+        load_batch_id=prepared.request.load_batch_id,
+        state="cancelled" if cancelled else "failed",
+        root_job=root,
+        child_jobs=prepared.child_jobs,
+        consistency_job=consistency,
+        mv_refresh_job=reloaded_mv,
+        consistency_report=report,
+        error_message=error_message or (
+            "pipeline cancellation marker won the batch phase CAS"
+            if cancelled
+            else "batch phase CAS did not update its running job"
+        ),
+    )
+
+
+async def _lock_batch_root(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+) -> None:
+    await lock_pipeline_hierarchy_for_jobs(session, (prepared.root_job.job_id,))
+
+
+async def _guard_batch_phase_start(
+    session: AsyncSession,
+    prepared: BatchDagPrepared,
+    phase_job: ImportJob,
+    *,
+    expected_phase_status: str = "running",
+) -> tuple[ImportJob, ImportJob]:
+    """row lock 없이 marker/status를 읽어 장기 작업 전후의 phase 소유권을 확인한다."""
+    root = await _reload_job(session, prepared.root_job.job_id)
+    current_phase = await _reload_job(session, phase_job.job_id)
+    if (
+        root is None
+        or current_phase is None
+        or root.cancellation_id is not None
+        or current_phase.cancellation_id is not None
+        or root.status != "running"
+        or current_phase.status != expected_phase_status
+    ):
+        raise BatchDagCancellationWon
+    return root, current_phase
+
+
+async def _reload_job(session: AsyncSession, job_id: str) -> ImportJob | None:
+    return await get_import_job(session, job_id)
+
+
+def _root_payload(request: BatchDagRequest) -> dict[str, Any]:
+    return {
+        **request.root_payload,
+        "load_batch_id": request.load_batch_id,
+        "child_job_ids": list(request.child_job_ids),
+        "dagster_run_id": request.dagster_run_id,
+        "materialized_views": list(request.materialized_views),
+        "mv_refresh_strategy": request.mv_refresh_strategy,
+    }
 
 
 async def refresh_materialized_views(

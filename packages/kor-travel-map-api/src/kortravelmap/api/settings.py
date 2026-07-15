@@ -230,6 +230,42 @@ class ApiSettings(BaseSettings):
         le=30.0,
         description="Dagster GraphQL 조회 timeout seconds.",
     )
+    dagster_termination_poll_interval_seconds: float = Field(
+        default=0.25,
+        ge=0.05,
+        le=5.0,
+        description="Dagster run 종료 재확인 poll 간격(초).",
+    )
+    dagster_termination_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="SAFE_TERMINATE 뒤 terminal 상태를 기다리는 전체 제한 시간(초).",
+    )
+    pipeline_cancellation_retry_after_seconds: int = Field(
+        default=3,
+        ge=1,
+        le=300,
+        description="pipeline cancellation 409/502/503 Retry-After 초.",
+    )
+    pipeline_cancellation_root_retry_limit: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="preliminary resolve와 lease 사이 canonical root 변경 재시도 횟수.",
+    )
+    pipeline_cancellation_lease_reload_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description="lease 경합 때 winner의 durable attempt를 bounded reload하는 횟수.",
+    )
+    pipeline_cancellation_lease_reload_interval_seconds: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="lease loser의 DB-only current attempt 재조회 간격(초).",
+    )
     dagster_repository_name: str = Field(
         default="__repository__",
         min_length=1,

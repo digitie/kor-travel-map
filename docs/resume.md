@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex) — T-ADM-C3d PR #695 CI 보강 중
+
+- 최신 main rebase 뒤 focused Python 140건, frontend unit 82건, Ruff, strict mypy
+  3패키지, import 계약 4/4, OpenAPI/admin type drift, frontend type/lint를 재통과했다.
+- 첫 CI에서 모든 1,299 unit test는 통과했으나 unit-only coverage가 75.24%로 실패했다.
+  DB 경로를 제외하거나 80% threshold를 낮추지 않고 Python 3.13 unit+PostGIS integration
+  coverage를 합산하도록 workflow와 구조 회귀를 수정했다.
+- 최종 적대 리뷰 S2/S3를 반영해 API 70%·Dagster 80% package gate, YAML 구조 기반 artifact
+  wiring 회귀, 실패 시 combined XML 보존을 추가했다. 실측은 API 77%, Dagster 82%, 메인
+  unit+integration 89.51%다. fresh DB에서 비결정적이던 EXPLAIN index 단언도 transaction-local
+  planner 설정으로 목적을 고정했다.
+- **다음 한 작업**: 합산 coverage를 로컬·PR CI에서 검증하고 #695를 머지한 뒤 #680을
+  증거와 함께 닫는다. 이후 C3e 복구 후보 확정 결과에 따라 별도 PR을 시작한다.
+
 ## 2026-07-15 (claude, agent A) — T-ADM-C3c 감사 종결 (전 항목 기충족)
 
 - **T-ADM-C3c 종결**: 착수 전 잔여범위 감사 결과 이슈 #681 수용 기준 전 항목이
@@ -11,6 +25,99 @@
   agent A).
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
+
+## 2026-07-15 (codex, agent A/B) — T-ADM-C3d 구현·적대 리뷰·로컬 검증
+
+- **구현 완료(PR 전)**: canonical root lease, marker/reservation 우선 commit,
+  attempt별 at-most-once `SAFE_TERMINATE`, orphan resume, mixed/pending 사실 보존,
+  hard backend invalidation과 네 cancel 진입점의 단일 coordinator를 구현했다.
+- **feature update 보강**: queue sensor를 peek-only로 바꾸고 request/scope session lease 뒤
+  CAS start, scope 경합 원자 requeue, scope data+`matched_scope` checkpoint, marker 우선
+  `CancelledError` 처리를 구현했다.
+- **적대 리뷰 반영**: 두 리뷰어가 찾은 running 고착, 미영속 checkpoint, CAS loser 409,
+  stale ownership snapshot, definitive 오류 덮어쓰기, downgrade TOCTOU, dispatch 오류 분류,
+  unlock backend 오염과 기존 UI 422를 수정했다. 최종 재리뷰에서 추가로 확인한 stale
+  Dagster failure 세대 덮어쓰기, production asset의 별도 적재 transaction, 취소 operation의
+  `Retry-After` OpenAPI 누락, 구 E2E cancel 계약도 수정했다. OpenAPI/admin types는 공용
+  cancellation body·response·header 계약으로 다시 생성했다.
+- **실행 경계 증거 보강**: failure sensor는 실패한 `dagster_run_id`를 expected generation
+  CAS로 넘겨 재큐잉/새 owner를 건드리지 않는다. CAS start 전 resource 초기화 실패는
+  `updated_at` generation이 같은 queued/null-run 행만 전진시켜 다음 sensor run key를 만든다.
+  request start와 연결 import job owner가 하나라도 어긋나면 둘 다 rollback한다. production
+  asset client는 executor scope transaction의 물리 connection에 bind하고 원본 engine 직접
+  연결은 fail-closed로 거부한다. hard invalidate 테스트는 원 backend PID 소멸과 경쟁
+  connection의 request lease 재획득을 확인한다. 브라우저 오류는 Next BFF allowlist를 포함해
+  RFC7807와 `Retry-After`를 보존하고, 409/502/503에서도 연결 member를 모르는 singular 상세
+  prefix까지 durable cancellation 상태를 다시 읽는다.
+- **#680 근거 재점검**: 이슈 #680과 원인 PR #677, root projection PR #689의 수용 기준을
+  다시 대조했다. 별도 marker, frozen canonical scope, authenticated actor/audit, GraphQL 5xx,
+  request/job/run CAS, runless running 보존, member별 결과, commit 데이터 비롤백을 현재 구현과
+  회귀 목록에 반영했다. #680은 C3d PR merge·CI green 뒤 증거 코멘트와 함께 닫는다.
+- **병행 감사 완료**: 리뷰 전문 agent가 최근 2일 Claude Code PR #672, #674, #675,
+  #676, #677, #683, #691, #692를 닫힘 여부와 무관하게 상세 검토하고 각 PR에
+  코멘트를 남겼다. 후속은 신규 #693·#694와 기존 #682·#684·#685·#686으로 묶었고,
+  미완 수용 기준 때문에 #682를 다시 열었다.
+- **검증 완료**: 두 적대 리뷰어의 S1/S2 0건 승인 뒤 main unit 1,295건, API 전체
+  470건, C3d Python 관련 134건, PostGIS 관련 통합 92건, frontend 전체 unit 82건,
+  Dagster 전체 270건(1 skipped), C3d mocked Playwright
+  37건을 통과했다. Ruff, strict mypy 3패키지, import 계약, OpenAPI/admin type drift와
+  frontend type-check/lint도 green이다. mocked E2E는 새 Next 서버의 현재 빌드에서
+  BFF 경유를 강제했으며 36건+실제 HATEOAS mock 수정 뒤 단독 1건으로 전량 확인했다.
+- **다음 한 작업**: Dagster 전체와 최종 정적 gate를 닫고 origin/main rebase·보안 감사를
+  거쳐 C3d PR을 CI green/review 뒤 merge한다. #680 종료 뒤 Claude Code worktree의 C3e를 회수해
+  별도 PR로 완료하고, adm-c5 merge를 확인한 다음 C6a→C6b→C7로 진행한다.
+
+## 2026-07-15 (codex, agent A/B) — T-ADM-C3d coordinator crash 계약 보강
+
+- 두 사전 적대 리뷰에서 요청 단위 session autobegin과 외부 호출 중 transaction 유지,
+  process crash 뒤 `in_progress` 고착/중복 terminate dispatch 위험을 확인했다.
+- canonical root별 nonblocking session lease와 run별 `termination_reserved_at` CAS를 문서 정본에
+  추가했다. lease 획득자는 orphan attempt를 frozen scope 그대로 재개하고, 이미 dispatch CAS가
+  commit된 run은 같은 attempt에서 mutation을 다시 호출하지 않는다.
+- 두 적대 리뷰어가 S1/S2 없이 문서 우선 gate를 승인했다.
+- **다음 한 작업**: application coordinator/Dagster transport와 feature-update connection 고정
+  phase를 agent A/B로 병렬 구현한다.
+
+## 2026-07-15 (codex, agent B) — T-ADM-C3d DB phase 2차 적대 리뷰 보강 진행 중
+
+- **진행 중**: queued shared-run 독립 취소, running-only retry, exact retryable과 definitive
+  mismatch 실패 분리, 최초 Dagster status 보존, normalized JSON error NULL 차단을 수정했다.
+  `cancel_failed`는 frozen running으로 한정하고 exact terminal run의 failure 우회를 막으며,
+  definitive run failure는 FAILED 코드가 기록된 `run=cancel_failed`만 인정한다.
+- **batch transaction 재수정**: consistency report와 MV side effect는 장기 transaction 안에서
+  만들되 종료 직전에만 lineage-global→canonical root lock을 잡고 marker CAS/finalize한다.
+  CAS 패배는 내부 sentinel로 장기 transaction 전체를 rollback한 뒤 별도 짧은 read
+  transaction에서 cancellation 결과를 reload한다. Tx3/failure는 첫 mutation 전에 잠근다.
+- **검증 상태**: 실제 report/side-effect rollback, exact terminal mapping, SQL NULL
+  `IntegrityError`, queued/running shared run, authoritative reconcile failure, 반대 row-lock
+  순서 회귀를 테스트로 정의했다. MV rollback은 refresh 내부 write와 별도 cancellation
+  commit 뒤 post-refresh guard가 전체 write를 되돌리는 경로를 고정한다.
+  사용자 지시에 따라 test/Ruff/mypy/import/compile은 실행하지 않았고 재리뷰·게이트도
+  남아 있으므로 완료 상태가 아니다.
+- **다음 한 작업**: 2차 적대 재리뷰를 통과시키고 허용된 실행 게이트 뒤 C3d 다음 phase로
+  진행한다.
+
+## 2026-07-15 (codex, agent B) — T-ADM-C3d 계층형 취소 문서 우선 설계 (#680)
+
+- **계약 고정**: 기존 job/request status CHECK는 유지하고 base marker와 정규화한
+  cancellation attempt/member/run을 영속 정본으로 삼는다. scope는 C3b의 request owner
+  branch·duplicate non-owner·standalone partition·nested request 경계를 그대로 사용하며,
+  terminal root 아래 active descendant도 취소한다. attempt status는 workflow
+  `in_progress`/`retryable`/`completed`/`failed`, 실제 취소 결과는 member/run에만 둔다.
+- **안전 경계**: marker와 durable audit를 먼저 commit하고 transaction 밖에서 Dagster
+  terminate한 뒤 terminal을 재확인한다. queued는 marker CAS, running은 `CANCELED` 확인
+  때만 cancelled로 확정하고 exact member-marker-run mapping의 `SUCCESS`/`FAILURE`만
+  done/failed로 reconcile한다. timeout 같은 transient 실패는 attempt `retryable`, 권위 있는
+  reconcile 불가는 `failed`로 구분하고, 둘 다 허위 cancelled 없이 marker와 대상별 오류를
+  남긴다.
+  재시도는 이전 frozen scope의 미해결 member만 복사한다.
+- **worker/transaction 정본**: status/payload/lineage를 포함한 모든 base-row mutation과
+  descendant 생성은 marker CAS/root lock을 요구하며 event/audit append만 허용한다. feature
+  update scope별 commit은 전용 `AsyncConnection` 하나에 session advisory lock을 고정하고,
+  이미 commit된 데이터는 rollback하지 않는다.
+- **다음 한 작업**: 이 문서-only commit의 적대적 재승인을 받는다. 승인 전 source edit은
+  0으로 유지하며, 승인 뒤 alembic 0050 → repository/coordinator → Dagster terminate service →
+  REST/OpenAPI 순서로 구현한다.
 
 ## 2026-07-15 (codex, agent A) — T-ADM-C3c pipeline Dagster run 상세 (#681)
 
@@ -25,8 +132,7 @@
   1,289건, API 전체 451건, 관련 Dagster router 82건, 전체 Ruff, strict mypy
   main 104파일/API 51파일, import 계약 4/4, OpenAPI admin/user와 admin TypeScript
   drift가 통과했다. DB/migration 변경이 없어 별도 PostGIS gate는 적용하지 않았다.
-- **다음 한 작업**: remote push 전 보안 감사 후 draft PR을 올리고, 원격 diff를 다시
-  적대적으로 검토해 CI green을 확인한다. PR merge 전까지 task는 진행 중이다.
+- **완료**: PR #690이 CI 8/8 green 뒤 merge됐다.
 
 ## 2026-07-15 (codex, agent B) — T-ADM-C3b pipeline root projection (#679)
 
@@ -36,9 +142,9 @@
 - **검증 완료**: root/agent A 적대적 리뷰 2인이 S1/S2 0건으로 승인했다.
   root unit 1,285건, API 전체 416건, 관련 PostGIS/EXPLAIN integration 10건과
   Ruff, strict mypy 155파일, import 계약 4/4, OpenAPI/admin types drift가 통과했다.
-- **다음 한 작업**: 보안 감사 후 draft PR을 올리고 원격 diff 재리뷰와
-  CI green을 확인한다. C3b는 PR merge 전까지 진행 중이며 C3e 전에는 C5를
-  시작하지 않는다.
+- **완료**: PR #689가 보안 감사와 CI 8개 green을 거쳐 merge commit
+  `d131c37c858d7fa8f6dda2b434dcae18d6d54b3f`로 main에 반영됐다. 다음 pipeline
+  작업은 T-ADM-C3d 문서 우선 설계이며 C3e 전에는 C5를 시작하지 않는다.
 
 ## 2026-07-15 (codex, agent A) — T-ADM-C2R datasets 차단 계약 보강 (#678)
 

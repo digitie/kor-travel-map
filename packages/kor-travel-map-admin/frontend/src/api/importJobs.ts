@@ -7,7 +7,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postJson } from "./client";
+import { ApiClientError, getJson, pathWithQuery, postJson } from "./client";
+import { pipelineCancellationQueryKeys } from "./pipelineCancellationInvalidation";
 import type { components, paths } from "./types";
 
 type ImportJobSchemas = components["schemas"];
@@ -35,8 +36,10 @@ export type OpsImportJobsListResponse =
 export type OpsImportJobResponse = ImportJobSchemas["OpsImportJobResponse"];
 export type OpsImportJobEventsListResponse =
   ImportJobSchemas["OpsImportJobEventsListResponse"];
-export type OpsImportJobCancelRequest =
-  ImportJobSchemas["OpsImportJobCancelRequest"];
+export type PipelineCancellationRequest =
+  ImportJobSchemas["PipelineCancellationRequest"];
+export type PipelineCancellationResponse =
+  ImportJobSchemas["PipelineCancellationResponse"];
 export type ImportJobsListParams = Omit<ImportJobsListQuery, "cursor"> & {
   cursor?: string;
 };
@@ -94,9 +97,9 @@ function cancelImportJob({
   body = {},
 }: {
   jobId: string;
-  body?: OpsImportJobCancelRequest;
-}): Promise<OpsImportJobResponse> {
-  return postJson<OpsImportJobResponse>(
+  body?: PipelineCancellationRequest;
+}): Promise<PipelineCancellationResponse> {
+  return postJson<PipelineCancellationResponse>(
     `/v1/ops/import-jobs/${encodeURIComponent(jobId)}/cancel`,
     body,
   );
@@ -143,19 +146,18 @@ export function useImportJobEvents(
 export function useCancelImportJobMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    OpsImportJobResponse,
-    Error,
-    { jobId: string; body?: OpsImportJobCancelRequest }
+    PipelineCancellationResponse,
+    ApiClientError,
+    { jobId: string; body?: PipelineCancellationRequest }
   >({
     mutationFn: cancelImportJob,
-    onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-      void queryClient.invalidateQueries({
-        queryKey: ["import-job", variables.jobId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["import-job-events", variables.jobId],
-      });
+    onSettled: (data) => {
+      // 409/502/503도 durable cancellation attempt를 만들 수 있으므로 항상 reload한다.
+      for (const queryKey of pipelineCancellationQueryKeys(data?.data.members)) {
+        void queryClient.invalidateQueries({
+          queryKey,
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     },
   });
