@@ -56,6 +56,10 @@ async def _set_api_call_created_at(
 async def test_record_and_list_system_logs_cursor_and_filters(
     migrated_session: AsyncSession,
 ) -> None:
+    # phase commit을 검증하는 다른 integration test가 의도적으로 남긴 운영 로그와
+    # 목록 순서/필터 단언을 분리한다. DELETE는 이 테스트 transaction 종료 시 rollback된다.
+    await migrated_session.execute(text("DELETE FROM ops.system_log"))
+
     old = await record_system_log(
         migrated_session,
         level="info",

@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-15 (codex) — T-ADM-C3d PR #695 CI 보강 중
+
+- 최신 main rebase 뒤 focused Python 140건, frontend unit 82건, Ruff, strict mypy
+  3패키지, import 계약 4/4, OpenAPI/admin type drift, frontend type/lint를 재통과했다.
+- 첫 CI에서 모든 1,299 unit test는 통과했으나 unit-only coverage가 75.24%로 실패했다.
+  DB 경로를 제외하거나 80% threshold를 낮추지 않고 Python 3.13 unit+PostGIS integration
+  coverage를 합산하도록 workflow와 구조 회귀를 수정했다.
+- **다음 한 작업**: 합산 coverage를 로컬·PR CI에서 검증하고 #695를 머지한 뒤 #680을
+  증거와 함께 닫는다. 이후 C3e 복구 후보 확정 결과에 따라 별도 PR을 시작한다.
+
 ## 2026-07-15 (claude, agent A) — T-ADM-C3c 감사 종결 (전 항목 기충족)
 
 - **T-ADM-C3c 종결**: 착수 전 잔여범위 감사 결과 이슈 #681 수용 기준 전 항목이

@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-15 (codex) — C3d CI coverage 측정 경계 수정
+
+- PR #695의 Python 3개 job에서 1,299개 테스트는 모두 통과했지만, unit 측정만으로 DB
+  transaction/repository 신규 코드를 0%에 가깝게 계산해 전체 coverage가 75.24%가 됐다.
+- threshold를 낮추거나 DB 코드를 제외하지 않고, Python 3.13 unit 원시 coverage와 별도
+  PostGIS integration coverage를 합산한 결과에 기존 `fail_under=80`을 적용하도록 CI를
+  수정했다. Python 3.11/3.12는 동일 unit 회귀를 계속 실행한다.
+- workflow 구조 테스트와 테스트 전략 문서를 같은 계약으로 갱신했다.
+- 로컬 합산 실행은 89.50%로 coverage gate를 통과했다. 전체 integration을 함께 돌리며
+  발견한 0048 migration의 고정 최신-head 단언은 단일 head+ancestor 단언으로 바꾸고,
+  phase commit 테스트가 남긴 운영 로그가 목록 테스트를 오염하지 않도록 해당 테스트의
+  transaction-local 초기화를 추가했다. 로컬 `kor-travel-geo` 400 응답 5건은 외부 live
+  서비스 상태이며 GitHub runner에서는 도달 불가 skip되는 기존 계약이다.
+
 ## 2026-07-15 (claude, agent A) — T-ADM-C3c 잔여범위 감사 → 전 항목 기충족 확인·종결
 
 T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수용 기준 전 항목이

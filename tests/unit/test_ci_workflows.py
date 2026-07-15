@@ -19,8 +19,13 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
 
     assert "name: pytest (Python ${{ matrix.python-version }})" in workflow
     assert "pytest tests/unit tests/lint -q" in workflow
+    assert "--cov-fail-under=0" in workflow
+    assert "name: coverage-unit-data" in workflow
     assert "name: pytest integration (PostGIS)" in workflow
-    assert "pytest tests/integration -q --no-cov" in workflow
+    assert "needs: unit" in workflow
+    assert "pytest tests/integration -q" in workflow
+    assert "--cov-append" in workflow
+    assert "name: coverage-xml" in workflow
     assert "name: pytest fixture replay" in workflow
     assert "[ -d tests/fixtures ]" in workflow
     assert "pytest tests/fixtures -q --no-cov" in workflow

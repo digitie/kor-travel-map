@@ -58,6 +58,12 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 true`. 단계적 상향 schedule은 아래 표 (구 ADR-032, T-014 코드 작성 단계 진입 시
 전환):
 
+CI의 전체 coverage 판정은 Python 3.13 unit coverage 원시 데이터와 같은 commit의
+PostGIS integration coverage를 합산한 뒤 한 번 수행한다. Python 3.11/3.12 unit job도
+동일 테스트를 실행하되 버전별 부분 측정치만으로 `fail_under`를 판정하지 않는다. DB
+transaction/repository 코드는 실제 PostgreSQL 경로를 검증하는 integration suite의 실행
+증거가 전체 80% gate에 포함되어야 한다.
+
 | Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` |
 |--------|---------------|---------|--------------|---------------------|
 | Sprint 1 (scaffolding) | 50% | 60% | 50% | 50% |
