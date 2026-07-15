@@ -7,6 +7,10 @@
 - 첫 CI에서 모든 1,299 unit test는 통과했으나 unit-only coverage가 75.24%로 실패했다.
   DB 경로를 제외하거나 80% threshold를 낮추지 않고 Python 3.13 unit+PostGIS integration
   coverage를 합산하도록 workflow와 구조 회귀를 수정했다.
+- 최종 적대 리뷰 S2/S3를 반영해 API 70%·Dagster 80% package gate, YAML 구조 기반 artifact
+  wiring 회귀, 실패 시 combined XML 보존을 추가했다. 실측은 API 77%, Dagster 82%, 메인
+  unit+integration 89.51%다. fresh DB에서 비결정적이던 EXPLAIN index 단언도 transaction-local
+  planner 설정으로 목적을 고정했다.
 - **다음 한 작업**: 합산 coverage를 로컬·PR CI에서 검증하고 #695를 머지한 뒤 #680을
   증거와 함께 닫는다. 이후 C3e 복구 후보 확정 결과에 따라 별도 PR을 시작한다.
 

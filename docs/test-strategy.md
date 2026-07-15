@@ -51,6 +51,7 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 | `providers/` | 70%+ statement (변환 함수당 ≥3 케이스) | CI 강제 |
 | `client/` | 80%+ statement | CI 강제 |
 | `api/` | 70%+ statement | CI 강제 |
+| `dagster/` | 80%+ statement | CI 강제 |
 | `dto/` | 100% (Pydantic validator branch) | CI 강제 |
 | **전체** | **80%+ branch** | CI 강제 |
 
@@ -58,11 +59,12 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 true`. 단계적 상향 schedule은 아래 표 (구 ADR-032, T-014 코드 작성 단계 진입 시
 전환):
 
-CI의 전체 coverage 판정은 Python 3.13 unit coverage 원시 데이터와 같은 commit의
+CI의 메인 라이브러리 전체 coverage 판정은 Python 3.13 unit coverage 원시 데이터와 같은 commit의
 PostGIS integration coverage를 합산한 뒤 한 번 수행한다. Python 3.11/3.12 unit job도
 동일 테스트를 실행하되 버전별 부분 측정치만으로 `fail_under`를 판정하지 않는다. DB
 transaction/repository 코드는 실제 PostgreSQL 경로를 검증하는 integration suite의 실행
-증거가 전체 80% gate에 포함되어야 한다.
+증거가 전체 80% gate에 포함되어야 한다. 별도 배포 패키지인 API와 Dagster는 각 Python
+matrix에서 coverage 파일을 분리해 각각 70%, 80%를 독립 강제한다.
 
 | Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` |
 |--------|---------------|---------|--------------|---------------------|
@@ -505,37 +507,19 @@ def mask_sensitive(obj):
 
 ## 9. CI 워크플로
 
-```
-.github/workflows/test.yml
-  jobs:
-    unit:
-      runs-on: ubuntu-latest
-      steps:
-        - pip install -e ".[dev]"
-        - pytest tests/unit -q --cov=src/kortravelmap --cov-fail-under=80
-        - ruff check .
-        - mypy src/kortravelmap
-        - lint-imports
-    integration:
-      runs-on: ubuntu-latest
-      services:
-        # testcontainers는 Docker-in-Docker 또는 docker socket mount 필요
-      steps:
-        - pip install -e ".[dev,api,geo,providers]"
-        - pytest tests/integration -q --cov=src/kortravelmap --cov-append --cov-fail-under=80
-    fixture_replay:
-      runs-on: ubuntu-latest
-      steps:
-        - pip install -e ".[dev]"
-        - pytest tests/fixtures -q
-    slow:
-      if: github.event_name == 'schedule'
-      runs-on: ubuntu-latest
-      steps:
-        - pytest -m slow -q
-```
+정본은 `.github/workflows/ci.yml`이다. PR에서는 다음 순서와 gate를 강제한다.
 
-PR에서는 unit + integration + fixture_replay만 강제. slow는 nightly.
+1. Python 3.11/3.12/3.13 matrix가 메인 unit/lint 테스트를 실행한다. 부분 측정치에는
+   `fail_under=0`을 적용하고 Python 3.13 원시 coverage만 artifact로 보존한다.
+2. 같은 matrix에서 API 70%, Dagster 80% coverage를 메인 파일과 분리해 독립 판정한다.
+3. 세 matrix가 모두 성공한 뒤 PostGIS integration job이 Python 3.13 원시 데이터를
+   내려받아 integration 측정을 append하고 메인 전체 `fail_under=80`을 판정한다.
+4. fixture replay는 별도 job으로 실행한다. lint, OpenAPI drift, frontend build/type gate는
+   각 전용 workflow가 모든 PR에서 실행한다.
+
+실패한 integration도 생성된 combined `coverage.xml`을 분석 artifact로 보존하되, 파일이
+생성되기 전 실패와 취소는 안전하게 건너뛴다. slow/live 외부 서비스 검증은 정규 PR gate와
+분리한다.
 
 ## 10. 회귀 차단 룰 (PR block 사유)
 

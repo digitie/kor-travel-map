@@ -15,6 +15,13 @@
   phase commit 테스트가 남긴 운영 로그가 목록 테스트를 오염하지 않도록 해당 테스트의
   transaction-local 초기화를 추가했다. 로컬 `kor-travel-geo` 400 응답 5건은 외부 live
   서비스 상태이며 GitHub runner에서는 도달 불가 skip되는 기존 계약이다.
+- 최종 적대 리뷰에서 API/Dagster package coverage 누락, artifact wiring의 문자열 단언,
+  실패 시 combined XML 미보존을 확인했다. 로컬 실측 API 77%, Dagster 82%를 기준으로
+  각각 70%/80% 독립 gate를 추가하고 YAML job/step 구조를 파싱해 artifact 대칭과 threshold
+  위치를 고정했다. combined XML은 취소가 아니면 실패 시에도 보존한다.
+- 2차 CI의 합산 coverage는 89.51%를 통과했지만 fresh DB의 1행 EXPLAIN이 비용상 seq scan을
+  선택했다. index 사용 가능성 검증 목적에 맞게 transaction-local `enable_seqscan=off`를
+  설정해 planner 우연성을 제거했다.
 
 ## 2026-07-15 (claude, agent A) — T-ADM-C3c 잔여범위 감사 → 전 항목 기충족 확인·종결
 

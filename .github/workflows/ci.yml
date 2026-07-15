@@ -65,14 +65,21 @@ jobs:
             --cov-fail-under=0
 
       - name: Run kor-travel-map-api unit tests
-        # 본 step은 메인 lib coverage gate(ADR-032)에 영향 X — API 패키지
-        # 자체 회귀 차단용. fail이면 PR 머지 차단.
+        # 메인 lib 원시 coverage와 파일을 분리하고 API 패키지 70% gate를 독립 강제한다.
+        env:
+          COVERAGE_FILE: .coverage.api
         run: |
-          pytest packages/kor-travel-map-api/tests/ -q
+          pytest packages/kor-travel-map-api/tests/ -q \
+            --cov=packages/kor-travel-map-api/src/kortravelmap/api \
+            --cov-report=term --cov-fail-under=70
 
       - name: Run kor-travel-map-dagster unit tests
+        env:
+          COVERAGE_FILE: .coverage.dagster
         run: |
-          pytest packages/kor-travel-map-dagster/tests/ -q
+          pytest packages/kor-travel-map-dagster/tests/ -q \
+            --cov=packages/kor-travel-map-dagster/src/kortravelmap/dagster \
+            --cov-report=term --cov-fail-under=80
 
       # DB transaction/repository 경로는 integration suite가 검증하므로 최신 Python의
       # unit coverage 원시 데이터를 PostGIS job에서 합산한 뒤 fail_under를 판정한다.
@@ -135,10 +142,12 @@ jobs:
             --cov-report=term-missing --cov-report=xml
 
       - name: Upload combined coverage XML
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
           path: coverage.xml
+          if-no-files-found: ignore
           retention-days: 7
 
   fixture-replay:
