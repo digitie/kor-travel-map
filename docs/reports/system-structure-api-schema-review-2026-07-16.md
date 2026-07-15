@@ -648,3 +648,216 @@ projection을 PinVi BFF에서 다시 정의하기보다 KTM public/service API�
 최종적으로 필요한 것은 endpoint 수를 늘리는 일이 아니라, 하나의 공개 Feature 정본과 목적별로
 작고 명시적인 projection을 만드는 일이다. 그 구조가 잡히면 PinVi의 지도, 여행 카드, 날씨,
 targeted refresh는 더 적은 query와 더 작은 payload로 구현할 수 있다.
+
+---
+
+## 11. 다양한 관점의 보강 리뷰 (2026-07-16 추가)
+
+> 보강 검토자: 별도 5개 관점(DB/스키마, API 보안·계약, PinVi 연동, 성능·공간쿼리,
+> 실행 전략·현실성)에서 §1~§10의 각 주장을 **실코드·실 DDL로 재대조**하고, 가능한 곳은
+> `postgis/postgis:16-3.5` scratch DB에서 EXPLAIN/insert 반례를 재현했다. 기준 커밋은
+> 원 리뷰와 동일한 `main@9ef008b2`이며, 대상 코드는 현재 `origin/main`과 byte-identical임을
+> 확인했다(그 사이 diff는 원 리뷰 문서 1건뿐).
+
+### 11.0 종합 판정
+
+- **결함 진단(§4 P0·§5 P1)의 사실관계는 대부분 확증된다.** 특히 DB 10개 항목·API 보안
+  다수(P0-1c Dagster mutation 무게이트, P0-4 raw_data 공개, P0-6 삼항 양분기 동일값,
+  P1-12 무조건 count, P1-15b 29 vs 159 operation)·성능(include_geometry membership 변경,
+  `&&`-only MBR false positive, 매행 LATERAL, GiST 6개)은 근거가 결정적이다.
+- **그러나 §8 실행 전략(호환 layer 없는 vNext 새 baseline + 전량 재적재 + legacy 동시 제거)은
+  이 운영 현실에서 채택하면 안 된다.** 목표 구조(§6)는 유지하되 도달 경로를 parallel-change로
+  바꿔야 한다. 이것이 가장 큰 이견이다(§11.5).
+- 원 리뷰가 **정정·과장한 지점 5건**과 **놓친 이슈 다수**가 확인됐다(§11.6 종합표).
+
+### 11.1 DB/스키마 관점
+
+- **확증(정정 없음)**: P0-2(status·deleted_at 결합 CHECK 부재 — 실제로는 `status='deleted'`·
+  `deleted_at`·`user_deleted_at`·`user_change_status`로 **삭제/상태 축이 사실상 4중**), P1-1
+  (`core/ids.py:149-152`가 bjd|kind|category|source를 해시 — docstring이 "bjd 변경 시
+  feature_id 변경"을 **의도된 동작으로 자인**), P1-2(4개 JSONB `jsonb_typeof` CHECK 없음, `geom`은
+  `Geometry("GEOMETRY")`라 route에 Point·한국 밖·325km 이격 저장 가능), P1-5(upsert의
+  거의 전 열이 `user_request` whole-row 동결), P1-6(weather는 semantic UNIQUE·source FK·range
+  CHECK 전무, price는 보유 — 비대칭 확증), P1-9(weather/price/log/api-key/auth-event **6개 table이
+  `models.metadata`에 없음**, `env.py`에 `include_object` 콜백 없어 `alembic check`가 PostGIS
+  object까지 drop 후보로 잡음), P1-10(coord·coord_5179·geom 각각 자동 full GiST + 수동 partial =
+  **6개**, `0009`는 ops table에 `spatial_index=False`를 명시해 함정을 인지하면서 features엔 미적용).
+- **정정 2건**: (a) **P1-4** — 원 리뷰가 "current pointer composite FK가 없다"고 했으나 ADR-063으로
+  `source_entities.(source_entity_key, current_source_record_key)→source_records` **deferrable
+  composite FK가 이미 존재**해 current-record cross-entity는 차단된다(다만 record denorm 식별자
+  미정합·순환 FK·`provider_datasets` 부재는 그대로). (b) **P1-8** — `coord_5179`는 coord로부터
+  **generated STORED**라 coord와 정합하다. 불일치 위험은 lon/lat/coord_key에 한정.
+- **보강**: ① `coord_5179` STORED generated의 **PROJ 버전 재현성 함정**(EPSG:5179 파이프라인
+  버전업 시 기존 저장값 ≠ 신규 write값, table rewrite 없이는 재계산 안 됨) — vNext에서 5179를
+  generated로 둘지 재검토. ② 순환 FK가 **deferrable로만 봉합**돼 §8의 "source 재적재"가 단순
+  COPY로 안 끝난다. ③ `provider_datasets` canonical table이 아예 없어 provider/dataset 문자열이
+  최소 9개 table에 흩어져 FK화 표면이 매우 넓다. ④ price payload도 `jsonb_typeof` CHECK 없음
+  (P1-6의 "price는 낫다"가 불완전). ⑤ `features.user_change_request_id`가 dangling UUID(FK 없음).
+  ⑥ Alembic graph가 이미 분기·merge(`0034` 중복번호·`0035_merge`) 누적 — P1-9의 "긴 graph 위에
+  patch 금지"를 실증으로 뒷받침.
+- **이견**: 안정 UUID 전환(P1-1)은 방향은 옳으나 파급이 크다 — `_canonical_notice_feature_sql`이
+  **feature_id를 raw SQL 안에서 sha1로 재계산**하므로 UUID 전환 = 전 feature 재키잉 + PinVi 저장
+  ID 무효화 + notice-lineage SQL 전면 재작성. **결정적 자연키를 indexed alias로 보존하고 UUID를
+  병행 surrogate로 도입**하는 편이 안전(§8 big-bang이 아니라 additive). P1-2/6 대다수 제약은
+  `ADD CONSTRAINT … NOT VALID → 배경 VALIDATE`로 **재적재 없이** 강제 가능. weather 유일성은
+  `NULLS NOT DISTINCT`보다 **tuple에서 파생한 generated key/컬럼 UNIQUE**가 더 견고. partition
+  유보(실측 후 결정)에는 동의.
+
+### 11.2 API 보안·계약 관점
+
+- **중요 시점 보정**: 원 과제가 "그 사이 ADR-064 게이트가 추가돼 부분 해소됐을 것"이라 전제했으나,
+  `require_admin_frontend`·`ops_datasets`·`ops_pipeline` 게이트는 **원 리뷰가 검토한 바로 그
+  커밋(9ef008b2)에 이미 존재**했다. 코드 diff는 리뷰 문서 1건뿐 → "문서 시점→현재 해소" 서사는
+  성립하지 않는다. 아래 판정은 doc-time=current 동일 코드 기준.
+- **확증**: P0-1c(legacy `ops`/`ops_live`/`dagster` router가 `app.py:628-632`에서 **dependency
+  없이 mount**, `dagster.py`에 cron PATCH·start/stop/reset/run mutation — app·route 양쪽 게이트
+  부재), P0-1d(admin secret/service token/public key **3개 기본값 모두 permissive** — 미설정 시
+  통과), P0-4(`FeatureObservationView`에 `raw_data`/`raw_payload_hash`/`source_record_key` — 공개
+  단건·200-batch·observation history가 동일 DTO 재사용), P0-6(`public_views.py:356-358` 삼항 양
+  분기가 동일 `None`/`[]`), P1-12a(`search_features`에 `include_total` 파라미터 자체가 없고 count
+  무조건 실행), P1-15b(`USER_OPERATIONS` 정확히 29개 vs full 159 — raw observation·beach no-op
+  포함, allowlist가 신규 public route 자동 편입 안 함).
+- **정정(과장) 1건**: P0-1 산문의 "admin 라우터도 prefix만 나뉜 채 무인증"은 과대 — admin
+  라우터는 이미 전부 `require_admin_frontend` 게이트됨. 실제 결함은 **(i) 세 게이트의 기본값
+  fail-open** + **(ii) legacy `curated`/`ops`/`dagster` 3개 라우터의 게이트 배선 누락**이다.
+- **보강**: ① API 계층에 **HTTP rate limit 전무**(공개 검색/nearby/batch 무제한 — P1-11 hot-path와
+  결합 시 단일 N150 DoS). ② 공개 key가 **URL query(`key=`)** 로 전달돼 uvicorn access log·Referer에
+  잔류. ③ 앱 전역 단일 CORS(`allow_methods/headers=["*"]`)를 public/admin/ops가 공유. ④ 반대로
+  **problem+json 일관성·stack 미노출은 오히려 양호**(#510) — §1의 우려와 달리 "유지할 설계"에
+  넣어야 함(단 422가 pydantic `loc/msg/type` 노출은 소소한 정보 누출). ⑤ `admin_destructive_enabled`
+  기본 True. ⑥ actor가 인증 principal이 아니라 헤더에서 와 신뢰 CIDR 안에서 **위조 가능**(감사 로그
+  신뢰성 약화).
+- **이견**: **3-app 물리 분리(별도 listener/DB role)는 단일 N150 운영에 과중.** surface별
+  dependency는 이미 분리돼 있고, 배포 차단의 실질은 물리 분리가 아니라 **(1) production profile에서
+  secret 미설정 시 기동 실패(fail-closed 전환) + (2) 누락된 3개 라우터에 dependency 배선**이다 —
+  이 둘이면 완료 기준의 90%를 단일 app에서 충족. 별도 read-only DB role은 가치 있음. **If-Match보다
+  Idempotency-Key가 우선**(PinVi가 5xx 재시도하므로 create 중복이 실발생, If-Match는 운영자 2인
+  규모에서 편익 낮음 + 이미 검수 큐가 대부분 mutation을 비동기화). OpenAPI drift는 3-app 없이
+  **역방향 검사**(public prefix 신규 route → allowlist 강제 or CI fail)로 해소.
+
+### 11.3 PinVi 연동 관점
+
+- **확증**: P0-5a(batch가 timeout/5xx 예외를 삼키고 fresh 없는 **전 POI를 broken**으로 —
+  `trip_view_builder.py:152-167`, `missing` 배열조차 안 읽음), P1-11(여행 지도 `TripMapView.tsx`가
+  `data.clusters`를 버리고 `items`만 저장 → 저zoom 소실; 대조군 `FeatureMapView`는 둘 다 렌더),
+  P1-13(POI마다 `weather?asof=` N+1 + 단건 weather가 **부모 미검증으로 삭제 ID에 빈 200**).
+- **정정(반증) 2건**: (a) **P0-5b `@` 절단** — 실 KTM feature_id는 `f_{bjd}_{kind}_{sha1}`로 `@`가
+  없고, `@raw` suffix는 PinVi **자체 snapshot 규약**(요청·응답에 대칭 적용)이라 프로덕션 KTM ID엔
+  무해한 방어 코드다. "계약이 깨져 있다"는 **잠재 스멜이지 능동 결함 아님**(과장). (b) **P0-5c** —
+  KTM은 **retired vs missing을 이미 구별해 준다**: `get_feature_rows_by_ids`가 D-12에 따라 inactive
+  feature를 status와 함께 반환하고 `FeatureDetailResponse`에 `status`·`updated_at`이 이미 있다.
+  **PinVi가 `status`를 안 읽을 뿐**(오히려 retired를 정상 live로 표시). 실제 부재는 `unchanged`
+  /revision-delta/요청단위 `service_revision`뿐.
+- **보강**: ① PinVi 계약 pinning이 **path-level 집합 동등성만** 검사해(`test_kor_travel_map_contract.py`)
+  KTM이 `found`/`missing` 의미나 `status` enum을 바꿔도 게이트가 green — 필드-레벨 계약 단언 필요.
+  ② outbox 신설은 KTM에 **이미 있는 `feature_update_requests` lifecycle과 이중화** — POI 이벤트를
+  기존 request enqueue에 배선하는 편이 안전. ③ KTM 장애가 표면마다 다른 상태(공개 503·여행
+  false-broken·지도 silent-empty)로 나타남 — degrade 표현을 표면 공통 규정 필요. ④ `feature-context:batch`가
+  `target_at`을 넘기면 **asof 버킷팅/타임존 라운딩 책임이 경계를 넘어가** 새 계약 버그 소지(target_at
+  의미 명시 필요).
+- **이견**: **P0-5의 핵심 결함은 PinVi-side 2줄 + 이미 계약된 `status` 소비로 닫힌다** —
+  (a) batch 전체 실패 시 broken 대신 stale 유지, (b) `status=='inactive'`를 retired 배지로. `service_revision`
+  /`known_revisions`/state-envelope 재설계는 P0 종료의 전제 아님. P1-13b도 KTM 단건 weather에
+  **부모 404만 추가**하면 닫힘 — `feature-context:batch` 신설 불요. §7 "부적합" 판정 다수는
+  하향 필요: "여행 날씨"는 작동하며 N+1 **최적화** 대상이지 정합성 결함 아님, "targeted refresh"는
+  primitive가 이미 존재해 **미완성 아닌 배선 필요**, "관리자 변경"은 create 멱등이 이미 있어 갭은
+  correction PATCH/DELETE의 If-Match뿐.
+
+### 11.4 성능·공간쿼리 관점 (라이브 EXPLAIN 재현)
+
+- **확증(EXPLAIN 재현)**: P1-3(include_geometry가 candidate 술어를 바꿔 **membership 변경** — 동일
+  envelope 2220→2221행; `&&`-only라 L자 polygon **MBR false positive** 실재), P1-11(공개
+  `in-bounds`는 `truncated`/cursor 없이 silent 절단 — debug 경로만 cursor 반환; 매행 LATERAL이
+  `ON f.kind=...`로 가지치기 안 돼 **place 행도 매행 price/weather probe 실행**), P1-12b(cursor가
+  q 텍스트·bbox·origin/radius·filter를 안 담아 다른 query 재사용 시 조용한 누락/중복), P1-6 후반
+  (card는 가장 먼 미래 effective time, marker는 now 최근접 — 같은 feature 두 화면 상이; asof가
+  `valid_at`만 바운드하고 `issued_at`은 안 해 **미래지식 누수**), P1-10(GiST 6개).
+- **정정(부분과장) 1건**: §9.3의 "현재 테스트는 `enable_seqscan=off`만" — 실제로는 3개 케이스가
+  `force_index=False`(planner 기본)로 기본 planner의 GiST 선택을 검사한다. 다만 100만행·ANALYZE·p95
+  부재라는 핵심 지적은 유효.
+- **보강**: ① **write-amplification 실측** — 150k place insert가 partial 3-GiST 1966ms vs 6-GiST
+  3179ms(**~1.6×**); geom이 전부 NULL인데도 full GiST가 5.8MB 저장(쿼리 이득 0). ② `ORDER BY
+  feature_id + LIMIT`가 **저선택도 뷰포트에서 GiST를 무력화**(planner가 PK scan + coord filter 선택)
+  — N150 기본값에서 더 강해짐. 이게 §9.3의 "planner 기본 EXPLAIN ANALYZE"가 필요한 이유. ③ 시간상관
+  table엔 partition 이전에 **BRIN-on-time**이 값싼 선행 단계(공간축은 GiST 유지). ④ admin dedup/enrichment
+  목록이 잔여 **OFFSET 페이징**(깊은 페이지 O(n)). ⑤ notice lineage 필터가 모든 공개 read의 상시
+  hot-path 비용(§9 fixture에 notice 밀집 시나리오 필요).
+- **이견**: **MVT tile 서버는 과함** — 실 사용처가 여행 지도 300건·popup 단건이므로, 병목은 tile
+  부재가 아니라 `truncated`/`next_cursor` 미반환 + PinVi가 cluster를 버리는 것. **JSON 3필드
+  추가 + 기존 `cluster_features_in_bbox` 재사용**(하루 작업)으로 실질 위해 해소. **`public_feature_map`
+  전면 projection보다 좁은 `current weather/price summary` 테이블**로 두 LATERAL을 LEFT JOIN 치환 —
+  P1-3(candidate 술어 통일)과 함께 **단일 패치로 수렴**. **cursor HMAC은 오버킬**(cursor에 인가가
+  실리지 않으므로 **fingerprint + version byte** + `CURSOR_QUERY_MISMATCH`면 충분). §9.3의 100만
+  fixture·p95를 **매 PR CI에 박는 건 과부하** — CI는 planner-기본 EXPLAIN 스모크 확대, 100만+ p95는
+  릴리스 게이트 1회성으로 **계층화**(이 repo의 e2e/heavy가 CI 게이트가 아닌 관례와 정합).
+
+### 11.5 실행 전략 이견 (핵심)
+
+원 리뷰의 **가장 큰 문제는 전제와 실행 순서**다. §1은 "개발 단계·하위 호환 불필요", §8은
+"호환 layer/dual-write 없는 순서"를 명시적으로 깐다. 이 전제는 저장소 현실과 충돌한다.
+
+- **(전제 붕괴)** `docs/integration-map.md` §2는 **PinVi가 이미 prod에서 `/v1/features*`·
+  `curated-features`·`weather/*`를 pull 중**임을 정본으로 못박는다. 소비자가 라이브인 순간
+  **사실상의 호환 계약**이 존재한다. "하위 호환 불필요"는 선택할 수 있는 정책이 아니라 PinVi를
+  동시에 끊을 각오가 있을 때만 성립하는 조건부 전제인데, 문서는 이 조건을 드러내지 않았다.
+- **(롤백 불능)** `docs/deploy.md`·ADR-056은 **streaming replication·auto-failover 없음**(단일
+  N150)을 명시한다. §8은 legacy drop + 새 baseline + 재적재를 동일 cutover에서 하고 **성능 검증을
+  파괴적 cutover 이후(step 7)** 에 둔다 — 검증 전에 되돌릴 수 없게 만드는 순서다.
+- **(재적재는 무손실이 아님)** 이 박스에서 이미 실증됨: 전국 OpiNet bbox 1회로 **일 quota 소진**
+  (MEMORY `opinet-nationwide-quota-limit`), MOIS bulk **WAL 디스크 사고**(F: ~100%), notice
+  reconcile **6분+**(feature 1,029,113행). 게다가 3년 보존 weather(ADR-062)·창이 닫힌 provider feed는
+  **upstream이 다시 서빙하지 않아** "source 재적재"가 재취득 불가 데이터를 조용히 버린다. 누적
+  정합 상태(`feature_versions`·`prevent_provider_reactivation`·486 curation membership·410
+  address-mismatch drop #673)도 폐기된다.
+- **(cross-repo lockstep)** §8 step 6은 **별도 repo·무-CD** 두 시스템의 동기 big-bang을 1~2인에
+  요구한다. PinVi가 조금이라도 지연되면 re-key로 저장 id·cache target이 dangling.
+- **(자기모순)** P1-1이 권하는 **canonical key/alias/redirect 테이블이 곧 §8이 금지한 호환 layer**다.
+  문서의 P1-1 설계 자체가 expand-contract(점진) 경로를 그린다.
+
+**대안 — 목표 구조(§6)는 유지하되 parallel-change로 도달**: 안정 UUID는 컬럼 ADD+backfill+alias로
+dual-serve(re-key 없음); 공개 predicate는 기존 status 위에 `public_features` view/generated 컬럼으로
+통일; 제약은 `NOT VALID→VALIDATE`; API는 ops/Dagster를 **fail-closed + 미설정 시 기동 거부 + 누락
+라우터 배선**으로 우선 닫고 3-app은 후속. 그리고 KTM이 **신 계약을 legacy와 병행 노출 → PinVi 이행·
+검증 → 그 다음 legacy 제거** 순서(문서와 반대).
+
+### 11.6 이견·정정 종합표
+
+| 원 리뷰 항목 | 보강 판정 | 요지 |
+|---|---|---|
+| P1-4 current pointer FK "없음" | **정정** | ADR-063으로 deferrable composite FK 이미 존재 — current cross-entity는 차단됨 |
+| P1-8 coord_5179 불일치 | **정정** | generated STORED라 coord와 정합. 불일치는 lon/lat/coord_key 한정 |
+| P0-1 "admin도 무인증" | **정정(과장)** | admin은 이미 `require_admin_frontend` 게이트. 실 결함은 fail-open 기본값 + legacy 3라우터 미배선 |
+| "그 사이 게이트 추가로 부분 해소" | **정정** | ADR-064 게이트는 doc-time 커밋에 이미 존재. code diff는 문서 1건뿐 |
+| P0-5b `@` 절단 | **정정(반증)** | 실 KTM ID엔 `@` 없음. PinVi 자체 snapshot 규약(대칭)이라 무해 |
+| P0-5c "found/retired/missing 못 줌" | **부분반증** | KTM은 D-12로 retired/missing 이미 구별. unchanged/revision만 부재. **PinVi가 status 미소비** |
+| §9.3 "enable_seqscan=off만" | **정정(부분과장)** | planner-기본 케이스도 있음. 단 100만·ANALYZE·p95 부재는 유효 |
+| P0-5/P1-13 처방(context batch·envelope) | **이견(과설계)** | P0는 PinVi 2줄 + 단건 부모 404로 닫힘. batch/outbox는 P0 후 선택 |
+| §6.2 3-app 물리 분리 | **이견** | fail-closed + 라우터 배선 + read-only role로 90% 달성. 물리 분리는 후속 |
+| P1-11 MVT tile | **이견** | truncated 플래그 + cluster 재사용이 하루 수정. MVT는 측정된 요구 시 |
+| cursor HMAC(P1-12) | **이견** | 인가 미탑재 → fingerprint+version이면 충분 |
+| §9.3 100만 p95 CI | **이견** | 계층화(CI 스모크 / 릴리스 1회성). 매 PR은 과부하 |
+| **§8 big-bang cutover 전체** | **강한 이견** | 전제 붕괴(PinVi live) + 롤백 불능 + 재적재 손실 + lockstep. **expand-contract로 대체** |
+
+### 11.7 보강 재분류 (배포 차단 vs 점진)
+
+- **즉시(스키마 변경 0, 가역)**: curated 공개 router 인증 + published/active predicate(P0-1 공개분·
+  P0-2), notice 방어적 cast(P0-3 — 완화만, `notice_states` 재설계 불요), 공개 detail에서 `raw_data`
+  제거·`trip_card` projection 고정(P0-4), no-op beach 옵션 삭제(P0-6). ops/Dagster **fail-closed +
+  기동 거부 + 누락 라우터 배선**(P0-1 핵심). PinVi-side broken 오판 2줄 + status 소비(P0-5).
+- **조기(additive, rewrite 비의존)**: `truncated`/`next_cursor`(P1-11), `include_total` repo 전달·
+  cursor fingerprint(P1-12), 단건 weather 부모 404(P1-13b), create Idempotency-Key(P1-14),
+  weather UNIQUE/range CHECK를 `NOT VALID→VALIDATE`(P1-6 가드 — **데이터 손상 위험이라 조기 승급
+  검토**), 중복 GiST 제거(P1-10, before/after 수치 첨부).
+- **parallel-change(수주)**: `public_features` view + partial index로 predicate 단일화, 안정 UUID
+  컬럼 + alias/redirect dual-serve(P1-1), current weather/price summary 테이블 + candidate 술어
+  통일(P1-3+P1-11 단일 패치).
+- **보류/마지막(측정·조율 후)**: vNext 새 baseline + 재적재(§8) — 위 wave로 가치의 대부분을 이미
+  확보하면 big-bang이 불필요해진다. weather partition/hypertable은 retention·write/read 실측 후.
+  3-app 물리 분리·MVT tile은 측정된 요구가 생길 때.
+
+### 11.8 지지(명확한 동의)
+
+§3 유지할 설계 6종, P0-2(공개 predicate 단일화 — 단 view로 점진), P0-3(공개 read 가용성 버그 —
+즉시 방어적 수정), P0-4(공개 계약 위생), P1-9 중 `alembic upgrade head && alembic check` exit 0을
+CI gate로 만드는 것, §9의 검증 gate(특히 "query 수가 batch item 수에 비례하지 않는지" 검사)는
+**어떤 재설계 경로를 택하든 지금 도입할 가치**가 있다 — 오히려 이 gate가 모든 후속 판정의 기준이 된다.
