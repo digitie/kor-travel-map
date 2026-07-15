@@ -1,6 +1,8 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { makePipelineCancellationResponse } from "./pipeline-cancellation-fixture";
 
 /**
  * `/ops/import-jobs/[jobId]` 상세 — ZERO 커버 페이지 spec
@@ -21,6 +23,7 @@ type OpsImportJobEventsListResponse =
   components["schemas"]["OpsImportJobEventsListResponse"];
 
 const JOB_ID = "88888888-8888-4888-8888-888888888888";
+const OWNER_REQUEST_ID = "77777777-7777-4777-8777-777777777777";
 const DETAIL_PATH = `/v1/ops/import-jobs/${JOB_ID}`;
 const meta = { duration_ms: 1, request_id: "e2e-import-job-detail" };
 
@@ -38,7 +41,7 @@ function makeJob(
     links: [
       { href: `/v1/ops/import-jobs/${JOB_ID}`, label: null, rel: "self" },
       {
-        href: "/v1/admin/features/update-requests",
+        href: `/v1/admin/features/update-requests/${OWNER_REQUEST_ID}`,
         label: "update request",
         rel: "feature_update_request",
       },
@@ -96,20 +99,22 @@ async function mockImportJob(
 
   await page.route("**/v1/ops/import-jobs/**", async (route) => {
     const request = route.request();
-    const url = new URL(request.url());
+    const pathname = bffApiPath(request.url());
     const method = request.method();
 
-    if (method === "POST" && url.pathname === `${DETAIL_PATH}/cancel`) {
+    if (method === "POST" && pathname === `${DETAIL_PATH}/cancel`) {
       calls.cancel += 1;
       status = "cancelled";
-      const body: OpsImportJobResponse = {
-        data: makeJob({ status, finished_at: "2026-06-08T00:02:00.000Z" }),
-        meta,
-      };
+      const body = makePipelineCancellationResponse({
+        rootKind: "import_job",
+        rootId: JOB_ID,
+        initialStatus: options.initialStatus ?? "running",
+        dagsterRunId: "dagster-run-import-detail-001",
+      });
       await fulfillJson(route, body);
       return;
     }
-    if (method === "GET" && url.pathname === `${DETAIL_PATH}/events`) {
+    if (method === "GET" && pathname === `${DETAIL_PATH}/events`) {
       calls.events += 1;
       const body: OpsImportJobEventsListResponse = {
         data: { items: events },
@@ -118,7 +123,7 @@ async function mockImportJob(
       await fulfillJson(route, body);
       return;
     }
-    if (method === "GET" && url.pathname === DETAIL_PATH) {
+    if (method === "GET" && pathname === DETAIL_PATH) {
       calls.detail += 1;
       if (options.detailStatus && options.detailStatus >= 400) {
         await fulfillJson(route, { detail: "job_id 없음" }, options.detailStatus);
@@ -142,15 +147,15 @@ test.describe("/ops/import-jobs/[jobId]", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Import job" }),
+      page.getByRole("heading", { level: 1, name: "적재 작업 상세" }),
     ).toBeVisible();
-    await expect(page.getByText("Job", { exact: true })).toBeVisible();
-    await expect(page.getByText("Events", { exact: true })).toBeVisible();
-    await expect(page.getByText("Payload", { exact: true })).toBeVisible();
+    await expect(page.getByText("작업", { exact: true })).toBeVisible();
+    await expect(page.getByText("이벤트", { exact: true })).toBeVisible();
+    await expect(page.getByText("요청값", { exact: true })).toBeVisible();
     await expect(page.getByText("42%", { exact: true })).toBeVisible();
     // Events 테이블 컬럼 + 행 1건.
     await expect(
-      page.getByRole("columnheader", { name: "message" }),
+      page.getByRole("columnheader", { name: "메시지" }),
     ).toBeVisible();
     await expect(page.getByText("loaded 10 features")).toBeVisible();
   });
@@ -159,7 +164,7 @@ test.describe("/ops/import-jobs/[jobId]", () => {
     await mockImportJob(page, { initialStatus: "running", events: [] });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await expect(page.getByText("event가 없습니다.")).toBeVisible();
+    await expect(page.getByText("이벤트가 없습니다.")).toBeVisible();
   });
 
   test("cancel 가능 — queued/running에서 cancel 버튼 활성", async ({ page }) => {
@@ -167,7 +172,7 @@ test.describe("/ops/import-jobs/[jobId]", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     await expect(
-      page.getByRole("button", { name: "cancel" }),
+      page.getByRole("button", { name: "중지 요청" }),
     ).toBeEnabled();
   });
 
@@ -176,17 +181,17 @@ test.describe("/ops/import-jobs/[jobId]", () => {
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
     await expect(
-      page.getByRole("button", { name: "cancel" }),
+      page.getByRole("button", { name: "중지 요청" }),
     ).toBeDisabled();
   });
 
-  test("cancel 액션 → cancel 요청됨 알림", async ({ page }) => {
+  test("cancel 액션 → 중지 처리됨 알림", async ({ page }) => {
     const calls = await mockImportJob(page, { initialStatus: "running" });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await page.getByPlaceholder("reason").fill("e2e cancel");
-    await page.getByRole("button", { name: "cancel" }).click();
-    await expect(page.getByText("cancel 요청됨")).toBeVisible();
+    await page.getByPlaceholder("중지 사유").fill("e2e cancel");
+    await page.getByRole("button", { name: "중지 요청" }).click();
+    await expect(page.getByText("중지 처리됨")).toBeVisible();
     expect(calls.cancel).toBe(1);
   });
 
@@ -194,6 +199,6 @@ test.describe("/ops/import-jobs/[jobId]", () => {
     await mockImportJob(page, { detailStatus: 404 });
     await page.goto(`/ops/import-jobs/${JOB_ID}`);
 
-    await expect(page.getByText("import job 조회 실패")).toBeVisible();
+    await expect(page.getByText("적재 작업 조회 실패")).toBeVisible();
   });
 });

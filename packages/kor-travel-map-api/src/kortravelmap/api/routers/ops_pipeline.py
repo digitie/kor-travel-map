@@ -28,15 +28,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
-    cancel_update_request,
     get_update_request,
 )
-from kortravelmap.infra.jobs_repo import cancel_import_job
 from kortravelmap.infra.ops_repo import (
     OpsImportJob,
     OpsImportJobEvent,
     get_ops_import_job,
     list_ops_import_job_events,
+)
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    get_current_pipeline_cancellation_detail,
 )
 from kortravelmap.infra.pipeline_repo import (
     PipelineExecution,
@@ -47,15 +48,20 @@ from kortravelmap.infra.pipeline_repo import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.api import (
     dagster_graphql,
     dagster_query_service,
     dagster_schedule_service,
     feature_update_service,
+    pipeline_cancellation_service,
 )
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError, DagsterUrls
+from kortravelmap.api.dagster_http import (
+    dagster_http_dependencies,
+)
 from kortravelmap.api.dagster_http import (
     http_client_from_request as _http_client_from_request,
 )
@@ -71,13 +77,27 @@ from kortravelmap.api.dagster_schema import (
     DagsterScheduleOverrideRequest,
     DagsterSensor,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import to_http_exception
 from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
     FeatureUpdateRequestRecord,
     FeatureUpdateRequestRunNowRequest,
+)
+from kortravelmap.api.pipeline_cancellation_http import (
+    error_responses as cancellation_error_responses,
+)
+from kortravelmap.api.pipeline_cancellation_http import (
+    to_http_exception as cancellation_to_http_exception,
+)
+from kortravelmap.api.pipeline_cancellation_schema import (
+    PipelineCancellationDetailRecord,
+    PipelineCancellationRequest,
+    PipelineCancellationResponse,
+    PipelineCancellationSummaryRecord,
+    cancellation_detail_record,
+    cancellation_summary_record,
 )
 from kortravelmap.api.response import Meta, make_meta
 
@@ -235,6 +255,7 @@ class PipelineExecutionRootRecord(BaseModel):
     )
     linked_job_count: int = Field(ge=0)
     projected_job: PipelineProjectedJobRecord | None = None
+    cancellation: PipelineCancellationSummaryRecord | None = None
     detail_url: str
 
 
@@ -309,6 +330,10 @@ class PipelineExecutionDetailData(BaseModel):
         default=None,
         description="kind=update_request의 본체 또는 import_job이 연결한 request.",
     )
+    cancellation: PipelineCancellationDetailRecord | None = Field(
+        default=None,
+        description="base lifecycle을 덮지 않는 current cancellation 상세.",
+    )
     events: list[PipelineJobEventRecord] = Field(default_factory=list)
     events_next_cursor: str | None = Field(
         default=None,
@@ -322,24 +347,6 @@ class PipelineExecutionDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: PipelineExecutionDetailData
-    meta: Meta
-
-
-class PipelineExecutionCancelRequest(BaseModel):
-    """``POST /ops/pipeline/executions/{kind}/{id}/cancel`` body."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    operator: str | None = Field(default=None, max_length=120)
-    reason: str | None = Field(default=None, max_length=500)
-
-
-class PipelineExecutionCancelResponse(BaseModel):
-    """취소 후 실행 행 응답."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: PipelineExecutionRecord
     meta: Meta
 
 
@@ -727,6 +734,7 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecor
         projected_job=(
             _projected_job_record(row.projected_job) if row.projected_job is not None else None
         ),
+        cancellation=cancellation_summary_record(row.cancellation),
         detail_url=_execution_detail_url(row.kind, row.id),
     )
 
@@ -1072,12 +1080,21 @@ async def _load_execution_detail(
         events = [_event_record(item) for item in events_page.items]
         events_next_cursor = events_page.next_cursor
 
+    cancellation = cancellation_detail_record(
+        await get_current_pipeline_cancellation_detail(
+            session,
+            kind=kind,
+            execution_id=execution_id,
+        )
+    )
+
     return PipelineExecutionDetailData(
         execution=execution,
         import_job=_import_job_record(job) if job is not None else None,
         update_request=(
             _update_request_record(update_request) if update_request is not None else None
         ),
+        cancellation=cancellation,
         events=events,
         events_next_cursor=events_next_cursor,
     )
@@ -1116,103 +1133,36 @@ async def get_execution_detail(
 
 @router.post(
     "/executions/{kind}/{execution_id}/cancel",
-    response_model=PipelineExecutionCancelResponse,
-    summary="실행 취소 (종류별 위임)",
-    responses={
-        404: {"description": "실행 없음"},
-        409: {"description": "이미 terminal 상태라 취소 불가"},
-    },
+    response_model=PipelineCancellationResponse,
+    summary="canonical 실행 계층 취소",
+    responses=cancellation_error_responses(not_found_description="실행 없음"),
 )
 async def cancel_execution(
     kind: ExecutionKind,
     execution_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    body: PipelineExecutionCancelRequest | None = None,
-) -> PipelineExecutionCancelResponse:
+    request: Request,
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    body: PipelineCancellationRequest | None = None,
+) -> PipelineCancellationResponse:
     started_at = perf_counter()
-    operator = body.operator if body is not None and body.operator else None
-    reason = body.reason if body is not None and body.reason else None
-    if kind == "import_job":
-        record = await _cancel_import_job_execution(
-            session, str(execution_id), operator=operator, reason=reason
+    settings, http_client = dagster_http_dependencies(request)
+    try:
+        record = await pipeline_cancellation_service.cancel_pipeline_execution(
+            engine=engine,
+            settings=settings,
+            http_client=http_client,
+            kind=kind,
+            execution_id=str(execution_id),
+            requested_by=context.actor,
+            reason=body.reason if body is not None else None,
         )
-    else:
-        record = await _cancel_update_request_execution(
-            session, str(execution_id), operator=operator, reason=reason
-        )
-    return PipelineExecutionCancelResponse(
+    except pipeline_cancellation_service.PipelineCancellationServiceError as exc:
+        raise cancellation_to_http_exception(exc) from exc
+    return PipelineCancellationResponse(
         data=record,
         meta=make_meta(started_at=started_at),
     )
-
-
-async def _cancel_import_job_execution(
-    session: AsyncSession,
-    job_id: str,
-    *,
-    operator: str | None,
-    reason: str | None,
-) -> PipelineExecutionRecord:
-    error_message = reason or "cancelled by admin API"
-    async with session.begin():
-        existing = await get_ops_import_job(session, job_id)
-        if existing is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"import job not found: {job_id}",
-            )
-        if existing.status not in {"queued", "running"}:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"cannot cancel import job in status: {existing.status}",
-            )
-        cancelled = await cancel_import_job(
-            session,
-            job_id,
-            error_message=error_message,
-            operator=operator,
-            reason=reason,
-        )
-        if cancelled is None:
-            refreshed = await get_ops_import_job(session, job_id)
-            detail_status = refreshed.status if refreshed is not None else existing.status
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"cannot cancel import job in status: {detail_status}",
-            )
-    return _execution_from_job(await get_ops_import_job(session, job_id) or existing)
-
-
-async def _cancel_update_request_execution(
-    session: AsyncSession,
-    request_id: str,
-    *,
-    operator: str | None,
-    reason: str | None,
-) -> PipelineExecutionRecord:
-    error_message = reason or "cancelled by admin API"
-    async with session.begin():
-        cancelled = await cancel_update_request(session, request_id, error_message=error_message)
-        if cancelled is None:
-            existing = await get_update_request(session, request_id)
-            if existing is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"feature update request 없음: {request_id!r}",
-                )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"취소할 수 없는 상태: {existing.status}",
-            )
-    # 감사: repo cancel 경로는 operator 컬럼이 없다 — 계약이 받은 operator를
-    # 조용히 버리지 않도록 구조화 로그로 남긴다(reason은 error_message로 영속).
-    _LOG.info(
-        "feature update request 취소 (request_id=%s, operator=%s, reason=%s)",
-        request_id,
-        operator or "unknown",
-        reason or "-",
-    )
-    return _execution_from_request(cancelled)
 
 
 @router.get(

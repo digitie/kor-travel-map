@@ -49,6 +49,7 @@ from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
+from kortravelmap.infra import feature_update_repo as fur_repo
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
@@ -1059,16 +1060,29 @@ class AsyncKorTravelMapClient:
         self,
         request_id: str,
         *,
-        dagster_run_id: str | None = None,
+        expected_dagster_run_id: str,
+        expected_request_updated_at: datetime,
         error_message: str | None = None,
     ) -> FeatureUpdateRequest | None:
-        """queued/running feature update request를 ``failed``로 닫는다."""
+        """Dagster failure를 pre-start retry 또는 started owner 실패로 반영한다.
+
+        request가 sensor가 본 queued generation 그대로면 ``updated_at``만 전진해
+        다음 run key를 연다. 이미 start한 동일 run이면 기존 run id CAS로 request와
+        import job을 ``failed``로 닫는다.
+        """
         async with self._session_factory() as session, session.begin():
+            retry = await fur_repo.advance_update_request_generation_after_pre_start_failure(
+                session,
+                request_id,
+                expected_updated_at=expected_request_updated_at,
+            )
+            if retry is not None:
+                return retry
             return await repo_finish_update_request(
                 session,
                 request_id,
                 status="failed",
-                dagster_run_id=dagster_run_id,
+                expected_dagster_run_id=expected_dagster_run_id,
                 error_message=error_message,
             )
 
@@ -1092,13 +1106,15 @@ class AsyncKorTravelMapClient:
         request_id: str,
         *,
         dagster_run_id: str | None = None,
+        expected_updated_at: datetime | None = None,
     ) -> FeatureUpdateRequest | None:
-        """Dagster worker run id를 긴 provider 실행 전에 짧게 기록한다."""
+        """queued generation을 특정 Dagster run owner로 fail-closed claim한다."""
         async with self._session_factory() as session, session.begin():
             return await repo_start_update_request(
                 session,
                 request_id,
                 dagster_run_id=dagster_run_id,
+                expected_updated_at=expected_updated_at,
             )
 
     async def execute_next_feature_update_request(
@@ -1108,15 +1124,15 @@ class AsyncKorTravelMapClient:
         dagster_run_id: str | None = None,
         sigungu_resolver: SigunguByRadiusResolver | None = None,
     ) -> FeatureUpdateExecutionResult | None:
-        """queued feature update request 1건을 claim하고 runner로 실행한다.
+        """queued feature update request 1건을 peek하고 lock 아래 claim해 실행한다.
 
         provider API 호출/Dagster orchestration은 runner가 담당한다. 본 client는
-        request/import job 상태, scope 재해석, target link 갱신, 성공/실패 전이를
-        한 transaction으로 묶는다.
+        전용 physical connection의 session-level scope lock을 유지하면서 prepare,
+        provider scope, finalize를 각각 commit한다.
         """
-        async with self._session_factory() as session, session.begin():
+        async with self._engine.connect() as connection:
             return await repo_execute_next_feature_update_request(
-                session,
+                connection,
                 runner=runner,
                 dagster_run_id=dagster_run_id,
                 sigungu_resolver=sigungu_resolver,
@@ -1128,18 +1144,24 @@ class AsyncKorTravelMapClient:
         *,
         runner: ProviderDatasetRefreshRunner,
         dagster_run_id: str | None = None,
+        expected_request_updated_at: datetime | None = None,
         sigungu_resolver: SigunguByRadiusResolver | None = None,
     ) -> FeatureUpdateExecutionResult | None:
         """특정 feature update request를 즉시 실행한다. 없으면 ``None``."""
-        async with self._session_factory() as session, session.begin():
-            request = await repo_get_update_request(session, request_id)
+        async with self._engine.connect() as connection:
+            async with AsyncSession(
+                bind=connection,
+                expire_on_commit=False,
+            ) as session, session.begin():
+                request = await repo_get_update_request(session, request_id)
             if request is None:
                 return None
             return await repo_execute_feature_update_request(
-                session,
+                connection,
                 request,
                 runner=runner,
                 dagster_run_id=dagster_run_id,
+                expected_request_updated_at=expected_request_updated_at,
                 sigungu_resolver=sigungu_resolver,
             )
 

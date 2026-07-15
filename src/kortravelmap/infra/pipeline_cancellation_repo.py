@@ -45,6 +45,7 @@ from kortravelmap.infra.pipeline_cancellation_queries import (
     _MARK_JOBS_SQL,
     _MARK_REQUESTS_SQL,
     _MEMBERS_SQL,
+    _RESERVE_RUN_TERMINATION_SQL,
     _RESOLVE_SCOPE_SQL,
     _RUNS_SQL,
     _TRANSITION_JOB_MEMBER_SQL,
@@ -130,6 +131,7 @@ def _run(row: Any) -> PipelineCancellationRun:
         cancellation_id=str(row.cancellation_id),
         dagster_run_id=str(row.dagster_run_id),
         initial_status=row.initial_status,
+        termination_reserved_at=row.termination_reserved_at,
         result=cast(PipelineCancellationResult, str(row.result)),
         terminal_status=row.terminal_status,
         error=_json_dict(row.error),
@@ -931,6 +933,57 @@ async def set_pipeline_cancellation_run_result(
     return True
 
 
+async def mark_pipeline_cancellation_run_termination_reserved(
+    session: AsyncSession,
+    *,
+    cancellation_id: str,
+    dagster_run_id: str,
+    initial_status: str,
+) -> bool:
+    """첫 active 관측과 attempt별 terminate dispatch 예약을 원자적으로 기록한다."""
+    normalized_status = initial_status.strip().upper()
+    if not normalized_status:
+        raise ValueError("initial_status must not be empty")
+    if normalized_status in {"CANCELED", "SUCCESS", "FAILURE"}:
+        raise ValueError("terminal Dagster status cannot reserve termination")
+    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+        return False
+    run = await _lock_run(
+        session,
+        cancellation_id=cancellation_id,
+        dagster_run_id=dagster_run_id,
+    )
+    if run is None or run.result != "pending":
+        return False
+    if run.termination_reserved_at is not None:
+        return False
+    row = (
+        await session.execute(
+            text(_RESERVE_RUN_TERMINATION_SQL),
+            {
+                "cancellation_id": _uuid(cancellation_id),
+                "dagster_run_id": dagster_run_id,
+                "initial_status": normalized_status,
+            },
+        )
+    ).one_or_none()
+    if row is None:
+        return False
+    await record_system_log(
+        session,
+        level="info",
+        source="pipeline_cancellation",
+        event="pipeline.cancellation.run_termination_reserved",
+        message="Dagster terminate dispatch reserved for this cancellation attempt",
+        detail={
+            "cancellation_id": cancellation_id,
+            "dagster_run_id": dagster_run_id,
+            "initial_status": normalized_status,
+        },
+    )
+    return True
+
+
 async def transition_pipeline_cancellation_member(
     session: AsyncSession,
     *,
@@ -1231,6 +1284,7 @@ __all__ = [
     "lock_pipeline_cancellation_root",
     "lock_pipeline_hierarchy_for_jobs",
     "lock_pipeline_lineage_mutation",
+    "mark_pipeline_cancellation_run_termination_reserved",
     "pipeline_cancellation_root_lock_key",
     "resolve_pipeline_cancellation_scope",
     "retry_pipeline_cancellation_attempt",

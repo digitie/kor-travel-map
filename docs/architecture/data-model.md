@@ -1488,9 +1488,11 @@ lineage-global→정렬 canonical root→source attempt `FOR UPDATE`→detail re
 `completed`는 marker·base·member·run 전체 대응이 정확하고 pending/cancel_failed가 0일
 때만 허용한다. `retryable`은 pending이 없고 exact marker/status/run을 유지한 `running`
 미해결 member가 하나 이상이며 모든 대응 run/member의 구조화 오류 코드가 재시도 허용
-집합일 때만 허용한다. `failed`는 모든 미해결 member가 frozen running이어야 하며,
-각 member에 definitive 정책 오류와 run 없음·관측 base mismatch·definitive run failure 중
-하나를 요구한다. pending/terminal run을 거짓 `cancel_failed`로 덮어쓰지 않는다.
+집합일 때만 허용한다. `failed`는 operator 개입이 필요한 definitive attempt 오류가 있을 때
+사용한다. 이때 다른 run/member에서 이미 관측한 timeout/unavailable 같은 retryable 오류와
+아직 권위 있게 관측하지 못한 pending 결과를 definitive 오류로 덮지 않고 그대로 보존한다.
+알려진 base/run mismatch만 해당 member의 definitive `cancel_failed`로 기록하며,
+unexpected coordinator 오류도 pending/terminal run을 거짓 `cancel_failed`로 만들지 않는다.
 
 재시도는 `previous_cancellation_id`가 가리키는 이전 시도의 frozen member 중
 `initial_status='running' AND result='cancel_failed'`인 행만
@@ -1525,10 +1527,11 @@ exactly-once가 아니라 **attempt별 at-most-once dispatch**다. 최초 canoni
 반복 변경은 409 `PIPELINE_CANCELLATION_UNSAFE`로 닫는다. 기존
 lineage-global/root transaction lock을 lease로 대체하지 않는다.
 lease 해제는 획득한 exact key를 같은 backend에서 `pg_advisory_unlock`하고 true를 확인한 뒤
-commit한다. 해제 여부를 확인할 수 없거나 connection이 끊기면 해당 connection을 invalidate해
-session lock을 가진 backend가 pool로 돌아가지 못하게 한다. lease 상실이나 reservation/base CAS
-패배를 감지한 old coordinator는 후속 외부 호출·결과 write를 중단하고 fresh session에서 current
-detail을 reload한다.
+commit한다. false/예외이면 성공을 반환하지 않는다. async invalidate가 실패하면 pool proxy의
+hard invalidate, 마지막으로 physical driver terminate를 시도하고, backend 폐기를 증명하지
+못하면 unsafe 오류를 전파한다. lease 상실이나 reservation/base CAS 패배를 감지한 old
+coordinator는 후속 외부 호출·결과 write를 중단하고 fresh session에서 exact 과거 attempt보다
+canonical root의 current detail을 우선 reload한다.
 
 feature update coordinator는 scope별 commit으로 이미 완료된 데이터와 외부 효과를
 rollback하지 않는다. provider scope 동시 실행 창을 만들지 않기 위해 engine에서 얻은 전용
@@ -1538,6 +1541,27 @@ pool에 반환하며, pin하지 않은 pooled `AsyncSession`에서 scope 사이 
 각 scope data transaction은 provider 결과를 쓰기 전에 대상 request/job row를 잠그고 marker
 NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit까지는 취소가 기다리고,
 취소 marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
+queue sensor는 상태를 바꾸지 않고 peek만 하며, executor가 request별 session lease와 scope
+session lease를 얻은 뒤 request/job을 CAS start한다. scope 경합이면 request/job의 stale run
+identity·progress·timestamp를 같은 transaction에서 초기화해 queued로 돌리고 새 run key를
+만든다. request lease 경합의 queued loser는 run key만 단조 증가시키며 running owner는
+건드리지 않는다. sensor는 request의 timezone-aware `updated_at`을 실행 generation으로 삼아
+run key·op config·run tag에 같은 값을 고정한다. start는 `queued + generation 동일 + run-id
+NULL` 또는 `running + 동일 run owner`만 허용하고, 연결 import job owner CAS가 실패하면
+request start도 savepoint에서 rollback한다. CAS start 전 resource 초기화 실패는
+`queued + run-id NULL + generation 동일 + marker NULL` 행의 `updated_at`만 전진시켜 Dagster
+중복 제거와 다른 새 run key를 만든다. running owner, 더 최신 generation, terminal/marker 행은
+변경하지 않는다. 예전 Dagster run의 지연 failure sensor는 실제 실패 run id를
+`expected_dagster_run_id`로 전달하고 request와 연결 job 모두 같은 generation일 때만 failed로
+닫는다. 어느 한쪽 CAS라도 실패하면 전체 terminal write를 rollback한다. 각 provider scope의
+data write와 `matched_scope.executed_provider_scopes` checkpoint는 같은 transaction에 commit한다.
+production asset이 사용하는 `AsyncKorTravelMapClient`도 executor session의 physical connection에
+bind하고 내부 session은 outer transaction을 commit하지 못하게 한다. bind 뒤 원본 client의
+engine으로 새 connection을 여는 public 경로는 fail-closed로 거부한다. 따라서 asset chunk
+적재·`provider_sync_state`·checkpoint가 하나의 scope transaction이고, checkpoint 전 crash가
+data-only commit을 남기지 않는다. 이후 취소·실패·process 종료에도 이미 반영된 scope를
+식별할 수 있다. marker 없는 `CancelledError`는 request/job을 failed로 닫고 원 예외를
+재전파하며, marker가 있으면 coordinator가 상태 전이를 우선한다.
 
 full-load batch consistency gate도 같은 원칙을 사용한다. 호출별 전용
 `AsyncConnection`에 `AsyncSession(expire_on_commit=False)`을 bind하고

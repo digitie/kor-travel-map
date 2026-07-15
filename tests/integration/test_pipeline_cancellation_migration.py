@@ -107,7 +107,9 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
                         WHERE schemaname = 'ops'
                           AND tablename IN (
                             'pipeline_cancellations',
-                            'pipeline_cancellation_members'
+                            'pipeline_cancellation_members',
+                            'import_jobs',
+                            'feature_update_requests'
                           )
                         """
                     )
@@ -118,33 +120,6 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
                     text("SELECT version_num FROM alembic_version")
                 )
             ).scalar_one()
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO ops.pipeline_cancellations (
-                        cancellation_id, root_kind, root_id, requested_by
-                    ) VALUES (
-                        CAST(:cancellation_id AS uuid), 'import_job',
-                        CAST(:job_id AS uuid), 'admin:test'
-                    )
-                    """
-                ),
-                {"cancellation_id": cancellation_id, "job_id": job_id},
-            )
-            await connection.execute(
-                text(
-                    """
-                    INSERT INTO ops.import_jobs (
-                        job_id, kind, payload, cancellation_id,
-                        cancellation_requested_at, cancellation_requested_by
-                    ) VALUES (
-                        CAST(:job_id AS uuid), 'provider_load', '{}'::jsonb,
-                        CAST(:cancellation_id AS uuid), now(), 'admin:test'
-                    )
-                    """
-                ),
-                {"cancellation_id": cancellation_id, "job_id": job_id},
-            )
 
         assert tables == {
             "pipeline_cancellations",
@@ -160,19 +135,88 @@ async def test_pipeline_cancellation_upgrade_and_strict_downgrade(
         assert {
             "uq_pipeline_cancellations_active_root",
             "idx_pipeline_cancellations_root_history",
+            "idx_pipeline_cancellations_previous",
             "idx_pipeline_cancellation_members_member",
+            "idx_pipeline_cancellation_members_run",
+            "idx_import_jobs_cancellation_id",
+            "idx_feature_update_requests_cancellation_id",
         } <= indexes
         assert revision == _TARGET_REVISION
 
-        await target_engine.dispose()
-        with pytest.raises(RuntimeError, match="active pipeline cancellation"):
-            await asyncio.to_thread(
+        # downgrade가 active 검사 전에 관련 테이블을 강하게 잠근다. 아직 commit되지
+        # 않은 marker writer가 끝나기 전에는 검사/DDL이 진행되지 않아야 하며, commit
+        # 뒤에는 그 active 상태를 반드시 보고 거부해야 한다.
+        writer = await target_engine.connect()
+        writer_tx = await writer.begin()
+        await writer.execute(
+            text(
+                """
+                INSERT INTO ops.pipeline_cancellations (
+                    cancellation_id, root_kind, root_id, requested_by
+                ) VALUES (
+                    CAST(:cancellation_id AS uuid), 'import_job',
+                    CAST(:job_id AS uuid), 'admin:test'
+                )
+                """
+            ),
+            {"cancellation_id": cancellation_id, "job_id": job_id},
+        )
+        await writer.execute(
+            text(
+                """
+                INSERT INTO ops.import_jobs (
+                    job_id, kind, payload, cancellation_id,
+                    cancellation_requested_at, cancellation_requested_by
+                ) VALUES (
+                    CAST(:job_id AS uuid), 'provider_load', '{}'::jsonb,
+                    CAST(:cancellation_id AS uuid), now(), 'admin:test'
+                )
+                """
+            ),
+            {"cancellation_id": cancellation_id, "job_id": job_id},
+        )
+        downgrade_task = asyncio.create_task(
+            asyncio.to_thread(
                 _run_alembic,
                 target_dsn,
                 _PRE_REVISION,
                 downgrade=True,
             )
+        )
+        downgrade_is_waiting = False
+        async with target_engine.connect() as probe:
+            for _ in range(100):
+                downgrade_is_waiting = bool(
+                    await probe.scalar(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_locks AS lock
+                                JOIN pg_class AS relation
+                                  ON relation.oid = lock.relation
+                                JOIN pg_namespace AS namespace
+                                  ON namespace.oid = relation.relnamespace
+                                WHERE namespace.nspname = 'ops'
+                                  AND relation.relname = 'pipeline_cancellations'
+                                  AND lock.mode = 'AccessExclusiveLock'
+                                  AND NOT lock.granted
+                            )
+                            """
+                        )
+                    )
+                )
+                if downgrade_is_waiting:
+                    break
+                await asyncio.sleep(0.01)
+        assert downgrade_is_waiting is True
+        assert downgrade_task.done() is False
+        await writer_tx.commit()
+        await writer.close()
+        with pytest.raises(RuntimeError, match="active pipeline cancellation"):
+            await downgrade_task
 
+        await target_engine.dispose()
         target_engine = make_async_engine(target_dsn)
         async with target_engine.begin() as connection:
             await connection.execute(

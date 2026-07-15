@@ -4,7 +4,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postJson } from "./client";
+import { ApiClientError, getJson, pathWithQuery, postJson } from "./client";
+import { pipelineCancellationQueryKeys } from "./pipelineCancellationInvalidation";
 import type { components, paths } from "./types";
 
 type FeatureUpdateSchemas = components["schemas"];
@@ -50,8 +51,10 @@ export type FeatureUpdateRequestListParams = Omit<
   created_from?: string | Date;
   created_to?: string | Date;
 };
-export type FeatureUpdateRequestCancelRequest =
-  FeatureUpdateSchemas["FeatureUpdateRequestCancelRequest"];
+export type PipelineCancellationRequest =
+  FeatureUpdateSchemas["PipelineCancellationRequest"];
+export type PipelineCancellationResponse =
+  FeatureUpdateSchemas["PipelineCancellationResponse"];
 export type FeatureUpdateRequestRunNowRequest =
   FeatureUpdateSchemas["FeatureUpdateRequestRunNowRequest"];
 
@@ -101,9 +104,9 @@ function createFeatureUpdateRequest(
 
 function cancelFeatureUpdateRequest(
   requestId: string,
-  body: FeatureUpdateRequestCancelRequest = {},
-): Promise<FeatureUpdateRequestCreateResponse> {
-  return postJson<FeatureUpdateRequestCreateResponse>(
+  body: PipelineCancellationRequest = {},
+): Promise<PipelineCancellationResponse> {
+  return postJson<PipelineCancellationResponse>(
     `/v1/admin/features/update-requests/${encodeURIComponent(requestId)}/cancel`,
     body,
   );
@@ -175,25 +178,19 @@ export function useCreateFeatureUpdateRequestMutation() {
 export function useCancelFeatureUpdateRequestMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    FeatureUpdateRequestCreateResponse,
-    Error,
-    { requestId: string; body?: FeatureUpdateRequestCancelRequest }
+    PipelineCancellationResponse,
+    ApiClientError,
+    { requestId: string; body?: PipelineCancellationRequest }
   >({
     mutationFn: ({ requestId, body }) =>
       cancelFeatureUpdateRequest(requestId, body),
-    onSuccess: (data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["feature-update-requests"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["feature-update-request", variables.requestId],
-      });
-      if (data.data.job_id) {
+    onSettled: (data) => {
+      // 409/502/503도 durable cancellation attempt를 만들 수 있으므로 항상 reload한다.
+      for (const queryKey of pipelineCancellationQueryKeys(data?.data.members)) {
         void queryClient.invalidateQueries({
-          queryKey: ["import-job", data.data.job_id],
+          queryKey,
         });
       }
-      void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       void queryClient.invalidateQueries({ queryKey: ["providers"] });
       void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });

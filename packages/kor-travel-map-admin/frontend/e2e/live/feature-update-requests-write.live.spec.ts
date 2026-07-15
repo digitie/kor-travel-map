@@ -8,6 +8,8 @@ type FeatureUpdateRequestDetailResponse =
   components["schemas"]["FeatureUpdateRequestDetailResponse"];
 type FeatureUpdateRequestListResponse =
   components["schemas"]["FeatureUpdateRequestListResponse"];
+type PipelineCancellationResponse =
+  components["schemas"]["PipelineCancellationResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -164,12 +166,12 @@ async function cancelByApi(page: Page, requestId: string): Promise<void> {
   // best-effort 정리: queued/running이면 cancel(200), terminal이면 409 → 무시.
   // 라우터: @router.post("/{request_id}/cancel", ...) → cancel_update_request.
   try {
-    await browserFetch<FeatureUpdateRequestCreateResponse>(
+    await browserFetch<PipelineCancellationResponse>(
       page,
       cancelPath(requestId),
       {
         method: "POST",
-        body: { error_message: `${BASE_REASON} cleanup cancel` },
+        body: { reason: `${BASE_REASON} cleanup cancel` },
       },
     );
   } catch {
@@ -750,10 +752,19 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         await cancelButton.click();
         const response = await responsePromise;
         expect(response.status()).toBe(200);
-        const body =
-          (await response.json()) as FeatureUpdateRequestCreateResponse;
-        expect(body.data.request_id).toBe(requestId);
-        expect(body.data.status).toBe("cancelled");
+        const body = (await response.json()) as PipelineCancellationResponse;
+        expect(body.data.root).toEqual({
+          kind: "update_request",
+          id: requestId,
+        });
+        expect(body.data.status).toBe("completed");
+        expect(body.data.members).toContainEqual(
+          expect.objectContaining({
+            member_kind: "update_request",
+            member_id: requestId,
+            terminal_status: "cancelled",
+          }),
+        );
       });
 
       await test.step("백엔드 detail이 cancelled로 전이됐다", async () => {

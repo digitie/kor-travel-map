@@ -117,7 +117,7 @@ export function FeatureUpdateRequestDetailClient({
                         cancelRequest.mutate({
                           requestId,
                           body: {
-                            error_message:
+                            reason:
                               "cancelled from feature update request detail",
                           },
                         })

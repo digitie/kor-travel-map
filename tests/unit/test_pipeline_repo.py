@@ -84,6 +84,13 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         projected_load_batch_id="33333333-3333-3333-3333-333333333333",
         projected_parent_job_id=job_id,
         projected_depth=1,
+        cancellation_id=None,
+        cancellation_status=None,
+        cancellation_requested_at=None,
+        cancellation_requested_by=None,
+        cancellation_reason=None,
+        cancellation_retryable=None,
+        cancellation_unresolved_member_count=None,
     )
 
 

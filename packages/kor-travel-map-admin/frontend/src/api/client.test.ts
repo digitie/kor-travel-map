@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getJson, postJson } from "./client";
+import { ApiClientError, getJson, postJson } from "./client";
 
 type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -74,5 +74,42 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     });
 
     expect(assign).toHaveBeenCalledWith("/login?next=%2Fadmin%2Fsettings%3Ftab%3Dkeys");
+  });
+
+  it("RFC7807 본문과 Retry-After를 typed 오류로 보존한다", async () => {
+    const problem = {
+      code: "PIPELINE_CANCELLATION_IN_PROGRESS",
+      detail: "다른 취소 시도가 진행 중입니다.",
+      request_id: "request-1",
+      status: 409,
+      title: "다른 취소 시도가 진행 중입니다.",
+      type: "https://kor-travel-map/errors/pipeline-cancellation-in-progress",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchMock>(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(problem), {
+            status: 409,
+            headers: {
+              "Content-Type": "application/problem+json",
+              "Retry-After": "15",
+            },
+          }),
+        ),
+      ),
+    );
+
+    const error = await postJson("/v1/ops/pipeline/executions/import_job/1/cancel", {
+      reason: "test",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({
+      status: 409,
+      problem,
+      retryAfterSeconds: 15,
+    });
+    expect((error as ApiClientError).message).toContain("재시도: 15초 후");
   });
 });

@@ -23,6 +23,81 @@ T-ADM-C3c(#681) 착수 전 잔여범위 감사를 수행한 결과, 이슈 수�
 - OpenAPI/admin types 고정 — 기충족(#690 재생성분, `types.ts`에
   `/v1/ops/pipeline/dagster-runs/{run_id}` 실측). UI 소비 경로는 C5(#691)/C4R.
 
+## 2026-07-15 — T-ADM-C3d 테스트 전 구현·적대 리뷰 반영
+
+- Agent A/B가 feature update phase executor와 pipeline cancellation coordinator를 병렬
+  구현하고, 별도 적대 리뷰어 2명의 S1/S2 지적을 테스트 실행 전에 반영했다.
+- queue claim-before-lock, `CancelledError` active 고착, scope checkpoint 유실,
+  reservation CAS loser, stale ownership reload, mixed 결과 덮어쓰기, downgrade TOCTOU,
+  terminate 오류 오분류, advisory lock backend 오염을 수정했다.
+- 네 cancel 진입점은 reason-only+인증 actor+공용 `PipelineCancellationResponse`로 수렴했고,
+  기존 admin UI hooks/call site도 같은 응답과 member 단위 invalidation으로 원자 전환했다.
+- concurrency/crash/shared·multi-run/backend invalidation 회귀를 추가하고 OpenAPI/admin types를
+  재생성했다. 최종 적대 재리뷰 전이므로 테스트·lint·typecheck는 아직 실행하지 않았다.
+- 첫 최종 재리뷰에서 old Dagster failure run의 generation CAS 부재, production asset이 executor
+  session을 무시하는 적재 경계, `Retry-After` 기계 계약 누락, mocked/live E2E의 구 cancel
+  envelope를 확인했다. failure sensor→client→request/job에 expected run CAS를 연결하고,
+  production asset client를 scope transaction의 physical connection에 bind했다. 세 공개
+  operation은 공용 OpenAPI header 선언을 사용하며 browser client는 RFC7807와 재시도 초를
+  보존하고 오류 뒤에도 durable 상태를 invalidate/reload한다. reason-only 요청과 root/member
+  응답으로 E2E fixture·파괴적 live spec을 함께 바꿨다.
+- 실제 production 축제 asset의 data write 뒤 checkpoint 실패 rollback, stale old-run의
+  queued/new-running 비변경, hard invalidate 뒤 backend PID 소멸·request lease 재획득을
+  회귀로 추가했다. 수정 snapshot 재리뷰 전이므로 실행 게이트는 계속 닫아 두었다.
+- 2차 최종 재리뷰에서 확인된 pre-start resource failure 영구 queued, Next BFF의
+  `Retry-After` 유실, 연결 member 상세 cache 잔존, 임의 queued child를 root로 가정한 파괴적
+  live E2E, bound client의 원본 engine 탈출을 R2A/B/C로 분리했다. sensor run key/config/tag에
+  동일 `updated_at` generation을 고정하고, 같은 queued/null-run generation만 전진시킨다.
+  start는 request/job owner CAS 전체가 성공해야 하며 불일치는 savepoint rollback한다.
+  BFF는 응답 header allowlist로 재시도 초를 전달하고, 오류 뒤 singular detail prefix를
+  invalidate하며, live E2E는 canonical standalone import root와 `linked_job_count`를 먼저
+  고정한다. transaction-bound asset client의 원본 engine 연결은 fail-closed로 거부하고
+  data·provider sync state·checkpoint rollback을 함께 검증한다.
+- 이슈 #680과 원인 PR #677 및 root projection PR #689를 다시 대조했다. marker/status 분리,
+  frozen hierarchy, authenticated actor/audit, request/job/run CAS, GraphQL problem 5xx, runless
+  running 사실 보존, member별 결과, commit 데이터 비롤백을 구현·회귀에 반영했다. 이슈는
+  C3d PR CI/review/merge 뒤 증거 코멘트를 남기고 닫는다.
+- 리뷰 전문 agent가 최근 2일 Claude Code PR 중 공동작성 trailer/session 근거가 있는
+  #672, #674, #675, #676, #677, #683, #691, #692를 닫힘 여부와 무관하게 상세
+  감사하고 각 PR에 코멘트를 남겼다. review-fix 전용 PR은 없었다. pipeline UI 상태
+  격리·sensor fail-closed·URL 복원은 #693, live E2E 의미 단언은 #694로 묶어 새 이슈를
+  만들었다. 기존 #682, #684, #685, #686에는 보강 코멘트를 남겼고, #687이
+  actor/problem/schedule 수용 기준을 완료하지 않아 #682를 다시 열었다.
+- 사용자 후속 지시로 C3d 다음 순서를 바꿨다. Claude Code worktree에 남은 C3e
+  schedule/manual canonical operation 작업을 보존적으로 회수해 별도 PR로 완료한 뒤,
+  adm-c5 merge를 확인하고 C6→C7로 진행한다.
+- 최종 교차 리뷰에서 failure sensor가 DB client resource를 필수 선언하지 않아 운영 context가
+  pre-start generation 복구를 건너뛸 수 있는 S2를 확인했다. sensor decorator에
+  `kor_travel_map_client` resource 계약을 추가하고 정의 수준 회귀로 고정했다. 실행 게이트는
+  재리뷰 승인 전까지 계속 닫아 둔다.
+- 같은 리뷰의 S3로 mock 응답이 `running + run 없음`과 `queued + STARTED run`을 만들 수 있음을
+  확인했다. cancellation fixture가 running에는 run ID를 요구하고 queued에는 DB-only no-run
+  경로만 허용하도록 상태별 invariant를 강제했으며 기존 호출부를 실제 사실 모델에 맞췄다.
+- 두 번째 교차 리뷰의 S3로 provider resource 생성 뒤 transaction-bound client 결합 실패 시
+  teardown이 실행되지 않는 handle 누수를 확인했다. resource 생성 직후부터 bind/context/asset
+  실행 전체를 `try/finally`로 감싸고 bind 실패에서도 teardown 1회를 보장하는 회귀를 추가했다.
+- 첫 실행 게이트에서 설치된 Dagster의 `run_failure_sensor` decorator가
+  `required_resource_keys` 인자를 받지 않아 collection 2건이 실패했다. 이 버전이 지원하는
+  `ResourceParam` 함수 인자 주입으로 DB client를 필수 resource로 선언하고 handler에 직접
+  전달하도록 바꿨다. 정의의 `required_resource_keys` 회귀는 동일 운영 계약을 계속 검증한다.
+- 전체 로컬 gate는 main unit 1,295건, API 470건, Dagster 270건(1 skipped), C3d 관련
+  Python 134건, PostGIS 관련 통합 92건, frontend unit 82건을 통과했다. Ruff, strict mypy
+  main 110/API 54/Dagster 21파일, import 계약 4/4, OpenAPI/admin type drift, frontend
+  type-check/lint도 green이다. WSL pytest는 Windows `TMP` 상속 시 capture 파일이 사라지는
+  환경 오류가 있어 `TMPDIR`/`TMP`/`TEMP`를 `/tmp`로 고정했다.
+- mocked Playwright 첫 실행에서 BFF 요청을 legacy pathname과 비교해 인증 redirect가 난
+  하네스 결함과 오래된 영문 접근성 이름을 확인했다. 공용 `bffApiPath`가
+  `/api/proxy/v1/*` 경유를 먼저 강제한 뒤 backend pathname을 반환하게 하고, feature
+  update/import-job 5개 spec을 현재 한글 UI·HATEOAS 계약으로 정렬했다. 새 Next 서버의
+  현재 빌드에서 36건을 통과하고, ID가 빠진 `feature_update_request` mock link를 실제
+  `/{request_id}` 형태로 고친 단독 1건도 통과해 대상 37건을 전량 확인했다.
+- 최종 교차 리뷰에서 실제 `load_batch` HATEOAS가
+  `/v1/ops/import-jobs?load_batch_id=...`인데 UI와 mock이 path tail 형태로 오해한
+  S2를 확인했다. UI는 query parameter를 fail-closed로 읽고, actions/base fixture는
+  실제 batch query와 ID 포함 feature-update-request 링크로 맞췄다. 새 서버 현재
+  빌드에서 relation link와 base smoke 2건을 다시 통과했다.
+- 위 수정까지 두 적대 리뷰어가 다시 확인해 최종 `S1/S2/S3 0`으로 승인했다.
+
 ## 2026-07-15 — T-ADM-C3d coordinator crash 계약 보강
 
 - C3d DB phase 최초 실행 게이트에서 단위 14건, cancellation 통합 32건, migration 1건,

@@ -252,15 +252,44 @@ async def test_feature_update_request_client_lifecycle(
     assert page1.items == (loaded,)
     assert page1.next_cursor is None
 
+    pre_start_failure = await map_client.enqueue_feature_update_request(
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-mois-api"],
+        priority=75,
+    )
+    assert isinstance(pre_start_failure, FeatureUpdateRequest)
+    retried = await map_client.fail_update_request(
+        pre_start_failure.request_id,
+        expected_dagster_run_id="dagster-run-before-start",
+        expected_request_updated_at=pre_start_failure.updated_at,
+        error_message="resource initialization failed",
+    )
+    assert retried is not None
+    assert retried.status == "queued"
+    assert retried.dagster_run_id is None
+    assert retried.updated_at > pre_start_failure.updated_at
+
     to_fail = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
         providers=["python-mois-api"],
         priority=80,
     )
     assert isinstance(to_fail, FeatureUpdateRequest)
-    failed = await map_client.fail_update_request(
+    started_to_fail = await map_client.mark_update_request_started(
         to_fail.request_id,
         dagster_run_id="dagster-run-client-test",
+        expected_updated_at=to_fail.updated_at,
+    )
+    assert started_to_fail is not None
+    wrong_owner = await map_client.mark_update_request_started(
+        to_fail.request_id,
+        dagster_run_id="dagster-run-other",
+    )
+    assert wrong_owner is None
+    failed = await map_client.fail_update_request(
+        to_fail.request_id,
+        expected_dagster_run_id="dagster-run-client-test",
+        expected_request_updated_at=to_fail.updated_at,
         error_message="client test failure",
     )
     assert failed is not None

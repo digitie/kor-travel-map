@@ -97,6 +97,10 @@ def _validate_normalized_shapes(detail: PipelineCancellationDetail) -> None:
                 )
             _structured_error_code(member.error)
     for run in detail.runs:
+        if run.termination_reserved_at is not None and run.initial_status is None:
+            raise PipelineCancellationInvariantError(
+                "reserved run requires its first observed status"
+            )
         if run.result == "pending":
             if run.terminal_status is not None or run.error is not None:
                 raise PipelineCancellationInvariantError(
@@ -277,31 +281,30 @@ def _validate_finish_invariants(
             )
         return
 
-    if (pending_members or pending_runs) and (status != "failed" or pending_members):
-        raise PipelineCancellationInvariantError(
-            "completed/retryable cancellation cannot retain pending results"
-        )
-    if not failed_members:
-        raise PipelineCancellationInvariantError(
-            "retryable/failed cancellation requires unresolved members"
-        )
-    if any(member.initial_status != "running" for member in failed_members):
-        raise PipelineCancellationInvariantError(
-            "cancel_failed is restricted to frozen running members"
-        )
-    failed_run_ids = {run.dagster_run_id for run in failed_runs}
-    referenced_failed_run_ids = {
-        member.dagster_run_id
-        for member in failed_members
-        if member.dagster_run_id is not None
-    }
-    if not failed_run_ids.issubset(referenced_failed_run_ids):
-        raise PipelineCancellationInvariantError(
-            "cancel_failed run has no unresolved member"
-        )
-
     if status == "retryable":
         _structured_error_code(error, allowed_codes=_RETRYABLE_ERROR_CODES)
+        if pending_members or pending_runs:
+            raise PipelineCancellationInvariantError(
+                "retryable cancellation cannot retain pending results"
+            )
+        if not failed_members:
+            raise PipelineCancellationInvariantError(
+                "retryable cancellation requires unresolved members"
+            )
+        if any(member.initial_status != "running" for member in failed_members):
+            raise PipelineCancellationInvariantError(
+                "cancel_failed is restricted to frozen running members"
+            )
+        failed_run_ids = {run.dagster_run_id for run in failed_runs}
+        referenced_failed_run_ids = {
+            member.dagster_run_id
+            for member in failed_members
+            if member.dagster_run_id is not None
+        }
+        if not failed_run_ids.issubset(referenced_failed_run_ids):
+            raise PipelineCancellationInvariantError(
+                "retryable run failure has no unresolved member"
+            )
         if not all(
             _base_matches_frozen_member(
                 detail,
@@ -318,17 +321,32 @@ def _validate_finish_invariants(
 
     if status == "failed":
         _structured_error_code(error, allowed_codes=_FAILED_ERROR_CODES)
-        if not all(
-            _definitive_failure_member(
+        # Unexpected close may happen between durable phases. Preserve pending rows
+        # as the truthful "not authoritatively observed" snapshot. Existing
+        # cancel_failed rows may mix retryable transport evidence with a separate
+        # definitive mismatch; failed attempts are never automatic retry sources.
+        for run in failed_runs:
+            code = _structured_error_code(run.error)
+            if code not in _RETRYABLE_ERROR_CODES | _FAILED_ERROR_CODES:
+                raise PipelineCancellationInvariantError(
+                    "failed cancellation contains an unknown run failure policy"
+                )
+        for member in failed_members:
+            if member.initial_status != "running":
+                raise PipelineCancellationInvariantError(
+                    "cancel_failed is restricted to frozen running members"
+                )
+            base = base_by_key[(member.member_kind, member.member_id)]
+            if _retry_capable_member(member, run_by_id) and _base_matches_frozen_member(
                 detail,
                 member,
-                base_by_key[(member.member_kind, member.member_id)],
-                run_by_id,
-            )
-            for member in failed_members
-        ):
+                base,
+            ):
+                continue
+            if _definitive_failure_member(detail, member, base, run_by_id):
+                continue
             raise PipelineCancellationInvariantError(
-                "failed cancellation requires a definitive member mismatch"
+                "failed cancellation has a definitive member mismatch"
             )
         return
 

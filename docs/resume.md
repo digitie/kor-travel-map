@@ -12,6 +12,47 @@
 - **다음 한 작업**: 체인 순서상 `T-ADM-C3d`(agent B, #680) 진행 →
   agent A는 `T-ADM-C4R`(#684 — C4 UI 소비 계약 수정, PR #683 재작업) 대기.
 
+## 2026-07-15 (codex, agent A/B) — T-ADM-C3d 구현·적대 리뷰·로컬 검증
+
+- **구현 완료(PR 전)**: canonical root lease, marker/reservation 우선 commit,
+  attempt별 at-most-once `SAFE_TERMINATE`, orphan resume, mixed/pending 사실 보존,
+  hard backend invalidation과 네 cancel 진입점의 단일 coordinator를 구현했다.
+- **feature update 보강**: queue sensor를 peek-only로 바꾸고 request/scope session lease 뒤
+  CAS start, scope 경합 원자 requeue, scope data+`matched_scope` checkpoint, marker 우선
+  `CancelledError` 처리를 구현했다.
+- **적대 리뷰 반영**: 두 리뷰어가 찾은 running 고착, 미영속 checkpoint, CAS loser 409,
+  stale ownership snapshot, definitive 오류 덮어쓰기, downgrade TOCTOU, dispatch 오류 분류,
+  unlock backend 오염과 기존 UI 422를 수정했다. 최종 재리뷰에서 추가로 확인한 stale
+  Dagster failure 세대 덮어쓰기, production asset의 별도 적재 transaction, 취소 operation의
+  `Retry-After` OpenAPI 누락, 구 E2E cancel 계약도 수정했다. OpenAPI/admin types는 공용
+  cancellation body·response·header 계약으로 다시 생성했다.
+- **실행 경계 증거 보강**: failure sensor는 실패한 `dagster_run_id`를 expected generation
+  CAS로 넘겨 재큐잉/새 owner를 건드리지 않는다. CAS start 전 resource 초기화 실패는
+  `updated_at` generation이 같은 queued/null-run 행만 전진시켜 다음 sensor run key를 만든다.
+  request start와 연결 import job owner가 하나라도 어긋나면 둘 다 rollback한다. production
+  asset client는 executor scope transaction의 물리 connection에 bind하고 원본 engine 직접
+  연결은 fail-closed로 거부한다. hard invalidate 테스트는 원 backend PID 소멸과 경쟁
+  connection의 request lease 재획득을 확인한다. 브라우저 오류는 Next BFF allowlist를 포함해
+  RFC7807와 `Retry-After`를 보존하고, 409/502/503에서도 연결 member를 모르는 singular 상세
+  prefix까지 durable cancellation 상태를 다시 읽는다.
+- **#680 근거 재점검**: 이슈 #680과 원인 PR #677, root projection PR #689의 수용 기준을
+  다시 대조했다. 별도 marker, frozen canonical scope, authenticated actor/audit, GraphQL 5xx,
+  request/job/run CAS, runless running 보존, member별 결과, commit 데이터 비롤백을 현재 구현과
+  회귀 목록에 반영했다. #680은 C3d PR merge·CI green 뒤 증거 코멘트와 함께 닫는다.
+- **병행 감사 완료**: 리뷰 전문 agent가 최근 2일 Claude Code PR #672, #674, #675,
+  #676, #677, #683, #691, #692를 닫힘 여부와 무관하게 상세 검토하고 각 PR에
+  코멘트를 남겼다. 후속은 신규 #693·#694와 기존 #682·#684·#685·#686으로 묶었고,
+  미완 수용 기준 때문에 #682를 다시 열었다.
+- **검증 완료**: 두 적대 리뷰어의 S1/S2 0건 승인 뒤 main unit 1,295건, API 전체
+  470건, C3d Python 관련 134건, PostGIS 관련 통합 92건, frontend 전체 unit 82건,
+  Dagster 전체 270건(1 skipped), C3d mocked Playwright
+  37건을 통과했다. Ruff, strict mypy 3패키지, import 계약, OpenAPI/admin type drift와
+  frontend type-check/lint도 green이다. mocked E2E는 새 Next 서버의 현재 빌드에서
+  BFF 경유를 강제했으며 36건+실제 HATEOAS mock 수정 뒤 단독 1건으로 전량 확인했다.
+- **다음 한 작업**: Dagster 전체와 최종 정적 gate를 닫고 origin/main rebase·보안 감사를
+  거쳐 C3d PR을 CI green/review 뒤 merge한다. #680 종료 뒤 Claude Code worktree의 C3e를 회수해
+  별도 PR로 완료하고, adm-c5 merge를 확인한 다음 C6a→C6b→C7로 진행한다.
+
 ## 2026-07-15 (codex, agent A/B) — T-ADM-C3d coordinator crash 계약 보강
 
 - 두 사전 적대 리뷰에서 요청 단위 session autobegin과 외부 호출 중 transaction 유지,

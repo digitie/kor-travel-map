@@ -116,6 +116,12 @@ def upgrade() -> None:
         ["root_kind", "root_id", sa.text("requested_at DESC"), sa.text("cancellation_id DESC")],
         schema="ops",
     )
+    op.create_index(
+        "idx_pipeline_cancellations_previous",
+        "pipeline_cancellations",
+        ["previous_cancellation_id"],
+        schema="ops",
+    )
 
     op.create_table(
         "pipeline_cancellation_runs",
@@ -126,6 +132,11 @@ def upgrade() -> None:
         ),
         sa.Column("dagster_run_id", sa.Text(), nullable=False),
         sa.Column("initial_status", sa.Text(), nullable=True),
+        sa.Column(
+            "termination_reserved_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
         sa.Column(
             "result",
             sa.Text(),
@@ -145,13 +156,14 @@ def upgrade() -> None:
             name="ck_pipeline_cancellation_runs_result",
         ),
         sa.CheckConstraint(
-            "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
-            "(result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
-            "(result = 'already_terminal' AND "
-            " (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
-            " AND error IS NULL) OR "
-            "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
-            " AND jsonb_typeof(error) = 'object')",
+            "(termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND ("
+            " (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            " (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
+            " (result = 'already_terminal' AND "
+            "  (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
+            "  AND error IS NULL) OR "
+            " (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
+            "  AND jsonb_typeof(error) = 'object'))",
             name="ck_pipeline_cancellation_runs_shape",
         ),
         sa.ForeignKeyConstraint(
@@ -244,6 +256,12 @@ def upgrade() -> None:
         ],
         schema="ops",
     )
+    op.create_index(
+        "idx_pipeline_cancellation_members_run",
+        "pipeline_cancellation_members",
+        ["cancellation_id", "dagster_run_id"],
+        schema="ops",
+    )
 
     for table_name, constraint_name in (
         ("import_jobs", "ck_import_jobs_cancellation_marker"),
@@ -300,10 +318,32 @@ def upgrade() -> None:
             "AND cancellation_requested_by IS NOT NULL)",
             schema="ops",
         )
+        op.create_index(
+            f"idx_{table_name}_cancellation_id",
+            table_name,
+            ["cancellation_id"],
+            schema="ops",
+        )
 
 
 def downgrade() -> None:
     connection = op.get_bind()
+    # 검사와 DDL 사이에 marker/attempt writer가 끼어드는 TOCTOU를 막는다.
+    # 정규화 attempt→member→run과 base request→job의 고정 순서로 잠가
+    # Alembic transaction이 끝날 때까지 신규 writer를 대기시킨다.
+    connection.execute(
+        sa.text(
+            """
+            LOCK TABLE
+                ops.pipeline_cancellations,
+                ops.pipeline_cancellation_members,
+                ops.pipeline_cancellation_runs,
+                ops.feature_update_requests,
+                ops.import_jobs
+            IN ACCESS EXCLUSIVE MODE
+            """
+        )
+    )
     blocked = connection.execute(
         sa.text(
             """
@@ -334,6 +374,11 @@ def downgrade() -> None:
         ("feature_update_requests", "ck_feature_update_requests_cancellation_marker"),
         ("import_jobs", "ck_import_jobs_cancellation_marker"),
     ):
+        op.drop_index(
+            f"idx_{table_name}_cancellation_id",
+            table_name=table_name,
+            schema="ops",
+        )
         op.drop_constraint(
             constraint_name,
             table_name,
@@ -352,12 +397,22 @@ def downgrade() -> None:
         op.drop_column(table_name, "cancellation_id", schema="ops")
 
     op.drop_index(
+        "idx_pipeline_cancellation_members_run",
+        table_name="pipeline_cancellation_members",
+        schema="ops",
+    )
+    op.drop_index(
         "idx_pipeline_cancellation_members_member",
         table_name="pipeline_cancellation_members",
         schema="ops",
     )
     op.drop_table("pipeline_cancellation_members", schema="ops")
     op.drop_table("pipeline_cancellation_runs", schema="ops")
+    op.drop_index(
+        "idx_pipeline_cancellations_previous",
+        table_name="pipeline_cancellations",
+        schema="ops",
+    )
     op.drop_index(
         "idx_pipeline_cancellations_root_history",
         table_name="pipeline_cancellations",

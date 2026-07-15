@@ -23,6 +23,7 @@ from kortravelmap.infra.status_repo import StatusCounts
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
+from kortravelmap.api.pipeline_cancellation_schema import PipelineCancellationDetailRecord
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -77,6 +78,50 @@ def _job(
         started_at=now,
         finished_at=None,
         heartbeat_at=now,
+    )
+
+
+def _cancellation_detail() -> PipelineCancellationDetailRecord:
+    now = datetime(2026, 6, 3, tzinfo=UTC)
+    job_id = _job().job_id
+    return PipelineCancellationDetailRecord.model_validate(
+        {
+            "cancellation_id": "77777777-7777-4777-8777-777777777777",
+            "previous_cancellation_id": None,
+            "root": {"kind": "import_job", "id": job_id},
+            "status": "completed",
+            "requested_at": now,
+            "requested_by": "local-dev",
+            "reason": "wrong scope",
+            "error": None,
+            "updated_at": now,
+            "finished_at": now,
+            "retryable": False,
+            "unresolved_member_count": 0,
+            "members": [
+                {
+                    "member_kind": "import_job",
+                    "member_id": job_id,
+                    "dagster_run_id": "run-1",
+                    "initial_status": "running",
+                    "result": "cancelled",
+                    "terminal_status": "cancelled",
+                    "error": None,
+                    "updated_at": now,
+                }
+            ],
+            "dagster_runs": [
+                {
+                    "dagster_run_id": "run-1",
+                    "initial_status": "STARTED",
+                    "termination_reserved_at": now,
+                    "result": "cancelled",
+                    "terminal_status": "CANCELED",
+                    "error": None,
+                    "updated_at": now,
+                }
+            ],
+        }
     )
 
 
@@ -154,6 +199,14 @@ def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/ops/consistency/reports" in spec["paths"]
     assert "/v1/ops/consistency/issues" in spec["paths"]
     assert "OpsMetricsResponse" in spec["components"]["schemas"]
+    cancel_operation = spec["paths"]["/v1/ops/import-jobs/{job_id}/cancel"]["post"]
+    assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
+        cancel_operation["responses"]
+    )
+    for status_code in ("409", "502", "503"):
+        assert cancel_operation["responses"][status_code]["headers"][
+            "Retry-After"
+        ]["schema"] == {"type": "integer"}
 
 
 @pytest.mark.unit
@@ -423,48 +476,42 @@ def test_import_job_cancel_running(
 ) -> None:
     from kortravelmap.api.routers import ops as router_mod
 
-    seen_gets: list[str] = []
+    calls: list[dict[str, Any]] = []
 
-    async def _get(_session: Any, job_id: str) -> OpsImportJob:
-        seen_gets.append(job_id)
-        return _job(status="cancelled") if len(seen_gets) > 1 else _job()
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        calls.append(kwargs)
+        return _cancellation_detail()
 
-    async def _cancel(_session: Any, job_id: str, **kwargs: Any) -> object:
-        assert job_id == _job().job_id
-        assert kwargs == {
-            "error_message": "wrong scope",
-            "operator": "local-admin",
-            "reason": "wrong scope",
-        }
-        return object()
-
-    monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
-    monkeypatch.setattr(router_mod, "cancel_import_job", _cancel)
+    monkeypatch.setattr(
+        router_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
 
     response = client.post(
         f"/v1/ops/import-jobs/{_job().job_id}/cancel",
-        json={"operator": "local-admin", "reason": "wrong scope"},
+        json={"reason": "wrong scope"},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["status"] == "cancelled"
+    assert response.json()["data"]["status"] == "completed"
+    assert calls[0]["kind"] == "import_job"
+    assert calls[0]["execution_id"] == _job().job_id
+    assert calls[0]["requested_by"] == "local-dev"
+    assert calls[0]["reason"] == "wrong scope"
+    assert calls[0]["engine"] is not None
+    assert isinstance(calls[0]["settings"], ApiSettings)
+    assert calls[0]["http_client"] is not None
 
 
 @pytest.mark.unit
-def test_import_job_cancel_terminal_conflict(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from kortravelmap.api.routers import ops as router_mod
+def test_import_job_cancel_rejects_actor_override(client: TestClient) -> None:
+    response = client.post(
+        f"/v1/ops/import-jobs/{_job().job_id}/cancel",
+        json={"operator": "spoofed"},
+    )
 
-    async def _get(_session: Any, _job_id: str) -> OpsImportJob:
-        return _job(status="done")
-
-    monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
-
-    response = client.post(f"/v1/ops/import-jobs/{_job().job_id}/cancel")
-
-    assert response.status_code == 409
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

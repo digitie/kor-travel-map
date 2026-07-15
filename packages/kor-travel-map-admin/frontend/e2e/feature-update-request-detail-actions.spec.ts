@@ -1,6 +1,8 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { makePipelineCancellationResponse } from "./pipeline-cancellation-fixture";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
@@ -40,8 +42,8 @@ type FeatureUpdateRequestDetailResponse =
   components["schemas"]["FeatureUpdateRequestDetailResponse"];
 type FeatureUpdateRequestCreateResponse =
   components["schemas"]["FeatureUpdateRequestCreateResponse"];
-type FeatureUpdateRequestCancelRequest =
-  components["schemas"]["FeatureUpdateRequestCancelRequest"];
+type PipelineCancellationRequest =
+  components["schemas"]["PipelineCancellationRequest"];
 type FeatureUpdateRequestRunNowRequest =
   components["schemas"]["FeatureUpdateRequestRunNowRequest"];
 type Meta = components["schemas"]["Meta"];
@@ -113,7 +115,7 @@ type Calls = {
   detail: number;
   cancel: number;
   runNow: number;
-  cancelBody: FeatureUpdateRequestCancelRequest | null;
+  cancelBody: PipelineCancellationRequest | null;
   runNowBody: FeatureUpdateRequestRunNowRequest | null;
 };
 
@@ -143,13 +145,13 @@ async function mockUpdateRequest(
     "**/v1/admin/features/update-requests/**",
     async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const pathname = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "POST" && url.pathname === `${DETAIL_PATH}/cancel`) {
+      if (method === "POST" && pathname === `${DETAIL_PATH}/cancel`) {
         calls.cancel += 1;
         calls.cancelBody =
-          request.postDataJSON() as FeatureUpdateRequestCancelRequest;
+          request.postDataJSON() as PipelineCancellationRequest;
         if (mutationFails) {
           await fulfillJson(
             route,
@@ -164,15 +166,17 @@ async function mockUpdateRequest(
           return;
         }
         status = "cancelled";
-        const body: FeatureUpdateRequestCreateResponse = {
-          data: makeUpdateRequest({ status }),
-          meta,
-        };
+        const body = makePipelineCancellationResponse({
+          rootKind: "update_request",
+          rootId: REQUEST_ID,
+          initialStatus: "queued",
+          reason: "cancelled from feature update request detail",
+        });
         await fulfillJson(route, body);
         return;
       }
 
-      if (method === "POST" && url.pathname === `${DETAIL_PATH}/run-now`) {
+      if (method === "POST" && pathname === `${DETAIL_PATH}/run-now`) {
         calls.runNow += 1;
         calls.runNowBody =
           request.postDataJSON() as FeatureUpdateRequestRunNowRequest;
@@ -198,7 +202,7 @@ async function mockUpdateRequest(
         return;
       }
 
-      if (method === "GET" && url.pathname === DETAIL_PATH) {
+      if (method === "GET" && pathname === DETAIL_PATH) {
         calls.detail += 1;
         let effectiveStatus = status;
         if (
@@ -232,13 +236,13 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await installInertOpsLiveWebSocket(page);
   });
 
-  test("cancel 액션 → POST /cancel body(error_message) + 호출 1회 + re-fetch", async ({
+  test("cancel 액션 → POST /cancel body(reason) + 호출 1회 + re-fetch", async ({
     page,
   }) => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const cancel = page.getByRole("button", { name: "cancel" });
+    const cancel = page.getByRole("button", { name: "취소" });
     await expect(cancel).toBeVisible();
     const detailBefore = calls.detail;
 
@@ -246,10 +250,10 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
 
     // POST가 정확히 /cancel pathname으로 단 1회.
     await expect.poll(() => calls.cancel).toBe(1);
-    // component(line 113-116)가 보내는 고정 error_message.
-    const cancelBody: FeatureUpdateRequestCancelRequest | null = calls.cancelBody;
+    // actor는 인증 context에서 정하고 UI는 reason만 전송한다.
+    const cancelBody: PipelineCancellationRequest | null = calls.cancelBody;
     expect(cancelBody).toMatchObject({
-      error_message: "cancelled from feature update request detail",
+      reason: "cancelled from feature update request detail",
     });
     // 성공 → status=cancelled(terminal) → cancel 버튼 사라짐 + 상세 re-fetch.
     await expect(cancel).toBeHidden();
@@ -262,7 +266,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const runNow = page.getByRole("button", { name: "run-now" });
+    const runNow = page.getByRole("button", { name: "즉시 실행" });
     await expect(runNow).toBeVisible();
     const detailBefore = calls.detail;
 
@@ -287,14 +291,14 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update request" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
     // failed ∈ terminalStatuses(component line 26) → canCancel=false.
-    await expect(page.getByRole("button", { name: "cancel" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
     // failed != running → canRunNow=true.
-    await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
     // StatusBadge가 status 문자열 그대로 렌더(status-badge.tsx line 37).
-    await expect(page.getByText("failed", { exact: true })).toBeVisible();
+    await expect(page.getByText("실패", { exact: true })).toBeVisible();
   });
 
   test("cancelled terminal — cancel 숨김, run-now는 재큐잉 가능", async ({
@@ -304,12 +308,12 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update request" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
     // cancelled ∈ terminalStatuses → cancel 숨김.
-    await expect(page.getByRole("button", { name: "cancel" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
     // cancelled != running → terminal이어도 run-now는 노출(재큐잉 허용).
-    await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
   test("cancel 실패(409) → request 조회 실패 alert + cancel 버튼 잔존", async ({
@@ -321,13 +325,13 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const cancel = page.getByRole("button", { name: "cancel" });
+    const cancel = page.getByRole("button", { name: "취소" });
     await expect(cancel).toBeVisible();
 
     await cancel.click();
 
     // cancelRequest.isError → 동일 destructive Alert(component line 78,80).
-    await expect(page.getByText("request 조회 실패")).toBeVisible();
+    await expect(page.getByText("요청 조회 실패")).toBeVisible();
     await expect.poll(() => calls.cancel).toBe(1);
     // mutation 실패라 status 미변경(queued) → cancel 버튼은 계속 노출.
     await expect(cancel).toBeVisible();
@@ -342,13 +346,13 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const runNow = page.getByRole("button", { name: "run-now" });
+    const runNow = page.getByRole("button", { name: "즉시 실행" });
     await expect(runNow).toBeVisible();
 
     await runNow.click();
 
     // runNow.isError → 동일 Alert(component line 78). cancel-error와 별개 분기.
-    await expect(page.getByText("request 조회 실패")).toBeVisible();
+    await expect(page.getByText("요청 조회 실패")).toBeVisible();
     await expect.poll(() => calls.runNow).toBe(1);
     // mutation 실패라 status 미변경(queued) → run-now 버튼 잔존.
     await expect(runNow).toBeVisible();
@@ -360,10 +364,10 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Feature update request" }),
+      page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
     // 초기 GET이 끝나 화면이 그려질 때까지 대기 후 카운트 고정.
-    await expect(page.getByText("done", { exact: true })).toBeVisible();
+    await expect(page.getByText("완료", { exact: true })).toBeVisible();
     const detailBefore = calls.detail;
 
     await page.getByRole("button", { name: "새로고침" }).click();
@@ -379,7 +383,9 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     // "목록" 링크(component line 52-58, ArrowLeftIcon + "목록").
-    await expect(page.getByRole("link", { name: "목록" })).toHaveAttribute(
+    await expect(
+      page.getByRole("link", { name: "목록", exact: true }),
+    ).toHaveAttribute(
       "href",
       LIST_PATH,
     );
@@ -401,10 +407,10 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
-    const cancel = page.getByRole("button", { name: "cancel" });
+    const cancel = page.getByRole("button", { name: "취소" });
     // running → canCancel=true, canRunNow=false.
     await expect(cancel).toBeVisible();
-    await expect(page.getByRole("button", { name: "run-now" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
 
     allowTransition = true;
 
@@ -412,7 +418,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     // 전체 스위트 병렬 부하에서도 안정적이도록 타임아웃 여유를 둔다(2s 폴링 간격 +
     // 5s staleTime + 렌더; 단일 실행 ~3s, 부하 시 8s 근접해 flaky했음).
     await expect(cancel).toBeHidden({ timeout: 15_000 });
-    await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
     // 폴링이 최소 1회 추가 fetch.
     await expect.poll(() => calls.detail).toBeGreaterThanOrEqual(2);
   });

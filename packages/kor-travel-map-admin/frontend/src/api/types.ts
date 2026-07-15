@@ -618,7 +618,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** feature update request 취소 */
+        /** feature update request 계층 취소 */
         post: operations["cancel_feature_update_request_v1_admin_features_update_requests__request_id__cancel_post"];
         delete?: never;
         options?: never;
@@ -1994,7 +1994,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Import Job Route
-         * @description queued/running import job을 best-effort로 ``cancelled`` 전이한다.
+         * @description legacy import-job action을 canonical cancellation coordinator에 위임한다.
          */
         post: operations["cancel_import_job_route_v1_ops_import_jobs__job_id__cancel_post"];
         delete?: never;
@@ -2149,7 +2149,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 실행 취소 (종류별 위임) */
+        /** canonical 실행 계층 취소 */
         post: operations["cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post"];
         delete?: never;
         options?: never;
@@ -6341,17 +6341,6 @@ export interface components {
             prevent_provider_reactivation?: boolean | null;
         };
         /**
-         * FeatureUpdateRequestCancelRequest
-         * @description 취소 요청 body.
-         */
-        FeatureUpdateRequestCancelRequest: {
-            /**
-             * Error Message
-             * @description 취소 사유. 미지정 시 기본 메시지를 저장한다.
-             */
-            error_message?: string | null;
-        };
-        /**
          * FeatureUpdateRequestCreateRequest
          * @description feature update request 생성 요청.
          */
@@ -7728,16 +7717,6 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
-         * OpsImportJobCancelRequest
-         * @description ``POST /ops/import-jobs/{job_id}/cancel`` 요청.
-         */
-        OpsImportJobCancelRequest: {
-            /** Operator */
-            operator?: string | null;
-            /** Reason */
-            reason?: string | null;
-        };
-        /**
          * OpsImportJobEventRecord
          * @description ``ops.import_job_events`` HTTP 표현.
          */
@@ -8147,6 +8126,179 @@ export interface components {
             total?: number | null;
         };
         /**
+         * PipelineCancellationDetailRecord
+         * @description POST 결과와 GET detail이 공유하는 reload 가능한 cancellation 표현.
+         */
+        PipelineCancellationDetailRecord: {
+            /** Cancellation Id */
+            cancellation_id: string;
+            /**
+             * Committed Data Rolled Back
+             * @default false
+             * @constant
+             */
+            committed_data_rolled_back: false;
+            /** Dagster Runs */
+            dagster_runs: components["schemas"]["PipelineCancellationRunRecord"][];
+            error: components["schemas"]["PipelineCancellationErrorRecord"] | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Members */
+            members: components["schemas"]["PipelineCancellationMemberRecord"][];
+            /** Previous Cancellation Id */
+            previous_cancellation_id: string | null;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /** Retryable */
+            retryable: boolean;
+            root: components["schemas"]["PipelineCancellationRootRecord"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "in_progress" | "retryable" | "completed" | "failed";
+            /** Unresolved Member Count */
+            unresolved_member_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * PipelineCancellationErrorRecord
+         * @description upstream raw body/stack을 제외한 영속 가능 오류.
+         */
+        PipelineCancellationErrorRecord: {
+            /** Code */
+            code: string;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Message */
+            message: string;
+        };
+        /**
+         * PipelineCancellationMemberRecord
+         * @description frozen base member와 대상별 결과.
+         */
+        PipelineCancellationMemberRecord: {
+            /** Dagster Run Id */
+            dagster_run_id: string | null;
+            error: components["schemas"]["PipelineCancellationErrorRecord"] | null;
+            /** Initial Status */
+            initial_status: string;
+            /** Member Id */
+            member_id: string;
+            /**
+             * Member Kind
+             * @enum {string}
+             */
+            member_kind: "import_job" | "update_request";
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "pending" | "cancelled" | "already_terminal" | "cancel_failed";
+            /** Terminal Status */
+            terminal_status: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PipelineCancellationRequest
+         * @description 취소 action body — actor는 인증 context에서만 파생한다.
+         */
+        PipelineCancellationRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * PipelineCancellationResponse
+         * @description 모든 pipeline cancellation action이 공유하는 성공 envelope.
+         */
+        PipelineCancellationResponse: {
+            data: components["schemas"]["PipelineCancellationDetailRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PipelineCancellationRootRecord
+         * @description canonical cancellation root.
+         */
+        PipelineCancellationRootRecord: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "import_job" | "update_request";
+        };
+        /**
+         * PipelineCancellationRunRecord
+         * @description attempt당 하나인 Dagster run terminate 결과.
+         */
+        PipelineCancellationRunRecord: {
+            /** Dagster Run Id */
+            dagster_run_id: string;
+            error: components["schemas"]["PipelineCancellationErrorRecord"] | null;
+            /** Initial Status */
+            initial_status: string | null;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "pending" | "cancelled" | "already_terminal" | "cancel_failed";
+            /** Terminal Status */
+            terminal_status: string | null;
+            /** Termination Reserved At */
+            termination_reserved_at: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PipelineCancellationSummaryRecord
+         * @description 실행 목록 root에 붙는 current cancellation overlay.
+         */
+        PipelineCancellationSummaryRecord: {
+            /** Cancellation Id */
+            cancellation_id: string;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /** Retryable */
+            retryable: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "in_progress" | "retryable" | "completed" | "failed";
+            /** Unresolved Member Count */
+            unresolved_member_count: number;
+        };
+        /**
          * PipelineDagsterOverview
          * @description overview의 Dagster 요약 부분 — GraphQL degrade 허용.
          */
@@ -8236,28 +8388,12 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
-         * PipelineExecutionCancelRequest
-         * @description ``POST /ops/pipeline/executions/{kind}/{id}/cancel`` body.
-         */
-        PipelineExecutionCancelRequest: {
-            /** Operator */
-            operator?: string | null;
-            /** Reason */
-            reason?: string | null;
-        };
-        /**
-         * PipelineExecutionCancelResponse
-         * @description 취소 후 실행 행 응답.
-         */
-        PipelineExecutionCancelResponse: {
-            data: components["schemas"]["PipelineExecutionRecord"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
          * PipelineExecutionDetailData
          * @description 실행 상세 — 실행 행 + 연결 개체 + 이벤트 페이지.
          */
         PipelineExecutionDetailData: {
+            /** @description base lifecycle을 덮지 않는 current cancellation 상세. */
+            cancellation?: components["schemas"]["PipelineCancellationDetailRecord"] | null;
             /** Events */
             events?: components["schemas"]["PipelineJobEventRecord"][];
             /**
@@ -8346,6 +8482,7 @@ export interface components {
          * @description 실행 목록의 request branch 또는 standalone partition root.
          */
         PipelineExecutionRootRecord: {
+            cancellation?: components["schemas"]["PipelineCancellationSummaryRecord"] | null;
             /**
              * Created At
              * Format: date-time
@@ -12308,7 +12445,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["FeatureUpdateRequestCancelRequest"] | null;
+                "application/json": components["schemas"]["PipelineCancellationRequest"] | null;
             };
         };
         responses: {
@@ -12318,7 +12455,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                    "application/json": components["schemas"]["PipelineCancellationResponse"];
                 };
             };
             /** @description request_id 없음 */
@@ -12330,9 +12467,11 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 이미 terminal 상태라 취소 불가 */
+            /** @description 동시 취소 또는 안전한 reconcile 불가 */
             409: {
                 headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12342,6 +12481,28 @@ export interface operations {
             /** @description Validation Error */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster terminate 실패 */
+            502: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            503: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16419,7 +16580,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["OpsImportJobCancelRequest"] | null;
+                "application/json": components["schemas"]["PipelineCancellationRequest"] | null;
             };
         };
         responses: {
@@ -16429,7 +16590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpsImportJobResponse"];
+                    "application/json": components["schemas"]["PipelineCancellationResponse"];
                 };
             };
             /** @description job_id 없음 */
@@ -16441,9 +16602,11 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 이미 terminal 상태라 취소 불가 */
+            /** @description 동시 취소 또는 안전한 reconcile 불가 */
             409: {
                 headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16453,6 +16616,28 @@ export interface operations {
             /** @description Validation Error */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster terminate 실패 */
+            502: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            503: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16812,7 +16997,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["PipelineExecutionCancelRequest"] | null;
+                "application/json": components["schemas"]["PipelineCancellationRequest"] | null;
             };
         };
         responses: {
@@ -16822,7 +17007,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PipelineExecutionCancelResponse"];
+                    "application/json": components["schemas"]["PipelineCancellationResponse"];
                 };
             };
             /** @description 실행 없음 */
@@ -16834,9 +17019,11 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 이미 terminal 상태라 취소 불가 */
+            /** @description 동시 취소 또는 안전한 reconcile 불가 */
             409: {
                 headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16846,6 +17033,28 @@ export interface operations {
             /** @description Validation Error */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster terminate 실패 */
+            502: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            503: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

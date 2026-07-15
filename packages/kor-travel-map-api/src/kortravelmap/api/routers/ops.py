@@ -7,8 +7,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from kortravelmap.infra.jobs_repo import cancel_import_job
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
@@ -31,9 +30,22 @@ from kortravelmap.infra.status_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api import pipeline_cancellation_service
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.dagster_http import dagster_http_dependencies
+from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.pipeline_cancellation_http import (
+    error_responses as cancellation_error_responses,
+)
+from kortravelmap.api.pipeline_cancellation_http import (
+    to_http_exception as cancellation_to_http_exception,
+)
+from kortravelmap.api.pipeline_cancellation_schema import (
+    PipelineCancellationRequest,
+    PipelineCancellationResponse,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -148,15 +160,6 @@ class OpsImportJobEventsListResponse(BaseModel):
 
     data: OpsImportJobEventsData
     meta: Meta
-
-
-class OpsImportJobCancelRequest(BaseModel):
-    """``POST /ops/import-jobs/{job_id}/cancel`` 요청."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    operator: str | None = None
-    reason: str | None = None
 
 
 class OpsConsistencyReportRecord(BaseModel):
@@ -721,50 +724,33 @@ async def list_import_job_events(
 
 @router.post(
     "/import-jobs/{job_id}/cancel",
-    response_model=OpsImportJobResponse,
-    responses={
-        404: {"description": "job_id 없음"},
-        409: {"description": "이미 terminal 상태라 취소 불가"},
-    },
+    response_model=PipelineCancellationResponse,
+    responses=cancellation_error_responses(not_found_description="job_id 없음"),
 )
 async def cancel_import_job_route(
-    job_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    body: OpsImportJobCancelRequest | None = None,
-) -> OpsImportJobResponse:
-    """queued/running import job을 best-effort로 ``cancelled`` 전이한다."""
+    job_id: UUID,
+    request: Request,
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    body: PipelineCancellationRequest | None = None,
+) -> PipelineCancellationResponse:
+    """legacy import-job action을 canonical cancellation coordinator에 위임한다."""
     started_at = perf_counter()
-    reason = body.reason if body is not None and body.reason else None
-    operator = body.operator if body is not None and body.operator else None
-    error_message = reason or "cancelled by admin API"
-    async with session.begin():
-        existing = await get_ops_import_job(session, job_id)
-        if existing is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"import job not found: {job_id}",
-            )
-        if existing.status not in {"queued", "running"}:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"cannot cancel import job in status: {existing.status}",
-            )
-        cancelled = await cancel_import_job(
-            session,
-            job_id,
-            error_message=error_message,
-            operator=operator,
-            reason=reason,
+    settings, http_client = dagster_http_dependencies(request)
+    try:
+        detail = await pipeline_cancellation_service.cancel_pipeline_execution(
+            engine=engine,
+            settings=settings,
+            http_client=http_client,
+            kind="import_job",
+            execution_id=str(job_id),
+            requested_by=context.actor,
+            reason=body.reason if body is not None else None,
         )
-        if cancelled is None:
-            refreshed = await get_ops_import_job(session, job_id)
-            detail_status = refreshed.status if refreshed is not None else existing.status
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"cannot cancel import job in status: {detail_status}",
-            )
-    return OpsImportJobResponse(
-        data=_job(await get_ops_import_job(session, job_id) or existing),
+    except pipeline_cancellation_service.PipelineCancellationServiceError as exc:
+        raise cancellation_to_http_exception(exc) from exc
+    return PipelineCancellationResponse(
+        data=detail,
         meta=make_meta(started_at=started_at),
     )
 

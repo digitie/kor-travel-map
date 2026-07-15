@@ -428,7 +428,9 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   commit하며, CAS 패자는 외부 mutation을 호출하지 않는다. 이미 값이 있으면 같은 attempt에서
   `terminateRun`을 재호출하지 않고 terminal poll만 수행한다. 이 경계는 attempt별 at-most-once
   dispatch를 보장한다. mutation HTTP timeout이나 응답 유실도 같은 attempt에서 재호출하지 않고
-  terminal poll을 먼저 수행한 뒤에만 retryable 여부를 정한다.
+  terminal poll을 먼저 수행한 뒤에만 retryable 여부를 정한다. 반대로 명시적인 HTTP status
+  오류나 해석 가능한 GraphQL/protocol 거절은 dispatch 불명으로 바꾸지 않고 원래 502 원인을
+  즉시 보존한다. poll까지 실패한 응답 유실도 최초 transport 원인을 detail에 유지한다.
   취소 snapshot과 child attach/enqueue는 같은 canonical root transaction lock을 공유한다.
   terminal 재조회 뒤 같은 attempt/marker/run임을 확인한 짧은 transaction에서만 base
   상태를 확정한다. marker로 claim이 차단된 queued member는 DB CAS로 `cancelled`, running
@@ -456,7 +458,14 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   `RunNotFound`는 502 `DAGSTER_TERMINATE_FAILED`, 연결 불가/timeout은 503
   `DAGSTER_UNAVAILABLE`/`DAGSTER_TERMINATION_TIMEOUT`이다. 모든 오류는
   `application/problem+json`이고, retry 가능한 502/503과 concurrent 409에는
-  `Retry-After`를 포함한다. lease loser는 winner의 prepare commit을 짧게 bounded DB-only
+  `Retry-After`를 포함한다. 세 공개 cancellation operation의 OpenAPI 409/502/503 response
+  header에도 optional integer seconds로 선언하며 admin generated type과 browser error 객체가
+  RFC7807 본문·재시도 초를 보존한다. Next same-origin BFF는 response header allowlist에
+  `Retry-After`를 포함하되 임의 upstream header는 전달하지 않는다. 409/502/503도 durable
+  attempt/marker를 기록할 수 있으므로 UI는 성공 여부와 무관하게 root 목록/detail을
+  invalidate하고 다시 읽는다. 오류 응답에서 연결 member를 알 수 없으면 import job detail/event와
+  feature update request detail의 singular query-key prefix 전체를 무효화한다. lease loser는
+  winner의 prepare commit을 짧게 bounded DB-only
   reload하며, current attempt가 보이면 `details.cancellation_id`/미해결 member/run을 포함한다.
   bounded reload 뒤에도 pre-marker winner라 current attempt가 보이지 않으면 409 details는 canonical
   `root`와 `cancellation:null`을 명시한다. GET detail의

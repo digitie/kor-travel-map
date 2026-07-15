@@ -1607,6 +1607,7 @@ class ImportJobRow(Base):
             "dagster_run_id",
             postgresql_where=text("dagster_run_id IS NOT NULL"),
         ),
+        Index("idx_import_jobs_cancellation_id", "cancellation_id"),
         {"schema": "ops"},
     )
 
@@ -1846,6 +1847,7 @@ class FeatureUpdateRequestRow(Base):
             "job_id",
             postgresql_where=text("job_id IS NOT NULL"),
         ),
+        Index("idx_feature_update_requests_cancellation_id", "cancellation_id"),
         {"schema": "ops"},
     )
 
@@ -1956,6 +1958,10 @@ class PipelineCancellationRow(Base):
             text("requested_at DESC"),
             text("cancellation_id DESC"),
         ),
+        Index(
+            "idx_pipeline_cancellations_previous",
+            "previous_cancellation_id",
+        ),
         {"schema": "ops"},
     )
 
@@ -2004,13 +2010,14 @@ class PipelineCancellationRunRow(Base):
             name="ck_pipeline_cancellation_runs_result",
         ),
         CheckConstraint(
-            "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
-            "(result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
-            "(result = 'already_terminal' AND "
-            " (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
-            " AND error IS NULL) OR "
-            "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
-            " AND jsonb_typeof(error) = 'object')",
+            "(termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND ("
+            " (result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
+            " (result = 'cancelled' AND terminal_status = 'CANCELED' AND error IS NULL) OR "
+            " (result = 'already_terminal' AND "
+            "  (terminal_status IS NULL OR terminal_status IN ('SUCCESS','FAILURE')) "
+            "  AND error IS NULL) OR "
+            " (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
+            "  AND jsonb_typeof(error) = 'object'))",
             name="ck_pipeline_cancellation_runs_shape",
         ),
         ForeignKeyConstraint(
@@ -2028,6 +2035,9 @@ class PipelineCancellationRunRow(Base):
     )
     dagster_run_id: Mapped[str] = mapped_column(Text, primary_key=True)
     initial_status: Mapped[str | None] = mapped_column(Text)
+    termination_reserved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     result: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -2085,6 +2095,11 @@ class PipelineCancellationMemberRow(Base):
             "member_id",
             text("updated_at DESC"),
             text("cancellation_id DESC"),
+        ),
+        Index(
+            "idx_pipeline_cancellation_members_run",
+            "cancellation_id",
+            "dagster_run_id",
         ),
         {"schema": "ops"},
     )

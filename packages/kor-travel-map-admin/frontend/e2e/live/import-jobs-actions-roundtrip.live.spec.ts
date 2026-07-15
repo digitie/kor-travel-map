@@ -14,8 +14,8 @@ import type { components } from "../../src/api/types";
  *      반영(필터된 응답의 첫 job deeplink 가시).
  *  A2 (ungated, read-only): 목록에서 job deeplink 클릭 → 상세 GET + events GET →
  *      JobSummary 필드(job_id/kind/progress) + Events 서브테이블이 응답을 반영.
- *  B  (GATED + EXTRA flag): queued(=in-flight 작업 손실 없는 SAFE 대상) job의 cancel
- *      POST → 응답·상세 GET·UI가 cancelled 전이를 반영.
+ *  B  (GATED + EXTRA flag): canonical projection에서 고른 queued standalone import root의
+ *      cancel POST → 응답 scope·상세 GET·UI가 cancelled 전이를 반영.
  *
  * 라운드트립 규칙은 gold-standard(admin-features-change-requests-write.live.spec.ts)를
  * 미러: 외부 액션 → waitForApiResponse(/api/proxy 경로) → 응답 body 단언 →
@@ -25,9 +25,10 @@ import type { components } from "../../src/api/types";
  * 비파괴/안전: A1·A2는 GET만 유발한다. B(cancel)는 ops.import_jobs 행을 cancelled로
  * **되돌릴 수 없게(irreversible)** 전이시키므로 (1) write 게이트(E2E_ADMIN_WRITE 또는
  * E2E_IMPORT_JOB_WRITE)에 더해 (2) 별도 명시 플래그 E2E_IMPORT_JOB_CANCEL=1 을 추가로
- * 요구하고, (3) 아직 시작 안 된 `queued` job만 대상으로 한다(running은 진행 중인 import를
- * 죽이므로 제외). 대상 job이 없으면 skip. cancel은 un-cancel API가 없어 finally 복구가
- * 불가능하다 — 그래서 이중 게이트로만 실행한다.
+ * 요구하고, (3) `/ops/pipeline/executions`가 반환한 `kind=import_job,status=queued` canonical
+ * root만 대상으로 한다. 취소 범위는 그 standalone partition의 `linked_job_count`와 일치해야
+ * 한다. 대상 root가 없으면 skip. cancel은 un-cancel API가 없어 finally 복구가 불가능하다 —
+ * 그래서 이중 게이트로만 실행한다.
  *
  * selector는 import-jobs-client.tsx / import-job-detail-client.tsx에서 검증된 것만
  * 사용한다(요약의 인용 라인 참조). NOTE: Playwright는 Windows 호스트에서만 실행된다.
@@ -39,8 +40,12 @@ type OpsImportJobResponse = components["schemas"]["OpsImportJobResponse"];
 type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
 type OpsImportJobEventsListResponse =
   components["schemas"]["OpsImportJobEventsListResponse"];
-type OpsImportJobCancelRequest =
-  components["schemas"]["OpsImportJobCancelRequest"];
+type PipelineCancellationRequest =
+  components["schemas"]["PipelineCancellationRequest"];
+type PipelineCancellationResponse =
+  components["schemas"]["PipelineCancellationResponse"];
+type PipelineExecutionsListResponse =
+  components["schemas"]["PipelineExecutionsListResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -54,6 +59,7 @@ const T = { timeout: UI_TIMEOUT } as const;
 
 const LIST_ROUTE = "/ops/import-jobs";
 const LIST_API_PATH = "/v1/ops/import-jobs";
+const PIPELINE_EXECUTIONS_API_PATH = "/v1/ops/pipeline/executions";
 
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -182,6 +188,20 @@ async function fetchJobs(
   expect(res.status).toBe(200);
   expect(res.body).not.toBeNull();
   return res.body as OpsImportJobsListResponse;
+}
+
+/** cancellation coordinator와 동일한 canonical root projection에서 대상을 고른다. */
+async function fetchQueuedStandaloneRoots(
+  page: Page,
+): Promise<PipelineExecutionsListResponse> {
+  const query = "?kind=import_job&status=queued&page_size=100";
+  const res = await browserFetch<PipelineExecutionsListResponse>(
+    page,
+    `${PIPELINE_EXECUTIONS_API_PATH}${query}`,
+  );
+  expect(res.status).toBe(200);
+  expect(res.body).not.toBeNull();
+  return res.body as PipelineExecutionsListResponse;
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -347,7 +367,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     });
   });
 
-  test("B: queued job cancel POST가 cancelled 전이를 응답·상세 API·UI에 반영한다", async ({
+  test("B: queued standalone root 취소가 canonical scope·상세 API·UI에 반영된다", async ({
     page,
   }) => {
     test.skip(
@@ -357,15 +377,22 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     test.setTimeout(FLOW_TIMEOUT);
     await gotoListReady(page);
 
-    // SAFE 대상: 아직 시작 안 된 queued만(running은 진행 중 import를 죽이므로 제외).
-    const queued = await fetchJobs(page, "?status=queued&page_size=100");
-    const queuedItems = queued.data.items;
-    test.skip(
-      queuedItems.length === 0,
-      "cancel 가능한 queued job이 없어 건너뜀(running은 SAFE 대상에서 제외)",
+    // legacy job 목록이 아니라 coordinator와 같은 canonical projection에서 standalone
+    // root와 파괴 범위를 함께 고정한다. request-owned child는 이 목록에 포함되지 않는다.
+    const roots = await fetchQueuedStandaloneRoots(page);
+    const root = roots.data.items.find(
+      (item) =>
+        item.kind === "import_job" &&
+        item.status === "queued" &&
+        item.cancellation == null &&
+        item.linked_job_count > 0,
     );
+    if (!root) {
+      test.skip(true, "cancel 가능한 queued standalone import root가 없어 건너뜀");
+      return;
+    }
 
-    const jobId = queuedItems[0].job_id;
+    const jobId = root.id;
     const detailApiPath = `${LIST_API_PATH}/${jobId}`;
     const cancelApiPath = `${LIST_API_PATH}/${jobId}/cancel`;
     const cancelReason = `live cancel ${RUN_ID}`;
@@ -376,7 +403,10 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     const detailResp = await detailRespP;
     expect(detailResp.status()).toBe(200);
     const before = (await detailResp.json()) as OpsImportJobResponse;
-    expect(before.data.status).toBe("queued");
+    if (before.data.status !== "queued") {
+      test.skip(true, "선택한 standalone root가 상세 진입 전에 queued를 벗어남");
+      return;
+    }
 
     await expect(
       page.getByRole("heading", { level: 1, name: "적재 작업 상세" }),
@@ -386,8 +416,7 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     const cancelButton = page.getByRole("button", { name: "중지 요청" });
     await expect(cancelButton).toBeEnabled(T);
 
-    // <Input placeholder="reason">(line 396)에 reason 입력 → handleCancel은
-    // body { operator:"admin-ui", reason: trim()||undefined }로 POST(line 258-264).
+    // actor는 인증 context에서 정하고 UI는 reason-only body를 POST한다.
     await page.getByPlaceholder("중지 사유").fill(cancelReason);
 
     const cancelRespP = waitForApiResponse(page, "POST", cancelApiPath);
@@ -396,24 +425,33 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
 
     // (1) 요청 body(=UI 입력)가 그대로 전달됐는지.
     const sent =
-      (cancelResp.request().postDataJSON() ?? {}) as OpsImportJobCancelRequest;
-    expect(sent.operator).toBe("admin-ui");
+      (cancelResp.request().postDataJSON() ?? {}) as PipelineCancellationRequest;
     expect(sent.reason).toBe(cancelReason);
 
-    // (2) 응답이 cancelled 전이(router line 752-769).
+    // (2) 응답은 공유 계층 취소 envelope이며 root와 완료 상태를 고정한다.
     expect(cancelResp.status()).toBe(200);
-    const after = (await cancelResp.json()) as OpsImportJobResponse;
-    expect(after.data.job_id).toBe(jobId);
-    expect(after.data.status).toBe("cancelled");
+    const after = (await cancelResp.json()) as PipelineCancellationResponse;
+    expect(after.data.root).toEqual({ kind: "import_job", id: jobId });
+    expect(after.data.status).toBe("completed");
+    expect(after.data.members).toHaveLength(root.linked_job_count);
+    expect(
+      after.data.members.every((member) => member.member_kind === "import_job"),
+    ).toBe(true);
+    expect(after.data.members).toContainEqual(
+      expect.objectContaining({
+        member_kind: "import_job",
+        member_id: jobId,
+        terminal_status: "cancelled",
+      }),
+    );
 
-    // (3) 성공 Alert(default variant → role=status, line 318-325).
-    // AlertDescription은 status를 statusLabel()로 렌더하므로(line 322) cancelled →
-    // "취소됨". (API body는 영어 "cancelled" 그대로 — 위 (2)에서 단언.)
+    // (3) 성공 Alert는 cancellation status와 canonical root를 표시한다.
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "중지 요청됨" });
+      .filter({ hasText: "중지 처리됨" });
     await expect(successAlert).toBeVisible(T);
-    await expect(successAlert).toContainText("취소됨");
+    await expect(successAlert).toContainText("completed");
+    await expect(successAlert).toContainText(jobId.slice(0, 12));
 
     // (4) backend 재확인 — 상세 GET이 cancelled를 반환.
     await expect

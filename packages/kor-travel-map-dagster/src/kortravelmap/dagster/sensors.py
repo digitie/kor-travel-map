@@ -3,13 +3,16 @@
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
+
+from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
 
 from dagster import (
     DefaultSensorStatus,
     Failure,
     OpExecutionContext,
+    ResourceParam,
     RunFailureSensorContext,
     RunRequest,
     SensorEvaluationContext,
@@ -36,6 +39,9 @@ FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
 """sensor tick 1회에 요청할 feature update worker run 상한."""
 
 FEATURE_UPDATE_REQUEST_ID_TAG: Final[str] = "kor_travel_map.feature_update_request_id"
+FEATURE_UPDATE_REQUEST_GENERATION_TAG: Final[str] = (
+    "kor_travel_map.feature_update_request_generation"
+)
 FEATURE_UPDATE_RUN_MODE_TAG: Final[str] = "kor_travel_map.feature_update_run_mode"
 FEATURE_UPDATE_SCOPE_TYPE_TAG: Final[str] = "kor_travel_map.feature_update_scope_type"
 
@@ -46,14 +52,22 @@ _T = TypeVar("_T")
 @op(
     name="execute_feature_update_request",
     required_resource_keys={"kor_travel_map_client", "feature_update_runner"},
-    config_schema={"request_id": str},
+    config_schema={"request_id": str, "request_updated_at": str},
 )
 async def execute_feature_update_request_op(
     context: OpExecutionContext,
 ) -> dict[str, object]:
     """RunRequest가 지정한 feature update request 1건을 실행한다."""
     request_id = str(context.op_config["request_id"])
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    request_updated_at = _parse_request_generation(
+        str(context.op_config["request_updated_at"])
+    )
+    if request_updated_at is None:
+        raise Failure(description="feature update request generation이 유효하지 않음")
+    client = cast(
+        "AsyncKorTravelMapClient",
+        _resource_object(context, "kor_travel_map_client"),
+    )
     runner = cast(
         "ProviderDatasetRefreshRunner",
         _resource_object(context, "feature_update_runner"),
@@ -63,16 +77,23 @@ async def execute_feature_update_request_op(
         _resource_object(context, "sigungu_by_radius_resolver", default=None),
     )
 
-    await client.mark_update_request_started(
-        request_id,
-        dagster_run_id=context.run_id,
-    )
-    result = await client.execute_feature_update_request(
-        request_id,
-        runner=runner,
-        dagster_run_id=context.run_id,
-        sigungu_resolver=sigungu_resolver,
-    )
+    try:
+        result = await client.execute_feature_update_request(
+            request_id,
+            runner=runner,
+            dagster_run_id=context.run_id,
+            expected_request_updated_at=request_updated_at,
+            sigungu_resolver=sigungu_resolver,
+        )
+    except FeatureUpdateLockBusy as exc:
+        metadata: dict[str, object] = {
+            "request_id": request_id,
+            "status": "lock_busy",
+            "retry_after_seconds": exc.retry_after_seconds,
+            "lock_key": exc.lock_key,
+        }
+        context.add_output_metadata(metadata)
+        return metadata
     if result is None:
         raise Failure(description=f"feature update request 없음: {request_id!r}")
 
@@ -110,7 +131,7 @@ def feature_update_request_queue_sensor(
         else _resource_object(context, "kor_travel_map_client"),
     )
     requests = _run_async(
-        client.claim_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
+        client.peek_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
     )
     if not requests:
         return SkipReason("queued feature update request 없음")
@@ -126,11 +147,23 @@ def feature_update_request_queue_sensor(
 )
 def feature_update_request_failure_sensor(
     context: RunFailureSensorContext,
+    kor_travel_map_client: ResourceParam[object],
 ) -> SkipReason:
     """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
+    request_generation = context.dagster_run.tags.get(
+        FEATURE_UPDATE_REQUEST_GENERATION_TAG
+    )
     message = _failure_message(context)
-    _run_async(_handle_failure_side_effects(context, request_id, message))
+    _run_async(
+        _handle_failure_side_effects(
+            context,
+            kor_travel_map_client,
+            request_id,
+            request_generation,
+            message,
+        )
+    )
     context.log.error(message)
     return SkipReason(message)
 
@@ -175,7 +208,10 @@ def _run_config_for_request(request: "FeatureUpdateRequest") -> dict[str, object
     return {
         "ops": {
             "execute_feature_update_request": {
-                "config": {"request_id": request.request_id}
+                "config": {
+                    "request_id": request.request_id,
+                    "request_updated_at": _request_generation(request),
+                }
             }
         }
     }
@@ -190,15 +226,30 @@ def _run_request_for_request(request: "FeatureUpdateRequest") -> RunRequest:
 
 
 def _run_key_for_request(request: "FeatureUpdateRequest") -> str:
-    claimed_at = request.updated_at
-    if claimed_at.tzinfo is not None:
-        claimed_at = claimed_at.astimezone(UTC)
-    return f"feature-update:{request.request_id}:{claimed_at.isoformat()}"
+    return f"feature-update:{request.request_id}:{_request_generation(request)}"
+
+
+def _request_generation(request: "FeatureUpdateRequest") -> str:
+    updated_at = request.updated_at
+    if updated_at.tzinfo is not None:
+        updated_at = updated_at.astimezone(UTC)
+    return updated_at.isoformat()
+
+
+def _parse_request_generation(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _tags_for_request(request: "FeatureUpdateRequest") -> dict[str, str]:
     return {
         FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+        FEATURE_UPDATE_REQUEST_GENERATION_TAG: _request_generation(request),
         FEATURE_UPDATE_RUN_MODE_TAG: request.run_mode,
         FEATURE_UPDATE_SCOPE_TYPE_TAG: request.scope_type,
     }
@@ -233,27 +284,35 @@ def _failure_message(context: RunFailureSensorContext) -> str:
 
 async def _handle_failure_side_effects(
     context: RunFailureSensorContext,
+    kor_travel_map_client: object,
     request_id: str | None,
+    request_generation: str | None,
     message: str,
 ) -> None:
     if request_id:
-        client = cast(
-            "AsyncKorTravelMapClient | None",
-            _resource_object(context, "kor_travel_map_client", default=None),
-        )
-        if client is not None:
-            try:
-                await client.fail_update_request(
-                    request_id,
-                    dagster_run_id=context.dagster_run.run_id,
-                    error_message=message,
+        client = cast("AsyncKorTravelMapClient", kor_travel_map_client)
+        try:
+            expected_updated_at = (
+                _parse_request_generation(request_generation)
+                if request_generation is not None
+                else None
+            )
+            if expected_updated_at is None:
+                raise ValueError(
+                    "feature update failure run에 request generation tag가 없음"
                 )
-            except Exception as exc:
-                context.log.error(
-                    "feature update request 실패 상태 반영 실패: request_id=%s error=%s",
-                    request_id,
-                    exc,
-                )
+            await client.fail_update_request(
+                request_id,
+                expected_dagster_run_id=context.dagster_run.run_id,
+                expected_request_updated_at=expected_updated_at,
+                error_message=message,
+            )
+        except Exception as exc:
+            context.log.error(
+                "feature update request 실패 상태 반영 실패: request_id=%s error=%s",
+                request_id,
+                exc,
+            )
     await _notify_failure(context, request_id=request_id, message=message)
 
 

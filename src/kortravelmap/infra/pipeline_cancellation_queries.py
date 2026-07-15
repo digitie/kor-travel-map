@@ -167,6 +167,7 @@ SELECT
     cancellation_id,
     dagster_run_id,
     initial_status,
+    termination_reserved_at,
     result,
     terminal_status,
     error,
@@ -181,6 +182,7 @@ SELECT
     cancellation_id,
     dagster_run_id,
     initial_status,
+    termination_reserved_at,
     result,
     terminal_status,
     error,
@@ -305,6 +307,18 @@ SET initial_status = COALESCE(initial_status, :initial_status),
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
   AND dagster_run_id = :dagster_run_id
   AND result = ANY(CAST(:expected_results AS text[]))
+RETURNING cancellation_id
+"""
+
+_RESERVE_RUN_TERMINATION_SQL = """
+UPDATE ops.pipeline_cancellation_runs
+SET initial_status = COALESCE(initial_status, :initial_status),
+    termination_reserved_at = now(),
+    updated_at = now()
+WHERE cancellation_id = CAST(:cancellation_id AS uuid)
+  AND dagster_run_id = :dagster_run_id
+  AND result = 'pending'
+  AND termination_reserved_at IS NULL
 RETURNING cancellation_id
 """
 

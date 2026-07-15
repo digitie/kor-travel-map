@@ -69,6 +69,7 @@ class PipelineCancellationRun:
     cancellation_id: str
     dagster_run_id: str
     initial_status: str | None
+    termination_reserved_at: datetime | None
     result: PipelineCancellationResult
     terminal_status: str | None
     error: dict[str, Any] | None

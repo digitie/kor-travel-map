@@ -11326,26 +11326,6 @@
         "title": "FeatureUpdatePolicy",
         "type": "object"
       },
-      "FeatureUpdateRequestCancelRequest": {
-        "additionalProperties": false,
-        "description": "취소 요청 body.",
-        "properties": {
-          "error_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "취소 사유. 미지정 시 기본 메시지를 저장한다.",
-            "title": "Error Message"
-          }
-        },
-        "title": "FeatureUpdateRequestCancelRequest",
-        "type": "object"
-      },
       "FeatureUpdateRequestCreateRequest": {
         "additionalProperties": false,
         "description": "feature update request 생성 요청.",
@@ -15135,36 +15115,6 @@
         "title": "OpsHealthDeepResponse",
         "type": "object"
       },
-      "OpsImportJobCancelRequest": {
-        "additionalProperties": false,
-        "description": "``POST /ops/import-jobs/{job_id}/cancel`` 요청.",
-        "properties": {
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "title": "OpsImportJobCancelRequest",
-        "type": "object"
-      },
       "OpsImportJobEventRecord": {
         "additionalProperties": false,
         "description": "``ops.import_job_events`` HTTP 표현.",
@@ -16258,6 +16208,458 @@
         "title": "PageMeta",
         "type": "object"
       },
+      "PipelineCancellationDetailRecord": {
+        "additionalProperties": false,
+        "description": "POST 결과와 GET detail이 공유하는 reload 가능한 cancellation 표현.",
+        "properties": {
+          "cancellation_id": {
+            "title": "Cancellation Id",
+            "type": "string"
+          },
+          "committed_data_rolled_back": {
+            "const": false,
+            "default": false,
+            "title": "Committed Data Rolled Back",
+            "type": "boolean"
+          },
+          "dagster_runs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineCancellationRunRecord"
+            },
+            "title": "Dagster Runs",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineCancellationErrorRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineCancellationMemberRecord"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "previous_cancellation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Cancellation Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "root": {
+            "$ref": "#/components/schemas/PipelineCancellationRootRecord"
+          },
+          "status": {
+            "enum": [
+              "in_progress",
+              "retryable",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unresolved_member_count": {
+            "minimum": 0.0,
+            "title": "Unresolved Member Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cancellation_id",
+          "previous_cancellation_id",
+          "root",
+          "status",
+          "requested_at",
+          "requested_by",
+          "reason",
+          "error",
+          "updated_at",
+          "finished_at",
+          "retryable",
+          "unresolved_member_count",
+          "members",
+          "dagster_runs"
+        ],
+        "title": "PipelineCancellationDetailRecord",
+        "type": "object"
+      },
+      "PipelineCancellationErrorRecord": {
+        "additionalProperties": false,
+        "description": "upstream raw body/stack을 제외한 영속 가능 오류.",
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "message": {
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PipelineCancellationErrorRecord",
+        "type": "object"
+      },
+      "PipelineCancellationMemberRecord": {
+        "additionalProperties": false,
+        "description": "frozen base member와 대상별 결과.",
+        "properties": {
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineCancellationErrorRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initial_status": {
+            "title": "Initial Status",
+            "type": "string"
+          },
+          "member_id": {
+            "title": "Member Id",
+            "type": "string"
+          },
+          "member_kind": {
+            "enum": [
+              "import_job",
+              "update_request"
+            ],
+            "title": "Member Kind",
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "pending",
+              "cancelled",
+              "already_terminal",
+              "cancel_failed"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "terminal_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Status"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_kind",
+          "member_id",
+          "dagster_run_id",
+          "initial_status",
+          "result",
+          "terminal_status",
+          "error",
+          "updated_at"
+        ],
+        "title": "PipelineCancellationMemberRecord",
+        "type": "object"
+      },
+      "PipelineCancellationRequest": {
+        "additionalProperties": false,
+        "description": "취소 action body — actor는 인증 context에서만 파생한다.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "PipelineCancellationRequest",
+        "type": "object"
+      },
+      "PipelineCancellationResponse": {
+        "additionalProperties": false,
+        "description": "모든 pipeline cancellation action이 공유하는 성공 envelope.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineCancellationDetailRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PipelineCancellationResponse",
+        "type": "object"
+      },
+      "PipelineCancellationRootRecord": {
+        "additionalProperties": false,
+        "description": "canonical cancellation root.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "import_job",
+              "update_request"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "PipelineCancellationRootRecord",
+        "type": "object"
+      },
+      "PipelineCancellationRunRecord": {
+        "additionalProperties": false,
+        "description": "attempt당 하나인 Dagster run terminate 결과.",
+        "properties": {
+          "dagster_run_id": {
+            "title": "Dagster Run Id",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineCancellationErrorRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initial_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Status"
+          },
+          "result": {
+            "enum": [
+              "pending",
+              "cancelled",
+              "already_terminal",
+              "cancel_failed"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "terminal_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Status"
+          },
+          "termination_reserved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Termination Reserved At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dagster_run_id",
+          "initial_status",
+          "termination_reserved_at",
+          "result",
+          "terminal_status",
+          "error",
+          "updated_at"
+        ],
+        "title": "PipelineCancellationRunRecord",
+        "type": "object"
+      },
+      "PipelineCancellationSummaryRecord": {
+        "additionalProperties": false,
+        "description": "실행 목록 root에 붙는 current cancellation overlay.",
+        "properties": {
+          "cancellation_id": {
+            "title": "Cancellation Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "in_progress",
+              "retryable",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unresolved_member_count": {
+            "minimum": 0.0,
+            "title": "Unresolved Member Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cancellation_id",
+          "status",
+          "requested_at",
+          "requested_by",
+          "reason",
+          "retryable",
+          "unresolved_member_count"
+        ],
+        "title": "PipelineCancellationSummaryRecord",
+        "type": "object"
+      },
       "PipelineDagsterOverview": {
         "additionalProperties": false,
         "description": "overview의 Dagster 요약 부분 — GraphQL degrade 허용.",
@@ -16448,60 +16850,21 @@
         "title": "PipelineEventsListResponse",
         "type": "object"
       },
-      "PipelineExecutionCancelRequest": {
-        "additionalProperties": false,
-        "description": "``POST /ops/pipeline/executions/{kind}/{id}/cancel`` body.",
-        "properties": {
-          "operator": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "maxLength": 500,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "title": "PipelineExecutionCancelRequest",
-        "type": "object"
-      },
-      "PipelineExecutionCancelResponse": {
-        "additionalProperties": false,
-        "description": "취소 후 실행 행 응답.",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PipelineExecutionRecord"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "PipelineExecutionCancelResponse",
-        "type": "object"
-      },
       "PipelineExecutionDetailData": {
         "additionalProperties": false,
         "description": "실행 상세 — 실행 행 + 연결 개체 + 이벤트 페이지.",
         "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineCancellationDetailRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "base lifecycle을 덮지 않는 current cancellation 상세."
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/PipelineJobEventRecord"
@@ -16806,6 +17169,16 @@
         "additionalProperties": false,
         "description": "실행 목록의 request branch 또는 standalone partition root.",
         "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineCancellationSummaryRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -25890,6 +26263,7 @@
             "name": "request_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Request Id",
               "type": "string"
             }
@@ -25901,7 +26275,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/FeatureUpdateRequestCancelRequest"
+                    "$ref": "#/components/schemas/PipelineCancellationRequest"
                   },
                   {
                     "type": "null"
@@ -25917,7 +26291,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                  "$ref": "#/components/schemas/PipelineCancellationResponse"
                 }
               }
             },
@@ -25941,7 +26315,15 @@
                 }
               }
             },
-            "description": "이미 terminal 상태라 취소 불가"
+            "description": "동시 취소 또는 안전한 reconcile 불가",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -25952,6 +26334,42 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster terminate 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -25964,7 +26382,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "feature update request 취소",
+        "summary": "feature update request 계층 취소",
         "tags": [
           "admin-update-requests"
         ]
@@ -34410,7 +34828,7 @@
     },
     "/v1/ops/import-jobs/{job_id}/cancel": {
       "post": {
-        "description": "queued/running import job을 best-effort로 ``cancelled`` 전이한다.",
+        "description": "legacy import-job action을 canonical cancellation coordinator에 위임한다.",
         "operationId": "cancel_import_job_route_v1_ops_import_jobs__job_id__cancel_post",
         "parameters": [
           {
@@ -34418,6 +34836,7 @@
             "name": "job_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Job Id",
               "type": "string"
             }
@@ -34429,7 +34848,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/OpsImportJobCancelRequest"
+                    "$ref": "#/components/schemas/PipelineCancellationRequest"
                   },
                   {
                     "type": "null"
@@ -34445,7 +34864,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OpsImportJobResponse"
+                  "$ref": "#/components/schemas/PipelineCancellationResponse"
                 }
               }
             },
@@ -34469,7 +34888,15 @@
                 }
               }
             },
-            "description": "이미 terminal 상태라 취소 불가"
+            "description": "동시 취소 또는 안전한 reconcile 불가",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -34480,6 +34907,42 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster terminate 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -35293,7 +35756,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/PipelineExecutionCancelRequest"
+                    "$ref": "#/components/schemas/PipelineCancellationRequest"
                   },
                   {
                     "type": "null"
@@ -35309,7 +35772,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineExecutionCancelResponse"
+                  "$ref": "#/components/schemas/PipelineCancellationResponse"
                 }
               }
             },
@@ -35333,7 +35796,15 @@
                 }
               }
             },
-            "description": "이미 terminal 상태라 취소 불가"
+            "description": "동시 취소 또는 안전한 reconcile 불가",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -35344,6 +35815,42 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster terminate 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -35356,7 +35863,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "실행 취소 (종류별 위임)",
+        "summary": "canonical 실행 계층 취소",
         "tags": [
           "ops-pipeline"
         ]

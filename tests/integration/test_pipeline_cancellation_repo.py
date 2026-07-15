@@ -1330,7 +1330,7 @@ async def test_structured_error_shape_rejects_sql_null(
             )
 
 
-async def test_finish_refuses_pending_and_misclassified_retryable_failure(
+async def test_failed_attempt_preserves_retryable_member_evidence(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-finish")
@@ -1369,16 +1369,154 @@ async def test_finish_refuses_pending_and_misclassified_retryable_failure(
         terminal_status=None,
         error={"code": "DAGSTER_UNAVAILABLE", "message": "timeout"},
     )
-    with pytest.raises(PipelineCancellationInvariantError, match="definitive member mismatch"):
-        await finish_pipeline_cancellation_attempt(
+    finished = await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        status="failed",
+        error={
+            "code": "PIPELINE_CANCELLATION_UNSAFE",
+            "message": "coordinator invariant failed after transport observation",
+        },
+    )
+
+    assert finished is not None
+    assert finished.attempt.status == "failed"
+    assert finished.members[0].error == {
+        "code": "DAGSTER_UNAVAILABLE",
+        "message": "timeout",
+    }
+    assert finished.runs[0].error == {
+        "code": "DAGSTER_UNAVAILABLE",
+        "message": "timeout",
+    }
+
+
+async def test_failed_attempt_preserves_mixed_retryable_and_definitive_evidence(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-retry")
+    await _job(
+        migrated_session,
+        _CHILD,
+        parent_job_id=_ROOT,
+        status="running",
+        dagster_run_id="run-definitive",
+    )
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
             migrated_session,
-            cancellation_id=detail.attempt.cancellation_id,
-            status="failed",
-            error={
-                "code": "PIPELINE_CANCELLATION_UNSAFE",
-                "message": "operator policy",
-            },
-        )
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    cancellation_id = detail.attempt.cancellation_id
+    retryable = {"code": "DAGSTER_UNAVAILABLE", "message": "response lost"}
+    definitive = {
+        "code": "DAGSTER_RECONCILE_FAILED",
+        "message": "frozen base run mapping changed",
+    }
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id="run-retry",
+        result="cancel_failed",
+        initial_status="STARTED",
+        terminal_status=None,
+        error=retryable,
+    ) is True
+    assert await set_pipeline_cancellation_member_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_kind="import_job",
+        member_id=_ROOT,
+        result="cancel_failed",
+        terminal_status=None,
+        error=retryable,
+    ) is True
+    assert await set_pipeline_cancellation_run_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        dagster_run_id="run-definitive",
+        result="already_terminal",
+        initial_status="STARTED",
+        terminal_status="SUCCESS",
+        error=None,
+    ) is True
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.import_jobs SET dagster_run_id='run-drifted' "
+            "WHERE job_id=CAST(:job_id AS uuid)"
+        ),
+        {"job_id": _CHILD},
+    )
+    assert await set_pipeline_cancellation_member_result(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        member_kind="import_job",
+        member_id=_CHILD,
+        result="cancel_failed",
+        terminal_status=None,
+        error=definitive,
+    ) is True
+
+    finished = await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=cancellation_id,
+        status="failed",
+        error=definitive,
+    )
+
+    assert finished is not None
+    assert finished.attempt.status == "failed"
+    failures = {
+        member.member_id: member.error
+        for member in finished.members
+        if member.result == "cancel_failed"
+    }
+    assert failures[_ROOT] == retryable
+    assert failures[_CHILD] == definitive
+    run_by_id = {run.dagster_run_id: run for run in finished.runs}
+    assert run_by_id["run-retry"].error == retryable
+    assert run_by_id["run-definitive"].result == "already_terminal"
+
+
+async def test_failed_unexpected_close_preserves_pending_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(migrated_session, _ROOT, status="running", dagster_run_id="run-pending")
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+    error = {
+        "code": "PIPELINE_CANCELLATION_INVARIANT",
+        "message": "coordinator closed before authoritative observation",
+    }
+
+    finished = await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        status="failed",
+        error=error,
+    )
+
+    assert finished is not None
+    assert finished.attempt.status == "failed"
+    assert [run.result for run in finished.runs] == ["pending"]
+    assert [member.result for member in finished.members] == ["pending"]
+    base = await get_import_job(migrated_session, _ROOT)
+    assert base is not None
+    assert base.status == "running"
+    assert base.cancellation_id == detail.attempt.cancellation_id
 
 
 async def test_running_member_without_run_closes_only_as_definitive_failed(

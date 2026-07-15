@@ -3,6 +3,16 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 최근 2일 Claude Code PR 사후 적대 리뷰 (2026-07-15, `T-ADM-RV-CLAUDE-2D`)
+
+- [x] **T-ADM-RV-CLAUDE-2D — 닫힘 여부와 무관한 Claude Code PR 상세 리뷰·이슈화.**
+  공동작성 trailer와 Claude session 근거가 있는 PR #672, #674, #675, #676, #677,
+  #683, #691, #692를 각각 상세 리뷰했다. review-fix 전용 PR은 없었고, Claude 근거가 없는
+  #664, #666~#671, #687~#690은 제외했다. pipeline UI 상태 격리·sensor fail-closed·URL
+  복원은 #693, live UI E2E 의미 단언은 #694로 묶어 새 이슈를 만들었다. 기존 #682,
+  #684, #685, #686에는 재현 근거와 보강 수용 기준을 남겼으며, #687로 완료되지 않은
+  actor/problem/schedule 범위 때문에 #682를 다시 열었다.
+
 ## 지도 신선도·provider 실행·고zoom 성능 반복 장애 수정 (2026-07-13, `T-231`)
 
 - [x] **T-231 — notice/OpiNet 반복 장애 근본 수정과 지도 응답성 보강.** KREX notice를
