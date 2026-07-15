@@ -346,12 +346,14 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
                 label="load batch jobs",
             )
         )
-    request_id = _payload_text(row, "request_id")
-    if request_id:
+    if row.update_request_id:
         links.append(
             OpsImportJobLink(
                 rel="feature_update_request",
-                href=f"/v1/admin/features/update-requests/{request_id}",
+                href=(
+                    "/v1/ops/pipeline/executions/update_request/"
+                    f"{row.update_request_id}"
+                ),
                 label="feature update request",
             )
         )

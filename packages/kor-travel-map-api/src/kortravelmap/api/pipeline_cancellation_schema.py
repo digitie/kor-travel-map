@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal, Self
+from uuid import UUID
 
 from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationDetail,
@@ -38,7 +39,7 @@ PipelineCancellationResult = Literal[
     "already_terminal",
     "cancel_failed",
 ]
-PipelineCancellationMemberKind = Literal["import_job", "update_request"]
+PipelineCancellationRootKind = Literal["import_job", "update_request"]
 
 _COMMITTED_DATA_WARNING = (
     "이미 commit된 scope 데이터와 외부 provider 효과는 rollback하지 않습니다."
@@ -68,8 +69,8 @@ class PipelineCancellationRootRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: PipelineCancellationMemberKind
-    id: str
+    kind: PipelineCancellationRootKind
+    id: UUID
 
 
 class PipelineCancellationSummaryRecord(BaseModel):
@@ -77,7 +78,7 @@ class PipelineCancellationSummaryRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    cancellation_id: str
+    cancellation_id: UUID
     status: PipelineCancellationStatus
     requested_at: datetime
     requested_by: str
@@ -91,8 +92,7 @@ class PipelineCancellationMemberRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    member_kind: PipelineCancellationMemberKind
-    member_id: str
+    job_id: UUID
     dagster_run_id: str | None
     operation_kind: str | None
     requires_run_termination: bool
@@ -124,8 +124,8 @@ class PipelineCancellationDetailRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    cancellation_id: str
-    previous_cancellation_id: str | None
+    cancellation_id: UUID
+    previous_cancellation_id: UUID | None
     root: PipelineCancellationRootRecord
     status: PipelineCancellationStatus
     requested_at: datetime
@@ -220,8 +220,7 @@ def cancellation_detail_record(
         unresolved_member_count=detail.unresolved_member_count,
         members=[
             PipelineCancellationMemberRecord(
-                member_kind=member.member_kind,
-                member_id=member.member_id,
+                job_id=member.job_id,
                 dagster_run_id=member.dagster_run_id,
                 operation_kind=member.operation_kind,
                 requires_run_termination=member.requires_run_termination,

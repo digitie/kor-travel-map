@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,6 +14,7 @@ from kortravelmap.infra.pipeline_repo import (
     PIPELINE_EXECUTION_KINDS,
     PipelineExecution,
     get_pipeline_status_counts,
+    list_latest_dataset_pipeline_executions,
     list_pipeline_executions,
 )
 
@@ -36,6 +38,9 @@ class _Result:
     def one(self) -> Any:
         return self._rows[0]
 
+    def one_or_none(self) -> Any | None:
+        return self._rows[0] if self._rows else None
+
 
 class _Session:
     def __init__(self, *results: _Result) -> None:
@@ -55,6 +60,17 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         created_at=at,
         providers=["python-kma-api"],
         dataset_keys=["kma_short_forecast"],
+        provider_datasets=json.dumps(
+            [
+                {
+                    "provider": "python-kma-api",
+                    "dataset_key": "kma_short_forecast",
+                    "sync_scope": None,
+                    "operation_member_id": job_id,
+                    "status": "running",
+                }
+            ]
+        ),
         scope_provider=None,
         scope_dataset=None,
         scope_sync_scope=None,
@@ -68,8 +84,10 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         started_at=at,
         finished_at=None,
         dagster_run_id="run-1",
+        dagster_run_status="STARTED",
+        trigger_kind="manual",
+        operation_registry_version=None,
         requested_job_id=None,
-        lineage_owner=None,
         linked_job_count=2,
         projected_job_id="77777777-7777-4777-8777-777777777777",
         projected_job_kind="provider_load",
@@ -81,6 +99,9 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         projected_started_at=at,
         projected_finished_at=None,
         projected_dagster_run_id="run-child",
+        projected_dagster_run_status=None,
+        projected_trigger_kind="manual",
+        projected_operation_registry_version=None,
         projected_load_batch_id="33333333-3333-3333-3333-333333333333",
         projected_parent_job_id=job_id,
         projected_depth=1,
@@ -91,6 +112,10 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         cancellation_reason=None,
         cancellation_retryable=None,
         cancellation_unresolved_member_count=None,
+        selected_provider="python-kma-api",
+        selected_dataset_key="kma_short_forecast",
+        selected_operation_member_id=job_id,
+        selected_pair_status="running",
     )
 
 
@@ -204,8 +229,8 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     assert item.kind == "import_job"
     assert item.providers == ("python-kma-api",)
     assert item.dagster_run_id == "run-1"
+    assert item.provider_datasets[0].operation_member_id == item.id
     assert item.linked_job_count == 2
-    assert item.projected_job is not None
     assert item.projected_job.job_kind == "provider_load"
     assert item.projected_job.load_batch_id == ("33333333-3333-3333-3333-333333333333")
     assert page.next_cursor is not None
@@ -229,10 +254,9 @@ async def test_status_counts_parses_aggregates() -> None:
         _Result(
             [
                 SimpleNamespace(
-                    import_jobs_by_status='{"queued": 2, "failed": 1}',
-                    update_requests_by_status='{"done": 4}',
-                    failed_import_jobs_24h=1,
-                    failed_update_requests_24h=0,
+                    operations_by_status='{"queued": 2, "failed": 1}',
+                    active_operations=2,
+                    failed_operations_24h=1,
                 )
             ]
         )
@@ -240,10 +264,24 @@ async def test_status_counts_parses_aggregates() -> None:
 
     counts = await get_pipeline_status_counts(cast(Any, session))
 
-    assert counts.import_jobs_by_status == {"queued": 2, "failed": 1}
-    assert counts.update_requests_by_status == {"done": 4}
-    assert counts.failed_import_jobs_24h == 1
-    assert counts.failed_update_requests_24h == 0
+    assert counts.operations_by_status == {"queued": 2, "failed": 1}
+    assert counts.active_operations == 2
+    assert counts.failed_operations_24h == 1
+
+
+async def test_latest_dataset_batch_maps_common_root_and_selected_pair() -> None:
+    at = datetime(2026, 7, 15, 9, 0, tzinfo=UTC)
+    row = _job_row("11111111-1111-1111-1111-111111111111", at=at)
+    session = _Session(_Result([row]))
+
+    items = await list_latest_dataset_pipeline_executions(cast(Any, session))
+
+    assert len(items) == 1
+    assert items[0].provider == "python-kma-api"
+    assert items[0].dataset_key == "kma_short_forecast"
+    assert items[0].execution.id == "11111111-1111-1111-1111-111111111111"
+    assert items[0].operation_member_id == items[0].execution.id
+    assert items[0].pair_status == "running"
 
 
 async def test_list_rejects_unknown_kind() -> None:

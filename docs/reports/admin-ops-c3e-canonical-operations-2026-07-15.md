@@ -1,6 +1,6 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 문서 gate PR #696 병합, C3e-A1 구현·로컬 검증 완료, PR/CI 대기
+> 상태: 문서 gate·C3e-A1 완료, C3e-A2 공용 projection 로컬 gate 단계(PR·CI·merge 전)
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -75,10 +75,10 @@ lifecycle이고 child
 `dataset_keys[]`는 검색·표시용 독립 배열일 뿐 pair를 복원하는 데 쓰지 않는다. 배열의
 cross-product는 어떤 API와 SQL에서도 만들지 않는다.
 
-update request root는 owned import child의 실컬럼 exact pair를 우선하고,
-`scope.type='provider_dataset'` direct pair를 fallback으로 보완한다. 같은 pair가 둘 다 있으면
-child 한 항목으로 접고, fallback 항목은 `operation_member_id=NULL`과 request root status를
-사용한다. provider/dataset 독립 배열에서 새 pair를 만들지 않는다.
+update request root도 owned import member의 실컬럼 exact pair만 사용한다.
+`scope.type='provider_dataset'` direct pair는 linked typed job pair와 DB에서 항상 같고,
+nullable `sync_scope` metadata만 보강한다. pair는 항상 non-null `operation_member_id`와 member
+status를 가진다. provider/dataset 독립 배열에서 새 pair를 만들지 않는다.
 
 이 계층은 C3d 취소 경계이기도 하다. 같은 Dagster run의 pair 하나에서 취소를 시작해도
 canonical root와 모든 child가 frozen scope에 포함되고 run terminate는 한 번만 호출된다.
@@ -380,15 +380,17 @@ type에도 raw terminal status와 분리해 노출한다. 기존 run에는 권�
   이 한계는 coverage에서 숨기지 않는다.
 - 신뢰 가능한 실행 신호가 없는 legacy job의 `trigger_kind`는 NULL로 둔다.
 
-신규 generic writer는 payload/event fallback을 만들지 않는다. `enqueue_import_job`과
-`start_import_job`은 reserved feature kind를 거부하며, 다른 kind에는 optional typed
-`provider_dataset`과 `trigger_kind`를 받고 둘을 실컬럼에
-같이 쓴다. offline validate/load/reserve, MOIS bulk/incremental/closed, exact
+신규 writer는 payload/event fallback을 만들지 않는다. pair가 없는 orchestration은
+`enqueue_unpaired_import_job`/`start_unpaired_import_job`, exact pair 작업은 required
+`ProviderDatasetOperationKey`를 받는 `enqueue_provider_dataset_import_job`/
+`start_provider_dataset_import_job`만 사용한다. 네 함수 모두 reserved feature kind를 거부한다.
+offline validate/load/reserve, MOIS bulk/incremental/closed, exact
 `provider_dataset` feature-update member는 호출 시 canonical pair를 넘긴다. multi-scope update
 request, batch aggregate root, consistency/MV child처럼 단일 pair가 아닌 작업은 NULL이다.
 batch attach는 identity를 추론·덮어쓰지 않고 기존 child 실컬럼을 보존한다. event append는
-기본적으로 job 실컬럼 pair를 상속하며 호출자가 다른 non-NULL pair를 주면 거부한다. stored pair가
-NULL인 신규 job에 explicit event pair를 주는 event-only identity도 거부한다.
+항상 같은 INSERT 시점의 job 실컬럼 pair만 복사하며 호출자가 다른 non-NULL pair를 주면 atomic
+equality predicate로 거부한다. stored pair가 NULL인 신규 job에 explicit event pair를 주는
+event-only identity도 거부한다.
 
 신규 feature-load root/child `created_at`은 sensor 처리 시각이 아니라 Dagster run record의
 timezone-aware authoritative create timestamp다. child도 같은 값을 사용한다. STARTED/terminal을
@@ -409,8 +411,9 @@ fail-closed한다.
 
 ## 4. 공용 root projection과 REST 계약
 
-`pipeline_repo`가 C3b의 cycle-safe component, nearest request anchor, duplicate owner,
-nested anchor, standalone partition 규칙을 유일하게 소유한다. 다음 네 소비자는 동일 root
+`pipeline_repo`가 cycle-safe component, 양방향 1:1 canonical request root,
+standalone partition 규칙을 유일하게 소유한다. request job은 parent/load batch 없는 root이고
+같은 job의 다중 request와 nested request anchor는 DB가 거부한다. 다음 네 소비자는 동일 root
 CTE와 exact pair projection을 사용한다.
 
 - `GET /v1/ops/pipeline/overview`: 상태 count와 최근 24시간 failure를 raw import job 행이 아니라
@@ -434,7 +437,7 @@ pipeline root/detail/projected job과 datasets latest/recent는 다음 정보를
 - root `status`와 별도 `projected_job.status/progress/current_stage`
 - nullable `dagster_run_id`, raw `dagster_run_status`, `trigger_kind`, authoritative engine 시각
 - feature-load root의 nullable `operation_registry_version`
-- exact `provider_datasets[]`의 member id/status/status_source; 표시용
+- exact `provider_datasets[]`의 non-null member id/status; 표시용
   `providers[]`/`dataset_keys[]`
 - C3d cancellation overlay(있을 때)
 
@@ -455,35 +458,136 @@ base 상태를 덮지 않는다.
 
 `provider_datasets[]`는 `(provider ASC, dataset_key ASC)`로 정렬한다. 같은 pair member가
 여러 개면 canonical branch 안에서 실컬럼 identity가 있는 행만 대상으로
-`depth DESC, created_at DESC, job_id DESC` 첫 행을 고른다. 이 member가 있으면
-`status_source='member'`, `operation_member_id`와 member status를 쓴다. 없고 request direct
-scope 또는 legacy exact event fallback만 있으면 `status_source='root'`, member id NULL,
-canonical root status를 쓴다.
+`depth DESC, created_at DESC, job_id DESC` 첫 행을 고르고 `operation_member_id`와 member
+status를 쓴다. typed member가 없으면 pair도 없다. event-only 과거 job은 실행 root로는 보존하지만 pair가 없으므로
+`provider_datasets=[]`이고 dataset latest에서는 제외한다.
 
-## 5. mixed-version 배포
+모든 request scope는 `ops.is_valid_feature_update_scope`가 강제하는 여섯 canonical JSON
+shape 중 하나이다. 필수/추가 키, JSON type, 문자열 trim·길이, 배열 크기,
+좌표·반경·bbox 범위는 OpenAPI 입력과 같다. 저장 경계는 `match`/`scope_mode`
+기본값을 채우고 nullable field의 JSON `null`을 제거한다. 0052 CHECK와 trigger가
+`provider_dataset` scope pair와 linked job typed pair를 일치시키므로 direct scope는 독립
+pair가 아니라 같은 pair의 target/`sync_scope` metadata다. 저장된 `providers[]`와
+`dataset_keys[]`는 표시·단일축 필터용 배열이며 pair를 복원하지 않는다.
+`update_policy`도 repository canonicalizer와 `ops.is_valid_feature_update_policy` CHECK가
+같은 허용 키를 강제한다. `mode='refresh_existing'`와 boolean override 5개만 저장하며,
+Python `None`은 키 생략으로 정규화하고 unknown key·JSON `null`·잘못된 타입은 거부한다.
+`import_job_events.provider`/`dataset_key`는 감사 endpoint의 filter 메타데이터로만 남고 runtime
+projection identity에는 사용하지 않는다.
 
-새 Dagster가 migration보다 먼저 뜨면 `UndefinedColumn`으로 실행이 유실될 수 있으므로 다음
-순서를 고정한다.
+## 5. 일방향 전환과 배포 preflight
+
+호환 writer/read model은 두지 않는다. 새 Dagster가 migration보다 먼저 뜨면
+`UndefinedColumn`으로 실행이 유실될 수 있으므로 다음 일방향 전환 순서를 고정한다.
 
 1. API/admin launch maintenance를 켜고 schedules/sensors와 Dagster UI/manual/backfill ingress를
    막는다.
 2. Dagster `QUEUED|STARTING|STARTED|CANCELING`과 DB active feature root/child가 모두 0일 때까지
    구 run을 소진한다.
 3. 구 Dagster webserver, daemon, code location을 모두 정지한다.
-4. API image를 먼저 배포해 migration 0051과 mixed reader를 적용한다.
+4. API image를 먼저 배포해 migration 0051/0052와 typed-only reader를 적용한다.
 5. column/CHECK/constraint trigger/index/Alembic single head를 검증하고 첫 backfill을 실행한다.
 6. Dagster 전 구성을 새 image로 재기동하고 same-run/pair 멱등성, catalog identity,
    recent/timeline 일치를 확인한다.
 7. 모든 tracking sensor가 RUNNING인지 확인하고 reconciliation cursor를 maintenance cutover
    시각으로 명시 초기화한 뒤 첫 tick/page commit과 cursor readback을 확인한다.
-8. 구 writer 소진을 다시 확인하고 backfill을 재실행한다.
+8. 구 writer 소진을 다시 확인하고 0051 backfill 결과와 아래 손실 분류를 기록한다.
 9. API/Dagster readback 뒤 UI를 재기동하고 ingress/schedules를 재개한다.
 
-구 writer가 만든 event-only row는 실컬럼 우선 + exact event pair fallback으로 읽는다. payload
-fallback은 두지 않는다. quiesce 없이 생긴 pure Dagster run 누락 창을 정상 coverage로 간주하지
-않는다. rollback은 신규 launch 차단 → 신 Dagster/API 모두 정지 → 0051을 아는 migration
-image가 active feature root/child와 관련 `in_progress|retryable` cancellation 0을 fail-closed 확인 후
-downgrade → 구 API → 구 Dagster 순서다.
+0052는 첫 동작으로 `ops.import_jobs`, `ops.feature_update_requests`를 그 순서로
+`ACCESS EXCLUSIVE` 잠근 뒤 immutable `ops.is_valid_feature_update_scope`, filter validator,
+update policy validator를 생성하고 여섯 scope와 provider/dataset filter array 및 policy의 완전한 shape를 repair와 같은
+transaction에서 점검한 뒤 두 filter를 JSONB에서 typed `TEXT[]`로 전환한다. malformed/persisted
+dry-run이 있으면 migration이 request ID와 함께 중단하므로
+scope/filter/policy를 정상화하거나 잘못 저장된 요청을 명시적으로 제거한 뒤 다시 적용한다. jobless 또는 linked
+job kind/pair 불일치는 0052가 request별 canonical job을 만들어
+재연결하고 이전 job ID를 audit payload에 보존하므로 데이터 삭제 대상이 아니다. 단, 해당 request/job에
+cancellation marker 또는 frozen cancellation member가 있으면 동결 집합을 임의로 바꾸지 않고
+request ID와 함께 중단하므로 기존 취소를 terminal로 정리한 뒤 재시도한다. request가
+`running`이거나 source job의 양방향 parent/child connected component에 DB `queued|running` 또는
+Dagster active raw status가 하나라도 있는 relink도 중단한다. maintenance drain 뒤 전체
+branch lifecycle을 terminal로 정리해야 한다. persisted row의 `dry_run` 컬럼은 0052가
+제거하며 실제 생성(201)과 미리보기(200)는 독립 HTTP endpoint다.
+
+```sql
+SELECT request_id, scope
+FROM ops.feature_update_requests
+WHERE dry_run
+ORDER BY request_id;
+```
+
+scope shape는 구 DB에 validation 함수가 없으므로 수동 SQL로 일부만 느슨하게 재구현하지
+않는다. migration이 함수 생성 뒤 전체 행을 검증하고, 실패 시 정확한 request ID를 출력한다.
+
+0052 downgrade는 schema rollback이다. upgrade가 만든 canonical job과 request relink는 구 schema에서도
+유효한 감사 데이터이므로 원래 nullable job ID로 역변환하거나 synthetic job을 삭제하지 않는다.
+`migration_source_job_id`는 사후 추적용이며 자동 데이터 복원 지시자가 아니다.
+
+0051 적용 뒤 typed pair가 남지 않은 event-only job을 다음 SQL로 분류한다. 결과의 job 수와
+유효 pair 수를 배포 기록에 남긴다. `unexpected_exact_untyped`는 0이어야 하며, `multi_pair`,
+`partial_or_invalid`, `linked_request_untyped`는 의도적으로 pair read model에서 제외한다. raw event와
+global/job event timeline은 삭제하지 않는다.
+
+```sql
+WITH event_identity AS (
+  SELECT
+    event.job_id,
+    count(*) FILTER (
+      WHERE event.provider IS NOT NULL OR event.dataset_key IS NOT NULL
+    ) AS identity_event_count,
+    count(*) FILTER (
+      WHERE event.provider IS NOT NULL
+        AND event.dataset_key IS NOT NULL
+        AND event.provider = btrim(event.provider)
+        AND event.dataset_key = btrim(event.dataset_key)
+        AND event.provider <> ''
+        AND event.dataset_key <> ''
+    ) AS valid_event_count,
+    count(DISTINCT ROW(event.provider, event.dataset_key)) FILTER (
+      WHERE event.provider IS NOT NULL
+        AND event.dataset_key IS NOT NULL
+        AND event.provider = btrim(event.provider)
+        AND event.dataset_key = btrim(event.dataset_key)
+        AND event.provider <> ''
+        AND event.dataset_key <> ''
+    ) AS valid_pair_count
+  FROM ops.import_job_events AS event
+  GROUP BY event.job_id
+), request_links AS (
+  SELECT request.job_id, count(*) AS request_count
+  FROM ops.feature_update_requests AS request
+  WHERE request.job_id IS NOT NULL
+  GROUP BY request.job_id
+), residual AS (
+  SELECT
+    job.job_id,
+    coalesce(event.identity_event_count, 0) AS identity_event_count,
+    coalesce(event.valid_event_count, 0) AS valid_event_count,
+    coalesce(event.valid_pair_count, 0) AS valid_pair_count,
+    coalesce(link.request_count, 0) AS request_count
+  FROM ops.import_jobs AS job
+  LEFT JOIN event_identity AS event ON event.job_id = job.job_id
+  LEFT JOIN request_links AS link ON link.job_id = job.job_id
+  WHERE job.provider IS NULL AND job.dataset_key IS NULL
+)
+SELECT
+  CASE
+    WHEN request_count > 0 AND identity_event_count > 0
+      THEN 'linked_request_untyped'
+    WHEN identity_event_count = 0 THEN 'no_event_identity'
+    WHEN valid_event_count <> identity_event_count THEN 'partial_or_invalid'
+    WHEN valid_pair_count > 1 THEN 'multi_pair'
+    ELSE 'unexpected_exact_untyped'
+  END AS category,
+  count(*) AS job_count,
+  sum(valid_pair_count) AS valid_pair_count
+FROM residual
+GROUP BY category
+ORDER BY category;
+```
+
+rollback 호환성은 지원하지 않는다. 배포 중단 시 신규 launch를 막고 새 image의 schema와 writer를
+그대로 유지한 채 원인을 수정해 재배포한다.
 
 ## 6. PR 단위 병렬 작업
 
@@ -502,6 +606,77 @@ origin/main에 rebase한다. 모든 branch는 착수, handoff, push 직전과 �
 상태를 확인한다. 파일 소유는 A1이 migration/main infra와 cancellation API, A2가 공용
 projection과 pipeline overview API/OpenAPI, B가 Dagster package, C가 datasets API/OpenAPI를
 맡도록 분리해 병렬 edit 충돌을 최소화한다.
+
+### C3e-A2 구현 기록
+
+`pipeline_repo`의 C3b cycle-safe lineage를 유일한 계보 정본으로 유지하면서 request branch와
+standalone partition을 canonical root로 먼저 확정하고 exact pair를 별도 관계로 계산했다. 실컬럼
+identity member는 `depth DESC, created_at DESC, job_id DESC`로 하나를 고르며 direct request
+scope는 같은 typed pair의 `sync_scope` metadata만 보강한다. 표시 배열은 결정적으로 정렬하지만
+pair filter에는 사용하지 않아 provider/dataset 교차곱을 차단한다. event는 감사 전용이며 이
+projection에서 읽지 않는다.
+
+executions, 단건 detail, overview, 모든 dataset latest batch와 dataset detail recent가 이 공용 CTE를
+사용한다. feature run의 `projected_job`은 root 자체이고 pair child 상태는
+`provider_datasets[]`만 소유한다. overview는 canonical root의 `operations_by_status`,
+`active_operations`, `failed_operations_24h`로 원자 전환했다. pair/provider-only/dataset-only
+필터는 identity access-path index를 대상으로 하는 EXPLAIN 회귀를 두었다. 1차 적대 리뷰 뒤에는
+production caller가 사라진 request/job 조립 DTO·helper·query를 제거하고 1,005개 canonical root의
+keyset 전수 순회, 모든 dataset latest, overview 합계가 누락 없이 일치하도록 고정했다. 또한
+status/latest/detail raw SQL 각각에 EXPLAIN gate를 둔다. 최종 성능 리뷰에서는 선택 조회가 전체
+graph를 먼저 투영하던 구조를 반려하고, typed/direct/request-array identity를 자연 planner의
+index로 seed한 뒤 해당 connected component와 관련 request만 canonicalize하도록 분리했다.
+production-like unrelated cardinality와 `ANALYZE`를 둔 gate는 selective pair/provider/dataset 및
+UUID detail에서 base job/request `Seq Scan`과 과도한 actual row/loop를 차단하고 event relation
+접근 자체를 금지한다.
+2차 적대 리뷰에서는 request detail scalar가 array 첫 원소를 독립 선택해 가짜 pair를 만들 수 있던
+경로와 request trigger 누락을 제거했다. scalar pair도 linked typed job에서만 읽고 non-exact
+provider/dataset 배열은 root 표시·단일 필터에만 남긴다. 이후 DB-boundary 리뷰에서 event fallback과
+jobless direct fallback을 모두 제거했다. 0052는 request job FK를 `NOT NULL/RESTRICT`로 바꾸고
+jobless·scope 불일치·reserved Dagster kind row를 request별 canonical job으로 재연결한다. 6종
+scope, typed provider/dataset `TEXT[]`, update policy의 exact canonical shape CHECK, canonical job kind/scope pair
+교차검증 trigger, import kind/pair 불변 trigger가 typed job 단독 정본을 DB에서 강제한다.
+persisted dry-run 컬럼은 제거하고 200 preview와 201 생성 endpoint를 분리한다.
+relink 전에는 source의 양방향 connected component 전체에서 active/cancellation 상태를 fail-closed한다.
+typed identity가 없는 event-only sibling은 root timeline에는 남지만 pair filter/latest에서 제외된다.
+영향도 평가는 codegraph에서
+`list_pipeline_executions` 19개, `PipelineExecution` 7개,
+`list_latest_dataset_executions`·`DatasetLatestExecution` 각 11개,
+`get_pipeline_status_counts` 9개, `PipelineStatusCounts` 12개, 상세의 `OpsImportJob` 34개 symbol을
+확인했고 `PipelineOverviewData`의 직접 영향은 3개였다. 테스트·정적 gate는 사용자 계약에
+따라 적대 리뷰 2회 반영 뒤 실행했다.
+
+#### C3e-A2 로컬 gate 기록
+
+과거 테스트 전 snapshot은 적대 리뷰를 통과했지만 이후 UI/DB clean-cut 변경으로 승인을
+무효화했다. 최신 source·generated artifact를 두 리뷰어가 다시 승인하기 전에는 테스트를
+최종 결과로 기록하지 않는다.
+
+- admin UI의 구 `/admin/feature-update-requests` 목록·상세 redirect route는 clean-cut으로
+  삭제하고 client 구현을 정본 `/admin/features/update-requests` route 내부로 이동했다.
+- `feature_update_requests.job_id`는 unique FK이며 job INSERT/request DELETE deferred trigger가
+  reverse orphan을 commit 시점에 차단한다. request의 `job_id`는 immutable이고 canonical job은
+  parent/load batch가 없는 root다. generic writer는 reserved kind의 생성·일반 lifecycle을 거부한다.
+  migration은 unlinked terminal component 전체에 명시적 격리 시각·사유를 기록하되 원래
+  `kind`·`payload`를 보존하고, active/cancellation component에서는 fail-closed한다.
+- 0052의 request→job FK는 SQLAlchemy naming convention이 실제 생성한
+  `fk_feature_update_requests_job_id_import_jobs`를 upgrade/downgrade에서 동일하게 사용한다.
+  새 CHECK 이름은 Alembic `op.f(...)`와 ORM `conv(...)`로 완성된 이름임을 표시해 convention의
+  이중 prefix를 제거했다.
+- migration fixture는 0051의 canonical unpaired root와 same-run typed pair child 불변식을
+  만족한다. active relink preflight truth table은 source DB 상태, raw Dagster 상태, request
+  cancellation, jobless request, child active 상태를 서로 다른 행으로 격리해 각 차단 조건을
+  독립 검증한다.
+- SQLAlchemy text SQL의 `:null` test bind 오해를 제거했다. direct-exact selective EXPLAIN은
+  배경 seed 분포와 `ANALYZE`를 보강해 identity index access path가 실제 선택성을 갖는 조건에서
+  검증되도록 했다.
+
+과거 migration/repository/Python/API/Dagster/frontend/build/mocked Playwright 결과는 위 변경으로
+모두 무효화했다. 최신 적대 리뷰 2인 승인 뒤 전체 gate를 재실행해 이 절을 실제 결과로 갱신한다.
+live n150/prod는 C3e-I/C7 최종 gate로 남긴다.
+
+A2는 아직 PR·CI·merge 전이므로 이 결과를 완료로 간주하지 않는다. `docs/tasks.md`의 A2
+항목은 유지하며 `docs/tasks-done.md`로 이동하지 않는다.
 
 ## 7. 구현 전 수용 테스트
 
@@ -542,6 +717,10 @@ projection과 pipeline overview API/OpenAPI, B가 Dagster package, C가 datasets
 - 모든 schedule/asset operation registry pair가 canonical provider catalog에 존재
 - 1,000개 이상 root에서도 dataset latest 누락이 없고 cycle/nested/duplicate owner가 pipeline과 동일
 - provider+dataset filter가 같은 child exact pair만 매칭하며 독립 배열 cross-product가 없음
+- 6종 malformed scope·provider/dataset filter shape·persisted dry-run·reserved Dagster kind의
+  active/cancellation relink는 0052 preflight/migration에서 request ID와 함께 차단되고,
+  terminal reserved kind는 canonical job으로 repair되며 Python/DB whitespace canonicalization이 일치
+- whitespace legacy event는 valid sibling pair를 오염시키거나 자체 pair가 되지 않음
 - feature run의 projected job은 root로 고정되어 pair insertion order/UUID에 무관하고 pair 상태는
   `provider_datasets[]`만 사용
 - overview status count/active count/최근 24시간 failure가 canonical root 단위이며 timeline root

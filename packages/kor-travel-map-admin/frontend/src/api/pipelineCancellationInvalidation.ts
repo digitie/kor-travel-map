@@ -4,11 +4,14 @@ type PipelineCancellationMember =
   components["schemas"]["PipelineCancellationMemberRecord"];
 type PipelineCancellationMemberIdentity = Pick<
   PipelineCancellationMember,
-  "member_id" | "member_kind"
+  "job_id"
 >;
+type PipelineCancellationRoot =
+  components["schemas"]["PipelineCancellationRootRecord"];
 
 export function pipelineCancellationQueryKeys(
   members: readonly PipelineCancellationMemberIdentity[] | undefined,
+  root?: PipelineCancellationRoot,
 ): ReadonlyArray<readonly unknown[]> {
   const queryKeys: Array<readonly unknown[]> = [
     ["import-jobs"],
@@ -22,13 +25,12 @@ export function pipelineCancellationQueryKeys(
       ["feature-update-request"],
     ];
   }
+  if (root?.kind === "update_request") {
+    queryKeys.push(["feature-update-request", root.id]);
+  }
   for (const member of members) {
-    if (member.member_kind === "import_job") {
-      queryKeys.push(["import-job", member.member_id]);
-      queryKeys.push(["import-job-events", member.member_id]);
-    } else {
-      queryKeys.push(["feature-update-request", member.member_id]);
-    }
+    queryKeys.push(["import-job", member.job_id]);
+    queryKeys.push(["import-job-events", member.job_id]);
   }
   return queryKeys;
 }

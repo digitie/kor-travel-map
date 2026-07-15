@@ -136,10 +136,7 @@ async function mockImportJob(
         initialStatus: options.initialStatus ?? "running",
         dagsterRunId: DAGSTER_RUN_ID,
         reason: cancelBodies.at(-1)?.reason ?? null,
-        members: [
-          { memberKind: "update_request", memberId: OWNER_REQUEST_ID },
-          { memberKind: "import_job", memberId: JOB_ID },
-        ],
+        members: [{ jobId: JOB_ID }],
       });
       cancellationResponses.push(body);
       await fulfillJson(route, body);
@@ -206,14 +203,8 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
       id: OWNER_REQUEST_ID,
     });
     expect(
-      cancellationResponses[0]?.data.members.map((member) => [
-        member.member_kind,
-        member.member_id,
-      ]),
-    ).toEqual([
-      ["update_request", OWNER_REQUEST_ID],
-      ["import_job", JOB_ID],
-    ]);
+      cancellationResponses[0]?.data.members.map((member) => member.job_id),
+    ).toEqual([JOB_ID]);
 
     // 성공 Alert: title "중지 처리됨" + 본문 `${status} · ${shortId(root.id)}`.
     // 성공(default variant) Alert는 role=status(polite)다 — destructive만 role=alert.

@@ -434,13 +434,9 @@ test.describe("/ops/import-jobs 실데이터 라운드트립", () => {
     expect(after.data.root).toEqual({ kind: "import_job", id: jobId });
     expect(after.data.status).toBe("completed");
     expect(after.data.members).toHaveLength(root.linked_job_count);
-    expect(
-      after.data.members.every((member) => member.member_kind === "import_job"),
-    ).toBe(true);
     expect(after.data.members).toContainEqual(
       expect.objectContaining({
-        member_kind: "import_job",
-        member_id: jobId,
+        job_id: jobId,
         terminal_status: "cancelled",
       }),
     );

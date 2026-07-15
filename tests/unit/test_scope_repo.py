@@ -11,6 +11,7 @@ from kortravelmap.infra.scope_repo import (
     FeatureScopeRow,
     ProviderDatasetScope,
     ScopeResolution,
+    canonicalize_feature_update_scope,
     count_features_matching_scope,
     resolve_cache_target_keys,
     resolve_feature_ids,
@@ -31,9 +32,7 @@ def test_scope_resolution_matched_scope_includes_cache_target_payload() -> None:
             FeatureScopeRow("feature-1", "11110"),
             FeatureScopeRow("feature-2", "11140"),
         ),
-        provider_datasets=(
-            ProviderDatasetScope("python-a-api", "dataset-a", 2),
-        ),
+        provider_datasets=(ProviderDatasetScope("python-a-api", "dataset-a", 2),),
         sigungu_codes=("11110", "11140"),
         extra_matched_scope={
             "target_count": 2,
@@ -104,16 +103,19 @@ def test_scope_helper_conversions_cover_json_rows_and_dedup() -> None:
     assert target.radius_km == 3.5
     assert target.provider_overrides["python-a-api"]["targeted_policy"] == "disabled"
     assert match.distance_m == 12.5
-    assert scope_repo._row_to_cache_match(
-        _row(
-            target_id="target-1",
-            feature_id="feature-2",
-            provider=None,
-            dataset_key=None,
-            distance_m=None,
-            relation="same_sigungu",
-        )
-    ).distance_m is None
+    assert (
+        scope_repo._row_to_cache_match(
+            _row(
+                target_id="target-1",
+                feature_id="feature-2",
+                provider=None,
+                dataset_key=None,
+                distance_m=None,
+                relation="same_sigungu",
+            )
+        ).distance_m
+        is None
+    )
 
 
 def test_cache_target_match_helpers_preserve_first_feature_order() -> None:
@@ -180,9 +182,7 @@ async def test_empty_or_invalid_public_resolvers_skip_db() -> None:
     assert await scope_repo._provider_datasets_for_feature_ids(object(), []) == ()
 
     with pytest.raises(ValueError, match="requires external_system"):
-        await resolve_cache_target_keys(
-            object(), external_system="", target_keys=["poi-1"]
-        )
+        await resolve_cache_target_keys(object(), external_system="", target_keys=["poi-1"])
     with pytest.raises(ValueError, match="radius_km must be greater than 0"):
         await resolve_cache_target_keys(
             object(), external_system="external-app", target_keys=["poi-1"], radius_km=0
@@ -221,18 +221,14 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
     def result(scope_type: str) -> ScopeResolution:
         return ScopeResolution(scope_type=scope_type, features=())
 
-    async def fake_count(
-        session: object, sql: str, params: dict[str, object]
-    ) -> int:
+    async def fake_count(session: object, sql: str, params: dict[str, object]) -> int:
         calls.append(("count", {"session": session, "sql": sql, "params": params}))
         return 3
 
     async def fake_provider_datasets(
         session: object, sql: str, params: dict[str, object]
     ) -> tuple[ProviderDatasetScope, ...]:
-        calls.append(
-            ("provider_datasets", {"session": session, "sql": sql, "params": params})
-        )
+        calls.append(("provider_datasets", {"session": session, "sql": sql, "params": params}))
         return (ProviderDatasetScope("python-a-api", "dataset-a", 3),)
 
     async def fake_provider_datasets_for_ids(
@@ -367,14 +363,14 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         return ("11110", "11110")
 
     scopes = [
-        {"type": "feature_ids", "feature_ids": [1, "two"]},
-        {"type": "center_radius", "center": {"lon": "127.0", "lat": "37.0"}, "radius_km": "3"},
+        {"type": "feature_ids", "feature_ids": ["one", "two"]},
+        {"type": "center_radius", "center": {"lon": 127.0, "lat": 37.0}, "radius_km": 3},
         {
             "type": "bbox",
-            "min_lon": "126.0",
-            "min_lat": "36.0",
-            "max_lon": "128.0",
-            "max_lat": "38.0",
+            "min_lon": 126.0,
+            "min_lat": 36.0,
+            "max_lon": 128.0,
+            "max_lat": 38.0,
         },
         {
             "type": "provider_dataset",
@@ -384,27 +380,27 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         {
             "type": "cache_target_keys",
             "external_system": "external-app",
-            "target_keys": ["poi-1", 2],
-            "radius_km": "4",
+            "target_keys": ["poi-1", "poi-2"],
+            "radius_km": 4,
             "scope_mode": "sigungu_by_radius",
         },
-        {"type": "sigungu_by_radius", "center": {"lon": "127.0", "lat": "37.0"}, "radius_km": "5"},
+        {
+            "type": "sigungu_by_radius",
+            "center": {"lon": 127.0, "lat": 37.0},
+            "radius_km": 5,
+        },
     ]
 
     for scope in scopes:
-        await count_features_matching_scope(
-            session, scope, sigungu_resolver=resolver
-        )
+        await count_features_matching_scope(session, scope, sigungu_resolver=resolver)
 
     call_names = [name for name, _payload in calls]
     assert call_names.count("count") == 5
     assert call_names.count("sigungu_codes") == 5
     assert "provider_datasets_for_ids" in call_names
     assert "execute_preview" in call_names
-    feature_id_payload = next(
-        payload for name, payload in calls if name == "feature_ids"
-    )
-    assert feature_id_payload["feature_ids"] == ("1", "two")
+    feature_id_payload = next(payload for name, payload in calls if name == "feature_ids")
+    assert feature_id_payload["feature_ids"] == ("one", "two")
     assert feature_id_payload["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
     preview_calls = {
         name: payload
@@ -415,17 +411,17 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
     assert preview_calls["bbox"]["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
     assert preview_calls["provider_dataset"]["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
     assert any(
-        name == "cache_target_keys" and payload["target_keys"] == ["poi-1", "2"]
+        name == "cache_target_keys" and payload["target_keys"] == ["poi-1", "poi-2"]
         for name, payload in calls
     )
 
 
 async def test_count_features_matching_scope_validation_errors() -> None:
-    with pytest.raises(ValueError, match="feature_ids scope requires"):
+    with pytest.raises(ValueError, match="feature_ids must be an array"):
         await count_features_matching_scope(object(), {"type": "feature_ids", "feature_ids": "x"})
-    with pytest.raises(ValueError, match="center_radius scope requires center"):
+    with pytest.raises(ValueError, match="missing required keys"):
         await count_features_matching_scope(object(), {"type": "center_radius"})
-    with pytest.raises(ValueError, match="cache_target_keys scope requires"):
+    with pytest.raises(ValueError, match="missing required keys"):
         await count_features_matching_scope(
             object(), {"type": "cache_target_keys", "target_keys": "poi"}
         )
@@ -434,7 +430,7 @@ async def test_count_features_matching_scope_validation_errors() -> None:
             object(),
             {"type": "sigungu_by_radius", "center": {"lon": 127, "lat": 37}, "radius_km": 1},
         )
-    with pytest.raises(ValueError, match="sigungu_by_radius scope requires center"):
+    with pytest.raises(ValueError, match="missing required keys"):
         await count_features_matching_scope(
             object(),
             {"type": "sigungu_by_radius", "radius_km": 1},
@@ -442,3 +438,98 @@ async def test_count_features_matching_scope_validation_errors() -> None:
         )
     with pytest.raises(ValueError, match="unsupported scope type"):
         await count_features_matching_scope(object(), {"type": "unknown"})
+
+
+def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_text() -> None:
+    assert canonicalize_feature_update_scope(
+        {
+            "type": "sigungu_by_radius",
+            "center": {"lon": 127, "lat": 37},
+            "radius_km": 5,
+        }
+    ) == {
+        "type": "sigungu_by_radius",
+        "center": {"lon": 127.0, "lat": 37.0},
+        "radius_km": 5.0,
+        "match": "intersects",
+    }
+    assert canonicalize_feature_update_scope(
+        {
+            "type": "provider_dataset",
+            "provider": "\t provider \n",
+            "dataset_key": " dataset ",
+            "sync_scope": None,
+        }
+    ) == {
+        "type": "provider_dataset",
+        "provider": "provider",
+        "dataset_key": "dataset",
+    }
+    assert canonicalize_feature_update_scope(
+        {
+            "type": "cache_target_keys",
+            "external_system": " pinvi ",
+            "target_keys": ["\tpoi-1\n"],
+            "radius_km": None,
+        }
+    ) == {
+        "type": "cache_target_keys",
+        "external_system": "pinvi",
+        "target_keys": ["poi-1"],
+        "scope_mode": "center_radius",
+    }
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"type": "feature_ids", "feature_ids": [1]},
+        {"type": "feature_ids", "feature_ids": ["\t"]},
+        {"type": "feature_ids", "feature_ids": ["a", "a"]},
+        {
+            "type": "center_radius",
+            "center": {"lon": 181, "lat": 37},
+            "radius_km": 1,
+        },
+        {
+            "type": "sigungu_by_radius",
+            "center": {"lon": 127, "lat": 37},
+            "radius_km": 1,
+            "match": "contains_center",
+        },
+        {
+            "type": "bbox",
+            "min_lon": 128,
+            "min_lat": 37,
+            "max_lon": 127,
+            "max_lat": 38,
+        },
+        {
+            "type": "provider_dataset",
+            "provider": "provider",
+            "dataset_key": "dataset",
+            "extra": True,
+        },
+        {
+            "type": "cache_target_keys",
+            "external_system": "pinvi",
+            "target_keys": [],
+            "radius_km": 501,
+        },
+        {
+            "type": "cache_target_keys",
+            "external_system": "pinvi",
+            "target_keys": ["poi-1", "poi-1"],
+        },
+        {
+            "type": "center_radius",
+            "center": {"lon": 10**1000, "lat": 37},
+            "radius_km": 1,
+        },
+    ],
+)
+def test_canonicalize_feature_update_scope_rejects_noncanonical_contract(
+    scope: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="must|unsupported|bbox"):
+        canonicalize_feature_update_scope(scope)

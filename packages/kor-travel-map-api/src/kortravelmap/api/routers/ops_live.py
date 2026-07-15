@@ -165,6 +165,7 @@ WITH status_counts AS (
   FROM (
     SELECT status, COUNT(*)::int AS count
     FROM ops.import_jobs
+    WHERE quarantined_at IS NULL
     GROUP BY status
   ) s
 ),
@@ -185,13 +186,16 @@ active_jobs AS (
       finished_at
     FROM ops.import_jobs
     WHERE status IN ('queued', 'running')
+      AND quarantined_at IS NULL
     ORDER BY created_at DESC, job_id DESC
     LIMIT 20
   ) j
 ),
 event_stats AS (
   SELECT COUNT(*)::int AS events_total, MAX(occurred_at) AS latest_event_at
-  FROM ops.import_job_events
+  FROM ops.import_job_events AS event
+  JOIN ops.import_jobs AS event_job ON event_job.job_id = event.job_id
+  WHERE event_job.quarantined_at IS NULL
 )
 SELECT
   status_counts.counts_by_status,
@@ -205,6 +209,7 @@ FROM ops.import_jobs
 CROSS JOIN status_counts
 CROSS JOIN active_jobs
 CROSS JOIN event_stats
+WHERE ops.import_jobs.quarantined_at IS NULL
 GROUP BY
   status_counts.counts_by_status,
   active_jobs.active_jobs,
@@ -223,6 +228,12 @@ WITH recent AS (
     occurred_at
   FROM ops.import_job_events
   WHERE job_id = CAST(:job_id AS uuid)
+    AND EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS job
+      WHERE job.job_id = ops.import_job_events.job_id
+        AND job.quarantined_at IS NULL
+    )
   ORDER BY occurred_at DESC, event_id DESC
   LIMIT 5
 )
@@ -234,15 +245,24 @@ SELECT
 FROM ops.import_job_events e
 LEFT JOIN recent ON recent.event_id = e.event_id::text
 WHERE e.job_id = CAST(:job_id AS uuid)
+  AND EXISTS (
+    SELECT 1
+    FROM ops.import_jobs AS job
+    WHERE job.job_id = e.job_id
+      AND job.quarantined_at IS NULL
+  )
 """
 
 _FEATURE_UPDATE_REQUESTS_LIVE_SQL: Final[str] = """
 WITH status_counts AS (
   SELECT COALESCE(jsonb_object_agg(status, count), '{}'::jsonb) AS counts_by_status
   FROM (
-    SELECT status, COUNT(*)::int AS count
-    FROM ops.feature_update_requests
-    GROUP BY status
+    SELECT job.status, COUNT(*)::int AS count
+    FROM ops.feature_update_requests AS request
+    JOIN ops.import_jobs AS job
+      ON job.job_id = request.job_id
+     AND job.quarantined_at IS NULL
+    GROUP BY job.status
   ) s
 ),
 active_requests AS (
@@ -250,25 +270,33 @@ active_requests AS (
     '[]'::jsonb) AS active_requests
   FROM (
     SELECT
-      request_id::text AS request_id,
-      status,
-      scope_type,
-      priority,
-      job_id::text AS job_id,
-      dagster_run_id,
-      created_at,
-      updated_at
-    FROM ops.feature_update_requests
-    WHERE status IN ('queued', 'running')
-    ORDER BY priority DESC, created_at ASC
+      request.request_id::text AS request_id,
+      job.status,
+      request.scope_type,
+      request.priority,
+      request.job_id::text AS job_id,
+      job.dagster_run_id,
+      request.created_at,
+      request.generation,
+      COALESCE(job.heartbeat_at, job.started_at, job.created_at) AS updated_at
+    FROM ops.feature_update_requests AS request
+    JOIN ops.import_jobs AS job
+      ON job.job_id = request.job_id
+     AND job.quarantined_at IS NULL
+    WHERE job.status IN ('queued', 'running')
+    ORDER BY request.priority DESC, request.created_at ASC
     LIMIT 20
   ) r
 )
 SELECT
   status_counts.counts_by_status,
   active_requests.active_requests,
-  MAX(ops.feature_update_requests.updated_at) AS latest_updated_at
-FROM ops.feature_update_requests
+  MAX(COALESCE(job.finished_at, job.heartbeat_at, job.started_at, job.created_at))
+    AS latest_updated_at
+FROM ops.feature_update_requests AS request
+JOIN ops.import_jobs AS job
+  ON job.job_id = request.job_id
+ AND job.quarantined_at IS NULL
 CROSS JOIN status_counts
 CROSS JOIN active_requests
 GROUP BY status_counts.counts_by_status, active_requests.active_requests
@@ -276,19 +304,23 @@ GROUP BY status_counts.counts_by_status, active_requests.active_requests
 
 _FEATURE_UPDATE_REQUEST_LIVE_SQL: Final[str] = """
 SELECT
-  request_id::text AS request_id,
-  status,
-  scope_type,
-  priority,
-  job_id::text AS job_id,
-  dagster_run_id,
-  error_message,
-  created_at,
-  started_at,
-  finished_at,
-  updated_at
-FROM ops.feature_update_requests
-WHERE request_id = CAST(:request_id AS uuid)
+  request.request_id::text AS request_id,
+  job.status,
+  request.scope_type,
+  request.priority,
+  request.job_id::text AS job_id,
+  job.dagster_run_id,
+  job.error_message,
+  request.created_at,
+  job.started_at,
+  job.finished_at,
+  request.generation,
+  COALESCE(job.finished_at, job.heartbeat_at, job.started_at, job.created_at) AS updated_at
+FROM ops.feature_update_requests AS request
+JOIN ops.import_jobs AS job
+  ON job.job_id = request.job_id
+ AND job.quarantined_at IS NULL
+WHERE request.request_id = CAST(:request_id AS uuid)
 """
 
 _OFFLINE_UPLOADS_LIVE_SQL: Final[str] = """
@@ -369,9 +401,12 @@ FROM (
     heartbeat_at,
     finished_at
   FROM ops.import_jobs
-  WHERE dagster_run_id IS NOT NULL
-     OR payload ? 'dagster_run_id'
-     OR payload ? 'run_id'
+  WHERE quarantined_at IS NULL
+    AND (
+      dagster_run_id IS NOT NULL
+      OR payload ? 'dagster_run_id'
+      OR payload ? 'run_id'
+    )
 ) j
 """
 
@@ -389,7 +424,8 @@ FROM (
     heartbeat_at,
     finished_at
   FROM ops.import_jobs
-  WHERE COALESCE(
+  WHERE quarantined_at IS NULL
+    AND COALESCE(
       dagster_run_id,
       NULLIF(COALESCE(payload->>'dagster_run_id', payload->>'run_id'), '')
     ) = :run_id

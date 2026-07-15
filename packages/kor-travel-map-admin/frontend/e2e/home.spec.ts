@@ -62,7 +62,7 @@ test.describe("home page (/)", () => {
     ).toBeVisible();
 
     await page.getByRole("link", { name: "갱신 요청" }).click();
-    await expect(page).toHaveURL(/\/admin\/feature-update-requests$/);
+    await expect(page).toHaveURL(/\/admin\/features\/update-requests$/);
     await expect(
       page.getByRole("heading", { level: 1, name: "갱신 요청" }),
     ).toBeVisible();

@@ -8,6 +8,8 @@ type FeatureUpdateRequestDetailResponse =
   components["schemas"]["FeatureUpdateRequestDetailResponse"];
 type FeatureUpdateRequestListResponse =
   components["schemas"]["FeatureUpdateRequestListResponse"];
+type FeatureUpdateRequestMutationResponse =
+  components["schemas"]["FeatureUpdateRequestMutationResponse"];
 type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
 
@@ -134,6 +136,14 @@ async function readCreateResponse(
   return (await response.json()) as FeatureUpdateRequestCreateResponse;
 }
 
+async function readMutationResponse(
+  response: Response,
+): Promise<FeatureUpdateRequestMutationResponse> {
+  // run-now는 새 request/job을 반환하지만 create의 result_kind는 없다.
+  expect(response.status()).toBe(201);
+  return (await response.json()) as FeatureUpdateRequestMutationResponse;
+}
+
 async function fetchDetailByApi(
   page: Page,
   requestId: string,
@@ -164,7 +174,7 @@ async function fetchListByProviderApi(
 
 async function cancelByApi(page: Page, requestId: string): Promise<void> {
   // best-effort 정리: queued/running이면 cancel(200), terminal이면 409 → 무시.
-  // 라우터: @router.post("/{request_id}/cancel", ...) → cancel_update_request.
+  // 라우터: @router.post("/{request_id}/cancel", ...) → C3d coordinator.
   try {
     await browserFetch<PipelineCancellationResponse>(
       page,
@@ -186,7 +196,8 @@ async function gotoUpdateRequests(page: Page): Promise<void> {
   ).toBeVisible(T);
   await expect(page.getByLabel("경도", { exact: true })).toBeVisible(T);
   await expect(page.getByLabel("반경(km)", { exact: true })).toBeVisible(T);
-  await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible(T);
+  // previewOnly가 기본 true이므로 초기 readiness는 실제 보이는 버튼으로 판정한다.
+  await expect(page.getByRole("button", { name: "미리보기" })).toBeVisible(T);
 }
 
 async function selectProvider(page: Page, provider: string): Promise<void> {
@@ -238,7 +249,7 @@ type CreatedRequest = {
 };
 
 // UI 폼으로 SAFE refreshable provider/dataset queued 요청을 만들고 request_id를 돌려준다.
-// dry-run을 해제해 실제 row를 만들되, 좁은 scope라 실행 부담이 낮다.
+// 미리보기를 해제해 실제 row를 만들되, 좁은 scope라 실행 부담이 낮다.
 async function createRefreshableQueuedRequest(
   page: Page,
   options: {
@@ -257,7 +268,7 @@ async function createRefreshableQueuedRequest(
   await selectProvider(page, options.provider);
   await page.getByLabel("데이터셋 키", { exact: true }).fill(options.dataset);
   await page.getByLabel("실행 모드").selectOption("queued");
-  await page.getByLabel("dry-run").uncheck();
+  await page.getByLabel(/미리보기/).uncheck();
 
   const responsePromise = waitForApiResponse(page, "POST", LIST_PATH);
   await page.getByRole("button", { name: "요청 생성" }).click();
@@ -279,6 +290,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
 
     let requestId: string | null = null;
     let runNowRequestId: string | null = null;
+    let sourceJobId: string | null = null;
 
     try {
       await test.step("update request 폼/필터 표면을 확인한다", async () => {
@@ -289,37 +301,40 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         ).toBeVisible(T);
         await expect(page.getByLabel("데이터셋 키", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("실행 모드")).toBeVisible(T);
-        await expect(page.getByLabel("dry-run")).toBeVisible(T);
+        await expect(page.getByLabel(/미리보기/)).toBeVisible(T);
         await expect(page.getByLabel("요청 상태 필터")).toBeVisible(T);
       });
 
-      await test.step("dry-run을 끄고 SAFE provider/dataset로 queued 요청을 생성한다", async () => {
+      await test.step("미리보기를 끄고 SAFE provider/dataset로 queued 요청을 생성한다", async () => {
         await page.getByLabel("경도", { exact: true }).fill(SAFE_LON);
         await page.getByLabel("위도", { exact: true }).fill(SAFE_LAT);
         await page.getByLabel("반경(km)", { exact: true }).fill(SAFE_RADIUS_KM);
         await selectProvider(page, PROVIDER);
         await page.getByLabel("데이터셋 키", { exact: true }).fill(DATASET);
         await page.getByLabel("실행 모드").selectOption("queued");
-        // dry-run 체크박스는 기본 checked → 실제 row를 만들기 위해 해제.
-        await page.getByLabel("dry-run").uncheck();
-        await expect(page.getByLabel("dry-run")).not.toBeChecked();
+        // 미리보기는 기본 checked → 실제 row를 만들기 위해 해제.
+        await page.getByLabel(/미리보기/).uncheck();
+        await expect(page.getByLabel(/미리보기/)).not.toBeChecked();
 
         const responsePromise = waitForApiResponse(page, "POST", LIST_PATH);
         await page.getByRole("button", { name: "요청 생성" }).click();
         const createResponse = await readCreateResponse(await responsePromise);
 
         requestId = createResponse.data.request_id ?? null;
+        sourceJobId = createResponse.data.job_id;
         expect(requestId).not.toBeNull();
         // 생성 직후 응답(동기 캡처) — 레이스 없이 queued/center_radius/입력값을 단언.
         expect(createResponse.data).toMatchObject({
           scope_type: "center_radius",
           run_mode: "queued",
           status: "queued",
-          dry_run: false,
+          result_kind: "request",
+          job_id: expect.any(String),
         });
         expect(createResponse.data.providers).toContain(PROVIDER);
         expect(createResponse.data.dataset_keys).toContain(DATASET);
         expect(createResponse.data.scope).toMatchObject({ type: "center_radius" });
+        expect(createResponse.data.generation).toBe(1);
 
         // 성공 피드백 alert: `{request_id} · {status}` (role=status).
         const successAlert = page
@@ -381,6 +396,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         expect(detail.body?.data.providers).toContain(PROVIDER);
         expect(detail.body?.data.dataset_keys).toContain(DATASET);
         expect(detail.body?.data.scope).toMatchObject({ type: "center_radius" });
+        expect(detail.body?.data.generation).toBeGreaterThanOrEqual(1);
         // queued로 생성된 row이며 무거운 실행을 강제하지 않았는지 확인.
         expect(detail.body?.data.run_mode).toBe("queued");
         expect(["queued", "running", "done"]).toContain(
@@ -407,10 +423,12 @@ test.describe("/admin/features/update-requests live write workflow", () => {
             "POST",
             runNowPath(requestId as string),
           );
-          await page.getByRole("button", { name: "run-now" }).click();
-          const runResponse = await readCreateResponse(await responsePromise);
+          await page.getByRole("button", { name: "즉시 실행" }).click();
+          const runResponse = await readMutationResponse(await responsePromise);
           runNowRequestId = runResponse.data.request_id ?? null;
           expect(runNowRequestId).not.toBeNull();
+          expect(runNowRequestId).not.toBe(requestId);
+          expect(runResponse.data.job_id).not.toBe(sourceJobId);
           expect(runResponse.data.run_mode).toBe("now");
           expect(runResponse.data.providers).toContain(PROVIDER);
 
@@ -672,7 +690,8 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         expect(data?.scope_type).toBe("center_radius");
         expect(data?.run_mode).toBe("queued");
         expect(data?.priority).toBe(50);
-        expect(data?.dry_run).toBe(false);
+        expect(data).not.toHaveProperty("dry_run");
+        expect(data?.job_id).toEqual(expect.any(String));
         expect(data?.providers).toContain(PROVIDER);
         expect(data?.dataset_keys).toContain(DATASET);
         // 폼이 update_policy 필드를 노출하지 않으므로 빈 객체로 저장된다.
@@ -722,6 +741,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
     test.setTimeout(FLOW_TIMEOUT);
 
     let requestId: string | null = null;
+    let jobId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
@@ -732,13 +752,14 @@ test.describe("/admin/features/update-requests live write workflow", () => {
           dataset: DATASET,
         });
         requestId = created.requestId;
+        jobId = created.create.data.job_id;
       });
 
       await test.step("queued row의 cancel 버튼이 POST /cancel을 호출하고 cancelled를 반환한다", async () => {
         await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
-        const cancelButton = row.getByRole("button", { name: "cancel" });
+        const cancelButton = row.getByRole("button", { name: "취소" });
         test.skip(
           (await cancelButton.count()) === 0,
           "sensor가 먼저 terminal status로 처리해 UI cancel 버튼이 사라짐",
@@ -760,8 +781,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         expect(body.data.status).toBe("completed");
         expect(body.data.members).toContainEqual(
           expect.objectContaining({
-            member_kind: "update_request",
-            member_id: requestId,
+            job_id: jobId,
             terminal_status: "cancelled",
           }),
         );
@@ -800,6 +820,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
 
     let requestId: string | null = null;
     let runNowRequestId: string | null = null;
+    let sourceJobId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
@@ -810,6 +831,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
           dataset: DATASET,
         });
         requestId = created.requestId;
+        sourceJobId = created.create.data.job_id;
       });
 
       await test.step("run-now 버튼이 run_mode=now 신규 row를 201로 enqueue한다", async () => {
@@ -822,11 +844,12 @@ test.describe("/admin/features/update-requests live write workflow", () => {
           "POST",
           runNowPath(requestId as string),
         );
-        await row.getByRole("button", { name: "run-now" }).click();
-        const runResponse = await readCreateResponse(await responsePromise);
+        await row.getByRole("button", { name: "즉시 실행" }).click();
+        const runResponse = await readMutationResponse(await responsePromise);
         runNowRequestId = runResponse.data.request_id ?? null;
         expect(runNowRequestId).not.toBeNull();
         expect(runNowRequestId).not.toBe(requestId);
+        expect(runResponse.data.job_id).not.toBe(sourceJobId);
         expect(runResponse.data.run_mode).toBe("now");
         expect(runResponse.data.providers).toContain(PROVIDER);
       });

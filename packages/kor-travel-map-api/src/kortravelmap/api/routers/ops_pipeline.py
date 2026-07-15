@@ -43,6 +43,7 @@ from kortravelmap.infra.pipeline_repo import (
     PipelineExecution,
     PipelineProjectedJob,
     PipelineProviderDatasetIdentity,
+    get_pipeline_execution,
     get_pipeline_status_counts,
     list_pipeline_executions,
 )
@@ -78,13 +79,17 @@ from kortravelmap.api.dagster_schema import (
     DagsterSensor,
 )
 from kortravelmap.api.db import get_engine, get_session
-from kortravelmap.api.feature_update_http import to_http_exception
+from kortravelmap.api.feature_update_http import LOCK_CONFLICT_RESPONSE, to_http_exception
 from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
+    FeatureUpdateRequestMutationResponse,
+    FeatureUpdateRequestPreviewRequest,
+    FeatureUpdateRequestPreviewResponse,
     FeatureUpdateRequestRecord,
     FeatureUpdateRequestRunNowRequest,
 )
+from kortravelmap.api.ops_operation_schema import OperationState
 from kortravelmap.api.pipeline_cancellation_http import (
     error_responses as cancellation_error_responses,
 )
@@ -119,7 +124,7 @@ router = APIRouter(prefix="/ops/pipeline", tags=["ops-pipeline"])
 _LOG = logging.getLogger(__name__)
 
 ExecutionKind = Literal["import_job", "update_request"]
-ExecutionState = Literal["queued", "running", "done", "failed", "cancelled"]
+ExecutionState = OperationState
 JobEventLevel = Literal["debug", "info", "warning", "error", "critical"]
 PipelineScheduleCommand = Literal["run", "start", "stop", "reset"]
 
@@ -144,32 +149,33 @@ class PipelineExecutionRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: ExecutionKind
-    id: str
-    status: str
+    id: UUID
+    status: OperationState
     created_at: datetime
-    job_kind: str | None = None
-    provider: str | None = None
-    dataset_key: str | None = None
-    progress: int | None = None
-    current_stage: str | None = None
-    scope_type: str | None = None
-    priority: int | None = None
-    run_mode: str | None = None
-    operator: str | None = None
-    error_message: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    dagster_run_id: str | None = None
-    job_id: str | None = Field(
-        default=None,
+    job_kind: str | None
+    provider: str | None
+    dataset_key: str | None
+    progress: int | None
+    current_stage: str | None
+    scope_type: str | None
+    priority: int | None
+    run_mode: str | None
+    operator: str | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    dagster_run_id: str | None
+    dagster_run_status: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
+    job_id: UUID | None = Field(
         description="update_request 행이 연결된 import job id.",
     )
-    request_id: str | None = Field(
-        default=None,
+    request_id: UUID | None = Field(
         description="import_job 행이 연결된 feature update request id.",
     )
-    load_batch_id: str | None = None
-    parent_job_id: str | None = None
+    load_batch_id: UUID | None
+    parent_job_id: UUID | None
     detail_url: str
 
 
@@ -178,30 +184,35 @@ class PipelineProjectedJobRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    id: UUID
     job_kind: str
-    status: str
+    status: OperationState
     progress: int
-    current_stage: str | None = None
-    error_message: str | None = None
+    current_stage: str | None
+    error_message: str | None
     created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    dagster_run_id: str | None = None
-    load_batch_id: str | None = None
-    parent_job_id: str | None = None
+    started_at: datetime | None
+    finished_at: datetime | None
+    dagster_run_id: str | None
+    dagster_run_status: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
+    load_batch_id: UUID | None
+    parent_job_id: UUID | None
     depth: int
     detail_url: str
 
 
 class PipelineProviderDatasetIdentityRecord(BaseModel):
-    """``provider_dataset`` request의 pair identity."""
+    """canonical root에 귀속된 exact pair 상태."""
 
     model_config = ConfigDict(extra="forbid")
 
     provider: str
     dataset_key: str
-    sync_scope: str | None = None
+    sync_scope: str | None
+    operation_member_id: UUID
+    status: OperationState
 
 
 class PipelineExecutionRootRecord(BaseModel):
@@ -210,52 +221,35 @@ class PipelineExecutionRootRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: ExecutionKind
-    id: str
-    status: str
+    id: UUID
+    status: OperationState
     created_at: datetime
-    providers: list[str] = Field(
-        description=(
-            "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 "
-            "끝에 보완한 effective provider identity."
-        )
-    )
+    providers: list[str] = Field(description="표시·provider-only 필터용 정렬된 유효 provider 목록.")
     dataset_keys: list[str] = Field(
-        description=(
-            "저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 "
-            "끝에 보완한 effective dataset identity."
-        )
+        description="표시·dataset-only 필터용 정렬된 유효 dataset 목록."
     )
-    provider_dataset: PipelineProviderDatasetIdentityRecord | None = Field(
-        default=None,
-        description=(
-            "scope_type=provider_dataset request의 provider/dataset/sync_scope pair. "
-            "두 effective 배열은 독립 identity 목록이므로 pair 복원에는 이 필드를 쓴다."
-        ),
+    provider_datasets: list[PipelineProviderDatasetIdentityRecord] = Field(
+        description="canonical branch의 exact pair와 pair별 lifecycle 상태.",
     )
-    progress: int | None = None
-    current_stage: str | None = None
-    scope_type: str | None = None
-    priority: int | None = None
-    run_mode: str | None = None
-    operator: str | None = None
-    error_message: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    dagster_run_id: str | None = None
-    requested_job_id: str | None = Field(
-        default=None,
+    progress: int | None
+    current_stage: str | None
+    scope_type: str | None
+    priority: int | None
+    run_mode: str | None
+    operator: str | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    dagster_run_id: str | None
+    dagster_run_status: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
+    requested_job_id: UUID | None = Field(
         description="update request가 원래 가리킨 import job id.",
     )
-    lineage_owner: bool | None = Field(
-        default=None,
-        description=(
-            "request가 자기 anchor branch를 소유하면 true, 같은 anchor의 다중 request "
-            "경쟁에서 탈락했거나 연결 job이 없으면 false. standalone import root는 null."
-        ),
-    )
-    linked_job_count: int = Field(ge=0)
-    projected_job: PipelineProjectedJobRecord | None = None
-    cancellation: PipelineCancellationSummaryRecord | None = None
+    linked_job_count: int = Field(ge=1)
+    projected_job: PipelineProjectedJobRecord
+    cancellation: PipelineCancellationSummaryRecord | None
     detail_url: str
 
 
@@ -281,21 +275,26 @@ class PipelineImportJobRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    job_id: str
+    job_id: UUID
     kind: str
-    load_batch_id: str | None = None
-    parent_job_id: str | None = None
+    load_batch_id: UUID | None
+    parent_job_id: UUID | None
     payload: dict[str, Any]
-    status: str
+    status: OperationState
     progress: int
-    current_stage: str | None = None
-    source_checksum: str | None = None
-    error_message: str | None = None
-    dagster_run_id: str | None = None
+    current_stage: str | None
+    source_checksum: str | None
+    error_message: str | None
+    dagster_run_id: str | None
+    provider: str | None
+    dataset_key: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
+    dagster_run_status: str | None
     created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    heartbeat_at: datetime | None = None
+    started_at: datetime | None
+    finished_at: datetime | None
+    heartbeat_at: datetime | None
 
 
 class PipelineJobEventRecord(BaseModel):
@@ -303,14 +302,14 @@ class PipelineJobEventRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    event_id: str
-    job_id: str
-    provider: str | None = None
-    dataset_key: str | None = None
-    feature_id: str | None = None
-    stage: str | None = None
+    event_id: UUID
+    job_id: UUID
+    provider: str | None
+    dataset_key: str | None
+    feature_id: str | None
+    stage: str | None
     level: str
-    code: str | None = None
+    code: str | None
     message: str
     payload: dict[str, Any]
     occurred_at: datetime
@@ -322,21 +321,20 @@ class PipelineExecutionDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     execution: PipelineExecutionRecord
+    root: PipelineExecutionRootRecord = Field(
+        description="요청 id 또는 import member id가 귀속되는 canonical root projection."
+    )
     import_job: PipelineImportJobRecord | None = Field(
-        default=None,
         description="kind=import_job의 본체 또는 update_request가 연결한 job.",
     )
     update_request: FeatureUpdateRequestRecord | None = Field(
-        default=None,
         description="kind=update_request의 본체 또는 import_job이 연결한 request.",
     )
     cancellation: PipelineCancellationDetailRecord | None = Field(
-        default=None,
         description="base lifecycle을 덮지 않는 current cancellation 상세.",
     )
-    events: list[PipelineJobEventRecord] = Field(default_factory=list)
+    events: list[PipelineJobEventRecord]
     events_next_cursor: str | None = Field(
-        default=None,
         description="이벤트 로그 전진 페이지네이션 cursor (없으면 마지막 페이지).",
     )
 
@@ -391,12 +389,9 @@ class PipelineOverviewData(BaseModel):
 
     checked_at: datetime
     dagster: PipelineDagsterOverview
-    import_jobs_by_status: dict[str, int]
-    update_requests_by_status: dict[str, int]
-    active_import_jobs: int
-    active_update_requests: int
-    failed_import_jobs_24h: int
-    failed_update_requests_24h: int
+    operations_by_status: dict[OperationState, int]
+    active_operations: int
+    failed_operations_24h: int
 
 
 class PipelineOverviewResponse(BaseModel):
@@ -661,21 +656,6 @@ def _execution_detail_url(kind: str, execution_id: str) -> str:
     return f"{_EXECUTIONS_URL_PREFIX}/{kind}/{execution_id}"
 
 
-def _payload_text(payload: dict[str, Any], key: str) -> str | None:
-    value = payload.get(key)
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
-def _is_uuid(value: str) -> bool:
-    try:
-        UUID(value)
-    except ValueError:
-        return False
-    return True
-
-
 def _projected_job_record(row: PipelineProjectedJob) -> PipelineProjectedJobRecord:
     return PipelineProjectedJobRecord(
         id=row.id,
@@ -688,6 +668,9 @@ def _projected_job_record(row: PipelineProjectedJob) -> PipelineProjectedJobReco
         started_at=row.started_at,
         finished_at=row.finished_at,
         dagster_run_id=row.dagster_run_id,
+        dagster_run_status=row.dagster_run_status,
+        trigger_kind=row.trigger_kind,
+        operation_registry_version=row.operation_registry_version,
         load_batch_id=row.load_batch_id,
         parent_job_id=row.parent_job_id,
         depth=row.depth,
@@ -702,6 +685,8 @@ def _provider_dataset_record(
         provider=row.provider,
         dataset_key=row.dataset_key,
         sync_scope=row.sync_scope,
+        operation_member_id=row.operation_member_id,
+        status=row.status,
     )
 
 
@@ -713,11 +698,7 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecor
         created_at=row.created_at,
         providers=list(row.providers),
         dataset_keys=list(row.dataset_keys),
-        provider_dataset=(
-            _provider_dataset_record(row.provider_dataset)
-            if row.provider_dataset is not None
-            else None
-        ),
+        provider_datasets=[_provider_dataset_record(item) for item in row.provider_datasets],
         progress=row.progress,
         current_stage=row.current_stage,
         scope_type=row.scope_type,
@@ -728,59 +709,65 @@ def _record_from_execution(row: PipelineExecution) -> PipelineExecutionRootRecor
         started_at=row.started_at,
         finished_at=row.finished_at,
         dagster_run_id=row.dagster_run_id,
+        dagster_run_status=row.dagster_run_status,
+        trigger_kind=row.trigger_kind,
+        operation_registry_version=row.operation_registry_version,
         requested_job_id=row.requested_job_id,
-        lineage_owner=row.lineage_owner,
         linked_job_count=row.linked_job_count,
-        projected_job=(
-            _projected_job_record(row.projected_job) if row.projected_job is not None else None
-        ),
+        projected_job=_projected_job_record(row.projected_job),
         cancellation=cancellation_summary_record(row.cancellation),
         detail_url=_execution_detail_url(row.kind, row.id),
     )
 
 
-def _execution_from_job(job: OpsImportJob) -> PipelineExecutionRecord:
+def _execution_from_job(
+    job: OpsImportJob,
+    *,
+    canonical_request_id: str | None,
+) -> PipelineExecutionRecord:
     return PipelineExecutionRecord(
         kind="import_job",
         id=job.job_id,
         status=job.status,
         created_at=job.created_at,
         job_kind=job.kind,
-        provider=_payload_text(job.payload, "provider"),
-        dataset_key=_payload_text(job.payload, "dataset_key"),
+        provider=job.provider,
+        dataset_key=job.dataset_key,
         progress=job.progress,
         current_stage=job.current_stage,
         error_message=job.error_message,
         started_at=job.started_at,
         finished_at=job.finished_at,
         dagster_run_id=job.dagster_run_id,
-        request_id=_payload_text(job.payload, "request_id"),
+        dagster_run_status=job.dagster_run_status,
+        trigger_kind=job.trigger_kind,
+        operation_registry_version=job.operation_registry_version,
+        job_id=None,
+        request_id=canonical_request_id,
         load_batch_id=job.load_batch_id,
         parent_job_id=job.parent_job_id,
+        scope_type=None,
+        priority=None,
+        run_mode=None,
+        operator=None,
         detail_url=_execution_detail_url("import_job", job.job_id),
     )
 
 
-def _execution_from_request(row: FeatureUpdateRequest) -> PipelineExecutionRecord:
-    scope_provider = row.scope.get("provider")
-    scope_dataset = row.scope.get("dataset_key")
-    provider = (
-        scope_provider
-        if isinstance(scope_provider, str) and scope_provider
-        else (row.providers[0] if row.providers else None)
-    )
-    dataset_key = (
-        scope_dataset
-        if isinstance(scope_dataset, str) and scope_dataset
-        else (row.dataset_keys[0] if row.dataset_keys else None)
-    )
+def _execution_from_request(
+    row: FeatureUpdateRequest,
+    linked_job: OpsImportJob,
+) -> PipelineExecutionRecord:
     return PipelineExecutionRecord(
         kind="update_request",
         id=row.request_id,
         status=row.status,
         created_at=row.created_at,
-        provider=provider,
-        dataset_key=dataset_key,
+        job_kind=None,
+        provider=linked_job.provider,
+        dataset_key=linked_job.dataset_key,
+        progress=None,
+        current_stage=None,
         scope_type=row.scope_type,
         priority=row.priority,
         run_mode=row.run_mode,
@@ -789,7 +776,13 @@ def _execution_from_request(row: FeatureUpdateRequest) -> PipelineExecutionRecor
         started_at=row.started_at,
         finished_at=row.finished_at,
         dagster_run_id=row.dagster_run_id,
+        dagster_run_status=linked_job.dagster_run_status,
+        trigger_kind="update_request",
+        operation_registry_version=linked_job.operation_registry_version,
         job_id=row.job_id,
+        request_id=None,
+        load_batch_id=None,
+        parent_job_id=None,
         detail_url=_execution_detail_url("update_request", row.request_id),
     )
 
@@ -807,6 +800,11 @@ def _import_job_record(job: OpsImportJob) -> PipelineImportJobRecord:
         source_checksum=job.source_checksum,
         error_message=job.error_message,
         dagster_run_id=job.dagster_run_id,
+        provider=job.provider,
+        dataset_key=job.dataset_key,
+        trigger_kind=job.trigger_kind,
+        operation_registry_version=job.operation_registry_version,
+        dagster_run_status=job.dagster_run_status,
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -834,10 +832,6 @@ def _update_request_record(row: FeatureUpdateRequest) -> FeatureUpdateRequestRec
     return feature_update_service.record_from_request(
         row, status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX
     )
-
-
-def _active_count(counts: dict[str, int]) -> int:
-    return sum(count for state, count in counts.items() if state in {"queued", "running"})
 
 
 _COMMAND_NAME_MAP: dict[
@@ -933,12 +927,9 @@ async def get_pipeline_overview(
         data=PipelineOverviewData(
             checked_at=checked_at,
             dagster=dagster_part,
-            import_jobs_by_status=counts.import_jobs_by_status,
-            update_requests_by_status=counts.update_requests_by_status,
-            active_import_jobs=_active_count(counts.import_jobs_by_status),
-            active_update_requests=_active_count(counts.update_requests_by_status),
-            failed_import_jobs_24h=counts.failed_import_jobs_24h,
-            failed_update_requests_24h=counts.failed_update_requests_24h,
+            operations_by_status=counts.operations_by_status,
+            active_operations=counts.active_operations,
+            failed_operations_24h=counts.failed_operations_24h,
         ),
         meta=make_meta(started_at=started_at),
     )
@@ -1040,6 +1031,11 @@ async def _load_execution_detail(
 ) -> PipelineExecutionDetailData:
     job: OpsImportJob | None = None
     update_request: FeatureUpdateRequest | None = None
+    root = await get_pipeline_execution(
+        session,
+        kind=kind,
+        execution_id=execution_id,
+    )
     if kind == "import_job":
         job = await get_ops_import_job(session, execution_id)
         if job is None:
@@ -1047,12 +1043,14 @@ async def _load_execution_detail(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"import job not found: {execution_id}",
             )
-        request_id = _payload_text(job.payload, "request_id")
-        if request_id and _is_uuid(request_id):
-            # payload는 자유 JSONB다 — 비-UUID 값이 DB uuid 비교 오류(500)로
-            # 새지 않게 형식이 맞을 때만 연결 request를 조회한다.
-            update_request = await get_update_request(session, request_id)
-        execution = _execution_from_job(job)
+        if root is not None and root.kind == "update_request":
+            update_request = await get_update_request(session, root.id)
+        execution = _execution_from_job(
+            job,
+            canonical_request_id=(
+                root.id if root is not None and root.kind == "update_request" else None
+            ),
+        )
     else:
         update_request = await get_update_request(session, execution_id)
         if update_request is None:
@@ -1060,9 +1058,13 @@ async def _load_execution_detail(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"feature update request 없음: {execution_id!r}",
             )
-        if update_request.job_id:
-            job = await get_ops_import_job(session, update_request.job_id)
-        execution = _execution_from_request(update_request)
+        job = await get_ops_import_job(session, update_request.job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="feature update request의 canonical import job이 없습니다.",
+            )
+        execution = _execution_from_request(update_request, job)
 
     events: list[PipelineJobEventRecord] = []
     events_next_cursor: str | None = None
@@ -1083,13 +1085,19 @@ async def _load_execution_detail(
     cancellation = cancellation_detail_record(
         await get_current_pipeline_cancellation_detail(
             session,
-            kind=kind,
-            execution_id=execution_id,
+            kind=root.kind if root is not None else kind,
+            execution_id=root.id if root is not None else execution_id,
         )
     )
+    if root is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="canonical pipeline root projection을 찾을 수 없습니다.",
+        )
 
     return PipelineExecutionDetailData(
         execution=execution,
+        root=_record_from_execution(root),
         import_job=_import_job_record(job) if job is not None else None,
         update_request=(
             _update_request_record(update_request) if update_request is not None else None
@@ -1538,33 +1546,25 @@ async def post_pipeline_schedule_command(
     "/requests",
     response_model=FeatureUpdateRequestCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="feature update request 생성 또는 dry-run",
+    summary="feature update request 생성",
     description=(
         "6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/"
-        "provider_dataset/cache_target_keys) + operator/reason 감사 필드 + "
-        "dry-run/priority 계약을 전량 승계한다. 카탈로그 refreshable 검증과 "
+        "provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 "
+        "전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 "
         "run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다."
     ),
-    responses={
-        409: {
-            "description": "run_mode=now 요청의 동일 scope advisory lock 경합",
-            "headers": {
-                "Retry-After": {
-                    "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                    "schema": {"type": "integer"},
-                }
-            },
-        }
-    },
+    responses=LOCK_CONFLICT_RESPONSE,
 )
 async def create_pipeline_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
     try:
         return await feature_update_service.create_feature_update_request(
             body,
             session,
+            operator=context.actor,
             status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
             settings=KorTravelMapSettings(),
         )
@@ -1573,8 +1573,29 @@ async def create_pipeline_update_request(
 
 
 @router.post(
+    "/requests/preview",
+    response_model=FeatureUpdateRequestPreviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="feature update request 비영속 미리보기",
+    description="scope 대상과 provider/dataset 실행 계획을 계산하며 DB 행은 만들지 않는다.",
+)
+async def preview_pipeline_update_request(
+    body: FeatureUpdateRequestPreviewRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestPreviewResponse:
+    try:
+        return await feature_update_service.preview_feature_update_request(
+            body,
+            session,
+            settings=KorTravelMapSettings(),
+        )
+    except feature_update_service.FeatureUpdateServiceError as exc:
+        raise to_http_exception(exc) from exc
+
+
+@router.post(
     "/requests/{request_id}/run-now",
-    response_model=FeatureUpdateRequestCreateResponse,
+    response_model=FeatureUpdateRequestMutationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="기존 request payload를 run_mode=now로 재큐잉 (201 + 새 request)",
     description=(
@@ -1583,22 +1604,15 @@ async def create_pipeline_update_request(
     ),
     responses={
         404: {"description": "request_id 없음"},
-        409: {
-            "description": "이미 running 상태 또는 동일 scope lock 경합",
-            "headers": {
-                "Retry-After": {
-                    "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                    "schema": {"type": "integer"},
-                }
-            },
-        },
+        **LOCK_CONFLICT_RESPONSE,
     },
 )
 async def run_pipeline_update_request_now(
     request_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     body: FeatureUpdateRequestRunNowRequest | None = None,
-) -> FeatureUpdateRequestCreateResponse:
+) -> FeatureUpdateRequestMutationResponse:
     started_at = perf_counter()
     async with session.begin():
         existing = await get_update_request(session, str(request_id))
@@ -1623,8 +1637,7 @@ async def run_pipeline_update_request_now(
                 priority=(
                     body.priority if body and body.priority is not None else existing.priority
                 ),
-                dry_run=False,
-                operator=body.operator if body and body.operator else existing.operator,
+                operator=context.actor,
                 reason=(
                     body.reason if body and body.reason else f"run-now from {existing.request_id}"
                 ),
@@ -1632,7 +1645,9 @@ async def run_pipeline_update_request_now(
             )
         except feature_update_service.FeatureUpdateServiceError as exc:
             raise to_http_exception(exc) from exc
-    return feature_update_service.create_response(
+    if not isinstance(result, FeatureUpdateRequest):
+        raise RuntimeError("run-now must persist a feature update request")
+    return feature_update_service.persisted_response(
         result,
         started_at=started_at,
         status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,

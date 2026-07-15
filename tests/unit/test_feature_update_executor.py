@@ -26,6 +26,11 @@ from kortravelmap.infra.scope_repo import (
 pytestmark = pytest.mark.unit
 
 
+class _IdleConnection:
+    def in_transaction(self) -> bool:
+        return False
+
+
 def _request(
     *,
     scope_type: str = "cache_target_keys",
@@ -38,14 +43,19 @@ def _request(
     return FeatureUpdateRequest(
         request_id="req-1",
         scope_type=scope_type,
-        scope=scope or {"type": scope_type},
+        scope=scope
+        or {
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": [],
+            "scope_mode": "center_radius",
+        },
         providers=providers,
         dataset_keys=dataset_keys,
         update_policy=update_policy or {},
         run_mode="queued",
         priority=100,
         status="queued",
-        dry_run=False,
         matched_scope={},
         job_id="job-1",
         dagster_run_id=None,
@@ -55,8 +65,31 @@ def _request(
         created_at=now,
         started_at=None,
         finished_at=None,
-        updated_at=now,
+        generation=1,
     )
+
+
+@pytest.mark.parametrize("entrypoint", ["specific", "next"])
+@pytest.mark.parametrize("owner", [None, "", " ", " owner", "owner "])
+async def test_execution_entrypoints_reject_missing_or_untrimmed_owner(
+    entrypoint: str,
+    owner: str | None,
+) -> None:
+    connection = _IdleConnection()
+    with pytest.raises(ValueError, match="trimmed non-empty"):
+        if entrypoint == "specific":
+            await executor.execute_feature_update_request(
+                connection,  # type: ignore[arg-type]
+                _request(),
+                runner=object(),  # type: ignore[arg-type]
+                dagster_run_id=owner,  # type: ignore[arg-type]
+            )
+        else:
+            await executor.execute_next_feature_update_request(
+                connection,  # type: ignore[arg-type]
+                runner=object(),  # type: ignore[arg-type]
+                dagster_run_id=owner,  # type: ignore[arg-type]
+            )
 
 
 def _policy(
@@ -85,7 +118,7 @@ def _policy(
         config_source="unit",
         enabled=enabled,
         created_at=now,
-        updated_at=now,
+        generation=1,
     )
 
 
@@ -120,7 +153,12 @@ def test_matched_scope_helpers_include_optional_payloads() -> None:
         provider="python-a-api",
         dataset_key="dataset-a",
         scope_type="cache_target_keys",
-        request_scope={"type": "cache_target_keys"},
+        request_scope={
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": [],
+            "scope_mode": "center_radius",
+        },
         update_policy={},
         feature_ids=("feature-1",),
         feature_count=1,
@@ -244,7 +282,12 @@ async def test_build_plan_applies_filters_overrides_and_rate_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request(
-        scope={"type": "cache_target_keys", "external_system": "external-app"},
+        scope={
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": ["poi-1"],
+            "scope_mode": "center_radius",
+        },
         providers=(
             "python-a-api",
             "python-b-api",

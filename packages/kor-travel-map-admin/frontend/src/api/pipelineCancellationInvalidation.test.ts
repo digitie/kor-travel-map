@@ -15,10 +15,10 @@ describe("pipeline cancellation query invalidation", () => {
 
   it("성공 응답은 folded root의 모든 member 상세를 정확한 key로 무효화한다", () => {
     expect(
-      pipelineCancellationQueryKeys([
-        { member_kind: "update_request", member_id: "request-1" },
-        { member_kind: "import_job", member_id: "job-1" },
-      ]),
+      pipelineCancellationQueryKeys(
+        [{ job_id: "job-1" }],
+        { kind: "update_request", id: "request-1" },
+      ),
     ).toEqual([
       ["import-jobs"],
       ["feature-update-requests"],

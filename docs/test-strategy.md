@@ -518,7 +518,8 @@ def mask_sensitive(obj):
 | terminal CAS | sensor/retry가 `done`/`failed`/`cancelled` 또는 cancellation marker 행을 reopen/overwrite하지 않음 |
 | update request | `FeatureUpdateAssetRunner` raw 호출은 standalone feature-load root 0개이고 기존 request root만 유지 |
 | identity | schedule spec/asset registry의 모든 exact pair가 provider catalog에 존재하며 alias·placeholder·배열 cross-product 없음 |
-| read model | twin/nested/duplicate-owner/standalone/cycle에서 overview/timeline/grid/detail의 `(kind,id)`, root/pair status 동일; direct/child pair는 child 우선 1항목과 deterministic `status_source`; feature run projected job은 root 고정으로 pair UUID/order에 무관 |
+| read model | twin/nested/duplicate-owner/standalone/cycle에서 overview/timeline/grid/detail의 `(kind,id)`, root/pair status 동일; direct scope는 linked typed member 1항목의 metadata만 보강; feature run projected job은 root 고정으로 pair UUID/order에 무관 |
+| request identity | 0052 up/down, writer 선잠금·동시 writer 차단, jobless·terminal-source scope 불일치·reserved Dagster kind request별 canonical job 재연결, active/cancellation relink와 malformed scope/provider/dataset 필터·persisted dry-run 차단, `dry_run` 컬럼 제거·down 복원, filter JSONB→`TEXT[]`→JSONB type/default 전환, 모든 scope object/type 및 direct pair/sync shape, provider/dataset 배열 1차원·unique·32/64개·trim·길이 검증, `job_id NOT NULL/RESTRICT`, canonical job kind/scope pair 교차검증과 import kind/pair 불변 trigger, job index partial→unconditional→partial |
 | overview | status/queued+running active/최근 24시간 failure는 canonical root 단위이며 timeline root count와 동일, multi-pair child N배 부풀림 0; 기존 import/update 분리 6필드 제거 |
 | progress/stage | child done=100, root progress=`floor(100*done/total)`; partial failure/cancel은 완료 비율 보존, exact SUCCESS는 100, stage는 고정 lifecycle 어휘 |
 | pagination | detail recent cursor가 pipeline total order와 같고 1,000 root 이상에서 page 누락·중복과 grid latest 누락 0 |

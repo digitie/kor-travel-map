@@ -49,6 +49,7 @@ class OpsImportJob:
     kind: str
     load_batch_id: str | None
     parent_job_id: str | None
+    update_request_id: str | None
     payload: dict[str, Any]
     status: str
     progress: int
@@ -60,6 +61,11 @@ class OpsImportJob:
     finished_at: datetime | None
     heartbeat_at: datetime | None
     dagster_run_id: str | None = None
+    provider: str | None = None
+    dataset_key: str | None = None
+    trigger_kind: str | None = None
+    operation_registry_version: str | None = None
+    dagster_run_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -200,39 +206,46 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
 
 
 _IMPORT_JOB_COLUMNS: Final[str] = (
-    "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
-    "current_stage, source_checksum, error_message, dagster_run_id, created_at, "
-    "started_at, finished_at, heartbeat_at"
+    "job.job_id, job.kind, job.load_batch_id, job.parent_job_id, "
+    "request.request_id AS update_request_id, job.payload, job.status, job.progress, "
+    "job.current_stage, job.source_checksum, job.error_message, job.dagster_run_id, "
+    "job.created_at, job.provider, job.dataset_key, job.trigger_kind, "
+    "job.operation_registry_version, job.dagster_run_status, job.started_at, "
+    "job.finished_at, job.heartbeat_at"
 )
 
 _LIST_IMPORT_JOBS_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_COLUMNS}
-FROM ops.import_jobs
-WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-  AND (CAST(:kind AS text) IS NULL OR kind = CAST(:kind AS text))
+FROM ops.import_jobs AS job
+LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
+WHERE (CAST(:status AS text) IS NULL OR job.status = CAST(:status AS text))
+  AND job.quarantined_at IS NULL
+  AND (CAST(:kind AS text) IS NULL OR job.kind = CAST(:kind AS text))
   AND (
     CAST(:load_batch_id AS uuid) IS NULL
-    OR load_batch_id = CAST(:load_batch_id AS uuid)
+    OR job.load_batch_id = CAST(:load_batch_id AS uuid)
   )
   AND (
     CAST(:parent_job_id AS uuid) IS NULL
-    OR parent_job_id = CAST(:parent_job_id AS uuid)
+    OR job.parent_job_id = CAST(:parent_job_id AS uuid)
   )
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
-    OR (created_at, job_id) < (
+    OR (job.created_at, job.job_id) < (
         CAST(:cursor_created_at AS timestamptz),
         CAST(:cursor_job_id AS uuid)
     )
   )
-ORDER BY created_at DESC, job_id DESC
+ORDER BY job.created_at DESC, job.job_id DESC
 LIMIT :limit
 """
 
 _GET_IMPORT_JOB_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_COLUMNS}
-FROM ops.import_jobs
-WHERE job_id = CAST(:job_id AS uuid)
+FROM ops.import_jobs AS job
+LEFT JOIN ops.feature_update_requests AS request ON request.job_id = job.job_id
+WHERE job.job_id = CAST(:job_id AS uuid)
+  AND job.quarantined_at IS NULL
 """
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
@@ -240,26 +253,49 @@ _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "message, payload, occurred_at"
 )
 
-_LIST_IMPORT_JOB_EVENTS_SQL: Final[str] = f"""
+def _list_import_job_events_sql(
+    *,
+    job_id: str | None,
+    level: str | None,
+    provider: str | None,
+    dataset_key: str | None,
+    cursor_occurred_at: datetime | None,
+) -> str:
+    """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
+    clauses: list[str] = [
+        "EXISTS (SELECT 1 FROM ops.import_jobs AS job "
+        "WHERE job.job_id = ops.import_job_events.job_id "
+        "AND job.quarantined_at IS NULL)"
+    ]
+    if job_id is not None:
+        clauses.append("job_id = CAST(:job_id AS uuid)")
+    if level is not None:
+        clauses.append("level = CAST(:level AS text)")
+    if provider is not None:
+        clauses.extend(
+            (
+                "provider IS NOT NULL",
+                "provider = CAST(:provider AS text)",
+            )
+        )
+    if dataset_key is not None:
+        clauses.extend(
+            (
+                "dataset_key IS NOT NULL",
+                "dataset_key = CAST(:dataset_key AS text)",
+            )
+        )
+    if cursor_occurred_at is not None:
+        clauses.append(
+            "(occurred_at, event_id) < "
+            "(CAST(:cursor_occurred_at AS timestamptz), "
+            "CAST(:cursor_event_id AS uuid))"
+        )
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
 FROM ops.import_job_events
-WHERE (
-    CAST(:job_id AS uuid) IS NULL
-    OR job_id = CAST(:job_id AS uuid)
-  )
-  AND (CAST(:level AS text) IS NULL OR level = CAST(:level AS text))
-  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
-  AND (
-    CAST(:dataset_key AS text) IS NULL
-    OR dataset_key = CAST(:dataset_key AS text)
-  )
-  AND (
-    CAST(:cursor_occurred_at AS timestamptz) IS NULL
-    OR (occurred_at, event_id) < (
-        CAST(:cursor_occurred_at AS timestamptz),
-        CAST(:cursor_event_id AS uuid)
-    )
-  )
+{where_sql}
 ORDER BY occurred_at DESC, event_id DESC
 LIMIT :limit
 """
@@ -382,6 +418,9 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
         kind=str(row.kind),
         load_batch_id=str(row.load_batch_id) if row.load_batch_id else None,
         parent_job_id=str(row.parent_job_id) if row.parent_job_id else None,
+        update_request_id=(
+            str(row.update_request_id) if row.update_request_id is not None else None
+        ),
         payload=_json_dict(row.payload),
         status=str(row.status),
         progress=int(row.progress),
@@ -393,6 +432,11 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
         dagster_run_id=row.dagster_run_id,
+        provider=getattr(row, "provider", None),
+        dataset_key=getattr(row, "dataset_key", None),
+        trigger_kind=getattr(row, "trigger_kind", None),
+        operation_registry_version=getattr(row, "operation_registry_version", None),
+        dagster_run_status=getattr(row, "dagster_run_status", None),
     )
 
 
@@ -503,9 +547,16 @@ async def list_ops_import_job_events(
     cursor_occurred_at, cursor_event_id = _decode_cursor(
         cursor, kind="import_job_events"
     )
+    sql = _list_import_job_events_sql(
+        job_id=job_id,
+        level=level,
+        provider=provider,
+        dataset_key=dataset_key,
+        cursor_occurred_at=cursor_occurred_at,
+    )
     rows = (
         await session.execute(
-            text(_LIST_IMPORT_JOB_EVENTS_SQL),
+            text(sql),
             {
                 "job_id": job_id,
                 "level": level,

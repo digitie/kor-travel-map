@@ -240,8 +240,7 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
                     assert await transition_pipeline_cancellation_member(
                         coordinator,
                         cancellation_id=cancellation_id,
-                        member_kind=root_member.member_kind,
-                        member_id=root_member.member_id,
+                        job_id=root_member.job_id,
                         dagster_run_id=run_id,
                         expected_status=root_member.initial_status,
                         target_status="cancelled",
@@ -769,8 +768,7 @@ async def test_partial_finish_resume_completes_without_external_call(
         assert await transition_pipeline_cancellation_member(
             setup,
             cancellation_id=attempt.attempt.cancellation_id,
-            member_kind="import_job",
-            member_id=job_id,
+            job_id=job_id,
             dagster_run_id=run_id,
             expected_status="running",
             target_status="cancelled",
@@ -1181,11 +1179,11 @@ async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
                 )
         assert raised.value.detail is not None
         first_cancellation_id = raised.value.detail.cancellation_id
-        first_member_ids = {
-            member.member_id for member in raised.value.detail.members
+        first_job_ids = {
+            member.job_id for member in raised.value.detail.members
         }
         assert raised.value.detail.status == "retryable"
-        assert len(first_member_ids) == len(pairs) + 1
+        assert len(first_job_ids) == len(pairs) + 1
         assert {member.result for member in raised.value.detail.members} == {
             "cancel_failed"
         }
@@ -1239,7 +1237,7 @@ async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
         second_cancellation_id = completed.cancellation_id
         assert second_cancellation_id != first_cancellation_id
         assert completed.previous_cancellation_id == first_cancellation_id
-        assert {member.member_id for member in completed.members} == first_member_ids
+        assert {member.job_id for member in completed.members} == first_job_ids
         assert {member.result for member in completed.members} == {"cancelled"}
         assert completed.dagster_runs[0].engine_started_at == started_at
         assert completed.dagster_runs[0].engine_finished_at == finished_at
@@ -1314,8 +1312,7 @@ async def test_ownership_loss_prefers_canonical_current_over_exact_old_attempt(
         assert await set_pipeline_cancellation_member_result(
             session,
             cancellation_id=first.attempt.cancellation_id,
-            member_kind="import_job",
-            member_id=job_id,
+            job_id=job_id,
             result="cancel_failed",
             terminal_status=None,
             error=retryable,
@@ -1386,8 +1383,7 @@ async def test_unexpected_service_close_keeps_retryable_observations(
         assert await set_pipeline_cancellation_member_result(
             setup,
             cancellation_id=attempt.attempt.cancellation_id,
-            member_kind="import_job",
-            member_id=job_id,
+            job_id=job_id,
             result="cancel_failed",
             terminal_status=None,
             error=retryable,

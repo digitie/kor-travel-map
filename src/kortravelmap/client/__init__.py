@@ -15,7 +15,8 @@ commit/rollback을 잡는다 (단위 of work).
   (``infra.enqueue_dedup_candidates``). 두 feature가 먼저 적재돼 있어야 함(FK).
 - ``enqueue_feature_update_request`` — admin/OpenAPI feature update request를
   ``ops.feature_update_requests``와 연결 ``ops.import_jobs``에 한 transaction으로
-  적재한다. ``dry_run=True``는 DB write 없이 scope 해석 preview만 반환한다.
+  적재한다.
+- ``preview_feature_update_request`` — DB write 없이 scope 해석 결과를 반환한다.
 - 읽기: ``features_in_bounds`` / ``get_feature`` / ``pending_dedup_reviews``.
 
 engine 수명은 호출자 소유 (ADR-004 ``infra/db.py`` — ``await engine.dispose()``는
@@ -206,12 +207,6 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.infra.feature_update_repo import (
-    cancel_update_request as repo_cancel_update_request,
-)
-from kortravelmap.infra.feature_update_repo import (
-    claim_update_requests as repo_claim_update_requests,
-)
-from kortravelmap.infra.feature_update_repo import (
     enqueue_feature_update_request as repo_enqueue_feature_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
@@ -228,6 +223,9 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.feature_update_repo import (
     peek_update_requests as repo_peek_update_requests,
+)
+from kortravelmap.infra.feature_update_repo import (
+    preview_feature_update_request as repo_preview_feature_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
@@ -1150,32 +1148,11 @@ class AsyncKorTravelMapClient:
         update_policy: Mapping[str, Any] | None = None,
         run_mode: str = "queued",
         priority: int = 50,
-        dry_run: bool = False,
         operator: str | None = None,
         reason: str | None = None,
         sigungu_resolver: SigunguByRadiusResolver | None = None,
-    ) -> FeatureUpdateRequest | FeatureUpdateRequestPreview:
-        """Feature update request를 생성하거나 dry-run preview를 반환한다.
-
-        ``dry_run=True``이면 DB row/import job을 만들지 않고 scope 해석 결과만
-        반환한다. 실제 요청은 ``ops.feature_update_requests``와 연결
-        ``ops.import_jobs``를 한 transaction에 생성한다.
-        """
-        if dry_run:
-            async with self._session_factory() as session:
-                return await repo_enqueue_feature_update_request(
-                    session,
-                    scope=scope,
-                    providers=providers,
-                    dataset_keys=dataset_keys,
-                    update_policy=update_policy,
-                    run_mode=run_mode,
-                    priority=priority,
-                    dry_run=True,
-                    operator=operator,
-                    reason=reason,
-                    sigungu_resolver=sigungu_resolver,
-                )
+    ) -> FeatureUpdateRequest:
+        """Feature update request와 연결 import job을 한 transaction에 생성한다."""
         async with self._session_factory() as session, session.begin():
             return await repo_enqueue_feature_update_request(
                 session,
@@ -1185,35 +1162,46 @@ class AsyncKorTravelMapClient:
                 update_policy=update_policy,
                 run_mode=run_mode,
                 priority=priority,
-                dry_run=False,
                 operator=operator,
                 reason=reason,
                 sigungu_resolver=sigungu_resolver,
             )
 
-    async def cancel_update_request(
+    async def preview_feature_update_request(
         self,
-        request_id: str,
         *,
-        error_message: str | None = None,
-    ) -> FeatureUpdateRequest | None:
-        """queued/running feature update request를 ``cancelled``로 닫는다."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_cancel_update_request(
-                session, request_id, error_message=error_message
+        scope: Mapping[str, Any],
+        providers: Sequence[str] | None = None,
+        dataset_keys: Sequence[str] | None = None,
+        update_policy: Mapping[str, Any] | None = None,
+        run_mode: str = "queued",
+        priority: int = 50,
+        sigungu_resolver: SigunguByRadiusResolver | None = None,
+    ) -> FeatureUpdateRequestPreview:
+        """scope 해석 결과를 반환하되 아무 행도 저장하지 않는다."""
+        async with self._session_factory() as session:
+            return await repo_preview_feature_update_request(
+                session,
+                scope=scope,
+                providers=providers,
+                dataset_keys=dataset_keys,
+                update_policy=update_policy,
+                run_mode=run_mode,
+                priority=priority,
+                sigungu_resolver=sigungu_resolver,
             )
 
     async def fail_update_request(
         self,
         request_id: str,
         *,
-        expected_dagster_run_id: str,
-        expected_request_updated_at: datetime,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
         error_message: str | None = None,
     ) -> FeatureUpdateRequest | None:
         """Dagster failure를 pre-start retry 또는 started owner 실패로 반영한다.
 
-        request가 sensor가 본 queued generation 그대로면 ``updated_at``만 전진해
+        request가 sensor가 본 queued generation 그대로면 generation을 +1해
         다음 run key를 연다. 이미 start한 동일 run이면 기존 run id CAS로 request와
         import job을 ``failed``로 닫는다.
         """
@@ -1221,7 +1209,7 @@ class AsyncKorTravelMapClient:
             retry = await fur_repo.advance_update_request_generation_after_pre_start_failure(
                 session,
                 request_id,
-                expected_updated_at=expected_request_updated_at,
+                expected_generation=expected_request_generation,
             )
             if retry is not None:
                 return retry
@@ -1229,7 +1217,8 @@ class AsyncKorTravelMapClient:
                 session,
                 request_id,
                 status="failed",
-                expected_dagster_run_id=expected_dagster_run_id,
+                owner_dagster_run_id=owner_dagster_run_id,
+                expected_generation=expected_request_generation,
                 error_message=error_message,
             )
 
@@ -1243,17 +1232,12 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session:
             return await repo_peek_update_requests(session, limit=limit)
 
-    async def claim_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
-        """Dagster sensor가 실행할 queued request batch를 짧은 transaction으로 claim한다."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_claim_update_requests(session, limit=limit)
-
     async def mark_update_request_started(
         self,
         request_id: str,
         *,
-        dagster_run_id: str | None = None,
-        expected_updated_at: datetime | None = None,
+        dagster_run_id: str,
+        expected_generation: int,
     ) -> FeatureUpdateRequest | None:
         """queued generation을 특정 Dagster run owner로 fail-closed claim한다."""
         async with self._session_factory() as session, session.begin():
@@ -1261,14 +1245,14 @@ class AsyncKorTravelMapClient:
                 session,
                 request_id,
                 dagster_run_id=dagster_run_id,
-                expected_updated_at=expected_updated_at,
+                expected_generation=expected_generation,
             )
 
     async def execute_next_feature_update_request(
         self,
         *,
         runner: ProviderDatasetRefreshRunner,
-        dagster_run_id: str | None = None,
+        dagster_run_id: str,
         sigungu_resolver: SigunguByRadiusResolver | None = None,
     ) -> FeatureUpdateExecutionResult | None:
         """queued feature update request 1건을 peek하고 lock 아래 claim해 실행한다.
@@ -1290,16 +1274,19 @@ class AsyncKorTravelMapClient:
         request_id: str,
         *,
         runner: ProviderDatasetRefreshRunner,
-        dagster_run_id: str | None = None,
-        expected_request_updated_at: datetime | None = None,
+        dagster_run_id: str,
+        expected_request_generation: int | None = None,
         sigungu_resolver: SigunguByRadiusResolver | None = None,
     ) -> FeatureUpdateExecutionResult | None:
         """특정 feature update request를 즉시 실행한다. 없으면 ``None``."""
         async with self._engine.connect() as connection:
-            async with AsyncSession(
-                bind=connection,
-                expire_on_commit=False,
-            ) as session, session.begin():
+            async with (
+                AsyncSession(
+                    bind=connection,
+                    expire_on_commit=False,
+                ) as session,
+                session.begin(),
+            ):
                 request = await repo_get_update_request(session, request_id)
             if request is None:
                 return None
@@ -1308,7 +1295,7 @@ class AsyncKorTravelMapClient:
                 request,
                 runner=runner,
                 dagster_run_id=dagster_run_id,
-                expected_request_updated_at=expected_request_updated_at,
+                expected_request_generation=expected_request_generation,
                 sigungu_resolver=sigungu_resolver,
             )
 

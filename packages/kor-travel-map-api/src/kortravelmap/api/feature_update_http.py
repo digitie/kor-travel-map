@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+from typing import Any, Final
+
 from fastapi import HTTPException, status
 
 from kortravelmap.api import feature_update_service
 
-__all__ = ["to_http_exception"]
+__all__ = ["LOCK_CONFLICT_RESPONSE", "to_http_exception"]
+
+LOCK_CONFLICT_RESPONSE: Final[dict[int, dict[str, Any]]] = {
+    409: {
+        "description": "동일 scope 즉시 실행 lock 경합",
+        "headers": {
+            "Retry-After": {
+                "description": "동일 scope lock 경합 시 재시도 대기 초.",
+                "schema": {"type": "integer"},
+            }
+        },
+    }
+}
 
 
 def to_http_exception(

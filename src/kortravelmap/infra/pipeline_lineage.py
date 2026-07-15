@@ -1,10 +1,63 @@
-"""C3b root projection과 계층형 취소가 공유하는 lineage CTE 정본."""
+"""C3b root projection과 계층형 취소가 공유하는 lineage CTE 정본.
+
+``PIPELINE_LINEAGE_BODY_SQL``은 payload를 포함하지 않는 ``pipeline_jobs``와
+``pipeline_requests`` source CTE를 입력으로 받는다. 취소 경계는 전역 source를 붙인
+``PIPELINE_LINEAGE_CTES_SQL``을 계속 사용하고, 조회 경계는 선택 조건으로 좁힌 source를
+공급할 수 있다.
+"""
 
 from __future__ import annotations
 
 from typing import Final
 
-PIPELINE_LINEAGE_CTES_SQL: Final[str] = """
+PIPELINE_LINEAGE_SOURCE_SQL: Final[str] = """
+pipeline_jobs AS MATERIALIZED (
+    SELECT
+        job_id,
+        kind,
+        load_batch_id,
+        parent_job_id,
+        status,
+        progress,
+        current_stage,
+        error_message,
+        dagster_run_id,
+        provider,
+        dataset_key,
+        trigger_kind,
+        operation_registry_version,
+        dagster_run_status,
+        started_at,
+        finished_at,
+        created_at
+    FROM ops.import_jobs
+    WHERE quarantined_at IS NULL
+),
+pipeline_requests AS MATERIALIZED (
+    SELECT
+        request_id,
+        scope_type,
+        scope,
+        providers,
+        dataset_keys,
+        run_mode,
+        priority,
+        identity_job.status,
+        request.job_id,
+        identity_job.dagster_run_id,
+        request.operator,
+        identity_job.error_message,
+        identity_job.started_at,
+        identity_job.finished_at,
+        request.created_at
+    FROM ops.feature_update_requests AS request
+    JOIN ops.import_jobs AS identity_job
+      ON identity_job.job_id = request.job_id
+     AND identity_job.quarantined_at IS NULL
+)
+"""
+
+PIPELINE_LINEAGE_BODY_SQL: Final[str] = """
 job_ancestry AS (
     SELECT
         job_id AS leaf_job_id,
@@ -13,7 +66,7 @@ job_ancestry AS (
         0 AS depth,
         ARRAY[job_id]::uuid[] AS path,
         false AS cycle
-    FROM ops.import_jobs
+    FROM pipeline_jobs
     UNION ALL
     SELECT
         walk.leaf_job_id,
@@ -23,7 +76,7 @@ job_ancestry AS (
         walk.path || parent.job_id,
         parent.job_id = ANY(walk.path)
     FROM job_ancestry AS walk
-    JOIN ops.import_jobs AS parent ON parent.job_id = walk.parent_job_id
+    JOIN pipeline_jobs AS parent ON parent.job_id = walk.parent_job_id
     WHERE NOT walk.cycle
 ),
 cycle_roots AS (
@@ -45,7 +98,7 @@ terminal_roots AS (
         walk.leaf_job_id,
         walk.ancestor_job_id AS component_root_id
     FROM job_ancestry AS walk
-    LEFT JOIN ops.import_jobs AS parent ON parent.job_id = walk.parent_job_id
+    LEFT JOIN pipeline_jobs AS parent ON parent.job_id = walk.parent_job_id
     WHERE NOT walk.cycle
       AND parent.job_id IS NULL
     ORDER BY walk.leaf_job_id, walk.depth DESC
@@ -55,7 +108,7 @@ job_component_roots AS (
         job.job_id,
         COALESCE(cycle.component_root_id, terminal.component_root_id, job.job_id)
             AS component_root_id
-    FROM ops.import_jobs AS job
+    FROM pipeline_jobs AS job
     LEFT JOIN cycle_roots AS cycle ON cycle.leaf_job_id = job.job_id
     LEFT JOIN terminal_roots AS terminal ON terminal.leaf_job_id = job.job_id
 ),
@@ -70,23 +123,14 @@ job_components AS (
      AND walk.ancestor_job_id = root.component_root_id
     GROUP BY root.job_id, root.component_root_id
 ),
-anchor_request_candidates AS (
+anchor_requests AS (
     SELECT
         request.request_id,
         request.job_id AS anchor_job_id,
         component.component_root_id,
-        request.created_at,
-        ROW_NUMBER() OVER (
-            PARTITION BY request.job_id
-            ORDER BY request.created_at ASC, request.request_id ASC
-        ) AS owner_rank
-    FROM ops.feature_update_requests AS request
+        request.created_at
+    FROM pipeline_requests AS request
     JOIN job_components AS component ON component.job_id = request.job_id
-),
-anchor_requests AS (
-    SELECT request_id, anchor_job_id, component_root_id, created_at
-    FROM anchor_request_candidates
-    WHERE owner_rank = 1
 ),
 job_anchor_candidates AS (
     SELECT
@@ -130,13 +174,26 @@ standalone_jobs AS (
         job.started_at,
         job.finished_at,
         job.dagster_run_id,
+        job.provider,
+        job.dataset_key,
+        job.trigger_kind,
+        job.operation_registry_version,
+        job.dagster_run_status,
         job.load_batch_id,
         job.parent_job_id
     FROM job_components AS component
-    JOIN ops.import_jobs AS job ON job.job_id = component.job_id
+    JOIN pipeline_jobs AS job ON job.job_id = component.job_id
     LEFT JOIN job_owners AS owner ON owner.job_id = component.job_id
     WHERE owner.job_id IS NULL
 )
 """
 
-__all__ = ["PIPELINE_LINEAGE_CTES_SQL"]
+PIPELINE_LINEAGE_CTES_SQL: Final[str] = (
+    PIPELINE_LINEAGE_SOURCE_SQL + ",\n" + PIPELINE_LINEAGE_BODY_SQL
+)
+
+__all__ = [
+    "PIPELINE_LINEAGE_BODY_SQL",
+    "PIPELINE_LINEAGE_CTES_SQL",
+    "PIPELINE_LINEAGE_SOURCE_SQL",
+]

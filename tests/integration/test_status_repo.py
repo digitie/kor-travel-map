@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from kortravelmap.infra.jobs_repo import enqueue_import_job, start_import_job
+from kortravelmap.infra import status_repo
+from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job, start_unpaired_import_job
 from kortravelmap.infra.status_repo import gather_status_counts
 from kortravelmap.mois import load_mois_license_features_bulk
 
@@ -23,6 +24,10 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 1, 12, 0, tzinfo=_KST)
+
+
+def test_import_job_status_count_excludes_quarantined_rows() -> None:
+    assert "WHERE quarantined_at IS NULL" in status_repo._IMPORT_JOBS_SQL
 
 
 @dataclass(frozen=True)
@@ -93,8 +98,8 @@ async def test_status_counts_with_data(migrated_session: AsyncSession) -> None:
         ],
         fetched_at=_FETCHED,
     )
-    await enqueue_import_job(migrated_session, kind="k")
-    await start_import_job(migrated_session, kind="k")
+    await enqueue_unpaired_import_job(migrated_session, kind="k")
+    await start_unpaired_import_job(migrated_session, kind="k")
     await migrated_session.flush()
 
     counts = await gather_status_counts(migrated_session)

@@ -584,8 +584,25 @@ export interface paths {
         /** feature update request 목록 */
         get: operations["list_feature_update_requests_v1_admin_features_update_requests_get"];
         put?: never;
-        /** feature update request 생성 또는 dry-run */
-        post: operations["create_feature_update_request_feature_route_v1_admin_features_update_requests_post"];
+        /** feature update request 생성 */
+        post: operations["create_feature_update_request_v1_admin_features_update_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/update-requests/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** feature update request 비영속 미리보기 */
+        post: operations["preview_feature_update_request_v1_admin_features_update_requests_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2187,10 +2204,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * feature update request 생성 또는 dry-run
-         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + operator/reason 감사 필드 + dry-run/priority 계약을 전량 승계한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
+         * feature update request 생성
+         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
          */
         post: operations["create_pipeline_update_request_v1_ops_pipeline_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/requests/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * feature update request 비영속 미리보기
+         * @description scope 대상과 provider/dataset 실행 계획을 계산하며 DB 행은 만들지 않는다.
+         */
+        post: operations["preview_pipeline_update_request_v1_ops_pipeline_requests_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6324,36 +6361,32 @@ export interface components {
         };
         /**
          * FeatureUpdatePolicy
-         * @description Provider refresh 실행 정책 override.
+         * @description 존재하는 key만 직렬화하는 strict provider refresh 정책.
          */
         FeatureUpdatePolicy: {
             /** Consistency Check After Load */
-            consistency_check_after_load?: boolean | null;
+            consistency_check_after_load?: boolean;
             /** Dedup After Load */
-            dedup_after_load?: boolean | null;
+            dedup_after_load?: boolean;
             /** Force Provider Call */
-            force_provider_call?: boolean | null;
+            force_provider_call?: boolean;
             /** Include Inactive */
-            include_inactive?: boolean | null;
-            /** Mode */
-            mode?: "refresh_existing" | null;
+            include_inactive?: boolean;
+            /**
+             * Mode
+             * @constant
+             */
+            mode?: "refresh_existing";
             /** Prevent Provider Reactivation */
-            prevent_provider_reactivation?: boolean | null;
+            prevent_provider_reactivation?: boolean;
         };
         /**
          * FeatureUpdateRequestCreateRequest
-         * @description feature update request 생성 요청.
+         * @description DB와 import job을 반드시 생성하는 feature update 요청.
          */
         FeatureUpdateRequestCreateRequest: {
             /** Dataset Keys */
             dataset_keys?: string[];
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run: boolean;
-            /** Operator */
-            operator?: string | null;
             /**
              * Priority
              * @default 50
@@ -6378,11 +6411,81 @@ export interface components {
         };
         /**
          * FeatureUpdateRequestCreateResponse
-         * @description 생성/취소/run-now 응답.
+         * @description 새 영속 요청 생성 응답.
          */
         FeatureUpdateRequestCreateResponse: {
-            data: components["schemas"]["FeatureUpdateRequestRecord"];
+            data: components["schemas"]["FeatureUpdateRequestCreatedRecord"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureUpdateRequestCreatedRecord
+         * @description 생성 API가 영속 요청을 반환했음을 나타내는 판별형.
+         */
+        FeatureUpdateRequestCreatedRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dagster Run Id */
+            dagster_run_id: string | null;
+            /** Dataset Keys */
+            dataset_keys: string[];
+            /** Error Message */
+            error_message: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Generation */
+            generation: number;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Matched Scope */
+            matched_scope: {
+                [key: string]: unknown;
+            };
+            /** Operator */
+            operator: string | null;
+            /** Priority */
+            priority: number;
+            /** Providers */
+            providers: string[];
+            /** Reason */
+            reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Result Kind
+             * @constant
+             */
+            result_kind: "request";
+            /**
+             * Run Mode
+             * @enum {string}
+             */
+            run_mode: "queued" | "now";
+            /** Scope */
+            scope: components["schemas"]["FeatureIdsScope"] | components["schemas"]["CenterRadiusScope"] | components["schemas"]["SigunguByRadiusScope"] | components["schemas"]["BboxScope"] | components["schemas"]["ProviderDatasetScope"] | components["schemas"]["CacheTargetKeysScope"];
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "feature_ids" | "center_radius" | "sigungu_by_radius" | "bbox" | "provider_dataset" | "cache_target_keys";
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Status Url */
+            status_url: string;
+            update_policy: components["schemas"]["FeatureUpdatePolicy"];
         };
         /**
          * FeatureUpdateRequestDetailResponse
@@ -6409,69 +6512,152 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
-         * FeatureUpdateRequestRecord
-         * @description feature update request 행/preview의 HTTP 표현.
+         * FeatureUpdateRequestMutationResponse
+         * @description run-now처럼 반드시 새 영속 요청을 만드는 mutation 응답.
          */
-        FeatureUpdateRequestRecord: {
-            /** Created At */
-            created_at?: string | null;
-            /** Dagster Run Id */
-            dagster_run_id?: string | null;
+        FeatureUpdateRequestMutationResponse: {
+            data: components["schemas"]["FeatureUpdateRequestRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureUpdateRequestPreviewRecord
+         * @description DB write 없이 scope 해석 결과만 반환하는 preview 표현.
+         */
+        FeatureUpdateRequestPreviewRecord: {
             /** Dataset Keys */
             dataset_keys: string[];
-            /** Dry Run */
-            dry_run: boolean;
-            /** Error Message */
-            error_message?: string | null;
-            /** Finished At */
-            finished_at?: string | null;
-            /** Job Id */
-            job_id?: string | null;
             /** Matched Scope */
             matched_scope: {
                 [key: string]: unknown;
             };
-            /** Operator */
-            operator?: string | null;
             /** Priority */
             priority: number;
             /** Providers */
             providers: string[];
-            /** Reason */
-            reason?: string | null;
-            /** Request Id */
-            request_id?: string | null;
+            /**
+             * Result Kind
+             * @constant
+             */
+            result_kind: "preview";
             /**
              * Run Mode
              * @enum {string}
              */
             run_mode: "queued" | "now";
             /** Scope */
-            scope: {
+            scope: components["schemas"]["FeatureIdsScope"] | components["schemas"]["CenterRadiusScope"] | components["schemas"]["SigunguByRadiusScope"] | components["schemas"]["BboxScope"] | components["schemas"]["ProviderDatasetScope"] | components["schemas"]["CacheTargetKeysScope"];
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "feature_ids" | "center_radius" | "sigungu_by_radius" | "bbox" | "provider_dataset" | "cache_target_keys";
+            update_policy: components["schemas"]["FeatureUpdatePolicy"];
+        };
+        /**
+         * FeatureUpdateRequestPreviewRequest
+         * @description DB write 없이 scope 해석 결과만 계산하는 요청.
+         */
+        FeatureUpdateRequestPreviewRequest: {
+            /** Dataset Keys */
+            dataset_keys?: string[];
+            /**
+             * Priority
+             * @default 50
+             */
+            priority: number;
+            /** Providers */
+            providers?: string[];
+            /**
+             * Run Mode
+             * @default queued
+             * @enum {string}
+             */
+            run_mode: "queued" | "now";
+            /**
+             * Scope
+             * @description feature update scope payload.
+             */
+            scope: components["schemas"]["FeatureIdsScope"] | components["schemas"]["CenterRadiusScope"] | components["schemas"]["SigunguByRadiusScope"] | components["schemas"]["BboxScope"] | components["schemas"]["ProviderDatasetScope"] | components["schemas"]["CacheTargetKeysScope"];
+            update_policy?: components["schemas"]["FeatureUpdatePolicy"];
+        };
+        /**
+         * FeatureUpdateRequestPreviewResponse
+         * @description 비영속 scope 미리보기 응답.
+         */
+        FeatureUpdateRequestPreviewResponse: {
+            data: components["schemas"]["FeatureUpdateRequestPreviewRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureUpdateRequestRecord
+         * @description DB에 저장된 feature update request의 HTTP 표현.
+         */
+        FeatureUpdateRequestRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dagster Run Id */
+            dagster_run_id: string | null;
+            /** Dataset Keys */
+            dataset_keys: string[];
+            /** Error Message */
+            error_message: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Generation */
+            generation: number;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Matched Scope */
+            matched_scope: {
                 [key: string]: unknown;
             };
-            /** Scope Type */
-            scope_type: string;
+            /** Operator */
+            operator: string | null;
+            /** Priority */
+            priority: number;
+            /** Providers */
+            providers: string[];
+            /** Reason */
+            reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Run Mode
+             * @enum {string}
+             */
+            run_mode: "queued" | "now";
+            /** Scope */
+            scope: components["schemas"]["FeatureIdsScope"] | components["schemas"]["CenterRadiusScope"] | components["schemas"]["SigunguByRadiusScope"] | components["schemas"]["BboxScope"] | components["schemas"]["ProviderDatasetScope"] | components["schemas"]["CacheTargetKeysScope"];
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "feature_ids" | "center_radius" | "sigungu_by_radius" | "bbox" | "provider_dataset" | "cache_target_keys";
             /** Started At */
-            started_at?: string | null;
-            /** Status */
-            status: string;
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Status Url */
-            status_url?: string | null;
-            /** Update Policy */
-            update_policy: {
-                [key: string]: unknown;
-            };
-            /** Updated At */
-            updated_at?: string | null;
+            status_url: string;
+            update_policy: components["schemas"]["FeatureUpdatePolicy"];
         };
         /**
          * FeatureUpdateRequestRunNowRequest
          * @description 기존 request payload를 run_mode=now로 재큐잉할 때의 override.
          */
         FeatureUpdateRequestRunNowRequest: {
-            /** Operator */
-            operator?: string | null;
             /** Priority */
             priority?: number | null;
             /** Reason */
@@ -7272,24 +7458,28 @@ export interface components {
             mutable: boolean;
             /** Orphan Reason */
             orphan_reason: string | null;
+            /** Pipeline History Url */
+            pipeline_history_url: string;
             /** Provider */
             provider: string;
             provider_issues: components["schemas"]["OpsIssueSummary"];
             /** Recent Events */
             recent_events: components["schemas"]["OpsDatasetEventRecord"][];
             /** Recent Runs */
-            recent_runs: components["schemas"]["OpsDatasetRunSummary"][];
+            recent_runs: components["schemas"]["OpsDatasetLatestExecution"][];
             /**
              * Recent Runs Coverage
-             * @description schedule/manual 전체 operation 통합은 #679 범위.
-             * @default update_requests_only
+             * @description DB에 영속된 exact pair canonical operation 이력.
+             * @default db_recorded_canonical_operations
              * @constant
              */
-            recent_runs_coverage: "update_requests_only";
-            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            recent_runs_coverage: "db_recorded_canonical_operations";
+            /** Recent Runs Next Cursor */
+            recent_runs_next_cursor: string | null;
+            refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
             schedule: components["schemas"]["OpsDatasetScheduleSummary"];
             /** Schedule Source Errors */
-            schedule_source_errors?: string[];
+            schedule_source_errors: string[];
             /**
              * Schedule Source Status
              * @enum {string}
@@ -7307,9 +7497,15 @@ export interface components {
         OpsDatasetEventRecord: {
             /** Code */
             code: string | null;
-            /** Event Id */
+            /**
+             * Event Id
+             * Format: uuid
+             */
             event_id: string;
-            /** Job Id */
+            /**
+             * Job Id
+             * Format: uuid
+             */
             job_id: string;
             /** Level */
             level: string;
@@ -7381,7 +7577,7 @@ export interface components {
             /** Provider */
             provider: string;
             provider_issues: components["schemas"]["OpsIssueSummary"];
-            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
             schedule: components["schemas"]["OpsDatasetScheduleSummary"];
             /** Status */
             status: string;
@@ -7390,46 +7586,63 @@ export interface components {
         };
         /**
          * OpsDatasetLatestExecution
-         * @description 그리드 N+1 없이 붙이는 최신 DB-recorded execution.
+         * @description 그리드 N+1 없이 붙이는 최신 canonical operation.
          */
         OpsDatasetLatestExecution: {
+            cancellation: components["schemas"]["PipelineCancellationSummaryRecord"] | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Current Stage */
-            current_stage: string | null;
             /** Dagster Run Id */
             dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
+            /** Dataset Keys */
+            dataset_keys: string[];
+            /** Detail Url */
+            detail_url: string;
             /** Error Message */
             error_message: string | null;
-            /** Execution Id */
-            execution_id: string;
             /** Finished At */
             finished_at: string | null;
-            /** Job Id */
-            job_id: string | null;
-            /** Job Status */
-            job_status: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
             /**
              * Kind
              * @enum {string}
              */
             kind: "import_job" | "update_request";
-            /** Progress */
-            progress: number | null;
-            /** Request Id */
-            request_id: string | null;
-            /** Started At */
-            started_at: string | null;
-            /** Status */
-            status: string;
             /**
-             * Status Source
+             * Operation Member Id
+             * Format: uuid
+             */
+            operation_member_id: string;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
+            /**
+             * Pair Status
              * @enum {string}
              */
-            status_source: "import_job" | "update_request";
+            pair_status: "queued" | "running" | "done" | "failed" | "cancelled";
+            projected_job: components["schemas"]["OpsDatasetProjectedJob"];
+            /** Provider Datasets */
+            provider_datasets: components["schemas"]["OpsDatasetProviderDataset"][];
+            /** Providers */
+            providers: string[];
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
         };
         /** OpsDatasetPreviewBudget */
         OpsDatasetPreviewBudget: {
@@ -7530,60 +7743,77 @@ export interface components {
             data: components["schemas"]["OpsDatasetPreviewData"];
             meta: components["schemas"]["Meta"];
         };
-        /** OpsDatasetRefreshPolicyResponse */
-        OpsDatasetRefreshPolicyResponse: {
-            data: components["schemas"]["ProviderRefreshPolicyRecord"];
-            meta: components["schemas"]["Meta"];
-        };
         /**
-         * OpsDatasetRunSummary
-         * @description 기존 update request + 연결 import job 상세 요약.
-         *
-         *     schedule/manual 전체 operation 정본은 #679에서 교체한다.
+         * OpsDatasetProjectedJob
+         * @description canonical root branch의 deterministic job projection.
          */
-        OpsDatasetRunSummary: {
+        OpsDatasetProjectedJob: {
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Current Stage */
+            current_stage: string | null;
             /** Dagster Run Id */
-            dagster_run_id?: string | null;
-            /** Dry Run */
-            dry_run: boolean;
+            dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
+            /** Depth */
+            depth: number;
+            /** Detail Url */
+            detail_url: string;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /** Finished At */
             finished_at: string | null;
-            /** Job Current Stage */
-            job_current_stage?: string | null;
-            /** Job Id */
-            job_id?: string | null;
-            /** Job Progress */
-            job_progress?: number | null;
-            /** Job Status */
-            job_status?: string | null;
-            /** Operator */
-            operator?: string | null;
-            /** Priority */
-            priority: number;
-            /** Reason */
-            reason?: string | null;
-            /** Request Id */
-            request_id: string;
-            /** Run Mode */
-            run_mode: string;
-            /** Scope Type */
-            scope_type: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Job Kind */
+            job_kind: string;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
+            /** Progress */
+            progress: number;
             /** Started At */
             started_at: string | null;
-            /** Status */
-            status: string;
             /**
-             * Updated At
-             * Format: date-time
+             * Status
+             * @enum {string}
              */
-            updated_at: string;
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
+        };
+        /**
+         * OpsDatasetProviderDataset
+         * @description canonical root의 exact provider/dataset member 상태.
+         */
+        OpsDatasetProviderDataset: {
+            /** Dataset Key */
+            dataset_key: string;
+            /**
+             * Operation Member Id
+             * Format: uuid
+             */
+            operation_member_id: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Sync Scope */
+            sync_scope: string | null;
+        };
+        /** OpsDatasetRefreshPolicyResponse */
+        OpsDatasetRefreshPolicyResponse: {
+            data: components["schemas"]["ProviderRefreshPolicyRecord"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsDatasetScheduleSummary
@@ -7642,13 +7872,13 @@ export interface components {
             items: components["schemas"]["OpsDatasetGridRow"][];
             /**
              * Latest Execution Coverage
-             * @description import job event와 provider_dataset update request로 DB identity가 남은 실행만 포함. schedule/manual 전체 operation 정본은 #679 범위.
-             * @default db_recorded
+             * @description DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다.
+             * @default db_recorded_canonical_operations
              * @constant
              */
-            latest_execution_coverage: "db_recorded";
+            latest_execution_coverage: "db_recorded_canonical_operations";
             /** Schedule Source Errors */
-            schedule_source_errors?: string[];
+            schedule_source_errors: string[];
             /**
              * Schedule Source Status
              * @enum {string}
@@ -8077,11 +8307,17 @@ export interface components {
             created_at: string;
             /** Dagster Run Id */
             dagster_run_id?: string | null;
-            /** Dry Run */
-            dry_run: boolean;
-            /** Job Id */
-            job_id?: string | null;
-            /** Request Id */
+            /** Generation */
+            generation: number;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
             request_id: string;
             /** Run Mode */
             run_mode: string;
@@ -8089,11 +8325,6 @@ export interface components {
             status: string;
             /** Status Url */
             status_url: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
         };
         /**
          * OpsProvidersData
@@ -8130,7 +8361,10 @@ export interface components {
          * @description POST 결과와 GET detail이 공유하는 reload 가능한 cancellation 표현.
          */
         PipelineCancellationDetailRecord: {
-            /** Cancellation Id */
+            /**
+             * Cancellation Id
+             * Format: uuid
+             */
             cancellation_id: string;
             /**
              * Committed Data Rolled Back
@@ -8198,13 +8432,11 @@ export interface components {
             error: components["schemas"]["PipelineCancellationErrorRecord"] | null;
             /** Initial Status */
             initial_status: string;
-            /** Member Id */
-            member_id: string;
             /**
-             * Member Kind
-             * @enum {string}
+             * Job Id
+             * Format: uuid
              */
-            member_kind: "import_job" | "update_request";
+            job_id: string;
             /** Operation Kind */
             operation_kind: string | null;
             /** Requires Run Termination */
@@ -8243,7 +8475,10 @@ export interface components {
          * @description canonical cancellation root.
          */
         PipelineCancellationRootRecord: {
-            /** Id */
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
             /**
              * Kind
@@ -8285,7 +8520,10 @@ export interface components {
          * @description 실행 목록 root에 붙는 current cancellation overlay.
          */
         PipelineCancellationSummaryRecord: {
-            /** Cancellation Id */
+            /**
+             * Cancellation Id
+             * Format: uuid
+             */
             cancellation_id: string;
             /** Reason */
             reason: string | null;
@@ -8401,19 +8639,21 @@ export interface components {
          */
         PipelineExecutionDetailData: {
             /** @description base lifecycle을 덮지 않는 current cancellation 상세. */
-            cancellation?: components["schemas"]["PipelineCancellationDetailRecord"] | null;
+            cancellation: components["schemas"]["PipelineCancellationDetailRecord"] | null;
             /** Events */
-            events?: components["schemas"]["PipelineJobEventRecord"][];
+            events: components["schemas"]["PipelineJobEventRecord"][];
             /**
              * Events Next Cursor
              * @description 이벤트 로그 전진 페이지네이션 cursor (없으면 마지막 페이지).
              */
-            events_next_cursor?: string | null;
+            events_next_cursor: string | null;
             execution: components["schemas"]["PipelineExecutionRecord"];
             /** @description kind=import_job의 본체 또는 update_request가 연결한 job. */
-            import_job?: components["schemas"]["PipelineImportJobRecord"] | null;
+            import_job: components["schemas"]["PipelineImportJobRecord"] | null;
+            /** @description 요청 id 또는 import member id가 귀속되는 canonical root projection. */
+            root: components["schemas"]["PipelineExecutionRootRecord"];
             /** @description kind=update_request의 본체 또는 import_job이 연결한 request. */
-            update_request?: components["schemas"]["FeatureUpdateRequestRecord"] | null;
+            update_request: components["schemas"]["FeatureUpdateRequestRecord"] | null;
         };
         /**
          * PipelineExecutionDetailResponse
@@ -8434,124 +8674,146 @@ export interface components {
              */
             created_at: string;
             /** Current Stage */
-            current_stage?: string | null;
+            current_stage: string | null;
             /** Dagster Run Id */
-            dagster_run_id?: string | null;
+            dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
             /** Dataset Key */
-            dataset_key?: string | null;
+            dataset_key: string | null;
             /** Detail Url */
             detail_url: string;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /** Finished At */
-            finished_at?: string | null;
-            /** Id */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
             /**
              * Job Id
              * @description update_request 행이 연결된 import job id.
              */
-            job_id?: string | null;
+            job_id: string | null;
             /** Job Kind */
-            job_kind?: string | null;
+            job_kind: string | null;
             /**
              * Kind
              * @enum {string}
              */
             kind: "import_job" | "update_request";
             /** Load Batch Id */
-            load_batch_id?: string | null;
+            load_batch_id: string | null;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
             /** Operator */
-            operator?: string | null;
+            operator: string | null;
             /** Parent Job Id */
-            parent_job_id?: string | null;
+            parent_job_id: string | null;
             /** Priority */
-            priority?: number | null;
+            priority: number | null;
             /** Progress */
-            progress?: number | null;
+            progress: number | null;
             /** Provider */
-            provider?: string | null;
+            provider: string | null;
             /**
              * Request Id
              * @description import_job 행이 연결된 feature update request id.
              */
-            request_id?: string | null;
+            request_id: string | null;
             /** Run Mode */
-            run_mode?: string | null;
+            run_mode: string | null;
             /** Scope Type */
-            scope_type?: string | null;
+            scope_type: string | null;
             /** Started At */
-            started_at?: string | null;
-            /** Status */
-            status: string;
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
         };
         /**
          * PipelineExecutionRootRecord
          * @description 실행 목록의 request branch 또는 standalone partition root.
          */
         PipelineExecutionRootRecord: {
-            cancellation?: components["schemas"]["PipelineCancellationSummaryRecord"] | null;
+            cancellation: components["schemas"]["PipelineCancellationSummaryRecord"] | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
             /** Current Stage */
-            current_stage?: string | null;
+            current_stage: string | null;
             /** Dagster Run Id */
-            dagster_run_id?: string | null;
+            dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
             /**
              * Dataset Keys
-             * @description 저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective dataset identity.
+             * @description 표시·dataset-only 필터용 정렬된 유효 dataset 목록.
              */
             dataset_keys: string[];
             /** Detail Url */
             detail_url: string;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /** Finished At */
-            finished_at?: string | null;
-            /** Id */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
             /**
              * Kind
              * @enum {string}
              */
             kind: "import_job" | "update_request";
-            /**
-             * Lineage Owner
-             * @description request가 자기 anchor branch를 소유하면 true, 같은 anchor의 다중 request 경쟁에서 탈락했거나 연결 job이 없으면 false. standalone import root는 null.
-             */
-            lineage_owner?: boolean | null;
             /** Linked Job Count */
             linked_job_count: number;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
             /** Operator */
-            operator?: string | null;
+            operator: string | null;
             /** Priority */
-            priority?: number | null;
+            priority: number | null;
             /** Progress */
-            progress?: number | null;
-            projected_job?: components["schemas"]["PipelineProjectedJobRecord"] | null;
-            /** @description scope_type=provider_dataset request의 provider/dataset/sync_scope pair. 두 effective 배열은 독립 identity 목록이므로 pair 복원에는 이 필드를 쓴다. */
-            provider_dataset?: components["schemas"]["PipelineProviderDatasetIdentityRecord"] | null;
+            progress: number | null;
+            projected_job: components["schemas"]["PipelineProjectedJobRecord"];
+            /**
+             * Provider Datasets
+             * @description canonical branch의 exact pair와 pair별 lifecycle 상태.
+             */
+            provider_datasets: components["schemas"]["PipelineProviderDatasetIdentityRecord"][];
             /**
              * Providers
-             * @description 저장 배열의 순서·중복을 유지하고 provider_dataset scope 값이 없으면 끝에 보완한 effective provider identity.
+             * @description 표시·provider-only 필터용 정렬된 유효 provider 목록.
              */
             providers: string[];
             /**
              * Requested Job Id
              * @description update request가 원래 가리킨 import job id.
              */
-            requested_job_id?: string | null;
+            requested_job_id: string | null;
             /** Run Mode */
-            run_mode?: string | null;
+            run_mode: string | null;
             /** Scope Type */
-            scope_type?: string | null;
+            scope_type: string | null;
             /** Started At */
-            started_at?: string | null;
-            /** Status */
-            status: string;
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
         };
         /**
          * PipelineExecutionsData
@@ -8580,35 +8842,51 @@ export interface components {
              */
             created_at: string;
             /** Current Stage */
-            current_stage?: string | null;
+            current_stage: string | null;
             /** Dagster Run Id */
-            dagster_run_id?: string | null;
+            dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
+            /** Dataset Key */
+            dataset_key: string | null;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /** Finished At */
-            finished_at?: string | null;
+            finished_at: string | null;
             /** Heartbeat At */
-            heartbeat_at?: string | null;
-            /** Job Id */
+            heartbeat_at: string | null;
+            /**
+             * Job Id
+             * Format: uuid
+             */
             job_id: string;
             /** Kind */
             kind: string;
             /** Load Batch Id */
-            load_batch_id?: string | null;
+            load_batch_id: string | null;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
             /** Parent Job Id */
-            parent_job_id?: string | null;
+            parent_job_id: string | null;
             /** Payload */
             payload: {
                 [key: string]: unknown;
             };
             /** Progress */
             progress: number;
+            /** Provider */
+            provider: string | null;
             /** Source Checksum */
-            source_checksum?: string | null;
+            source_checksum: string | null;
             /** Started At */
-            started_at?: string | null;
-            /** Status */
-            status: string;
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
         };
         /**
          * PipelineJobEventRecord
@@ -8616,14 +8894,20 @@ export interface components {
          */
         PipelineJobEventRecord: {
             /** Code */
-            code?: string | null;
+            code: string | null;
             /** Dataset Key */
-            dataset_key?: string | null;
-            /** Event Id */
+            dataset_key: string | null;
+            /**
+             * Event Id
+             * Format: uuid
+             */
             event_id: string;
             /** Feature Id */
-            feature_id?: string | null;
-            /** Job Id */
+            feature_id: string | null;
+            /**
+             * Job Id
+             * Format: uuid
+             */
             job_id: string;
             /** Level */
             level: string;
@@ -8639,35 +8923,27 @@ export interface components {
                 [key: string]: unknown;
             };
             /** Provider */
-            provider?: string | null;
+            provider: string | null;
             /** Stage */
-            stage?: string | null;
+            stage: string | null;
         };
         /**
          * PipelineOverviewData
          * @description ``GET /ops/pipeline/overview`` data — 상태 스트립 집계.
          */
         PipelineOverviewData: {
-            /** Active Import Jobs */
-            active_import_jobs: number;
-            /** Active Update Requests */
-            active_update_requests: number;
+            /** Active Operations */
+            active_operations: number;
             /**
              * Checked At
              * Format: date-time
              */
             checked_at: string;
             dagster: components["schemas"]["PipelineDagsterOverview"];
-            /** Failed Import Jobs 24H */
-            failed_import_jobs_24h: number;
-            /** Failed Update Requests 24H */
-            failed_update_requests_24h: number;
-            /** Import Jobs By Status */
-            import_jobs_by_status: {
-                [key: string]: number;
-            };
-            /** Update Requests By Status */
-            update_requests_by_status: {
+            /** Failed Operations 24H */
+            failed_operations_24h: number;
+            /** Operations By Status */
+            operations_by_status: {
                 [key: string]: number;
             };
         };
@@ -8690,43 +8966,65 @@ export interface components {
              */
             created_at: string;
             /** Current Stage */
-            current_stage?: string | null;
+            current_stage: string | null;
             /** Dagster Run Id */
-            dagster_run_id?: string | null;
+            dagster_run_id: string | null;
+            /** Dagster Run Status */
+            dagster_run_status: string | null;
             /** Depth */
             depth: number;
             /** Detail Url */
             detail_url: string;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /** Finished At */
-            finished_at?: string | null;
-            /** Id */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
             /** Job Kind */
             job_kind: string;
             /** Load Batch Id */
-            load_batch_id?: string | null;
+            load_batch_id: string | null;
+            /** Operation Registry Version */
+            operation_registry_version: string | null;
             /** Parent Job Id */
-            parent_job_id?: string | null;
+            parent_job_id: string | null;
             /** Progress */
             progress: number;
             /** Started At */
-            started_at?: string | null;
-            /** Status */
-            status: string;
+            started_at: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Trigger Kind */
+            trigger_kind: string | null;
         };
         /**
          * PipelineProviderDatasetIdentityRecord
-         * @description ``provider_dataset`` request의 pair identity.
+         * @description canonical root에 귀속된 exact pair 상태.
          */
         PipelineProviderDatasetIdentityRecord: {
             /** Dataset Key */
             dataset_key: string;
+            /**
+             * Operation Member Id
+             * Format: uuid
+             */
+            operation_member_id: string;
             /** Provider */
             provider: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
             /** Sync Scope */
-            sync_scope?: string | null;
+            sync_scope: string | null;
         };
         /**
          * PipelineScheduleCommandData
@@ -9821,9 +10119,9 @@ export interface components {
             /**
              * Match
              * @default intersects
-             * @enum {string}
+             * @constant
              */
-            match: "intersects" | "contains_center" | "feature_sigungu";
+            match: "intersects";
             /** Radius Km */
             radius_km: number;
             /**
@@ -12299,7 +12597,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
-                scope_type?: string | null;
+                scope_type?: ("feature_ids" | "center_radius" | "sigungu_by_radius" | "bbox" | "provider_dataset" | "cache_target_keys") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
                 created_from?: string | null;
@@ -12342,7 +12640,7 @@ export interface operations {
             };
         };
     };
-    create_feature_update_request_feature_route_v1_admin_features_update_requests_post: {
+    create_feature_update_request_v1_admin_features_update_requests_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -12364,13 +12662,57 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description run_mode=now 요청의 동일 scope advisory lock 경합 */
+            /** @description 동일 scope 즉시 실행 lock 경합 */
             409: {
+                headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    preview_feature_update_request_v1_admin_features_update_requests_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureUpdateRequestPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestPreviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12549,7 +12891,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                    "application/json": components["schemas"]["FeatureUpdateRequestMutationResponse"];
                 };
             };
             /** @description request_id 없음 */
@@ -12561,9 +12903,11 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 이미 running 상태 또는 동일 scope lock 경합 */
+            /** @description 동일 scope 즉시 실행 lock 경합 */
             409: {
                 headers: {
+                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17142,7 +17486,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description run_mode=now 요청의 동일 scope advisory lock 경합 */
+            /** @description 동일 scope 즉시 실행 lock 경합 */
             409: {
                 headers: {
                     /** @description 동일 scope lock 경합 시 재시도 대기 초. */
@@ -17151,6 +17495,48 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    preview_pipeline_update_request_v1_ops_pipeline_requests_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureUpdateRequestPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestPreviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17194,7 +17580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                    "application/json": components["schemas"]["FeatureUpdateRequestMutationResponse"];
                 };
             };
             /** @description request_id 없음 */
@@ -17206,7 +17592,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 이미 running 상태 또는 동일 scope lock 경합 */
+            /** @description 동일 scope 즉시 실행 lock 경합 */
             409: {
                 headers: {
                     /** @description 동일 scope lock 경합 시 재시도 대기 초. */

@@ -16,7 +16,7 @@ PipelineCancellationResult: TypeAlias = Literal[
     "already_terminal",
     "cancel_failed",
 ]
-PipelineCancellationMemberKind: TypeAlias = Literal["import_job", "update_request"]
+PipelineCancellationRootKind: TypeAlias = Literal["import_job", "update_request"]
 
 PIPELINE_CANCELLATION_STATUS_VALUES: tuple[PipelineCancellationStatus, ...] = (
     "in_progress",
@@ -30,15 +30,15 @@ PIPELINE_CANCELLATION_RESULT_VALUES: tuple[PipelineCancellationResult, ...] = (
     "already_terminal",
     "cancel_failed",
 )
-PIPELINE_CANCELLATION_MEMBER_KIND_VALUES: tuple[
-    PipelineCancellationMemberKind, ...
+PIPELINE_CANCELLATION_ROOT_KIND_VALUES: tuple[
+    PipelineCancellationRootKind, ...
 ] = ("import_job", "update_request")
 
 __all__ = [
-    "PIPELINE_CANCELLATION_MEMBER_KIND_VALUES",
+    "PIPELINE_CANCELLATION_ROOT_KIND_VALUES",
     "PIPELINE_CANCELLATION_RESULT_VALUES",
     "PIPELINE_CANCELLATION_STATUS_VALUES",
-    "PipelineCancellationMemberKind",
+    "PipelineCancellationRootKind",
     "PipelineCancellationResult",
     "PipelineCancellationStatus",
 ]

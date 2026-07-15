@@ -68,16 +68,27 @@ def _scope(
     dataset_key: str = "places",
     scope_type: str = "provider_dataset",
 ) -> ProviderDatasetRefreshScope:
+    request_scope: dict[str, object]
+    if scope_type == "provider_dataset":
+        request_scope = {
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": dataset_key,
+        }
+    elif scope_type == "center_radius":
+        request_scope = {
+            "type": "center_radius",
+            "center": {"lon": 127.0, "lat": 37.0},
+            "radius_km": 1.0,
+        }
+    else:
+        raise ValueError(f"unsupported test scope_type: {scope_type}")
     return ProviderDatasetRefreshScope(
         request_id="11111111-1111-4111-8111-111111111111",
         provider=provider,
         dataset_key=dataset_key,
         scope_type=scope_type,
-        request_scope={
-            "type": scope_type,
-            "provider": provider,
-            "dataset_key": dataset_key,
-        },
+        request_scope=request_scope,
         update_policy={"prevent_provider_reactivation": True},
         feature_ids=("feature-1",),
         feature_count=1,

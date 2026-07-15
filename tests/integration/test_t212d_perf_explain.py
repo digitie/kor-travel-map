@@ -230,7 +230,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 load_batch_id, parent_job_id, created_at, started_at, heartbeat_at
             )
             SELECT
-                CASE WHEN g % 3 = 0 THEN 'feature_update_request'
+                CASE WHEN g % 3 = 0 THEN 'update_request_perf_fixture'
                      WHEN g % 3 = 1 THEN 'provider_load'
                      ELSE 'consistency_check' END,
                 jsonb_build_object('row', g),

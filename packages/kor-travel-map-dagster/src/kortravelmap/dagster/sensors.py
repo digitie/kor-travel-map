@@ -3,7 +3,6 @@
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
@@ -52,17 +51,17 @@ _T = TypeVar("_T")
 @op(
     name="execute_feature_update_request",
     required_resource_keys={"kor_travel_map_client", "feature_update_runner"},
-    config_schema={"request_id": str, "request_updated_at": str},
+    config_schema={"request_id": str, "request_generation": int},
 )
 async def execute_feature_update_request_op(
     context: OpExecutionContext,
 ) -> dict[str, object]:
     """RunRequest가 지정한 feature update request 1건을 실행한다."""
     request_id = str(context.op_config["request_id"])
-    request_updated_at = _parse_request_generation(
-        str(context.op_config["request_updated_at"])
+    request_generation = _parse_request_generation(
+        context.op_config["request_generation"]
     )
-    if request_updated_at is None:
+    if request_generation is None:
         raise Failure(description="feature update request generation이 유효하지 않음")
     client = cast(
         "AsyncKorTravelMapClient",
@@ -82,7 +81,7 @@ async def execute_feature_update_request_op(
             request_id,
             runner=runner,
             dagster_run_id=context.run_id,
-            expected_request_updated_at=request_updated_at,
+            expected_request_generation=request_generation,
             sigungu_resolver=sigungu_resolver,
         )
     except FeatureUpdateLockBusy as exc:
@@ -210,7 +209,7 @@ def _run_config_for_request(request: "FeatureUpdateRequest") -> dict[str, object
             "execute_feature_update_request": {
                 "config": {
                     "request_id": request.request_id,
-                    "request_updated_at": _request_generation(request),
+                    "request_generation": _request_generation(request),
                 }
             }
         }
@@ -229,27 +228,24 @@ def _run_key_for_request(request: "FeatureUpdateRequest") -> str:
     return f"feature-update:{request.request_id}:{_request_generation(request)}"
 
 
-def _request_generation(request: "FeatureUpdateRequest") -> str:
-    updated_at = request.updated_at
-    if updated_at.tzinfo is not None:
-        updated_at = updated_at.astimezone(UTC)
-    return updated_at.isoformat()
+def _request_generation(request: "FeatureUpdateRequest") -> int:
+    return request.generation
 
 
-def _parse_request_generation(value: str) -> datetime | None:
+def _parse_request_generation(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
     try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
+        parsed = int(value)
+    except (TypeError, ValueError):
         return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed
+    return parsed if parsed > 0 else None
 
 
 def _tags_for_request(request: "FeatureUpdateRequest") -> dict[str, str]:
     return {
         FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
-        FEATURE_UPDATE_REQUEST_GENERATION_TAG: _request_generation(request),
+        FEATURE_UPDATE_REQUEST_GENERATION_TAG: str(_request_generation(request)),
         FEATURE_UPDATE_RUN_MODE_TAG: request.run_mode,
         FEATURE_UPDATE_SCOPE_TYPE_TAG: request.scope_type,
     }
@@ -292,19 +288,19 @@ async def _handle_failure_side_effects(
     if request_id:
         client = cast("AsyncKorTravelMapClient", kor_travel_map_client)
         try:
-            expected_updated_at = (
+            expected_generation = (
                 _parse_request_generation(request_generation)
                 if request_generation is not None
                 else None
             )
-            if expected_updated_at is None:
+            if expected_generation is None:
                 raise ValueError(
                     "feature update failure run에 request generation tag가 없음"
                 )
             await client.fail_update_request(
                 request_id,
-                expected_dagster_run_id=context.dagster_run.run_id,
-                expected_request_updated_at=expected_updated_at,
+                owner_dagster_run_id=context.dagster_run.run_id,
+                expected_request_generation=expected_generation,
                 error_message=message,
             )
         except Exception as exc:

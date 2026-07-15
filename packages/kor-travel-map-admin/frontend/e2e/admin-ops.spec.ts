@@ -1239,20 +1239,22 @@ test.describe("admin/ops pages", () => {
       page.getByRole("heading", { level: 1, name: "갱신 요청" }),
     ).toBeVisible();
     await expect(page.getByText("새 요청")).toBeVisible();
-    for (const label of ["lon", "lat", "radius km", "providers", "dataset keys"]) {
+    for (const label of ["경도", "위도", "반경(km)", "제공자", "데이터셋 키"]) {
       await expect(page.getByLabel(label)).toBeVisible();
     }
-    await expect(page.getByLabel("run mode")).toBeVisible();
-    await expect(page.getByLabel("dry-run")).toBeChecked();
-    await expect(page.getByLabel("request status")).toBeVisible();
+    await expect(page.getByLabel("실행 모드")).toBeVisible();
+    await expect(
+      page.getByLabel("미리보기(요청을 저장하거나 실행하지 않음)"),
+    ).toBeChecked();
+    await expect(page.getByLabel("요청 상태 필터")).toBeVisible();
 
     // T-218b: lon을 비우고 생성 → 클라이언트 검증 에러 + 포커스(네트워크 호출 전 차단).
-    const lon = page.getByLabel("lon");
+    const lon = page.getByLabel("경도");
     await lon.fill("");
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "미리보기" }).click();
     await expect(lon).toHaveAttribute("aria-invalid", "true");
     await expect(lon).toBeFocused();
-    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
+    await expect(page.getByText("경도를 입력하세요.")).toBeVisible();
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {

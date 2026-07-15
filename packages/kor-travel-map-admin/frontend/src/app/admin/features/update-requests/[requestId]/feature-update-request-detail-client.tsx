@@ -43,6 +43,10 @@ export function FeatureUpdateRequestDetailClient({
     ],
   });
   const data = request.data?.data;
+  const cancellation = cancelRequest.data?.data;
+  const cancelledJob = cancellation?.members.find(
+    (member) => member.job_id === data?.job_id,
+  );
   const canCancel = Boolean(data?.status && !terminalStatuses.has(data.status));
   const canRunNow = Boolean(data?.status && data.status !== "running");
 
@@ -81,13 +85,53 @@ export function FeatureUpdateRequestDetailClient({
       title="갱신 요청 상세"
     >
       <div className="flex flex-col gap-4">
-        {request.isError || cancelRequest.isError || runNow.isError ? (
+        {request.isError ? (
           <Alert variant="destructive">
             <AlertTitle>요청 조회 실패</AlertTitle>
+            <AlertDescription>{request.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {cancelRequest.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>요청 취소 실패</AlertTitle>
+            <AlertDescription>{cancelRequest.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {cancellation ? (
+          <Alert>
+            <AlertTitle>요청 취소 처리 결과</AlertTitle>
             <AlertDescription>
-              {request.error?.message ??
-                cancelRequest.error?.message ??
-                runNow.error?.message}
+              원 요청 <span className="break-all font-mono">{cancellation.root.id}</span>
+              {" · "}연결 작업 상태{" "}
+              {cancelledJob?.terminal_status ??
+                cancelledJob?.result ??
+                "확인 중"}
+              {" · "}취소 처리 상태 {cancellation.status}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {runNow.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>즉시 실행 요청 생성 실패</AlertTitle>
+            <AlertDescription>{runNow.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {runNow.data ? (
+          <Alert>
+            <AlertTitle>즉시 실행 요청 생성 완료</AlertTitle>
+            <AlertDescription>
+              원본 요청은 변경되지 않았습니다. 새 요청{" "}
+              <Link
+                className="break-all font-mono underline underline-offset-2"
+                href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
+              >
+                {runNow.data.data.request_id}
+              </Link>
+              을 확인하세요.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -104,7 +148,6 @@ export function FeatureUpdateRequestDetailClient({
                     <StatusBadge status={data.status} />
                     <Badge variant="outline">{data.scope_type}</Badge>
                     <Badge variant="outline">{data.run_mode}</Badge>
-                    {data.dry_run ? <Badge variant="outline">dry-run</Badge> : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -148,16 +191,12 @@ export function FeatureUpdateRequestDetailClient({
                 <div>
                   <dt className="text-muted-foreground">작업</dt>
                   <dd className="font-mono">
-                    {data.job_id ? (
-                      <Link
-                        className="underline underline-offset-2"
-                        href={`/ops/import-jobs/${data.job_id}`}
-                      >
-                        {shortId(data.job_id)}
-                      </Link>
-                    ) : (
-                      "-"
-                    )}
+                    <Link
+                      className="underline underline-offset-2"
+                      href={`/ops/import-jobs/${data.job_id}`}
+                    >
+                      {shortId(data.job_id)}
+                    </Link>
                   </dd>
                 </div>
                 <div>
@@ -177,8 +216,8 @@ export function FeatureUpdateRequestDetailClient({
                   <dd>{formatDateTime(data.created_at)}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">수정</dt>
-                  <dd>{formatDateTime(data.updated_at)}</dd>
+                  <dt className="text-muted-foreground">실행 세대</dt>
+                  <dd className="font-mono">{data.generation}</dd>
                 </div>
               </dl>
             </section>

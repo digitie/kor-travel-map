@@ -111,6 +111,7 @@ GROUP BY provider
 _IMPORT_JOBS_SQL: Final[str] = """
 SELECT status, count(*) AS n
 FROM ops.import_jobs
+WHERE quarantined_at IS NULL
 GROUP BY status
 """
 

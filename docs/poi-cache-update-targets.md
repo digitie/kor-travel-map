@@ -443,7 +443,6 @@ PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 �
     "scope_mode": "center_radius"
   },
   "run_mode": "queued",
-  "dry_run": false,
   "operator": "pinvi",
   "reason": "저장 POI 주변 캐시 갱신"
 }
@@ -458,8 +457,8 @@ PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 �
 - provider policy가 `follow_system`이면 targeted update에서 제외하고
   `follow_system_skipped`에 기록한다.
 - provider policy가 `disabled`이면 제외한다.
-- `dry_run=true`이면 실제 job을 만들지 않고 대상 feature 수, provider call scope,
-  skipped reason만 반환한다.
+- `/v1/admin/features/update-requests/preview`로 보내면 실제 job을 만들지 않고 대상
+  feature 수, provider call scope, skipped reason만 반환한다.
 
 ## 8. 업데이트 시간 규칙
 
@@ -472,7 +471,8 @@ PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 �
 - detail section: 가능하면 `detail_last_updated_at`
 - weather/price/source/file 관련 section: 각 item 또는 section에 `last_updated_at`
 - cache target: `last_updated_at`, `last_refreshed_at`, `next_eligible_refresh_at`
-- update request/job: `created_at`, `updated_at`, `started_at`, `finished_at`
+- update request: `created_at`, 정수 `generation`; canonical job: `created_at`,
+  `started_at`, `heartbeat_at`, `finished_at`
 
 DB 규칙:
 

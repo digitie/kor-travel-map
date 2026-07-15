@@ -31,7 +31,7 @@ from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
 )
-from kortravelmap.infra.jobs_repo import start_import_job
+from kortravelmap.infra.jobs_repo import start_provider_dataset_import_job
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -489,7 +489,7 @@ async def reserve_offline_upload_load(
     if upload is None:
         return None
 
-    job = await start_import_job(
+    job = await start_provider_dataset_import_job(
         session,
         kind=job_kind,
         payload={

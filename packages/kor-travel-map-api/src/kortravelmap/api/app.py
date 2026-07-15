@@ -63,7 +63,6 @@ from kortravelmap.api.routers import (
     etl_router,
     feature_dedup_review_router,
     feature_enrichment_review_router,
-    feature_update_requests_feature_router,
     feature_update_requests_router,
     features_router,
     mois_detail_router,
@@ -580,7 +579,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=admin_dependencies,
         )
         application.include_router(
-            feature_update_requests_feature_router,
+            feature_update_requests_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )
@@ -601,11 +600,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             enrichment_review_router,
-            prefix="/v1",
-            dependencies=admin_dependencies,
-        )
-        application.include_router(
-            feature_update_requests_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

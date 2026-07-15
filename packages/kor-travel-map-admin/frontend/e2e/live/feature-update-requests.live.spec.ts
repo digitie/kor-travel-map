@@ -11,7 +11,7 @@ async function expectUpdateRequestsReady(
   await expect(page.getByLabel("경도")).toBeVisible(T);
   await expect(page.getByLabel("위도")).toBeVisible(T);
   await expect(page.getByLabel("반경(km)")).toBeVisible(T);
-  await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible(T);
+  await expect(page.getByRole("button", { name: "미리보기" })).toBeVisible(T);
 }
 
 test.describe("/admin/features/update-requests live", () => {
@@ -20,7 +20,9 @@ test.describe("/admin/features/update-requests live", () => {
 
     await expectUpdateRequestsReady(page);
     await expect(page.getByLabel("요청 상태 필터")).toBeVisible(T);
-    await expect(page.getByLabel("dry-run")).toBeChecked();
+    await expect(
+      page.getByLabel("미리보기(요청을 저장하거나 실행하지 않음)"),
+    ).toBeChecked();
     await expect(page.getByLabel("실행 모드")).toHaveValue("queued");
   });
 
@@ -33,7 +35,7 @@ test.describe("/admin/features/update-requests live", () => {
     await page.getByLabel("경도").fill("");
     await page.getByLabel("위도").fill("44");
     await page.getByLabel("반경(km)").fill("0.01");
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "미리보기" }).click();
 
     await expect(page.getByText("경도를 입력하세요.")).toBeVisible(T);
     await expect(
@@ -42,21 +44,22 @@ test.describe("/admin/features/update-requests live", () => {
     await expect(page.getByText("반경은 0.1 이상이어야 합니다.")).toBeVisible(T);
   });
 
-  test("dry-run 생성 — 실제 API preview 응답을 성공 alert로 표시", async ({
+  test("미리보기 — 실제 API preview 응답을 성공 alert로 표시", async ({
     page,
   }) => {
     await page.goto("/admin/features/update-requests");
     await expectUpdateRequestsReady(page);
 
-    await expect(page.getByLabel("dry-run")).toBeChecked();
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect(
+      page.getByLabel("미리보기(요청을 저장하거나 실행하지 않음)"),
+    ).toBeChecked();
+    await page.getByRole("button", { name: "미리보기" }).click();
 
     const successAlert = page
       .getByRole("status")
       .filter({ hasText: "요청 처리 완료" });
     await expect(successAlert).toBeVisible(T);
-    await expect(successAlert).toContainText("dry-run");
-    await expect(successAlert).toContainText("모의실행");
+    await expect(successAlert).toContainText("미리보기 완료");
   });
 
   test("/features 지도 Update 링크 → feature update requests 화면", async ({

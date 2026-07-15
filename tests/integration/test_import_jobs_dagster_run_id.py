@@ -14,9 +14,10 @@ from sqlalchemy import text
 from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.jobs_repo import (
     bind_import_job_dagster_run,
-    enqueue_import_job,
+    enqueue_provider_dataset_import_job,
+    enqueue_unpaired_import_job,
     record_import_job_event,
-    start_import_job,
+    start_unpaired_import_job,
     update_import_job_payload,
 )
 
@@ -41,7 +42,7 @@ async def _column_value(session: AsyncSession, job_id: str) -> str | None:
 async def test_enqueue_writes_explicit_dagster_run_id(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await enqueue_import_job(
+    job = await enqueue_unpaired_import_job(
         migrated_session,
         kind="provider_load",
         payload={"provider": "python-kma-api", "dagster_run_id": "run-enqueue"},
@@ -56,7 +57,7 @@ async def test_generic_exact_pair_is_stored_and_inherited_by_events(
     migrated_session: AsyncSession,
 ) -> None:
     pair = ProviderDatasetOperationKey("python-kma-api", "forecast")
-    job = await enqueue_import_job(
+    job = await enqueue_provider_dataset_import_job(
         migrated_session,
         kind="provider_load",
         provider_dataset=pair,
@@ -79,7 +80,7 @@ async def test_generic_exact_pair_is_stored_and_inherited_by_events(
 async def test_start_does_not_infer_legacy_payload_run_id(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await start_import_job(
+    job = await start_unpaired_import_job(
         migrated_session,
         kind="provider_load",
         payload={"run_id": "run-legacy"},
@@ -92,7 +93,7 @@ async def test_start_does_not_infer_legacy_payload_run_id(
 async def test_enqueue_without_run_id_leaves_column_null(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await enqueue_import_job(
+    job = await enqueue_unpaired_import_job(
         migrated_session,
         kind="provider_load",
         payload={"provider": "python-kma-api"},
@@ -105,7 +106,7 @@ async def test_enqueue_without_run_id_leaves_column_null(
 async def test_explicit_bind_sets_and_payload_update_keeps_run_id(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await start_import_job(
+    job = await start_unpaired_import_job(
         migrated_session,
         kind="offline_upload_load",
         payload={"upload_id": "u-1"},
@@ -140,13 +141,13 @@ async def test_ops_live_dagster_snapshots_use_real_column(
         _dagster_runs_snapshot,
     )
 
-    linked = await start_import_job(
+    linked = await start_unpaired_import_job(
         migrated_session,
         kind="provider_load",
         payload={"dagster_run_id": "run-live"},
         dagster_run_id="run-live",
     )
-    await start_import_job(
+    await start_unpaired_import_job(
         migrated_session,
         kind="provider_load",
         payload={"provider": "python-kma-api"},

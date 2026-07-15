@@ -79,7 +79,7 @@ start/stop/reset/run mutation이 포함된다. 동시에 admin secret과 service
 
 - [`app.py`](../../packages/kor-travel-map-api/src/kortravelmap/api/app.py#L491)는 public router의
   dependency와 curated 예외를 보여 준다.
-- [`app.py`](../../packages/kor-travel-map-api/src/kortravelmap/api/app.py#L628)는 legacy ops/Dagster를
+- [`app.py`](../../packages/kor-travel-map-api/src/kortravelmap/api/app.py#L622)는 legacy ops/Dagster를
   dependency 없이 mount한다.
 - [`auth.py`](../../packages/kor-travel-map-api/src/kortravelmap/api/auth.py#L127)는 admin secret이
   없을 때 `local-dev`로 통과시키고, 같은 파일의 service token 검사도 미설정 시 통과한다.

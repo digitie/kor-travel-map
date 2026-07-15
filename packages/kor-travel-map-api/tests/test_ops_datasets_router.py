@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -13,8 +12,7 @@ from kortravelmap.infra.dataset_status_repo import (
     DatasetIntegrityIssueCount,
     DatasetLatestExecution,
 )
-from kortravelmap.infra.feature_update_repo import FeatureUpdateRequest
-from kortravelmap.infra.ops_repo import OpsImportJob
+from kortravelmap.infra.pipeline_repo import PipelineExecution, PipelineProjectedJob
 from kortravelmap.infra.provider_refresh_policy_repo import ProviderRefreshPolicy
 from kortravelmap.infra.sync_state_repo import SyncState
 
@@ -34,7 +32,6 @@ from kortravelmap.api.ops_dataset_schema import (
 )
 from kortravelmap.api.ops_dataset_service import (
     OrphanMutationDisabledError,
-    _run_summary,
     load_datasets_grid,
 )
 from kortravelmap.api.settings import ApiSettings
@@ -153,6 +150,11 @@ def _empty_detail() -> OpsDatasetDetailData:
         schedule_source_status="ok",
         refresh_policy=None,
         recent_runs=[],
+        recent_runs_next_cursor=None,
+        pipeline_history_url=(
+            "/v1/ops/pipeline/executions?provider=python-mois-api&"
+            "dataset_key=mois_license_features_bulk"
+        ),
         recent_events=[],
         dataset_issues=OpsIssueSummary(open_count=0, severity_counts={}),
         provider_issues=OpsIssueSummary(open_count=0, severity_counts={}),
@@ -162,6 +164,7 @@ def _empty_detail() -> OpsDatasetDetailData:
 @pytest.mark.unit
 def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
+    operation_states = {"queued", "running", "done", "failed", "cancelled"}
     assert "/v1/ops/datasets" in spec["paths"]
     row = spec["components"]["schemas"]["OpsDatasetGridRow"]
     assert {
@@ -178,6 +181,51 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert {"truncated", "total_items", "returned_items", "budget"} <= set(
         preview["properties"]
     )
+    latest = spec["components"]["schemas"]["OpsDatasetLatestExecution"]
+    assert {
+        "id",
+        "detail_url",
+        "pair_status",
+        "operation_member_id",
+        "provider_datasets",
+        "projected_job",
+        "cancellation",
+    } <= set(latest["properties"])
+    assert {"operation_member_id", "projected_job", "cancellation"} <= set(
+        latest["required"]
+    )
+    assert {
+        "started_at",
+        "finished_at",
+        "dagster_run_id",
+        "dagster_run_status",
+        "trigger_kind",
+        "operation_registry_version",
+        "error_message",
+    } <= set(latest["required"])
+    assert latest["properties"]["id"]["format"] == "uuid"
+    assert latest["properties"]["operation_member_id"]["format"] == "uuid"
+    assert set(latest["properties"]["status"]["enum"]) == operation_states
+    assert set(latest["properties"]["pair_status"]["enum"]) == operation_states
+    assert "status_source" not in latest["properties"]
+    pair = spec["components"]["schemas"]["OpsDatasetProviderDataset"]
+    assert "operation_member_id" in pair["required"]
+    assert pair["properties"]["operation_member_id"]["format"] == "uuid"
+    assert set(pair["properties"]["status"]["enum"]) == operation_states
+    assert "status_source" not in pair["properties"]
+    projected = spec["components"]["schemas"]["OpsDatasetProjectedJob"]
+    assert projected["properties"]["id"]["format"] == "uuid"
+    assert set(projected["properties"]["status"]["enum"]) == operation_states
+    detail = spec["components"]["schemas"]["OpsDatasetDetailData"]
+    assert {"recent_runs_next_cursor", "pipeline_history_url"} <= set(
+        detail["properties"]
+    )
+    assert "recent_runs_next_cursor" in detail["required"]
+    cursor_schema = detail["properties"]["recent_runs_next_cursor"]
+    assert {item["type"] for item in cursor_schema["anyOf"]} == {
+        "string",
+        "null",
+    }
 
 
 @pytest.mark.unit
@@ -219,7 +267,10 @@ def test_detail_endpoint_uses_application_service(
         "/v1/ops/datasets/python-mois-api/mois_license_features_bulk"
     )
     assert response.status_code == 200
-    assert response.json()["data"]["recent_runs_coverage"] == "update_requests_only"
+    assert (
+        response.json()["data"]["recent_runs_coverage"]
+        == "db_recorded_canonical_operations"
+    )
 
 
 @pytest.mark.unit
@@ -352,20 +403,50 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     latest = DatasetLatestExecution(
         provider=state.provider,
         dataset_key=state.dataset_key,
-        kind="update_request",
-        execution_id="11111111-1111-1111-1111-111111111111",
-        status="running",
-        status_source="update_request",
-        job_status="running",
-        created_at=_NOW,
-        started_at=_NOW,
-        finished_at=None,
-        dagster_run_id="run-1",
-        job_id="22222222-2222-2222-2222-222222222222",
-        request_id="11111111-1111-1111-1111-111111111111",
-        progress=30,
-        current_stage="fetch",
-        error_message=None,
+        execution=PipelineExecution(
+            kind="update_request",
+            id="11111111-1111-1111-1111-111111111111",
+            status="running",
+            created_at=_NOW,
+            providers=(state.provider,),
+            dataset_keys=(state.dataset_key,),
+            provider_datasets=(),
+            progress=None,
+            current_stage=None,
+            scope_type="provider_dataset",
+            priority=50,
+            run_mode="queued",
+            operator=None,
+            error_message=None,
+            started_at=_NOW,
+            finished_at=None,
+            dagster_run_id="run-1",
+            dagster_run_status=None,
+            trigger_kind="update_request",
+            operation_registry_version=None,
+            requested_job_id="22222222-2222-2222-2222-222222222222",
+            linked_job_count=1,
+            projected_job=PipelineProjectedJob(
+                id="22222222-2222-2222-2222-222222222222",
+                job_kind="feature_update_request",
+                status="running",
+                progress=0,
+                current_stage=None,
+                error_message=None,
+                created_at=_NOW,
+                started_at=_NOW,
+                finished_at=None,
+                dagster_run_id="run-1",
+                dagster_run_status=None,
+                trigger_kind="update_request",
+                operation_registry_version=None,
+                load_batch_id=None,
+                parent_job_id=None,
+                depth=0,
+            ),
+        ),
+        operation_member_id="22222222-2222-2222-2222-222222222222",
+        pair_status="running",
     )
     schedule_index = DatasetScheduleIndex(
         source_status="ok",
@@ -429,7 +510,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     assert row.provider_issues.open_count == 1
     assert row.latest_execution is not None
     assert row.latest_execution.status == "running"
-    assert row.latest_execution.job_status == "running"
+    assert row.latest_execution.pair_status == "running"
     assert calls["latest"] == 1
 
 
@@ -455,64 +536,3 @@ def test_freshness_unknown_without_explicit_sla_and_disabled_precedes_never_run(
     assert due.state == "overdue"
     assert due.is_overdue is True
     assert due.overdue_by_seconds == 0
-
-
-@pytest.mark.unit
-def test_recent_run_uses_request_then_linked_job_fallbacks() -> None:
-    request = FeatureUpdateRequest(
-        request_id="11111111-1111-1111-1111-111111111111",
-        scope_type="provider_dataset",
-        scope={
-            "type": "provider_dataset",
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
-        providers=(),
-        dataset_keys=(),
-        update_policy={},
-        run_mode="queued",
-        priority=50,
-        status="failed",
-        dry_run=False,
-        matched_scope={},
-        job_id="22222222-2222-2222-2222-222222222222",
-        dagster_run_id=None,
-        operator=None,
-        reason=None,
-        error_message=None,
-        created_at=_NOW,
-        started_at=_NOW,
-        finished_at=_NOW,
-        updated_at=_NOW,
-    )
-    job = OpsImportJob(
-        job_id="22222222-2222-2222-2222-222222222222",
-        kind="feature_update_request",
-        load_batch_id=None,
-        parent_job_id=None,
-        payload={},
-        status="failed",
-        progress=20,
-        current_stage="fetch",
-        source_checksum=None,
-        error_message="child failed",
-        created_at=_NOW,
-        started_at=_NOW,
-        finished_at=_NOW,
-        heartbeat_at=_NOW,
-        dagster_run_id="dagster-child",
-    )
-
-    summary = _run_summary(request, job)
-
-    assert summary.dagster_run_id == "dagster-child"
-    assert summary.error_message == "child failed"
-
-    request_value = replace(
-        request,
-        dagster_run_id="dagster-request",
-        error_message="request failed",
-    )
-    request_summary = _run_summary(request_value, job)
-    assert request_summary.dagster_run_id == "dagster-request"
-    assert request_summary.error_message == "request failed"

@@ -5,6 +5,47 @@
 
 ## [Unreleased]
 
+### canonical root/exact-pair projection (2026-07-15, ADR-064 T-ADM-C3e-A2)
+
+- **CHANGED**: pipeline timeline·detail·overview와 datasets grid/detail이 C3b lineage를
+  공유한다. exact `provider_datasets[]`는 typed member의 상태와 member id를 노출하고,
+  direct scope는 같은 linked member의 `sync_scope` metadata만 보강한다. import job의 typed provider/dataset pair가
+  실행 identity의 유일한 정본이며 event의 같은 필드는 감사 메타데이터로만 남는다.
+- **CHANGED**: 모든 feature update request는 canonical import job을 `NOT NULL/RESTRICT` FK로
+  소유한다. migration은 writer table을 먼저 잠그고 기존 jobless·scope 불일치 request를 새 job으로
+  재연결하되 active/cancellation connected branch는 중단한다. persisted dry-run을 금지하고
+  `dry_run` DB 컬럼을 제거했다. DB CHECK/trigger는 OpenAPI와 같은 6종 scope의 exact canonical
+  shape를 강제하고 provider/dataset 필터는 JSONB에서 typed `TEXT[]`로 전환해
+  32/64개·trimmed non-empty 문자열 규칙을 적용한다. direct pair와
+  `kind=feature_update_request` job 일치, non-direct unpaired shape, job kind/pair 불변성을
+  강제한다. 기존 reserved Dagster job 연결도 canonical job으로 재연결한다. Python
+  client/repository도 같은 validator를 preview와 enqueue 전에 사용한다.
+- **CHANGED**: feature update request의 lifecycle·Dagster owner·취소 marker·오류·실행 시각은
+  canonical import job 한 행만 소유한다. request는 immutable 입력/감사와 `matched_scope`, 양수
+  `generation`만 보존하고, start/heartbeat/finish/requeue는 request+job row lock 아래 generation과
+  trimmed non-empty Dagster run owner를 함께 CAS한다. queued job은 owner가 없어야 하고 running
+  job은 owner가 반드시 있어야 한다.
+- **CHANGED**: 연결 request가 없는 terminal feature-update job의 양방향 연결 component 전체에
+  `quarantined_at`과 고정 사유를 기록한다. 원래 `kind`·`payload`는 보존하고 pipeline/legacy ops/live/
+  Dagster engine read와 generic writer에서 제외한다. DB trigger는 runtime 격리 표식 생성·변경, 격리 행 UPDATE/DELETE/event
+  추가와 새 child attach를 거부한다.
+- **CHANGED**: 취소 대상 member identity를 `job_id` 하나로 통일했다. request ID는 root correlation에만
+  남고, frozen member는 `(cancellation_id, job_id)` PK와 import job `RESTRICT` FK를 사용한다.
+- **CHANGED**: 갱신 요청의 영속 생성은 201 endpoint, 비영속 실행 계획은 별도 200 `/preview`
+  endpoint로 분리했다. `sigungu_by_radius.match`는 실제 kor-travel-geo 실행 의미가 있는
+  `intersects`만 허용한다.
+- **REMOVED**: admin UI의 구 `/admin/feature-update-requests` 목록·상세 redirect route를
+  삭제했다. client 구현도 정본 `/admin/features/update-requests` route 아래에서만 소유한다.
+- **CHANGED**: feature-load run의 `projected_job`은 root 자체로 고정하고 pair child 상태는
+  exact pair에만 둔다. overview는 canonical root 기준 `operations_by_status`,
+  `active_operations`, `failed_operations_24h`로 원자 전환했다.
+- **CHANGED**: dataset별 최신 실행은 전체 canonical root에서 한 번에 계산하며, 상세 이력은
+  pipeline과 같은 keyset cursor와 history URL을 제공한다. provider와 dataset 표시 배열을
+  교차 조합하지 않는다.
+- **ADDED**: 무필터·dataset-only·exact pair import job event 감사 조회에 각 시간순 index와
+  고정-clause query shape를 추가했다. projection용 event identity index와 runtime event fallback은
+  제거했다. direct scope JSON expression index도 typed job index로 통합했다.
+
 ### canonical provider operation 영속화 (2026-07-15, ADR-064 T-ADM-C3e-A1)
 
 - **ADDED**: Alembic 0051과 immutable Python API로 Dagster feature load를 run root
@@ -40,14 +81,16 @@
 
 ### admin ops pipeline root projection (2026-07-15, ADR-064 T-ADM-C3b)
 
-- **CHANGED**: `GET /v1/ops/pipeline/executions`가 import job hierarchy를 job별
-  가장 가까운 update request anchor branch와 standalone partition으로 접는다.
-  batch root 아래 서로 다른 request sibling, nested request anchor, 같은 anchor의
-  중복 request를 섞지 않고 각 job을 정확히 한 partition에 귀속한다.
+- **CHANGED**: `GET /v1/ops/pipeline/executions`가 import job hierarchy를 canonical
+  update request root와 standalone partition으로 접는다. request↔job 양방향 1:1과
+  request job의 root shape를 DB가 강제하므로 각 job은 정확히 한 root에 귀속된다.
+- **CHANGED**: feature update request의 lifecycle 정본을 `ops.import_jobs` 한 곳으로 통합했다.
+  request 테이블의 중복 status/run/cancellation/error/time 컬럼을 제거하고 REST·queue·projection·
+  cancellation은 unique job JOIN을 사용한다. 재시도 CAS는 timestamp 대신 양수 `generation`을 쓴다.
 - **CHANGED**: 목록 item은 저장 순서·중복을 유지하면서 direct scope 누락값을 보완한
   `providers[]`/`dataset_keys[]`, provider/dataset/sync_scope pair를 보존하는
   `provider_dataset`,
-  `linked_job_count`, `requested_job_id`, `lineage_owner`, root와 상태를 분리한
+  `linked_job_count`, `requested_job_id`, root와 상태를 분리한
   `projected_job`을 반환한다. standalone identity는 자유 payload가 아니라 해당
   미소유 partition의 import job event 실컬럼만 사용한다.
 - **CHANGED**: 실행 목록 cursor를

@@ -53,8 +53,9 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.schema import conv
 
 from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_EVENT_KIND_VALUES,
@@ -66,8 +67,8 @@ from kortravelmap.core.managed_file_states import (
 )
 from kortravelmap.core.offline_upload_states import OFFLINE_UPLOAD_STATE_VALUES
 from kortravelmap.core.pipeline_cancellation_states import (
-    PIPELINE_CANCELLATION_MEMBER_KIND_VALUES,
     PIPELINE_CANCELLATION_RESULT_VALUES,
+    PIPELINE_CANCELLATION_ROOT_KIND_VALUES,
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
 
@@ -169,8 +170,7 @@ class FeatureRow(Base):
             name="ck_features_user_change_kind",
         ),
         CheckConstraint(
-            "user_change_status IS NULL OR user_change_status IN "
-            "('pending','applied','rejected')",
+            "user_change_status IS NULL OR user_change_status IN ('pending','applied','rejected')",
             name="ck_features_user_change_status",
         ),
         CheckConstraint(
@@ -187,15 +187,30 @@ class FeatureRow(Base):
             ")",
             name="coord_precision",
         ),
-        Index("idx_features_coord_gist", "coord", postgresql_using="gist",
-              postgresql_where=text("deleted_at IS NULL")),
-        Index("idx_features_coord_5179_gist", "coord_5179",
-              postgresql_using="gist",
-              postgresql_where=text("deleted_at IS NULL")),
-        Index("idx_features_geom_gist", "geom", postgresql_using="gist",
-              postgresql_where=text("deleted_at IS NULL AND geom IS NOT NULL")),
-        Index("idx_features_kind_category", "kind", "category",
-              postgresql_where=text("deleted_at IS NULL")),
+        Index(
+            "idx_features_coord_gist",
+            "coord",
+            postgresql_using="gist",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_features_coord_5179_gist",
+            "coord_5179",
+            postgresql_using="gist",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_features_geom_gist",
+            "geom",
+            postgresql_using="gist",
+            postgresql_where=text("deleted_at IS NULL AND geom IS NOT NULL"),
+        ),
+        Index(
+            "idx_features_kind_category",
+            "kind",
+            "category",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         Index(
             "idx_features_updated_keyset",
             text("updated_at DESC"),
@@ -219,14 +234,28 @@ class FeatureRow(Base):
             ),
         ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
-        Index("idx_features_sigungu", "sigungu_code", "kind",
-              postgresql_where=text("deleted_at IS NULL")),
-        Index("idx_features_parent", "parent_feature_id",
-              postgresql_where=text("parent_feature_id IS NOT NULL")),
-        Index("idx_features_sibling", "sibling_group_id",
-              postgresql_where=text("sibling_group_id IS NOT NULL")),
-        Index("idx_features_name_trgm", "name", postgresql_using="gin",
-              postgresql_ops={"name": "x_extension.gin_trgm_ops"}),
+        Index(
+            "idx_features_sigungu",
+            "sigungu_code",
+            "kind",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_features_parent",
+            "parent_feature_id",
+            postgresql_where=text("parent_feature_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_features_sibling",
+            "sibling_group_id",
+            postgresql_where=text("sibling_group_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_features_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "x_extension.gin_trgm_ops"},
+        ),
         Index("idx_features_data_origin", "data_origin", "data_version"),
         Index(
             "idx_features_user_deleted",
@@ -247,8 +276,7 @@ class FeatureRow(Base):
     coord_5179: Mapped[Any | None] = mapped_column(
         Geometry("POINT", srid=5179),
         Computed(
-            "CASE WHEN coord IS NULL THEN NULL "
-            "ELSE ST_Transform(coord, 5179) END",
+            "CASE WHEN coord IS NULL THEN NULL ELSE ST_Transform(coord, 5179) END",
             persisted=True,
         ),
     )
@@ -256,7 +284,9 @@ class FeatureRow(Base):
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     legal_dong_code: Mapped[str | None] = mapped_column(String(10))
     road_name_code: Mapped[str | None] = mapped_column(String)
@@ -267,32 +297,45 @@ class FeatureRow(Base):
 
     # 표시.
     urls: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     marker_icon: Mapped[str | None] = mapped_column(String)
     marker_color: Mapped[str | None] = mapped_column(String)
 
     # 관계.
     parent_feature_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
     )
     sibling_group_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
 
     # 상세 (ADR-018 — Pydantic DETAIL_MODELS 직렬화).
     detail: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     raw_refs: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
     status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'active'"),
+        String,
+        nullable=False,
+        server_default=text("'active'"),
     )
     data_origin: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'provider'"),
+        String,
+        nullable=False,
+        server_default=text("'provider'"),
     )
     data_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0"),
+        Integer,
+        nullable=False,
+        server_default=text("0"),
     )
     user_change_kind: Mapped[str | None] = mapped_column(String)
     user_change_status: Mapped[str | None] = mapped_column(String)
@@ -302,10 +345,14 @@ class FeatureRow(Base):
     user_change_reason: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -341,12 +388,16 @@ class FeatureVersionRow(Base):
     origin: Mapped[str] = mapped_column(String, nullable=False)
     change_kind: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     created_by: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -396,12 +447,8 @@ class SourceEntityRow(Base):
     source_entity_type: Mapped[str] = mapped_column(String, nullable=False)
     source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
     current_source_record_key: Mapped[str | None] = mapped_column(String)
-    first_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class NoticeLifecycleScopeRow(Base):
@@ -420,9 +467,7 @@ class NoticeLifecycleScopeRow(Base):
     dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
     source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
     mode: Mapped[str] = mapped_column(String, nullable=False)
-    applied_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     state_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -449,9 +494,7 @@ class NoticeLineageStateRow(Base):
     source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
     lineage_key: Mapped[str] = mapped_column(String, primary_key=True)
     present: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -466,8 +509,11 @@ class SourceRecordRow(Base):
     __tablename__ = "source_records"
     __table_args__ = (
         UniqueConstraint(
-            "provider", "dataset_key", "source_entity_type",
-            "source_entity_id", "raw_payload_hash",
+            "provider",
+            "dataset_key",
+            "source_entity_type",
+            "source_entity_id",
+            "raw_payload_hash",
             name="source_records",
         ),
         UniqueConstraint(
@@ -477,22 +523,29 @@ class SourceRecordRow(Base):
         ),
         Index(
             "idx_source_records_provider_dataset_entity",
-            "provider", "dataset_key", "source_entity_type", "source_entity_id",
+            "provider",
+            "dataset_key",
+            "source_entity_type",
+            "source_entity_id",
         ),
         Index(
-            "idx_source_records_imported_at_brin", "imported_at",
+            "idx_source_records_imported_at_brin",
+            "imported_at",
             postgresql_using="brin",
         ),
         Index(
-            "idx_source_records_fetched_at_brin", "fetched_at",
+            "idx_source_records_fetched_at_brin",
+            "fetched_at",
             postgresql_using="brin",
         ),
         Index(
-            "idx_source_records_last_seen_at_brin", "last_seen_at",
+            "idx_source_records_last_seen_at_brin",
+            "last_seen_at",
             postgresql_using="brin",
         ),
         Index(
-            "idx_source_records_expires_at", "expires_at",
+            "idx_source_records_expires_at",
+            "expires_at",
             postgresql_where=text("expires_at IS NOT NULL"),
         ),
         Index(
@@ -525,17 +578,24 @@ class SourceRecordRow(Base):
     raw_longitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
     raw_latitude: Mapped[Any | None] = mapped_column(Numeric(12, 8))
     raw_data: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     raw_payload_hash: Mapped[str] = mapped_column(String, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
+        DateTime(timezone=True),
+        nullable=False,
     )
     imported_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -565,13 +625,16 @@ class SourceLinkRow(Base):
             name="source_links_confidence",
         ),
         Index(
-            "idx_source_links_entity", "source_entity_key",
+            "idx_source_links_entity",
+            "source_entity_key",
         ),
         Index(
-            "idx_source_links_role", "source_role",
+            "idx_source_links_role",
+            "source_role",
         ),
         Index(
-            "idx_source_links_primary", "feature_id",
+            "idx_source_links_primary",
+            "feature_id",
             postgresql_where=text("is_primary_source"),
         ),
         {"schema": "provider_sync"},
@@ -591,15 +654,20 @@ class SourceLinkRow(Base):
         primary_key=True,
     )
     source_role: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'enrichment'"),
+        String,
+        nullable=False,
+        server_default=text("'enrichment'"),
     )
     match_method: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False)
     is_primary_source: Mapped[bool] = mapped_column(
-        nullable=False, server_default=text("false"),
+        nullable=False,
+        server_default=text("false"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -634,14 +702,20 @@ class CuratedThemeRow(Base):
     theme_slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     theme_name: Mapped[str] = mapped_column(Text, nullable=False)
     theme_description: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''"),
+        Text,
+        nullable=False,
+        server_default=text("''"),
     )
     theme_group: Mapped[str] = mapped_column(Text, nullable=False)
     default_curated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"),
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
     )
     visibility: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'admin_only'"),
+        Text,
+        nullable=False,
+        server_default=text("'admin_only'"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
@@ -650,10 +724,14 @@ class CuratedThemeRow(Base):
         server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -672,15 +750,11 @@ class CuratedSourceRow(Base):
             name="ck_curated_sources_source_kind",
         ),
         CheckConstraint(
-            "update_cycle IN ("
-            "'realtime','daily','weekly','monthly','annual','one_time','unknown'"
-            ")",
+            "update_cycle IN ('realtime','daily','weekly','monthly','annual','one_time','unknown')",
             name="ck_curated_sources_update_cycle",
         ),
         CheckConstraint(
-            "provider_status IN ("
-            "'implemented','provider_needed','manual_only','deprecated'"
-            ")",
+            "provider_status IN ('implemented','provider_needed','manual_only','deprecated')",
             name="ck_curated_sources_provider_status",
         ),
         CheckConstraint(
@@ -709,7 +783,9 @@ class CuratedSourceRow(Base):
     source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     license: Mapped[str | None] = mapped_column(Text)
     update_cycle: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'unknown'"),
+        Text,
+        nullable=False,
+        server_default=text("'unknown'"),
     )
     last_source_modified_at: Mapped[Any | None] = mapped_column(Date)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -717,7 +793,9 @@ class CuratedSourceRow(Base):
     row_count: Mapped[int | None] = mapped_column(Integer)
     freshness_note: Mapped[str | None] = mapped_column(Text)
     provider_status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'implemented'"),
+        Text,
+        nullable=False,
+        server_default=text("'implemented'"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
@@ -726,10 +804,14 @@ class CuratedSourceRow(Base):
         server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -784,20 +866,28 @@ class CuratedSourceRuleRow(Base):
     place_kind: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str | None] = mapped_column(Text)
     region_scope: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     # 단일 source를 detail JSON 값으로 분할하는 선택 필터(예: concierge youtube
     # channel/playlist 그룹핑). {"path": ["payload","kor_travel_concierge",...],
     # "value": "<grouping-value>"}. NULL이면 미적용.
     detail_selector: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     default_action: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'candidate'"),
+        Text,
+        nullable=False,
+        server_default=text("'candidate'"),
     )
     priority: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0"),
+        Integer,
+        nullable=False,
+        server_default=text("0"),
     )
     enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true"),
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
@@ -806,10 +896,14 @@ class CuratedSourceRuleRow(Base):
         server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -835,9 +929,7 @@ class CuratedFeatureRow(Base):
             name="ck_curated_features_curation_relation",
         ),
         CheckConstraint(
-            "reuse_policy IN ("
-            "'allowed','blocked','manual_review'"
-            ")",
+            "reuse_policy IN ('allowed','blocked','manual_review')",
             name="ck_curated_features_reuse_policy",
         ),
         CheckConstraint(
@@ -902,10 +994,14 @@ class CuratedFeatureRow(Base):
         ),
     )
     curation_status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'candidate'"),
+        Text,
+        nullable=False,
+        server_default=text("'candidate'"),
     )
     selection_origin: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'source_rule'"),
+        Text,
+        nullable=False,
+        server_default=text("'source_rule'"),
     )
     selected_by: Mapped[str | None] = mapped_column(Text)
     selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -913,18 +1009,26 @@ class CuratedFeatureRow(Base):
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
     rank_score: Mapped[Any] = mapped_column(
-        Numeric(10, 4), nullable=False, server_default=text("0"),
+        Numeric(10, 4),
+        nullable=False,
+        server_default=text("0"),
     )
     display_title: Mapped[str | None] = mapped_column(Text)
     display_summary: Mapped[str | None] = mapped_column(Text)
     curation_relation: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'nearby_option'"),
+        Text,
+        nullable=False,
+        server_default=text("'nearby_option'"),
     )
     reuse_policy: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'manual_review'"),
+        Text,
+        nullable=False,
+        server_default=text("'manual_review'"),
     )
     content_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1"),
+        Integer,
+        nullable=False,
+        server_default=text("1"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
@@ -933,10 +1037,14 @@ class CuratedFeatureRow(Base):
         server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -946,9 +1054,7 @@ class CurationCollectionRow(Base):
 
     __tablename__ = "curation_collections"
     __table_args__ = (
-        CheckConstraint(
-            "btrim(collection_key) <> ''", name="key"
-        ),
+        CheckConstraint("btrim(collection_key) <> ''", name="key"),
         CheckConstraint("btrim(title) <> ''", name="title"),
         CheckConstraint(
             "status IN ('draft','published','archived')",
@@ -994,13 +1100,9 @@ class CurationCollectionRow(Base):
         ForeignKey("feature.curated_sources.source_id", ondelete="SET NULL"),
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    edition_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    edition_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'draft'")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
     visibility: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'admin_only'")
     )
@@ -1023,9 +1125,7 @@ class CurationItemRow(Base):
 
     __tablename__ = "curation_items"
     __table_args__ = (
-        CheckConstraint(
-            "btrim(external_item_id) <> ''", name="external_id"
-        ),
+        CheckConstraint("btrim(external_item_id) <> ''", name="external_id"),
         CheckConstraint("btrim(place_name) <> ''", name="place_name"),
         CheckConstraint(
             "status IN ('candidate','included','rejected','archived')",
@@ -1089,19 +1189,13 @@ class CurationItemRow(Base):
     )
     source_record_key: Mapped[str | None] = mapped_column(
         Text,
-        ForeignKey(
-            "provider_sync.source_records.source_record_key", ondelete="SET NULL"
-        ),
+        ForeignKey("provider_sync.source_records.source_record_key", ondelete="SET NULL"),
     )
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
     place_name: Mapped[str] = mapped_column(Text, nullable=False)
     address_hint: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'candidate'")
-    )
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     item_title: Mapped[str | None] = mapped_column(Text)
     item_summary: Mapped[str | None] = mapped_column(Text)
     curation_relation: Mapped[str] = mapped_column(
@@ -1155,10 +1249,14 @@ class CuratedFeatureDetailSnapshotRow(Base):
     etag: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     materialized_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1177,7 +1275,8 @@ class ProviderSyncStateRow(Base):
             name="provider_sync_state_status",
         ),
         Index(
-            "idx_sync_state_next_run", "next_run_after",
+            "idx_sync_state_next_run",
+            "next_run_after",
             postgresql_where=text("status='active'"),
         ),
         {"schema": "provider_sync"},
@@ -1187,10 +1286,14 @@ class ProviderSyncStateRow(Base):
     dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
     sync_scope: Mapped[str] = mapped_column(String, primary_key=True)
     status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'active'"),
+        String,
+        nullable=False,
+        server_default=text("'active'"),
     )
     cursor: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     last_success_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -1199,13 +1302,17 @@ class ProviderSyncStateRow(Base):
         DateTime(timezone=True),
     )
     consecutive_failures: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0"),
+        Integer,
+        nullable=False,
+        server_default=text("0"),
     )
     next_run_after: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1247,7 +1354,9 @@ class FeatureConsistencyReportRow(Base):
     )
     batch_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     severity_max: Mapped[str] = mapped_column(String, nullable=False)
@@ -1318,13 +1427,17 @@ class DedupReviewQueueRow(Base):
     spatial_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
     category_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
     status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'pending'"),
+        String,
+        nullable=False,
+        server_default=text("'pending'"),
     )
     decision_reason: Mapped[str | None] = mapped_column(String)
     reviewed_by: Mapped[str | None] = mapped_column(String)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1398,13 +1511,17 @@ class EnrichmentReviewQueueRow(Base):
     name_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
     source_record: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'pending'"),
+        String,
+        nullable=False,
+        server_default=text("'pending'"),
     )
     decision_reason: Mapped[str | None] = mapped_column(String)
     reviewed_by: Mapped[str | None] = mapped_column(String)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1439,9 +1556,7 @@ class FeatureOverrideRow(Base):
             "idx_overrides_prevent_reactivation",
             "feature_id",
             "field_path",
-            postgresql_where=text(
-                "status = 'active' AND prevent_provider_reactivation"
-            ),
+            postgresql_where=text("status = 'active' AND prevent_provider_reactivation"),
         ),
         {"schema": "ops"},
     )
@@ -1465,19 +1580,23 @@ class FeatureOverrideRow(Base):
     )
     field_path: Mapped[str] = mapped_column(Text, nullable=False)
     source_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    override_value: Mapped[dict[str, Any] | str | int | float | bool | None] = (
-        mapped_column(JSONB)
-    )
+    override_value: Mapped[dict[str, Any] | str | int | float | bool | None] = mapped_column(JSONB)
     prevent_provider_reactivation: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"),
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
     )
     status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'active'"),
+        Text,
+        nullable=False,
+        server_default=text("'active'"),
     )
     reason: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1525,11 +1644,15 @@ class FeatureChangeRequestRow(Base):
     feature_id: Mapped[str] = mapped_column(String, nullable=False)
     action: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'pending'"),
+        String,
+        nullable=False,
+        server_default=text("'pending'"),
     )
     review_mode: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     reason: Mapped[str | None] = mapped_column(Text)
     requested_by: Mapped[str | None] = mapped_column(Text)
@@ -1537,7 +1660,9 @@ class FeatureChangeRequestRow(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1588,8 +1713,25 @@ class ImportJobRow(Base):
             name="ck_import_jobs_trigger_kind",
         ),
         CheckConstraint(
-            "operation_registry_version IS NULL "
-            "OR kind = 'provider_feature_load_run'",
+            "kind <> 'feature_update_request' OR quarantined_at IS NOT NULL OR "
+            "(parent_job_id IS NULL AND load_batch_id IS NULL "
+            "AND trigger_kind = 'update_request' "
+            "AND operation_registry_version IS NULL AND dagster_run_status IS NULL "
+            "AND payload = '{}'::jsonb "
+            "AND (dagster_run_id IS NULL OR (dagster_run_id = btrim(dagster_run_id) "
+            "AND dagster_run_id <> '')) "
+            "AND (status <> 'queued' OR dagster_run_id IS NULL) "
+            "AND (status <> 'running' OR dagster_run_id IS NOT NULL))",
+            name=conv("ck_import_jobs_update_request_shape"),
+        ),
+        CheckConstraint(
+            "(quarantined_at IS NULL AND quarantine_reason IS NULL) OR "
+            "(quarantined_at IS NOT NULL AND "
+            "quarantine_reason = 'unlinked_feature_update_component')",
+            name=conv("ck_import_jobs_quarantine_shape"),
+        ),
+        CheckConstraint(
+            "operation_registry_version IS NULL OR kind = 'provider_feature_load_run'",
             name="ck_import_jobs_registry_version_owner",
         ),
         CheckConstraint(
@@ -1633,7 +1775,22 @@ class ImportJobRow(Base):
             text("job_id DESC"),
         ),
         Index(
-            "idx_import_jobs_heartbeat", "heartbeat_at",
+            "idx_import_jobs_feature_update_queue",
+            "job_id",
+            postgresql_where=text(
+                "kind = 'feature_update_request' AND status = 'queued' "
+                "AND cancellation_id IS NULL"
+            ),
+        ),
+        Index(
+            "idx_import_jobs_quarantined",
+            text("quarantined_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text("quarantined_at IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_jobs_heartbeat",
+            "heartbeat_at",
             postgresql_where=text("status='running'"),
         ),
         Index(
@@ -1659,9 +1816,7 @@ class ImportJobRow(Base):
             "uq_import_jobs_feature_run",
             "dagster_run_id",
             unique=True,
-            postgresql_where=text(
-                "kind = 'provider_feature_load_run' AND parent_job_id IS NULL"
-            ),
+            postgresql_where=text("kind = 'provider_feature_load_run' AND parent_job_id IS NULL"),
         ),
         Index(
             "uq_import_jobs_feature_run_pair",
@@ -1669,9 +1824,7 @@ class ImportJobRow(Base):
             "provider",
             "dataset_key",
             unique=True,
-            postgresql_where=text(
-                "kind = 'provider_feature_load' AND parent_job_id IS NOT NULL"
-            ),
+            postgresql_where=text("kind = 'provider_feature_load' AND parent_job_id IS NOT NULL"),
         ),
         Index(
             "idx_import_jobs_provider_dataset_created",
@@ -1679,9 +1832,7 @@ class ImportJobRow(Base):
             "dataset_key",
             text("created_at DESC"),
             text("job_id DESC"),
-            postgresql_where=text(
-                "provider IS NOT NULL AND dataset_key IS NOT NULL"
-            ),
+            postgresql_where=text("provider IS NOT NULL AND dataset_key IS NOT NULL"),
         ),
         Index(
             "idx_import_jobs_dataset_created",
@@ -1718,13 +1869,19 @@ class ImportJobRow(Base):
         ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
     )
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'queued'"),
+        Text,
+        nullable=False,
+        server_default=text("'queued'"),
     )
     progress: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0"),
+        Integer,
+        nullable=False,
+        server_default=text("0"),
     )
     current_stage: Mapped[str | None] = mapped_column(Text)
     source_checksum: Mapped[str | None] = mapped_column(Text)
@@ -1748,11 +1905,15 @@ class ImportJobRow(Base):
     )
     cancellation_requested_by: Mapped[str | None] = mapped_column(Text)
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
+    quarantined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    quarantine_reason: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1771,6 +1932,11 @@ class ImportJobEventRow(Base):
             name="ck_import_job_events_level",
         ),
         Index(
+            "idx_import_job_events_time",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+        ),
+        Index(
             "idx_import_job_events_job_time",
             "job_id",
             text("occurred_at DESC"),
@@ -1782,6 +1948,21 @@ class ImportJobEventRow(Base):
             text("occurred_at DESC"),
             text("event_id DESC"),
             postgresql_where=text("provider IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_job_events_dataset_time",
+            "dataset_key",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+            postgresql_where=text("dataset_key IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_job_events_provider_dataset_time",
+            "provider",
+            "dataset_key",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+            postgresql_where=text("provider IS NOT NULL AND dataset_key IS NOT NULL"),
         ),
         Index(
             "idx_import_job_events_level_time",
@@ -1810,10 +1991,14 @@ class ImportJobEventRow(Base):
     code: Mapped[str | None] = mapped_column(Text)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1861,7 +2046,9 @@ class OfflineUploadRow(Base):
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
     sync_scope: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'default'"),
+        Text,
+        nullable=False,
+        server_default=text("'default'"),
     )
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1871,7 +2058,9 @@ class OfflineUploadRow(Base):
     detected_format: Mapped[str | None] = mapped_column(Text)
     detected_encoding: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'uploaded'"),
+        Text,
+        nullable=False,
+        server_default=text("'uploaded'"),
     )
     validation_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
@@ -1883,10 +2072,14 @@ class OfflineUploadRow(Base):
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -1898,9 +2091,8 @@ class OfflineUploadRow(Base):
 class FeatureUpdateRequestRow(Base):
     """``ops.feature_update_requests`` row mapping — Dagster update request 큐.
 
-    Admin/OpenAPI가 만든 지리 범위/provider 범위 업데이트 요청을 저장하고
-    ``ops.import_jobs``/Dagster run과 연결한다. raw SQL repository와 상태 전이는
-    T-206b에서 별도 구현한다.
+    Admin/OpenAPI가 만든 지리 범위/provider 범위 업데이트 입력과 generation을 저장한다.
+    lifecycle/Dagster/cancellation은 unique ``job_id``의 canonical import job 단일 정본이다.
     """
 
     __tablename__ = "feature_update_requests"
@@ -1917,32 +2109,69 @@ class FeatureUpdateRequestRow(Base):
             name="ck_feature_update_run_mode",
         ),
         CheckConstraint(
-            "status IN ('queued','running','done','failed','cancelled')",
-            name="ck_feature_update_status",
+            "ops.is_valid_feature_update_scope(scope_type, scope)",
+            name=conv("ck_feature_update_requests_scope_shape"),
         ),
         CheckConstraint(
-            "(cancellation_id IS NULL AND cancellation_requested_at IS NULL "
-            "AND cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR "
-            "(cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL "
-            "AND cancellation_requested_by IS NOT NULL)",
-            name="ck_feature_update_requests_cancellation_marker",
+            "ops.is_valid_feature_update_filter_array(providers, 32)",
+            name=conv("ck_feature_update_requests_providers_shape"),
+        ),
+        CheckConstraint(
+            "ops.is_valid_feature_update_filter_array(dataset_keys, 64)",
+            name=conv("ck_feature_update_requests_dataset_keys_shape"),
+        ),
+        CheckConstraint(
+            "ops.is_valid_feature_update_policy(update_policy)",
+            name=conv("ck_feature_update_requests_update_policy_shape"),
+        ),
+        CheckConstraint(
+            "scope_type <> 'provider_dataset' OR "
+            "(cardinality(providers) = 0 AND cardinality(dataset_keys) = 0)",
+            name=conv("ck_feature_update_requests_direct_filters_empty"),
+        ),
+        CheckConstraint(
+            "priority BETWEEN 0 AND 1000",
+            name=conv("ck_feature_update_requests_priority_range"),
+        ),
+        CheckConstraint(
+            "generation > 0",
+            name=conv("ck_feature_update_requests_generation_positive"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(matched_scope) = 'object'",
+            name=conv("ck_feature_update_requests_matched_scope_object"),
+        ),
+        CheckConstraint(
+            "reason IS NULL OR (reason <> '' AND reason = btrim(reason) "
+            "AND reason !~ '^[[:space:]]|[[:space:]]$' "
+            "AND char_length(reason) <= 500)",
+            name=conv("ck_feature_update_requests_reason_shape"),
+        ),
+        UniqueConstraint(
+            "job_id",
+            name=conv("uq_feature_update_requests_job_id"),
         ),
         Index(
-            "idx_feature_update_status_priority",
-            "status",
+            "idx_feature_update_priority",
             text("priority DESC"),
             "created_at",
+            "request_id",
         ),
         Index(
             "idx_feature_update_created",
             text("created_at DESC"),
+            text("request_id DESC"),
         ),
         Index(
-            "idx_feature_update_job",
-            "job_id",
-            postgresql_where=text("job_id IS NOT NULL"),
+            "idx_feature_update_providers_gin",
+            "providers",
+            postgresql_using="gin",
         ),
-        Index("idx_feature_update_requests_cancellation_id", "cancellation_id"),
+        Index(
+            "idx_feature_update_dataset_keys_gin",
+            "dataset_keys",
+            postgresql_using="gin",
+        ),
         {"schema": "ops"},
     )
 
@@ -1954,54 +2183,47 @@ class FeatureUpdateRequestRow(Base):
     scope_type: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     providers: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
     )
     dataset_keys: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
     )
     update_policy: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     run_mode: Mapped[str] = mapped_column(Text, nullable=False)
     priority: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("50"),
-    )
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'queued'"),
-    )
-    dry_run: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"),
+        Integer,
+        nullable=False,
+        server_default=text("50"),
     )
     matched_scope: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
-    job_id: Mapped[str | None] = mapped_column(
+    job_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+        ForeignKey("ops.import_jobs.job_id", ondelete="RESTRICT"),
+        nullable=False,
     )
-    dagster_run_id: Mapped[str | None] = mapped_column(Text)
-    cancellation_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey(
-            "ops.pipeline_cancellations.cancellation_id",
-            ondelete="RESTRICT",
-        ),
-    )
-    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-    )
-    cancellation_requested_by: Mapped[str | None] = mapped_column(Text)
-    cancellation_reason: Mapped[str | None] = mapped_column(Text)
     operator: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
-    error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    generation: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
     )
 
 
@@ -2016,7 +2238,7 @@ class PipelineCancellationRow(Base):
     __tablename__ = "pipeline_cancellations"
     __table_args__ = (
         CheckConstraint(
-            f"root_kind IN ({_sql_text_literals(PIPELINE_CANCELLATION_MEMBER_KIND_VALUES)})",
+            f"root_kind IN ({_sql_text_literals(PIPELINE_CANCELLATION_ROOT_KIND_VALUES)})",
             name="ck_pipeline_cancellations_root_kind",
         ),
         CheckConstraint(
@@ -2024,8 +2246,7 @@ class PipelineCancellationRow(Base):
             name="ck_pipeline_cancellations_status",
         ),
         CheckConstraint(
-            "previous_cancellation_id IS NULL "
-            "OR previous_cancellation_id <> cancellation_id",
+            "previous_cancellation_id IS NULL OR previous_cancellation_id <> cancellation_id",
             name="ck_pipeline_cancellations_previous",
         ),
         CheckConstraint(
@@ -2138,9 +2359,7 @@ class PipelineCancellationRunRow(Base):
     )
     dagster_run_id: Mapped[str] = mapped_column(Text, primary_key=True)
     initial_status: Mapped[str | None] = mapped_column(Text)
-    termination_reserved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    termination_reserved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -2148,12 +2367,8 @@ class PipelineCancellationRunRow(Base):
     )
     terminal_status: Mapped[str | None] = mapped_column(Text)
     error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    engine_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-    engine_finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    engine_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    engine_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -2162,14 +2377,10 @@ class PipelineCancellationRunRow(Base):
 
 
 class PipelineCancellationMemberRow(Base):
-    """attempt의 frozen request/job 대상과 대상별 실제 결과."""
+    """attempt의 frozen canonical import job과 대상별 실제 결과."""
 
     __tablename__ = "pipeline_cancellation_members"
     __table_args__ = (
-        CheckConstraint(
-            f"member_kind IN ({_sql_text_literals(PIPELINE_CANCELLATION_MEMBER_KIND_VALUES)})",
-            name="ck_pipeline_cancellation_members_kind",
-        ),
         CheckConstraint(
             f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
             name="ck_pipeline_cancellation_members_result",
@@ -2185,8 +2396,7 @@ class PipelineCancellationMemberRow(Base):
         ),
         CheckConstraint(
             "operation_kind IS NULL OR "
-            "(member_kind = 'import_job' "
-            "AND operation_kind = btrim(operation_kind) AND operation_kind <> '')",
+            "(operation_kind = btrim(operation_kind) AND operation_kind <> '')",
             name="ck_pipeline_cancellation_members_operation_kind",
         ),
         CheckConstraint(
@@ -2212,9 +2422,8 @@ class PipelineCancellationMemberRow(Base):
             name="fk_pipeline_cancellation_members_run",
         ),
         Index(
-            "idx_pipeline_cancellation_members_member",
-            "member_kind",
-            "member_id",
+            "idx_pipeline_cancellation_members_job",
+            "job_id",
             text("updated_at DESC"),
             text("cancellation_id DESC"),
         ),
@@ -2230,8 +2439,15 @@ class PipelineCancellationMemberRow(Base):
         UUID(as_uuid=False),
         primary_key=True,
     )
-    member_kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    member_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.import_jobs.job_id",
+            name="fk_pipeline_cancellation_members_job",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
     operation_kind: Mapped[str | None] = mapped_column(Text)
     requires_run_termination: Mapped[bool] = mapped_column(
@@ -2338,13 +2554,19 @@ class DataIntegrityViolationRow(Base):
     severity: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'open'"),
+        Text,
+        nullable=False,
+        server_default=text("'open'"),
     )
     detected_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -2359,9 +2581,7 @@ class PoiCacheTargetRow(Base):
             name="ck_poi_cache_targets_scope_mode",
         ),
         CheckConstraint(
-            "refresh_policy IN ("
-            "'provider_default','follow_system','allow_targeted','disabled'"
-            ")",
+            "refresh_policy IN ('provider_default','follow_system','allow_targeted','disabled')",
             name="ck_poi_cache_targets_refresh_policy",
         ),
         CheckConstraint(
@@ -2369,8 +2589,7 @@ class PoiCacheTargetRow(Base):
             name="ck_poi_cache_targets_radius",
         ),
         CheckConstraint(
-            "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
-            "ST_Y(coord) BETWEEN 33.0 AND 39.5",
+            "ST_X(coord) BETWEEN 124.0 AND 132.0 AND ST_Y(coord) BETWEEN 33.0 AND 39.5",
             name="ck_poi_cache_targets_coord",
         ),
         CheckConstraint(
@@ -2417,27 +2636,42 @@ class PoiCacheTargetRow(Base):
         Computed("ST_Transform(coord, 5179)", persisted=True),
     )
     coord_precision_digits: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, server_default=text("6"),
+        SmallInteger,
+        nullable=False,
+        server_default=text("6"),
     )
     coord_key: Mapped[str] = mapped_column(Text, nullable=False)
     radius_km: Mapped[Any] = mapped_column(Numeric(8, 3), nullable=False)
     scope_mode: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'center_radius'"),
+        Text,
+        nullable=False,
+        server_default=text("'center_radius'"),
     )
     update_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true"),
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
     )
     refresh_policy: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'provider_default'"),
+        Text,
+        nullable=False,
+        server_default=text("'provider_default'"),
     )
     provider_overrides: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     last_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -2447,10 +2681,14 @@ class PoiCacheTargetRow(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -2491,16 +2729,24 @@ class PoiCacheTargetFeatureLinkRow(Base):
     dataset_key: Mapped[str | None] = mapped_column(Text)
     distance_m: Mapped[Any | None] = mapped_column(Numeric(12, 2))
     relation: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'within_radius'"),
+        Text,
+        nullable=False,
+        server_default=text("'within_radius'"),
     )
     active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true"),
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
     )
     first_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -2568,7 +2814,9 @@ class ProviderRefreshPolicyRow(Base):
     dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
     source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     targeted_policy: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'follow_system'"),
+        Text,
+        nullable=False,
+        server_default=text("'follow_system'"),
     )
     system_interval_seconds: Mapped[int | None] = mapped_column(Integer)
     optimal_interval_seconds: Mapped[int | None] = mapped_column(Integer)
@@ -2578,23 +2826,35 @@ class ProviderRefreshPolicyRow(Base):
     max_requests_per_hour: Mapped[int | None] = mapped_column(Integer)
     max_requests_per_day: Mapped[int | None] = mapped_column(Integer)
     max_concurrent: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1"),
+        Integer,
+        nullable=False,
+        server_default=text("1"),
     )
     burst_size: Mapped[int | None] = mapped_column(Integer)
     rate_limit_source: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     config_source: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'db'"),
+        Text,
+        nullable=False,
+        server_default=text("'db'"),
     )
     enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true"),
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -2628,10 +2888,15 @@ class DagsterScheduleOverrideRow(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     updated_by: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
 
 
@@ -2683,7 +2948,9 @@ class FeatureMergeHistoryRow(Base):
     merged_by: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     merged_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -2704,8 +2971,7 @@ class ManagedFileRow(Base):
     __tablename__ = "managed_files"
     __table_args__ = (
         CheckConstraint(
-            "storage_backend IN "
-            f"({_sql_text_literals(MANAGED_FILE_STORAGE_BACKEND_VALUES)})",
+            f"storage_backend IN ({_sql_text_literals(MANAGED_FILE_STORAGE_BACKEND_VALUES)})",
             name="ck_managed_files_storage_backend",
         ),
         CheckConstraint(
@@ -2722,8 +2988,7 @@ class ManagedFileRow(Base):
             name="ck_managed_files_orphan_reason",
         ),
         CheckConstraint(
-            "registered_by IN "
-            f"({_sql_text_literals(MANAGED_FILE_REGISTERED_BY_VALUES)})",
+            f"registered_by IN ({_sql_text_literals(MANAGED_FILE_REGISTERED_BY_VALUES)})",
             name="ck_managed_files_registered_by",
         ),
         CheckConstraint("byte_size >= 0", name="ck_managed_files_byte_size"),
@@ -2772,19 +3037,25 @@ class ManagedFileRow(Base):
     )
 
     file_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True,
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
     )
     storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
     location: Mapped[str] = mapped_column(Text, nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     is_directory: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"),
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     provider: Mapped[str | None] = mapped_column(Text)
     dataset_key: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'active'"),
+        Text,
+        nullable=False,
+        server_default=text("'active'"),
     )
     orphan_reason: Mapped[str | None] = mapped_column(Text)
     registered_by: Mapped[str] = mapped_column(Text, nullable=False)
@@ -2804,13 +3075,19 @@ class ManagedFileRow(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meta: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 
@@ -2854,7 +3131,9 @@ class ManagedFileEventRow(Base):
     )
 
     event_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True,
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
     )
     file_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -2863,7 +3142,9 @@ class ManagedFileEventRow(Base):
     )
     event_kind: Mapped[str] = mapped_column(Text, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
     import_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
@@ -2872,5 +3153,7 @@ class ManagedFileEventRow(Base):
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
     actor: Mapped[str | None] = mapped_column(Text)
     detail: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )

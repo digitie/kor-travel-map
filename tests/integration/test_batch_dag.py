@@ -28,7 +28,7 @@ from kortravelmap.infra.batch_dag import (
     start_batch_mv_phase,
 )
 from kortravelmap.infra.consistency import ConsistencyReport
-from kortravelmap.infra.jobs_repo import finish_import_job, start_import_job
+from kortravelmap.infra.jobs_repo import finish_import_job, start_unpaired_import_job
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
@@ -147,7 +147,7 @@ async def test_batch_dag_gate_links_done_child_and_records_mv_refresh_skip(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(
+        child = await start_unpaired_import_job(
             setup,
             kind="offline_upload_load",
             payload={"upload_id": "00000000-0000-0000-0000-000000000001"},
@@ -188,7 +188,7 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="feature_event_source_load")
+        child = await start_unpaired_import_job(setup, kind="feature_event_source_load")
         child = await finish_import_job(setup, child.job_id, status="done") or child
         setup.add(
             SourceEntityRow(
@@ -241,7 +241,7 @@ async def test_batch_dag_gate_fails_when_child_not_done(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
     result = await AsyncKorTravelMapClient(migrated_engine).run_batch_dag_consistency_gate(
         child_job_ids=[child.job_id],
         load_batch_id="aaaaaaaa-0000-0000-0000-000000000003",
@@ -260,7 +260,7 @@ async def test_batch_phases_keep_one_backend_but_release_lineage_xact_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
     backend_pids: list[int] = []
     original_prepare = client_module.prepare_batch_dag
@@ -359,7 +359,7 @@ async def test_mv_phase_exception_rolls_back_before_durable_failure_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
 
     async def fail_after_write(
@@ -399,7 +399,7 @@ async def test_cancellation_marker_wins_mv_phase_without_status_overwrite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
     batch_id = "aaaaaaaa-0000-0000-0000-000000000008"
     refresh_calls: list[tuple[tuple[str, ...], str]] = []
@@ -473,7 +473,7 @@ async def test_cancellation_rolls_back_consistency_report_and_transient_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
     original_checks = batch_module.run_consistency_checks
 
@@ -553,7 +553,7 @@ async def test_prepare_batch_persists_explicit_dagster_run_identity(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        child = await start_import_job(session, kind="offline_upload_load")
+        child = await start_unpaired_import_job(session, kind="offline_upload_load")
         await finish_import_job(session, child.job_id, status="done")
         prepared = await prepare_batch_dag(
             session,
@@ -583,7 +583,7 @@ async def test_phase_row_lock_first_can_commit_before_cancellation_progresses(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
         prepared = await prepare_batch_dag(
             setup,
@@ -643,7 +643,7 @@ async def test_tx3_and_failure_have_no_bidirectional_deadlock(
         ("failure", "cancellation"): "14",
     }[(phase_name, first_owner)]
     async with AsyncSession(migrated_engine) as setup, setup.begin():
-        child = await start_import_job(setup, kind="offline_upload_load")
+        child = await start_unpaired_import_job(setup, kind="offline_upload_load")
         await finish_import_job(setup, child.job_id, status="done")
         prepared = await prepare_batch_dag(
             setup,

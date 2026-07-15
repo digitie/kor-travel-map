@@ -33,20 +33,7 @@ canonical_root AS (
 ),
 scope_members AS (
     SELECT
-        'update_request'::text AS member_kind,
-        request.request_id AS member_id,
-        request.status AS initial_status,
-        request.dagster_run_id,
-        NULL::text AS operation_kind,
-        request.cancellation_id
-    FROM canonical_root AS root
-    JOIN ops.feature_update_requests AS request
-      ON root.root_kind = 'update_request'
-     AND request.request_id = root.root_id
-    UNION ALL
-    SELECT
-        'import_job'::text AS member_kind,
-        job.job_id AS member_id,
+        job.job_id,
         job.status AS initial_status,
         job.dagster_run_id,
         CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
@@ -59,8 +46,7 @@ scope_members AS (
     JOIN ops.import_jobs AS job ON job.job_id = owner.job_id
     UNION ALL
     SELECT
-        'import_job'::text AS member_kind,
-        job.job_id AS member_id,
+        job.job_id,
         job.status AS initial_status,
         job.dagster_run_id,
         CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
@@ -75,15 +61,14 @@ scope_members AS (
 SELECT
     root.root_kind,
     root.root_id,
-    member.member_kind,
-    member.member_id,
+    member.job_id,
     member.initial_status,
     member.dagster_run_id,
     member.operation_kind,
     member.cancellation_id
 FROM canonical_root AS root
 JOIN scope_members AS member ON true
-ORDER BY member.member_kind, member.member_id
+ORDER BY member.job_id
 """
 
 _CURRENT_ATTEMPT_SQL = """
@@ -137,8 +122,7 @@ _LOCK_ATTEMPT_SQL = _ATTEMPT_SQL + "\nFOR UPDATE"
 _MEMBERS_SQL = """
 SELECT
     cancellation_id,
-    member_kind,
-    member_id,
+    job_id,
     dagster_run_id,
     operation_kind,
     requires_run_termination,
@@ -149,14 +133,13 @@ SELECT
     updated_at
 FROM ops.pipeline_cancellation_members
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-ORDER BY member_kind, member_id
+ORDER BY job_id
 """
 
 _LOCK_MEMBER_SQL = """
 SELECT
     cancellation_id,
-    member_kind,
-    member_id,
+    job_id,
     dagster_run_id,
     operation_kind,
     requires_run_termination,
@@ -167,8 +150,7 @@ SELECT
     updated_at
 FROM ops.pipeline_cancellation_members
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-  AND member_kind = :member_kind
-  AND member_id = CAST(:member_id AS uuid)
+  AND job_id = CAST(:job_id AS uuid)
 FOR UPDATE
 """
 
@@ -244,8 +226,7 @@ INSERT INTO ops.pipeline_cancellation_runs (
 _INSERT_MEMBER_SQL = """
 INSERT INTO ops.pipeline_cancellation_members (
     cancellation_id,
-    member_kind,
-    member_id,
+    job_id,
     dagster_run_id,
     operation_kind,
     initial_status,
@@ -254,8 +235,7 @@ INSERT INTO ops.pipeline_cancellation_members (
     terminal_status
 ) VALUES (
     CAST(:cancellation_id AS uuid),
-    :member_kind,
-    CAST(:member_id AS uuid),
+    CAST(:job_id AS uuid),
     :dagster_run_id,
     :operation_kind,
     :initial_status,
@@ -266,40 +246,21 @@ INSERT INTO ops.pipeline_cancellation_members (
 """
 
 _MARK_JOBS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
+WITH jobs AS (
+    SELECT value::uuid AS job_id
+    FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
 )
 UPDATE ops.import_jobs AS job
 SET cancellation_id = CAST(:cancellation_id AS uuid),
     cancellation_requested_at = now(),
     cancellation_requested_by = :requested_by,
     cancellation_reason = :reason
-WHERE job.job_id IN (SELECT member_id FROM members)
+WHERE job.job_id IN (SELECT job_id FROM jobs)
   AND (
     (CAST(:expected_cancellation_id AS uuid) IS NULL AND job.cancellation_id IS NULL)
     OR job.cancellation_id = CAST(:expected_cancellation_id AS uuid)
   )
 RETURNING job.job_id
-"""
-
-_MARK_REQUESTS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-UPDATE ops.feature_update_requests AS request
-SET cancellation_id = CAST(:cancellation_id AS uuid),
-    cancellation_requested_at = now(),
-    cancellation_requested_by = :requested_by,
-    cancellation_reason = :reason
-WHERE request.request_id IN (SELECT member_id FROM members)
-  AND (
-    (CAST(:expected_cancellation_id AS uuid) IS NULL
-      AND request.cancellation_id IS NULL)
-    OR request.cancellation_id = CAST(:expected_cancellation_id AS uuid)
-  )
-RETURNING request.request_id
 """
 
 _UPDATE_MEMBER_SQL = """
@@ -309,8 +270,7 @@ SET result = :result,
     error = CAST(:error AS jsonb),
     updated_at = now()
 WHERE cancellation_id = CAST(:cancellation_id AS uuid)
-  AND member_kind = :member_kind
-  AND member_id = CAST(:member_id AS uuid)
+  AND job_id = CAST(:job_id AS uuid)
   AND result = ANY(CAST(:expected_results AS text[]))
 RETURNING cancellation_id
 """
@@ -335,8 +295,7 @@ WITH canonical_jobs AS (
   SELECT job.created_at, job.started_at, job.finished_at, job.cancellation_id
   FROM ops.pipeline_cancellation_members AS member
   JOIN ops.import_jobs AS job
-    ON member.member_kind = 'import_job'
-   AND job.job_id = member.member_id
+    ON job.job_id = member.job_id
   WHERE member.cancellation_id = CAST(:cancellation_id AS uuid)
     AND member.dagster_run_id = :dagster_run_id
     AND member.operation_kind IN (
@@ -389,10 +348,9 @@ _FILL_CANONICAL_STARTS_SQL = """
 WITH canonical_jobs AS (
   SELECT job.job_id, job.cancellation_id, job.started_at
   FROM ops.pipeline_cancellation_members AS member
-  JOIN ops.import_jobs AS job ON job.job_id = member.member_id
+  JOIN ops.import_jobs AS job ON job.job_id = member.job_id
   WHERE member.cancellation_id = CAST(:cancellation_id AS uuid)
     AND member.dagster_run_id = :dagster_run_id
-    AND member.member_kind = 'import_job'
     AND member.operation_kind IN (
       'provider_feature_load_run','provider_feature_load'
     )
@@ -438,54 +396,22 @@ WHERE attempt.cancellation_id = CAST(:cancellation_id AS uuid)
 RETURNING attempt.cancellation_id
 """
 
-_LOCK_REQUEST_MEMBERS_SQL = """
-WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
-)
-SELECT
-    'update_request'::text AS member_kind,
-    request.request_id AS member_id,
-    request.status AS initial_status,
-    request.dagster_run_id,
-    NULL::text AS operation_kind,
-    request.cancellation_id
-FROM ops.feature_update_requests AS request
-WHERE request.request_id IN (SELECT member_id FROM members)
-ORDER BY request.request_id
-FOR UPDATE
-"""
-
 _LOCK_JOB_MEMBERS_SQL = """
 WITH members AS (
-    SELECT value::uuid AS member_id
-    FROM jsonb_array_elements_text(CAST(:member_ids AS jsonb))
+    SELECT value::uuid AS job_id
+    FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
 )
 SELECT
-    'import_job'::text AS member_kind,
-    job.job_id AS member_id,
+    job.job_id,
     job.status AS initial_status,
     job.dagster_run_id,
     CASE WHEN job.kind = btrim(job.kind) AND job.kind <> ''
       THEN job.kind ELSE NULL END AS operation_kind,
     job.cancellation_id
 FROM ops.import_jobs AS job
-WHERE job.job_id IN (SELECT member_id FROM members)
+WHERE job.job_id IN (SELECT job_id FROM members)
 ORDER BY job.job_id
 FOR UPDATE
-"""
-
-_TRANSITION_REQUEST_MEMBER_SQL = """
-UPDATE ops.feature_update_requests
-SET status = :target_status,
-    error_message = COALESCE(:error_message, error_message),
-    finished_at = now(),
-    updated_at = now()
-WHERE request_id = CAST(:member_id AS uuid)
-  AND cancellation_id = CAST(:cancellation_id AS uuid)
-  AND status = ANY(CAST(:expected_statuses AS text[]))
-  AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)
-RETURNING request_id
 """
 
 _TRANSITION_JOB_MEMBER_SQL = """
@@ -522,7 +448,7 @@ SET status = :target_status,
       WHEN kind = 'provider_feature_load_run' THEN :dagster_terminal_status
       ELSE dagster_run_status
     END
-WHERE job_id = CAST(:member_id AS uuid)
+WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id = CAST(:cancellation_id AS uuid)
   AND status = ANY(CAST(:expected_statuses AS text[]))
   AND dagster_run_id IS NOT DISTINCT FROM CAST(:dagster_run_id AS text)

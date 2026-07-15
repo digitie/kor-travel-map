@@ -28,8 +28,12 @@ DagsterFeatureOperationBlockReason: TypeAlias = Literal["cancellation", "termina
 
 FEATURE_OPERATION_ROOT_KIND = "provider_feature_load_run"
 FEATURE_OPERATION_MEMBER_KIND = "provider_feature_load"
+FEATURE_UPDATE_REQUEST_JOB_KIND = "feature_update_request"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
-    {FEATURE_OPERATION_ROOT_KIND, FEATURE_OPERATION_MEMBER_KIND}
+    {
+        FEATURE_OPERATION_ROOT_KIND,
+        FEATURE_OPERATION_MEMBER_KIND,
+    }
 )
 TRIGGER_KIND_VALUES: tuple[TriggerKind, ...] = (
     "schedule",
@@ -144,6 +148,7 @@ __all__ = [
     "FEATURE_OPERATION_MEMBER_KIND",
     "FEATURE_OPERATION_RESERVED_KINDS",
     "FEATURE_OPERATION_ROOT_KIND",
+    "FEATURE_UPDATE_REQUEST_JOB_KIND",
     "TRIGGER_KIND_VALUES",
     "DagsterFeatureOperation",
     "DagsterFeatureOperationBlockReason",

@@ -56,8 +56,7 @@ def _infra_detail(
         members=(
             PipelineCancellationMember(
                 cancellation_id=cancellation_id,
-                member_kind="import_job",
-                member_id=root_id,
+                job_id=root_id,
                 dagster_run_id="run-1",
                 operation_kind="provider_feature_load_run",
                 requires_run_termination=True,
@@ -113,8 +112,7 @@ def _detail_payload(*, status: str = "completed", result: str = "cancelled") -> 
         "unresolved_member_count": int(result in {"pending", "cancel_failed"}),
         "members": [
             {
-                "member_kind": "import_job",
-                "member_id": "22222222-2222-4222-8222-222222222222",
+                "job_id": "22222222-2222-4222-8222-222222222222",
                 "dagster_run_id": "run-1",
                 "operation_kind": "provider_feature_load_run",
                 "requires_run_termination": True,
@@ -158,6 +156,24 @@ def test_completed_dto_rejects_unresolved_results() -> None:
         )
 
 
+def test_root_keeps_request_correlation_but_members_are_import_jobs_only() -> None:
+    payload = _detail_payload()
+    payload["root"] = {
+        "kind": "update_request",
+        "id": "44444444-4444-4444-8444-444444444444",
+    }
+    detail = PipelineCancellationDetailRecord.model_validate(payload)
+
+    assert detail.root.kind == "update_request"
+    assert {str(member.job_id) for member in detail.members} == {
+        "22222222-2222-4222-8222-222222222222"
+    }
+
+    payload["members"][0]["member_kind"] = "update_request"
+    with pytest.raises(ValidationError):
+        PipelineCancellationDetailRecord.model_validate(payload)
+
+
 def test_run_dto_exposes_dispatch_reservation() -> None:
     detail = PipelineCancellationDetailRecord.model_validate(_detail_payload())
 
@@ -168,18 +184,17 @@ def test_run_dto_exposes_dispatch_reservation() -> None:
     assert detail.warnings
 
 
-def test_service_member_batches_follow_repo_request_then_job_order() -> None:
+def test_service_member_batches_follow_canonical_job_id_order() -> None:
     detail = _infra_detail()
-    request_member = replace(
+    earlier_job = replace(
         detail.members[0],
-        member_kind="update_request",
-        member_id="33333333-3333-4333-8333-333333333333",
+        job_id="33333333-3333-4333-8333-333333333333",
     )
-    mixed = replace(detail, members=(detail.members[0], request_member))
+    mixed = replace(detail, members=(detail.members[0], earlier_job))
 
-    assert [member.member_kind for member in service._ordered_members(mixed)] == [
-        "update_request",
-        "import_job",
+    assert [member.job_id for member in service._ordered_members(mixed)] == [
+        "22222222-2222-4222-8222-222222222222",
+        "33333333-3333-4333-8333-333333333333",
     ]
 
 

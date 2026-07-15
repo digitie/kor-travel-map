@@ -37,7 +37,7 @@ from kortravelmap.infra.feature_repo import (
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
     finish_import_job,
-    start_import_job,
+    start_provider_dataset_import_job,
 )
 from kortravelmap.infra.sync_state_repo import (
     SyncState,
@@ -318,7 +318,7 @@ async def run_mois_license_bulk_job(
     1. ``try_advisory_lock("import:python-mois-api:<dataset_key>")`` — 단일 워커
        직렬화. 다른 워커가 이미 적재 중이면 대기하지 않고
        ``MoisBulkJobResult(acquired=False)``로 즉시 반환(skip).
-    2. ``start_import_job`` — ``state='running'`` 작업 row 생성(추적).
+    2. ``start_provider_dataset_import_job`` — typed pair의 running 작업 row 생성.
     3. ``sync_mois_license_features_bulk`` — 변환 → upsert → snapshot prune.
     4. ``finish_import_job`` — 성공 시 ``done``(progress 100), 예외 시 ``failed``
        (error_message 기록) 후 re-raise.
@@ -331,7 +331,7 @@ async def run_mois_license_bulk_job(
     async with try_advisory_lock(session, _bulk_advisory_key(dataset_key)) as acquired:
         if not acquired:
             return MoisBulkJobResult(acquired=False)
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind=_BULK_JOB_KIND,
             payload={"dataset_key": dataset_key},
@@ -410,7 +410,7 @@ async def run_mois_license_incremental_job(
 
     1. ``try_advisory_lock("import:python-mois-api:<dataset_key>")`` — 단일 워커
        직렬화. 미획득 시 ``MoisIncrementalJobResult(acquired=False)``로 skip.
-    2. ``start_import_job`` — running 작업 row.
+    2. ``start_provider_dataset_import_job`` — typed pair의 running 작업 row.
     3. ``load_mois_license_features_incremental`` — batched upsert(prune 없음).
     4. 성공: ``record_sync_success``로 cursor 전진(``new_cursor``) + ``done``.
        예외: ``record_sync_failure``(cursor 미전진) + ``failed`` 후 re-raise.
@@ -423,7 +423,7 @@ async def run_mois_license_incremental_job(
     async with try_advisory_lock(session, _bulk_advisory_key(dataset_key)) as acquired:
         if not acquired:
             return MoisIncrementalJobResult(acquired=False)
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind=_INCREMENTAL_JOB_KIND,
             payload={"dataset_key": dataset_key, "sync_scope": sync_scope},
@@ -505,9 +505,9 @@ async def run_mois_license_closed_job(
 
     1. ``try_advisory_lock("import:python-mois-api:mois_license_features_closed")``
        — 단일 워커 직렬화. 미획득 시 ``MoisClosedJobResult(acquired=False)``로 skip.
-    2. ``start_import_job`` → ``close_mois_license_features``(비활성화) → cursor 전진
-       (closed dataset) → ``done``. 예외 시 ``record_sync_failure`` + ``failed`` 후
-       re-raise.
+    2. ``start_provider_dataset_import_job`` →
+       ``close_mois_license_features``(비활성화) → cursor 전진(closed dataset) → ``done``.
+       예외 시 ``record_sync_failure`` + ``failed`` 후 re-raise.
 
     ``new_cursor``는 이번 폐업분 이후 다음 시작 위치(provider 결정, ADR-006).
     inactivation 대상은 ``target_dataset_key``(feature가 사는 dataset, 보통 bulk),
@@ -518,7 +518,7 @@ async def run_mois_license_closed_job(
     ) as acquired:
         if not acquired:
             return MoisClosedJobResult(acquired=False)
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind=_CLOSED_JOB_KIND,
             payload={

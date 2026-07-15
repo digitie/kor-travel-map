@@ -9,7 +9,6 @@ import pytest
 import kortravelmap.infra as infra
 from kortravelmap.infra import pipeline_cancellation_queries as queries
 from kortravelmap.infra.models import (
-    FeatureUpdateRequestRow,
     ImportJobRow,
     PipelineCancellationMemberRow,
     PipelineCancellationRow,
@@ -54,7 +53,6 @@ def test_all_pipeline_cancellation_foreign_keys_have_orm_index_parity() -> None:
             PipelineCancellationRow,
             PipelineCancellationMemberRow,
             ImportJobRow,
-            FeatureUpdateRequestRow,
         )
     }
 
@@ -62,7 +60,7 @@ def test_all_pipeline_cancellation_foreign_keys_have_orm_index_parity() -> None:
     assert "idx_pipeline_cancellation_members_run" in indexed[
         "pipeline_cancellation_members"
     ]
-    assert "idx_import_jobs_cancellation_id" in indexed["import_jobs"]
-    assert "idx_feature_update_requests_cancellation_id" in indexed[
-        "feature_update_requests"
+    assert "idx_pipeline_cancellation_members_job" in indexed[
+        "pipeline_cancellation_members"
     ]
+    assert "idx_import_jobs_cancellation_id" in indexed["import_jobs"]

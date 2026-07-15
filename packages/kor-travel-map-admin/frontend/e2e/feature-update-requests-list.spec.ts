@@ -14,6 +14,12 @@ type FeatureUpdateRequestCreateResponse =
   components["schemas"]["FeatureUpdateRequestCreateResponse"];
 type FeatureUpdateRequestCreateRequest =
   components["schemas"]["FeatureUpdateRequestCreateRequest"];
+type FeatureUpdateRequestPreviewRequest =
+  components["schemas"]["FeatureUpdateRequestPreviewRequest"];
+type FeatureUpdateRequestPreviewResponse =
+  components["schemas"]["FeatureUpdateRequestPreviewResponse"];
+type FeatureUpdateRequestMutationResponse =
+  components["schemas"]["FeatureUpdateRequestMutationResponse"];
 type PipelineCancellationRequest =
   components["schemas"]["PipelineCancellationRequest"];
 type FeatureUpdateRequestRunNowRequest =
@@ -24,6 +30,10 @@ const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 // detail deeplink truncation을 검증할 수 있게 12자 초과 uuid를 쓴다(shortId는 12자+"...").
 const DONE_REQUEST_ID = "aaaaaaaa-1111-4111-8111-111111111111";
 const QUEUED_REQUEST_ID = "bbbbbbbb-2222-4222-8222-222222222222";
+const CREATED_REQUEST_ID = "dddddddd-0000-4000-8000-000000000001";
+const RUN_NOW_REQUEST_ID = "eeeeeeee-0000-4000-8000-000000000001";
+const JOB_ID = "cccccccc-3333-4333-8333-333333333333";
+const RUN_NOW_JOB_ID = "ffffffff-0000-4000-8000-000000000001";
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -40,24 +50,27 @@ function makeRequest(
     created_at: MOCK_NOW,
     dagster_run_id: null,
     dataset_keys: [],
-    dry_run: false,
     error_message: null,
     finished_at: null,
-    job_id: null,
+    job_id: JOB_ID,
     matched_scope: {},
-    operator: "local-admin",
+    operator: "e2e-authenticated-admin",
     priority: 50,
     providers: [],
     reason: "admin ui request",
     request_id: QUEUED_REQUEST_ID,
     run_mode: "queued",
-    scope: { type: "center_radius", center: { lon: 126.978, lat: 37.5665 }, radius_km: 5 },
+    scope: {
+      type: "center_radius",
+      center: { lon: 126.978, lat: 37.5665 },
+      radius_km: 5,
+    },
     scope_type: "center_radius",
     started_at: null,
     status: "queued",
-    status_url: null,
+    status_url: `/v1/admin/features/update-requests/${QUEUED_REQUEST_ID}`,
     update_policy: {},
-    updated_at: MOCK_NOW,
+    generation: 1,
     ...overrides,
   };
 }
@@ -81,14 +94,48 @@ function createResponse(
   record: FeatureUpdateRequestRecord,
 ): FeatureUpdateRequestCreateResponse {
   return {
-    data: record,
+    data: { ...record, result_kind: "request" },
     meta: { duration_ms: 1, request_id: "e2e-feature-update-create" },
+  };
+}
+
+function previewResponse(
+  body: FeatureUpdateRequestPreviewRequest,
+  matchedScope: Record<string, unknown> = {
+    feature_count: 0,
+    sigungu_codes: [],
+  },
+): FeatureUpdateRequestPreviewResponse {
+  return {
+    data: {
+      result_kind: "preview",
+      scope_type: body.scope.type,
+      scope: body.scope,
+      providers: body.providers ?? [],
+      dataset_keys: body.dataset_keys ?? [],
+      update_policy: body.update_policy ?? {},
+      run_mode: body.run_mode ?? "queued",
+      priority: body.priority ?? 50,
+      matched_scope: matchedScope,
+    },
+    meta: { duration_ms: 1, request_id: "e2e-feature-update-preview" },
+  };
+}
+
+function mutationResponse(
+  record: FeatureUpdateRequestRecord,
+): FeatureUpdateRequestMutationResponse {
+  return {
+    data: record,
+    meta: { duration_ms: 1, request_id: "e2e-feature-update-mutation" },
   };
 }
 
 interface FeatureUpdateMocks {
   /** create POST 호출 수(pathname === base). */
   create: number;
+  /** preview POST 호출 수. */
+  preview: number;
   /** run-now POST 호출 수(pathname endsWith /run-now). */
   runNow: number;
   /** cancel POST 호출 수(pathname endsWith /cancel). */
@@ -96,7 +143,9 @@ interface FeatureUpdateMocks {
   /** GET list 호출 수(2초 폴링이 있으므로 create/mutation count만 정확하다). */
   list: number;
   createBodies: FeatureUpdateRequestCreateRequest[];
+  previewBodies: FeatureUpdateRequestPreviewRequest[];
   runNowBodies: FeatureUpdateRequestRunNowRequest[];
+  runNowRecords: FeatureUpdateRequestRecord[];
   cancelBodies: PipelineCancellationRequest[];
 }
 
@@ -111,16 +160,22 @@ async function mockFeatureUpdateRequests(
     initial?: FeatureUpdateRequestRecord[];
     createStatus?: number;
     createErrorBody?: unknown;
+    previewStatus?: number;
+    previewErrorBody?: unknown;
+    previewMatchedScopes?: Record<string, unknown>[];
   } = {},
 ): Promise<FeatureUpdateMocks> {
   let items = [...(options.initial ?? [])];
   const mocks: FeatureUpdateMocks = {
     create: 0,
+    preview: 0,
     runNow: 0,
     cancel: 0,
     list: 0,
     createBodies: [],
+    previewBodies: [],
     runNowBodies: [],
+    runNowRecords: [],
     cancelBodies: [],
   };
   const base = "/v1/admin/features/update-requests";
@@ -161,6 +216,30 @@ async function mockFeatureUpdateRequests(
       return;
     }
 
+    if (method === "POST" && pathname === `${base}/preview`) {
+      mocks.preview += 1;
+      const body = request.postDataJSON() as FeatureUpdateRequestPreviewRequest;
+      mocks.previewBodies.push(body);
+      if (options.previewStatus && options.previewStatus >= 400) {
+        await fulfillJson(
+          route,
+          options.previewErrorBody ?? {
+            detail: "feature update preview failed",
+          },
+          options.previewStatus,
+        );
+        return;
+      }
+      await fulfillJson(
+        route,
+        previewResponse(
+          body,
+          options.previewMatchedScopes?.[mocks.preview - 1],
+        ),
+      );
+      return;
+    }
+
     if (method === "POST" && pathname === base) {
       mocks.create += 1;
       const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
@@ -173,26 +252,21 @@ async function mockFeatureUpdateRequests(
         );
         return;
       }
-      // dry-run preview는 request_id 없이 반환(actions 컬럼이 'dry-run' 텍스트 렌더).
-      const created = body.dry_run
-        ? makeRequest({
-            request_id: null,
-            dry_run: true,
-            run_mode: body.run_mode,
-            reason: body.reason,
-            status: "done",
-            scope: body.scope as FeatureUpdateRequestRecord["scope"],
-            scope_type: "center_radius",
-          })
-        : makeRequest({
-            request_id: `created-${mocks.create}-00000000-0000-4000-8000-000000000000`,
-            dry_run: false,
-            run_mode: body.run_mode,
-            reason: body.reason,
-            status: "queued",
-            scope: body.scope as FeatureUpdateRequestRecord["scope"],
-            scope_type: "center_radius",
-          });
+      const createdRequestId = `dddddddd-0000-4000-8000-${String(mocks.create).padStart(12, "0")}`;
+      const created = makeRequest({
+        request_id: createdRequestId,
+        job_id: `abababab-0000-4000-8000-${String(mocks.create).padStart(12, "0")}`,
+        status_url: `/v1/admin/features/update-requests/${createdRequestId}`,
+        providers: body.providers ?? [],
+        dataset_keys: body.dataset_keys ?? [],
+        update_policy: body.update_policy ?? {},
+        run_mode: body.run_mode ?? "queued",
+        priority: body.priority ?? 50,
+        reason: body.reason ?? null,
+        status: "queued",
+        scope: body.scope as FeatureUpdateRequestRecord["scope"],
+        scope_type: body.scope.type,
+      });
       // invalidateQueries refetch가 새 행을 보도록 list에 push.
       items = [created, ...items];
       await fulfillJson(route, createResponse(created));
@@ -201,22 +275,28 @@ async function mockFeatureUpdateRequests(
 
     if (method === "POST" && url.pathname.endsWith("/run-now")) {
       mocks.runNow += 1;
-      mocks.runNowBodies.push(
-        request.postDataJSON() as FeatureUpdateRequestRunNowRequest,
-      );
+      const body = request.postDataJSON() as FeatureUpdateRequestRunNowRequest;
+      mocks.runNowBodies.push(body);
       const requestId = url.pathname.split("/").at(-2) ?? "";
       const target =
         items.find((item) => item.request_id === requestId) ?? makeRequest();
+      const requeuedRequestId = `eeeeeeee-0000-4000-8000-${String(mocks.runNow).padStart(12, "0")}`;
       const requeued = makeRequest({
         ...target,
-        request_id: requestId,
+        request_id: requeuedRequestId,
+        job_id:
+          mocks.runNow === 1
+            ? RUN_NOW_JOB_ID
+            : `ffffffff-0000-4000-8000-${String(mocks.runNow).padStart(12, "0")}`,
+        priority: body.priority ?? target.priority,
+        reason: body.reason ?? `run-now from ${target.request_id}`,
+        run_mode: "now",
+        status_url: `/v1/admin/features/update-requests/${requeuedRequestId}`,
         status: "queued",
       });
-      items = [
-        requeued,
-        ...items.filter((item) => item.request_id !== requestId),
-      ];
-      await fulfillJson(route, createResponse(requeued));
+      mocks.runNowRecords.push(requeued);
+      items = [requeued, ...items];
+      await fulfillJson(route, mutationResponse(requeued));
       return;
     }
 
@@ -245,19 +325,28 @@ async function mockFeatureUpdateRequests(
           initialStatus: target.status,
           dagsterRunId: target.dagster_run_id,
           reason: "cancelled from admin ui",
+          members: [
+            {
+              jobId: target.job_id,
+              dagsterRunId: target.dagster_run_id,
+              operationKind: "feature_update_request",
+            },
+          ],
         }),
       );
       return;
     }
 
-    throw new Error(`Unhandled feature-update-requests route: ${method} ${url}`);
+    throw new Error(
+      `Unhandled feature-update-requests route: ${method} ${url}`,
+    );
   });
 
   return mocks;
 }
 
-test.describe("admin/feature-update-requests list + create depth", () => {
-  test("create queued request: POST fires queued+dry_run=false payload, success Alert, new row", async ({
+test.describe("admin/features/update-requests list + create depth", () => {
+  test("create queued request: POST fires persisted payload, success Alert, new row", async ({
     page,
   }) => {
     const mocks = await mockFeatureUpdateRequests(page);
@@ -269,9 +358,8 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await expect(page.getByLabel("위도")).toHaveValue("37.5665");
     await expect(page.getByLabel("반경(km)")).toHaveValue("5");
 
-    // native <input type=checkbox> dry-run을 해제(base-ui Checkbox gotcha 미적용).
-    await page.getByLabel("dry-run").uncheck();
-    await expect(page.getByLabel("dry-run")).not.toBeChecked();
+    await page.getByLabel(/미리보기/).uncheck();
+    await expect(page.getByLabel(/미리보기/)).not.toBeChecked();
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -282,11 +370,10 @@ test.describe("admin/feature-update-requests list + create depth", () => {
         center: { lon: 126.978, lat: 37.5665 },
         radius_km: 5,
       },
-      dry_run: false,
       run_mode: "queued",
-      operator: "local-admin",
       reason: "admin ui request",
     });
+    expect(mocks.createBodies[0]).not.toHaveProperty("operator");
 
     // 성공 Alert(role=status): request_id + status 노출.
     const successAlert = page
@@ -294,55 +381,110 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       .filter({ hasText: "요청 처리 완료" });
     await expect(successAlert).toBeVisible();
     await expect(successAlert).toContainText("대기");
-    await expect(successAlert).toContainText("created-1");
+    await expect(successAlert).toContainText(CREATED_REQUEST_ID);
 
     // 생성 후 list refetch가 새 queued 행을 보인다. 'all'로 바꿔도 보이도록 방어.
     await page.getByLabel("요청 상태 필터").selectOption("all");
     await expect(
-      page.getByRole("row", { name: /created-1/ }),
+      page.getByRole("row", {
+        name: new RegExp(CREATED_REQUEST_ID.slice(0, 12)),
+      }),
     ).toBeVisible();
   });
 
-  test("dry-run vs run-now kill switch: dry_run=true preview row, then run_mode=now create", async ({
+  test("preview endpoint vs run-now: preview는 비영속, now는 생성", async ({
     page,
   }) => {
-    const mocks = await mockFeatureUpdateRequests(page);
+    const mocks = await mockFeatureUpdateRequests(page, {
+      previewMatchedScopes: [
+        {
+          feature_count: 37,
+          sigungu_codes: ["11110", "11140"],
+          provider_datasets: [
+            {
+              provider: "kma",
+              dataset_key: "weather_short",
+              feature_count: 30,
+            },
+            {
+              provider: "tourapi",
+              dataset_key: "tour_spot",
+              feature_count: 7,
+            },
+          ],
+        },
+        {
+          feature_count: 2,
+          sigungu_codes: ["26110"],
+          deduped_provider_scopes: [
+            {
+              provider: "tourapi",
+              dataset_key: "tour_spot",
+              feature_count: 2,
+            },
+          ],
+        },
+      ],
+    });
 
     await page.goto("/admin/features/update-requests");
+    await page.getByLabel("데이터셋 키").fill("tour_spot, weather_short");
 
-    // Branch A — dry-run(기본 checked) 그대로 제출.
-    await expect(page.getByLabel("dry-run")).toBeChecked();
+    // Branch A — 기본 미리보기는 별도 200 endpoint를 쓴다.
+    await expect(page.getByLabel(/미리보기/)).toBeChecked();
+    await page.getByRole("button", { name: "미리보기" }).click();
+
+    await expect.poll(() => mocks.preview).toBe(1);
+    expect(mocks.create).toBe(0);
+    expect(mocks.previewBodies[0]).toMatchObject({
+      dataset_keys: ["tour_spot", "weather_short"],
+      run_mode: "queued",
+    });
+    const previewAlert = page
+      .getByRole("status")
+      .filter({ hasText: "미리보기 완료" });
+    await expect(previewAlert).toContainText("대상 Feature 37개");
+    await expect(previewAlert).toContainText("시군구 2개");
+    await expect(previewAlert).toContainText("11110, 11140");
+    await expect(previewAlert).toContainText("제공자 전체");
+    await expect(previewAlert).toContainText(
+      "데이터셋 tour_spot, weather_short",
+    );
+    await expect(previewAlert).toContainText("실제 적재 그룹 2개");
+    await expect(previewAlert).toContainText(
+      "kma / weather_short · Feature 30개",
+    );
+    await expect(previewAlert).toContainText(
+      "tourapi / tour_spot · Feature 7개",
+    );
+
+    // 같은 입력이라도 서버가 다시 계산한 응답으로 결과가 교체되어야 한다.
+    await page.getByRole("button", { name: "미리보기" }).click();
+    await expect.poll(() => mocks.preview).toBe(2);
+    await expect(previewAlert).toContainText("대상 Feature 2개");
+    await expect(previewAlert).toContainText("시군구 1개");
+    await expect(previewAlert).toContainText("26110");
+    await expect(previewAlert).toContainText("실제 적재 그룹 1개");
+    await expect(previewAlert).toContainText(
+      "tourapi / tour_spot · Feature 2개",
+    );
+    await expect(previewAlert).not.toContainText("11110");
+    await expect(previewAlert).not.toContainText("kma / weather_short");
+
+    // Branch B — 미리보기 해제 + run mode=now 제출.
+    await page.getByLabel(/미리보기/).uncheck();
+    await page.getByLabel("실행 모드").selectOption("now");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => mocks.create).toBe(1);
     expect(mocks.createBodies[0]).toMatchObject({
-      dry_run: true,
-      run_mode: "queued",
-      reason: "admin ui dry-run",
-    });
-
-    // request_id가 null인 dry-run preview 행은 actions 컬럼에 'dry-run' 텍스트만 렌더.
-    await page.getByLabel("요청 상태 필터").selectOption("all");
-    const dryRunCell = page.getByRole("cell", { name: "dry-run", exact: true });
-    await expect(dryRunCell).toBeVisible();
-    const dryRunRow = page.getByRole("row").filter({ has: dryRunCell });
-    await expect(dryRunRow.getByRole("button", { name: "cancel" })).toHaveCount(0);
-    await expect(dryRunRow.getByRole("button", { name: "run-now" })).toHaveCount(0);
-
-    // Branch B — dry-run 해제 + run mode=now 제출.
-    await page.getByLabel("dry-run").uncheck();
-    await page.getByLabel("실행 모드").selectOption("now");
-    await page.getByRole("button", { name: "요청 생성" }).click();
-
-    await expect.poll(() => mocks.create).toBe(2);
-    expect(mocks.createBodies[1]).toMatchObject({
-      dry_run: false,
       run_mode: "now",
       reason: "admin ui request",
     });
+    expect(mocks.createBodies[0]).not.toHaveProperty("operator");
   });
 
-  test("row run-now re-queues existing request (POST .../run-now)", async ({
+  test("row run-now는 원 요청을 유지하고 신규 request_id를 안내한다", async ({
     page,
   }) => {
     const mocks = await mockFeatureUpdateRequests(page, {
@@ -366,13 +508,39 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     });
     await expect(doneRow).toBeVisible();
     // done 행: run-now 존재, cancel 없음.
-    await expect(doneRow.getByRole("button", { name: "cancel" })).toHaveCount(0);
-    await doneRow.getByRole("button", { name: "run-now" }).click();
+    await expect(doneRow.getByRole("button", { name: "취소" })).toHaveCount(0);
+    await doneRow.getByRole("button", { name: "즉시 실행" }).click();
 
     await expect.poll(() => mocks.runNow).toBe(1);
     expect(mocks.runNowBodies[0]).toMatchObject({
       reason: "run-now from admin ui",
     });
+    expect(mocks.runNowBodies[0]).not.toHaveProperty("operator");
+    expect(mocks.runNowRecords[0]).toMatchObject({
+      request_id: RUN_NOW_REQUEST_ID,
+      job_id: RUN_NOW_JOB_ID,
+      priority: 50,
+      reason: "run-now from admin ui",
+      run_mode: "now",
+    });
+    expect(mocks.runNowRecords[0]?.job_id).not.toBe(JOB_ID);
+    const successAlert = page
+      .getByRole("status")
+      .filter({ hasText: "즉시 실행 요청 생성 완료" });
+    await expect(successAlert).toContainText(
+      "원본 요청은 변경되지 않았습니다.",
+    );
+    await expect(
+      successAlert.getByRole("link", { name: RUN_NOW_REQUEST_ID }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/features/update-requests/${RUN_NOW_REQUEST_ID}`,
+    );
+    // done 필터에서 원 요청은 완료 상태로 그대로 남는다.
+    await expect(doneRow).toContainText("완료");
+    await expect(
+      doneRow.getByRole("button", { name: "즉시 실행" }),
+    ).toBeVisible();
 
     // queued 행은 cancel + run-now 둘 다 노출 + cancel은 /cancel POST.
     await page.getByLabel("요청 상태 필터").selectOption("queued");
@@ -380,13 +548,25 @@ test.describe("admin/feature-update-requests list + create depth", () => {
       name: new RegExp(QUEUED_REQUEST_ID.slice(0, 12)),
     });
     await expect(queuedRow).toBeVisible();
-    await expect(queuedRow.getByRole("button", { name: "run-now" })).toBeVisible();
-    await queuedRow.getByRole("button", { name: "cancel" }).click();
+    await expect(
+      queuedRow.getByRole("button", { name: "즉시 실행" }),
+    ).toBeVisible();
+    const listBeforeCancel = mocks.list;
+    await queuedRow.getByRole("button", { name: "취소" }).click();
 
     await expect.poll(() => mocks.cancel).toBe(1);
     expect(mocks.cancelBodies[0]).toMatchObject({
       reason: "cancelled from admin ui",
     });
+    const cancelSuccessAlert = page
+      .getByRole("status")
+      .filter({ hasText: "요청 취소 처리 결과" });
+    await expect(cancelSuccessAlert).toContainText(QUEUED_REQUEST_ID);
+    await expect.poll(() => mocks.list).toBeGreaterThan(listBeforeCancel);
+    await expect(queuedRow).toHaveCount(0);
+    await expect(cancelSuccessAlert).toContainText("원 요청 상태 cancelled");
+    await expect(cancelSuccessAlert).not.toContainText("확인 중");
+    await expect(cancelSuccessAlert).toContainText("취소 처리 상태 completed");
   });
 
   test("empty list: zero items -> empty message and 0 rows badge", async ({
@@ -401,14 +581,15 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await expect(page.getByText("0건")).toBeVisible();
   });
 
-  test("list error: GET 500 -> destructive Alert 'request 처리 실패' with HTTP 500 message", async ({
-    page,
-  }) => {
+  test("list error: GET 500 -> 요청 목록 조회 실패 alert", async ({ page }) => {
     await page.route("**/v1/debug/etl/providers**", async (route) => {
       bffApiPath(route.request().url());
       await fulfillJson(route, {
         data: { providers: [] },
-        meta: { duration_ms: 1, request_id: "e2e-feature-update-providers-error" },
+        meta: {
+          duration_ms: 1,
+          request_id: "e2e-feature-update-providers-error",
+        },
       } satisfies ProvidersResponse);
     });
     await page.route(
@@ -430,10 +611,10 @@ test.describe("admin/feature-update-requests list + create depth", () => {
 
     await page.goto("/admin/features/update-requests");
 
-    // 목록 실패 배너는 role=alert(destructive) + 'request 처리 실패'(CREATE 실패는 '요청 생성 실패').
+    // 목록 실패 배너는 create/preview/mutation 실패와 다른 제목을 쓴다.
     const errorAlert = page
       .getByRole("alert")
-      .filter({ hasText: "요청 처리 실패" });
+      .filter({ hasText: "요청 목록 조회 실패" });
     await expect(errorAlert).toBeVisible();
     // ApiClientError.message: "GET /v1/... 실패 (HTTP 500) ...".
     await expect(page.getByText(/HTTP 500/)).toBeVisible();
@@ -449,6 +630,7 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await page.getByLabel("경도").fill("");
     await page.getByLabel("위도").fill("44");
     await page.getByLabel("반경(km)").fill("0.01");
+    await page.getByLabel(/미리보기/).uncheck();
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(page.getByText("경도를 입력하세요.")).toBeVisible();
@@ -466,10 +648,13 @@ test.describe("admin/feature-update-requests list + create depth", () => {
   }) => {
     const mocks = await mockFeatureUpdateRequests(page, {
       createStatus: 422,
-      createErrorBody: { detail: "radius_km must be less than or equal to 500" },
+      createErrorBody: {
+        detail: "radius_km must be less than or equal to 500",
+      },
     });
 
     await page.goto("/admin/features/update-requests");
+    await page.getByLabel(/미리보기/).uncheck();
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => mocks.create).toBe(1);
@@ -479,6 +664,23 @@ test.describe("admin/feature-update-requests list + create depth", () => {
     await expect(errorAlert).toBeVisible();
     await expect(errorAlert).toContainText("HTTP 422");
     await expect(errorAlert).toContainText("radius_km");
+  });
+
+  test("preview API 422 -> 미리보기 실패 alert", async ({ page }) => {
+    const mocks = await mockFeatureUpdateRequests(page, {
+      previewStatus: 422,
+      previewErrorBody: { detail: "preview radius_km is invalid" },
+    });
+
+    await page.goto("/admin/features/update-requests");
+    await page.getByRole("button", { name: "미리보기" }).click();
+
+    await expect.poll(() => mocks.preview).toBe(1);
+    const errorAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "미리보기 실패" });
+    await expect(errorAlert).toBeVisible();
+    await expect(errorAlert).toContainText("HTTP 422");
   });
 
   test("row -> detail deeplink: request column link href uses full id, text is shortId", async ({
