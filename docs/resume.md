@@ -1,6 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-16 (codex, agent A) — T-ADM-C3e-A2 구현·로컬 gate 완료(PR 전)
+## 2026-07-16 (codex) — C3e-B 실행 재분할·C3e-C 잔여 범위 확정
+
+- PR #705로 A2가 병합됐고 main·CI가 green임을 확인했다. datasets grid/detail과 pipeline은
+  이미 공용 canonical projection·DTO/OpenAPI를 소비하므로 C3e-C는 production 코드를 중복
+  수정하지 않고 실제 PostgreSQL/FastAPI REST 교차 통합 증거만 추가한다.
+- Claude Code의 C3e-B branch/worktree를 원격 branch, reflog, stash, filesystem blob까지 감사했다.
+  C3e-B 고유 구현은 0파일이며 고아 worktree의 의미 있는 파일은 원격 C4R/C45X commit과
+  동일했다. 따라서 복구할 코드 없이 최신 main에서 구현한다.
+- C3e-B를 `B1` immutable registry/run identity, `B2` provider guard/public wrapper/MCST callback,
+  `B3` active·terminal sensor/양방향 reconcile의 독립 PR로 나눴다. B1과 C를 먼저 병렬 진행하고,
+  B1 병합 뒤 B2/B3를 병렬 진행한다. 모든 코드·테스트 의미 변경은 테스트 전 적대 리뷰 2인을
+  유지하며 변수명/import 정렬 등 비동작 변경은 재리뷰하지 않는다.
+- **다음 한 작업**: 이 문서-only 분할 PR을 rebase·CI green 후 추가 적대 리뷰 없이 바로
+  병합하고, Agent A가 C3e-C, Agent B가 C3e-B1을 병렬 구현한다.
+
+## 2026-07-16 (codex, agent A) — T-ADM-C3e-A2 구현·로컬 gate 완료(PR #705 병합)
 
 - **공용 projection**: C3b cycle-safe lineage 위에서 canonical root와 exact
   `provider_datasets[]`를 한 번 계산하도록 executions, 단건 detail, overview, datasets latest
@@ -76,9 +91,8 @@
   통과했다. n150 Linux 격리 checkout의 11개 mocked spec은 **501/501 통과**했고 prod
   checkout/container는 변경하지 않았다. 로컬 reverse geocoder가 400을 반환하는 live 전용 5건은
   C3e-I/C7의 n150 prod gate로 분리했다.
-- **다음 한 작업**: remote push 전 보안 감사와 문서-only origin/main rebase를 마치고 A2 PR을
-  CI green·review approval 뒤 병합한다. 사용자 지시에 따라 PR 제출 직전에 A2를
-  `docs/tasks-done.md`로 이동했다. 이후 C3e-B/C/I를 진행해 #679를 닫고 C45X/C4R 리뷰·개선으로
+- **병합 결과**: PR #705는 8개 CI gate green 뒤 main에 병합됐고, 사용자 지시에 따라 A2는
+  `docs/tasks-done.md`로 이동했다. 이후 C3e-B1/B2/B3/C/I를 진행해 #679를 닫고 C45X/C4R 리뷰·개선으로
   넘어간다. 파괴적 live UI E2E와 prod 최종 검증은 C3e-I/C7에서 수행한다.
 
 ## 2026-07-15 (codex, agent A) — T-ADM-C3e-A1 구현·로컬 gate 완료

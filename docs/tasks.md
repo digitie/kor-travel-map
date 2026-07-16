@@ -8,8 +8,10 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C3e-B` — Dagster tracking registry·wrapper·run status sensor (agent B)
-  - [ ] `T-ADM-C3e-C` — datasets REST/OpenAPI/admin types canonical 소비 (agent A)
+  - [ ] `T-ADM-C3e-B1` — Dagster immutable operation registry·run identity tag (agent B)
+  - [ ] `T-ADM-C3e-B2` — provider guard·public wrapper·MCST pair callback (agent A)
+  - [ ] `T-ADM-C3e-B3` — active/terminal run sensor·양방향 reconcile (agent B)
+  - [ ] `T-ADM-C3e-C` — datasets/pipeline REST canonical 교차 통합 증거 (agent A)
   - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
@@ -37,22 +39,34 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C3e-B` — **Dagster canonical tracking** (agent **B**, 의존 C3e-A1,
-  C3e-A2와 병렬): 모든 public feature-load wrapper와 KMA/MCST를 immutable registry에 연결하고
-  definition trigger tag 오분류를 제거한다. event-backed QUEUED/STARTING/STARTED/CANCELING 각 sensor가
-  DB-only 1차 ensure하고 NOT_STARTED/MANAGED는 periodic scan/guard가 처리하며,
-  guard resource가 provider fetcher 전 ensure, wrapper가 마지막 fallback/pair success를 소유하고
-  SUCCESS/FAILURE/CANCELED와 periodic reconcile sensor가 run terminal을 소유한다. MCST에는
-  wrapper-owned pair completion callback을 주입한다.
-  등록 identity drift fail-closed와 비등록 arbitrary panel-only, pre-resource/queued cancel,
-  partial success, multi-asset/shared-run, direct Dagster cancel, sensor default/readiness·selection
-  mismatch·중복 delivery와 끝에서 wrap하는 양방향 watermark reconcile을 회귀로 고정한다.
-- [ ] `T-ADM-C3e-C` — **datasets REST/OpenAPI 소비** (agent **A**, 의존 C3e-A2):
-  독자 recursive SQL과 payload 계보를 제거하고 grid latest/detail recent/timeline이 같은 root와
-  pair member status·nullable raw Dagster status·engine 시각을 반환하게 한다. recent cursor/history URL, status vocabulary,
-  `db_recorded_canonical_operations` coverage, 공용 DTO/HATEOAS mapper, OpenAPI/admin types를
-  완결한다.
-- [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B/C): 선행 merge마다
+- [ ] `T-ADM-C3e-B1` — **Dagster immutable operation registry·run identity** (agent
+  **B**, 의존 C3e-A1): schedule/job/asset selection을 canonical catalog의 exact pair와 연결하는
+  immutable registry와 version을 만든다. KNPS run-config snapshot과 MCST 13 pair를 명시하고,
+  registry가 생성한 redacted identity tag만 신뢰한다. job definition에서 schedule trigger tag를
+  제거해 UI/CLI manual 실행 오분류를 막고, 등록 identity의 누락·불일치는 fail-closed,
+  비등록 arbitrary job은 panel-only로 구분한다. 전체 schedule/asset pair catalog coverage,
+  registry version/selection/config drift, trigger 우선순위와 definition readiness를 회귀로 고정한다.
+- [ ] `T-ADM-C3e-B2` — **provider guard·public wrapper tracking** (agent **A**, 의존
+  C3e-B1, C3e-B3와 병렬): 모든 live provider resource 앞에 DB-only operation guard를 두고,
+  모든 public feature-load asset/KMA wrapper가 raw runner 직전 마지막 ensure와 자기 exact pair
+  success를 기록하게 한다. MCST raw runner에는 nullable async pair-completion callback을 주입하되
+  `FeatureUpdateAssetRunner` direct raw 경로는 tracking 0을 유지한다. marker 선점 시 provider I/O와
+  child 생성 0, ensure 선점 시 selection 전체 freeze, step retry·partial success·shared run과
+  MCST 전반 성공/후반 실패를 회귀로 고정한다.
+- [ ] `T-ADM-C3e-B3` — **run-status sensor·양방향 reconcile** (agent **B**, 의존
+  C3e-B1, C3e-B2와 병렬): QUEUED/STARTING/STARTED/CANCELING event sensor, SUCCESS/FAILURE/
+  CANCELED terminal sensor와 NOT_STARTED/MANAGED·missed event periodic scan을 provider-resource-free로
+  구현한다. Dagster→DB total-order watermark는 page commit 뒤 전진하고 DB→Dagster active-root
+  keyset sweep은 끝에서 처음으로 wrap한다. sensor default RUNNING/readiness, 중복 delivery,
+  pre-resource/direct cancel, terminal selection mismatch, partial success, Dagster unavailable/not-found,
+  양방향 watermark 재시작을 회귀로 고정한다.
+- [ ] `T-ADM-C3e-C` — **datasets/pipeline REST canonical 교차 통합 증거** (agent
+  **A**, 의존 C3e-A2, C3e-B1과 병렬): A2에서 완료한 공용 projection·DTO·OpenAPI 구현은
+  중복 수정하지 않는다. 실제 migrated PostgreSQL과 FastAPI dependency를 사용해 datasets grid,
+  dataset detail recent, pipeline executions REST가 같은 `(kind,id)`, exact pair/member UUID,
+  root/pair 상태, raw Dagster 상태, engine 시각과 projected job을 반환하는지 검증한다. detail
+  cursor/history URL과 `db_recorded_canonical_operations` coverage도 같은 통합 테스트로 고정한다.
+- [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B1/B2/B3/C): 선행 merge마다
   origin/main rebase하고 교차 회귀·적대 리뷰 2인·전체 CI를 통과시킨다. 일정/수동/갱신/import
   실행과 datasets/pipeline 동일 root 증거를 이슈 #679에 남긴 뒤 닫는다.
 - [ ] `T-ADM-C4R` — **C4 UI 소비 계약 수정** (agent **A**, issue **#684**,
@@ -98,7 +112,8 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트.
 
-현재 codex 실행 순서는 사용자 지시로 **C3e-B/C/I → C45X·C4R 차단 계약 → 기존
+현재 codex 실행 순서는 사용자 지시로 **C3e-B1과 C3e-C 병렬 → C3e-B2와 B3 병렬 → C3e-I
+→ C45X·C4R 차단 계약 → 기존
 C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
 worktree의 C45X/C4R 구현이 정본이다. C3e 종료 뒤 해당 worktree와 PR을 가져와 적대적 상세 리뷰
 후 개선을 반영한다. C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다.
