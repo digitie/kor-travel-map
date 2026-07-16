@@ -127,6 +127,17 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.resolve_sensor_def("feature_update_request_failure_sensor").name == (
         "feature_update_request_failure_sensor"
     )
+    for sensor_name in (
+        "feature_operation_queued_sensor",
+        "feature_operation_starting_sensor",
+        "feature_operation_started_sensor",
+        "feature_operation_canceling_sensor",
+        "feature_operation_success_sensor",
+        "feature_operation_failure_sensor",
+        "feature_operation_canceled_sensor",
+        "feature_operation_reconciliation_sensor",
+    ):
+        assert defs.resolve_sensor_def(sensor_name).name == sensor_name
 
 
 def test_feature_update_runner_default_resource_registered() -> None:

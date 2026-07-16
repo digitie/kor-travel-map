@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (agent B) — T-ADM-C3e-B3 로컬 gate 완료
+
+- QUEUED/STARTING/STARTED/CANCELING/SUCCESS/FAILURE/CANCELED를 각각 받는 7개
+  `run_status_sensor`와 missed event·NOT_STARTED/MANAGED를 복구하는 periodic sensor를
+  기본 RUNNING으로 등록했다. sensor는 provider resource를 열지 않고 DB client만 사용한다.
+- Dagster→DB는 public insertion cursor `(storage_id, run_id)`를 사용한다. 페이지를 ID로 먼저
+  읽고 300초 settle lag를 만족하는 연속 prefix만 처리해 clock skew가 있는 낮은 ID를 건너뛰지
+  않는다. cursor anchor가 삭제·변조됐거나 비어 있지 않은 storage에 초기 cursor가 없으면
+  fail-closed한다. scan/list/write 오류는 타입만 기록하고 cursor를 유지한다.
+- DB→Dagster active-root keyset은 마지막 page에서 첫 page로 wrap한다. active event는 root/child를
+  멱등 ensure하고 terminal event는 pre-resource/direct cancel과 partial success를 원자 reconcile한다.
+  trigger·selection 불일치는 active 행을 남기지 않고 같은 transaction에서
+  `tracking_invariant`로 닫는다.
+- codegraph 영향도와 모든 caller를 확인했고, 적대 리뷰어 2명의 최종 판정은 S1/S2/S3 0건이다.
+  focused 101건과 기계적 정리 후 52건, 실제 PostGIS 통합 27건, Dagster 전체 342건(1 skip),
+  main unit 1,366건, Ruff, strict mypy 135개 소스, import 계약 4/4를 통과했다. WSL/NTFS pytest
+  capture 오류는 실행 0건임을 확인하고 `-s`로 재실행했다.
+- **다음 한 작업**: B3 PR을 CI green·승인 뒤 병합하고, B2 병합 후 C3e-I에서 교차 회귀와
+  이슈 #679 종결 증거를 확인한다.
+
 ## 2026-07-16 (agent B) — T-ADM-C3e-B1 로컬 gate 완료
 
 - 33개 Dagster feature-load job과 asset selection을 canonical exact pair registry로 고정했다.

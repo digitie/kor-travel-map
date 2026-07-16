@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Dagster canonical operation run 추적 (2026-07-16, ADR-064 T-ADM-C3e-B3)
+
+- **ADDED**: QUEUED부터 CANCELED까지 7개 run-status sensor와 NOT_STARTED/MANAGED·누락
+  event를 복구하는 periodic sensor를 기본 RUNNING으로 등록했다. 모든 추적 경로는 provider
+  resource 없이 canonical DB client만 사용한다.
+- **CHANGED**: Dagster insertion cursor는 300초 settle lag를 만족하는 연속 ID prefix를 page
+  commit 뒤 전진하며, DB active-root keyset은 마지막 page에서 첫 page로 순환한다. cursor anchor
+  삭제·변조, 초기 무cursor, Dagster/DB 오류는 fail-closed한다.
+- **FIXED**: terminal run의 trigger·selection 불변식 위반, pre-resource 실패, direct cancel,
+  partial success가 active root/child를 남기지 않고 원자적으로 terminal 상태가 되도록 보강했다.
+
 ### Dagster canonical operation registry (2026-07-16, ADR-064 T-ADM-C3e-B1)
 
 - **CHANGED**: 33개 feature-load job의 asset selection과 53개 provider/dataset 선택지를

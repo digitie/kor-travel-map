@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e Dagster run sensor·양방향 복구 (2026-07-16, `T-ADM-C3e-B3`)
+
+- [x] **T-ADM-C3e-B3 — active/terminal sensor·양방향 reconcile.** QUEUED부터
+  CANCELED까지 7개 run-status sensor와 NOT_STARTED/MANAGED·누락 event를 복구하는 30초
+  periodic sensor를 기본 RUNNING으로 등록했다. public Dagster insertion cursor는 300초
+  settle lag와 연속 settled prefix를 사용하고, DB active-root keyset은 마지막 page에서 처음으로
+  wrap한다. cursor anchor 삭제·변조, 비어 있지 않은 storage의 무cursor 시작, scan/list/write
+  실패는 fail-closed하며 cursor를 전진시키지 않는다. terminal trigger·selection 불변식 위반은
+  같은 transaction에서 root/child를 `tracking_invariant`로 닫는다. 적대 리뷰어 2명 최종
+  S1/S2/S3 0건 승인 뒤 focused 101건과 수정 후 52건, 실제 PostGIS 27건, Dagster 전체
+  342건(1 skip), main unit 1,366건, Ruff·strict mypy·import 계약 4/4를 통과했다.
+
 ## C3e Dagster operation registry (2026-07-16, `T-ADM-C3e-B1`)
 
 - [x] **T-ADM-C3e-B1 — immutable registry·run identity.** 33개 feature-load job과
