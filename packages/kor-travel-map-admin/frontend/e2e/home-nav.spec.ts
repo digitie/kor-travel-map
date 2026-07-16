@@ -11,6 +11,8 @@ type PublicHealthResponse = components["schemas"]["PublicHealthResponse"];
 type PublicVersionResponse = components["schemas"]["PublicVersionResponse"];
 type OpsMetricsResponse = components["schemas"]["OpsMetricsResponse"];
 type OpsMetricsData = components["schemas"]["OpsMetricsData"];
+type PipelineOverviewResponse =
+  components["schemas"]["PipelineOverviewResponse"];
 type OpsImportJobsListResponse =
   components["schemas"]["OpsImportJobsListResponse"];
 type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
@@ -108,6 +110,25 @@ function makeMetrics(overrides: Partial<OpsMetricsData> = {}): OpsMetricsRespons
     ...overrides,
   };
   return { data, meta: simpleMeta("e2e-home-metrics") };
+}
+
+function makePipelineOverview(): PipelineOverviewResponse {
+  return {
+    data: {
+      active_operations: 3,
+      checked_at: MOCK_NOW,
+      dagster: {
+        dagster_url: "http://127.0.0.1:12702",
+        graphql_url: "http://127.0.0.1:12702/graphql",
+        schedule_count: 1,
+        sensor_count: 0,
+        status: "ok",
+      },
+      failed_operations_24h: 1,
+      operations_by_status: { done: 7, queued: 1, running: 2 },
+    },
+    meta: simpleMeta("e2e-home-pipeline"),
+  };
 }
 
 function makeImportJob(
@@ -295,6 +316,26 @@ async function routeImportJobs(
   });
 }
 
+async function routePipeline(
+  page: Page,
+  handler: (route: Route) => Promise<void>,
+) {
+  await page.route("**/v1/ops/pipeline/overview**", async (route) => {
+    if (isRoutePassthrough(route)) {
+      await route.continue();
+      return;
+    }
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/pipeline/overview") {
+      throw new Error(
+        `Unhandled home pipeline route: ${request.method()} ${apiPath}`,
+      );
+    }
+    await handler(route);
+  });
+}
+
 async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/v1/admin/features/dedup-reviews**", async (route) => {
     if (isRoutePassthrough(route)) {
@@ -344,6 +385,7 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "큐레이션 관리", href: "/admin/features/curated" },
   { label: "큐레이션 지도", href: "/curated-features" },
   // [수집 파이프라인]
+  { label: "파이프라인", href: "/ops/pipeline" },
   { label: "Provider 상태", href: "/ops/providers" },
   { label: "적재 작업", href: "/ops/import-jobs" },
   { label: "갱신 요청", href: "/admin/features/update-requests" },
@@ -387,8 +429,8 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 21개 — source NAV_GROUPS 기준.
-    await expect(navigation.getByRole("link")).toHaveCount(21);
+    // nav 링크는 정확히 22개 — source NAV_GROUPS 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(22);
 
     // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
     for (const header of NAV_GROUP_HEADERS) {
@@ -403,6 +445,9 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await routeHealth(page, (route) => fulfillJson(route, makeHealth()));
     await routeVersion(page, (route) => fulfillJson(route, makeVersion()));
     await routeMetrics(page, (route) => fulfillJson(route, makeMetrics()));
+    await routePipeline(page, (route) =>
+      fulfillJson(route, makePipelineOverview()),
+    );
     await routeImportJobs(page, (route) =>
       fulfillJson(route, makeImportJobsList([makeImportJob()])),
     );
@@ -432,13 +477,14 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       featuresCard.getByText("활성 30 / 비활성 12"),
     ).toBeVisible();
 
-    // Import jobs MetricCard: import_jobs_by_status 합(1+2=3)을 reduce한다.
+    // Pipeline MetricCard: canonical operations_by_status 합(7+1+2=10).
     const importJobsCard = cards.filter({
-      has: page.getByRole("heading", { name: "적재 작업", exact: true }),
+      has: page.getByRole("heading", { name: "파이프라인 작업", exact: true }),
     });
     await expect(
-      importJobsCard.getByText("3", { exact: true }),
+      importJobsCard.getByText("10", { exact: true }),
     ).toBeVisible();
+    await expect(importJobsCard.getByText("3건 진행 중")).toBeVisible();
 
     // Dedup queue MetricCard: dedup_queue_by_status 합(6+3=9) + pending desc.
     const dedupQueueCard = cards.filter({
@@ -460,8 +506,11 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       featuresCard.getByRole("link", { name: "Feature", exact: true }),
     ).toHaveAttribute("href", "/admin/features");
     await expect(
-      importJobsCard.getByRole("link", { name: "적재 작업", exact: true }),
-    ).toHaveAttribute("href", "/ops/import-jobs");
+      importJobsCard.getByRole("link", {
+        name: "파이프라인 작업",
+        exact: true,
+      }),
+    ).toHaveAttribute("href", "/ops/pipeline");
     await expect(
       dedupQueueCard.getByRole("link", { name: "중복 검수", exact: true }),
     ).toHaveAttribute("href", "/admin/features/dedup-reviews");
@@ -516,6 +565,9 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       fulfillJson(route, { detail: "boom" }, 500),
     );
     await routeMetrics(page, (route) =>
+      fulfillJson(route, { detail: "boom" }, 500),
+    );
+    await routePipeline(page, (route) =>
       fulfillJson(route, { detail: "boom" }, 500),
     );
     await routeDagster(page, (route) =>
@@ -591,6 +643,9 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     );
     await routeDedup(page, (route) => fulfillJson(route, makeDedupList([])));
     await routeDagster(page, (route) => fulfillJson(route, makeDagster()));
+    await routePipeline(page, (route) =>
+      fulfillJson(route, makePipelineOverview()),
+    );
     await routeMetrics(page, async (route) => {
       await gate;
       await fulfillJson(route, makeMetrics());

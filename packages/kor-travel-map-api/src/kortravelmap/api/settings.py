@@ -33,6 +33,7 @@ class ApiSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     host: str = Field(
@@ -242,6 +243,17 @@ class ApiSettings(BaseSettings):
         ge=1.0,
         le=300.0,
         description="SAFE_TERMINATE 뒤 terminal 상태를 기다리는 전체 제한 시간(초).",
+    )
+    mois_source_sync_ttl_hours: int = Field(
+        default=24,
+        ge=0,
+        validation_alias="KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS",
+        description=(
+            "MOIS 적재 요청 전 mois_localdata_source_sync 최근 SUCCESS run을 "
+            "유효하게 보는 최대 경과 시간. Dagster/source 정본과 같은 "
+            "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS를 읽는다. 0이면 "
+            "MOIS 적재 요청을 차단한다."
+        ),
     )
     pipeline_cancellation_retry_after_seconds: int = Field(
         default=3,

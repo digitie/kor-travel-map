@@ -28,6 +28,75 @@ class ApiClientError extends Error {
   }
 }
 
+const idempotencyFallback = new Map<string, string>();
+
+function idempotencyStorageKey(operationKey: string): string {
+  return `kor-travel-map:idempotency:${operationKey}`;
+}
+
+function readIdempotencyKey(operationKey: string): string | null {
+  const storageKey = idempotencyStorageKey(operationKey);
+  try {
+    return window.sessionStorage.getItem(storageKey) ?? idempotencyFallback.get(storageKey) ?? null;
+  } catch {
+    return idempotencyFallback.get(storageKey) ?? null;
+  }
+}
+
+function writeIdempotencyKey(operationKey: string, value: string | null): void {
+  const storageKey = idempotencyStorageKey(operationKey);
+  if (value === null) {
+    idempotencyFallback.delete(storageKey);
+  } else {
+    idempotencyFallback.set(storageKey, value);
+  }
+  try {
+    if (value === null) {
+      window.sessionStorage.removeItem(storageKey);
+    } else {
+      window.sessionStorage.setItem(storageKey, value);
+    }
+  } catch {
+    // storage 차단 환경은 탭 수명 in-memory key로 동일 재시도를 보호한다.
+  }
+}
+
+export async function withIdempotencyKey<T>(
+  operationKey: string,
+  operation: (idempotencyKey: string) => Promise<T>,
+  options: { retainOnSuccess?: (result: T) => boolean } = {},
+): Promise<T> {
+  const idempotencyKey =
+    readIdempotencyKey(operationKey) ?? globalThis.crypto.randomUUID();
+  writeIdempotencyKey(operationKey, idempotencyKey);
+  try {
+    const result = await operation(idempotencyKey);
+    if (!options.retainOnSuccess?.(result)) {
+      writeIdempotencyKey(operationKey, null);
+    }
+    return result;
+  } catch (error) {
+    const uncertainConflict =
+      error instanceof ApiClientError &&
+      error.problem?.code === "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT";
+    const uncertainTransport =
+      error instanceof ApiClientError &&
+      (error.status >= 500 ||
+        error.status === 408 ||
+        error.status === 425 ||
+        error.status === 429 ||
+        error.status === 499);
+    if (
+      error instanceof ApiClientError &&
+      !uncertainConflict &&
+      !uncertainTransport
+    ) {
+      writeIdempotencyKey(operationKey, null);
+    }
+    throw error;
+  }
+}
+
 function parseRetryAfterSeconds(response: Response): number | null {
   const value = response.headers.get("Retry-After");
   if (value === null || !/^\d+$/.test(value)) {
@@ -113,6 +182,7 @@ export function pathWithQuery(path: string, params: QueryParams): string {
  * (kor-travel-concierge #111과 동일 계열).
  */
 export interface RequestOptions {
+  headers?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -122,6 +192,7 @@ async function requestJson<T>(
     method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     body?: unknown;
     cache?: RequestCache;
+    headers?: Record<string, string>;
     signal?: AbortSignal;
   } = {},
 ): Promise<T> {
@@ -132,6 +203,7 @@ async function requestJson<T>(
     headers: {
       Accept: "application/json",
       ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
     },
     credentials: "same-origin",
     cache: options.cache ?? "no-store",
@@ -146,7 +218,10 @@ async function requestJson<T>(
 }
 
 export function getJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  return requestJson<T>(path, { signal: options.signal });
+  return requestJson<T>(path, {
+    headers: options.headers,
+    signal: options.signal,
+  });
 }
 
 export function postJson<T>(
@@ -154,7 +229,12 @@ export function postJson<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  return requestJson<T>(path, { method: "POST", body, signal: options.signal });
+  return requestJson<T>(path, {
+    method: "POST",
+    body,
+    headers: options.headers,
+    signal: options.signal,
+  });
 }
 
 export async function postFormData<T>(
@@ -164,7 +244,7 @@ export async function postFormData<T>(
 ): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...options.headers },
     credentials: "same-origin",
     cache: "no-store",
     signal: options.signal,
@@ -182,7 +262,12 @@ export function putJson<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  return requestJson<T>(path, { method: "PUT", body, signal: options.signal });
+  return requestJson<T>(path, {
+    method: "PUT",
+    body,
+    headers: options.headers,
+    signal: options.signal,
+  });
 }
 
 export function patchJson<T>(
@@ -190,7 +275,12 @@ export function patchJson<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  return requestJson<T>(path, { method: "PATCH", body, signal: options.signal });
+  return requestJson<T>(path, {
+    method: "PATCH",
+    body,
+    headers: options.headers,
+    signal: options.signal,
+  });
 }
 
 export function deleteJson<T>(
@@ -198,7 +288,12 @@ export function deleteJson<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  return requestJson<T>(path, { method: "DELETE", body, signal: options.signal });
+  return requestJson<T>(path, {
+    method: "DELETE",
+    body,
+    headers: options.headers,
+    signal: options.signal,
+  });
 }
 
 /** `GET /health` — backend liveness probe. */

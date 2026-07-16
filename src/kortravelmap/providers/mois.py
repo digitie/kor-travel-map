@@ -90,6 +90,8 @@ __all__ = [
     "PROMOTED_PLACE_KIND_BY_SLUG",
     "MOIS_MARKER_COLOR",
     "MOIS_DEFAULT_MARKER_ICON",
+    "MOIS_SOURCE_SYNC_COVERAGE_TAG",
+    "MOIS_SOURCE_SYNC_FULL_COVERAGE",
 ]
 
 
@@ -108,6 +110,14 @@ MOIS_MARKER_COLOR: Final[str] = "P-01"
 
 MOIS_DEFAULT_MARKER_ICON: Final[str] = "marker"
 """category maki 미상 시 fallback marker icon."""
+
+MOIS_SOURCE_SYNC_COVERAGE_TAG: Final[str] = (
+    "kor_travel_map.mois_source_sync.coverage"
+)
+"""Dagster MOIS Phase A run이 성공적으로 실행한 범위 tag."""
+
+MOIS_SOURCE_SYNC_FULL_COVERAGE: Final[str] = "promoted-national-v1"
+"""PROMOTED 전체 업종·전국 동기화를 증명하는 coverage 값."""
 
 # source_natural_key 구분자. make_feature_id/make_source_record_key는 구성요소
 # 내부 ``|``를 금지하므로 ``::`` 사용 (kma.py alert×region 패턴과 동일).

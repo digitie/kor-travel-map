@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from uuid import UUID
 
 import httpx
 import pytest
@@ -10,18 +12,33 @@ from fastapi.testclient import TestClient
 
 from kortravelmap.api import dagster_graphql as dagster_mod
 from kortravelmap.api import dagster_query_service as dagster_query
+from kortravelmap.api import dagster_schedule_service as dagster_schedule
 from kortravelmap.api.app import create_app
+from kortravelmap.api.dagster_schema import (
+    DagsterScheduleCommandData,
+    DagsterScheduleCommandResponse,
+)
+from kortravelmap.api.routers import dagster as dagster_router
 from kortravelmap.api.settings import ApiSettings
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app = create_app(
         ApiSettings(
             dagster_url="http://dagster.example:12302",
             dagster_allowed_hosts=["dagster.example"],
             dagster_request_timeout_seconds=1.0,
         )
+    )
+
+    async def _empty_schedule_overrides(_session: object) -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr(
+        dagster_schedule,
+        "schedule_overrides",
+        _empty_schedule_overrides,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -207,6 +224,13 @@ def test_dagster_summary_parses_graphql_response(
     assert data["sensor_count"] == 1
     assert data["run_counts"] == {"SUCCESS": 1}
     repository = data["repositories"][0]
+    assert repository["schedules"][0]["effective_cron_schedule"] == "0 2 * * *"
+    assert repository["schedules"][0]["override_saved"] is False
+    assert repository["schedules"][0]["override_effective"] is None
+    assert repository["schedules"][0]["can_run_now"] is False
+    assert repository["schedules"][0]["disabled_reason"] == (
+        "schedule job 이름이 없습니다."
+    )
     assert repository["schedules"][0]["recent_ticks"] == [
         {
             "tick_id": "schedule-tick-1",
@@ -253,6 +277,77 @@ def test_dagster_summary_parses_graphql_response(
     assert calls == [
         {"query": dagster_query._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
     ]
+
+
+@pytest.mark.unit
+def test_dagster_schedule_write_contract_has_no_client_actor(
+    client: TestClient,
+) -> None:
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    assert set(schemas["DagsterScheduleOverrideRequest"]["properties"]) == {
+        "cron_schedule",
+        "reason",
+    }
+    assert set(schemas["DagsterScheduleCommandRequest"]["properties"]) == {
+        "reason"
+    }
+
+
+@pytest.mark.unit
+def test_legacy_schedule_command_uses_server_actor_and_idempotency_key(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_audited_command(
+        _session: object,
+        **kwargs: object,
+    ) -> DagsterScheduleCommandResponse:
+        captured.update(kwargs)
+        return DagsterScheduleCommandResponse(
+            data=DagsterScheduleCommandData(
+                status="ok",
+                dagster_url="http://dagster.example:12302",
+                graphql_url="http://dagster.example:12302/graphql",
+                checked_at=datetime.now(UTC),
+                schedule_name="weather_daily",
+                command="start",
+                effective_cron_schedule="0 6 * * *",
+                schedule_status="RUNNING",
+                save_status="not_applicable",
+                reload_status="not_requested",
+                effective_status="confirmed",
+            ),
+            meta={"duration_ms": 0, "request_id": "unit"},
+        )
+
+    monkeypatch.setattr(
+        dagster_router,
+        "_execute_audited_command",
+        _fake_audited_command,
+    )
+    command_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    response = client.post(
+        "/v1/ops/dagster/schedules/weather_daily/start",
+        headers={"Idempotency-Key": command_id},
+        json={"reason": "운영 재개"},
+    )
+
+    assert response.status_code == 200
+    assert captured["actor"] == "local-dev"
+    assert captured["reason"] == "운영 재개"
+    assert captured["request_details"] == {"command": "start"}
+    assert captured["command_id"] == UUID(command_id)
+
+    spoofed = client.post(
+        "/v1/ops/dagster/schedules/weather_daily/start",
+        headers={"Idempotency-Key": command_id},
+        json={"operator": "spoofed"},
+    )
+    assert spoofed.status_code == 422
 
 
 @pytest.mark.unit

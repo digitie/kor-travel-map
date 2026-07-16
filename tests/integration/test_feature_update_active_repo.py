@@ -213,6 +213,9 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
         )
 
         async def _create() -> FeatureUpdateRequestCreateResponse:
+            async def _allow_plan(_pairs: frozenset[tuple[str, str]]) -> None:
+                return None
+
             async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
                 return await create_feature_update_request(
                     body,
@@ -220,6 +223,7 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                     operator="integration-c45x-race",
                     status_url_prefix="/v1/admin/features/update-requests",
                     settings=settings,
+                    resolved_plan_guard=_allow_plan,
                 )
 
         first, second = await asyncio.wait_for(

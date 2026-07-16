@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Final, Literal
+from uuid import UUID
 
 import httpx
 from kortravelmap.providers.feature_operation_registry import (
@@ -16,6 +20,7 @@ from kortravelmap.providers.feature_operation_registry import (
     validate_feature_operation_identity,
 )
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_graphql
@@ -32,7 +37,14 @@ from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
+    "DagsterScheduleValidationError",
+    "DagsterScheduleStorageUnavailable",
+    "DagsterScheduleIdempotencyConflict",
+    "DagsterScheduleReplayedFailure",
+    "append_schedule_audit_event",
+    "ScheduleCommand",
     "delete_schedule_override",
+    "execute_audited_schedule_command",
     "mutate_schedule_state",
     "reset_schedule_default",
     "run_schedule_now",
@@ -40,6 +52,35 @@ __all__ = [
     "upsert_schedule_override",
     "update_schedule",
 ]
+
+ScheduleCommand = Literal["update", "default", "start", "stop", "reset", "run"]
+
+
+class DagsterScheduleValidationError(ValueError):
+    """운영자 schedule 입력이 실행 전에 거부되었음을 나타낸다."""
+
+
+class DagsterScheduleStorageUnavailable(RuntimeError):
+    """schedule override/audit 영속 저장소를 안전하게 사용할 수 없다."""
+
+
+class DagsterScheduleIdempotencyConflict(RuntimeError):
+    """같은 idempotency key가 다른 요청이거나 결과 불명 상태다."""
+
+    def __init__(self, message: str, *, command_id: UUID) -> None:
+        super().__init__(message)
+        self.command_id = command_id
+
+
+class DagsterScheduleReplayedFailure(RuntimeError):
+    """이미 terminal 실패가 기록되어 원격 조작 없이 재생된 예상 밖 오류."""
+
+    def __init__(self, message: str, *, command_id: UUID) -> None:
+        super().__init__(message)
+        self.command_id = command_id
+
+
+_LOG = logging.getLogger(__name__)
 
 _DAGSTER_SCHEDULES_QUERY = """
 query KorTravelMapDagsterSchedules {
@@ -132,6 +173,12 @@ mutation KorTravelMapReloadLocation($repositoryLocationName: String!) {
     ... on WorkspaceLocationEntry {
       id
       name
+      loadStatus
+      locationOrLoadError {
+        __typename
+        ... on RepositoryLocation { name }
+        ... on PythonError { message stack className }
+      }
     }
     ... on ReloadNotSupported {
       message
@@ -275,8 +322,11 @@ async def schedule_overrides(
                 """
             )
         )
-    except Exception:
-        return {}
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule override 저장소를 조회할 수 없습니다."
+        ) from exc
     return {str(row.schedule_name): str(row.cron_schedule) for row in result}
 
 
@@ -285,31 +335,336 @@ async def upsert_schedule_override(
     *,
     schedule_name: str,
     cron_schedule: str,
-    operator: str | None,
+    actor: str,
     reason: str | None,
 ) -> None:
-    await session.execute(
-        text(
-            """
+    try:
+        await session.execute(
+            text(
+                """
             INSERT INTO ops.dagster_schedule_overrides (
               schedule_name, cron_schedule, updated_by, reason, metadata
             )
-            VALUES (:schedule_name, :cron_schedule, :operator, :reason, '{}'::jsonb)
+            VALUES (:schedule_name, :cron_schedule, :actor, :reason, '{}'::jsonb)
             ON CONFLICT (schedule_name) DO UPDATE
             SET cron_schedule = EXCLUDED.cron_schedule,
                 updated_by = EXCLUDED.updated_by,
                 reason = EXCLUDED.reason,
                 updated_at = now()
-            """
-        ),
-        {
-            "schedule_name": schedule_name,
-            "cron_schedule": cron_schedule,
-            "operator": operator,
-            "reason": reason,
-        },
+                """
+            ),
+            {
+                "schedule_name": schedule_name,
+                "cron_schedule": cron_schedule,
+                "actor": actor,
+                "reason": reason,
+            },
+        )
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule override를 저장할 수 없습니다."
+        ) from exc
+
+
+async def append_schedule_audit_event(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+    schedule_name: str,
+    command: ScheduleCommand,
+    phase: Literal["requested", "succeeded", "failed"],
+    actor: str,
+    reason: str | None,
+    details: dict[str, object],
+) -> None:
+    """schedule 명령 감사 이벤트를 덮어쓰기 없이 1행 추가한다."""
+
+    try:
+        await session.execute(
+            text(
+                """
+            INSERT INTO ops.dagster_schedule_audit_events (
+              command_id, schedule_name, command, phase, actor, reason, details
+            ) VALUES (
+              CAST(:command_id AS uuid), :schedule_name, :command, :phase,
+              :actor, :reason, CAST(:details AS jsonb)
+            )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+                "command": command,
+                "phase": phase,
+                "actor": actor,
+                "reason": reason,
+                "details": json.dumps(details, ensure_ascii=False, sort_keys=True),
+            },
+        )
+        if phase != "requested":
+            await session.execute(
+                text(
+                    """
+                    DELETE FROM ops.dagster_schedule_active_claims
+                    WHERE command_id = CAST(:command_id AS uuid)
+                      AND schedule_name = :schedule_name
+                    """
+                ),
+                {
+                    "command_id": str(command_id),
+                    "schedule_name": schedule_name,
+                },
+            )
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule 감사 이벤트를 저장할 수 없습니다."
+        ) from exc
+
+
+async def _claim_schedule_command(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+    schedule_name: str,
+    command: ScheduleCommand,
+    actor: str,
+    reason: str | None,
+    request_details: dict[str, object],
+) -> DagsterScheduleCommandResponse | None:
+    """idempotency key를 durable하게 선점하고 완료 응답이면 재생한다."""
+
+    try:
+        inserted = await session.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_audit_events (
+                  command_id, schedule_name, command, phase, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name, :command, 'requested',
+                  :actor, :reason, CAST(:details AS jsonb)
+                )
+                ON CONFLICT (command_id) WHERE phase = 'requested'
+                DO NOTHING
+                RETURNING event_id
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+                "command": command,
+                "actor": actor,
+                "reason": reason,
+                "details": json.dumps(
+                    request_details,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
+        inserted_event_id = inserted.scalar_one_or_none()
+        if inserted_event_id is not None:
+            claimed = await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.dagster_schedule_active_claims (
+                      command_id, schedule_name
+                    ) VALUES (
+                      CAST(:command_id AS uuid), :schedule_name
+                    )
+                    ON CONFLICT (schedule_name) DO NOTHING
+                    RETURNING command_id
+                    """
+                ),
+                {
+                    "command_id": str(command_id),
+                    "schedule_name": schedule_name,
+                },
+            )
+            if claimed.scalar_one_or_none() is None:
+                active = await session.execute(
+                    text(
+                        """
+                        SELECT command_id
+                        FROM ops.dagster_schedule_active_claims
+                        WHERE schedule_name = :schedule_name
+                        """
+                    ),
+                    {"schedule_name": schedule_name},
+                )
+                active_command_id = active.scalar_one_or_none()
+                await session.rollback()
+                raise DagsterScheduleIdempotencyConflict(
+                    "이 schedule의 이전 명령 결과가 확정되지 않았습니다. "
+                    "새 키로 재실행하지 마세요"
+                    + (
+                        f" (active_command_id={active_command_id})"
+                        if active_command_id is not None
+                        else ""
+                    ),
+                    command_id=command_id,
+                )
+            await session.commit()
+            return None
+        existing = await session.execute(
+            text(
+                """
+                SELECT schedule_name, command, phase, actor, reason, details
+                FROM ops.dagster_schedule_audit_events
+                WHERE command_id = CAST(:command_id AS uuid)
+                ORDER BY event_id
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        rows = list(existing)
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule 명령 idempotency 상태를 저장할 수 없습니다."
+        ) from exc
+
+    requested = next((row for row in rows if row.phase == "requested"), None)
+    if requested is None:
+        raise DagsterScheduleIdempotencyConflict(
+            "idempotency key의 요청 이벤트를 찾을 수 없습니다.",
+            command_id=command_id,
+        )
+    if (
+        str(requested.schedule_name) != schedule_name
+        or str(requested.command) != command
+        or str(requested.actor) != actor
+        or requested.reason != reason
+        or dict(requested.details) != request_details
+    ):
+        raise DagsterScheduleIdempotencyConflict(
+            "같은 Idempotency-Key를 다른 schedule 명령에 재사용할 수 없습니다.",
+            command_id=command_id,
+        )
+    terminal = next(
+        (row for row in reversed(rows) if row.phase in {"succeeded", "failed"}),
+        None,
     )
-    await session.commit()
+    if terminal is None:
+        raise DagsterScheduleIdempotencyConflict(
+            "이 schedule 명령은 실행 중이거나 결과 확인이 필요합니다. 새 키로 재실행하지 마세요.",
+            command_id=command_id,
+        )
+    if (
+        str(terminal.schedule_name) != str(requested.schedule_name)
+        or str(terminal.command) != str(requested.command)
+        or str(terminal.actor) != str(requested.actor)
+        or terminal.reason != requested.reason
+    ):
+        raise DagsterScheduleIdempotencyConflict(
+            "저장된 schedule terminal 이벤트가 원 요청과 일치하지 않습니다.",
+            command_id=command_id,
+        )
+    terminal_details = dict(terminal.details)
+    if terminal_details.get("outcome") == "exception":
+        message = str(
+            terminal_details.get("message") or "schedule 명령이 예외로 실패했습니다."
+        )
+        exception_kind = terminal_details.get("exception_kind")
+        if exception_kind == "validation":
+            raise DagsterScheduleValidationError(message)
+        if exception_kind == "storage_unavailable":
+            raise DagsterScheduleStorageUnavailable(message)
+        raise DagsterScheduleReplayedFailure(message, command_id=command_id)
+    try:
+        data = DagsterScheduleCommandData.model_validate(terminal_details)
+    except ValueError as exc:
+        raise DagsterScheduleIdempotencyConflict(
+            "저장된 schedule 명령 결과를 해석할 수 없습니다.",
+            command_id=command_id,
+        ) from exc
+    data.audit_command_id = command_id
+    return _schedule_command_response(data, started_at=perf_counter())
+
+
+async def execute_audited_schedule_command(
+    session: AsyncSession,
+    *,
+    schedule_name: str,
+    command: ScheduleCommand,
+    actor: str,
+    reason: str | None,
+    request_details: dict[str, object],
+    command_id: UUID,
+    operation: Callable[[], Awaitable[DagsterScheduleCommandResponse]],
+) -> DagsterScheduleCommandResponse:
+    """인증 actor 기반 request/result 두 이벤트로 외부 mutation을 감싼다."""
+
+    replay = await _claim_schedule_command(
+        session,
+        command_id=command_id,
+        schedule_name=schedule_name,
+        command=command,
+        actor=actor,
+        reason=reason,
+        request_details=request_details,
+    )
+    if replay is not None:
+        return replay
+    try:
+        response = await operation()
+    except Exception as exc:
+        await session.rollback()
+        exception_kind = (
+            "validation"
+            if isinstance(exc, DagsterScheduleValidationError)
+            else "storage_unavailable"
+            if isinstance(exc, DagsterScheduleStorageUnavailable)
+            else "unexpected"
+        )
+        try:
+            await append_schedule_audit_event(
+                session,
+                command_id=command_id,
+                schedule_name=schedule_name,
+                command=command,
+                phase="failed",
+                actor=actor,
+                reason=reason,
+                details={
+                    "outcome": "exception",
+                    "outcome_version": 1,
+                    "exception_kind": exception_kind,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+        except DagsterScheduleStorageUnavailable:
+            _LOG.exception(
+                "schedule 실패 terminal audit 저장 실패 (command_id=%s)",
+                command_id,
+            )
+        raise
+    response.data.audit_command_id = command_id
+    try:
+        await append_schedule_audit_event(
+            session,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command=command,
+            phase="succeeded" if response.data.status == "ok" else "failed",
+            actor=actor,
+            reason=reason,
+            details=response.data.model_dump(mode="json"),
+        )
+    except DagsterScheduleStorageUnavailable:
+        response.data.audit_status = "terminal_record_failed"
+        _LOG.exception(
+            "schedule 원격 결과 terminal audit 저장 실패; 결과는 재시도 유도 없이 반환 "
+            "(command_id=%s, status=%s)",
+            command_id,
+            response.data.status,
+        )
+    return response
 
 
 async def delete_schedule_override(
@@ -317,16 +672,22 @@ async def delete_schedule_override(
     *,
     schedule_name: str,
 ) -> None:
-    await session.execute(
-        text(
-            """
+    try:
+        await session.execute(
+            text(
+                """
             DELETE FROM ops.dagster_schedule_overrides
             WHERE schedule_name = :schedule_name
-            """
-        ),
-        {"schedule_name": schedule_name},
-    )
-    await session.commit()
+                """
+            ),
+            {"schedule_name": schedule_name},
+        )
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule override를 삭제할 수 없습니다."
+        ) from exc
 
 
 def _schedule_command_response(
@@ -382,17 +743,22 @@ def _command_error_data(
     dagster_urls: DagsterUrls,
     checked_at: datetime,
     schedule_name: str,
-    command: Literal["update", "default", "start", "stop", "reset", "run"],
+    command: ScheduleCommand,
     error: str,
+    status: Literal["unavailable", "error"] = "error",
 ) -> DagsterScheduleCommandData:
     return DagsterScheduleCommandData(
-        status="error",
+        status=status,
         dagster_url=dagster_urls.dagster_url,
         graphql_url=dagster_urls.graphql_url,
         checked_at=checked_at,
         schedule_name=schedule_name,
         command=command,
         default_cron_schedule=dagster_graphql.default_cron_for_schedule(schedule_name, None),
+        effective_cron_schedule=None,
+        save_status="not_applicable",
+        reload_status="not_requested",
+        effective_status="unknown",
         errors=[error],
     )
 
@@ -447,9 +813,9 @@ async def _reload_location(
     client: httpx.AsyncClient,
     dagster_urls: DagsterUrls,
     repository_location_name: str | None,
-) -> tuple[bool, str | None]:
+) -> tuple[Literal["succeeded", "unavailable", "error"], str | None]:
     if not repository_location_name:
-        return False, "repository location 이름이 없습니다."
+        return "error", "repository location 이름이 없습니다."
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,
@@ -458,17 +824,33 @@ async def _reload_location(
             query=_DAGSTER_RELOAD_LOCATION_MUTATION,
         )
     except httpx.HTTPError as exc:
-        return False, f"code location reload 요청 실패: {exc}"
+        return "unavailable", f"code location reload 요청 실패: {exc}"
+    except ValueError as exc:
+        return "error", f"code location reload 응답 해석 실패: {exc}"
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
-        return False, " / ".join(
+        return "error", " / ".join(
             dagster_graphql.graphql_error_message(error) for error in graphql_errors
         )
     result = dagster_graphql.as_dict(
         dagster_graphql.as_dict(payload.get("data")).get("reloadRepositoryLocation")
     )
+    if result.get("__typename") == "WorkspaceLocationEntry":
+        load_status = dagster_graphql.optional_string(result.get("loadStatus"))
+        location = dagster_graphql.as_dict(result.get("locationOrLoadError"))
+        if (
+            load_status == "LOADED"
+            and location.get("__typename") == "RepositoryLocation"
+        ):
+            return "succeeded", None
+        location_error = _graphql_result_error(location)
+        return (
+            "error",
+            "code location reload 후 load 실패"
+            f"(loadStatus={load_status or 'unknown'}): {location_error}",
+        )
     error = _graphql_result_error(result)
-    return error is None, error
+    return "error", error or "code location reload 응답을 확인할 수 없습니다."
 
 
 def _schedule_url_error(
@@ -476,16 +858,20 @@ def _schedule_url_error(
     settings: ApiSettings,
     checked_at: datetime,
     schedule_name: str,
-    command: Literal["update", "default", "start", "stop", "reset", "run"],
+    command: ScheduleCommand,
     error: Exception,
 ) -> DagsterScheduleCommandData:
     return DagsterScheduleCommandData(
-        status="error",
+        status="unavailable",
         dagster_url=settings.dagster_url,
         graphql_url=dagster_graphql.candidate_graphql_url(settings),
         checked_at=checked_at,
         schedule_name=schedule_name,
         command=command,
+        effective_cron_schedule=None,
+        save_status="not_applicable",
+        reload_status="not_requested",
+        effective_status="unknown",
         errors=[str(error)],
     )
 
@@ -497,6 +883,7 @@ async def update_schedule(
     session: AsyncSession,
     schedule_name: str,
     body: DagsterScheduleOverrideRequest,
+    actor: str,
 ) -> DagsterScheduleCommandResponse:
     """cron override를 저장하고 code location을 reload한다."""
 
@@ -515,18 +902,28 @@ async def update_schedule(
             ),
             started_at=started_at,
         )
-    overrides = await schedule_overrides(session)
     try:
         cron_schedule = _validate_cron_schedule(body.cron_schedule)
+    except ValueError as exc:
+        raise DagsterScheduleValidationError(str(exc)) from exc
+    overrides = await schedule_overrides(session)
+    try:
         schedule, errors = await _find_schedule(
             client=client,
             dagster_urls=urls,
             schedule_name=schedule_name,
             overrides=overrides,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
         schedule = None
         errors = [str(exc)]
+        unavailable = True
+    except ValueError as exc:
+        schedule = None
+        errors = [str(exc)]
+        unavailable = False
+    else:
+        unavailable = False
     if schedule is None:
         return _schedule_command_response(
             _command_error_data(
@@ -535,6 +932,7 @@ async def update_schedule(
                 schedule_name=schedule_name,
                 command="update",
                 error=" / ".join(errors),
+                status="unavailable" if unavailable else "error",
             ),
             started_at=started_at,
         )
@@ -542,17 +940,23 @@ async def update_schedule(
         session,
         schedule_name=schedule_name,
         cron_schedule=cron_schedule,
-        operator=body.operator,
+        actor=actor,
         reason=body.reason,
     )
-    reloaded, reload_error = await _reload_location(
+    reload_result, reload_error = await _reload_location(
         client=client,
         dagster_urls=urls,
         repository_location_name=schedule.repository_location_name,
     )
     return _schedule_command_response(
         DagsterScheduleCommandData(
-            status="ok",
+            status=(
+                "ok"
+                if reload_result == "succeeded"
+                else "unavailable"
+                if reload_result == "unavailable"
+                else "error"
+            ),
             dagster_url=urls.dagster_url,
             graphql_url=urls.graphql_url,
             checked_at=checked_at,
@@ -561,8 +965,21 @@ async def update_schedule(
             cron_schedule=cron_schedule,
             default_cron_schedule=schedule.default_cron_schedule,
             override_cron_schedule=cron_schedule,
+            effective_cron_schedule=schedule.cron_schedule,
             schedule_status=schedule.status,
-            reloaded=reloaded,
+            save_status="saved",
+            reload_status=(
+                "succeeded" if reload_result == "succeeded" else "failed"
+            ),
+            effective_status=(
+                "pending_verification"
+                if reload_result == "succeeded"
+                else (
+                    "confirmed"
+                    if schedule.cron_schedule == cron_schedule
+                    else "mismatch"
+                )
+            ),
             errors=[] if reload_error is None else [reload_error],
         ),
         started_at=started_at,
@@ -601,9 +1018,16 @@ async def reset_schedule_default(
             schedule_name=schedule_name,
             overrides=overrides,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
         schedule = None
         errors = [str(exc)]
+        unavailable = True
+    except ValueError as exc:
+        schedule = None
+        errors = [str(exc)]
+        unavailable = False
+    else:
+        unavailable = False
     if schedule is None:
         return _schedule_command_response(
             _command_error_data(
@@ -612,18 +1036,25 @@ async def reset_schedule_default(
                 schedule_name=schedule_name,
                 command="default",
                 error=" / ".join(errors),
+                status="unavailable" if unavailable else "error",
             ),
             started_at=started_at,
         )
     await delete_schedule_override(session, schedule_name=schedule_name)
-    reloaded, reload_error = await _reload_location(
+    reload_result, reload_error = await _reload_location(
         client=client,
         dagster_urls=urls,
         repository_location_name=schedule.repository_location_name,
     )
     return _schedule_command_response(
         DagsterScheduleCommandData(
-            status="ok",
+            status=(
+                "ok"
+                if reload_result == "succeeded"
+                else "unavailable"
+                if reload_result == "unavailable"
+                else "error"
+            ),
             dagster_url=urls.dagster_url,
             graphql_url=urls.graphql_url,
             checked_at=checked_at,
@@ -631,8 +1062,22 @@ async def reset_schedule_default(
             command="default",
             cron_schedule=schedule.default_cron_schedule,
             default_cron_schedule=schedule.default_cron_schedule,
+            override_cron_schedule=None,
+            effective_cron_schedule=schedule.cron_schedule,
             schedule_status=schedule.status,
-            reloaded=reloaded,
+            save_status="cleared",
+            reload_status=(
+                "succeeded" if reload_result == "succeeded" else "failed"
+            ),
+            effective_status=(
+                "pending_verification"
+                if reload_result == "succeeded"
+                else (
+                    "confirmed"
+                    if schedule.cron_schedule == schedule.default_cron_schedule
+                    else "mismatch"
+                )
+            ),
             errors=[] if reload_error is None else [reload_error],
         ),
         started_at=started_at,
@@ -672,9 +1117,16 @@ async def mutate_schedule_state(
             schedule_name=schedule_name,
             overrides=overrides,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
         schedule = None
         errors = [str(exc)]
+        unavailable = True
+    except ValueError as exc:
+        schedule = None
+        errors = [str(exc)]
+        unavailable = False
+    else:
+        unavailable = False
     if schedule is None:
         return _schedule_command_response(
             _command_error_data(
@@ -683,6 +1135,7 @@ async def mutate_schedule_state(
                 schedule_name=schedule_name,
                 command=command,
                 error=" / ".join(errors),
+                status="unavailable" if unavailable else "error",
             ),
             started_at=started_at,
         )
@@ -725,7 +1178,19 @@ async def mutate_schedule_state(
             variables=variables,
             query=query,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
+        return _schedule_command_response(
+            _command_error_data(
+                dagster_urls=urls,
+                checked_at=checked_at,
+                schedule_name=schedule_name,
+                command=command,
+                error=str(exc),
+                status="unavailable",
+            ),
+            started_at=started_at,
+        )
+    except ValueError as exc:
         return _schedule_command_response(
             _command_error_data(
                 dagster_urls=urls,
@@ -763,7 +1228,11 @@ async def mutate_schedule_state(
             cron_schedule=schedule.cron_schedule,
             default_cron_schedule=schedule.default_cron_schedule,
             override_cron_schedule=schedule.override_cron_schedule,
+            effective_cron_schedule=schedule.effective_cron_schedule,
             schedule_status=dagster_graphql.optional_string(state.get("status")) or schedule.status,
+            save_status="not_applicable",
+            reload_status="not_requested",
+            effective_status="confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
@@ -777,6 +1246,7 @@ async def run_schedule_now(
     session: AsyncSession,
     schedule_name: str,
     body: DagsterScheduleCommandRequest | None = None,
+    actor: str,
 ) -> DagsterScheduleCommandResponse:
     """스케줄이 가리키는 job을 1회 실행한다."""
 
@@ -803,9 +1273,16 @@ async def run_schedule_now(
             schedule_name=schedule_name,
             overrides=overrides,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
         schedule = None
         errors = [str(exc)]
+        unavailable = True
+    except ValueError as exc:
+        schedule = None
+        errors = [str(exc)]
+        unavailable = False
+    else:
+        unavailable = False
     if schedule is None or not schedule.pipeline_name:
         return _schedule_command_response(
             _command_error_data(
@@ -814,10 +1291,10 @@ async def run_schedule_now(
                 schedule_name=schedule_name,
                 command="run",
                 error=" / ".join(errors) if errors else "schedule job 이름이 없습니다.",
+                status="unavailable" if unavailable else "error",
             ),
             started_at=started_at,
         )
-    operator = body.operator if body else None
     reason = body.reason if body else None
     try:
         run_config, operation_tags = _admin_feature_operation_launch(
@@ -837,7 +1314,7 @@ async def run_schedule_now(
     metadata_tags = {
         **operation_tags,
         "kor_travel_map.schedule_name": schedule_name,
-        "kor_travel_map.operator": operator or "admin-ui",
+        "kor_travel_map.operator": actor,
         "kor_travel_map.reason": reason or "manual run",
     }
     execution_params = {
@@ -864,7 +1341,19 @@ async def run_schedule_now(
             variables={"executionParams": execution_params},
             query=_DAGSTER_LAUNCH_RUN_MUTATION,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPError as exc:
+        return _schedule_command_response(
+            _command_error_data(
+                dagster_urls=urls,
+                checked_at=checked_at,
+                schedule_name=schedule_name,
+                command="run",
+                error=str(exc),
+                status="unavailable",
+            ),
+            started_at=started_at,
+        )
+    except ValueError as exc:
         return _schedule_command_response(
             _command_error_data(
                 dagster_urls=urls,
@@ -902,9 +1391,13 @@ async def run_schedule_now(
             cron_schedule=schedule.cron_schedule,
             default_cron_schedule=schedule.default_cron_schedule,
             override_cron_schedule=schedule.override_cron_schedule,
+            effective_cron_schedule=schedule.effective_cron_schedule,
             schedule_status=schedule.status,
             run_id=dagster_graphql.optional_string(run.get("runId")),
             run_status=dagster_graphql.optional_string(run.get("status")),
+            save_status="not_applicable",
+            reload_status="not_requested",
+            effective_status="confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,

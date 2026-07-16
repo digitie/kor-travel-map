@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClientError, getJson, postJson } from "./client";
+import {
+  ApiClientError,
+  getJson,
+  postJson,
+  withIdempotencyKey,
+} from "./client";
 
 type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -23,6 +28,20 @@ function stubFetchStatus(status: number) {
   );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function stubIdempotencyBrowser(keys: string[]) {
+  const values = new Map<string, string>();
+  const randomUUID = vi.fn(() => keys.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff");
+  vi.stubGlobal("crypto", { randomUUID });
+  vi.stubGlobal("window", {
+    sessionStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+  return randomUUID;
 }
 
 describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
@@ -112,4 +131,130 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     });
     expect((error as ApiClientError).message).toContain("재시도: 15초 후");
   });
+
+  it("network 결과가 불명확하면 같은 idempotency key를 재사용하고 성공 후 폐기한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    const seen: string[] = [];
+
+    await expect(
+      withIdempotencyKey("schedule:network", async (key) => {
+        seen.push(key);
+        throw new TypeError("network interrupted");
+      }),
+    ).rejects.toThrow("network interrupted");
+    await withIdempotencyKey("schedule:network", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+    await withIdempotencyKey("schedule:network", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("idempotency conflict도 결과 확인 전까지 같은 key를 유지한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    const seen: string[] = [];
+    const conflict = new ApiClientError(
+      "command result uncertain",
+      409,
+      "/v1/ops/pipeline/schedules/x/commands",
+      {
+        code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+        detail: "command result uncertain",
+        errors: [],
+        request_id: "request-1",
+        status: 409,
+        title: "command result uncertain",
+        type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+      },
+    );
+
+    await expect(
+      withIdempotencyKey("schedule:conflict", async (key) => {
+        seen.push(key);
+        throw conflict;
+      }),
+    ).rejects.toBe(conflict);
+    await withIdempotencyKey("schedule:conflict", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("terminal audit 결과가 불명확한 성공 응답도 같은 key를 유지한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    ]);
+    const seen: string[] = [];
+    const operation = async (key: string) => {
+      seen.push(key);
+      return { audit_status: "terminal_record_failed" as const };
+    };
+
+    await withIdempotencyKey("schedule:audit", operation, {
+      retainOnSuccess: (result) =>
+        result.audit_status === "terminal_record_failed",
+    });
+    await withIdempotencyKey("schedule:audit", operation, {
+      retainOnSuccess: (result) =>
+        result.audit_status === "terminal_record_failed",
+    });
+
+    expect(seen).toEqual([
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 425, 429, 499, 500, 502, 503])(
+    "HTTP %s 불확실 응답은 같은 idempotency key를 유지한다",
+    async (status) => {
+      const randomUUID = stubIdempotencyBrowser([
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      ]);
+      const seen: string[] = [];
+      const error = new ApiClientError(
+        "uncertain transport",
+        status,
+        "/v1/ops/pipeline/schedules/x/commands",
+      );
+
+      await expect(
+        withIdempotencyKey(`schedule:http:${status}`, async (key) => {
+          seen.push(key);
+          throw error;
+        }),
+      ).rejects.toBe(error);
+      await withIdempotencyKey(`schedule:http:${status}`, async (key) => {
+        seen.push(key);
+        return "ok";
+      });
+
+      expect(seen).toEqual([
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      ]);
+      expect(randomUUID).toHaveBeenCalledTimes(1);
+    },
+  );
 });

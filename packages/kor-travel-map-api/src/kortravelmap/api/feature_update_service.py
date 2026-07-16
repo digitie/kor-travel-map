@@ -6,7 +6,7 @@ application exception으로 노출하며 HTTP status 매핑은 각 라우터가 
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from time import perf_counter
 from typing import Any, NoReturn
@@ -65,6 +65,7 @@ __all__ = [
     "FeatureUpdateResolverError",
     "FeatureUpdateServiceError",
     "FeatureUpdateValidationError",
+    "ResolvedPlanGuard",
     "SigunguResolverUnavailable",
     "create_feature_update_request",
     "created_response",
@@ -93,6 +94,13 @@ class SigunguResolverUnavailable(RuntimeError, FeatureUpdateServiceError):
 
 class FeatureUpdateValidationError(ValueError, FeatureUpdateServiceError):
     """요청 scope/provider/dataset 조합이 유효하지 않다."""
+
+
+ResolvedPlanGuard = Callable[
+    [frozenset[tuple[str, str]]],
+    Awaitable[None],
+]
+"""영속 전 canonical provider/dataset exact pair 선행조건 검사."""
 
 
 class FeatureUpdateLockConflict(RuntimeError, FeatureUpdateServiceError):
@@ -266,6 +274,35 @@ def _scope_explicitly_needs_sigungu(scope: Mapping[str, Any]) -> bool:
 
 def _refreshable_pairs() -> frozenset[tuple[str, str]]:
     return frozenset((entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries())
+
+
+def _resolved_refreshable_pairs(
+    *,
+    scope: Mapping[str, Any],
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+) -> frozenset[tuple[str, str]]:
+    """검증된 request filter를 실제 실행될 canonical exact pair로 확장한다."""
+
+    refreshable_pairs = _refreshable_pairs()
+    if scope.get("type") == "provider_dataset":
+        return frozenset(
+            {
+                (
+                    str(scope.get("provider", "")),
+                    str(scope.get("dataset_key", "")),
+                )
+            }
+        )
+    if providers and dataset_keys:
+        return frozenset(
+            (provider, dataset_key)
+            for provider in providers
+            for dataset_key in dataset_keys
+        )
+    if providers:
+        return frozenset(pair for pair in refreshable_pairs if pair[0] in providers)
+    return frozenset(pair for pair in refreshable_pairs if pair[1] in dataset_keys)
 
 
 async def _validate_refreshable_request(
@@ -663,6 +700,7 @@ async def create_feature_update_request(
     operator: str,
     status_url_prefix: str,
     settings: KorTravelMapSettings,
+    resolved_plan_guard: ResolvedPlanGuard,
 ) -> FeatureUpdateRequestCreateResponse:
     """새 canonical 요청을 만들거나 같은 계획의 활성 요청을 멱등 재사용한다."""
 
@@ -675,6 +713,13 @@ async def create_feature_update_request(
             scope=scope,
             providers=body.providers,
             dataset_keys=body.dataset_keys,
+        )
+        await resolved_plan_guard(
+            _resolved_refreshable_pairs(
+                scope=scope,
+                providers=body.providers,
+                dataset_keys=body.dataset_keys,
+            )
         )
         result = await _find_reusable_provider_dataset_request(
             session,

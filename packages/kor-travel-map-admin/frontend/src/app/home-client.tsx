@@ -19,6 +19,7 @@ import { DAGSTER_UI_URL, useDagsterSummary } from "@/api/dagster";
 import { useDedupReviews } from "@/api/dedup";
 import { useImportJobs } from "@/api/importJobs";
 import { useOpsMetrics } from "@/api/ops";
+import { usePipelineOverview } from "@/api/pipeline";
 import { useHealth, useVersion } from "@/api/queries";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
@@ -132,6 +133,8 @@ export function HomePageClient() {
   const version = useVersion();
   const metrics = useOpsMetrics();
   const metricsData = metrics.data?.data;
+  const pipeline = usePipelineOverview(8);
+  const pipelineData = pipeline.data?.data;
   const importJobs = useImportJobs({ page_size: 8 });
   const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
   const dagster = useDagsterSummary(8);
@@ -142,12 +145,10 @@ export function HomePageClient() {
   const activeFeatures = metricsData?.features_active ?? 0;
   const activeFeatureRatio =
     totalFeatures > 0 ? Math.min(100, (activeFeatures / totalFeatures) * 100) : 0;
-  const importJobTotal = Object.values(
-    metricsData?.import_jobs_by_status ?? {},
+  const operationTotal = Object.values(
+    pipelineData?.operations_by_status ?? {},
   ).reduce((sum, count) => sum + count, 0);
-  const runningImportJobs =
-    (metricsData?.import_jobs_by_status?.running ?? 0) +
-    (metricsData?.import_jobs_by_status?.queued ?? 0);
+  const activeOperations = pipelineData?.active_operations ?? 0;
   const dedupQueueTotal = Object.values(
     metricsData?.dedup_queue_by_status ?? {},
   ).reduce((sum, count) => sum + count, 0);
@@ -211,6 +212,7 @@ export function HomePageClient() {
     void health.refetch();
     void version.refetch();
     void metrics.refetch();
+    void pipeline.refetch();
     void importJobs.refetch();
     void dedup.refetch();
     void dagster.refetch();
@@ -239,18 +241,21 @@ export function HomePageClient() {
       title="운영 홈"
     >
       <div className="space-y-6">
-        {(health.isError || metrics.isError || dagster.isError) && (
+        {(health.isError || metrics.isError || pipeline.isError || dagster.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>운영 summary 확인 필요</AlertTitle>
             <AlertDescription>
-              {health.error?.message ?? metrics.error?.message ?? dagster.error?.message}
+              {health.error?.message ??
+                metrics.error?.message ??
+                pipeline.error?.message ??
+                dagster.error?.message}
             </AlertDescription>
           </Alert>
         )}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {metrics.isLoading ? (
+          {metrics.isLoading || pipeline.isLoading ? (
             <>
               <MetricCardSkeleton />
               <MetricCardSkeleton />
@@ -280,15 +285,15 @@ export function HomePageClient() {
                 </div>
               </MetricCard>
               <MetricCard
-                href="/ops/import-jobs"
+                href="/ops/pipeline"
                 icon={ListChecksIcon}
-                title="적재 작업"
+                title="파이프라인 작업"
                 unit="건"
-                value={formatCount(importJobTotal)}
+                value={formatCount(operationTotal)}
               >
-                <StatusLine tone={runningImportJobs > 0 ? "warning" : "success"}>
-                  {runningImportJobs > 0
-                    ? `${formatCount(runningImportJobs)}건 진행 중`
+                <StatusLine tone={activeOperations > 0 ? "warning" : "success"}>
+                  {activeOperations > 0
+                    ? `${formatCount(activeOperations)}건 진행 중`
                     : "대기 중인 작업 없음"}
                 </StatusLine>
               </MetricCard>

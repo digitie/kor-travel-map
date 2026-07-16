@@ -23,6 +23,7 @@ from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
 from kortravelmap.api import feature_update_service as service_mod
+from kortravelmap.api import mois_source_precheck
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.pipeline_cancellation_schema import PipelineCancellationDetailRecord
@@ -69,11 +70,22 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _no_active_request(*_args: Any, **_kwargs: Any) -> None:
         return None
 
+    async def _ready_mois_source_sync(
+        _resolved_pairs: frozenset[tuple[str, str]],
+        **_kwargs: Any,
+    ) -> None:
+        return None
+
     app.dependency_overrides[get_session] = _fake_session
     monkeypatch.setattr(
         service_mod,
         "find_active_provider_dataset_request",
         _no_active_request,
+    )
+    monkeypatch.setattr(
+        mois_source_precheck,
+        "ensure_mois_source_sync_for_plan",
+        _ready_mois_source_sync,
     )
     return TestClient(app)
 
@@ -215,6 +227,14 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         "responses"
     ]["200"]["content"]["application/json"]["schema"]
     assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
+    create_responses = spec["paths"]["/v1/admin/features/update-requests"]["post"][
+        "responses"
+    ]
+    for code in ("409", "502", "503"):
+        schema = create_responses[code]["content"]["application/problem+json"][
+            "schema"
+        ]
+        assert schema["$ref"].endswith("/ProblemDetail")
     preview_response = spec["paths"]["/v1/admin/features/update-requests/preview"]["post"][
         "responses"
     ]["200"]["content"]["application/json"]["schema"]

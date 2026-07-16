@@ -18,14 +18,14 @@ admin ops 통합 재작성 페이지 ①(`/ops/pipeline`)의 백엔드 리소스
 
 from __future__ import annotations
 
-import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     get_update_request,
@@ -56,12 +56,18 @@ from kortravelmap.api import (
     dagster_query_service,
     dagster_schedule_service,
     feature_update_service,
+    mois_source_precheck,
     pipeline_cancellation_service,
 )
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError, DagsterUrls
 from kortravelmap.api.dagster_http import (
+    SCHEDULE_WRITE_ERROR_RESPONSES,
     dagster_http_dependencies,
+    schedule_idempotency_http_exception,
+    schedule_replayed_failure_http_exception,
+    schedule_storage_http_exception,
+    schedule_validation_http_exception,
 )
 from kortravelmap.api.dagster_http import (
     http_client_from_request as _http_client_from_request,
@@ -75,6 +81,7 @@ from kortravelmap.api.dagster_schema import (
     DagsterSchedule,
     DagsterScheduleCommandData,
     DagsterScheduleCommandRequest,
+    DagsterScheduleCommandResponse,
     DagsterScheduleOverrideRequest,
     DagsterSensor,
 )
@@ -108,7 +115,7 @@ from kortravelmap.api.pipeline_cancellation_schema import (
     cancellation_summary_record,
 )
 from kortravelmap.api.provider_catalog import resolve_dataset_history_sync_scopes
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 
 __all__ = [
     "router",
@@ -124,8 +131,6 @@ __all__ = [
 
 
 router = APIRouter(prefix="/ops/pipeline", tags=["ops-pipeline"])
-
-_LOG = logging.getLogger(__name__)
 
 ExecutionKind = Literal["import_job", "update_request"]
 ExecutionState = OperationState
@@ -430,6 +435,29 @@ class PipelineDagsterRunsResponse(BaseModel):
     meta: Meta
 
 
+class PipelineJobPrecheckData(BaseModel):
+    """Dagster 선행 job의 최신 완료 상태와 freshness 판정."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_name: str
+    ready: bool
+    checked_at: datetime
+    max_age_hours: int = Field(ge=0)
+    age_hours: float | None = Field(default=None, ge=0)
+    latest_run: DagsterRunSummary | None
+    disabled_reason: str | None
+
+
+class PipelineJobPrecheckResponse(BaseModel):
+    """``GET /ops/pipeline/prechecks/mois-source-sync`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PipelineJobPrecheckData
+    meta: Meta
+
+
 class PipelineSchedulesData(BaseModel):
     """``GET /ops/pipeline/schedules`` data — override 병합 + sensor 상태."""
 
@@ -463,7 +491,6 @@ class PipelineScheduleUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cron_schedule: CronString | None
-    operator: str | None = Field(default=None, max_length=120)
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -473,7 +500,6 @@ class PipelineScheduleCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: PipelineScheduleCommand
-    operator: str | None = Field(default=None, max_length=120)
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -491,10 +517,17 @@ class PipelineScheduleCommandData(BaseModel):
     cron_schedule: str | None = None
     default_cron_schedule: str | None = None
     override_cron_schedule: str | None = None
+    effective_cron_schedule: str | None
     schedule_status: str | None = None
     run_id: str | None = None
     run_status: str | None = None
-    reloaded: bool = False
+    save_status: Literal["not_applicable", "saved", "cleared"]
+    reload_status: Literal["not_requested", "succeeded", "failed"]
+    effective_status: Literal[
+        "confirmed", "pending_verification", "mismatch", "unknown"
+    ]
+    audit_command_id: UUID | None = None
+    audit_status: Literal["recorded", "terminal_record_failed"] = "recorded"
     errors: list[str] = Field(default_factory=list)
 
 
@@ -863,12 +896,80 @@ def _pipeline_command_data(
         cron_schedule=data.cron_schedule,
         default_cron_schedule=data.default_cron_schedule,
         override_cron_schedule=data.override_cron_schedule,
+        effective_cron_schedule=data.effective_cron_schedule,
         schedule_status=data.schedule_status,
         run_id=data.run_id,
         run_status=data.run_status,
-        reloaded=data.reloaded,
+        save_status=data.save_status,
+        reload_status=data.reload_status,
+        effective_status=data.effective_status,
+        audit_command_id=data.audit_command_id,
+        audit_status=data.audit_status,
         errors=data.errors,
     )
+
+
+def _pipeline_command_data_or_raise(
+    data: DagsterScheduleCommandData,
+) -> PipelineScheduleCommandData:
+    """legacy service result를 canonical command 어휘로 변환한 후 HTTP 실패를 만든다."""
+
+    canonical = _pipeline_command_data(data)
+    if canonical.status == "ok":
+        return canonical
+    status_code = (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+        if canonical.status == "unavailable"
+        else status.HTTP_502_BAD_GATEWAY
+    )
+    code = (
+        "DAGSTER_SCHEDULE_UNAVAILABLE"
+        if canonical.status == "unavailable"
+        else "DAGSTER_SCHEDULE_COMMAND_FAILED"
+    )
+    message = (
+        canonical.errors[0]
+        if canonical.errors
+        else "Dagster schedule 명령에 실패했습니다."
+    )
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "code": code,
+            "message": message,
+            "details": canonical.model_dump(mode="json"),
+        },
+    )
+
+
+async def _execute_audited_schedule_command(
+    session: AsyncSession,
+    *,
+    schedule_name: str,
+    command: dagster_schedule_service.ScheduleCommand,
+    actor: str,
+    reason: str | None,
+    request_details: dict[str, object],
+    command_id: UUID,
+    operation: Callable[[], Awaitable[DagsterScheduleCommandResponse]],
+) -> DagsterScheduleCommandResponse:
+    try:
+        return await dagster_schedule_service.execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command=command,
+            actor=actor,
+            reason=reason,
+            request_details=request_details,
+            command_id=command_id,
+            operation=operation,
+        )
+    except dagster_schedule_service.DagsterScheduleIdempotencyConflict as exc:
+        raise schedule_idempotency_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleReplayedFailure as exc:
+        raise schedule_replayed_failure_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
+        raise schedule_storage_http_exception(exc) from exc
 
 
 # =============================================================================
@@ -1320,6 +1421,47 @@ async def list_dagster_runs(
 
 
 @router.get(
+    "/prechecks/mois-source-sync",
+    response_model=PipelineJobPrecheckResponse,
+    summary="MOIS source sync 선행 job freshness 확인",
+    description=(
+        "Dagster runs를 jobName=mois_localdata_source_sync로 직접 필터링해 최신 run이 "
+        "SUCCESS이고 MOIS source DB TTL 이내인지 판정한다. provider sync_state의 "
+        "가상 dataset key를 사용하지 않는다."
+    ),
+    responses={
+        502: {"model": ProblemDetail, "description": "Dagster GraphQL/응답 오류"},
+        503: {"model": ProblemDetail, "description": "Dagster 연결/설정 오류"},
+    },
+)
+async def get_mois_source_sync_precheck(
+    request: Request,
+) -> PipelineJobPrecheckResponse:
+    started_at = perf_counter()
+    settings = _settings_from_request(request)
+    client = _http_client_from_request(request, settings)
+    try:
+        precheck = await mois_source_precheck.fetch_mois_source_sync_precheck(
+            settings=settings,
+            client=client,
+        )
+    except mois_source_precheck.MoisSourceSyncPrecheckError as exc:
+        raise mois_source_precheck.to_http_exception(exc) from exc
+    return PipelineJobPrecheckResponse(
+        data=PipelineJobPrecheckData(
+            job_name=precheck.job_name,
+            ready=precheck.ready,
+            checked_at=precheck.checked_at,
+            max_age_hours=precheck.max_age_hours,
+            age_hours=precheck.age_hours,
+            latest_run=precheck.latest_run,
+            disabled_reason=precheck.disabled_reason,
+        ),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@router.get(
     "/dagster-runs/{run_id}",
     response_model=DagsterRunDetailResponse,
     summary="Dagster run event/failure 상세",
@@ -1416,7 +1558,10 @@ async def list_pipeline_schedules(
             meta=make_meta(started_at=started_at),
         )
     client = _http_client_from_request(request, settings)
-    overrides = await dagster_schedule_service.schedule_overrides(session)
+    try:
+        overrides = await dagster_schedule_service.schedule_overrides(session)
+    except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
+        raise schedule_storage_http_exception(exc) from exc
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,
@@ -1477,47 +1622,61 @@ async def list_pipeline_schedules(
         "override를 삭제해 코드 기본값으로 되돌린다(구 `default` 명령 대체). "
         "override는 code location reload 이후 반영되므로 지연이 있을 수 있다."
     ),
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def patch_pipeline_schedule(
     request: Request,
     schedule_name: str,
     body: PipelineScheduleUpdateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
     settings = _settings_from_request(request)
     client = _http_client_from_request(request, settings)
     if body.cron_schedule is None:
-        response = await dagster_schedule_service.reset_schedule_default(
-            settings=settings,
-            client=client,
-            session=session,
+        response = await _execute_audited_schedule_command(
+            session,
             schedule_name=schedule_name,
-        )
-        # 감사: override 삭제는 override 행 자체가 사라져 updated_by/reason을
-        # 영속할 자리가 없다 — 계약이 받은 감사 필드를 조용히 버리지 않도록
-        # 구조화 로그로 남긴다(영속 감사 테이블 도입은 후속 판단).
-        _LOG.info(
-            "schedule cron override 삭제 (schedule=%s, operator=%s, reason=%s, status=%s)",
-            schedule_name,
-            body.operator or "unknown",
-            body.reason or "-",
-            response.data.status,
-        )
-    else:
-        response = await dagster_schedule_service.update_schedule(
-            settings=settings,
-            client=client,
-            session=session,
-            schedule_name=schedule_name,
-            body=DagsterScheduleOverrideRequest(
-                cron_schedule=body.cron_schedule,
-                operator=body.operator,
-                reason=body.reason,
+            command="default",
+            actor=context.actor,
+            reason=body.reason,
+            request_details={"target": "code_default"},
+            command_id=idempotency_key,
+            operation=lambda: dagster_schedule_service.reset_schedule_default(
+                settings=settings,
+                client=client,
+                session=session,
+                schedule_name=schedule_name,
             ),
         )
+    else:
+        try:
+            response = await _execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="update",
+                actor=context.actor,
+                reason=body.reason,
+                request_details={"cron_schedule": body.cron_schedule},
+                command_id=idempotency_key,
+                operation=lambda: dagster_schedule_service.update_schedule(
+                    settings=settings,
+                    client=client,
+                    session=session,
+                    schedule_name=schedule_name,
+                    body=DagsterScheduleOverrideRequest(
+                        cron_schedule=body.cron_schedule,
+                        reason=body.reason,
+                    ),
+                    actor=context.actor,
+                ),
+            )
+        except dagster_schedule_service.DagsterScheduleValidationError as exc:
+            raise schedule_validation_http_exception(exc) from exc
     return PipelineScheduleCommandResponse(
-        data=_pipeline_command_data(response.data),
+        data=_pipeline_command_data_or_raise(response.data),
         meta=make_meta(started_at=started_at),
     )
 
@@ -1530,34 +1689,57 @@ async def patch_pipeline_schedule(
         "run은 스케줄이 가리키는 job을 현재 설정으로 1회 즉시 실행하고, "
         "start/stop은 스케줄 상태를 전환하며, reset은 코드 기본 상태로 되돌린다."
     ),
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def post_pipeline_schedule_command(
     request: Request,
     schedule_name: str,
     body: PipelineScheduleCommandRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
     settings = _settings_from_request(request)
     client = _http_client_from_request(request, settings)
-    if body.command == "run":
-        response = await dagster_schedule_service.run_schedule_now(
-            settings=settings,
-            client=client,
-            session=session,
+    command = body.command
+    if command == "run":
+        response = await _execute_audited_schedule_command(
+            session,
             schedule_name=schedule_name,
-            body=DagsterScheduleCommandRequest(operator=body.operator, reason=body.reason),
+            actor=context.actor,
+            command=command,
+            reason=body.reason,
+            request_details={"command": command},
+            command_id=idempotency_key,
+            operation=lambda: dagster_schedule_service.run_schedule_now(
+                settings=settings,
+                client=client,
+                session=session,
+                schedule_name=schedule_name,
+                body=DagsterScheduleCommandRequest(reason=body.reason),
+                actor=context.actor,
+            ),
         )
     else:
-        response = await dagster_schedule_service.mutate_schedule_state(
-            settings=settings,
-            client=client,
+        response = await _execute_audited_schedule_command(
+            session,
             schedule_name=schedule_name,
-            command=body.command,
-            session=session,
+            actor=context.actor,
+            command=command,
+            reason=body.reason,
+            request_details={"command": command},
+            command_id=idempotency_key,
+            operation=lambda: dagster_schedule_service.mutate_schedule_state(
+                settings=settings,
+                client=client,
+                session=session,
+                schedule_name=schedule_name,
+                command=command,
+            ),
         )
     return PipelineScheduleCommandResponse(
-        data=_pipeline_command_data(response.data),
+        data=_pipeline_command_data_or_raise(response.data),
         meta=make_meta(started_at=started_at),
     )
 
@@ -1584,14 +1766,28 @@ async def post_pipeline_schedule_command(
             "description": "같은 계획의 활성 canonical request 재사용",
         },
         **FEATURE_UPDATE_CONFLICT_RESPONSES,
+        **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES,
     },
 )
 async def create_pipeline_update_request(
+    request: Request,
     body: FeatureUpdateRequestCreateRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
+    api_settings = _settings_from_request(request)
+    dagster_client = _http_client_from_request(request, api_settings)
+
+    async def _resolved_plan_guard(
+        resolved_pairs: frozenset[tuple[str, str]],
+    ) -> None:
+        await mois_source_precheck.ensure_mois_source_sync_for_plan(
+            resolved_pairs,
+            settings=api_settings,
+            client=dagster_client,
+        )
+
     try:
         result = await feature_update_service.create_feature_update_request(
             body,
@@ -1599,7 +1795,13 @@ async def create_pipeline_update_request(
             operator=context.actor,
             status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
             settings=KorTravelMapSettings(),
+            resolved_plan_guard=_resolved_plan_guard,
         )
+    except (
+        mois_source_precheck.MoisSourceSyncPrecheckError,
+        mois_source_precheck.MoisSourceSyncRequired,
+    ) as exc:
+        raise mois_source_precheck.to_http_exception(exc) from exc
     except feature_update_service.FeatureUpdateServiceError as exc:
         raise to_http_exception(exc) from exc
     if result.reused_active_request:

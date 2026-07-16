@@ -3,7 +3,8 @@
 Dagster schedule의 ``cron_schedule``은 code location 로드 시점에 고정된다.
 운영 UI는 ``ops.dagster_schedule_overrides``에 override를 저장하고 repository
 location reload를 호출한다. 이 모듈은 reload 시 DB override를 읽되, DB 또는
-마이그레이션이 아직 준비되지 않았으면 조용히 코드 기본값으로 fallback한다.
+마이그레이션을 읽을 수 없으면 code location 로드를 실패시켜 저장된 override를
+조용히 무시한 채 기본 cron으로 실행하는 상태를 만들지 않는다.
 """
 
 from __future__ import annotations
@@ -37,29 +38,26 @@ def _psycopg_dsn() -> str:
 def load_schedule_cron_overrides() -> dict[str, str]:
     """Return schedule_name → cron override mapping.
 
-    Dagster code location import는 운영 상태와 독립적으로 성공해야 하므로 모든 DB
-    오류는 기본값 fallback으로 처리한다.
+    DB 조회 실패는 호출자에게 그대로 전파한다. 저장된 override가 존재할 수 있는
+    상황에서 기본값 fallback은 UI의 저장 상태와 실제 실행 cron을 갈라놓기 때문이다.
     """
 
-    try:
-        with (
-            psycopg.connect(_psycopg_dsn(), connect_timeout=2) as conn,
-            conn.cursor() as cur,
-        ):
-            cur.execute(
-                """
-                SELECT schedule_name, cron_schedule
-                FROM ops.dagster_schedule_overrides
-                WHERE btrim(schedule_name) <> ''
-                  AND btrim(cron_schedule) <> ''
-                """
-            )
-            return {
-                str(schedule_name): str(cron_schedule)
-                for schedule_name, cron_schedule in cur.fetchall()
-            }
-    except Exception:
-        return {}
+    with (
+        psycopg.connect(_psycopg_dsn(), connect_timeout=2) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(
+            """
+            SELECT schedule_name, cron_schedule
+            FROM ops.dagster_schedule_overrides
+            WHERE btrim(schedule_name) <> ''
+              AND btrim(cron_schedule) <> ''
+            """
+        )
+        return {
+            str(schedule_name): str(cron_schedule)
+            for schedule_name, cron_schedule in cur.fetchall()
+        }
 
 
 def cron_for_schedule(schedule_name: str, default_cron: str) -> str:

@@ -2194,6 +2194,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/pipeline/prechecks/mois-source-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * MOIS source sync 선행 job freshness 확인
+         * @description Dagster runs를 jobName=mois_localdata_source_sync로 직접 필터링해 최신 run이 SUCCESS이고 MOIS source DB TTL 이내인지 판정한다. provider sync_state의 가상 dataset key를 사용하지 않는다.
+         */
+        get: operations["get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/pipeline/requests": {
         parameters: {
             query?: never;
@@ -5476,6 +5496,8 @@ export interface components {
              * @default false
              */
             can_reset: boolean;
+            /** Can Run Now */
+            can_run_now: boolean;
             /** Cron Schedule */
             cron_schedule?: string | null;
             /** Default Cron Schedule */
@@ -5484,6 +5506,10 @@ export interface components {
             default_status?: string | null;
             /** Description */
             description?: string | null;
+            /** Disabled Reason */
+            disabled_reason: string | null;
+            /** Effective Cron Schedule */
+            effective_cron_schedule: string | null;
             /** Execution Timezone */
             execution_timezone?: string | null;
             /** Mode */
@@ -5492,6 +5518,10 @@ export interface components {
             name: string;
             /** Override Cron Schedule */
             override_cron_schedule?: string | null;
+            /** Override Effective */
+            override_effective: boolean | null;
+            /** Override Saved */
+            override_saved: boolean;
             /** Pipeline Name */
             pipeline_name?: string | null;
             /** Recent Ticks */
@@ -5514,6 +5544,14 @@ export interface components {
          * @description Schedule write 명령 결과.
          */
         DagsterScheduleCommandData: {
+            /** Audit Command Id */
+            audit_command_id?: string | null;
+            /**
+             * Audit Status
+             * @default recorded
+             * @enum {string}
+             */
+            audit_status: "recorded" | "terminal_record_failed";
             /**
              * Checked At
              * Format: date-time
@@ -5530,6 +5568,13 @@ export interface components {
             dagster_url: string;
             /** Default Cron Schedule */
             default_cron_schedule?: string | null;
+            /** Effective Cron Schedule */
+            effective_cron_schedule: string | null;
+            /**
+             * Effective Status
+             * @enum {string}
+             */
+            effective_status: "confirmed" | "pending_verification" | "mismatch" | "unknown";
             /** Errors */
             errors?: string[];
             /** Graphql Url */
@@ -5537,14 +5582,19 @@ export interface components {
             /** Override Cron Schedule */
             override_cron_schedule?: string | null;
             /**
-             * Reloaded
-             * @default false
+             * Reload Status
+             * @enum {string}
              */
-            reloaded: boolean;
+            reload_status: "not_requested" | "succeeded" | "failed";
             /** Run Id */
             run_id?: string | null;
             /** Run Status */
             run_status?: string | null;
+            /**
+             * Save Status
+             * @enum {string}
+             */
+            save_status: "not_applicable" | "saved" | "cleared";
             /** Schedule Name */
             schedule_name: string;
             /** Schedule Status */
@@ -5560,8 +5610,6 @@ export interface components {
          * @description Schedule start/stop/reset/run-now 명령 body.
          */
         DagsterScheduleCommandRequest: {
-            /** Operator */
-            operator?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -5580,8 +5628,6 @@ export interface components {
         DagsterScheduleOverrideRequest: {
             /** Cron Schedule */
             cron_schedule: string;
-            /** Operator */
-            operator?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -8984,6 +9030,36 @@ export interface components {
             stage: string | null;
         };
         /**
+         * PipelineJobPrecheckData
+         * @description Dagster 선행 job의 최신 완료 상태와 freshness 판정.
+         */
+        PipelineJobPrecheckData: {
+            /** Age Hours */
+            age_hours?: number | null;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Disabled Reason */
+            disabled_reason: string | null;
+            /** Job Name */
+            job_name: string;
+            latest_run: components["schemas"]["DagsterRunSummary"] | null;
+            /** Max Age Hours */
+            max_age_hours: number;
+            /** Ready */
+            ready: boolean;
+        };
+        /**
+         * PipelineJobPrecheckResponse
+         * @description ``GET /ops/pipeline/prechecks/mois-source-sync`` 응답.
+         */
+        PipelineJobPrecheckResponse: {
+            data: components["schemas"]["PipelineJobPrecheckData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * PipelineOverviewData
          * @description ``GET /ops/pipeline/overview`` data — 상태 스트립 집계.
          */
@@ -9087,6 +9163,14 @@ export interface components {
          * @description schedule write(PATCH/commands) 결과.
          */
         PipelineScheduleCommandData: {
+            /** Audit Command Id */
+            audit_command_id?: string | null;
+            /**
+             * Audit Status
+             * @default recorded
+             * @enum {string}
+             */
+            audit_status: "recorded" | "terminal_record_failed";
             /**
              * Checked At
              * Format: date-time
@@ -9103,6 +9187,13 @@ export interface components {
             dagster_url: string;
             /** Default Cron Schedule */
             default_cron_schedule?: string | null;
+            /** Effective Cron Schedule */
+            effective_cron_schedule: string | null;
+            /**
+             * Effective Status
+             * @enum {string}
+             */
+            effective_status: "confirmed" | "pending_verification" | "mismatch" | "unknown";
             /** Errors */
             errors?: string[];
             /** Graphql Url */
@@ -9110,14 +9201,19 @@ export interface components {
             /** Override Cron Schedule */
             override_cron_schedule?: string | null;
             /**
-             * Reloaded
-             * @default false
+             * Reload Status
+             * @enum {string}
              */
-            reloaded: boolean;
+            reload_status: "not_requested" | "succeeded" | "failed";
             /** Run Id */
             run_id?: string | null;
             /** Run Status */
             run_status?: string | null;
+            /**
+             * Save Status
+             * @enum {string}
+             */
+            save_status: "not_applicable" | "saved" | "cleared";
             /** Schedule Name */
             schedule_name: string;
             /** Schedule Status */
@@ -9138,8 +9234,6 @@ export interface components {
              * @enum {string}
              */
             command: "run" | "start" | "stop" | "reset";
-            /** Operator */
-            operator?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -9161,8 +9255,6 @@ export interface components {
         PipelineScheduleUpdateRequest: {
             /** Cron Schedule */
             cron_schedule: string | null;
-            /** Operator */
-            operator?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -12723,7 +12815,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
+            /** @description 요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12734,6 +12826,24 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster precheck 응답 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster precheck transport/설정 오류 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16295,7 +16405,9 @@ export interface operations {
     update_dagster_schedule_v1_ops_dagster_schedules__schedule_name__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16316,8 +16428,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16339,7 +16487,9 @@ export interface operations {
     reset_dagster_schedule_default_v1_ops_dagster_schedules__schedule_name__default_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16360,8 +16510,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16383,7 +16569,9 @@ export interface operations {
     reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16404,8 +16592,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16427,7 +16651,9 @@ export interface operations {
     run_dagster_schedule_now_v1_ops_dagster_schedules__schedule_name__run_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16448,8 +16674,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16471,7 +16733,9 @@ export interface operations {
     start_dagster_schedule_v1_ops_dagster_schedules__schedule_name__start_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16492,8 +16756,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16515,7 +16815,9 @@ export interface operations {
     stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -16536,8 +16838,44 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17524,6 +17862,62 @@ export interface operations {
             };
         };
     };
+    get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineJobPrecheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster GraphQL/응답 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 연결/설정 오류 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     create_pipeline_update_request_v1_ops_pipeline_requests_post: {
         parameters: {
             query?: never;
@@ -17555,7 +17949,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
+            /** @description 요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17566,6 +17960,24 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster precheck 응답 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster precheck transport/설정 오류 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17729,7 +18141,9 @@ export interface operations {
     patch_pipeline_schedule_v1_ops_pipeline_schedules__schedule_name__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -17750,8 +18164,44 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17773,7 +18223,9 @@ export interface operations {
     post_pipeline_schedule_command_v1_ops_pipeline_schedules__schedule_name__commands_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 schedule_name: string;
             };
@@ -17794,8 +18246,44 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Idempotency-Key 충돌/결과 확인 필요 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 요청 body/header 또는 cron 검증 실패 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 명령 의미 오류 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

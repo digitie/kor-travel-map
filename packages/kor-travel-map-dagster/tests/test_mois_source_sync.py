@@ -9,7 +9,11 @@ from typing import Any, cast
 
 import pytest
 from dagster import build_op_context
-from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
+from kortravelmap.providers.mois import (
+    MOIS_SOURCE_SYNC_COVERAGE_TAG,
+    MOIS_SOURCE_SYNC_FULL_COVERAGE,
+    PROMOTED_SERVICE_SLUGS,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster.mois_source_sync import (
@@ -220,10 +224,17 @@ def test_op_runs_sync_and_emits_metadata(
 ) -> None:
     calls = _install_fake_mois(monkeypatch)
     db_file = tmp_path / "op-source.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
     monkeypatch.setenv("KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH", str(db_file))
 
     context = build_op_context(
         config={"service_slugs": [], "org_code": None, "batch_size": 1000}
+    )
+    run_tags: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        context.instance,
+        "add_run_tags",
+        lambda run_id, tags: run_tags.append((run_id, tags)),
     )
     metadata = mois_localdata_source_sync_op(context)
 
@@ -231,7 +242,58 @@ def test_op_runs_sync_and_emits_metadata(
     assert metadata["upserted_count"] == 8 * len(PROMOTED_SERVICE_SLUGS)
     assert metadata["service_slug_count"] == len(PROMOTED_SERVICE_SLUGS)
     assert metadata["db_path"] == str(db_file)
+    assert metadata["coverage"] == MOIS_SOURCE_SYNC_FULL_COVERAGE
+    assert run_tags == [
+        (
+            context.run_id,
+            {MOIS_SOURCE_SYNC_COVERAGE_TAG: MOIS_SOURCE_SYNC_FULL_COVERAGE},
+        )
+    ]
     assert all(call["commit"] is True for call in calls["sync_calls"])
+    marker = db_file.parent / (db_file.name + ".synced")
+    assert marker.exists()
+    datetime.fromisoformat(marker.read_text(encoding="utf-8"))
+
+    settings = KorTravelMapSettings(
+        mois_source_db_path=str(db_file),
+        mois_source_sync_ttl_hours=24,
+    )
+    sync_calls = _stub_sync(monkeypatch)
+    assert ensure_mois_source_db_fresh(settings) is None
+    assert sync_calls["n"] == 0
+
+
+def test_op_tags_custom_scope_as_partial(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_mois(monkeypatch)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH",
+        str(tmp_path / "partial.sqlite"),
+    )
+    db_file = tmp_path / "partial.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    context = build_op_context(
+        config={
+            "service_slugs": ["restaurants"],
+            "org_code": "6110000",
+            "batch_size": 1000,
+        }
+    )
+    run_tags: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        context.instance,
+        "add_run_tags",
+        lambda run_id, tags: run_tags.append((run_id, tags)),
+    )
+
+    metadata = mois_localdata_source_sync_op(context)
+
+    assert metadata["coverage"] == "partial"
+    assert run_tags == [
+        (context.run_id, {MOIS_SOURCE_SYNC_COVERAGE_TAG: "partial"})
+    ]
+    assert not (db_file.parent / (db_file.name + ".synced")).exists()
 
 
 # -- ensure_mois_source_db_fresh: freshness 게이트(#617 리뷰) --------------------

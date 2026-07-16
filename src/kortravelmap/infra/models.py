@@ -115,6 +115,8 @@ __all__ = [
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
     "ProviderRefreshPolicyRow",
+    "DagsterScheduleAuditEventRow",
+    "DagsterScheduleActiveClaimRow",
     "DagsterScheduleOverrideRow",
     "FeatureMergeHistoryRow",
     "ManagedFileRow",
@@ -2943,6 +2945,112 @@ class ProviderRefreshPolicyRow(Base):
         server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class DagsterScheduleAuditEventRow(Base):
+    """``ops.dagster_schedule_audit_events`` append-only command event."""
+
+    __tablename__ = "dagster_schedule_audit_events"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(schedule_name) <> ''",
+            name=conv("ck_dagster_schedule_audit_events_schedule_name_not_blank"),
+        ),
+        CheckConstraint(
+            "command IN ('update','default','start','stop','reset','run')",
+            name=conv("ck_dagster_schedule_audit_events_command"),
+        ),
+        CheckConstraint(
+            "phase IN ('requested','succeeded','failed')",
+            name=conv("ck_dagster_schedule_audit_events_phase"),
+        ),
+        CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=conv("ck_dagster_schedule_audit_events_actor"),
+        ),
+        CheckConstraint(
+            "reason IS NULL OR char_length(reason) <= 500",
+            name=conv("ck_dagster_schedule_audit_events_reason"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(details) = 'object'",
+            name=conv("ck_dagster_schedule_audit_events_details_object"),
+        ),
+        Index(
+            "idx_dagster_schedule_audit_schedule_created",
+            "schedule_name",
+            text("created_at DESC"),
+            text("event_id DESC"),
+        ),
+        Index(
+            "idx_dagster_schedule_audit_command",
+            "command_id",
+            "event_id",
+        ),
+        Index(
+            "uq_dagster_schedule_audit_requested_command",
+            "command_id",
+            unique=True,
+            postgresql_where=text("phase = 'requested'"),
+        ),
+        Index(
+            "uq_dagster_schedule_audit_terminal_command",
+            "command_id",
+            unique=True,
+            postgresql_where=text("phase IN ('succeeded','failed')"),
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    command_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    schedule_name: Mapped[str] = mapped_column(Text, nullable=False)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class DagsterScheduleActiveClaimRow(Base):
+    """불명 terminal 결과 전 동일 schedule 재실행을 막는 durable claim."""
+
+    __tablename__ = "dagster_schedule_active_claims"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(schedule_name) <> ''",
+            name=conv("ck_dagster_schedule_active_claims_schedule_name_not_blank"),
+        ),
+        UniqueConstraint(
+            "schedule_name",
+            name=conv("uq_dagster_schedule_active_claims_schedule_name"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+    )
+    schedule_name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
