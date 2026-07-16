@@ -3,6 +3,21 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e n150 운영 종결 (2026-07-16, `T-ADM-C3e-I2`)
+
+- [x] **T-ADM-C3e-I2 — migration·sensor/cursor·4종 동일-root·live UI 검증.** 배포 전
+  pg_dump(259,608,395 bytes, SHA-256
+  `0c01693808a0cc94dcbe1dce9a04c5996364c642ac4fa3f1df77d87c08667167`) 뒤 n150 prod에
+  0051/0052를 일방향 적용했고 Alembic single head와 0048 재수렴 `updated=0`, 예상 밖 exact
+  untyped `0`, request validation/identity/quarantine 불일치 `0`을 확인했다. tracking sensor
+  8개와 update sensor 2개는 모두 RUNNING이며 reconciliation cursor는 maintenance anchor
+  `storage_id=5160`에서 `5175`로 전진하고 최근 5개 tick이 관측 오류 0으로 끝났다. 스케줄은
+  기존 snapshot인 34 RUNNING·3 STOPPED로 정확히 복원했다. 일정·수동·갱신·standalone import가
+  datasets/pipeline 상세에서 같은 `(kind,id)` root를 반환했고 모두 terminal이다. 공식 Playwright
+  1.60.0 컨테이너로 provider consistency, Dagster/update request, offline upload, import action,
+  home dashboard를 실제 prod에 실행해 138건 통과·전제 미충족 2건 skip을 기록했다. 최종 DB와
+  Dagster active run은 0이고 이슈 #679에 전체 증거를 남긴 뒤 완료로 닫았다.
+
 ## C3e B2→B3 실제 PostGIS 교차 회귀 (2026-07-16, `T-ADM-C3e-I1`)
 
 - [x] **T-ADM-C3e-I1 — public wrapper 결과와 terminal sensor의 단일 lifecycle 검증.** 실제

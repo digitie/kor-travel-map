@@ -1,7 +1,7 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 문서 gate·C3e-A1/A2/B1/B2/B3/C 구현·C3e-I1 actual PostGIS 교차 회귀·로컬 gate 완료,
-> C3e-I2·#679·n150 미완료
+> 상태: 문서 gate·C3e-A1/A2/B1/B2/B3/C·C3e-I1 actual PostGIS 교차 회귀·C3e-I2 n150
+> prod 일방향 전환과 live UI E2E 완료, #679 CLOSED
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -721,8 +721,8 @@ asset resource에 같은 snapshot을 전달하고 실제 `Definitions` 구성까
 7개 파일 260건(1 skip), migration 0001→0052를 포함한 실제 PostGIS canonical operation 30건,
 Dagster package 전체 428건(1 skip), main unit 1,366건을 통과했다. Ruff, strict mypy 136개 소스,
 import 계약 4/4와 staged diff check도 통과했다. B2 wrapper 결과를 B3 sensor가 실제 terminal DB
-상태로 닫는 교차 검증은 C3e-I1에서 완료했다. 일정·수동·갱신·import 4종 동일-root 증거,
-이슈 #679 종결과 n150/prod 검증은 `T-ADM-C3e-I2`의 미완료 범위다.
+상태로 닫는 교차 검증은 C3e-I1에서 완료했다. 일정·수동·갱신·import 4종 동일-root 증거와
+이슈 #679 종결, n150/prod 검증은 `T-ADM-C3e-I2`에서 완료했다.
 
 ### C3e-I1 실제 PostGIS 교차 회귀·로컬 gate 기록
 
@@ -737,9 +737,32 @@ event의 identity·payload를 보존하고 raw 오류를 노출하지 않는지 
 최종 source를 다시 검토했고 각각 S1/S2/S3 0건으로 판정했다. focused 실제 PostGIS 32건,
 `pytest -m 'not live'` 1,902건(5 deselected), Ruff, strict mypy 136개 소스, import 계약 4/4를
 통과했다. raw 전체 실행은 로컬 외부 `kor-travel-geo` reverse endpoint가 HTTP 400을 반환해 live
-5건이 실패했고 191건 통과 시점에 중단했으므로 not-live green과 명확히 분리한다. n150 migration,
-8개 tracking sensor/cursor readback, 일정/수동/갱신/import 4종의 datasets/pipeline 동일-root 증거와
-이슈 #679 종결은 `T-ADM-C3e-I2`에 남아 있다.
+5건이 실패했고 191건 통과 시점에 중단했으므로 not-live green과 명확히 분리한다. 이 로컬 외부
+서비스 실패와 분리한 n150 migration·sensor/cursor·4종 동일-root·live UI 검증은 아래 C3e-I2에서
+완료했다.
+
+### C3e-I2 n150 prod 전환·live UI 기록
+
+maintenance 전 pg_dump는 259,608,395 bytes이고 SHA-256은
+`0c01693808a0cc94dcbe1dce9a04c5996364c642ac4fa3f1df77d87c08667167`이다. 취소된 두 Dagster
+run에 연결된 legacy active request 1건을 감사 row 삭제 없이 terminal `cancelled`로 명시 정리한 뒤
+0051/0052를 일방향 적용했다. Alembic single head, 0048 재수렴 `updated=0`, payload run identity
+missing/mismatch 0, 0051 예상 밖 exact untyped 0을 확인했다. request validation/identity/duplicate,
+quarantine marker, active canonical/raw Dagster feature run 불일치는 모두 0이다.
+
+새 Dagster webserver/daemon을 각각 재빌드하고 tracking sensor 8개와 update queue/failure sensor
+2개를 모두 RUNNING으로 복원했다. reconciliation insertion cursor는 maintenance anchor
+`storage_id=5160`에서 `5175`로 전진했고 최근 5개 tick은 panel-only/DB observation error 0으로
+끝났다. run retention/delete 정책은 구성되어 있지 않다. schedule은 배포 전 snapshot과 같은
+34 RUNNING·3 STOPPED다.
+
+admin manual KMA nowcast, 자연 schedule KREX traffic notices, feature update KMA nowcast,
+standalone MOIS incremental import를 실제 실행해 모두 terminal로 닫았다. 각 실행은 datasets 상세와
+pipeline 상세의 `execution/root(kind,id)`가 정확히 일치했다. 공식 Playwright 1.60.0 컨테이너와
+worker 1로 provider consistency 112건, Dagster round-trip 4건, feature update 8건, offline upload
+6건, import action 3건, home dashboard 5건을 통과했다. heavy direct launch와 queued standalone
+cancel은 전제 미충족으로 각각 skip했다. 최종 합계는 138 passed·2 skipped이며 로그인 POST 200와
+Set-Cookie, 오답 비밀번호 401도 확인했다. 전체 증거를 이슈 #679에 기록하고 완료로 닫았다.
 
 ## 7. 구현 전 수용 테스트
 

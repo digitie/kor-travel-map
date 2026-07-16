@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (codex) — T-ADM-C3e-I2 n150 운영 종결
+
+- n150 prod를 maintenance drain한 뒤 백업하고 0051/0052를 일방향 적용했다. Alembic은
+  `0052_pipeline_projection_access` 단일 head이며 0048 재수렴 변경 0, 예상 밖 exact untyped 0,
+  request identity/validation/duplicate/quarantine 불일치 0이다. 최종 DB canonical feature 작업과
+  Dagster active run도 모두 0이다.
+- tracking sensor 8개와 update queue/failure sensor 2개는 모두 RUNNING이다. reconciliation cursor는
+  maintenance anchor `storage_id=5160`에서 `5175`로 전진했고 최근 5개 tick이 observation error 없이
+  끝났다. schedule은 배포 전과 같은 34 RUNNING·3 STOPPED로 복원했다.
+- 실제 일정·수동·갱신·standalone import 네 실행이 datasets/pipeline 상세에서 같은 canonical
+  `(kind,id)` root를 반환했다. prod Playwright 6개 묶음은 138건 통과·전제 미충족 2건 skip이며,
+  로그인·오답 인증·파괴적 update/offline upload와 복원까지 확인했다. 전체 증거를 이슈 #679에
+  남기고 완료로 닫았으며 #680도 CLOSED 상태를 재확인했다.
+- **다음 한 작업**: Claude Code worktree/PR #701(C45X)을 0052 typed identity·scope 정본에 맞춰
+  적대적 리뷰하고 DB/API/UI를 보강한다. 이어 #698(C4R)과 #712를 같은 방식으로 개선한 뒤 기존
+  C4/C5 작업으로 진행한다.
+
 ## 2026-07-16 (codex) — T-ADM-C3e-I1 로컬 gate 완료
 
 - 실제 migration 0001→0052가 적용된 PostGIS에서 B2 public wrapper와 B3 terminal record의
