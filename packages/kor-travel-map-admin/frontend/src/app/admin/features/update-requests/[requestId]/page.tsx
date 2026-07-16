@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { FeatureUpdateRequestDetailClient } from "../../../feature-update-requests/[requestId]/feature-update-request-detail-client";
+import { FeatureUpdateRequestDetailClient } from "./feature-update-request-detail-client";
 
 type FeatureUpdateRequestDetailPageProps = {
   params: Promise<{ requestId: string }>;

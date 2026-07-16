@@ -6,15 +6,18 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from kortravelmap.core.pipeline_cancellation_states import (
-    PIPELINE_CANCELLATION_MEMBER_KIND_VALUES,
-    PIPELINE_CANCELLATION_RESULT_VALUES,
+        PIPELINE_CANCELLATION_RESULT_VALUES,
+    PIPELINE_CANCELLATION_ROOT_KIND_VALUES,
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
 from kortravelmap.infra import feature_update_repo, jobs_repo, pipeline_repo
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationAttempt,
 )
-from kortravelmap.infra.pipeline_lineage import PIPELINE_LINEAGE_CTES_SQL
+from kortravelmap.infra.pipeline_lineage import (
+    PIPELINE_LINEAGE_BODY_SQL,
+    PIPELINE_LINEAGE_CTES_SQL,
+)
 
 
 def test_cancellation_literals_keep_workflow_and_result_namespaces_separate() -> None:
@@ -30,7 +33,7 @@ def test_cancellation_literals_keep_workflow_and_result_namespaces_separate() ->
         "already_terminal",
         "cancel_failed",
     )
-    assert PIPELINE_CANCELLATION_MEMBER_KIND_VALUES == (
+    assert PIPELINE_CANCELLATION_ROOT_KIND_VALUES == (
         "import_job",
         "update_request",
     )
@@ -58,12 +61,17 @@ def test_attempt_retryable_is_derived_only_from_workflow_status() -> None:
     assert attempt.retryable is True
 
 
-def test_pipeline_list_and_cancellation_resolver_share_lineage_cte() -> None:
+def test_pipeline_projection_and_cancellation_share_lineage_body() -> None:
     from kortravelmap.infra import pipeline_cancellation_repo
 
-    assert PIPELINE_LINEAGE_CTES_SQL in pipeline_repo._LIST_EXECUTIONS_SQL
+    assert PIPELINE_LINEAGE_BODY_SQL in pipeline_repo._LIST_EXECUTIONS_SQL
+    assert PIPELINE_LINEAGE_BODY_SQL in pipeline_repo._GET_EXECUTION_SQL
+    assert PIPELINE_LINEAGE_CTES_SQL in pipeline_repo._LIST_ALL_EXECUTIONS_SQL
     assert PIPELINE_LINEAGE_CTES_SQL in pipeline_cancellation_repo._RESOLVE_SCOPE_SQL
     assert "payload" not in PIPELINE_LINEAGE_CTES_SQL
+    assert "scoped_jobs" in pipeline_repo._LIST_EXECUTIONS_SQL
+    assert "scoped_jobs" in pipeline_repo._GET_EXECUTION_SQL
+    assert "payload" not in pipeline_repo._LIST_EXECUTIONS_SQL
 
 
 def test_import_job_mutator_inventory_has_marker_guards() -> None:
@@ -84,18 +92,26 @@ def test_import_job_mutator_inventory_has_marker_guards() -> None:
 
 def test_feature_update_mutator_inventory_has_marker_guards() -> None:
     request_sql = (
-        feature_update_repo._CLAIM_REQUEST_SQL,
         feature_update_repo._START_REQUEST_SQL,
+        feature_update_repo._REQUEUE_REQUEST_SQL,
         feature_update_repo._SET_MATCHED_SCOPE_SQL,
         feature_update_repo._FINISH_REQUEST_SQL,
+        feature_update_repo._HEARTBEAT_IMPORT_JOB_SQL,
+        feature_update_repo._TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL,
     )
-    job_sql = (
-        feature_update_repo._START_IMPORT_JOB_SQL,
-        feature_update_repo._FINISH_IMPORT_JOB_SQL,
-    )
-    assert all("cancellation_id IS NULL" in sql for sql in (*request_sql, *job_sql))
+    assert all("cancellation_id IS NULL" in sql for sql in request_sql)
     assert "cancellation_id IS NULL" in feature_update_repo._PEEK_REQUEST_SQL
     assert "job.cancellation_id IS NULL" in feature_update_repo._INSERT_REQUEST_SQL
+
+
+def test_cancellation_repository_mutates_only_import_job_members() -> None:
+    from kortravelmap.infra import pipeline_cancellation_queries as queries
+
+    assert "member_kind" not in queries._RESOLVE_SCOPE_SQL
+    assert "request.cancellation_id" not in queries._RESOLVE_SCOPE_SQL
+    assert not hasattr(queries, "_MARK_REQUESTS_SQL")
+    assert not hasattr(queries, "_LOCK_REQUEST_MEMBERS_SQL")
+    assert not hasattr(queries, "_TRANSITION_REQUEST_MEMBER_SQL")
 
 
 def test_pipeline_mapper_keeps_base_status_and_adds_nullable_overlay() -> None:
@@ -107,6 +123,7 @@ def test_pipeline_mapper_keeps_base_status_and_adds_nullable_overlay() -> None:
         created_at=at,
         providers=[],
         dataset_keys=[],
+        provider_datasets=[],
         scope_provider=None,
         scope_dataset=None,
         scope_sync_scope=None,
@@ -120,10 +137,27 @@ def test_pipeline_mapper_keeps_base_status_and_adds_nullable_overlay() -> None:
         started_at=at,
         finished_at=None,
         dagster_run_id="run-1",
+        dagster_run_status="STARTED",
+        trigger_kind="manual",
+        operation_registry_version=None,
         requested_job_id=None,
-        lineage_owner=None,
         linked_job_count=1,
-        projected_job_id=None,
+        projected_job_id="11111111-1111-4111-8111-111111111111",
+        projected_job_kind="provider_load",
+        projected_status="running",
+        projected_progress=10,
+        projected_current_stage="load",
+        projected_error_message=None,
+        projected_created_at=at,
+        projected_started_at=at,
+        projected_finished_at=None,
+        projected_dagster_run_id="run-1",
+        projected_dagster_run_status="STARTED",
+        projected_trigger_kind="manual",
+        projected_operation_registry_version=None,
+        projected_load_batch_id=None,
+        projected_parent_job_id=None,
+        projected_depth=0,
         cancellation_id="22222222-2222-4222-8222-222222222222",
         cancellation_status="retryable",
         cancellation_requested_at=at,

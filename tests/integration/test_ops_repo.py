@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from kortravelmap.api.routers.ops_live import (
+    _IMPORT_JOB_EVENTS_LIVE_SQL,
+    _IMPORT_JOBS_LIVE_SQL,
+)
 from sqlalchemy import text
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
+from kortravelmap.infra import ops_repo
 from kortravelmap.infra.consistency import run_consistency_checks
+from kortravelmap.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    enqueue_feature_update_request,
+)
 from kortravelmap.infra.integrity_violation_repo import create_data_integrity_violation
 from kortravelmap.infra.jobs_repo import (
-    enqueue_import_job,
+    enqueue_unpaired_import_job,
     record_import_job_event,
-    start_import_job,
+    start_provider_dataset_import_job,
+    start_unpaired_import_job,
 )
 from kortravelmap.infra.ops_repo import (
     get_latest_consistency_report,
@@ -34,26 +44,97 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 
 
+async def test_import_job_reverse_links_typed_update_request_identity(
+    migrated_session: AsyncSession,
+) -> None:
+    request = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "feature_ids", "feature_ids": []},
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+
+    job = await get_ops_import_job(migrated_session, request.job_id)
+
+    assert job is not None
+    assert job.update_request_id == request.request_id
+    assert job.payload == {}
+
+
+def _plan_nodes(plan: Any) -> list[dict[str, Any]]:
+    document = plan[0] if isinstance(plan, list) else plan
+    pending = [document["Plan"]]
+    nodes: list[dict[str, Any]] = []
+    while pending:
+        node = pending.pop()
+        nodes.append(node)
+        pending.extend(node.get("Plans", ()))
+    return nodes
+
+
+def _assert_bounded_event_audit_plan(plan: Any, *, expected_index: str) -> None:
+    nodes = _plan_nodes(plan)
+    event_nodes = [
+        node for node in nodes if node.get("Relation Name") == "import_job_events"
+    ]
+    assert event_nodes
+    assert all(node.get("Node Type") != "Seq Scan" for node in event_nodes)
+    assert not any("Sort" in str(node.get("Node Type")) for node in nodes)
+    assert any(node.get("Index Name") == expected_index for node in event_nodes)
+    touches = sum(
+        float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+        for node in event_nodes
+    )
+    removed = sum(
+        float(node.get("Rows Removed by Filter", 0))
+        * float(node.get("Actual Loops", 0))
+        for node in event_nodes
+    )
+    assert touches <= 64
+    assert removed <= 64
+
+
+def _assert_bounded_live_event_plan(plan: Any, *, expected_index: str) -> None:
+    event_nodes = [
+        node
+        for node in _plan_nodes(plan)
+        if node.get("Relation Name") == "import_job_events"
+    ]
+    assert event_nodes
+    assert all(node.get("Node Type") != "Seq Scan" for node in event_nodes)
+    assert any(node.get("Index Name") == expected_index for node in event_nodes)
+    touches = sum(
+        float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+        for node in event_nodes
+    )
+    removed = sum(
+        float(node.get("Rows Removed by Filter", 0))
+        * float(node.get("Actual Loops", 0))
+        for node in event_nodes
+    )
+    assert touches <= 8
+    assert removed <= 8
+
+
 async def test_ops_import_jobs_list_detail_and_cursor(
     migrated_session: AsyncSession,
 ) -> None:
     batch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    root_job = await start_import_job(
+    root_job = await start_unpaired_import_job(
         migrated_session,
         kind="full_load_batch",
         payload={"mode": "full"},
         load_batch_id=batch_id,
     )
-    old_job = await enqueue_import_job(
+    old_job = await enqueue_unpaired_import_job(
         migrated_session,
-        kind="feature_update_request",
+        kind="ops_update_fixture",
         payload={"request_id": "old"},
         load_batch_id=batch_id,
         parent_job_id=root_job.job_id,
     )
-    new_job = await start_import_job(
+    new_job = await start_provider_dataset_import_job(
         migrated_session,
-        kind="feature_update_request",
+        kind="ops_update_fixture",
         payload={"request_id": "new"},
         load_batch_id=batch_id,
         parent_job_id=root_job.job_id,
@@ -92,7 +173,7 @@ async def test_ops_import_jobs_list_detail_and_cursor(
 
     page1 = await list_ops_import_jobs(
         migrated_session,
-        kind="feature_update_request",
+        kind="ops_update_fixture",
         load_batch_id=batch_id,
         parent_job_id=root_job.job_id,
         limit=1,
@@ -102,7 +183,7 @@ async def test_ops_import_jobs_list_detail_and_cursor(
 
     page2 = await list_ops_import_jobs(
         migrated_session,
-        kind="feature_update_request",
+        kind="ops_update_fixture",
         load_batch_id=batch_id,
         parent_job_id=root_job.job_id,
         limit=1,
@@ -198,6 +279,135 @@ async def test_ops_import_jobs_list_detail_and_cursor(
         second_event.event_id,
         first_event.event_id,
     ]
+
+
+async def test_event_audit_filters_use_bounded_natural_plans(
+    migrated_session: AsyncSession,
+) -> None:
+    target_job = await start_unpaired_import_job(
+        migrated_session,
+        kind="event_audit_target_plan_fixture",
+    )
+    noise_job = await start_unpaired_import_job(
+        migrated_session,
+        kind="event_audit_noise_plan_fixture",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_job_events (
+              event_id, job_id, provider, dataset_key, level, message, occurred_at
+            )
+            SELECT
+              ('81000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              CAST(:target_job_id AS uuid), 'target-provider', 'target-dataset',
+              'info', 'target', CAST(:occurred_at AS timestamptz)
+                + seed.n * INTERVAL '1 second'
+            FROM generate_series(1, 60) AS seed(n)
+
+            UNION ALL
+
+            SELECT
+              ('82000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              CAST(:noise_job_id AS uuid), 'other-provider-' || seed.n::text,
+              'target-dataset', 'warning', 'dataset-noise',
+              CAST(:occurred_at AS timestamptz) + INTERVAL '1 day'
+                + seed.n * INTERVAL '1 second'
+            FROM generate_series(1, 4000) AS seed(n)
+
+            UNION ALL
+
+            SELECT
+              ('83000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              CAST(:noise_job_id AS uuid), 'target-provider',
+              'other-dataset-' || seed.n::text, 'warning', 'provider-noise',
+              CAST(:occurred_at AS timestamptz) + INTERVAL '2 days'
+                + seed.n * INTERVAL '1 second'
+            FROM generate_series(1, 4000) AS seed(n)
+            """
+        ),
+        {
+            "target_job_id": target_job.job_id,
+            "noise_job_id": noise_job.job_id,
+            "occurred_at": datetime(2026, 7, 1, tzinfo=_KST),
+        },
+    )
+    await migrated_session.execute(text("ANALYZE ops.import_job_events"))
+    await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
+
+    cases = (
+        (None, None, None, None, "idx_import_job_events_time"),
+        (
+            target_job.job_id,
+            None,
+            None,
+            None,
+            "idx_import_job_events_job_time",
+        ),
+        (None, "info", None, None, "idx_import_job_events_level_time"),
+        (
+            None,
+            None,
+            "target-provider",
+            None,
+            "idx_import_job_events_provider_time",
+        ),
+        (
+            None,
+            None,
+            None,
+            "target-dataset",
+            "idx_import_job_events_dataset_time",
+        ),
+        (
+            None,
+            None,
+            "target-provider",
+            "target-dataset",
+            "idx_import_job_events_provider_dataset_time",
+        ),
+    )
+    for cursor_at in (None, datetime(2026, 7, 1, 2, 0, tzinfo=_KST)):
+        for job_id, level, provider, dataset_key, expected_index in cases:
+            sql = ops_repo._list_import_job_events_sql(
+                job_id=job_id,
+                level=level,
+                provider=provider,
+                dataset_key=dataset_key,
+                cursor_occurred_at=cursor_at,
+            )
+            plan = (
+                await migrated_session.execute(
+                    text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}"),
+                    {
+                        "job_id": job_id,
+                        "level": level,
+                        "provider": provider,
+                        "dataset_key": dataset_key,
+                        "cursor_occurred_at": cursor_at,
+                        "cursor_event_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                        "limit": 51,
+                    },
+                )
+            ).scalar_one()
+            _assert_bounded_event_audit_plan(plan, expected_index=expected_index)
+
+    live_cases = (
+        (_IMPORT_JOBS_LIVE_SQL, {}, "idx_import_job_events_time"),
+        (
+            _IMPORT_JOB_EVENTS_LIVE_SQL,
+            {"job_id": target_job.job_id},
+            "idx_import_job_events_job_time",
+        ),
+    )
+    for sql, params, expected_index in live_cases:
+        plan = (
+            await migrated_session.execute(
+                text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}"),
+                params,
+            )
+        ).scalar_one()
+        _assert_bounded_live_event_plan(plan, expected_index=expected_index)
 
 
 async def test_ops_consistency_reports_latest_and_list(

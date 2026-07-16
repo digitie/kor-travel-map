@@ -37,9 +37,6 @@ from kortravelmap.api.routers.enrichment_review import (
 )
 from kortravelmap.api.routers.etl import router as etl_router
 from kortravelmap.api.routers.feature_update_requests import (
-    feature_router as feature_update_requests_feature_router,
-)
-from kortravelmap.api.routers.feature_update_requests import (
     router as feature_update_requests_router,
 )
 from kortravelmap.api.routers.features import (
@@ -78,7 +75,6 @@ __all__ = [
     "enrichment_review_router",
     "feature_enrichment_review_router",
     "feature_update_requests_router",
-    "feature_update_requests_feature_router",
     "poi_cache_targets_router",
     "provider_refresh_policies_router",
     "features_router",

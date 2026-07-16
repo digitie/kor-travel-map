@@ -336,8 +336,6 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
   },
   "run_mode": "queued",
   "priority": 50,
-  "dry_run": false,
-  "operator": "local-admin",
   "reason": "광화문 주변 데이터 즉시 갱신"
 }
 ```
@@ -348,17 +346,54 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
 {
   "data": {
     "request_id": "uuid",
+    "scope_type": "center_radius",
+    "scope": {
+      "type": "center_radius",
+      "center": {"lon": 126.978, "lat": 37.5665},
+      "radius_km": 3.0
+    },
+    "providers": ["python-mois-api", "python-krheritage-api"],
+    "dataset_keys": [],
+    "update_policy": {
+      "mode": "refresh_existing",
+      "include_inactive": false,
+      "force_provider_call": true,
+      "dedup_after_load": true,
+      "consistency_check_after_load": true
+    },
+    "run_mode": "queued",
+    "priority": 50,
+    "result_kind": "request",
+    "status": "queued",
     "job_id": "uuid",
-    "state": "queued",
+    "dagster_run_id": null,
+    "operator": "local-admin",
+    "reason": "광화문 주변 데이터 즉시 갱신",
+    "error_message": null,
     "matched_scope": {
       "feature_count": 134,
       "sigungu_codes": ["11110"]
     },
-    "status_url": "/admin/features/update-requests/uuid"
+    "created_at": "2026-07-15T12:00:00Z",
+    "started_at": null,
+    "finished_at": null,
+    "generation": 1,
+    "status_url": "/v1/admin/features/update-requests/uuid"
   },
   "meta": {"duration_ms": 34}
 }
 ```
+
+`POST /admin/features/update-requests`는 항상 영속 요청을 만들고 `201`과
+`data.result_kind="request"`를 반환한다. 비영속 계산은 같은 실행 계획 본문에서
+`reason`을 제외해 `POST /admin/features/update-requests/preview`로 보내며,
+`200`과 `data.result_kind="preview"`를 반환한다. preview에는 저장 identity와 lifecycle이 없으므로
+`request_id`, `job_id`, `status`,
+`dagster_run_id`, `status_url`, DB timestamp 필드가 존재하지 않는다.
+
+create와 run-now 요청 body는 `operator`/`actor`를 받지 않으며 포함하면 extra field로
+`422 VALIDATION_ERROR`다. 저장 행과 응답의 `operator`는 서버가 인증된
+`AdminProxyContext.actor`에서만 파생한다.
 
 `run_mode="now"`에서 동일 scope advisory lock이 이미 점유되어 있으면 queued fallback
 없이 `409`를 반환한다. 응답은 공통 RFC7807 `application/problem+json`을 사용한다(§3).
@@ -389,8 +424,10 @@ HTTP header에도 `Retry-After: 15`를 포함한다.
   `providers`는 최대 32개, `dataset_keys`는 최대 64개다.
 - `update_policy`는 `mode`, `include_inactive`, `force_provider_call`,
   `dedup_after_load`, `consistency_check_after_load`,
-  `prevent_provider_reactivation`만 허용한다. 알 수 없는 key는 queue 생성 전에
-  거절한다.
+  `prevent_provider_reactivation`만 허용한다. 각 key는 생략할 수 있지만 존재하면
+  `mode='refresh_existing'` 또는 strict JSON boolean이어야 한다. 알 수 없는 key,
+  문자열·정수 boolean, 명시적 JSON `null`은 queue 생성 전에 거절한다. 응답도 저장된
+  sparse object를 그대로 반환해 생략한 key를 `null`로 팽창시키지 않는다.
 
 ### 5.2 Scope 타입
 
@@ -446,12 +483,9 @@ feature를 업데이트한다.
 }
 ```
 
-`match`:
-
-- `intersects`: 반경 원과 조금이라도 교차하는 시군구.
-- `contains_center`: 중심점이 속한 시군구만.
-- `feature_sigungu`: 현재 feature들의 `sigungu_code` 중 반경 안 feature가 속한
-  시군구.
+`match`는 `intersects`만 허용한다. 현재 kor-travel-geo REST v2가 반경 원과
+교차하는 시군구 목록을 반환하므로, 실행 의미가 없는 `contains_center`/
+`feature_sigungu` 값은 계약에 두지 않는다.
 
 처리:
 
@@ -522,12 +556,15 @@ feature를 업데이트한다.
 | `queued` | queue에 넣고 Dagster worker/sensor가 순서대로 실행 |
 | `now` | 높은 우선순위/즉시 실행 의도를 가진 request. Dagster sensor가 같은 queue에서 감지해 worker run을 생성 |
 
-`dry_run=true`이면 대상 수, provider/dataset group, 예상 job만 반환하고 run을 만들지
-않는다.
+`POST /admin/features/update-requests/preview`는 대상 수와 provider/dataset group을
+preview 전용 응답으로 반환하고 request/import job/run을 만들지 않는다. 영속 생성 본문에
+`dry_run` 필드는 없고 `ops.feature_update_requests`에도 해당 컬럼이 없다. 생성과 미리보기
+응답은 각각 문자열 `result_kind=request|preview`로 판별한다. 저장 응답은 `request_id`, `job_id`,
+`status_url`, `created_at`, `generation`이 모두 required이고 preview에는 이 필드가 존재하지 않는다.
 
 구현 상태: T-206a에서 `infra.scope_repo.count_features_matching_scope`가
 `feature_ids`, `center_radius`, `bbox`, `sigungu_by_radius`, `provider_dataset`의
-read-only dry-run 해석을 제공한다. T-206d에서 `cache_target_keys`도 active
+read-only preview 해석을 제공한다. T-206d에서 `cache_target_keys`도 active
 `ops.poi_cache_targets` 기반으로 해석하고, missing/deleted/disabled key를
 `matched_scope`에 기록한다.
 
@@ -537,7 +574,7 @@ read-only dry-run 해석을 제공한다. T-206d에서 `cache_target_keys`도 ac
 
 Query:
 
-- `state`
+- `status`
 - `scope_type`
 - `provider`
 - `dataset_key`
@@ -548,28 +585,44 @@ Query:
 
 #### `GET /admin/features/update-requests/{request_id}`
 
-응답에는 연결된 import job, Dagster run id, 대상 feature count, resolved sigungu,
-최근 events를 포함한다.
+응답은 `FeatureUpdateRequestRecord` 한 건을 반환한다. `request_id`, scope와 필터,
+`update_policy`, `run_mode`, `priority`, `status`, `matched_scope`, 연결 `job_id`, nullable
+`dagster_run_id`, 운영자·사유·오류, lifecycle timestamp, 정수 `generation`과 `status_url`이
+현재 계약이다.
+import job 객체나 recent events 배열은 이 응답에 포함하지 않는다.
 
 ### 5.5 취소와 재실행
 
 #### `POST /admin/features/update-requests/{request_id}/cancel`
 
-queued 또는 running 요청을 취소 요청 상태로 둔다. running job은 cooperative cancel이다.
+request를 canonical `update_request` pipeline root로 해석하고, 연결된 request/job/run 계층을
+공유 C3d coordinator의 frozen scope로 취소한다. body는 nullable `reason`만 허용하며, 응답은
+원본 request record가 아니라 canonical root와 durable cancellation attempt의 member/run별
+결과를 담은 `PipelineCancellationResponse`다. 상세 상태·멱등·재시도·오류 계약은
+`docs/architecture/rest-api.md` §2.6을 따른다.
 
 #### `POST /admin/features/update-requests/{request_id}/run-now`
 
-기존 request payload로 즉시 실행을 재요청한다. 이미 running이면 409.
+선택 요청 body:
+
+```json
+{"priority": 100, "reason": "실패 원인 수정 후 즉시 재실행"}
+```
+
+기존 request payload를 복사해 `run_mode=now`인 **새 request/job row**를 만들고 `201`을
+반환한다. 응답 `data.request_id`와 `data.job_id`는 원본과 다른 새 identity이며 원본 request의
+상태·내용은 변경하지 않는다. 원본이 이미 running이거나 동일 scope lock이 경합하면 `409`다.
 
 ## 6. Dagster 큐잉 방식
 
 권장 기본 방식:
 
 1. API가 `ops.feature_update_requests`와 `ops.import_jobs`를 같은 transaction에 생성.
-2. Dagster sensor가 `status='queued'` request를 peek해 request id별 run을 생성.
-3. Dagster worker run은 request/import job을 `running`으로 바꾸고 progress를 갱신.
-4. 완료 시 `feature_update_requests.status`와 `import_jobs.status`를 같이 terminal로
-   갱신.
+2. Dagster sensor가 canonical job이 `status='queued'`인 request를 JOIN으로 peek해
+   `(request_id, generation)`별 run을 생성.
+3. Dagster worker run은 trimmed non-empty `dagster_run_id`를 owner로 제시한 generation CAS로
+   canonical job만 `running`으로 바꾸고 progress를 갱신. `NULL` run owner는 허용하지 않는다.
+4. 완료 시 canonical job만 terminal로 갱신하고 request 응답은 JOIN으로 같은 상태를 읽는다.
 
 즉시 실행(`run_mode=now`)도 request와 job row를 먼저 저장한다. 현재 구현은 API가
 Dagster run을 직접 만들지 않고, sensor가 같은 queue에서 감지해 worker run을 만든다.
@@ -581,23 +634,17 @@ CREATE TABLE ops.feature_update_requests (
   request_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   scope_type TEXT NOT NULL,
   scope JSONB NOT NULL,
-  providers JSONB NOT NULL DEFAULT '[]'::jsonb,
-  dataset_keys JSONB NOT NULL DEFAULT '[]'::jsonb,
+  providers TEXT[] NOT NULL DEFAULT '{}'::text[],
+  dataset_keys TEXT[] NOT NULL DEFAULT '{}'::text[],
   update_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   run_mode TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 50,
-  status TEXT NOT NULL DEFAULT 'queued',
-  dry_run BOOLEAN NOT NULL DEFAULT FALSE,
   matched_scope JSONB NOT NULL DEFAULT '{}'::jsonb,
-  job_id UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
-  dagster_run_id TEXT,
+  job_id UUID NOT NULL UNIQUE REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT,
   operator TEXT,
   reason TEXT,
-  error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  started_at TIMESTAMPTZ,
-  finished_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
   CONSTRAINT ck_feature_update_scope CHECK (
     scope_type IN (
       'feature_ids','center_radius','sigungu_by_radius','bbox','provider_dataset',
@@ -605,25 +652,90 @@ CREATE TABLE ops.feature_update_requests (
     )
   ),
   CONSTRAINT ck_feature_update_run_mode CHECK (run_mode IN ('queued','now')),
-  CONSTRAINT ck_feature_update_status CHECK (
-    status IN ('queued','running','done','failed','cancelled')
+  CONSTRAINT ck_feature_update_requests_scope_shape CHECK (
+    ops.is_valid_feature_update_scope(scope_type, scope)
+  ),
+  CONSTRAINT ck_feature_update_requests_providers_shape CHECK (
+    ops.is_valid_feature_update_filter_array(providers, 32)
+  ),
+  CONSTRAINT ck_feature_update_requests_dataset_keys_shape CHECK (
+    ops.is_valid_feature_update_filter_array(dataset_keys, 64)
+  ),
+  CONSTRAINT ck_feature_update_requests_update_policy_shape CHECK (
+    ops.is_valid_feature_update_policy(update_policy)
+  ),
+  CONSTRAINT ck_feature_update_requests_direct_filters_empty CHECK (
+    scope_type <> 'provider_dataset'
+    OR (cardinality(providers) = 0 AND cardinality(dataset_keys) = 0)
+  ),
+  CONSTRAINT ck_feature_update_requests_priority_range CHECK (
+    priority BETWEEN 0 AND 1000
+  ),
+  CONSTRAINT ck_feature_update_requests_matched_scope_object CHECK (
+    jsonb_typeof(matched_scope) = 'object'
+  ),
+  CONSTRAINT ck_feature_update_requests_reason_shape CHECK (
+    reason IS NULL OR (
+      reason <> '' AND reason = btrim(reason) AND char_length(reason) <= 500
+    )
   )
 );
 
-CREATE INDEX idx_feature_update_status_priority
-  ON ops.feature_update_requests (status, priority DESC, created_at);
+CREATE INDEX idx_feature_update_priority
+  ON ops.feature_update_requests (priority DESC, created_at, request_id);
 CREATE INDEX idx_feature_update_created
-  ON ops.feature_update_requests (created_at DESC);
-CREATE INDEX idx_feature_update_job
-  ON ops.feature_update_requests (job_id) WHERE job_id IS NOT NULL;
+  ON ops.feature_update_requests (created_at DESC, request_id DESC);
+CREATE INDEX idx_feature_update_providers_gin
+  ON ops.feature_update_requests USING gin (providers);
+CREATE INDEX idx_feature_update_dataset_keys_gin
+  ON ops.feature_update_requests USING gin (dataset_keys);
 ```
 
-구현 상태: Alembic `0008_feature_update_requests`와
+`ops.is_valid_feature_update_scope`는 immutable DB 함수로 여섯 scope의 필수 키,
+추가 키 금지, JSON type, 문자열 trim/길이, 배열 크기, 좌표·반경·bbox 범위를
+위 OpenAPI 입력 계약과 동일하게 강제한다. 기본값이 있는 `match`/`scope_mode`는 저장 전
+canonical 값으로 채우고, nullable `sync_scope`/`radius_km`는 `NULL` JSON을 저장하지 않고
+키를 생략한다. 0052는 `providers`/`dataset_keys`를 JSONB에서 typed `TEXT[]`로 전환한다.
+`ops.is_valid_feature_update_filter_array`는 1차원·중복 없음과 각각 최대 32/64개의
+trimmed non-empty string(항목당 128자 이하)을 강제한다.
+`ops.is_valid_feature_update_policy`는 object만 허용하고 `mode='refresh_existing'`와
+5개 boolean override 외의 키, JSON `null`, 잘못된 값 타입을 거부한다. repository는
+입력의 Python `None` 값을 키 생략으로 canonicalize한 뒤 같은 계약을 저장한다.
+
+0052 clean-cut부터 request 테이블은 입력·감사·queue generation metadata만 소유한다.
+`status`, `dagster_run_id`, cancellation marker, `error_message`, `started_at`, `finished_at`은
+삭제하고 unique `job_id`로 연결된 `ops.import_jobs`가 lifecycle 단일 정본이다. REST 응답은 두
+테이블을 JOIN해 화면에 필요한 lifecycle을 한 번만 투영한다. claim/start/finish/requeue와
+cancellation도 canonical job 한 행만 변경하므로 부분 성공과 이중 상태가 없다. queue 세대는
+timestamp를 논리 토큰으로 쓰지 않고 명시적 `generation` 정수로 관리한다. requeue/pre-start retry만
+원자적으로 1 증가시키며 Dagster run key와 CAS도 이 값을 사용한다. canonical job payload는
+runtime에서 빈 object이며 relation/scope/policy/matched scope를 복제하지 않는다. migration audit만
+source job ID를 별도로 보존한다. request 입력·
+감사 필드는 INSERT 뒤 immutable이며 `matched_scope`와 `generation`만 linked job이 active이고
+cancellation marker가 없을 때 변경한다. request/canonical job은 cancellation root와 audit correlation을
+보존하는 append-only identity라 DELETE할 수 없다.
+
+구현 상태: Alembic `0008_feature_update_requests`와 `0052_pipeline_projection_access`,
 `FeatureUpdateRequestRow`가 이 DDL을 반영한다. `infra.feature_update_repo`는
-dry-run preview, request/import job enqueue, priority claim, start/finish/cancel,
+preview, request/import job enqueue, priority peek와 generation/owner CAS start/finish,
 단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKorTravelMapClient`는
-enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). T-206d의
-`infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. T-207a는
+preview/enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). 0052 CHECK와
+trigger는 여섯 scope, 두 필터 배열, update policy의 canonical 저장 shape와 연결 job의
+`kind=feature_update_request`, parent/load-batch 없는 root/update-request shape,
+`queued → run-id NULL`/`running → trimmed non-empty run-id`, typed pair가 정확히 맞고 다른 scope
+request는 unpaired job을 가리키도록 강제한다. `job_id` UNIQUE, request→job FK, canonical job
+INSERT의 deferred reverse-pair trigger가 commit 시 job↔request 양방향 1:1을 보장하며 generic
+job writer는 reserved kind 생성과 lifecycle 변경을 거부한다. request와 canonical job의 DELETE,
+job identity/payload 변경도 DB trigger가 거부한다. 기존
+jobless·공유·pair 불일치·reserved Dagster kind request는 migration이 request별 canonical job을 만들어
+재연결한다. unlinked feature-update job의 연결 component 전체에는 명시적 격리 시각·고정 사유를
+기록하되 원래 `kind`·`payload`를 보존하고 pipeline/legacy ops/live/Dagster engine read에서 제외한다.
+다른 request와 연결된 component는
+격리하지 않고 중단하며 generic writer와 DB trigger가 runtime 격리 표식 변경, 격리 행 mutation/delete,
+event 추가와 새 child attach를 거부한다. malformed scope/filter/policy,
+persisted dry-run, active connected branch, cancellation 동결
+후보가 있으면 request ID를 제시하고 중단한다. dry-run은 DB row 없이 preview 응답만 만든다.
+T-206d의 `infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. T-207a는
 admin HTTP router와 OpenAPI schema export를 연결했다. T-208e는
 `feature_update_request_queue_sensor`와 `feature_update_request_worker`로 queued/now
 request 실행을 Dagster에 연결했다.
@@ -673,12 +785,11 @@ T-221d 구현 상태:
 - `freshness`: 정책의 명시적 `stale_after_minutes`와 마지막 성공으로 서버가 계산한다.
   SLA가 없으면 `unknown`, 성공 이력이 없으면 `never_run`, 정책 비활성이면
   `disabled`다. `system_interval_seconds`나 rate-limit 값에서 SLA를 추론하지 않는다.
-- `latest_execution`: DB에 canonical dataset identity가 남은 import job 또는
-  provider_dataset update request의 root projection이다. 연결 request/job 쌍은 request
-  한 행으로 접고 direct job, `parent_job_id` descendant, 동일 payload `request_id` job은
-  같은 request 계보로 처리한다. 가장 깊은 child job 상태·진척은 별도 속성으로 보존한다.
-  schedule/manual 전체 operation 정본은 #679 범위이므로
-  `latest_execution_coverage=db_recorded`를 함께 준다.
+- `latest_execution`: typed `import_jobs.provider/dataset_key`가 있는 canonical root
+  projection이다. 연결 request/job 쌍은 FK와 lineage로 request 한 행에 접고 payload나
+  event를 identity/계보 근거로 읽지 않는다. 선택된 pair member 상태와 root/대표 job
+  상태·진척은 별도 속성으로 보존하며
+  `latest_execution_coverage=db_recorded_canonical_operations`를 함께 준다.
 - integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
 - 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
@@ -717,32 +828,39 @@ DB에 기록된 update request와 import job hierarchy를 root 실행 목록으�
 `created_at`·UUID `id`·`kind(update_request|import_job)`를 담고, 형식이나 kind가
 잘못되면 DB 조회 전에 `422`다. query는 `kind`, root `status`, `provider`,
 `dataset_key`, `created_from`, `created_to`, `page_size`, `cursor`를 지원한다.
-provider/dataset filter는 request의 저장 배열 membership과 `provider_dataset` direct
-scope를 함께 보고, standalone import root는 전체 lineage event identity를 본다.
+provider-only/dataset-only filter는 request 저장 배열 membership과 canonical exact pair를
+함께 본다. provider와 dataset을 모두 주면 배열을 교차 조합하지 않고 같은 canonical
+`provider_datasets[]` member가 정확히 일치할 때만 반환한다. import 실행 identity의 유일한
+정본은 typed `import_jobs.provider`/`dataset_key`다. `import_job_events`의 같은 이름 필드는
+감사 메타데이터일 뿐 projection·filter·latest의 identity를 만들거나 바꾸지 않는다.
 
 각 item의 공통 root 필드는 `kind`, `id`, `status`, `progress`, `current_stage`,
-`dagster_run_id`, `providers[]`, `dataset_keys[]`, `provider_dataset`,
-`created_at`/시작/종료 시각이다. request 배열은 저장 순서·중복을 유지하고 direct
-`provider_dataset` 값이 없을 때만 끝에 보완한다. 두 배열은 독립 identity 목록이므로
-provider/dataset/sync_scope pair는 typed `provider_dataset` object가 정본이다.
-다른 request와 standalone root의 `provider_dataset`은 `null`이다.
+`dagster_run_id`, `providers[]`, `dataset_keys[]`, `provider_datasets[]`,
+`created_at`/시작/종료 시각이다. 표시 배열은 저장 배열과 canonical pair의 유효값을 합쳐
+정렬·중복 제거한다. 두 배열은 provider-only/dataset-only 표시·필터용 독립 목록이며,
+provider/dataset/sync_scope와 pair별 member/status는 required 배열인
+`provider_datasets[]`가 정본이다. pair가 없는 root도 필드를 생략하지 않고 빈 배열을 반환한다.
+각 pair의 `operation_member_id`는 필수 UUID이고, nullable `sync_scope`도 필드를 생략하지 않는다.
 `projected_job`은 일반 hierarchy에서 `depth DESC, created_at DESC, job_id DESC` 규칙으로 고른
 대표 job이며 root와 별도의 status/progress/error/times/Dagster run/detail URL을 가진다. 단,
 C3e `provider_feature_load_run`은 임의 pair child를 대표로 고르지 않고 root 자체를
 `projected_job`으로 고정한다.
 `linked_job_count`는 해당 request branch 또는 standalone partition의 job 수다.
 
-request item은 원래 FK인 `requested_job_id`와 `lineage_owner`를 추가로 제공한다. 같은
-job anchor를 여러 request가 가리키면 생성 시각·ID 기준 owner 하나만
-`lineage_owner=true`와 projection을 갖는다. nested anchor는 상위 request branch를
-그 지점에서 분리한다. 탈락한 request는 `lineage_owner=false`, `linked_job_count=0`,
-`projected_job=null`이지만 `requested_job_id`는 보존한다. 이는 데이터 손실이 아니라
-job hierarchy의 다중 소유·중복 표시를 막는 명시적 진단 상태다.
+request item은 양방향 1:1 FK인 `requested_job_id`를 필수로 제공한다. canonical request job은
+항상 hierarchy root라 request branch는 root와 descendants 전체다. 같은 job을 여러 request가
+가리키거나 request job이 다른 job의 child가 되는 상태는 DB가 거부하므로 owner/loser 진단과
+`lineage_owner`는 계약에 없다. `projected_job`도 모든 root에서 필수다.
 
-단건 detail/cancel 계약은 이 목록 projection으로 바꾸지 않는다. Dagster run 상세는
-T-ADM-C3c, 계층 취소는 C3d가 소유한다.
+단건 detail과 cancel도 같은 canonical root projection을 필수로 반환한다. 단건의 raw
+request/job/event 부속 정보는 유지하되 identity와 root 상태는 목록과 갈라지지 않는다.
+Dagster run 상세는 T-ADM-C3c, 계층 취소는 C3d가 소유한다.
 
 ## 7.2.1 Canonical operation REST 계약 (T-ADM-C3e)
+
+갱신 조작은 admin 정본과 동일하게 `POST /v1/ops/pipeline/requests` 영속 생성(201)과
+`POST /v1/ops/pipeline/requests/preview` 비영속 미리보기(200)로 분리한다. 생성 본문은
+`dry_run`을 받지 않으며 미리보기 응답에는 request/job identity와 lifecycle이 없다.
 
 pipeline overview/timeline, datasets grid latest execution, datasets detail recent runs는 C3b의
 같은 lineage/root CTE와 exact pair projection을 소비한다. grid는 전 dataset을 한 번에 읽는
@@ -761,20 +879,19 @@ pair가 두 값을 모두 만족해야 하며 다른 event/독립 배열의 교�
 `provider_datasets[]` 각 항목은 다음을 가진다.
 
 - `provider`, `dataset_key`
-- nullable `operation_member_id`: 선택된 import job member UUID
+- `operation_member_id`: 선택된 import job member UUID
 - `status`: 해당 pair의 `queued|running|done|failed|cancelled`
-- `status_source`: `member|root`
 
-update request root에서는 owned import child의 실컬럼 pair를 우선한다. direct
-`provider_dataset` scope와 같은 pair면 한 항목으로 접고, child가 없는 direct pair fallback은
-`operation_member_id=null`과 request root status를 사용한다. 독립 provider/dataset 배열은
-표시와 단일 필터용일 뿐 exact pair 생성 근거가 아니다.
+update request root도 연결된 import job/descendant의 실컬럼 pair만 사용한다. direct
+`provider_dataset` scope는 연결된 typed job pair와 DB trigger로 항상 같고, `sync_scope`를
+보강하는 request metadata일 뿐 독립 identity나 fallback을 만들지 않는다. 독립
+provider/dataset 배열은 표시와 단일 필터용일 뿐 exact pair 생성 근거가 아니다.
 
 pair 배열은 `(provider ASC, dataset_key ASC)`로 정렬한다. 같은 pair의 typed member가 여러
 개면 canonical branch의 `depth DESC, created_at DESC, job_id DESC` 첫 행을 선택해
-`status_source=member`로 반환한다. typed member가 없고 direct request scope 또는 legacy exact
-event fallback만 있으면 member id는 NULL, `status_source=root`, status는 canonical root
-status다. 이 선택·정렬은 pipeline/datasets 양쪽에서 같다.
+그 member id와 status를 반환한다. typed member가 없으면 pair도 없다. event-only 과거
+실행은 root timeline에는 남지만 `provider_datasets=[]`이며 dataset latest에서 제외된다. 이
+선택·정렬은 pipeline/datasets 양쪽에서 같다.
 
 root `status`도 같은 lifecycle 어휘지만 run 전체 결과다. `projected_job.status`, C3d
 cancellation workflow/result, nullable `dagster_run_status`, freshness, `trigger_kind`는 별도 필드이며

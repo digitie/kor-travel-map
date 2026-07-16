@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Any
 
 from kortravelmap.core.pipeline_cancellation_states import (
-    PipelineCancellationMemberKind,
     PipelineCancellationResult,
+    PipelineCancellationRootKind,
     PipelineCancellationStatus,
 )
 
@@ -32,7 +32,7 @@ class PipelineCancellationAttempt:
 
     cancellation_id: str
     previous_cancellation_id: str | None
-    root_kind: PipelineCancellationMemberKind
+    root_kind: PipelineCancellationRootKind
     root_id: str
     status: PipelineCancellationStatus
     requested_by: str
@@ -49,11 +49,10 @@ class PipelineCancellationAttempt:
 
 @dataclass(frozen=True)
 class PipelineCancellationMember:
-    """frozen request/job 대상과 대상별 결과."""
+    """frozen import job 대상과 대상별 결과."""
 
     cancellation_id: str
-    member_kind: PipelineCancellationMemberKind
-    member_id: str
+    job_id: str
     dagster_run_id: str | None
     initial_status: str
     result: PipelineCancellationResult
@@ -98,10 +97,9 @@ class PipelineCancellationDetail:
 
 @dataclass(frozen=True)
 class PipelineCancellationScopeMember:
-    """marker 직전 C3b parity scope의 base row snapshot."""
+    """marker 직전 C3b parity scope의 import job snapshot."""
 
-    member_kind: PipelineCancellationMemberKind
-    member_id: str
+    job_id: str
     initial_status: str
     dagster_run_id: str | None
     cancellation_id: str | None
@@ -127,7 +125,7 @@ class PipelineCancellationScopeMember:
 class PipelineCancellationScope:
     """canonical root와 deterministic frozen member 목록."""
 
-    root_kind: PipelineCancellationMemberKind
+    root_kind: PipelineCancellationRootKind
     root_id: str
     members: tuple[PipelineCancellationScopeMember, ...]
 

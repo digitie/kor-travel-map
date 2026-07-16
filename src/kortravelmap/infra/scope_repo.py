@@ -1,7 +1,7 @@
 """``kortravelmap.infra.scope_repo`` — feature update request scope resolver.
 
 ADR-045 feature update request가 받은 scope를 실제 feature 집합으로 해석하는
-read-only repository다. T-206a는 dry-run/count와 후속 queue bridge의 기반만 제공한다.
+read-only repository다. T-206a는 preview/count와 후속 queue bridge의 기반만 제공한다.
 
 설계 원칙:
 - raw SQL ``text()``만 사용한다(ADR-004).
@@ -14,6 +14,7 @@ read-only repository다. T-206a는 dry-run/count와 후속 queue bridge의 기�
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
@@ -30,6 +31,7 @@ __all__ = [
     "ProviderDatasetScope",
     "ScopeResolution",
     "SigunguByRadiusResolver",
+    "canonicalize_feature_update_scope",
     "resolve_feature_ids",
     "resolve_center_radius",
     "resolve_bbox",
@@ -40,6 +42,9 @@ __all__ = [
 ]
 
 DEFAULT_SCOPE_PREVIEW_LIMIT: Final[int] = 1000
+MAX_SCOPE_FEATURE_IDS: Final[int] = 1000
+MAX_SCOPE_TARGET_KEYS: Final[int] = 500
+MAX_RADIUS_KM: Final[float] = 500.0
 
 ScopeType = Literal[
     "feature_ids",
@@ -66,6 +71,208 @@ class ProviderDatasetScope:
     provider: str
     dataset_key: str
     feature_count: int
+
+
+def _canonical_scope_text(value: Any, *, field_name: str, max_length: int) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    canonical = value.strip()
+    if not canonical or len(canonical) > max_length:
+        raise ValueError(f"{field_name} must contain 1..{max_length} non-whitespace characters")
+    return canonical
+
+
+def _canonical_scope_number(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: float,
+    maximum: float,
+    minimum_exclusive: bool = False,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be a number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a finite number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field_name} must be finite")
+    minimum_valid = number > minimum if minimum_exclusive else number >= minimum
+    if not minimum_valid or number > maximum:
+        lower = ">" if minimum_exclusive else ">="
+        raise ValueError(f"{field_name} must be {lower} {minimum} and <= {maximum}")
+    return 0.0 if number == 0 else number
+
+
+def _require_exact_scope_keys(
+    scope: Mapping[str, Any],
+    *,
+    required: frozenset[str],
+    optional: frozenset[str] = frozenset(),
+) -> None:
+    keys = set(scope)
+    if any(not isinstance(key, str) for key in keys):
+        raise ValueError("scope keys must be strings")
+    missing = required - keys
+    extra = keys - required - optional
+    if missing:
+        raise ValueError(f"scope missing required keys: {sorted(missing)}")
+    if extra:
+        raise ValueError(f"scope contains unsupported keys: {sorted(extra)}")
+
+
+def _canonical_scope_point(value: Any) -> dict[str, float]:
+    if not isinstance(value, Mapping):
+        raise ValueError("scope center must be an object")
+    _require_exact_scope_keys(value, required=frozenset({"lon", "lat"}))
+    return {
+        "lon": _canonical_scope_number(
+            value["lon"], field_name="center.lon", minimum=-180, maximum=180
+        ),
+        "lat": _canonical_scope_number(
+            value["lat"], field_name="center.lat", minimum=-90, maximum=90
+        ),
+    }
+
+
+def canonicalize_feature_update_scope(scope: Mapping[str, Any]) -> dict[str, Any]:
+    """여섯 feature update scope를 DB CHECK와 같은 canonical JSON shape로 만든다."""
+    if not isinstance(scope, Mapping):
+        raise ValueError("scope must be an object")
+    scope_type = scope.get("type")
+    if not isinstance(scope_type, str):
+        raise ValueError("scope requires string type")
+
+    if scope_type == "feature_ids":
+        _require_exact_scope_keys(scope, required=frozenset({"type", "feature_ids"}))
+        raw_ids = scope["feature_ids"]
+        if not isinstance(raw_ids, list) or len(raw_ids) > MAX_SCOPE_FEATURE_IDS:
+            raise ValueError(
+                f"feature_ids must be an array with at most {MAX_SCOPE_FEATURE_IDS} items"
+            )
+        feature_ids = [
+            _canonical_scope_text(value, field_name="feature_ids item", max_length=256)
+            for value in raw_ids
+        ]
+        if len(feature_ids) != len(set(feature_ids)):
+            raise ValueError("feature_ids items must be unique")
+        return {
+            "type": scope_type,
+            "feature_ids": feature_ids,
+        }
+
+    if scope_type in {"center_radius", "sigungu_by_radius"}:
+        required = {"type", "center", "radius_km"}
+        optional = {"match"} if scope_type == "sigungu_by_radius" else set()
+        _require_exact_scope_keys(scope, required=frozenset(required), optional=frozenset(optional))
+        radius_payload: dict[str, Any] = {
+            "type": scope_type,
+            "center": _canonical_scope_point(scope["center"]),
+            "radius_km": _canonical_scope_number(
+                scope["radius_km"],
+                field_name="radius_km",
+                minimum=0,
+                maximum=MAX_RADIUS_KM,
+                minimum_exclusive=True,
+            ),
+        }
+        if scope_type == "sigungu_by_radius":
+            match = scope.get("match", "intersects")
+            if match != "intersects":
+                raise ValueError("sigungu_by_radius match must be 'intersects'")
+            radius_payload["match"] = match
+        return radius_payload
+
+    if scope_type == "bbox":
+        _require_exact_scope_keys(
+            scope,
+            required=frozenset({"type", "min_lon", "min_lat", "max_lon", "max_lat"}),
+        )
+        min_lon = _canonical_scope_number(
+            scope["min_lon"], field_name="min_lon", minimum=-180, maximum=180
+        )
+        min_lat = _canonical_scope_number(
+            scope["min_lat"], field_name="min_lat", minimum=-90, maximum=90
+        )
+        max_lon = _canonical_scope_number(
+            scope["max_lon"], field_name="max_lon", minimum=-180, maximum=180
+        )
+        max_lat = _canonical_scope_number(
+            scope["max_lat"], field_name="max_lat", minimum=-90, maximum=90
+        )
+        if min_lon > max_lon or min_lat > max_lat:
+            raise ValueError("bbox min values must be less than or equal to max values")
+        return {
+            "type": scope_type,
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+        }
+
+    if scope_type == "provider_dataset":
+        _require_exact_scope_keys(
+            scope,
+            required=frozenset({"type", "provider", "dataset_key"}),
+            optional=frozenset({"sync_scope"}),
+        )
+        provider_payload: dict[str, Any] = {
+            "type": scope_type,
+            "provider": _canonical_scope_text(
+                scope["provider"], field_name="provider", max_length=128
+            ),
+            "dataset_key": _canonical_scope_text(
+                scope["dataset_key"], field_name="dataset_key", max_length=128
+            ),
+        }
+        if scope.get("sync_scope") is not None:
+            provider_payload["sync_scope"] = _canonical_scope_text(
+                scope["sync_scope"], field_name="sync_scope", max_length=128
+            )
+        return provider_payload
+
+    if scope_type == "cache_target_keys":
+        _require_exact_scope_keys(
+            scope,
+            required=frozenset({"type", "external_system", "target_keys"}),
+            optional=frozenset({"radius_km", "scope_mode"}),
+        )
+        raw_keys = scope["target_keys"]
+        if not isinstance(raw_keys, list) or len(raw_keys) > MAX_SCOPE_TARGET_KEYS:
+            raise ValueError(
+                f"target_keys must be an array with at most {MAX_SCOPE_TARGET_KEYS} items"
+            )
+        scope_mode = scope.get("scope_mode", "center_radius")
+        if scope_mode not in {"center_radius", "sigungu_by_radius"}:
+            raise ValueError("scope_mode must be 'center_radius' or 'sigungu_by_radius'")
+        target_keys = [
+            _canonical_scope_text(value, field_name="target_keys item", max_length=256)
+            for value in raw_keys
+        ]
+        if len(target_keys) != len(set(target_keys)):
+            raise ValueError("target_keys items must be unique")
+        cache_payload: dict[str, Any] = {
+            "type": scope_type,
+            "external_system": _canonical_scope_text(
+                scope["external_system"],
+                field_name="external_system",
+                max_length=128,
+            ),
+            "target_keys": target_keys,
+            "scope_mode": scope_mode,
+        }
+        if scope.get("radius_km") is not None:
+            cache_payload["radius_km"] = _canonical_scope_number(
+                scope["radius_km"],
+                field_name="radius_km",
+                minimum=0,
+                maximum=MAX_RADIUS_KM,
+                minimum_exclusive=True,
+            )
+        return cache_payload
+
+    raise ValueError(f"unsupported scope type: {scope_type!r}")
 
 
 @dataclass(frozen=True)
@@ -97,7 +304,7 @@ class CacheTargetFeatureMatch:
 
 @dataclass(frozen=True)
 class ScopeResolution:
-    """feature update request dry-run/queue가 공유하는 scope 해석 결과."""
+    """feature update request preview/queue가 공유하는 scope 해석 결과."""
 
     scope_type: ScopeType
     features: tuple[FeatureScopeRow, ...]
@@ -658,9 +865,7 @@ def _row_to_cache_match(row: Any) -> CacheTargetFeatureMatch:
 
 
 def _sigungu_codes(features: Sequence[FeatureScopeRow]) -> tuple[str, ...]:
-    return tuple(
-        sorted({row.sigungu_code for row in features if row.sigungu_code})
-    )
+    return tuple(sorted({row.sigungu_code for row in features if row.sigungu_code}))
 
 
 def _limit_value(limit: int | None) -> int | None:
@@ -683,9 +888,7 @@ async def _provider_datasets_from_sql(
     sql: str,
     params: Mapping[str, Any],
 ) -> tuple[ProviderDatasetScope, ...]:
-    rows = (
-        await session.execute(text(sql), dict(params))
-    ).mappings().all()
+    rows = (await session.execute(text(sql), dict(params))).mappings().all()
     return tuple(
         ProviderDatasetScope(
             provider=str(row["provider"]),
@@ -741,11 +944,15 @@ async def _provider_datasets_for_feature_ids(
     if not feature_ids:
         return ()
     rows = (
-        await session.execute(
-            text(_PROVIDER_DATASETS_FOR_FEATURE_IDS_SQL),
-            {"feature_ids": list(feature_ids)},
+        (
+            await session.execute(
+                text(_PROVIDER_DATASETS_FOR_FEATURE_IDS_SQL),
+                {"feature_ids": list(feature_ids)},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return tuple(
         ProviderDatasetScope(
             provider=str(row["provider"]),
@@ -820,11 +1027,15 @@ async def resolve_feature_ids(
     if not unique_ids:
         return ScopeResolution(scope_type="feature_ids", features=())
     rows = (
-        await session.execute(
-            text(_RESOLVE_FEATURE_IDS_SQL),
-            {"feature_ids": list(unique_ids), "limit": _limit_value(limit)},
+        (
+            await session.execute(
+                text(_RESOLVE_FEATURE_IDS_SQL),
+                {"feature_ids": list(unique_ids), "limit": _limit_value(limit)},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return await _resolution(session, "feature_ids", _rows_to_features(rows))
 
 
@@ -840,16 +1051,20 @@ async def resolve_center_radius(
     if radius_km <= 0:
         raise ValueError("radius_km must be greater than 0")
     rows = (
-        await session.execute(
-            text(_RESOLVE_CENTER_RADIUS_SQL),
-            {
-                "lon": lon,
-                "lat": lat,
-                "radius_m": radius_km * 1000.0,
-                "limit": _limit_value(limit),
-            },
+        (
+            await session.execute(
+                text(_RESOLVE_CENTER_RADIUS_SQL),
+                {
+                    "lon": lon,
+                    "lat": lat,
+                    "radius_m": radius_km * 1000.0,
+                    "limit": _limit_value(limit),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return await _resolution(session, "center_radius", _rows_to_features(rows))
 
 
@@ -866,17 +1081,21 @@ async def resolve_bbox(
     if min_lon > max_lon or min_lat > max_lat:
         raise ValueError("bbox min values must be less than or equal to max values")
     rows = (
-        await session.execute(
-            text(_RESOLVE_BBOX_SQL),
-            {
-                "min_lon": min_lon,
-                "min_lat": min_lat,
-                "max_lon": max_lon,
-                "max_lat": max_lat,
-                "limit": _limit_value(limit),
-            },
+        (
+            await session.execute(
+                text(_RESOLVE_BBOX_SQL),
+                {
+                    "min_lon": min_lon,
+                    "min_lat": min_lat,
+                    "max_lon": max_lon,
+                    "max_lat": max_lat,
+                    "limit": _limit_value(limit),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return await _resolution(session, "bbox", _rows_to_features(rows))
 
 
@@ -898,22 +1117,22 @@ async def resolve_sigungu_by_radius(
     if not sigungu_codes:
         return ScopeResolution(scope_type="sigungu_by_radius", features=())
     rows = (
-        await session.execute(
-            text(_RESOLVE_SIGUNGU_CODES_SQL),
-            {"sigungu_codes": list(sigungu_codes), "limit": _limit_value(limit)},
+        (
+            await session.execute(
+                text(_RESOLVE_SIGUNGU_CODES_SQL),
+                {"sigungu_codes": list(sigungu_codes), "limit": _limit_value(limit)},
+            )
         )
-    ).mappings().all()
-    resolution = await _resolution(
-        session, "sigungu_by_radius", _rows_to_features(rows)
+        .mappings()
+        .all()
     )
+    resolution = await _resolution(session, "sigungu_by_radius", _rows_to_features(rows))
     matched_codes = set(resolution.sigungu_codes)
     return ScopeResolution(
         scope_type=resolution.scope_type,
         features=resolution.features,
         provider_datasets=resolution.provider_datasets,
-        sigungu_codes=tuple(
-            code for code in sigungu_codes if code in matched_codes
-        ),
+        sigungu_codes=tuple(code for code in sigungu_codes if code in matched_codes),
     )
 
 
@@ -926,15 +1145,19 @@ async def resolve_provider_dataset(
 ) -> ScopeResolution:
     """primary source가 특정 provider/dataset인 feature를 해석한다."""
     rows = (
-        await session.execute(
-            text(_RESOLVE_PROVIDER_DATASET_SQL),
-            {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "limit": _limit_value(limit),
-            },
+        (
+            await session.execute(
+                text(_RESOLVE_PROVIDER_DATASET_SQL),
+                {
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                    "limit": _limit_value(limit),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return await _resolution(session, "provider_dataset", _rows_to_features(rows))
 
 
@@ -972,11 +1195,15 @@ async def resolve_cache_target_keys(
         raise ValueError("radius_km must be greater than 0")
 
     rows = (
-        await session.execute(
-            text(_CACHE_TARGETS_BY_KEYS_SQL),
-            {"external_system": external_system, "target_keys": list(unique_keys)},
+        (
+            await session.execute(
+                text(_CACHE_TARGETS_BY_KEYS_SQL),
+                {"external_system": external_system, "target_keys": list(unique_keys)},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     active_targets: list[CacheTargetScopeTarget] = []
     skipped_deleted: list[str] = []
     skipped_disabled: list[str] = []
@@ -1003,14 +1230,18 @@ async def resolve_cache_target_keys(
     ]
     if center_target_ids:
         center_rows = (
-            await session.execute(
-                text(_CACHE_TARGET_CENTER_MATCHES_SQL),
-                {
-                    "target_ids": center_target_ids,
-                    "radius_km": radius_km,
-                },
+            (
+                await session.execute(
+                    text(_CACHE_TARGET_CENTER_MATCHES_SQL),
+                    {
+                        "target_ids": center_target_ids,
+                        "radius_km": radius_km,
+                    },
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         for row in center_rows:
             match = _row_to_cache_match(row)
             matches.append(match)
@@ -1032,14 +1263,18 @@ async def resolve_cache_target_keys(
         if not sigungu_codes:
             continue
         sigungu_rows = (
-            await session.execute(
-                text(_CACHE_TARGET_SIGUNGU_MATCHES_SQL),
-                {
-                    "target_id": target.target_id,
-                    "sigungu_codes": list(sigungu_codes),
-                },
+            (
+                await session.execute(
+                    text(_CACHE_TARGET_SIGUNGU_MATCHES_SQL),
+                    {
+                        "target_id": target.target_id,
+                        "sigungu_codes": list(sigungu_codes),
+                    },
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         for row in sigungu_rows:
             match = _row_to_cache_match(row)
             matches.append(match)
@@ -1064,16 +1299,17 @@ async def resolve_cache_target_keys(
 
 async def count_features_matching_scope(
     session: AsyncSession,
-    scope: dict[str, Any],
+    scope: Mapping[str, Any],
     *,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
     preview_limit: int = DEFAULT_SCOPE_PREVIEW_LIMIT,
 ) -> ScopeResolution:
-    """OpenAPI scope payload를 해석해 dry-run용 count/matched_scope를 반환한다."""
+    """Canonical scope를 해석해 preview용 count/matched_scope를 반환한다."""
+    scope = canonicalize_feature_update_scope(scope)
     limit = _limit_value(preview_limit)
     if limit is None:
         raise ValueError("preview_limit must be greater than 0")
-    scope_type = scope.get("type")
+    scope_type = scope["type"]
     if scope_type == "feature_ids":
         raw_ids = scope.get("feature_ids", ())
         if not isinstance(raw_ids, list):
@@ -1082,9 +1318,7 @@ async def count_features_matching_scope(
         if not unique_ids:
             return ScopeResolution(scope_type="feature_ids", features=())
         feature_id_params: dict[str, Any] = {"feature_ids": list(unique_ids)}
-        total_count = await _count_scalar(
-            session, _COUNT_FEATURE_IDS_SQL, feature_id_params
-        )
+        total_count = await _count_scalar(session, _COUNT_FEATURE_IDS_SQL, feature_id_params)
         provider_datasets = await _provider_datasets_for_feature_ids(session, unique_ids)
         sigungu_codes = await _sigungu_codes_from_sql(
             session, _MATCHED_SIGUNGU_FEATURE_IDS_SQL, feature_id_params
@@ -1106,9 +1340,7 @@ async def count_features_matching_scope(
             "lat": float(center["lat"]),
             "radius_m": float(scope["radius_km"]) * 1000.0,
         }
-        total_count = await _count_scalar(
-            session, _COUNT_CENTER_RADIUS_SQL, center_params
-        )
+        total_count = await _count_scalar(session, _COUNT_CENTER_RADIUS_SQL, center_params)
         provider_datasets = await _provider_datasets_from_sql(
             session, _PROVIDER_DATASETS_CENTER_RADIUS_SQL, center_params
         )
@@ -1163,9 +1395,7 @@ async def count_features_matching_scope(
             "provider": str(scope["provider"]),
             "dataset_key": str(scope["dataset_key"]),
         }
-        total_count = await _count_scalar(
-            session, _COUNT_PROVIDER_DATASET_SQL, provider_params
-        )
+        total_count = await _count_scalar(session, _COUNT_PROVIDER_DATASET_SQL, provider_params)
         provider_datasets = (
             (
                 ProviderDatasetScope(
@@ -1197,9 +1427,7 @@ async def count_features_matching_scope(
         raw_keys = scope.get("target_keys", ())
         if not isinstance(raw_keys, list):
             raise ValueError("cache_target_keys scope requires target_keys list")
-        radius_km = (
-            float(scope["radius_km"]) if scope.get("radius_km") is not None else None
-        )
+        radius_km = float(scope["radius_km"]) if scope.get("radius_km") is not None else None
         raw_scope_mode = scope.get("scope_mode")
         return await resolve_cache_target_keys(
             session,
@@ -1233,11 +1461,15 @@ async def count_features_matching_scope(
             session, _MATCHED_SIGUNGU_CODES_SQL, params
         )
         rows = (
-            await session.execute(
-                text(_RESOLVE_SIGUNGU_CODES_SQL),
-                {**params, "limit": limit},
+            (
+                await session.execute(
+                    text(_RESOLVE_SIGUNGU_CODES_SQL),
+                    {**params, "limit": limit},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         preview = ScopeResolution(
             scope_type="sigungu_by_radius",
             features=_rows_to_features(rows),

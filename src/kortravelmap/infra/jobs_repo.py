@@ -6,7 +6,7 @@ ETL 적재 작업 상태를 영속화해 프로세스 재시작 안전성과 다
 
 워커 흐름
 ---------
-1. ``enqueue_import_job(kind, payload)`` — ``status='queued'`` 행 INSERT.
+1. ``enqueue_unpaired_import_job(kind, payload)`` — ``status='queued'`` 행 INSERT.
 2. ``claim_next_import_job()`` — advisory lock(큐 슬롯)으로 동시 claim 직렬화 후
    ``SELECT ... FOR UPDATE SKIP LOCKED``로 가장 오래된 ``queued`` 1건을 잡아
    ``status='running'`` + ``started_at``/``heartbeat_at``으로 전이. 없으면 ``None``.
@@ -38,6 +38,7 @@ from sqlalchemy import text
 
 from kortravelmap.core.feature_operation import (
     FEATURE_OPERATION_RESERVED_KINDS,
+    FEATURE_UPDATE_REQUEST_JOB_KIND,
     TRIGGER_KIND_VALUES,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationKey,
@@ -59,8 +60,11 @@ __all__ = [
     "ImportJobEvent",
     "IMPORT_QUEUE_ADVISORY_KEY",
     "DEFAULT_STALE_AFTER",
-    "enqueue_import_job",
-    "start_import_job",
+    "enqueue_unpaired_import_job",
+    "enqueue_provider_dataset_import_job",
+    "enqueue_feature_update_request_job",
+    "start_unpaired_import_job",
+    "start_provider_dataset_import_job",
     "get_import_job",
     "record_import_job_event",
     "update_import_job_payload",
@@ -85,12 +89,15 @@ _FINISHED_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "cancelle
 _EVENT_LEVELS: Final[frozenset[str]] = frozenset(
     {"debug", "info", "warning", "error", "critical"}
 )
+_GENERIC_IMPORT_RESERVED_KINDS: Final[frozenset[str]] = (
+    FEATURE_OPERATION_RESERVED_KINDS | {FEATURE_UPDATE_REQUEST_JOB_KIND}
+)
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
     "current_stage, source_checksum, error_message, dagster_run_id, provider, "
     "dataset_key, trigger_kind, operation_registry_version, dagster_run_status, "
-    "cancellation_id, "
+    "cancellation_id, quarantined_at, quarantine_reason, "
     "cancellation_requested_at, cancellation_requested_by, cancellation_reason, "
     "started_at, finished_at, heartbeat_at, created_at"
 )
@@ -129,6 +136,8 @@ class ImportJob:
     cancellation_requested_at: datetime | None = None
     cancellation_requested_by: str | None = None
     cancellation_reason: str | None = None
+    quarantined_at: datetime | None = None
+    quarantine_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -183,6 +192,8 @@ def _row_to_job(row: Any) -> ImportJob:
         cancellation_requested_at=row.cancellation_requested_at,
         cancellation_requested_by=row.cancellation_requested_by,
         cancellation_reason=row.cancellation_reason,
+        quarantined_at=row.quarantined_at,
+        quarantine_reason=row.quarantine_reason,
     )
 
 
@@ -220,6 +231,7 @@ WHERE CAST(:parent_job_id AS uuid) IS NULL
       FROM ops.import_jobs AS parent
       WHERE parent.job_id = CAST(:parent_job_id AS uuid)
         AND parent.cancellation_id IS NULL
+        AND parent.quarantined_at IS NULL
    )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -242,6 +254,7 @@ WHERE CAST(:parent_job_id AS uuid) IS NULL
       FROM ops.import_jobs AS parent
       WHERE parent.job_id = CAST(:parent_job_id AS uuid)
         AND parent.cancellation_id IS NULL
+        AND parent.quarantined_at IS NULL
    )
 RETURNING {_RETURN_COLUMNS}
 """
@@ -250,6 +263,7 @@ _GET_JOB_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
+  AND quarantined_at IS NULL
 """
 
 _INSERT_EVENT_SQL: Final[str] = f"""
@@ -258,8 +272,8 @@ INSERT INTO ops.import_job_events (
 )
 SELECT
     job_id,
-    COALESCE(provider, CAST(:provider AS text)),
-    COALESCE(dataset_key, CAST(:dataset_key AS text)),
+    provider,
+    dataset_key,
     COALESCE(CAST(:feature_id AS text), payload ->> 'feature_id'),
     COALESCE(CAST(:stage AS text), current_stage),
     :level,
@@ -268,6 +282,14 @@ SELECT
     CAST(:event_payload AS jsonb)
 FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
+  AND quarantined_at IS NULL
+  AND (
+    (CAST(:provider AS text) IS NULL AND CAST(:dataset_key AS text) IS NULL)
+    OR (
+      provider = CAST(:provider AS text)
+      AND dataset_key = CAST(:dataset_key AS text)
+    )
+  )
 RETURNING {_EVENT_RETURN_COLUMNS}
 """
 
@@ -279,6 +301,7 @@ WITH ids AS (
 SELECT {_RETURN_COLUMNS}
 FROM ops.import_jobs
 WHERE job_id IN (SELECT job_id FROM ids)
+  AND quarantined_at IS NULL
 """
 
 _UPDATE_PAYLOAD_SQL: Final[str] = f"""
@@ -286,7 +309,10 @@ UPDATE ops.import_jobs
 SET payload = CAST(:payload AS jsonb)
 WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -295,7 +321,10 @@ UPDATE ops.import_jobs
 SET dagster_run_id = :dagster_run_id
 WHERE job_id = CAST(:job_id AS uuid)
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
   AND status IN ('queued','running')
   AND (dagster_run_id IS NULL OR dagster_run_id = :dagster_run_id)
 RETURNING {_RETURN_COLUMNS}
@@ -320,14 +349,25 @@ eligible AS (
         SELECT 1
         FROM ops.import_jobs
         WHERE job_id IN (SELECT job_id FROM ids)
-          AND kind IN ('provider_feature_load_run','provider_feature_load')
+          AND quarantined_at IS NOT NULL
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.import_jobs
+        WHERE job_id IN (SELECT job_id FROM ids)
+          AND kind IN (
+            'provider_feature_load_run','provider_feature_load','feature_update_request'
+          )
       )
       AND EXISTS (
         SELECT 1
         FROM ops.import_jobs AS parent
         WHERE parent.job_id = CAST(:parent_job_id AS uuid)
           AND parent.cancellation_id IS NULL
-          AND parent.kind NOT IN ('provider_feature_load_run','provider_feature_load')
+          AND parent.quarantined_at IS NULL
+          AND parent.kind NOT IN (
+            'provider_feature_load_run','provider_feature_load','feature_update_request'
+          )
       ) AS allowed
 )
 UPDATE ops.import_jobs
@@ -346,7 +386,10 @@ WHERE job_id = (
     SELECT job_id FROM ops.import_jobs
     WHERE status = 'queued'
       AND cancellation_id IS NULL
-      AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+      AND quarantined_at IS NULL
+      AND kind NOT IN (
+        'provider_feature_load_run','provider_feature_load','feature_update_request'
+      )
     ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -362,7 +405,10 @@ SET heartbeat_at = now(),
 WHERE job_id = :job_id
   AND status = 'running'
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -376,7 +422,10 @@ SET status = :status,
 WHERE job_id = :job_id
   AND status = 'running'
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -388,7 +437,10 @@ SET status = 'cancelled',
 WHERE job_id = CAST(:job_id AS uuid)
   AND status IN ('queued', 'running')
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -402,7 +454,10 @@ SET status = 'failed',
     error_message = COALESCE(error_message, 'recovered: stale running on startup')
 WHERE status = 'running'
   AND cancellation_id IS NULL
-  AND kind NOT IN ('provider_feature_load_run','provider_feature_load')
+  AND quarantined_at IS NULL
+  AND kind NOT IN (
+    'provider_feature_load_run','provider_feature_load','feature_update_request'
+  )
   AND (
     CAST(:stale_seconds AS double precision) IS NULL
     OR heartbeat_at IS NULL
@@ -420,13 +475,18 @@ WITH ids AS (
 SELECT job_id, kind
 FROM ops.import_jobs
 WHERE job_id IN (SELECT job_id FROM ids)
-  AND kind IN ('provider_feature_load_run','provider_feature_load')
+  AND (
+    kind IN (
+      'provider_feature_load_run','provider_feature_load','feature_update_request'
+    )
+    OR quarantined_at IS NOT NULL
+  )
 LIMIT 1
 """
 
 
 def _validate_generic_kind(kind: str) -> None:
-    if kind in FEATURE_OPERATION_RESERVED_KINDS:
+    if kind in _GENERIC_IMPORT_RESERVED_KINDS:
         raise FeatureOperationInvariantConflict(
             "reserved feature operation kind requires the tracking repository",
             dagster_run_id="unknown",
@@ -475,7 +535,7 @@ async def assert_generic_import_job_targets(
         )
 
 
-async def enqueue_import_job(
+async def enqueue_unpaired_import_job(
     session: AsyncSession,
     *,
     kind: str,
@@ -484,11 +544,85 @@ async def enqueue_import_job(
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
     dagster_run_id: str | None = None,
-    provider_dataset: ProviderDatasetOperationKey | None = None,
     trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
-    """``status='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
+    """Pair가 없는 orchestration 작업을 ``queued``로 INSERT한다."""
     _validate_generic_kind(kind)
+    return await _enqueue_import_job(
+        session,
+        kind=kind,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        provider_dataset=None,
+        trigger_kind=trigger_kind,
+    )
+
+
+async def enqueue_provider_dataset_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    provider_dataset: ProviderDatasetOperationKey,
+    payload: Mapping[str, Any] | None = None,
+    source_checksum: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+    trigger_kind: TriggerKind | None = None,
+) -> ImportJob:
+    """Required typed pair를 가진 작업을 ``queued``로 INSERT한다."""
+    _validate_generic_kind(kind)
+    return await _enqueue_import_job(
+        session,
+        kind=kind,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        provider_dataset=provider_dataset,
+        trigger_kind=trigger_kind,
+    )
+
+
+async def enqueue_feature_update_request_job(
+    session: AsyncSession,
+    *,
+    provider_dataset: ProviderDatasetOperationKey | None,
+) -> ImportJob:
+    """전용 request writer가 같은 transaction에서 연결할 canonical job을 만든다.
+
+    이 함수만 reserved ``feature_update_request`` kind를 생성할 수 있다. transaction을
+    request INSERT 없이 commit하면 DB의 deferred 양방향 constraint trigger가 거부한다.
+    """
+    return await _enqueue_import_job(
+        session,
+        kind=FEATURE_UPDATE_REQUEST_JOB_KIND,
+        payload={},
+        source_checksum=None,
+        load_batch_id=None,
+        parent_job_id=None,
+        dagster_run_id=None,
+        provider_dataset=provider_dataset,
+        trigger_kind="update_request",
+    )
+
+
+async def _enqueue_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    payload: Mapping[str, Any] | None,
+    source_checksum: str | None,
+    load_batch_id: str | None,
+    parent_job_id: str | None,
+    dagster_run_id: str | None,
+    provider_dataset: ProviderDatasetOperationKey | None,
+    trigger_kind: TriggerKind | None,
+) -> ImportJob:
     normalized_run_id = _optional_dagster_run_id(dagster_run_id)
     identity = _identity_params(
         provider_dataset=provider_dataset, trigger_kind=trigger_kind
@@ -524,7 +658,7 @@ async def enqueue_import_job(
     return job
 
 
-async def start_import_job(
+async def start_unpaired_import_job(
     session: AsyncSession,
     *,
     kind: str,
@@ -533,16 +667,66 @@ async def start_import_job(
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
     dagster_run_id: str | None = None,
-    provider_dataset: ProviderDatasetOperationKey | None = None,
     trigger_kind: TriggerKind | None = None,
 ) -> ImportJob:
-    """곧바로 ``status='running'``인 작업 1건 INSERT (self-driven inline job).
+    """Pair가 없는 orchestration 작업을 곧바로 ``running``으로 INSERT한다.
 
     queue를 거치지 않고 호출자가 직접 수행하는 작업 추적용 — 보통 advisory lock을
     보유한 단일 워커가 적재 전에 호출하고, 종료 시 ``finish_import_job``으로 닫는다.
-    queue-worker 경로는 ``enqueue_import_job`` + ``claim_next_import_job`` 사용.
+    queue-worker 경로는 ``enqueue_unpaired_import_job`` + ``claim_next_import_job`` 사용.
     commit은 호출자 책임.
     """
+    return await _start_import_job(
+        session,
+        kind=kind,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        provider_dataset=None,
+        trigger_kind=trigger_kind,
+    )
+
+
+async def start_provider_dataset_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    provider_dataset: ProviderDatasetOperationKey,
+    payload: Mapping[str, Any] | None = None,
+    source_checksum: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
+    dagster_run_id: str | None = None,
+    trigger_kind: TriggerKind | None = None,
+) -> ImportJob:
+    """Required typed pair를 가진 작업을 곧바로 ``running``으로 INSERT한다."""
+    return await _start_import_job(
+        session,
+        kind=kind,
+        payload=payload,
+        source_checksum=source_checksum,
+        load_batch_id=load_batch_id,
+        parent_job_id=parent_job_id,
+        dagster_run_id=dagster_run_id,
+        provider_dataset=provider_dataset,
+        trigger_kind=trigger_kind,
+    )
+
+
+async def _start_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    payload: Mapping[str, Any] | None,
+    source_checksum: str | None,
+    load_batch_id: str | None,
+    parent_job_id: str | None,
+    dagster_run_id: str | None,
+    provider_dataset: ProviderDatasetOperationKey | None,
+    trigger_kind: TriggerKind | None,
+) -> ImportJob:
     _validate_generic_kind(kind)
     normalized_run_id = _optional_dagster_run_id(dagster_run_id)
     identity = _identity_params(
@@ -605,7 +789,7 @@ async def record_import_job_event(
     provider/dataset은 연결된 ``ops.import_jobs``의 typed identity를 상속한다.
     명시 pair는 저장된 pair와 정확히 같아야 하며, 저장된 pair가 없는 신규 job에
     event-only identity를 만드는 것도 거부한다. stage를 생략하면 job의
-    ``current_stage``를 사용한다. 없는 ``job_id``면 ``None``을 반환한다.
+    ``current_stage``를 사용한다. 없거나 격리된 ``job_id``면 ``None``을 반환한다.
     commit은 호출자 책임이다.
     """
     if level not in _EVENT_LEVELS:
@@ -658,7 +842,14 @@ async def record_import_job_event(
         },
     )
     row = result.one_or_none()
-    return _row_to_event(row) if row is not None else None
+    if row is None:
+        raise FeatureOperationInvariantConflict(
+            "event insert lost the typed import job identity",
+            dagster_run_id=job.dagster_run_id or "unknown",
+            root_job_id=job.job_id,
+            details={"reason": "identity_changed_or_job_removed"},
+        )
+    return _row_to_event(row)
 
 
 async def list_import_jobs_by_ids(

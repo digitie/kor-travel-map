@@ -4,6 +4,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { publicUrlEnv } from "./env";
+import { invalidateOpsProviderQueries } from "./providers";
 
 export type OpsLiveConnectionState =
   | "disabled"
@@ -106,7 +107,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     void queryClient.invalidateQueries({ queryKey: ["providers"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
+    invalidateOpsProviderQueries(queryClient);
     return;
   }
   if (topic.startsWith("feature_update_request:")) {
@@ -121,7 +122,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     });
     invalidateFeatureSurfaces(queryClient);
     void queryClient.invalidateQueries({ queryKey: ["providers"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
+    invalidateOpsProviderQueries(queryClient);
     return;
   }
   if (topic === "offline_uploads") {

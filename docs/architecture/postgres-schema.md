@@ -84,8 +84,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair, trigger, registry version, root raw Dagster status를 실컬럼으로 추가하고 feature run root/pair child shape를 강제 |
-| `pipeline_cancellation_members` | `(cancellation_id, member_kind, member_id)` | 0050 frozen member 결과; 0051은 import `operation_kind`와 `requires_run_termination`을 백필·영속해 run-backed queued와 generic queued를 구분 |
+| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status/progress, heartbeat, `dagster_run_id`; 0051은 provider/dataset exact pair, trigger, registry version, root raw Dagster status를 추가하고, 0052는 migration-owned `quarantined_at`/`quarantine_reason`으로 손실 없이 격리한 component를 runtime projection·writer에서 제외한다 |
+| `pipeline_cancellation_members` | `(cancellation_id, job_id)` | frozen import job 결과; `job_id → ops.import_jobs(job_id) ON DELETE RESTRICT`, `operation_kind`, `requires_run_termination`으로 run-backed queued와 generic queued를 구분 |
 | `pipeline_cancellation_runs` | `(cancellation_id, dagster_run_id)` | run terminate reservation/result 정본; 0051은 authoritative nullable `engine_started_at`/`engine_finished_at`을 terminal observation과 함께 영속 |
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
@@ -96,7 +96,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009 + 0049, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, 명시적 `stale_after_minutes`, rate_limit_source, enabled |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
-| `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008, ADR-045 T-205a)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), status (queued/running/done/failed/cancelled — import_jobs와 동일 전이), matched_scope JSONB, job_id FK, dagster_run_id, operator, reason, error_message. DDL 정본: `docs/architecture/openapi-admin-contract.md` §6.1 + `docs/architecture/data-model.md` §9.8 |
+| `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008+0052)** — immutable scope/filter/policy/run mode/priority/audit, mutable `matched_scope`, 양수 `generation`, non-null canonical `job_id` RESTRICT FK. status/Dagster/cancellation/error/timeline은 linked `feature_update_request` job 단일 정본이며 runtime payload는 `{}`. DDL 정본: `docs/architecture/openapi-admin-contract.md` §6.1 + `docs/architecture/data-model.md` §9.8 |
 | `feature_change_requests` | `request_id UUID` | **구현됨(alembic 0021)** — place/event 사용자 요청 add/update/delete queue. review_mode(require_review/immediate), state(pending/applied/rejected), payload JSONB, reviewer/applied timestamp |
 
 ## 4. 인덱스 카탈로그
@@ -205,6 +205,16 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_import_jobs_provider_dataset_created` | (provider, dataset_key, created_at DESC, job_id DESC) | exact pair timeline/latest (0051) |
 | `idx_import_jobs_dataset_created` | (dataset_key, created_at DESC, job_id DESC) | dataset-only timeline/latest (0051) |
 | `idx_import_jobs_provider_created` | (provider, created_at DESC, job_id DESC) | provider-only timeline/latest (0051) |
+| `idx_import_jobs_quarantined` | (quarantined_at DESC, job_id DESC) WHERE quarantined_at non-NULL | 격리 component 감사 조회 (0052) |
+| `idx_import_job_events_time` | (occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | 무필터 감사 polling (0052) |
+| `idx_import_job_events_job_time` | (job_id, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | job 감사 타임라인과 bounded live snapshot (0052에서 partial 전환) |
+| `idx_import_job_events_provider_time` | (provider, occurred_at DESC, event_id DESC) WHERE provider non-NULL AND `quarantined_at IS NULL` | provider-only 감사 타임라인 (0052에서 partial 전환) |
+| `idx_import_job_events_dataset_time` | (dataset_key, occurred_at DESC, event_id DESC) WHERE dataset non-NULL AND `quarantined_at IS NULL` | dataset-only 감사 타임라인 (0052, identity projection에는 사용 금지) |
+| `idx_import_job_events_provider_dataset_time` | (provider, dataset_key, occurred_at DESC, event_id DESC) WHERE pair non-NULL AND `quarantined_at IS NULL` | exact pair 감사 타임라인 (0052, identity projection에는 사용 금지) |
+| `idx_import_job_events_level_time` | (level, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | level 감사 타임라인 (0052에서 partial 전환) |
+| `idx_feature_update_providers_gin` | GIN(providers) | request provider `TEXT[]` membership selective seed (0052) |
+| `idx_feature_update_dataset_keys_gin` | GIN(dataset_keys) | request dataset `TEXT[]` membership selective seed (0052) |
+| `uq_feature_update_requests_job_id` | UNIQUE (job_id) | request→job 유일성과 역추적 B-tree; deferred 양방향 trigger와 함께 canonical 1:1 보장 (0052) |
 | `idx_dedup_status_score` | (status, total_score DESC) | partial pending |
 | `idx_overrides_feature` | (feature_id, status) | |
 | `idx_overrides_field` | (field_path) | |
@@ -266,7 +276,19 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `import_jobs` | `ck_import_jobs_feature_engine_timeline` | feature root/child의 create ≤ start ≤ finish 순서(NULL 허용) |
 | `import_jobs` | `ck_import_jobs_dagster_run_status` | feature run root의 raw Dagster status 허용값 |
 | `import_jobs` | feature operation trigger 2종 | child parent kind/run 일치와 root/child identity update 금지 |
-| `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_operation_kind` | import member만 trimmed non-empty operation kind, 그 외 member는 NULL |
+| `import_jobs` | `trg_import_jobs_identity_immutable` | 모든 generic/feature job의 kind/provider/dataset identity는 insert 뒤 변경 금지 (0052) |
+| `import_jobs` | `ck_import_jobs_quarantine_shape` | 두 격리 컬럼이 모두 NULL이거나 시각과 고정 사유 `unlinked_feature_update_component`가 함께 존재 (0052) |
+| `import_jobs` | `trg_import_jobs_quarantine_immutable` | runtime 격리 표식 생성·변경, 격리 행 UPDATE/DELETE와 격리 parent 아래 child attach 금지 (0052) |
+| `import_job_events` | `quarantined_at` + `trg_import_job_events_quarantine_immutable` | 0052 migration이 parent 격리 시각을 backfill하며 runtime marker INSERT/UPDATE, 격리 job의 기존 event UPDATE/DELETE와 신규 event append를 금지 |
+| `import_job_event_clock` | singleton PK/CHECK + nonnegative revision CHECK | event DML AFTER STATEMENT trigger 내부의 statement당 revision+1만 허용하는 bounded live projection; 직접 UPDATE/DELETE/TRUNCATE 금지 (0052) |
+| `import_job_events` | `trg_import_job_events_clock` | INSERT/UPDATE/DELETE/TRUNCATE statement마다 event clock revision을 한 번 증가 (0052) |
+| `pipeline_cancellation_members` | `trg_pipeline_cancellation_members_reject_quarantine` | 격리 job을 신규/변경 cancellation member로 연결하지 못하게 차단 (0052) |
+| `feature_update_requests` | `ck_feature_update_requests_scope_shape` | immutable `ops.is_valid_feature_update_scope`로 6종 scope의 exact key/type/길이/범위·`scope.type=scope_type`을 OpenAPI와 동일하게 강제 (0052) |
+| `feature_update_requests` | `ck_feature_update_requests_providers_shape` | 1차원 unique `TEXT[]`, 최대 32개, 각 항목 trimmed non-empty string 128자 이하를 강제 (0052) |
+| `feature_update_requests` | `ck_feature_update_requests_dataset_keys_shape` | 1차원 unique `TEXT[]`, 최대 64개, 각 항목 trimmed non-empty string 128자 이하를 강제 (0052) |
+| `feature_update_requests` | `ck_feature_update_requests_update_policy_shape` | `mode='refresh_existing'`와 strict boolean override 5개만 가진 sparse canonical JSON object를 강제 (0052) |
+| `feature_update_requests` | `trg_feature_update_requests_job_identity` | linked `kind=feature_update_request`, direct scope=linked typed pair, non-direct=unpaired job을 교차테이블로 강제 (0052) |
+| `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_operation_kind` | nullable operation kind가 있으면 trimmed non-empty 문자열 |
 | `pipeline_cancellation_members` | `ck_pipeline_cancellation_members_run_termination` | frozen boolean = running+run-id 또는 queued feature kind+run-id |
 | `pipeline_cancellation_runs` | `ck_pipeline_cancellation_runs_engine_times` | legacy/generic의 두 시각 NULL은 허용; 하나라도 저장하면 terminal 성공 결과+finish가 필수이고 start가 있으면 start ≤ finish |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
@@ -321,6 +343,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `feature_merge_history.review_id` → `dedup_review_queue` | SET NULL | 큐 행 삭제돼도 이력 보존 |
 | `data_integrity_violations.feature_id` → `features` | CASCADE | |
 | `data_integrity_violations.source_record_key` → `source_records` | SET NULL | source 정리해도 이슈 이력 보존 |
+| `feature_update_requests.job_id` → `import_jobs` | RESTRICT | request의 canonical job/typed identity를 고아로 만들지 않음 (0052) |
 | `poi_cache_target_feature_links.target_id` → `poi_cache_targets` | CASCADE | target 삭제 시 link 제거 |
 | `poi_cache_target_feature_links.feature_id` → `features` | CASCADE | feature 삭제 시 link 제거 |
 

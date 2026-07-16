@@ -15,6 +15,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra import sync_state_repo
@@ -27,7 +28,7 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
     list_provider_refresh_policies,
 )
 from kortravelmap.infra.sync_state_repo import SyncState
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
@@ -168,14 +169,13 @@ class OpsProviderUpdateRequestSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    request_id: str
+    request_id: UUID
     status: str
     run_mode: str
-    dry_run: bool
-    job_id: str | None = None
+    job_id: UUID
     dagster_run_id: str | None = None
     created_at: datetime
-    updated_at: datetime
+    generation: int = Field(ge=1)
     status_url: str
 
 
@@ -302,11 +302,10 @@ def _update_request_summary(
         request_id=request.request_id,
         status=request.status,
         run_mode=request.run_mode,
-        dry_run=request.dry_run,
         job_id=request.job_id,
         dagster_run_id=request.dagster_run_id,
         created_at=request.created_at,
-        updated_at=request.updated_at,
+        generation=request.generation,
         status_url=f"/v1/admin/features/update-requests/{request.request_id}",
     )
 

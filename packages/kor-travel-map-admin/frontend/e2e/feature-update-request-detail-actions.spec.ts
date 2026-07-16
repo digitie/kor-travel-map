@@ -12,9 +12,9 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  * `feature-update-request-detail.spec.ts`(smoke + 버튼 가시성)와 **중복되지 않는**
  * 깊이 시나리오만 더한다:
  *  - cancel/run-now POST가 정확한 pathname·method·body로 단 1회 발사되는지(payload 단언)
- *  - run-now가 201을 반환해도 onSuccess invalidation → 상세 re-fetch가 도는지
+ *  - run-now가 원 요청을 바꾸지 않고 새 request_id를 반환·안내하는지
  *  - failed/cancelled 같은 done 외 terminal 분기의 버튼 가시성
- *  - cancel/run-now mutation 실패(409)가 같은 destructive Alert를 띄우고 버튼이 잔존하는지
+ *  - cancel/run-now mutation 실패(409)가 액션별 Alert를 띄우고 버튼이 잔존하는지
  *  - 새로고침(refetch) 버튼 / "목록" back-link
  *  - status 전환(running→done)이 자동 폴링 re-fetch로 반영되는지(WS 실시간 invalidation의
  *    deterministic 대체 — 아래 NOTE 참고)
@@ -40,8 +40,9 @@ type FeatureUpdateRequestRecord =
   components["schemas"]["FeatureUpdateRequestRecord"];
 type FeatureUpdateRequestDetailResponse =
   components["schemas"]["FeatureUpdateRequestDetailResponse"];
-type FeatureUpdateRequestCreateResponse =
-  components["schemas"]["FeatureUpdateRequestCreateResponse"];
+type FeatureUpdateRequestMutationResponse =
+  components["schemas"]["FeatureUpdateRequestMutationResponse"];
+type FeatureUpdateStatus = FeatureUpdateRequestRecord["status"];
 type PipelineCancellationRequest =
   components["schemas"]["PipelineCancellationRequest"];
 type FeatureUpdateRequestRunNowRequest =
@@ -49,8 +50,11 @@ type FeatureUpdateRequestRunNowRequest =
 type Meta = components["schemas"]["Meta"];
 
 const REQUEST_ID = "88888888-8888-4888-8888-888888888888";
+const NEW_REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const JOB_ID = "99999999-9999-4999-8999-999999999999";
+const NEW_JOB_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const DETAIL_PATH = `/v1/admin/features/update-requests/${REQUEST_ID}`;
+const NEW_DETAIL_PATH = `/v1/admin/features/update-requests/${NEW_REQUEST_ID}`;
 const LIST_PATH = "/admin/features/update-requests";
 
 const meta: Meta = { duration_ms: 1, request_id: "e2e-fur-detail-actions" };
@@ -62,22 +66,29 @@ function makeUpdateRequest(
     created_at: "2026-06-08T00:00:00.000Z",
     dagster_run_id: "dagster-run-fur-002",
     dataset_keys: ["festival_open_api"],
-    dry_run: true,
+    error_message: null,
+    finished_at: null,
     job_id: JOB_ID,
     // scope/matched_scope/policy mock 값에 'running'/'done'/'failed' 문자열을 넣지 않아
     // StatusBadge 텍스트 단언이 pre 블록과 충돌(strict mode)하지 않게 한다.
-    matched_scope: { sido_code: "11" },
-    operator: "local-admin",
+    matched_scope: { feature_count: 1, sigungu_codes: ["11110"] },
+    operator: "e2e-authenticated-admin",
     priority: 100,
     providers: ["python-visitkorea-api"],
     reason: "e2e",
     request_id: REQUEST_ID,
     run_mode: "queued",
-    scope: { kind: "sido", sido_code: "11" },
-    scope_type: "sido",
+    scope: {
+      type: "center_radius",
+      center: { lon: 126.978, lat: 37.5665 },
+      radius_km: 5,
+    },
+    scope_type: "center_radius",
     status: "queued",
-    update_policy: { mode: "upsert" },
-    updated_at: "2026-06-08T00:05:00.000Z",
+    status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
+    started_at: null,
+    update_policy: { mode: "refresh_existing" },
+    generation: 1,
     ...overrides,
   };
 }
@@ -92,12 +103,12 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 type MockOptions = {
   /** 초기(첫 GET) status. */
-  initialStatus?: string;
+  initialStatus?: FeatureUpdateStatus;
   /**
    * 단계 전환: WS/폴링 시나리오용. 지정하면 GET 호출 횟수가
    * `transitionAfterDetailCalls`를 넘은 시점부터 이 status를 반환한다.
    */
-  transitionStatus?: string;
+  transitionStatus?: FeatureUpdateStatus;
   transitionAfterDetailCalls?: number;
   shouldTransition?: () => boolean;
   /** cancel/run-now POST가 반환할 HTTP status(>=400이면 mutation 실패 분기). */
@@ -113,16 +124,18 @@ type MockOptions = {
 
 type Calls = {
   detail: number;
+  newDetail: number;
   cancel: number;
   runNow: number;
   cancelBody: PipelineCancellationRequest | null;
   runNowBody: FeatureUpdateRequestRunNowRequest | null;
+  runNowRecord: FeatureUpdateRequestRecord | null;
 };
 
 /**
  * 상세 GET / cancel / run-now를 한 핸들러로 가로챈다.
  *  - cancel/run-now POST의 method·pathname·body·횟수를 캡처
- *  - 성공(2xx) 시 status를 갈아끼워 후속 GET이 전환된 상태를 반환(가시성 변화 검증)
+ *  - cancel은 원 요청 상태를 바꾸고, run-now는 원 요청 불변 + 신규 요청 201을 반환
  *  - mutationStatus>=400이면 POST를 실패시켜 mutation error 분기를 트리거(status 미변경)
  *  - transitionStatus가 있으면 GET 횟수 기반으로 status를 단계 전환(폴링 검증)
  */
@@ -132,10 +145,12 @@ async function mockUpdateRequest(
 ): Promise<Calls> {
   const calls: Calls = {
     detail: 0,
+    newDetail: 0,
     cancel: 0,
     runNow: 0,
     cancelBody: null,
     runNowBody: null,
+    runNowRecord: null,
   };
   let status = options.initialStatus ?? "queued";
   const mutationStatus = options.mutationStatus ?? 0;
@@ -171,6 +186,7 @@ async function mockUpdateRequest(
           rootId: REQUEST_ID,
           initialStatus: "queued",
           reason: "cancelled from feature update request detail",
+          members: [{ jobId: JOB_ID }],
         });
         await fulfillJson(route, body);
         return;
@@ -193,9 +209,18 @@ async function mockUpdateRequest(
           );
           return;
         }
-        status = "running";
-        const body: FeatureUpdateRequestCreateResponse = {
-          data: makeUpdateRequest({ status, run_mode: "now" }),
+        const runNowRecord = makeUpdateRequest({
+          request_id: NEW_REQUEST_ID,
+          job_id: NEW_JOB_ID,
+          priority: calls.runNowBody?.priority ?? 100,
+          reason: calls.runNowBody?.reason ?? `run-now from ${REQUEST_ID}`,
+          run_mode: "now",
+          status: "queued",
+          status_url: `/v1/admin/features/update-requests/${NEW_REQUEST_ID}`,
+        });
+        calls.runNowRecord = runNowRecord;
+        const body: FeatureUpdateRequestMutationResponse = {
+          data: runNowRecord,
           meta,
         };
         await fulfillJson(route, body, 201);
@@ -219,6 +244,16 @@ async function mockUpdateRequest(
           meta,
         };
         await fulfillJson(route, body);
+        return;
+      }
+
+      if (method === "GET" && pathname === NEW_DETAIL_PATH) {
+        calls.newDetail += 1;
+        await fulfillJson(
+          route,
+          { detail: "run-now mutation cache miss" },
+          500,
+        );
         return;
       }
 
@@ -255,20 +290,26 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     expect(cancelBody).toMatchObject({
       reason: "cancelled from feature update request detail",
     });
+    const successAlert = page
+      .getByRole("status")
+      .filter({ hasText: "요청 취소 처리 결과" });
+    await expect(successAlert).toContainText(REQUEST_ID);
+    // 요청 lifecycle은 연결된 import job이 정본이므로 결과도 job 상태로 표현한다.
+    await expect(successAlert).toContainText("연결 작업 상태 cancelled");
+    await expect(successAlert).toContainText("취소 처리 상태 completed");
     // 성공 → status=cancelled(terminal) → cancel 버튼 사라짐 + 상세 re-fetch.
     await expect(cancel).toBeHidden();
     await expect.poll(() => calls.detail).toBeGreaterThan(detailBefore);
   });
 
-  test("run-now 액션 → POST /run-now body(reason) + 201 처리 + 호출 1회", async ({
+  test("run-now 액션 → 원 요청 불변 + 새 request_id 안내", async ({
     page,
   }) => {
-    const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
+    const calls = await mockUpdateRequest(page, { initialStatus: "done" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "즉시 실행" });
     await expect(runNow).toBeVisible();
-    const detailBefore = calls.detail;
 
     await runNow.click();
 
@@ -279,9 +320,44 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     expect(runNowBody).toMatchObject({
       reason: "run-now from detail view",
     });
-    // 201 응답이어도 onSuccess invalidation → status=running → run-now 숨김 + re-fetch.
-    await expect(runNow).toBeHidden();
-    await expect.poll(() => calls.detail).toBeGreaterThan(detailBefore);
+    expect(runNowBody).not.toHaveProperty("operator");
+    expect(calls.runNowRecord).toMatchObject({
+      request_id: NEW_REQUEST_ID,
+      job_id: NEW_JOB_ID,
+      reason: "run-now from detail view",
+      run_mode: "now",
+    });
+    expect(calls.runNowRecord?.job_id).not.toBe(JOB_ID);
+    const successAlert = page
+      .getByRole("status")
+      .filter({ hasText: "즉시 실행 요청 생성 완료" });
+    await expect(successAlert).toContainText("원본 요청은 변경되지 않았습니다.");
+    const newRequestLink = successAlert.getByRole("link", {
+      name: NEW_REQUEST_ID,
+    });
+    await expect(newRequestLink).toHaveAttribute(
+      "href",
+      `/admin/features/update-requests/${NEW_REQUEST_ID}`,
+    );
+    // 원 요청은 done 그대로라 즉시 실행 버튼과 완료 상태가 유지된다.
+    await expect(runNow).toBeVisible();
+    await expect(page.getByText("완료", { exact: true })).toBeVisible();
+
+    await newRequestLink.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/admin/features/update-requests/${NEW_REQUEST_ID}$`),
+    );
+    const newRequestSummary = page.locator("section").first();
+    await expect(
+      newRequestSummary.getByText(NEW_REQUEST_ID, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      newRequestSummary.getByText("now", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      newRequestSummary.getByText("대기", { exact: true }),
+    ).toBeVisible();
+    expect(calls.newDetail).toBe(0);
   });
 
   test("failed terminal — cancel 숨김, run-now 유지(재큐잉)", async ({
@@ -316,7 +392,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
-  test("cancel 실패(409) → request 조회 실패 alert + cancel 버튼 잔존", async ({
+  test("cancel 실패(409) → 요청 취소 실패 alert + cancel 버튼 잔존", async ({
     page,
   }) => {
     const calls = await mockUpdateRequest(page, {
@@ -330,14 +406,13 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
 
     await cancel.click();
 
-    // cancelRequest.isError → 동일 destructive Alert(component line 78,80).
-    await expect(page.getByText("요청 조회 실패")).toBeVisible();
+    await expect(page.getByText("요청 취소 실패")).toBeVisible();
     await expect.poll(() => calls.cancel).toBe(1);
     // mutation 실패라 status 미변경(queued) → cancel 버튼은 계속 노출.
     await expect(cancel).toBeVisible();
   });
 
-  test("run-now 실패(409) → request 조회 실패 alert + run-now 버튼 잔존", async ({
+  test("run-now 실패(409) → 즉시 실행 생성 실패 alert + 버튼 잔존", async ({
     page,
   }) => {
     const calls = await mockUpdateRequest(page, {
@@ -351,8 +426,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
 
     await runNow.click();
 
-    // runNow.isError → 동일 Alert(component line 78). cancel-error와 별개 분기.
-    await expect(page.getByText("요청 조회 실패")).toBeVisible();
+    await expect(page.getByText("즉시 실행 요청 생성 실패")).toBeVisible();
     await expect.poll(() => calls.runNow).toBe(1);
     // mutation 실패라 status 미변경(queued) → run-now 버튼 잔존.
     await expect(runNow).toBeVisible();

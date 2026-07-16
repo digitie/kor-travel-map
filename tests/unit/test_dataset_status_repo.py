@@ -9,14 +9,18 @@ from typing import Any, cast
 
 import pytest
 
+from kortravelmap.infra import dataset_status_repo
 from kortravelmap.infra.dataset_status_repo import (
     DatasetIntegrityIssueCount,
     DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
     list_latest_dataset_executions,
-    list_ops_import_jobs_by_ids,
 )
-from kortravelmap.infra.ops_repo import OpsImportJob
+from kortravelmap.infra.pipeline_repo import (
+    PipelineDatasetLatestExecution,
+    PipelineExecution,
+    PipelineProjectedJob,
+)
 
 
 class _Result:
@@ -53,44 +57,48 @@ def _count_row(
     )
 
 
-def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
-    return SimpleNamespace(
-        job_id=job_id,
-        kind="feature_update_request",
-        load_batch_id=None,
-        parent_job_id=None,
-        payload='{"request_id":"req-1"}',
-        status="done",
-        progress=100,
-        current_stage="loading",
-        source_checksum=None,
-        error_message=None,
-        created_at=at,
-        started_at=at,
-        finished_at=at,
-        heartbeat_at=at,
-        dagster_run_id="run-1",
-    )
-
-
-def _latest_execution_row(*, at: datetime) -> SimpleNamespace:
-    return SimpleNamespace(
-        provider="python-mois-api",
-        dataset_key="mois_license_features_bulk",
+def _pipeline_execution(*, at: datetime) -> PipelineExecution:
+    return PipelineExecution(
         kind="update_request",
-        execution_id="11111111-1111-1111-1111-111111111111",
+        id="11111111-1111-1111-1111-111111111111",
         status="running",
-        status_source="update_request",
-        job_status="running",
         created_at=at,
+        providers=("python-mois-api",),
+        dataset_keys=("mois_license_features_bulk",),
+        provider_datasets=(),
+        progress=None,
+        current_stage=None,
+        scope_type="provider_dataset",
+        priority=50,
+        run_mode="queued",
+        operator=None,
+        error_message=None,
         started_at=at,
         finished_at=None,
         dagster_run_id="run-1",
-        job_id="22222222-2222-2222-2222-222222222222",
-        request_id="11111111-1111-1111-1111-111111111111",
-        progress=40,
-        current_stage="fetch",
-        error_message=None,
+        dagster_run_status=None,
+        trigger_kind="update_request",
+        operation_registry_version=None,
+        requested_job_id="22222222-2222-2222-2222-222222222222",
+        linked_job_count=1,
+        projected_job=PipelineProjectedJob(
+            id="22222222-2222-2222-2222-222222222222",
+            job_kind="feature_update_request",
+            status="running",
+            progress=0,
+            current_stage=None,
+            error_message=None,
+            created_at=at,
+            started_at=at,
+            finished_at=None,
+            dagster_run_id="run-1",
+            dagster_run_status=None,
+            trigger_kind="update_request",
+            operation_registry_version=None,
+            load_batch_id=None,
+            parent_job_id=None,
+            depth=0,
+        ),
     )
 
 
@@ -156,77 +164,37 @@ async def test_count_open_issues_passes_filters() -> None:
 
 
 @pytest.mark.unit
-async def test_list_latest_dataset_executions_maps_root_and_child_status() -> None:
+async def test_list_latest_dataset_executions_maps_common_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     at = datetime(2026, 7, 15, tzinfo=UTC)
-    session = _Session(_Result([_latest_execution_row(at=at)]))
+    session = _Session()
+    projected = PipelineDatasetLatestExecution(
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        execution=_pipeline_execution(at=at),
+        operation_member_id="22222222-2222-2222-2222-222222222222",
+        pair_status="running",
+    )
+
+    async def _latest(_session: Any) -> tuple[PipelineDatasetLatestExecution, ...]:
+        return (projected,)
+
+    monkeypatch.setattr(
+        dataset_status_repo,
+        "list_latest_dataset_pipeline_executions",
+        _latest,
+    )
 
     executions = await list_latest_dataset_executions(cast(Any, session))
 
-    assert session.params == [{}]
+    assert session.params == []
     assert executions == (
         DatasetLatestExecution(
             provider="python-mois-api",
             dataset_key="mois_license_features_bulk",
-            kind="update_request",
-            execution_id="11111111-1111-1111-1111-111111111111",
-            status="running",
-            status_source="update_request",
-            job_status="running",
-            created_at=at,
-            started_at=at,
-            finished_at=None,
-            dagster_run_id="run-1",
-            job_id="22222222-2222-2222-2222-222222222222",
-            request_id="11111111-1111-1111-1111-111111111111",
-            progress=40,
-            current_stage="fetch",
-            error_message=None,
+            execution=projected.execution,
+            operation_member_id="22222222-2222-2222-2222-222222222222",
+            pair_status="running",
         ),
     )
-
-
-@pytest.mark.unit
-async def test_list_jobs_by_ids_empty_input_skips_db() -> None:
-    session = _Session()
-    db = cast(Any, session)
-
-    assert await list_ops_import_jobs_by_ids(db, []) == ()
-    # 빈/falsy id만 있는 입력도 DB를 치지 않는다.
-    assert await list_ops_import_jobs_by_ids(db, [""]) == ()
-    assert session.params == []
-
-
-@pytest.mark.unit
-async def test_list_jobs_by_ids_dedupes_and_maps_rows() -> None:
-    at = datetime(2026, 7, 14, tzinfo=UTC)
-    session = _Session(
-        _Result([_job_row("11111111-1111-1111-1111-111111111111", at=at)])
-    )
-    db = cast(Any, session)
-
-    jobs = await list_ops_import_jobs_by_ids(
-        db,
-        [
-            "22222222-2222-2222-2222-222222222222",
-            "11111111-1111-1111-1111-111111111111",
-            "11111111-1111-1111-1111-111111111111",
-        ],
-    )
-
-    # 중복 제거 + 정렬된 jsonb 텍스트 배열로 바인딩한다.
-    assert session.params[0]["job_ids"] == json.dumps(
-        [
-            "11111111-1111-1111-1111-111111111111",
-            "22222222-2222-2222-2222-222222222222",
-        ]
-    )
-    assert len(jobs) == 1
-    job = jobs[0]
-    assert isinstance(job, OpsImportJob)
-    assert job.job_id == "11111111-1111-1111-1111-111111111111"
-    assert job.payload == {"request_id": "req-1"}
-    assert job.status == "done"
-    assert job.progress == 100
-    assert job.created_at == at
-    # ADR-064: datasets 상세의 최근 실행 요약에 dagster_run_id 실컬럼이 흘러야 한다.
-    assert job.dagster_run_id == "run-1"

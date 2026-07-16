@@ -25,6 +25,7 @@ from kortravelmap.infra.feature_update_repo import (
     feature_update_scope_advisory_key,
     finish_update_request,
     get_update_request,
+    heartbeat_feature_update_request_job,
     lock_feature_update_execution_guard,
     peek_next_update_request,
     requeue_update_request_after_lock_contention,
@@ -32,7 +33,6 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
     touch_queued_update_request_for_lock_retry,
 )
-from kortravelmap.infra.jobs_repo import heartbeat_import_job
 from kortravelmap.infra.poi_cache_target_repo import (
     deactivate_poi_cache_target_feature_links,
     mark_poi_cache_targets_refresh_failed,
@@ -54,7 +54,6 @@ from kortravelmap.infra.scope_repo import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -464,17 +463,20 @@ async def _heartbeat_request_job(
     session: AsyncSession,
     request: FeatureUpdateRequest,
     *,
+    owner_dagster_run_id: str,
     progress: int | None = None,
     current_stage: str | None = None,
 ) -> None:
-    if request.job_id is None:
-        return
-    await heartbeat_import_job(
+    updated = await heartbeat_feature_update_request_job(
         session,
         request.job_id,
+        expected_generation=request.generation,
+        owner_dagster_run_id=owner_dagster_run_id,
         progress=progress,
         current_stage=current_stage,
     )
+    if not updated:
+        raise _FeatureUpdateExecutionStopped
 
 
 async def _hard_invalidate_connection(
@@ -586,8 +588,16 @@ async def _release_scope_lock(
 async def _guard_execution_phase(
     session: AsyncSession,
     request_id: str,
+    *,
+    expected_generation: int,
+    owner_dagster_run_id: str,
 ) -> FeatureUpdateRequest:
-    request = await lock_feature_update_execution_guard(session, request_id)
+    request = await lock_feature_update_execution_guard(
+        session,
+        request_id,
+        expected_generation=expected_generation,
+        owner_dagster_run_id=owner_dagster_run_id,
+    )
     if request is None:
         raise _FeatureUpdateExecutionStopped
     return request
@@ -623,19 +633,25 @@ async def _finish_failed_execution(
     *,
     plan: FeatureUpdateExecutionPlan,
     results: Sequence[ProviderDatasetRefreshResult],
-    dagster_run_id: str | None,
     error_message: str,
+    owner_dagster_run_id: str,
 ) -> FeatureUpdateExecutionResult:
     target_ids = [target.target_id for target in plan.resolution.cache_targets]
     try:
         async with session.begin():
-            await _guard_execution_phase(session, request.request_id)
+            await _guard_execution_phase(
+                session,
+                request.request_id,
+                expected_generation=request.generation,
+                owner_dagster_run_id=owner_dagster_run_id,
+            )
             await mark_poi_cache_targets_refresh_failed(session, target_ids)
             failed = await finish_update_request(
                 session,
                 request.request_id,
                 status="failed",
-                dagster_run_id=dagster_run_id,
+                owner_dagster_run_id=owner_dagster_run_id,
+                expected_generation=request.generation,
                 error_message=error_message,
             )
             if failed is None:
@@ -661,13 +677,15 @@ async def execute_feature_update_request(
     request: FeatureUpdateRequest,
     *,
     runner: ProviderDatasetRefreshRunner,
-    dagster_run_id: str | None = None,
-    expected_request_updated_at: datetime | None = None,
+    dagster_run_id: str,
+    expected_request_generation: int | None = None,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateExecutionResult:
     """전용 physical connection에서 request 1건을 phase별 commit으로 실행한다."""
     if connection.in_transaction():
         raise ValueError("feature update execution requires an idle connection")
+    if not dagster_run_id or dagster_run_id != dagster_run_id.strip():
+        raise ValueError("dagster_run_id must be a trimmed non-empty string")
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=request.scope_type,
         scope=request.scope,
@@ -691,6 +709,11 @@ async def execute_feature_update_request(
                 await touch_queued_update_request_for_lock_retry(
                     session,
                     request.request_id,
+                    expected_generation=(
+                        expected_request_generation
+                        if expected_request_generation is not None
+                        else request.generation
+                    ),
                 )
             raise FeatureUpdateLockBusy(lock_key=request_lock_key)
         scope_acquired = False
@@ -712,6 +735,12 @@ async def execute_feature_update_request(
                     await requeue_update_request_after_lock_contention(
                         session,
                         request.request_id,
+                        expected_generation=(
+                            expected_request_generation
+                            if expected_request_generation is not None
+                            else request.generation
+                        ),
+                        caller_dagster_run_id=dagster_run_id,
                     )
                 raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
             return await _execute_feature_update_request_locked(
@@ -719,8 +748,10 @@ async def execute_feature_update_request(
                 request,
                 runner=runner,
                 dagster_run_id=dagster_run_id,
-                expected_request_updated_at=(
-                    expected_request_updated_at or request.updated_at
+                expected_request_generation=(
+                    expected_request_generation
+                    if expected_request_generation is not None
+                    else request.generation
                 ),
                 sigungu_resolver=sigungu_resolver,
             )
@@ -777,8 +808,8 @@ async def _execute_feature_update_request_locked(
     request: FeatureUpdateRequest,
     *,
     runner: ProviderDatasetRefreshRunner,
-    dagster_run_id: str | None,
-    expected_request_updated_at: datetime,
+    dagster_run_id: str,
+    expected_request_generation: int,
     sigungu_resolver: SigunguByRadiusResolver | None,
 ) -> FeatureUpdateExecutionResult:
     started = request
@@ -787,19 +818,29 @@ async def _execute_feature_update_request_locked(
     results: list[ProviderDatasetRefreshResult] = []
     try:
         async with session.begin():
-            await _guard_execution_phase(session, request.request_id)
+            await _guard_execution_phase(
+                session,
+                request.request_id,
+                expected_generation=expected_request_generation,
+                owner_dagster_run_id=dagster_run_id,
+            )
             claimed = await start_update_request(
                 session,
                 request.request_id,
                 dagster_run_id=dagster_run_id,
-                expected_updated_at=expected_request_updated_at,
+                expected_generation=expected_request_generation,
             )
             if claimed is None:
                 raise _FeatureUpdateExecutionStopped
             started = claimed
 
         async with session.begin():
-            await _guard_execution_phase(session, started.request_id)
+            await _guard_execution_phase(
+                session,
+                started.request_id,
+                expected_generation=started.generation,
+                owner_dagster_run_id=dagster_run_id,
+            )
             plan = await build_feature_update_execution_plan(
                 session,
                 started,
@@ -809,12 +850,15 @@ async def _execute_feature_update_request_locked(
                 session,
                 started.request_id,
                 matched_scope=plan.matched_scope,
+                expected_generation=started.generation,
+                owner_dagster_run_id=dagster_run_id,
             )
             if updated is None:
                 raise _FeatureUpdateExecutionStopped
             await _heartbeat_request_job(
                 session,
                 started,
+                owner_dagster_run_id=dagster_run_id,
                 progress=10,
                 current_stage="resolved_scope",
             )
@@ -827,10 +871,16 @@ async def _execute_feature_update_request_locked(
         total = max(len(plan.refresh_scopes), 1)
         for index, scope in enumerate(plan.refresh_scopes, start=1):
             async with session.begin():
-                await _guard_execution_phase(session, started.request_id)
+                await _guard_execution_phase(
+                    session,
+                    started.request_id,
+                    expected_generation=started.generation,
+                    owner_dagster_run_id=dagster_run_id,
+                )
                 await _heartbeat_request_job(
                     session,
                     started,
+                    owner_dagster_run_id=dagster_run_id,
                     progress=10 + int((index - 1) * 80 / total),
                     current_stage=(
                         f"refreshing:{scope.provider}:{scope.dataset_key}"
@@ -848,13 +898,20 @@ async def _execute_feature_update_request_locked(
                     session,
                     started.request_id,
                     matched_scope=checkpoint,
+                    expected_generation=started.generation,
+                    owner_dagster_run_id=dagster_run_id,
                 )
                 if updated is None:
                     raise _FeatureUpdateExecutionStopped
             results.append(result)
 
         async with session.begin():
-            await _guard_execution_phase(session, started.request_id)
+            await _guard_execution_phase(
+                session,
+                started.request_id,
+                expected_generation=started.generation,
+                owner_dagster_run_id=dagster_run_id,
+            )
             final_resolution = plan.resolution
             if started.scope_type == "cache_target_keys":
                 final_resolution = await _final_resolution(
@@ -874,6 +931,8 @@ async def _execute_feature_update_request_locked(
                 session,
                 started.request_id,
                 matched_scope=final_matched_scope,
+                expected_generation=started.generation,
+                owner_dagster_run_id=dagster_run_id,
             )
             if updated is None:
                 raise _FeatureUpdateExecutionStopped
@@ -885,7 +944,8 @@ async def _execute_feature_update_request_locked(
                 session,
                 started.request_id,
                 status="done",
-                dagster_run_id=dagster_run_id,
+                owner_dagster_run_id=dagster_run_id,
+                expected_generation=started.generation,
             )
             if done is None:
                 raise _FeatureUpdateExecutionStopped
@@ -917,10 +977,10 @@ async def _execute_feature_update_request_locked(
                 started,
                 plan=plan,
                 results=results,
-                dagster_run_id=dagster_run_id,
                 error_message=(
                     "CancelledError: feature update execution was interrupted"
                 ),
+                owner_dagster_run_id=dagster_run_id,
             )
         except Exception:
             _LOG.exception(
@@ -937,8 +997,8 @@ async def _execute_feature_update_request_locked(
             started,
             plan=plan,
             results=results,
-            dagster_run_id=dagster_run_id,
             error_message=error_message,
+            owner_dagster_run_id=dagster_run_id,
         )
 
 
@@ -946,12 +1006,14 @@ async def execute_next_feature_update_request(
     connection: AsyncConnection,
     *,
     runner: ProviderDatasetRefreshRunner,
-    dagster_run_id: str | None = None,
+    dagster_run_id: str,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateExecutionResult | None:
     """queued request를 peek한 뒤 scope lock 아래 CAS claim해 실행한다."""
     if connection.in_transaction():
         raise ValueError("feature update execution requires an idle connection")
+    if not dagster_run_id or dagster_run_id != dagster_run_id.strip():
+        raise ValueError("dagster_run_id must be a trimmed non-empty string")
     async with AsyncSession(
         bind=connection,
         expire_on_commit=False,

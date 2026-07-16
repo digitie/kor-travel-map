@@ -1,5 +1,86 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (codex, agent A) — T-ADM-C3e-A2 구현·로컬 gate 완료(PR 전)
+
+- **공용 projection**: C3b cycle-safe lineage 위에서 canonical root와 exact
+  `provider_datasets[]`를 한 번 계산하도록 executions, 단건 detail, overview, datasets latest
+  batch/detail recent를 통합했다. 실컬럼 member를 유일한 import identity로 사용하며 direct
+  scope와 provider/dataset 배열에서 pair를 재구성하지 않는다. event는
+  감사·타임라인 전용으로 projection/filter/latest에서 완전히 분리했다.
+- **계약 원자 전환**: feature run의 projected job을 root로 고정하고 raw
+  `dagster_run_status`, `trigger_kind`, `operation_registry_version`, authoritative engine 시각과 pair별
+  non-null member/status를 노출했다. overview는 canonical root의
+  `operations_by_status`/`active_operations`/`failed_operations_24h`로 교체했다.
+- **UI clean-cut**: 구 `/admin/feature-update-requests` 목록·상세 redirect route를 삭제했다.
+  갱신 요청 client 구현은 정본 `/admin/features/update-requests` route 아래에서만 소유한다.
+  n150 격리 checkout의 mocked E2E에서 인증 BFF와 현재 한국어 UI 계약을 함께 검증했다.
+- **영향도·회귀 준비**: codegraph 영향 19/7/11/11/9/12/34개 symbol을 확인하고 all-dataset
+  latest, timeline/grid/detail 동일 root, feature root 고정, pair 교차곱 금지와
+  pair/provider-only/dataset-only identity-index EXPLAIN 회귀를 작성했다. 1차 적대 리뷰에서
+  production caller가 사라진 구 request/job 요약 경계를 제거했고, 1,005개 root의 전수
+  pagination·latest·overview 일치와 status/latest/detail raw SQL EXPLAIN gate를 추가했다. 2차
+  적대 리뷰의 S2를 반영해 request detail scalar identity와 trigger를 root 계약에 맞추고 direct
+  scope를 양쪽 JSON string·trim 보존·nonempty인 단일 pair로만 인정했다. DB-boundary 재리뷰와
+  사용자 지시에 따라 runtime legacy event fallback은 호환 대상으로 유지하지 않고 제거했다.
+  0051의 보수적 일회성 backfill만 event를 읽으며 multi/partial/ambiguous 잔여는 pair로 노출하지
+  않는다.
+- **최종 성능/계약 보강**: 테스트 후 재리뷰에서 선택 pair/UUID 조회의 전체 graph 선투영,
+  pipeline pair 필드 optional 약화, 문서 drift를 발견했다. indexed identity에서 connected
+  component/request를 먼저 좁히고 production-like natural-planner EXPLAIN으로 base relation
+  `Seq Scan`·과도한 actual row를 차단한다. selective plan은 `import_job_events` relation 접근도
+  금지한다. projection seed event index는 제거하고 무필터·dataset-only·exact pair event 감사
+  조회용 시간순 index와 고정-clause query로 책임을 분리했다. `provider_datasets`와 nullable pair
+  필드는 required로 통일한다. 최종 DB 리뷰의 이중 정본 지적에 따라 0052는 request의 canonical
+  job FK를 `NOT NULL/RESTRICT`로 강화하고 jobless·불일치·reserved Dagster kind request를 새
+  canonical job으로 재연결한다. direct scope/filter shape와 linked `feature_update_request`
+  kind·typed pair 일치, non-direct unpaired shape, import kind/pair 불변성을 DB CHECK/trigger로
+  강제하며 filter는 JSONB에서 typed `TEXT[]`로 clean cut하고 direct JSON expression index와
+  root fallback을 제거했다. 재리뷰에 따라
+  migration 첫 SQL에서 writer table을 잠그고 request/source connected component 전체의
+  active/cancellation relink를 중단한다. immutable DB 함수와 main-library 공용 validator가
+  OpenAPI와 같은 6종 scope의 exact key/type/문자열/배열/좌표/반경 shape와 provider/dataset
+  filter의 32/64개·trimmed string 규칙을 강제하고 기본값과
+  nullable field를 canonicalize한다. 실행기에 의미가 없던 `sigungu_by_radius.match` 두 값은 제거해
+  `intersects`만 허용한다. write 없는 dry-run은 persisted schema에서 제거하고 201 생성과 200
+  preview endpoint로 분리했다. 후속 DB 적대 리뷰에 따라 request↔canonical job은 unique FK와
+  양쪽 deferred constraint trigger로 양방향 1:1을 강제한다. 기존 unlinked terminal job의 양방향
+  연결 component 전체에는 `quarantined_at`과 고정 사유를 기록하고 원래 `kind`·`payload`는 보존한다.
+  모든 projection/generic writer에서 제외하며 runtime 표식 변경, UPDATE/DELETE/event 추가와 새 child
+  attach를 거부한다. active/cancellation-protected component는 migration을 중단한다. canonical
+  job kind는 generic enqueue/start/claim/finish/cancel/recover/bind/payload/batch 경계에서 reserved로
+  차단하고 전용 enqueue/lifecycle/heartbeat만 사용한다.
+- **리뷰 보강**: 첫 통합 재리뷰 이후에도 DB/UI clean-cut 변경이 이어졌으므로 과거 승인은
+  최종 gate로 사용하지 않는다.
+  DB reviewer가 찾은 임의 `update_policy` JSON 저장→typed 목록 500 경로를 repository
+  canonicalizer, 0052 preflight, DB CHECK/ORM metadata와 valid/malformed migration 회귀로
+  제거했다. 후속 REST 재리뷰가 찾은 boolean coercion과 sparse response의 null 재팽창도
+  `total=False` strict policy `TypedDict`와 422/OpenAPI 회귀로 제거했다.
+  이어진 DB 리뷰에서는 request/job lifecycle 이중 저장, timestamp generation, NULL owner의 중복
+  claim과 MVCC join race를 제거했다. request는 입력/감사·`matched_scope`·정수 `generation`만
+  소유하고 canonical job이 lifecycle 단일 정본이다. 모든 실행 mutation은 두 행을 함께 잠근 뒤
+  exact generation과 trimmed non-empty Dagster run owner를 CAS하며, cancellation member는
+  `job_id` PK/FK 한 종류만 사용한다.
+- **테스트 중 발견·수정**: 0052가 SQLAlchemy naming convention의 실제 FK 이름
+  `fk_feature_update_requests_job_id_import_jobs`를 사용하도록 맞추고, 새 CHECK 이름에는
+  Alembic `op.f(...)`와 ORM `conv(...)`를 적용해 이중 prefix를 제거했다. migration fixture는
+  canonical 0051 root/child shape로 고쳤고 active preflight truth table은 source/raw
+  Dagster/request/jobless/child 조건을 서로 격리했다. SQLAlchemy text SQL의 `:null` test bind
+  해석을 제거하고, direct-exact EXPLAIN seed의 배경 분포도 실제 선택성을 검증하도록 강화했다.
+  event 감사 조회는 격리 marker가 부모 join 없이 직접 필터되며, statement-level event clock이
+  late commit·rollback·TRUNCATE·zero-job invalidation을 누락 없이 표현한다. 같은 transaction의
+  `now()` 동률 event는 인과 최신을 가정하지 않고 heartbeat의 exact code/stage/payload를 검증한다.
+- **리뷰·gate 완료**: DB/REST/UI 최종 diff와 이후 로직 수정마다 적대 리뷰 2인의
+  S1/S2/S3 0건 승인을 받았다. Ruff, strict mypy(main 112/API 55/Dagster 21), import 계약 4/4,
+  OpenAPI/admin type drift, frontend type/lint(오류 0), unit 1,366, API 502, Dagster 270
+  (optional `mois.db` 1 skip), non-live integration 518, frontend unit 82, production build를
+  통과했다. n150 Linux 격리 checkout의 11개 mocked spec은 **501/501 통과**했고 prod
+  checkout/container는 변경하지 않았다. 로컬 reverse geocoder가 400을 반환하는 live 전용 5건은
+  C3e-I/C7의 n150 prod gate로 분리했다.
+- **다음 한 작업**: remote push 전 보안 감사와 문서-only origin/main rebase를 마치고 A2 PR을
+  CI green·review approval 뒤 병합한다. 사용자 지시에 따라 PR 제출 직전에 A2를
+  `docs/tasks-done.md`로 이동했다. 이후 C3e-B/C/I를 진행해 #679를 닫고 C45X/C4R 리뷰·개선으로
+  넘어간다. 파괴적 live UI E2E와 prod 최종 검증은 C3e-I/C7에서 수행한다.
+
 ## 2026-07-15 (codex, agent A) — T-ADM-C3e-A1 구현·로컬 gate 완료
 
 - **문서 선행 완료**: C3e-D 문서 계약 PR #696이 병합되어 `T-ADM-C3e-D`를 완료

@@ -36,7 +36,6 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     enqueue_feature_update_request,
     feature_update_scope_advisory_key,
-    finish_update_request,
     get_update_request,
 )
 from kortravelmap.infra.pipeline_cancellation_repo import (
@@ -287,12 +286,22 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     async def record_guard(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         assert session.in_transaction()
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-run-1"
         phase_pids.append(
             int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
         )
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     async def record_release(
         session: AsyncSession,
@@ -425,6 +434,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
         migrated_engine
     ).execute_next_feature_update_request(
         runner=runner,
+        dagster_run_id="dagster-follow-system-skip",
     )
 
     assert result is not None
@@ -498,6 +508,7 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
         migrated_engine
     ).execute_next_feature_update_request(
         runner=runner,
+        dagster_run_id="dagster-runner-skip",
     )
 
     assert result is not None
@@ -566,6 +577,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
         migrated_engine
     ).execute_next_feature_update_request(
         runner=runner,
+        dagster_run_id="dagster-provider-failure",
     )
 
     assert result is not None
@@ -654,6 +666,8 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
         request_id: str,
         *,
         matched_scope: Mapping[str, Any],
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest | None:
         nonlocal checkpoint_writes
         checkpoint_writes += 1
@@ -663,6 +677,8 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
             session,
             request_id,
             matched_scope=matched_scope,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
         )
 
     monkeypatch.setattr(
@@ -675,6 +691,7 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-checkpoint-failure",
     )
 
     assert result is not None
@@ -730,6 +747,7 @@ async def test_transaction_bound_asset_client_rejects_engine_connection_escape(
             await bound_client.execute_feature_update_request(
                 "11111111-1111-4111-8111-111111111111",
                 runner=unused_runner,
+                dagster_run_id="dagster-bound-client",
             )
 
 
@@ -764,6 +782,7 @@ async def test_probe_failure_finishes_committed_prepare_as_failed(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-plan-failure",
     )
 
     assert result is not None
@@ -807,15 +826,11 @@ async def test_cancellation_marker_wins_before_runner_starts(
             )
         cancellation_id = detail.attempt.cancellation_id
         async with cancel_session.begin():
-            for member in sorted(
-                detail.members,
-                key=lambda item: (item.member_kind != "update_request", item.member_id),
-            ):
+            for member in sorted(detail.members, key=lambda item: item.job_id):
                 assert await cancel_queued_pipeline_cancellation_member(
                     cancel_session,
                     cancellation_id=cancellation_id,
-                    member_kind=member.member_kind,
-                    member_id=member.member_id,
+                    job_id=member.job_id,
                 )
         async with cancel_session.begin():
             finished = await finish_pipeline_cancellation_attempt(
@@ -841,12 +856,21 @@ async def test_cancellation_marker_wins_before_runner_starts(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-cancelled-before-start",
     )
 
     assert result is not None
     assert result.status == "cancelled"
     assert result.request.status == "cancelled"
-    assert result.request.cancellation_id == cancellation_id
+    assert str(
+        await execution_session.scalar(
+            text(
+                "SELECT cancellation_id FROM ops.import_jobs "
+                "WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": request.job_id},
+        )
+    ) == cancellation_id
     assert runner_calls == 0
 
 
@@ -893,7 +917,10 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
         with pytest.raises(FeatureUpdateLockBusy):
             await AsyncKorTravelMapClient(
                 migrated_engine
-            ).execute_next_feature_update_request(runner=runner)
+            ).execute_next_feature_update_request(
+                runner=runner,
+                dagster_run_id="dagster-scope-lock-loser",
+            )
 
         queued = await get_update_request(execution_session, request.request_id)
         assert queued is not None
@@ -906,7 +933,10 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
 
     result = await AsyncKorTravelMapClient(
         migrated_engine
-    ).execute_next_feature_update_request(runner=runner)
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-scope-lock-retry",
+    )
 
     assert result is not None
     assert result.status == "done"
@@ -932,6 +962,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
     preclaimed = await client.mark_update_request_started(
         request.request_id,
         dagster_run_id="dagster-preclaim",
+        expected_generation=request.generation,
     )
     assert preclaimed is not None
     assert preclaimed.status == "running"
@@ -940,11 +971,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
         text(
             """
             UPDATE ops.import_jobs
-            SET payload = payload || jsonb_build_object(
-                    'dagster_run_id', 'dagster-preclaim',
-                    'run_id', 'legacy-preclaim'
-                ),
-                progress = 47,
+            SET progress = 47,
                 current_stage = 'stale-provider-stage'
             WHERE job_id = :job_id
             """
@@ -985,6 +1012,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
                 request.request_id,
                 runner=runner,
                 dagster_run_id="dagster-preclaim",
+                expected_request_generation=preclaimed.generation,
             )
 
     requeued = await get_update_request(execution_session, request.request_id)
@@ -992,7 +1020,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
     assert requeued.status == "queued"
     assert requeued.dagster_run_id is None
     assert requeued.started_at is None
-    assert requeued.updated_at > preclaimed.updated_at
+    assert requeued.generation == preclaimed.generation + 1
     requeued_job = await _job_status(execution_session, request.job_id)
     assert requeued_job["status"] == "queued"
     assert requeued_job["dagster_run_id"] is None
@@ -1004,14 +1032,14 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
     assert requeued_job["error_message"] is None
     requeued_payload = requeued_job["payload"]
     assert isinstance(requeued_payload, dict)
-    assert "dagster_run_id" not in requeued_payload
-    assert "run_id" not in requeued_payload
+    assert requeued_payload == {}
     await execution_session.commit()
 
     result = await client.execute_feature_update_request(
         request.request_id,
         runner=runner,
         dagster_run_id="dagster-retry",
+        expected_request_generation=requeued.generation,
     )
     assert result is not None
     assert result.status == "done"
@@ -1036,16 +1064,6 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
-    await execution_session.execute(
-        text(
-            """
-            UPDATE ops.feature_update_requests
-            SET updated_at = now() - INTERVAL '1 hour'
-            WHERE request_id = :request_id
-            """
-        ),
-        {"request_id": request.request_id},
-    )
     await execution_session.commit()
     before = await get_update_request(execution_session, request.request_id)
     assert before is not None
@@ -1078,11 +1096,13 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
             ).execute_feature_update_request(
                 request.request_id,
                 runner=runner,
+                dagster_run_id="dagster-request-lock-loser",
+                expected_request_generation=before.generation,
             )
         touched = await get_update_request(execution_session, request.request_id)
         assert touched is not None
         assert touched.status == "queued"
-        assert touched.updated_at > before.updated_at
+        assert touched.generation == before.generation + 1
         assert (await _job_status(execution_session, request.job_id))["status"] == (
             "queued"
         )
@@ -1094,6 +1114,8 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-request-lock-retry",
+        expected_request_generation=touched.generation,
     )
     assert result is not None
     assert result.status == "done"
@@ -1119,6 +1141,7 @@ async def test_request_lease_loser_does_not_touch_active_running_owner(
     running = await client.mark_update_request_started(
         request.request_id,
         dagster_run_id="active-owner-run",
+        expected_generation=request.generation,
     )
     assert running is not None
     request_lock_key = (
@@ -1141,12 +1164,14 @@ async def test_request_lease_loser_does_not_touch_active_running_owner(
             await client.execute_feature_update_request(
                 request.request_id,
                 runner=runner,
+                dagster_run_id="active-owner-run",
+                expected_request_generation=running.generation,
             )
 
     unchanged = await get_update_request(execution_session, request.request_id)
     assert unchanged is not None
     assert unchanged.status == "running"
-    assert unchanged.updated_at == running.updated_at
+    assert unchanged.generation == running.generation
     assert unchanged.dagster_run_id == "active-owner-run"
     active_job = await _job_status(execution_session, request.job_id)
     assert active_job["status"] == "running"
@@ -1187,6 +1212,7 @@ async def test_cancelled_error_releases_scope_lock_on_same_connection(
         ).execute_feature_update_request(
             request.request_id,
             runner=runner,
+            dagster_run_id="dagster-cancelled-error",
         )
 
     async with (
@@ -1282,6 +1308,7 @@ async def test_false_exact_unlock_invalidates_connection(
             ).execute_feature_update_request(
                 request.request_id,
                 runner=runner,
+                dagster_run_id="dagster-unlock-failure",
             )
     finally:
         event.remove(migrated_engine.sync_engine, "invalidate", record_invalidation)
@@ -1353,7 +1380,7 @@ async def test_hard_invalidation_raises_unsafe_when_no_backend_can_be_closed() -
         )
 
 
-async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
+async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runner(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1413,12 +1440,22 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     async def guarded_phase(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         nonlocal guard_calls
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-mid-scope-cancellation"
         guard_calls += 1
         if guard_calls == 4:
             await asyncio.wait_for(cancellation_finished.wait(), timeout=5)
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     monkeypatch.setattr(executor_mod, "build_feature_update_execution_plan", fake_plan)
     monkeypatch.setattr(executor_mod, "_guard_execution_phase", guarded_phase)
@@ -1426,19 +1463,27 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     runner_calls: list[str] = []
     loaded_feature_id: str | None = None
     cancellation_task: asyncio.Task[None] | None = None
+    cancellation_detail: Any = None
 
     async def cancel_after_first_scope() -> None:
+        nonlocal cancellation_detail
         try:
             async with (
                 AsyncSession(migrated_engine) as cancel_session,
                 cancel_session.begin(),
             ):
-                cancelled = await finish_update_request(
+                scope = await resolve_pipeline_cancellation_scope(
                     cancel_session,
-                    request.request_id,
-                    status="cancelled",
+                    kind="update_request",
+                    execution_id=request.request_id,
                 )
-                assert cancelled is not None
+                assert scope is not None
+                cancellation_detail = await create_pipeline_cancellation_attempt(
+                    cancel_session,
+                    scope=scope,
+                    requested_by="admin:test",
+                    reason="scope checkpoint test",
+                )
         finally:
             cancellation_finished.set()
 
@@ -1466,13 +1511,19 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-mid-scope-cancellation",
     )
     assert cancellation_task is not None
     await cancellation_task
 
     assert result is not None
-    assert result.status == "cancelled"
-    assert result.request.status == "cancelled"
+    assert cancellation_detail is not None
+    assert result.status == "running"
+    assert result.request.status == "running"
+    assert (
+        result.request.cancellation_id
+        == cancellation_detail.attempt.cancellation_id
+    )
     assert [item.dataset_key for item in result.results] == ["phase-a"]
     assert runner_calls == ["phase-a"]
     assert loaded_feature_id is not None
@@ -1485,6 +1536,8 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     assert persisted is not None
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
+    assert stored.status == "running"
+    assert stored.cancellation_id == cancellation_detail.attempt.cancellation_id
     assert [
         item["dataset_key"]
         for item in stored.matched_scope["executed_provider_scopes"]
@@ -1568,6 +1621,7 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-provider-checkpoint-cancel",
     )
 
     assert result is not None
@@ -1678,12 +1732,22 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
     async def wait_for_marker_before_finalize(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         nonlocal guard_calls
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-finalize-cancel-race"
         guard_calls += 1
         if guard_calls == 4:
             await asyncio.wait_for(marker_finished.wait(), timeout=5)
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     monkeypatch.setattr(executor_mod, "build_feature_update_execution_plan", fake_plan)
     monkeypatch.setattr(
@@ -1718,6 +1782,7 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
     ).execute_feature_update_request(
         request.request_id,
         runner=runner,
+        dagster_run_id="dagster-finalize-cancel-race",
     )
     assert marker_task is not None
     await marker_task
@@ -1725,7 +1790,15 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
     assert result is not None
     assert result.status == "running"
     assert cancellation_detail is not None
-    assert result.request.cancellation_id == cancellation_detail.attempt.cancellation_id
+    assert str(
+        await execution_session.scalar(
+            text(
+                "SELECT cancellation_id FROM ops.import_jobs "
+                "WHERE job_id = CAST(:job_id AS uuid)"
+            ),
+            {"job_id": request.job_id},
+        )
+    ) == cancellation_detail.attempt.cancellation_id
     assert loaded_feature_id is not None
     assert (
         await execution_session.execute(

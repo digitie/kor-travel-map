@@ -24,13 +24,14 @@ from kortravelmap.infra.jobs_repo import (
     attach_import_jobs_to_batch,
     cancel_import_job,
     claim_next_import_job,
-    enqueue_import_job,
+    enqueue_unpaired_import_job,
     finish_import_job,
     heartbeat_import_job,
     list_import_jobs_by_ids,
     record_import_job_event,
     recover_stale_running_jobs,
-    start_import_job,
+    start_provider_dataset_import_job,
+    start_unpaired_import_job,
 )
 
 if TYPE_CHECKING:
@@ -66,7 +67,7 @@ async def _event_codes(session: AsyncSession, job_id: str) -> list[str | None]:
 
 
 async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> None:
-    job = await enqueue_import_job(
+    job = await enqueue_unpaired_import_job(
         migrated_session,
         kind="mois_license_full_update",
         payload={"dataset_key": "mois_license_features_bulk"},
@@ -84,13 +85,13 @@ async def test_batch_columns_preserved_across_start_enqueue_and_claim(
     migrated_session: AsyncSession,
 ) -> None:
     batch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    root = await start_import_job(
+    root = await start_unpaired_import_job(
         migrated_session,
         kind="full_load_batch",
         payload={"mode": "full"},
         load_batch_id=batch_id,
     )
-    child = await enqueue_import_job(
+    child = await enqueue_unpaired_import_job(
         migrated_session,
         kind="feature_event_visitkorea_festivals",
         payload={"provider": "python-visitkorea-api"},
@@ -119,13 +120,13 @@ async def test_attach_existing_jobs_to_batch(
     migrated_session: AsyncSession,
 ) -> None:
     batch_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    root = await start_import_job(
+    root = await start_unpaired_import_job(
         migrated_session,
         kind="full_load_batch",
         payload={"mode": "full"},
         load_batch_id=batch_id,
     )
-    child = await start_import_job(
+    child = await start_unpaired_import_job(
         migrated_session,
         kind="offline_upload_load",
         payload={"upload_id": "u1"},
@@ -146,8 +147,8 @@ async def test_attach_existing_jobs_to_batch(
 
 
 async def test_claim_fifo_and_transition_running(migrated_session: AsyncSession) -> None:
-    j1 = await enqueue_import_job(migrated_session, kind="k", payload={"n": 1})
-    j2 = await enqueue_import_job(migrated_session, kind="k", payload={"n": 2})
+    j1 = await enqueue_unpaired_import_job(migrated_session, kind="k", payload={"n": 1})
+    j2 = await enqueue_unpaired_import_job(migrated_session, kind="k", payload={"n": 2})
     await migrated_session.flush()
 
     claimed1 = await claim_next_import_job(migrated_session)
@@ -168,7 +169,7 @@ async def test_claim_empty_queue_returns_none(migrated_session: AsyncSession) ->
 async def test_heartbeat_updates_progress_and_stage(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     updated = await heartbeat_import_job(
         migrated_session, job.job_id, progress=42, current_stage="loading"
@@ -177,12 +178,12 @@ async def test_heartbeat_updates_progress_and_stage(
     assert updated.progress == 42
     assert updated.current_stage == "loading"
     # queued 작업엔 heartbeat 안 먹음(running만).
-    other = await enqueue_import_job(migrated_session, kind="k")
+    other = await enqueue_unpaired_import_job(migrated_session, kind="k")
     assert await heartbeat_import_job(migrated_session, other.job_id) is None
 
 
 async def test_finish_done_sets_progress_100(migrated_session: AsyncSession) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     done = await finish_import_job(migrated_session, job.job_id, status="done")
     assert done is not None
@@ -193,7 +194,7 @@ async def test_finish_done_sets_progress_100(migrated_session: AsyncSession) -> 
 
 
 async def test_finish_failed_records_error(migrated_session: AsyncSession) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     failed = await finish_import_job(
         migrated_session, job.job_id, status="failed", error_message="boom"
@@ -207,9 +208,9 @@ async def test_finish_failed_records_error(migrated_session: AsyncSession) -> No
 async def test_record_import_job_event_defaults_context(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await start_import_job(
+    job = await start_provider_dataset_import_job(
         migrated_session,
-        kind="feature_update_request",
+        kind="provider_event_context_test",
         payload={
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
@@ -242,7 +243,7 @@ async def test_record_import_job_event_defaults_context(
 async def test_record_event_rejects_identity_on_untyped_job(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await start_import_job(
+    job = await start_unpaired_import_job(
         migrated_session,
         kind="manual_provider_sync",
         payload={"provider": "legacy-payload", "dataset_key": "legacy-dataset"},
@@ -280,7 +281,7 @@ async def test_record_event_rejects_identity_on_untyped_job(
 async def test_cancel_import_job_transitions_active_job(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
 
     cancelled = await cancel_import_job(
         migrated_session,
@@ -296,14 +297,14 @@ async def test_cancel_import_job_transitions_active_job(
 
 
 async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     with pytest.raises(ValueError, match="status must be one of"):
         await finish_import_job(migrated_session, job.job_id, status="running")
 
 
 async def test_recover_stale_running_all(migrated_session: AsyncSession) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     assert await _state(migrated_session, job.job_id) == "running"
 
@@ -316,7 +317,7 @@ async def test_recover_stale_running_all(migrated_session: AsyncSession) -> None
 async def test_recover_stale_respects_fresh_heartbeat(
     migrated_session: AsyncSession,
 ) -> None:
-    job = await enqueue_import_job(migrated_session, kind="k")
+    job = await enqueue_unpaired_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)  # heartbeat_at = now()
     # 5분 cutoff → 방금 claim한 fresh 행은 복구 대상 아님.
     recovered = await recover_stale_running_jobs(

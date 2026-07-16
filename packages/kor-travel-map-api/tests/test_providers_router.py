@@ -76,7 +76,6 @@ def _update_request() -> FeatureUpdateRequest:
         run_mode="queued",
         priority=50,
         status="queued",
-        dry_run=False,
         matched_scope={"feature_count": 0},
         job_id="22222222-2222-2222-2222-222222222222",
         dagster_run_id=None,
@@ -86,7 +85,7 @@ def _update_request() -> FeatureUpdateRequest:
         created_at=now,
         started_at=None,
         finished_at=None,
-        updated_at=now,
+        generation=1,
     )
 
 
@@ -124,6 +123,11 @@ def test_providers_freshness_in_openapi(client: TestClient) -> None:
     assert "/v1/ops/providers/{provider}" in spec["paths"]
     assert "ProvidersFreshnessResponse" in spec["components"]["schemas"]
     assert "OpsProviderDetailResponse" in spec["components"]["schemas"]
+    request_summary = spec["components"]["schemas"][
+        "OpsProviderUpdateRequestSummary"
+    ]
+    assert request_summary["properties"]["request_id"]["format"] == "uuid"
+    assert request_summary["properties"]["job_id"]["format"] == "uuid"
 
 
 @pytest.mark.unit
@@ -462,6 +466,7 @@ def test_ops_provider_detail_includes_cursor_policy_and_recent_requests(
         assert dataset["sync_states"][0]["cursor"] == {"last_modified": "2026-06-12"}
         assert dataset["refresh_policy"]["max_concurrent"] == 2
         assert dataset["recent_update_requests"][0]["request_id"].startswith("11111111")
+        assert dataset["recent_update_requests"][0]["generation"] == 1
         assert {link["rel"] for link in dataset["links"]} >= {
             "feature_update_requests",
             "create_feature_update_request",

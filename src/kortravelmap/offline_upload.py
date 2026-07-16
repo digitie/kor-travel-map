@@ -60,7 +60,7 @@ from kortravelmap.infra.jobs_repo import (
     finish_import_job,
     get_import_job,
     heartbeat_import_job,
-    start_import_job,
+    start_provider_dataset_import_job,
     update_import_job_payload,
 )
 from kortravelmap.infra.offline_upload_repo import (
@@ -317,7 +317,7 @@ async def run_offline_upload_validation_job(
         if not acquired:
             raise ValueError(f"offline upload validation lock 획득 실패: {upload.upload_id}")
 
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind=OFFLINE_UPLOAD_VALIDATE_JOB_KIND,
             payload={
@@ -517,7 +517,7 @@ async def run_offline_upload_load_job(
                 else preclaimed_job
             )
         else:
-            job = await start_import_job(
+            job = await start_provider_dataset_import_job(
                 session,
                 kind=OFFLINE_UPLOAD_LOAD_JOB_KIND,
                 payload={

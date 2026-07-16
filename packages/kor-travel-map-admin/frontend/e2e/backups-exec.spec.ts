@@ -1,6 +1,7 @@
 import { expect, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -93,14 +94,14 @@ test.describe("admin/backups execute depth", () => {
     // '**/v1/admin/backups**' glob은 list GET + backup POST 둘 다 매칭(restore는 미매칭).
     await page.route("**/v1/admin/backups**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
-      if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "GET" && apiPath === "/v1/admin/backups") {
         // command_enabled:true → Badge가 'execute enabled'를 보인다.
         await fulfillJson(route, makeBackupList({ command_enabled: true }));
         return;
       }
-      if (request.method() === "POST" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "POST" && apiPath === "/v1/admin/backups") {
         captured.backup = request.postDataJSON() as BackupRunRequest;
         await fulfillJson(
           route,
@@ -111,16 +112,17 @@ test.describe("admin/backups execute depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
     });
 
     // '**/v1/admin/restore/**' glob은 restore POST + /swap POST 둘 다 매칭.
-    // admin-ops 처럼 pathname.endsWith('/swap')으로 분기한다.
+    // restore와 swap의 exact method + path로 분기한다.
     await page.route("**/v1/admin/restore/**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
+      const restorePath = `/v1/admin/restore/${MOCK_BACKUP_ID}`;
 
-      if (url.pathname.endsWith("/swap")) {
+      if (request.method() === "POST" && apiPath === `${restorePath}/swap`) {
         captured.swap = request.postDataJSON() as RestoreSwapRequest;
         await fulfillJson(
           route,
@@ -131,19 +133,23 @@ test.describe("admin/backups execute depth", () => {
         );
         return;
       }
-      captured.restore = request.postDataJSON() as RestoreRunRequest;
-      await fulfillJson(
-        route,
-        makeBackupOp({
-          message: "restore command executed",
-          operation: "restore",
-          restore_targets: {
-            app_db: "kor_travel_map_staging",
-            dagster_db: "kor_travel_map_dagster_staging",
-            rustfs_volume: "rustfs_staging",
-          },
-        }),
-      );
+      if (request.method() === "POST" && apiPath === restorePath) {
+        captured.restore = request.postDataJSON() as RestoreRunRequest;
+        await fulfillJson(
+          route,
+          makeBackupOp({
+            message: "restore command executed",
+            operation: "restore",
+            restore_targets: {
+              app_db: "kor_travel_map_staging",
+              dagster_db: "kor_travel_map_dagster_staging",
+              rustfs_volume: "rustfs_staging",
+            },
+          }),
+        );
+        return;
+      }
+      throw new Error(`Unhandled restore route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/backups");
@@ -169,7 +175,7 @@ test.describe("admin/backups execute depth", () => {
     await expect(executeBackupCheckbox).toBeVisible();
     await executeBackupCheckbox.click();
     await expect(executeBackupCheckbox).toBeChecked();
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
 
     await expect.poll(() => captured.backup).not.toBeNull();
     // backup_id는 input 미입력이므로 backupId.trim() || null → null.
@@ -182,8 +188,8 @@ test.describe("admin/backups execute depth", () => {
     await expect(
       page.getByRole("status").filter({ hasText: "backup command executed" }),
     ).toBeVisible();
-    // 'completed' status(plan-only smoke의 'planned'와 구분)로 execute 경로임을 못박는다.
-    await expect(page.getByText("backup / completed")).toBeVisible();
+    // 한국어 '완료' status(plan-only smoke의 '계획됨'과 구분)로 execute 경로임을 못박는다.
+    await expect(page.getByText("backup / 완료", { exact: true })).toBeVisible();
 
     // --- 2) restore execute:true ---
     const executeRestoreCheckbox = page.getByLabel("restore command 실행");
@@ -238,14 +244,14 @@ test.describe("admin/backups execute depth", () => {
 
     await page.route("**/v1/admin/backups**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
-      if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "GET" && apiPath === "/v1/admin/backups") {
         getCount += 1;
         await fulfillJson(route, makeBackupList({ command_enabled: true }));
         return;
       }
-      if (request.method() === "POST" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "POST" && apiPath === "/v1/admin/backups") {
         backupBody = request.postDataJSON() as BackupRunRequest;
         await fulfillJson(
           route,
@@ -253,7 +259,7 @@ test.describe("admin/backups execute depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/backups");
@@ -266,7 +272,7 @@ test.describe("admin/backups execute depth", () => {
 
     // 유일한 비-체크박스 입력(backup id)을 채워 payload 흐름을 확인한다.
     await page.getByLabel("backup id").fill("manual-backup-001");
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
 
     await expect.poll(() => backupBody).not.toBeNull();
     // 불변식: execute는 순수 클라이언트 체크박스 상태이며 server command_enabled가
@@ -287,16 +293,16 @@ test.describe("admin/backups execute depth", () => {
   }) => {
     await page.route("**/v1/admin/backups**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
-      if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "GET" && apiPath === "/v1/admin/backups") {
         await fulfillJson(
           route,
           makeBackupList({ command_enabled: false, items: [] }),
         );
         return;
       }
-      throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/backups");
@@ -330,13 +336,13 @@ test.describe("admin/backups execute depth", () => {
     // useBackups retry:1 → 500 list GET은 두 번 요청된다. 매 호출 500을 돌려 결정성 확보.
     await page.route("**/v1/admin/backups**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
-      if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+      if (request.method() === "GET" && apiPath === "/v1/admin/backups") {
         await fulfillJson(route, { detail: "backup root unavailable" }, 500);
         return;
       }
-      throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/backups");

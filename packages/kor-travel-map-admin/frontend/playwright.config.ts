@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
+import { MOCKED_STORAGE_STATE } from "./e2e/_auth-state";
+
 const artifactRoot =
   process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
   path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend");
@@ -56,5 +58,20 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "chromium",
+      testIgnore: ["**/live/**", /auth\.setup\.ts/],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: MOCKED_STORAGE_STATE,
+      },
+      dependencies: ["setup"],
+    },
+  ],
 });

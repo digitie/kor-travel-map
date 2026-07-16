@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(admin-ops.spec 패턴).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -213,16 +214,27 @@ function makeDagster(
 // 홈은 health/version/metrics/import-jobs/dedup-reviews/dagster-summary 6개를
 // GET으로 호출한다. method + pathname을 가드해 다른 sub-request를 오배달하지 않는다.
 
+function isRoutePassthrough(route: Route): boolean {
+  const request = route.request();
+  const url = new URL(request.url());
+  return (
+    request.resourceType() === "document" ||
+    url.pathname.startsWith("/_next/") ||
+    url.pathname === "/favicon.ico" ||
+    url.searchParams.has("_rsc")
+  );
+}
+
 async function routeHealth(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/health**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== "/health") {
-      await route.continue();
-      return;
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/health") {
+      throw new Error(`Unhandled home health route: ${request.method()} ${apiPath}`);
     }
     await handler(route);
   });
@@ -230,14 +242,16 @@ async function routeHealth(page: Page, handler: (route: Route) => Promise<void>)
 
 async function routeVersion(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/version**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== "/version") {
-      await route.continue();
-      return;
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/version") {
+      throw new Error(
+        `Unhandled home version route: ${request.method()} ${apiPath}`,
+      );
     }
     await handler(route);
   });
@@ -245,14 +259,16 @@ async function routeVersion(page: Page, handler: (route: Route) => Promise<void>
 
 async function routeMetrics(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/v1/ops/metrics**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== "/v1/ops/metrics") {
-      await route.continue();
-      return;
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/metrics") {
+      throw new Error(
+        `Unhandled home metrics route: ${request.method()} ${apiPath}`,
+      );
     }
     await handler(route);
   });
@@ -263,15 +279,17 @@ async function routeImportJobs(
   handler: (route: Route) => Promise<void>,
 ) {
   await page.route("**/v1/ops/import-jobs**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
     // 홈은 목록(list)만 호출한다 — `/{job_id}` 상세/events는 오지 않지만 방어한다.
-    if (url.pathname !== "/v1/ops/import-jobs") {
-      await route.continue();
-      return;
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/import-jobs") {
+      throw new Error(
+        `Unhandled home import-jobs route: ${request.method()} ${apiPath}`,
+      );
     }
     await handler(route);
   });
@@ -279,14 +297,17 @@ async function routeImportJobs(
 
 async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/v1/admin/features/dedup-reviews**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== "/v1/admin/features/dedup-reviews") {
-      await route.continue();
-      return;
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (
+      request.method() !== "GET" ||
+      apiPath !== "/v1/admin/features/dedup-reviews"
+    ) {
+      throw new Error(`Unhandled home dedup route: ${request.method()} ${apiPath}`);
     }
     await handler(route);
   });
@@ -294,14 +315,16 @@ async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) 
 
 async function routeDagster(page: Page, handler: (route: Route) => Promise<void>) {
   await page.route("**/v1/ops/dagster/summary**", async (route) => {
-    if (route.request().method() !== "GET") {
+    if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== "/v1/ops/dagster/summary") {
-      await route.continue();
-      return;
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/dagster/summary") {
+      throw new Error(
+        `Unhandled home Dagster route: ${request.method()} ${apiPath}`,
+      );
     }
     await handler(route);
   });
@@ -457,13 +480,13 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     }
     const jobRow = page.getByRole("row", { name: /festival_sync/ });
     await expect(jobRow).toBeVisible();
-    await expect(jobRow.getByText("running")).toBeVisible();
+    await expect(jobRow.getByText("실행중", { exact: true })).toBeVisible();
     // shortId(job_id) — font-mono 텍스트.
     await expect(jobRow.getByText("import-job-0", { exact: false })).toBeVisible();
 
     // ── Backend status 카드 (Backend Card로 scope — Dagster StatusBadge 충돌 회피) ──
     const backendCard = page.getByTestId("service-backend");
-    await expect(backendCard.getByText("ok", { exact: true })).toBeVisible();
+    await expect(backendCard.getByText("정상", { exact: true })).toBeVisible();
     await expect(backendCard.getByText("admin 1.2.3")).toBeVisible();
     await expect(backendCard.getByText("map 2.0.0")).toBeVisible();
 
@@ -530,14 +553,14 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // Backend StatusBadge "error" (health.isError) — Backend Card로 scope.
     const backendCard = page.getByTestId("service-backend");
-    await expect(backendCard.getByText("error", { exact: true })).toBeVisible();
+    await expect(backendCard.getByText("오류", { exact: true })).toBeVisible();
     // version 200 → admin/map 배지는 여전히 렌더.
     await expect(backendCard.getByText("admin 1.2.3")).toBeVisible();
     await expect(backendCard.getByText("map 2.0.0")).toBeVisible();
 
     // Dagster StatusBadge "error".
     const dagsterCard = page.getByTestId("service-dagster");
-    await expect(dagsterCard.getByText("error", { exact: true })).toBeVisible();
+    await expect(dagsterCard.getByText("오류", { exact: true })).toBeVisible();
 
     // 최근 import jobs: error.message <p>(text-destructive) + 빈 테이블 emptyMessage.
     const importCard = cards.filter({

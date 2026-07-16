@@ -555,16 +555,12 @@ const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => (
       <span className="font-mono text-xs">
-        {row.original.job_id ? (
-          <Link
-            className="underline underline-offset-2"
-            href={`/ops/import-jobs/${row.original.job_id}`}
-          >
-            {shortId(row.original.job_id)}
-          </Link>
-        ) : (
-          "-"
-        )}
+        <Link
+          className="underline underline-offset-2"
+          href={`/ops/import-jobs/${row.original.job_id}`}
+        >
+          {shortId(row.original.job_id)}
+        </Link>
       </span>
     ),
   },
@@ -602,7 +598,14 @@ function DatasetDetailPanel({
   detail: OpsProviderDatasetDetail | null;
 }) {
   const createRequest = useCreateFeatureUpdateRequestMutation();
-  const createdRequestId = createRequest.data?.data.request_id ?? null;
+  const selectedSyncState =
+    detail?.sync_states.find(
+      (state) => state.sync_scope === selection.syncScope,
+    ) ?? null;
+  const createdRequest =
+    createRequest.data?.data.result_kind === "request"
+      ? createRequest.data.data
+      : null;
 
   const createProviderDatasetRequest = () => {
     createRequest.mutate({
@@ -613,12 +616,8 @@ function DatasetDetailPanel({
         sync_scope:
           selection.syncScope === "default" ? undefined : selection.syncScope,
       },
-      providers: [selection.provider],
-      dataset_keys: [selection.datasetKey],
-      dry_run: false,
       run_mode: "queued",
       priority: 75,
-      operator: "local-admin",
       reason: "provider dataset refresh from ops/providers",
     });
   };
@@ -656,18 +655,18 @@ function DatasetDetailPanel({
             요청 생성
           </Button>
         </div>
-        {createRequest.data && createdRequestId ? (
+        {createdRequest ? (
           <Alert>
             <AlertTitle>요청 생성 완료</AlertTitle>
             <AlertDescription>
               <Link
                 className="underline underline-offset-2"
-                href={`/admin/features/update-requests/${createdRequestId}`}
+                href={`/admin/features/update-requests/${createdRequest.request_id}`}
               >
-                {shortId(createdRequestId)}
+                {shortId(createdRequest.request_id)}
               </Link>
               {" · "}
-              {statusLabel(createRequest.data.data.status)}
+              {statusLabel(createdRequest.status)}
             </AlertDescription>
           </Alert>
         ) : null}
@@ -686,13 +685,22 @@ function DatasetDetailPanel({
         emptyMessage="sync state 없음"
         manualSorting={false}
         containerClassName="overflow-auto rounded-lg border bg-background"
+        isRowActive={(state) => state.sync_scope === selection.syncScope}
       />
 
       <div className="rounded-lg border bg-background p-4">
-        <div className="mb-2 font-medium">커서</div>
-        <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
-          {JSON.stringify(detail?.sync_states[0]?.cursor ?? {}, null, 2)}
-        </pre>
+        <div className="mb-2 font-medium">
+          커서 · <span className="font-mono text-xs">{selection.syncScope}</span>
+        </div>
+        {selectedSyncState ? (
+          <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
+            {JSON.stringify(selectedSyncState.cursor, null, 2)}
+          </pre>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            선택한 범위의 sync state가 없습니다.
+          </div>
+        )}
       </div>
 
       <DataTable
@@ -977,7 +985,7 @@ export function ProvidersFreshnessClient({
                 />
                 <PolicyEditor
                   datasetKey={activeSelection.datasetKey}
-                  key={`${activeSelection.provider}/${activeSelection.datasetKey}`}
+                  key={`${activeSelection.provider}/${activeSelection.datasetKey}/${selectedDetail?.refresh_policy?.updated_at ?? "missing"}`}
                   policy={selectedDetail?.refresh_policy ?? null}
                   provider={activeSelection.provider}
                 />

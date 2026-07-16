@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -64,6 +65,7 @@ _PIPELINE_PATHS = [
     "/v1/ops/pipeline/schedules/{schedule_name}",
     "/v1/ops/pipeline/schedules/{schedule_name}/commands",
     "/v1/ops/pipeline/requests",
+    "/v1/ops/pipeline/requests/preview",
     "/v1/ops/pipeline/requests/{request_id}/run-now",
 ]
 
@@ -107,12 +109,21 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _no_cancellation(*_args: Any, **_kwargs: Any) -> None:
         return None
 
+    async def _canonical_root(
+        _session: Any,
+        *,
+        kind: str,
+        execution_id: str,
+    ) -> PipelineExecution:
+        return _execution(kind=kind, execution_id=execution_id)
+
     app.dependency_overrides[get_session] = _fake_session
     monkeypatch.setattr(
         pipeline_mod,
         "get_current_pipeline_cancellation_detail",
         _no_cancellation,
     )
+    monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _canonical_root)
     return TestClient(app)
 
 
@@ -169,12 +180,15 @@ def _job(
     status: str = "running",
     payload: dict[str, Any] | None = None,
     dagster_run_id: str | None = "run-1",
+    provider: str | None = MOIS_PROVIDER_NAME,
+    dataset_key: str | None = DATASET_KEY_BULK,
 ) -> OpsImportJob:
     return OpsImportJob(
         job_id=job_id,
         kind="feature_update_request",
         load_batch_id=None,
         parent_job_id=None,
+        update_request_id="22222222-2222-2222-2222-222222222222",
         payload=(
             payload
             if payload is not None
@@ -194,12 +208,15 @@ def _job(
         finished_at=None,
         heartbeat_at=_NOW,
         dagster_run_id=dagster_run_id,
+        provider=provider,
+        dataset_key=dataset_key,
     )
 
 
 def _update_request(
     request_id: str = "22222222-2222-2222-2222-222222222222",
     *,
+    job_id: str = "11111111-1111-1111-1111-111111111111",
     status: str = "queued",
 ) -> FeatureUpdateRequest:
     return FeatureUpdateRequest(
@@ -216,9 +233,8 @@ def _update_request(
         run_mode="queued",
         priority=50,
         status=status,
-        dry_run=False,
         matched_scope={"feature_count": 1},
-        job_id="11111111-1111-1111-1111-111111111111",
+        job_id=job_id,
         dagster_run_id="run-1",
         operator="tester",
         reason="unit",
@@ -226,7 +242,7 @@ def _update_request(
         created_at=_NOW,
         started_at=None,
         finished_at=None,
-        updated_at=_NOW,
+        generation=1,
     )
 
 
@@ -251,8 +267,7 @@ def _cancellation_detail(
             "unresolved_member_count": 0,
             "members": [
                 {
-                    "member_kind": root_kind,
-                    "member_id": root_id,
+                    "job_id": "11111111-1111-1111-1111-111111111111",
                     "dagster_run_id": "run-1",
                     "operation_kind": None,
                     "requires_run_termination": True,
@@ -300,8 +315,7 @@ def _cancellation_domain_detail() -> PipelineCancellationDetail:
         members=(
             PipelineCancellationMember(
                 cancellation_id="77777777-7777-4777-8777-777777777777",
-                member_kind="import_job",
-                member_id="11111111-1111-1111-1111-111111111111",
+                job_id="11111111-1111-1111-1111-111111111111",
                 dagster_run_id="run-1",
                 operation_kind=None,
                 requires_run_termination=True,
@@ -349,23 +363,24 @@ def _execution(
     *,
     kind: str = "import_job",
     execution_id: str = "11111111-1111-1111-1111-111111111111",
+    status: str = "running",
     cancellation: PipelineCancellationSummary | None = None,
 ) -> PipelineExecution:
     return PipelineExecution(
         kind=kind,
         id=execution_id,
-        status="running",
+        status=status,
         created_at=_NOW,
         providers=(MOIS_PROVIDER_NAME,),
         dataset_keys=(DATASET_KEY_BULK,),
-        provider_dataset=(
-            None
-            if kind == "import_job"
-            else PipelineProviderDatasetIdentity(
+        provider_datasets=(
+            PipelineProviderDatasetIdentity(
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
                 sync_scope="default",
-            )
+                operation_member_id="11111111-1111-1111-1111-111111111111",
+                status="running",
+            ),
         ),
         progress=40 if kind == "import_job" else None,
         current_stage="loading" if kind == "import_job" else None,
@@ -377,8 +392,10 @@ def _execution(
         started_at=_NOW,
         finished_at=None,
         dagster_run_id="run-1",
+        dagster_run_status=None,
+        trigger_kind="update_request" if kind == "update_request" else "manual",
+        operation_registry_version=None,
         requested_job_id=(None if kind == "import_job" else "11111111-1111-1111-1111-111111111111"),
-        lineage_owner=None if kind == "import_job" else True,
         linked_job_count=1,
         projected_job=PipelineProjectedJob(
             id="11111111-1111-1111-1111-111111111111",
@@ -391,6 +408,9 @@ def _execution(
             started_at=_NOW,
             finished_at=None,
             dagster_run_id="run-1",
+            dagster_run_status=None,
+            trigger_kind="manual",
+            operation_registry_version=None,
             load_batch_id=None,
             parent_job_id=None,
             depth=0,
@@ -401,10 +421,9 @@ def _execution(
 
 def _counts() -> PipelineStatusCounts:
     return PipelineStatusCounts(
-        import_jobs_by_status={"queued": 2, "running": 1, "failed": 3},
-        update_requests_by_status={"queued": 4, "done": 7},
-        failed_import_jobs_24h=3,
-        failed_update_requests_24h=1,
+        operations_by_status={"queued": 6, "running": 1, "failed": 3, "done": 7},
+        active_operations=7,
+        failed_operations_24h=4,
     )
 
 
@@ -485,6 +504,7 @@ _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
 @pytest.mark.unit
 def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
+    operation_states = {"queued", "running", "done", "failed", "cancelled"}
     for path in _PIPELINE_PATHS:
         assert path in spec["paths"], path
     # kind는 enum 경로 파라미터다 (import_job|update_request).
@@ -496,6 +516,48 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     # 갱신 요청 생성은 기존 6-type scope union 계약을 그대로 공유한다.
     request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert len(request_schema["properties"]["scope"]["oneOf"]) == 6
+    create_response = spec["paths"]["/v1/ops/pipeline/requests"]["post"]["responses"]["201"][
+        "content"
+    ]["application/json"]["schema"]
+    assert create_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
+    preview_response = spec["paths"]["/v1/ops/pipeline/requests/preview"]["post"]["responses"][
+        "200"
+    ]["content"]["application/json"]["schema"]
+    assert preview_response["$ref"].endswith("/FeatureUpdateRequestPreviewResponse")
+    run_now_response = spec["paths"]["/v1/ops/pipeline/requests/{request_id}/run-now"]["post"][
+        "responses"
+    ]["201"]["content"]["application/json"]["schema"]
+    assert run_now_response["$ref"].endswith("/FeatureUpdateRequestMutationResponse")
+    schemas = spec["components"]["schemas"]
+    for schema_name in (
+        "PipelineExecutionRecord",
+        "PipelineExecutionRootRecord",
+        "PipelineProjectedJobRecord",
+    ):
+        schema = schemas[schema_name]
+        assert schema["properties"]["id"]["format"] == "uuid"
+        assert set(schema["properties"]["status"]["enum"]) == operation_states
+        assert {
+            "dagster_run_status",
+            "trigger_kind",
+            "operation_registry_version",
+        } <= set(schema["required"])
+    root_schema = schemas["PipelineExecutionRootRecord"]
+    assert {"projected_job", "cancellation"} <= set(root_schema["required"])
+    assert "lineage_owner" not in root_schema["properties"]
+    pair_schema = schemas["PipelineProviderDatasetIdentityRecord"]
+    assert pair_schema["properties"]["operation_member_id"]["format"] == "uuid"
+    assert set(pair_schema["properties"]["status"]["enum"]) == operation_states
+    import_job_schema = schemas["PipelineImportJobRecord"]
+    assert import_job_schema["properties"]["job_id"]["format"] == "uuid"
+    assert import_job_schema["properties"]["load_batch_id"]["anyOf"][0]["format"] == "uuid"
+    assert import_job_schema["properties"]["parent_job_id"]["anyOf"][0]["format"] == "uuid"
+    assert set(import_job_schema["properties"]["status"]["enum"]) == operation_states
+    assert {
+        "trigger_kind",
+        "operation_registry_version",
+        "dagster_run_status",
+    } <= set(import_job_schema["required"])
     # commands body는 4종 enum이다.
     command_schema = spec["components"]["schemas"]["PipelineScheduleCommandRequest"]
     assert command_schema["properties"]["command"]["enum"] == [
@@ -505,28 +567,65 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "reset",
     ]
     detail_operation = spec["paths"]["/v1/ops/pipeline/dagster-runs/{run_id}"]["get"]
-    assert {"200", "404", "422", "502", "503", "default"} <= set(
-        detail_operation["responses"]
-    )
+    assert {"200", "404", "422", "502", "503", "default"} <= set(detail_operation["responses"])
     assert "/v1/ops/pipeline/nux-seen" not in spec["paths"]
     assert "/v1/ops/dagster/nux-seen" in spec["paths"]
     detail_schema = spec["components"]["schemas"]["DagsterRunDetailData"]
     assert "현재 event page" in detail_schema["properties"]["failure_reason"]["description"]
     assert "현재 event page" in detail_schema["properties"]["failure_events"]["description"]
-    cancel_operation = spec["paths"][
-        "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel"
-    ]["post"]
+    cancel_operation = spec["paths"]["/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel"][
+        "post"
+    ]
     assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
         cancel_operation["responses"]
     )
     for status_code in ("409", "502", "503"):
-        assert cancel_operation["responses"][status_code]["headers"][
-            "Retry-After"
-        ]["schema"] == {"type": "integer"}
+        assert cancel_operation["responses"][status_code]["headers"]["Retry-After"]["schema"] == {
+            "type": "integer"
+        }
     cancel_request = spec["components"]["schemas"]["PipelineCancellationRequest"]
     assert set(cancel_request["properties"]) == {"reason"}
     cancel_run = spec["components"]["schemas"]["PipelineCancellationRunRecord"]
     assert "termination_reserved_at" in cancel_run["properties"]
+    cancellation_root = schemas["PipelineCancellationRootRecord"]
+    cancellation_summary = schemas["PipelineCancellationSummaryRecord"]
+    cancellation_detail = schemas["PipelineCancellationDetailRecord"]
+    assert cancellation_root["properties"]["id"]["format"] == "uuid"
+    assert cancellation_summary["properties"]["cancellation_id"]["format"] == "uuid"
+    assert cancellation_detail["properties"]["cancellation_id"]["format"] == "uuid"
+    assert (
+        cancellation_detail["properties"]["previous_cancellation_id"]["anyOf"][0][
+            "format"
+        ]
+        == "uuid"
+    )
+    root = spec["components"]["schemas"]["PipelineExecutionRootRecord"]
+    assert "provider_datasets" in root["properties"]
+    assert "provider_datasets" in root["required"]
+    assert "provider_dataset" not in root["properties"]
+    pair = spec["components"]["schemas"]["PipelineProviderDatasetIdentityRecord"]
+    assert {"sync_scope", "operation_member_id"} <= set(pair["required"])
+    assert pair["properties"]["operation_member_id"]["type"] == "string"
+    assert "status_source" not in pair["properties"]
+    assert {"dagster_run_status", "trigger_kind", "operation_registry_version"} <= set(
+        root["properties"]
+    )
+    overview = spec["components"]["schemas"]["PipelineOverviewData"]
+    assert {
+        "operations_by_status",
+        "active_operations",
+        "failed_operations_24h",
+    } <= set(overview["properties"])
+    assert "import_jobs_by_status" not in overview["properties"]
+    event_schema = schemas["PipelineJobEventRecord"]
+    assert event_schema["properties"]["event_id"]["format"] == "uuid"
+    assert event_schema["properties"]["job_id"]["format"] == "uuid"
+    for path in (
+        "/v1/ops/pipeline/requests",
+        "/v1/ops/pipeline/requests/{request_id}/run-now",
+    ):
+        conflict = spec["paths"][path]["post"]["responses"]["409"]
+        assert conflict["headers"]["Retry-After"]["schema"] == {"type": "integer"}
 
 
 @pytest.mark.unit
@@ -587,8 +686,7 @@ def test_cancel_execution_uses_authenticated_proxy_actor(
     gated_client = TestClient(app, client=("127.0.0.1", 50000))
 
     response = gated_client.post(
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111/cancel",
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
         headers={
             ADMIN_PROXY_SECRET_HEADER: "pipeline-secret",
             ADMIN_ACTOR_HEADER: "admin:reviewer",
@@ -619,11 +717,14 @@ def test_overview_combines_db_counts_and_dagster(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["import_jobs_by_status"] == {"queued": 2, "running": 1, "failed": 3}
-    assert data["active_import_jobs"] == 3
-    assert data["active_update_requests"] == 4
-    assert data["failed_import_jobs_24h"] == 3
-    assert data["failed_update_requests_24h"] == 1
+    assert data["operations_by_status"] == {
+        "queued": 6,
+        "running": 1,
+        "failed": 3,
+        "done": 7,
+    }
+    assert data["active_operations"] == 7
+    assert data["failed_operations_24h"] == 4
     dagster = data["dagster"]
     assert dagster["status"] == "ok"
     assert dagster["version"] == "1.13.7"
@@ -656,7 +757,12 @@ def test_overview_dagster_unavailable_keeps_db_counts(
     data = response.json()["data"]
     assert data["dagster"]["status"] == "unavailable"
     assert data["dagster"]["errors"] == ["dagster down"]
-    assert data["import_jobs_by_status"] == {"queued": 2, "running": 1, "failed": 3}
+    assert data["operations_by_status"] == {
+        "queued": 6,
+        "running": 1,
+        "failed": 3,
+        "done": 7,
+    }
 
 
 @pytest.mark.unit
@@ -725,12 +831,16 @@ def test_executions_list_passes_filters_and_maps_rows(
         "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
     )
     assert items[1]["requested_job_id"] == ("11111111-1111-1111-1111-111111111111")
-    assert items[1]["provider_dataset"] == {
-        "provider": MOIS_PROVIDER_NAME,
-        "dataset_key": DATASET_KEY_BULK,
-        "sync_scope": "default",
-    }
-    assert items[1]["lineage_owner"] is True
+    assert items[1]["provider_datasets"] == [
+        {
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "default",
+            "operation_member_id": "11111111-1111-1111-1111-111111111111",
+            "status": "running",
+        }
+    ]
+    assert items[1]["projected_job"]["id"] == "11111111-1111-1111-1111-111111111111"
     assert items[1]["dagster_run_id"] == "run-1"
 
 
@@ -756,6 +866,12 @@ def test_execution_detail_import_job_links_request_and_events(
         assert job_id == "11111111-1111-1111-1111-111111111111"
         return _job()
 
+    async def _root(*_args: Any, **_kwargs: Any) -> PipelineExecution:
+        return _execution(
+            kind="update_request",
+            execution_id="22222222-2222-2222-2222-222222222222",
+        )
+
     async def _get_request(_session: Any, request_id: str) -> FeatureUpdateRequest | None:
         assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request()
@@ -772,12 +888,13 @@ def test_execution_detail_import_job_links_request_and_events(
         **kwargs: Any,
     ) -> PipelineCancellationDetail:
         assert kwargs == {
-            "kind": "import_job",
-            "execution_id": "11111111-1111-1111-1111-111111111111",
+            "kind": "update_request",
+            "execution_id": "22222222-2222-2222-2222-222222222222",
         }
         return _cancellation_domain_detail()
 
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
+    monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _root)
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
     monkeypatch.setattr(
@@ -826,9 +943,17 @@ def test_execution_detail_update_request_links_job(
     ) -> OpsImportJobEventPage:
         return OpsImportJobEventPage(items=(_event(),), next_cursor=None)
 
+    async def _root(*_args: Any, **_kwargs: Any) -> PipelineExecution:
+        return _execution(
+            kind="update_request",
+            execution_id="22222222-2222-2222-2222-222222222222",
+            status="queued",
+        )
+
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
     monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
     monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
+    monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _root)
 
     response = client.get(
         "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
@@ -836,11 +961,117 @@ def test_execution_detail_update_request_links_job(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["execution"]["kind"] == "update_request"
-    assert data["execution"]["provider"] == MOIS_PROVIDER_NAME
+    execution = data["execution"]
+    root = data["root"]
+    assert execution["kind"] == root["kind"] == "update_request"
+    assert execution["id"] == root["id"]
+    assert execution["status"] == root["status"] == "queued"
+    assert execution["provider"] == root["provider_datasets"][0]["provider"]
+    assert execution["dataset_key"] == root["provider_datasets"][0]["dataset_key"]
+    assert execution["trigger_kind"] == root["trigger_kind"] == "update_request"
     assert data["import_job"]["status"] == "running"
     assert data["cancellation"] is None
     assert data["events_next_cursor"] is None
+
+
+@pytest.mark.unit
+def test_execution_detail_non_exact_request_keeps_arrays_on_root_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = replace(
+        _update_request(),
+        scope_type="feature_ids",
+        scope={"type": "feature_ids", "feature_ids": ["feature-1"]},
+        providers=("provider-a", "provider-b"),
+        dataset_keys=("dataset-a", "dataset-b"),
+    )
+    root = replace(
+        _execution(
+            kind="update_request",
+            execution_id=request.request_id,
+            status=request.status,
+        ),
+        providers=request.providers,
+        dataset_keys=request.dataset_keys,
+        provider_datasets=(),
+        scope_type=request.scope_type,
+    )
+
+    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
+        return request
+
+    async def _get_job(_session: Any, _job_id: str) -> OpsImportJob | None:
+        return _job(provider=None, dataset_key=None)
+
+    async def _events(
+        _session: Any, _job_id: str | None = None, **_kwargs: Any
+    ) -> OpsImportJobEventPage:
+        return OpsImportJobEventPage(items=(), next_cursor=None)
+
+    async def _root(*_args: Any, **_kwargs: Any) -> PipelineExecution:
+        return root
+
+    monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
+    monkeypatch.setattr(pipeline_mod, "get_ops_import_job", _get_job)
+    monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
+    monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _root)
+
+    response = client.get(f"/v1/ops/pipeline/executions/update_request/{request.request_id}")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["execution"]["provider"] is None
+    assert data["execution"]["dataset_key"] is None
+    assert data["execution"]["trigger_kind"] == "update_request"
+    assert data["root"]["providers"] == ["provider-a", "provider-b"]
+    assert data["root"]["dataset_keys"] == ["dataset-a", "dataset-b"]
+    assert data["root"]["provider_datasets"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("scope_type", "scope", "job_provider", "job_dataset_key"),
+    [
+        (
+            "feature_ids",
+            {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            None,
+            None,
+        ),
+        (
+            "provider_dataset",
+            {
+                "type": "provider_dataset",
+                "provider": "typed-provider",
+                "dataset_key": "typed-dataset",
+            },
+            "typed-provider",
+            "typed-dataset",
+        ),
+    ],
+)
+def test_request_execution_scalar_identity_uses_linked_typed_job(
+    scope_type: str,
+    scope: dict[str, Any],
+    job_provider: str | None,
+    job_dataset_key: str | None,
+) -> None:
+    request = replace(
+        _update_request(),
+        scope_type=scope_type,
+        scope=scope,
+        providers=("provider-array",),
+        dataset_keys=("dataset-array",),
+    )
+
+    execution = pipeline_mod._execution_from_request(
+        request,
+        _job(provider=job_provider, dataset_key=job_dataset_key),
+    )
+
+    assert execution.provider == job_provider
+    assert execution.dataset_key == job_dataset_key
+    assert execution.trigger_kind == "update_request"
 
 
 @pytest.mark.unit
@@ -991,6 +1222,7 @@ def test_cancel_execution_maps_typed_failures_to_problem_details(
     )
 
     for error, expected_status, expected_code, retry_after in cases:
+
         async def _cancel(
             _error: Exception = error,
             **_kwargs: Any,
@@ -1003,19 +1235,16 @@ def test_cancel_execution_maps_typed_failures_to_problem_details(
             _cancel,
         )
         response = client.post(
-            "/v1/ops/pipeline/executions/import_job/"
-            "11111111-1111-1111-1111-111111111111/cancel",
+            "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel",
             json={"reason": "operator request"},
         )
 
         assert response.status_code == expected_status
-        assert response.headers["content-type"].startswith(
-            "application/problem+json"
-        )
+        assert response.headers["content-type"].startswith("application/problem+json")
         assert response.json()["code"] == expected_code
         assert response.headers.get("retry-after") == retry_after
         if expected_status != 404:
-            assert response.json()["details"]["cancellation_id"] == (
+            assert response.json()["details"]["cancellation_id"] == str(
                 detail.cancellation_id
             )
 
@@ -1041,8 +1270,7 @@ def test_cancel_update_request_uses_same_coordinator(
     )
 
     response = client.post(
-        "/v1/ops/pipeline/executions/update_request/"
-        "22222222-2222-2222-2222-222222222222/cancel",
+        "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222/cancel",
         json={"reason": "잘못된 scope"},
     )
 
@@ -1625,13 +1853,12 @@ def test_schedule_command_run_launches_job(
 
 
 @pytest.mark.unit
-def test_create_request_dry_run_returns_preview(
+def test_preview_request_returns_preview(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPreview:
-        assert kwargs["dry_run"] is True
         return FeatureUpdateRequestPreview(
             scope_type="provider_dataset",
             scope={
@@ -1647,8 +1874,37 @@ def test_create_request_dry_run_returns_preview(
             matched_scope={"feature_count": 3},
         )
 
-    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(fur_mod, "preview_feature_update_request_repo", _enqueue)
 
+    response = client.post(
+        "/v1/ops/pipeline/requests/preview",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["result_kind"] == "preview"
+    assert {
+        "request_id",
+        "job_id",
+        "created_at",
+        "generation",
+        "status_url",
+    }.isdisjoint(body["data"])
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_create_request_rejects_dry_run_flag(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
     response = client.post(
         "/v1/ops/pipeline/requests",
         json={
@@ -1661,10 +1917,7 @@ def test_create_request_dry_run_returns_preview(
         },
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["data"]["status"] == "dry_run"
-    assert body["data"]["request_id"] is None
+    assert response.status_code == 422
     assert session.begin_count == 0
 
 
@@ -1675,8 +1928,7 @@ def test_create_request_persists_with_new_status_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
-        assert kwargs["dry_run"] is False
-        assert kwargs["operator"] == "tester"
+        assert kwargs["operator"] == "local-dev"
         assert kwargs["reason"] == "stale 복구"
         return _update_request()
 
@@ -1690,7 +1942,6 @@ def test_create_request_persists_with_new_status_url(
                 "provider": MOIS_PROVIDER_NAME,
                 "dataset_key": DATASET_KEY_BULK,
             },
-            "operator": "tester",
             "reason": "stale 복구",
         },
     )
@@ -1700,6 +1951,7 @@ def test_create_request_persists_with_new_status_url(
     assert body["data"]["status_url"] == (
         "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
     )
+    assert body["data"]["generation"] == 1
     assert session.begin_count == 1
 
 
@@ -1757,8 +2009,12 @@ def test_run_now_requeues_as_new_request(
 
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
         assert kwargs["run_mode"] == "now"
+        assert kwargs["operator"] == "local-dev"
         assert kwargs["reason"] == ("run-now from 22222222-2222-2222-2222-222222222222")
-        return _update_request(request_id="33333333-3333-3333-3333-333333333333")
+        return _update_request(
+            request_id="33333333-3333-3333-3333-333333333333",
+            job_id="44444444-4444-4444-8444-444444444444",
+        )
 
     monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
     monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
@@ -1771,10 +2027,40 @@ def test_run_now_requeues_as_new_request(
     assert response.status_code == 201
     body = response.json()
     assert body["data"]["request_id"] == "33333333-3333-3333-3333-333333333333"
+    assert body["data"]["job_id"] == "44444444-4444-4444-8444-444444444444"
+    assert body["data"]["job_id"] != _update_request().job_id
+    assert body["data"]["generation"] == 1
     assert body["data"]["status_url"] == (
         "/v1/ops/pipeline/executions/update_request/33333333-3333-3333-3333-333333333333"
     )
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": []},
+                "operator": "spoofed",
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
+            {"operator": "spoofed"},
+        ),
+    ],
+)
+def test_pipeline_request_mutations_reject_operator_override(
+    client: TestClient,
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

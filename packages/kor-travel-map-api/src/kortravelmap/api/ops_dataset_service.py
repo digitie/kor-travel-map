@@ -6,6 +6,8 @@ DB 조회 조립·freshness 계산·orphan mutation 가드를 router에서 분�
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import overload
+from urllib.parse import quote, urlencode
 
 import httpx
 from kortravelmap.core import kst_now
@@ -15,17 +17,12 @@ from kortravelmap.infra.dataset_status_repo import (
     DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
     list_latest_dataset_executions,
-    list_ops_import_jobs_by_ids,
-)
-from kortravelmap.infra.feature_update_repo import (
-    FeatureUpdateRequest,
-    list_update_requests,
 )
 from kortravelmap.infra.ops_repo import (
-    OpsImportJob,
     OpsImportJobEvent,
     list_ops_import_job_events,
 )
+from kortravelmap.infra.pipeline_repo import list_pipeline_executions
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
     get_provider_refresh_policy,
@@ -53,12 +50,14 @@ from kortravelmap.api.ops_dataset_schema import (
     OpsDatasetGridRow,
     OpsDatasetLatestExecution,
     OpsDatasetPreviewCapability,
-    OpsDatasetRunSummary,
+    OpsDatasetProjectedJob,
+    OpsDatasetProviderDataset,
     OpsDatasetScheduleSummary,
     OpsDatasetScopeState,
     OpsDatasetsGridData,
     OpsIssueSummary,
 )
+from kortravelmap.api.pipeline_cancellation_schema import cancellation_summary_record
 from kortravelmap.api.provider_catalog import (
     PROVIDER_DATASET_CATALOG,
     ProviderDatasetCatalogEntry,
@@ -194,26 +193,68 @@ def _schedule_summary(state: DatasetScheduleState) -> OpsDatasetScheduleSummary:
     )
 
 
+@overload
+def _latest_execution(item: None) -> None:
+    ...
+
+
+@overload
+def _latest_execution(item: DatasetLatestExecution) -> OpsDatasetLatestExecution:
+    ...
+
+
 def _latest_execution(
     item: DatasetLatestExecution | None,
 ) -> OpsDatasetLatestExecution | None:
     if item is None:
         return None
+    root = item.execution
+    projected = root.projected_job
     return OpsDatasetLatestExecution(
-        kind=item.kind,
-        execution_id=item.execution_id,
-        status=item.status,
-        status_source=item.status_source,
-        job_status=item.job_status,
-        created_at=item.created_at,
-        started_at=item.started_at,
-        finished_at=item.finished_at,
-        dagster_run_id=item.dagster_run_id,
-        job_id=item.job_id,
-        request_id=item.request_id,
-        progress=item.progress,
-        current_stage=item.current_stage,
-        error_message=item.error_message,
+        kind=root.kind,
+        id=root.id,
+        detail_url=f"/v1/ops/pipeline/executions/{root.kind}/{root.id}",
+        status=root.status,
+        pair_status=item.pair_status,
+        operation_member_id=item.operation_member_id,
+        providers=list(root.providers),
+        dataset_keys=list(root.dataset_keys),
+        provider_datasets=[
+            OpsDatasetProviderDataset(
+                provider=pair.provider,
+                dataset_key=pair.dataset_key,
+                sync_scope=pair.sync_scope,
+                operation_member_id=pair.operation_member_id,
+                status=pair.status,
+            )
+            for pair in root.provider_datasets
+        ],
+        created_at=root.created_at,
+        started_at=root.started_at,
+        finished_at=root.finished_at,
+        dagster_run_id=root.dagster_run_id,
+        dagster_run_status=root.dagster_run_status,
+        trigger_kind=root.trigger_kind,
+        operation_registry_version=root.operation_registry_version,
+        error_message=root.error_message,
+        projected_job=OpsDatasetProjectedJob(
+            id=projected.id,
+            job_kind=projected.job_kind,
+            status=projected.status,
+            progress=projected.progress,
+            current_stage=projected.current_stage,
+            error_message=projected.error_message,
+            created_at=projected.created_at,
+            started_at=projected.started_at,
+            finished_at=projected.finished_at,
+            dagster_run_id=projected.dagster_run_id,
+            dagster_run_status=projected.dagster_run_status,
+            trigger_kind=projected.trigger_kind,
+            operation_registry_version=projected.operation_registry_version,
+            depth=projected.depth,
+            detail_url=f"/v1/ops/pipeline/executions/import_job/{projected.id}",
+        ),
+        cancellation=cancellation_summary_record(root.cancellation),
     )
 
 
@@ -394,38 +435,6 @@ def _scope_state(
     )
 
 
-def _run_summary(
-    update_request: FeatureUpdateRequest,
-    job: OpsImportJob | None,
-) -> OpsDatasetRunSummary:
-    return OpsDatasetRunSummary(
-        request_id=update_request.request_id,
-        status=update_request.status,
-        run_mode=update_request.run_mode,
-        scope_type=update_request.scope_type,
-        dry_run=update_request.dry_run,
-        priority=update_request.priority,
-        job_id=update_request.job_id,
-        dagster_run_id=(
-            update_request.dagster_run_id
-            or (job.dagster_run_id if job is not None else None)
-        ),
-        job_status=job.status if job is not None else None,
-        job_progress=job.progress if job is not None else None,
-        job_current_stage=job.current_stage if job is not None else None,
-        operator=update_request.operator,
-        reason=update_request.reason,
-        error_message=(
-            update_request.error_message
-            or (job.error_message if job is not None else None)
-        ),
-        created_at=update_request.created_at,
-        started_at=update_request.started_at,
-        finished_at=update_request.finished_at,
-        updated_at=update_request.updated_at,
-    )
-
-
 def _event_record(event: OpsImportJobEvent) -> OpsDatasetEventRecord:
     return OpsDatasetEventRecord(
         event_id=event.event_id,
@@ -474,17 +483,12 @@ async def load_dataset_detail(
             )
         ]
 
-    requests_page = await list_update_requests(
+    executions_page = await list_pipeline_executions(
         session,
         provider=provider,
         dataset_key=dataset_key,
         limit=_RECENT_RUNS_LIMIT,
     )
-    jobs = await list_ops_import_jobs_by_ids(
-        session,
-        [item.job_id for item in requests_page.items if item.job_id],
-    )
-    jobs_by_id = {job.job_id: job for job in jobs}
     events_page = await list_ops_import_job_events(
         session,
         provider=provider,
@@ -525,12 +529,30 @@ async def load_dataset_detail(
             provider_refresh_policy_record(policy) if policy is not None else None
         ),
         recent_runs=[
-            _run_summary(
-                item,
-                jobs_by_id.get(item.job_id) if item.job_id is not None else None,
+            _latest_execution(
+                DatasetLatestExecution(
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    execution=item,
+                    operation_member_id=pair.operation_member_id,
+                    pair_status=pair.status,
+                )
             )
-            for item in requests_page.items
+            for item in executions_page.items
+            for pair in item.provider_datasets
+            if pair.provider == provider and pair.dataset_key == dataset_key
         ],
+        recent_runs_next_cursor=executions_page.next_cursor,
+        pipeline_history_url=(
+            "/v1/ops/pipeline/executions?"
+            + urlencode(
+                {
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                },
+                quote_via=quote,
+            )
+        ),
         recent_events=[_event_record(item) for item in events_page.items],
         dataset_issues=_issue_summary(dataset_issues),
         provider_issues=_issue_summary(provider_issues),

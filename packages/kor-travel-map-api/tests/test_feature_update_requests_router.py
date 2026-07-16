@@ -24,6 +24,12 @@ from kortravelmap.api.pipeline_cancellation_schema import PipelineCancellationDe
 from kortravelmap.api.routers import feature_update_requests as router_mod
 from kortravelmap.api.settings import ApiSettings
 
+_REQUEST_ID = "22222222-2222-4222-8222-222222222222"
+_MISSING_REQUEST_ID = "33333333-3333-4333-8333-333333333333"
+_RUN_NOW_REQUEST_ID = "44444444-4444-4444-8444-444444444444"
+_JOB_ID = "55555555-5555-4555-8555-555555555555"
+_RUN_NOW_JOB_ID = "66666666-6666-4666-8666-666666666666"
+
 
 class _Tx:
     async def __aenter__(self) -> None:
@@ -60,7 +66,8 @@ def client(session: _FakeSession) -> TestClient:
 
 def _request(
     *,
-    request_id: str = "req-1",
+    request_id: str = _REQUEST_ID,
+    job_id: str = _JOB_ID,
     state: str = "queued",
     run_mode: str = "queued",
 ) -> FeatureUpdateRequest:
@@ -75,9 +82,8 @@ def _request(
         run_mode=run_mode,
         priority=50,
         status=state,
-        dry_run=False,
         matched_scope={"feature_count": 1, "sigungu_codes": []},
-        job_id="job-1",
+        job_id=job_id,
         dagster_run_id=None,
         operator="tester",
         reason="unit",
@@ -85,7 +91,7 @@ def _request(
         created_at=now,
         started_at=None,
         finished_at=None,
-        updated_at=now,
+        generation=1,
     )
 
 
@@ -107,8 +113,7 @@ def _cancellation_detail(request_id: str) -> PipelineCancellationDetailRecord:
             "unresolved_member_count": 0,
             "members": [
                 {
-                    "member_kind": "update_request",
-                    "member_id": request_id,
+                    "job_id": _JOB_ID,
                     "dagster_run_id": None,
                     "operation_kind": None,
                     "requires_run_termination": False,
@@ -141,6 +146,7 @@ def _preview() -> FeatureUpdateRequestPreview:
 def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/v1/admin/features/update-requests" in spec["paths"]
+    assert "/v1/admin/features/update-requests/preview" in spec["paths"]
     assert "/v1/admin/features/update-requests/{request_id}" in spec["paths"]
     assert "/v1/admin/features/update-requests/{request_id}/cancel" in spec["paths"]
     assert "/v1/admin/features/update-requests/{request_id}/run-now" in spec["paths"]
@@ -148,55 +154,201 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/feature-update-requests/{request_id}" not in spec["paths"]
     assert "FeatureUpdateRequestCreateRequest" in spec["components"]["schemas"]
     assert "FeatureUpdateRequestRecord" in spec["components"]["schemas"]
-    request_schema = spec["components"]["schemas"][
-        "FeatureUpdateRequestCreateRequest"
+    assert "FeatureUpdateRequestCreatedRecord" in spec["components"]["schemas"]
+    assert "FeatureUpdateRequestPreviewRecord" in spec["components"]["schemas"]
+    assert "FeatureUpdateRequestPreviewRequest" in spec["components"]["schemas"]
+    assert "FeatureUpdateRequestPreviewResponse" in spec["components"]["schemas"]
+    assert "FeatureUpdateRequestMutationResponse" in spec["components"]["schemas"]
+    record_schema = spec["components"]["schemas"]["FeatureUpdateRequestRecord"]
+    assert {
+        "request_id",
+        "job_id",
+        "dagster_run_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "generation",
+        "status_url",
+    } <= set(record_schema["required"])
+    assert record_schema["properties"]["request_id"]["format"] == "uuid"
+    assert record_schema["properties"]["job_id"]["format"] == "uuid"
+    assert record_schema["properties"]["scope"]["discriminator"]["propertyName"] == "type"
+    assert len(record_schema["properties"]["scope"]["oneOf"]) == 6
+    assert record_schema["properties"]["update_policy"]["$ref"].endswith(
+        "/FeatureUpdatePolicy"
+    )
+    preview_schema = spec["components"]["schemas"]["FeatureUpdateRequestPreviewRecord"]
+    assert {
+        "request_id",
+        "job_id",
+        "dagster_run_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "generation",
+        "status_url",
+    }.isdisjoint(preview_schema["properties"])
+    create_data_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateResponse"][
+        "properties"
+    ]["data"]
+    assert create_data_schema["$ref"].endswith("/FeatureUpdateRequestCreatedRecord")
+    preview_response = spec["paths"]["/v1/admin/features/update-requests/preview"]["post"][
+        "responses"
+    ]["200"]["content"]["application/json"]["schema"]
+    assert preview_response["$ref"].endswith("/FeatureUpdateRequestPreviewResponse")
+    run_now_response = spec["paths"]["/v1/admin/features/update-requests/{request_id}/run-now"][
+        "post"
+    ]["responses"]["201"]["content"]["application/json"]["schema"]
+    assert run_now_response["$ref"].endswith("/FeatureUpdateRequestMutationResponse")
+    request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
+    assert "dry_run" not in request_schema["properties"]
+    assert "operator" not in request_schema["properties"]
+    preview_request_schema = spec["components"]["schemas"][
+        "FeatureUpdateRequestPreviewRequest"
     ]
+    assert "dry_run" not in preview_request_schema["properties"]
+    sigungu_match = spec["components"]["schemas"]["SigunguByRadiusScope"][
+        "properties"
+    ]["match"]
+    assert sigungu_match["const"] == "intersects"
     scope_schema = request_schema["properties"]["scope"]
     assert scope_schema["discriminator"]["propertyName"] == "type"
     assert len(scope_schema["oneOf"]) == 6
     assert request_schema["properties"]["providers"]["maxItems"] == 32
+    assert request_schema["properties"]["providers"]["uniqueItems"] is True
+    assert request_schema["properties"]["dataset_keys"]["maxItems"] == 64
+    assert request_schema["properties"]["dataset_keys"]["uniqueItems"] is True
+    assert request_schema["properties"]["priority"]["minimum"] == 0
+    assert request_schema["properties"]["priority"]["maximum"] == 1000
+    bbox_properties = spec["components"]["schemas"]["BboxScope"]["properties"]
+    for field in ("min_lon", "max_lon"):
+        assert bbox_properties[field]["minimum"] == -180
+        assert bbox_properties[field]["maximum"] == 180
+        assert {"ge", "le"}.isdisjoint(bbox_properties[field])
+    for field in ("min_lat", "max_lat"):
+        assert bbox_properties[field]["minimum"] == -90
+        assert bbox_properties[field]["maximum"] == 90
+        assert {"ge", "le"}.isdisjoint(bbox_properties[field])
+    point_properties = spec["components"]["schemas"]["FeatureUpdatePoint"][
+        "properties"
+    ]
+    assert point_properties["lon"]["minimum"] == -180
+    assert point_properties["lon"]["maximum"] == 180
+    assert point_properties["lat"]["minimum"] == -90
+    assert point_properties["lat"]["maximum"] == 90
+    for scope_name in ("CenterRadiusScope", "SigunguByRadiusScope"):
+        radius_schema = spec["components"]["schemas"][scope_name]["properties"][
+            "radius_km"
+        ]
+        assert radius_schema["exclusiveMinimum"] == 0
+        assert radius_schema["maximum"] == 500
+        assert {"gt", "le"}.isdisjoint(radius_schema)
+    reason_schema = next(
+        item
+        for item in request_schema["properties"]["reason"]["anyOf"]
+        if item.get("type") == "string"
+    )
+    assert reason_schema["minLength"] == 1
+    assert reason_schema["maxLength"] == 500
+    assert spec["components"]["schemas"]["FeatureIdsScope"]["properties"][
+        "feature_ids"
+    ]["uniqueItems"] is True
+    assert spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"][
+        "target_keys"
+    ]["uniqueItems"] is True
     update_policy_schema = spec["components"]["schemas"]["FeatureUpdatePolicy"]
     assert update_policy_schema["additionalProperties"] is False
-    cancel_operation = spec["paths"][
-        "/v1/admin/features/update-requests/{request_id}/cancel"
-    ]["post"]
+    assert "required" not in update_policy_schema
+    assert update_policy_schema["properties"]["include_inactive"]["type"] == "boolean"
+    assert "anyOf" not in update_policy_schema["properties"]["include_inactive"]
+    list_parameters = {
+        parameter["name"]: parameter["schema"]
+        for parameter in spec["paths"]["/v1/admin/features/update-requests"]["get"][
+            "parameters"
+        ]
+    }
+    assert set(list_parameters["scope_type"]["anyOf"][0]["enum"]) == {
+        "feature_ids",
+        "center_radius",
+        "sigungu_by_radius",
+        "bbox",
+        "provider_dataset",
+        "cache_target_keys",
+    }
+    for path, method in (
+        ("/v1/admin/features/update-requests/{request_id}", "get"),
+        ("/v1/admin/features/update-requests/{request_id}/cancel", "post"),
+        ("/v1/admin/features/update-requests/{request_id}/run-now", "post"),
+    ):
+        parameter = spec["paths"][path][method]["parameters"][0]
+        assert parameter["schema"]["format"] == "uuid"
+    cancel_operation = spec["paths"]["/v1/admin/features/update-requests/{request_id}/cancel"][
+        "post"
+    ]
     assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
         cancel_operation["responses"]
     )
     for status_code in ("409", "502", "503"):
-        assert cancel_operation["responses"][status_code]["headers"][
-            "Retry-After"
-        ]["schema"] == {"type": "integer"}
+        assert cancel_operation["responses"][status_code]["headers"]["Retry-After"]["schema"] == {
+            "type": "integer"
+        }
+    for path in (
+        "/v1/admin/features/update-requests",
+        "/v1/admin/features/update-requests/{request_id}/run-now",
+    ):
+        conflict = spec["paths"][path]["post"]["responses"]["409"]
+        assert conflict["headers"]["Retry-After"]["schema"] == {"type": "integer"}
 
 
 @pytest.mark.unit
-def test_create_dry_run_returns_preview_without_transaction(
+def test_preview_returns_preview_without_transaction(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPreview:
-        assert kwargs["dry_run"] is True
         assert kwargs["scope"] == {"type": "feature_ids", "feature_ids": ["feature-1"]}
         return _preview()
 
-    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "preview_feature_update_request_repo", _enqueue)
 
     response = client.post(
-        "/v1/admin/features/update-requests",
+        "/v1/admin/features/update-requests/preview",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "providers": [MOIS_PROVIDER_NAME],
             "dataset_keys": [DATASET_KEY_BULK],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["result_kind"] == "preview"
+    assert {
+        "request_id",
+        "job_id",
+        "dagster_run_id",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "generation",
+        "status_url",
+    }.isdisjoint(body["data"])
+    assert body["data"]["matched_scope"]["feature_count"] == 1
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_create_rejects_dry_run_flag(client: TestClient, session: _FakeSession) -> None:
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "dry_run": True,
         },
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["data"]["status"] == "dry_run"
-    assert body["data"]["request_id"] is None
-    assert body["data"]["matched_scope"]["feature_count"] == 1
+    assert response.status_code == 422
     assert session.begin_count == 0
 
 
@@ -207,8 +359,8 @@ def test_create_actual_request_uses_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
-        assert kwargs["dry_run"] is False
         assert kwargs["priority"] == 75
+        assert kwargs["operator"] == "local-dev"
         return _request()
 
     monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
@@ -223,47 +375,51 @@ def test_create_actual_request_uses_transaction(
     )
 
     assert response.status_code == 201
-    assert response.json()["data"]["status_url"] == (
-        "/v1/admin/features/update-requests/req-1"
+    data = response.json()["data"]
+    assert data["result_kind"] == "request"
+    assert data["job_id"] == _JOB_ID
+    assert data["created_at"] is not None
+    assert data["generation"] == 1
+    assert data["status_url"] == (
+        f"/v1/admin/features/update-requests/{_REQUEST_ID}"
     )
     assert session.begin_count == 1
 
 
 @pytest.mark.unit
-def test_unversioned_update_request_alias_is_not_mounted(
+def test_legacy_update_request_aliases_are_not_mounted(
     client: TestClient,
     session: _FakeSession,
 ) -> None:
-    response = client.post(
+    for prefix in (
         "/feature-update-requests",
-        json={
-            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
-            "run_mode": "queued",
-        },
-    )
-
-    assert response.status_code == 404
-    assert client.get("/feature-update-requests/req-1").status_code == 404
+        "/v1/admin/feature-update-requests",
+    ):
+        response = client.post(
+            prefix,
+            json={
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "run_mode": "queued",
+            },
+        )
+        assert response.status_code == 404
+        assert client.get(f"{prefix}/{_REQUEST_ID}").status_code == 404
     assert session.begin_count == 0
 
 
 @pytest.mark.unit
-def test_create_rejects_legacy_center_radius_shape_before_enqueue(
+def test_preview_rejects_legacy_center_radius_shape_before_enqueue(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _unexpected_enqueue(
-        _session: Any, **_kwargs: Any
-    ) -> FeatureUpdateRequest:
+    async def _unexpected_enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
         raise AssertionError("validation should run before enqueue")
 
-    monkeypatch.setattr(
-        service_mod, "enqueue_feature_update_request", _unexpected_enqueue
-    )
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _unexpected_enqueue)
 
     response = client.post(
-        "/v1/admin/features/update-requests",
+        "/v1/admin/features/update-requests/preview",
         json={
             "scope": {
                 "type": "center_radius",
@@ -271,7 +427,6 @@ def test_create_rejects_legacy_center_radius_shape_before_enqueue(
                 "lat": 37.0,
                 "radius_km": 5,
             },
-            "dry_run": True,
         },
     )
 
@@ -301,6 +456,168 @@ def test_create_rejects_unknown_update_policy_key(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("invalid_value", ["false", 0, None])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/admin/features/update-requests",
+        "/v1/admin/features/update-requests/preview",
+    ],
+)
+def test_request_rejects_non_boolean_update_policy_value(
+    client: TestClient,
+    session: _FakeSession,
+    path: str,
+    invalid_value: Any,
+) -> None:
+    response = client.post(
+        path,
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "update_policy": {"include_inactive": invalid_value},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/admin/features/update-requests",
+            {
+                "scope": {
+                    "type": "center_radius",
+                    "center": {"lon": "127.0", "lat": 37.0},
+                    "radius_km": 5,
+                }
+            },
+        ),
+        (
+            "/v1/admin/features/update-requests/preview",
+            {
+                "scope": {
+                    "type": "center_radius",
+                    "center": {"lon": 127.0, "lat": 37.0},
+                    "radius_km": True,
+                }
+            },
+        ),
+        (
+            "/v1/admin/features/update-requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "priority": "75",
+            },
+        ),
+        (
+            f"/v1/admin/features/update-requests/{_REQUEST_ID}/run-now",
+            {"priority": True},
+        ),
+        (
+            "/v1/admin/features/update-requests",
+            {
+                "scope": {
+                    "type": "center_radius",
+                    "center": {"lon": 10**1000, "lat": 37},
+                    "radius_km": 5,
+                }
+            },
+        ),
+    ],
+)
+def test_request_rejects_coerced_numeric_input(
+    client: TestClient,
+    session: _FakeSession,
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", ["   ", "x" * 501])
+def test_request_rejects_invalid_audit_reason(
+    client: TestClient,
+    session: _FakeSession,
+    reason: str,
+) -> None:
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": []},
+            "reason": reason,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "scope"),
+    [
+        (
+            "/v1/admin/features/update-requests",
+            {"type": "feature_ids", "feature_ids": ["feature-1", "feature-1"]},
+        ),
+        (
+            "/v1/admin/features/update-requests/preview",
+            {
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["poi-1", "poi-1"],
+            },
+        ),
+    ],
+)
+def test_request_rejects_duplicate_scope_items(
+    client: TestClient,
+    session: _FakeSession,
+    path: str,
+    scope: dict[str, Any],
+) -> None:
+    response = client.post(path, json={"scope": scope})
+
+    assert response.status_code == 422
+    assert "unique" in str(response.json()["errors"])
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_request_rejects_redundant_provider_dataset_filters(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+            },
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "must not repeat" in str(response.json()["errors"])
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_create_rejects_unbounded_provider_filter_list(
     client: TestClient,
     session: _FakeSession,
@@ -319,27 +636,41 @@ def test_create_rejects_unbounded_provider_filter_list(
 
 
 @pytest.mark.unit
-def test_create_rejects_non_refreshable_provider_dataset_before_enqueue(
+def test_create_rejects_duplicate_filter_items(
     client: TestClient,
     session: _FakeSession,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _unexpected_enqueue(
-        _session: Any, **_kwargs: Any
-    ) -> FeatureUpdateRequest:
-        raise AssertionError("non-refreshable request should be rejected")
-
-    monkeypatch.setattr(
-        service_mod, "enqueue_feature_update_request", _unexpected_enqueue
-    )
-
     response = client.post(
         "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME, MOIS_PROVIDER_NAME],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert "unique" in str(response.json()["errors"])
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_preview_rejects_non_refreshable_provider_dataset_before_enqueue(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _unexpected_enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise AssertionError("non-refreshable request should be rejected")
+
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _unexpected_enqueue)
+
+    response = client.post(
+        "/v1/admin/features/update-requests/preview",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "providers": [MOIS_PROVIDER_NAME],
             "dataset_keys": [DATASET_KEY_DETAIL],
-            "dry_run": True,
         },
     )
 
@@ -352,7 +683,7 @@ def test_create_rejects_non_refreshable_provider_dataset_before_enqueue(
 
 
 @pytest.mark.unit
-def test_create_sigungu_scope_without_kor_travel_geo_returns_503(
+def test_preview_sigungu_scope_without_kor_travel_geo_returns_503(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -362,14 +693,13 @@ def test_create_sigungu_scope_without_kor_travel_geo_returns_503(
     monkeypatch.setattr(router_mod, "KorTravelMapSettings", _Settings)
 
     response = client.post(
-        "/v1/admin/features/update-requests",
+        "/v1/admin/features/update-requests/preview",
         json={
             "scope": {
                 "type": "sigungu_by_radius",
                 "center": {"lon": 127.0, "lat": 37.0},
                 "radius_km": 5,
             },
-            "dry_run": True,
         },
     )
 
@@ -410,8 +740,18 @@ def test_list_requests_passes_filters(
         "next_cursor": "next",
         "total": None,
     }
-    assert body["data"]["items"][0]["request_id"] == "req-1"
+    assert body["data"]["items"][0]["request_id"] == _REQUEST_ID
     assert body["data"]["items"][0]["status"] == "queued"
+
+
+@pytest.mark.unit
+def test_list_requests_rejects_unknown_scope_type(client: TestClient) -> None:
+    response = client.get(
+        "/v1/admin/features/update-requests",
+        params={"scope_type": "unknown"},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
@@ -424,25 +764,64 @@ def test_get_request_404_when_missing(
 
     monkeypatch.setattr(router_mod, "get_update_request", _missing)
 
-    response = client.get("/v1/admin/features/update-requests/missing")
+    response = client.get(
+        f"/v1/admin/features/update-requests/{_MISSING_REQUEST_ID}"
+    )
 
     assert response.status_code == 404
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "prefix",
+    ("method", "path"),
     [
-        "/v1/admin/features/update-requests",
-        "/v1/admin/feature-update-requests",
+        ("get", "/v1/admin/features/update-requests/not-a-uuid"),
+        ("post", "/v1/admin/features/update-requests/not-a-uuid/run-now"),
     ],
 )
-def test_cancel_request_delegates_both_admin_paths(
+def test_request_resource_rejects_malformed_uuid(
+    client: TestClient,
+    method: str,
+    path: str,
+) -> None:
+    response = client.request(method, path)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/admin/features/update-requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": []},
+                "operator": "spoofed",
+            },
+        ),
+        (
+            f"/v1/admin/features/update-requests/{_REQUEST_ID}/run-now",
+            {"operator": "spoofed"},
+        ),
+    ],
+)
+def test_request_mutations_reject_operator_override(
+    client: TestClient,
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_cancel_request_delegates_canonical_admin_path(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
-    prefix: str,
 ) -> None:
-    request_id = "22222222-2222-4222-8222-222222222222"
+    request_id = _REQUEST_ID
     calls: list[dict[str, Any]] = []
 
     async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
@@ -456,7 +835,7 @@ def test_cancel_request_delegates_both_admin_paths(
     )
 
     response = client.post(
-        f"{prefix}/{request_id}/cancel",
+        f"/v1/admin/features/update-requests/{request_id}/cancel",
         json={"reason": "stop"},
     )
 
@@ -473,7 +852,7 @@ def test_cancel_request_delegates_both_admin_paths(
 
 @pytest.mark.unit
 def test_cancel_request_rejects_actor_override(client: TestClient) -> None:
-    request_id = "22222222-2222-4222-8222-222222222222"
+    request_id = _REQUEST_ID
     response = client.post(
         f"/v1/admin/features/update-requests/{request_id}/cancel",
         json={"actor": "spoofed"},
@@ -488,27 +867,35 @@ def test_run_now_requeues_existing_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _get(_session: Any, request_id: str) -> FeatureUpdateRequest:
-        assert request_id == "req-1"
+        assert request_id == _REQUEST_ID
         return _request()
 
     async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
         assert kwargs["run_mode"] == "now"
         assert kwargs["priority"] == 90
+        assert kwargs["operator"] == "local-dev"
         assert kwargs["reason"] == "force"
-        return _request(request_id="req-2", run_mode="now")
+        return _request(
+            request_id=_RUN_NOW_REQUEST_ID,
+            job_id=_RUN_NOW_JOB_ID,
+            run_mode="now",
+        )
 
     monkeypatch.setattr(router_mod, "get_update_request", _get)
     monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
-        "/v1/admin/features/update-requests/req-1/run-now",
+        f"/v1/admin/features/update-requests/{_REQUEST_ID}/run-now",
         json={"priority": 90, "reason": "force"},
     )
 
     assert response.status_code == 201
     body = response.json()
-    assert body["data"]["request_id"] == "req-2"
+    assert body["data"]["request_id"] == _RUN_NOW_REQUEST_ID
+    assert body["data"]["job_id"] == _RUN_NOW_JOB_ID
+    assert body["data"]["job_id"] != _request().job_id
     assert body["data"]["run_mode"] == "now"
+    assert body["data"]["generation"] == 1
 
 
 @pytest.mark.unit
@@ -552,6 +939,4 @@ def test_create_unknown_enqueue_error_hides_internal_message(
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == (
-        "feature update request enqueue failed"
-    )
+    assert response.json()["detail"] == ("feature update request enqueue failed")

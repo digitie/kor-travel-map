@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from kortravelmap.infra import ops_repo
 from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
@@ -55,6 +56,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         kind="feature_update_request",
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
+        update_request_id="22222222-2222-2222-2222-222222222222",
         payload='{"request_id":"req-1"}',
         status="running",
         progress=42,
@@ -117,6 +119,22 @@ def _issue_row(key: str, *, at: datetime) -> SimpleNamespace:
 def _cursor(payload: object) -> str:
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+@pytest.mark.unit
+def test_import_job_reads_exclude_quarantined_rows() -> None:
+    assert "job.quarantined_at IS NULL" in ops_repo._LIST_IMPORT_JOBS_SQL
+    assert "job.quarantined_at IS NULL" in ops_repo._GET_IMPORT_JOB_SQL
+
+    events_sql = ops_repo._list_import_job_events_sql(
+        job_id=None,
+        level=None,
+        provider=None,
+        dataset_key=None,
+        cursor_occurred_at=None,
+    )
+    assert "quarantined_at IS NULL" in events_sql
+    assert "ops.import_jobs" not in events_sql
 
 
 @pytest.mark.unit

@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -12,6 +13,8 @@ type AdminFeatureChangeListResponse =
   components["schemas"]["AdminFeatureChangeListResponse"];
 type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
 type AdminFeaturePatchRequest =
@@ -179,7 +182,13 @@ function categoriesResponse(): CategoriesResponse {
 
 async function mockCategories(page: Page) {
   await page.route("**/v1/categories**", async (route) => {
-    await fulfillJson(route, categoriesResponse());
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "GET" && apiPath === "/v1/categories") {
+      await fulfillJson(route, categoriesResponse());
+      return;
+    }
+    throw new Error(`Unhandled categories route: ${request.method()} ${apiPath}`);
   });
 }
 
@@ -264,9 +273,10 @@ async function mockOfflineUploadMutations(page: Page) {
       await route.continue();
       return;
     }
+    const apiPath = bffApiPath(request.url());
     const uploadPath = `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
 
-    if (request.method() === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+    if (request.method() === "GET" && apiPath === "/v1/admin/offline-uploads") {
       const status = url.searchParams.get("status");
       const items = status
         ? uploads.filter((item) => item.status === status)
@@ -282,7 +292,7 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+    if (request.method() === "POST" && apiPath === "/v1/admin/offline-uploads") {
       requests.create += 1;
       expect(request.headers()["content-type"]).toContain("multipart/form-data");
       uploads = [upload];
@@ -298,12 +308,12 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "GET" && url.pathname === uploadPath) {
+    if (request.method() === "GET" && apiPath === uploadPath) {
       await fulfillJson(route, { data: upload, meta: { duration_ms: 1 } });
       return;
     }
 
-    if (request.method() === "DELETE" && url.pathname === uploadPath) {
+    if (request.method() === "DELETE" && apiPath === uploadPath) {
       requests.delete += 1;
       const deleted = upload;
       uploads = uploads.filter((item) => item.upload_id !== deleted.upload_id);
@@ -314,7 +324,7 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "GET" && url.pathname === `${uploadPath}/preview`) {
+    if (request.method() === "GET" && apiPath === `${uploadPath}/preview`) {
       requests.preview += 1;
       await fulfillJson(route, {
         data: upload,
@@ -336,7 +346,7 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === `${uploadPath}/validate`) {
+    if (request.method() === "POST" && apiPath === `${uploadPath}/validate`) {
       requests.validate += 1;
       expect(request.postData()).toContain("column_mapping");
       upload = {
@@ -384,7 +394,7 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "GET" && url.pathname === `${uploadPath}/validation`) {
+    if (request.method() === "GET" && apiPath === `${uploadPath}/validation`) {
       await fulfillJson(route, {
         data: upload,
         meta: {
@@ -415,7 +425,7 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === `${uploadPath}/load`) {
+    if (request.method() === "POST" && apiPath === `${uploadPath}/load`) {
       requests.load += 1;
       upload = {
         ...upload,
@@ -435,7 +445,9 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    throw new Error(`Unhandled offline upload route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled offline upload route: ${request.method()} ${apiPath}`,
+    );
   });
 
   return requests;
@@ -460,9 +472,10 @@ async function mockPoiCacheTargetMutations(page: Page) {
       await route.continue();
       return;
     }
+    const apiPath = bffApiPath(request.url());
     const targetPath = "/v1/admin/poi-cache-targets/external-app/mock-target-1";
 
-    if (request.method() === "GET" && url.pathname === "/v1/admin/poi-cache-targets") {
+    if (request.method() === "GET" && apiPath === "/v1/admin/poi-cache-targets") {
       await fulfillJson(route, {
         data: { items: targets },
         meta: {
@@ -474,7 +487,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "PUT" && url.pathname === targetPath) {
+    if (request.method() === "PUT" && apiPath === targetPath) {
       requests.upsert += 1;
       expect(request.postDataJSON()).toMatchObject({
         coord: { lon: 126.978, lat: 37.5665 },
@@ -492,7 +505,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "DELETE" && url.pathname === targetPath) {
+    if (request.method() === "DELETE" && apiPath === targetPath) {
       requests.delete += 1;
       targets = [];
       await fulfillJson(route, {
@@ -506,12 +519,20 @@ async function mockPoiCacheTargetMutations(page: Page) {
       return;
     }
 
-    throw new Error(`Unhandled POI cache target route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled POI cache target route: ${request.method()} ${apiPath}`,
+    );
   });
 
   await page.route("**/v1/features/nearby/by-target**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/features/nearby/by-target") {
+      throw new Error(
+        `Unhandled nearby-by-target route: ${request.method()} ${apiPath}`,
+      );
+    }
     requests.nearby += 1;
     expect(url.searchParams.get("external_system")).toBe("external-app");
     expect(url.searchParams.get("target_key")).toBe("mock-target-1");
@@ -552,9 +573,9 @@ async function mockBackupOperations(page: Page) {
 
   await page.route("**/v1/admin/backups**", async (route) => {
     const request = route.request();
-    const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
 
-    if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+    if (request.method() === "GET" && apiPath === "/v1/admin/backups") {
       await fulfillJson(route, {
         data: {
           backup_root: "/var/backups",
@@ -566,7 +587,7 @@ async function mockBackupOperations(page: Page) {
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/v1/admin/backups") {
+    if (request.method() === "POST" && apiPath === "/v1/admin/backups") {
       requests.create += 1;
       await fulfillJson(route, {
         data: {
@@ -580,14 +601,15 @@ async function mockBackupOperations(page: Page) {
       return;
     }
 
-    throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+    throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
   });
 
   await page.route("**/v1/admin/restore/**", async (route) => {
     const request = route.request();
-    const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
+    const restorePath = `/v1/admin/restore/${MOCK_BACKUP_ID}`;
 
-    if (url.pathname.endsWith("/swap")) {
+    if (request.method() === "POST" && apiPath === `${restorePath}/swap`) {
       requests.swap += 1;
       await fulfillJson(route, {
         data: {
@@ -601,21 +623,26 @@ async function mockBackupOperations(page: Page) {
       return;
     }
 
-    requests.restore += 1;
-    await fulfillJson(route, {
-      data: {
-        backup_id: MOCK_BACKUP_ID,
-        message: "restore command planned",
-        operation: "restore",
-        status: "planned",
-        restore_targets: {
-          app_db: "kor_travel_map_staging",
-          dagster_db: "kor_travel_map_dagster_staging",
-          rustfs_volume: "rustfs_staging",
+    if (request.method() === "POST" && apiPath === restorePath) {
+      requests.restore += 1;
+      await fulfillJson(route, {
+        data: {
+          backup_id: MOCK_BACKUP_ID,
+          message: "restore command planned",
+          operation: "restore",
+          status: "planned",
+          restore_targets: {
+            app_db: "kor_travel_map_staging",
+            dagster_db: "kor_travel_map_dagster_staging",
+            rustfs_volume: "rustfs_staging",
+          },
         },
-      },
-      meta: { duration_ms: 1 },
-    });
+        meta: { duration_ms: 1 },
+      });
+      return;
+    }
+
+    throw new Error(`Unhandled restore route: ${request.method()} ${apiPath}`);
   });
 
   return requests;
@@ -642,6 +669,38 @@ function featureChangeResponse(
   return {
     data: { request },
     meta: { duration_ms: 1, request_id: "e2e-feature-change" },
+  };
+}
+
+function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
+  return {
+    data: {
+      change_requests: [],
+      curations: [],
+      feature: {
+        address: {},
+        category: "01070300",
+        created_at: MOCK_NOW,
+        data_origin: "provider",
+        data_version: 1,
+        detail: {},
+        feature_id: featureId,
+        kind: "place",
+        lat: 37.5665,
+        lon: 126.978,
+        name: `Existing ${featureId}`,
+        raw_refs: [],
+        status: "active",
+        updated_at: MOCK_NOW,
+        urls: {},
+      },
+      files: [],
+      issues: [],
+      overrides: [],
+      sources: [],
+      versions: [],
+    },
+    meta: { duration_ms: 1, request_id: "e2e-feature-detail" },
   };
 }
 
@@ -718,31 +777,35 @@ async function mockFeatureChangeMutations(
   await page.route("**/v1/admin/features**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
 
     if (
       request.method() === "GET" &&
-      url.pathname === "/v1/admin/features/change-requests"
+      apiPath === "/v1/admin/features/change-requests"
     ) {
       requests.list += 1;
       await fulfillJson(
         route,
         featureChangeListResponse(
           filteredChanges(url),
-            reviewMode,
+          reviewMode,
           Number(url.searchParams.get("page_size") ?? 100),
         ),
       );
       return;
     }
 
+    const reviewPathMatch = apiPath.match(
+      /^\/v1\/admin\/features\/change-requests\/([^/]+)\/(approve|reject)$/,
+    );
     if (
       request.method() === "POST" &&
-      url.pathname.endsWith("/approve")
+      reviewPathMatch?.[2] === "approve"
     ) {
       requests.approve += 1;
       const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
       requests.reviewBodies.push(body);
-      const requestId = url.pathname.split("/").at(-2);
+      const requestId = decodeURIComponent(reviewPathMatch[1]);
       const target = changes.find((item) => item.request_id === requestId);
       if (!target) {
         await fulfillJson(route, { detail: "not found" }, 404);
@@ -753,11 +816,11 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    if (request.method() === "POST" && url.pathname.endsWith("/reject")) {
+    if (request.method() === "POST" && reviewPathMatch?.[2] === "reject") {
       requests.reject += 1;
       const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
       requests.reviewBodies.push(body);
-      const requestId = url.pathname.split("/").at(-2);
+      const requestId = decodeURIComponent(reviewPathMatch[1]);
       const target = changes.find((item) => item.request_id === requestId);
       if (!target) {
         await fulfillJson(route, { detail: "not found" }, 404);
@@ -773,7 +836,7 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/v1/admin/features") {
+    if (request.method() === "POST" && apiPath === "/v1/admin/features") {
       requests.create += 1;
       const body = request.postDataJSON() as AdminFeatureCreateRequest;
       requests.createBodies.push(body);
@@ -793,14 +856,19 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    if (
-      request.method() === "PATCH" &&
-      url.pathname.startsWith("/v1/admin/features/")
-    ) {
+    const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
+    if (request.method() === "GET" && featurePathMatch) {
+      await fulfillJson(
+        route,
+        featureDetailResponse(decodeURIComponent(featurePathMatch[1])),
+      );
+      return;
+    }
+    if (request.method() === "PATCH" && featurePathMatch) {
       requests.patch += 1;
       const body = request.postDataJSON() as AdminFeaturePatchRequest;
       requests.patchBodies.push(body);
-      const featureId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const featureId = decodeURIComponent(featurePathMatch[1]);
       const updated = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -818,14 +886,11 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    if (
-      request.method() === "DELETE" &&
-      url.pathname.startsWith("/v1/admin/features/")
-    ) {
+    if (request.method() === "DELETE" && featurePathMatch) {
       requests.delete += 1;
       const body = request.postDataJSON() as AdminFeatureDeleteRequest;
       requests.deleteBodies.push(body);
-      const featureId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const featureId = decodeURIComponent(featurePathMatch[1]);
       const deleted = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -843,7 +908,9 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    throw new Error(`Unhandled feature change route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled feature change route: ${request.method()} ${apiPath}`,
+    );
   });
 
   return requests;
@@ -864,10 +931,12 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
-    await expect(page.getByLabel("status")).toBeVisible();
-    await expect(page.getByPlaceholder("kind filter")).toBeVisible();
-    for (const column of ["job", "kind", "status", "progress", "stage"]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    await expect(page.getByLabel("상태")).toBeVisible();
+    await expect(page.getByPlaceholder("작업 종류")).toBeVisible();
+    for (const column of ["작업", "종류", "상태", "진행", "단계"]) {
+      await expect(
+        page.getByRole("columnheader", { name: column, exact: true }),
+      ).toBeVisible();
     }
   });
 
@@ -885,14 +954,16 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("feature page size")).toBeVisible();
     for (const column of [
       "feature",
-      "kind/status",
+      "종류/상태",
       "provider",
-      "issues",
-      "coord/address",
-      "updated",
-      "actions",
+      "이슈",
+      "좌표/주소",
+      "수정",
+      "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column, exact: true }),
+      ).toBeVisible();
     }
     await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
   });
@@ -903,7 +974,9 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "변경 요청 작성" }),
     ).toBeVisible();
-    await expect(page.getByText("Feature 변경 요청")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "변경 요청 작성" }),
+    ).toBeVisible();
     for (const label of [
       "change action",
       "change feature id",
@@ -915,10 +988,16 @@ test.describe("admin/ops pages", () => {
       "change category",
       "change lon",
       "change lat",
-      "change detail JSON",
     ]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
+    const detailSection = page
+      .getByRole("heading", { level: 2, name: "상세", exact: true })
+      .locator("..");
+    await detailSection.getByText("고급 추가 정보", { exact: true }).click();
+    await expect(
+      page.getByLabel("change detail JSON", { exact: true }),
+    ).toBeVisible();
   });
 
   test("/v1/admin/features/change-reviews", async ({ page }) => {
@@ -936,15 +1015,17 @@ test.describe("admin/ops pages", () => {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     for (const column of [
-      "request",
-      "action/status",
+      "요청",
+      "작업/상태",
       "feature",
-      "review",
-      "reason",
-      "created",
-      "actions",
+      "리뷰",
+      "사유",
+      "생성",
+      "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column, exact: true }),
+      ).toBeVisible();
     }
     await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
   });
@@ -957,13 +1038,19 @@ test.describe("admin/ops pages", () => {
     // 필수값을 채우되 detail JSON에 object가 아닌 배열을 넣어 클라이언트 검증 실패 유도.
     await page.getByLabel("change name", { exact: true }).fill("Neg test");
     await page.getByLabel("change reason", { exact: true }).fill("음성 경로");
+    const detailSection = page
+      .getByRole("heading", { level: 2, name: "상세", exact: true })
+      .locator("..");
+    await detailSection.getByText("고급 추가 정보", { exact: true }).click();
     await page.getByLabel("change detail JSON", { exact: true }).fill("[]");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     // buildCreatePayload가 동기적으로 throw → 네트워크 호출 없이 formError 배너 노출.
     await expect(
-      page.getByText("detail는 JSON object여야 합니다."),
-    ).toBeVisible();
+      page
+        .getByRole("alert")
+        .filter({ hasText: "detail extra JSON은(는) JSON object여야 합니다." }),
+    ).toContainText("detail extra JSON은(는) JSON object여야 합니다.");
   });
 
   test("/v1/admin/features/change-requests approve workflow", async ({ page }) => {
@@ -990,15 +1077,15 @@ test.describe("admin/ops pages", () => {
     await pendingRow.click();
     await expect(page.locator("aside").getByText("change-pending-1")).toBeVisible();
 
-    await pendingRow.getByRole("button", { name: "approve" }).click();
+    await pendingRow.getByRole("button", { name: "승인" }).click();
 
     await expect.poll(() => requests.approve).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
       operator: "local-admin",
       reason: "admin-ui approve",
     });
-    await expect(pendingRow.getByText("applied")).toBeVisible();
-    await expect(pendingRow.getByRole("button", { name: "approve" })).toHaveCount(
+    await expect(pendingRow.getByText("반영됨")).toBeVisible();
+    await expect(pendingRow.getByRole("button", { name: "승인" })).toHaveCount(
       0,
     );
   });
@@ -1011,7 +1098,13 @@ test.describe("admin/ops pages", () => {
     });
 
     await page.goto("/admin/features/change-requests");
-    await expect(page.getByText("immediate").first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        level: 1,
+        name: "변경 요청 작성",
+        exact: true,
+      }),
+    ).toBeVisible();
 
     await page.getByLabel("change name", { exact: true }).fill("Immediate feature");
     await page.getByLabel("change reason", { exact: true }).fill("즉시 적용");
@@ -1030,7 +1123,7 @@ test.describe("admin/ops pages", () => {
     await page.getByLabel("change status", { exact: true }).selectOption("all");
     const createdRow = page.getByRole("row", { name: /Immediate feature/ });
     await expect(createdRow).toBeVisible();
-    await expect(createdRow.getByText("applied")).toBeVisible();
+    await expect(createdRow.getByText("반영됨")).toBeVisible();
   });
 
   test("/v1/admin/features/change-requests update/delete workflow", async ({
@@ -1044,6 +1137,9 @@ test.describe("admin/ops pages", () => {
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-update-1");
+    await expect(
+      page.getByLabel("change name", { exact: true }),
+    ).toHaveValue("Existing feature-update-1");
     await page.getByLabel("change reason", { exact: true }).fill("이름 수정");
     await page.getByLabel("change name", { exact: true }).fill("Updated feature");
     await page.getByRole("button", { name: "요청 생성" }).click();
@@ -1075,9 +1171,9 @@ test.describe("admin/ops pages", () => {
     await page.getByLabel("change status", { exact: true }).selectOption("all");
     const deleteRow = page.getByRole("row", { name: /feature-delete-1/ });
     await expect(deleteRow).toBeVisible();
-    await deleteRow.getByRole("button", { name: "approve" }).click();
+    await deleteRow.getByRole("button", { name: "승인" }).click();
     await expect.poll(() => requests.approve).toBe(1);
-    await expect(deleteRow.getByText("applied")).toBeVisible();
+    await expect(deleteRow.getByText("반영됨")).toBeVisible();
     await expect(deleteRow.getByText("완료")).toBeVisible();
 
     await page
@@ -1095,23 +1191,23 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "이슈" }),
     ).toBeVisible();
-    await expect(page.getByLabel("issue search")).toBeVisible();
-    await expect(page.getByLabel("issue status")).toBeVisible();
-    await expect(page.getByLabel("issue severity")).toBeVisible();
+    await expect(page.getByLabel("이슈 검색")).toBeVisible();
+    await expect(page.getByLabel("이슈 상태 필터")).toBeVisible();
+    await expect(page.getByLabel("이슈 심각도 필터")).toBeVisible();
     await expect(page.getByLabel("issue page size")).toBeVisible();
     await expect(page.getByLabel("issue type")).toBeVisible();
     await expect(page.getByLabel("issue provider")).toBeVisible();
     await expect(page.getByLabel("issue dataset")).toBeVisible();
     await expect(page.getByLabel("bbox")).toBeVisible();
     for (const column of [
-      "issue",
-      "severity",
-      "status",
+      "이슈",
+      "심각도",
+      "상태",
       "provider",
-      "message",
+      "메시지",
       "feature",
-      "detected",
-      "actions",
+      "감지",
+      "작업",
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
@@ -1172,12 +1268,12 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("system log level")).toBeVisible();
     await expect(page.getByLabel("system log source")).toBeVisible();
     for (const column of [
-      "created",
-      "level",
-      "source",
-      "event",
-      "message",
-      "request",
+      "생성",
+      "레벨",
+      "소스",
+      "이벤트",
+      "메시지",
+      "요청",
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
@@ -1186,13 +1282,13 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("api log path")).toBeVisible();
     await expect(page.getByLabel("api log min status")).toBeVisible();
     for (const column of [
-      "created",
-      "method",
-      "status",
-      "duration",
-      "path",
-      "request",
-      "error",
+      "생성",
+      "방식",
+      "상태",
+      "소요시간",
+      "경로",
+      "요청",
+      "오류",
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
@@ -1205,7 +1301,16 @@ test.describe("admin/ops pages", () => {
       page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
     await expect(page.getByLabel("dedup status")).toBeVisible();
-    for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
+    for (const column of [
+      "리뷰",
+      "점수",
+      "거리",
+      "후보 A",
+      "후보 B",
+      "상태",
+      "생성",
+      "작업",
+    ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
   });
@@ -1218,11 +1323,14 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByLabel("enrichment status")).toBeVisible();
     for (const column of [
-      "review",
-      "score",
+      "리뷰",
+      "점수",
+      "거리",
       "1차 (datagokr)",
       "2차 (visitkorea)",
-      "actions",
+      "상태",
+      "생성",
+      "작업",
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
@@ -1239,20 +1347,22 @@ test.describe("admin/ops pages", () => {
       page.getByRole("heading", { level: 1, name: "갱신 요청" }),
     ).toBeVisible();
     await expect(page.getByText("새 요청")).toBeVisible();
-    for (const label of ["lon", "lat", "radius km", "providers", "dataset keys"]) {
+    for (const label of ["경도", "위도", "반경(km)", "제공자", "데이터셋 키"]) {
       await expect(page.getByLabel(label)).toBeVisible();
     }
-    await expect(page.getByLabel("run mode")).toBeVisible();
-    await expect(page.getByLabel("dry-run")).toBeChecked();
-    await expect(page.getByLabel("request status")).toBeVisible();
+    await expect(page.getByLabel("실행 모드")).toBeVisible();
+    await expect(
+      page.getByLabel("미리보기(요청을 저장하거나 실행하지 않음)"),
+    ).toBeChecked();
+    await expect(page.getByLabel("요청 상태 필터")).toBeVisible();
 
     // T-218b: lon을 비우고 생성 → 클라이언트 검증 에러 + 포커스(네트워크 호출 전 차단).
-    const lon = page.getByLabel("lon");
+    const lon = page.getByLabel("경도");
     await lon.fill("");
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "미리보기" }).click();
     await expect(lon).toHaveAttribute("aria-invalid", "true");
     await expect(lon).toBeFocused();
-    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
+    await expect(page.getByText("경도를 입력하세요.")).toBeVisible();
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {
@@ -1263,16 +1373,16 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByText("Target upsert")).toBeVisible();
     for (const label of [
-      "external system",
-      "target key",
-      "target name",
-      "lon",
-      "lat",
-      "radius km",
+      "외부 시스템",
+      "대상 키",
+      "이름",
+      "경도",
+      "위도",
+      "반경(km)",
     ]) {
       await expect(page.getByLabel(label)).toBeVisible();
     }
-    await expect(page.getByLabel("scope mode")).toBeVisible();
+    await expect(page.getByLabel("대상 범위")).toBeVisible();
     await expect(page.getByText("Nearby features")).toBeVisible();
   });
 
@@ -1280,8 +1390,8 @@ test.describe("admin/ops pages", () => {
     const requests = await mockPoiCacheTargetMutations(page);
 
     await page.goto("/admin/poi-cache-targets");
-    await page.getByLabel("target key").fill("mock-target-1");
-    await page.getByLabel("target name").fill("Mock target");
+    await page.getByLabel("대상 키").fill("mock-target-1");
+    await page.getByLabel("이름").fill("Mock target");
     await page.getByRole("button", { name: "저장" }).click();
 
     await expect.poll(() => requests.upsert).toBe(1);
@@ -1293,6 +1403,13 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.nearby).toBeGreaterThanOrEqual(1);
 
     await targetRow.getByRole("button", { name: "삭제" }).click();
+    const confirmDialog = page.getByRole("alertdialog", {
+      name: "'mock-target-1' 대상을 삭제할까요?",
+    });
+    await expect(confirmDialog).toBeVisible();
+    await confirmDialog
+      .getByRole("button", { name: "삭제", exact: true })
+      .click();
     await expect.poll(() => requests.delete).toBe(1);
     await expect(page.getByRole("row", { name: /Mock target/ })).toHaveCount(0);
   });
@@ -1305,19 +1422,19 @@ test.describe("admin/ops pages", () => {
     // target_key가 비어있는 상태로 저장 → 클라이언트 검증 에러(서버 미호출).
     await page.getByRole("button", { name: "저장" }).click();
 
-    const targetKey = page.getByLabel("target key");
+    const targetKey = page.getByLabel("대상 키");
     await expect(targetKey).toHaveAttribute("aria-invalid", "true");
     await expect(targetKey).toBeFocused();
-    await expect(page.getByText("target_key는 필수입니다.")).toBeVisible();
+    await expect(page.getByText("대상 키를 입력하세요.")).toBeVisible();
     expect(requests.upsert).toBe(0);
 
     // 채우면 에러가 사라지고 정상 제출.
     await targetKey.fill("mock-target-1");
-    await page.getByLabel("target name").fill("Mock target");
+    await page.getByLabel("이름").fill("Mock target");
     await page.getByRole("button", { name: "저장" }).click();
     await expect.poll(() => requests.upsert).toBe(1);
     await expect(targetKey).not.toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText("target_key는 필수입니다.")).toHaveCount(0);
+    await expect(page.getByText("대상 키를 입력하세요.")).toHaveCount(0);
   });
 
   test("/v1/admin/offline-uploads", async ({ page }) => {
@@ -1337,14 +1454,14 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("provider filter")).toBeVisible();
     await expect(page.getByLabel("dataset filter")).toBeVisible();
     for (const column of [
-      "upload",
-      "status",
-      "format",
+      "업로드",
+      "상태",
+      "형식",
       "provider/dataset",
-      "file",
-      "size",
-      "updated",
-      "actions",
+      "파일",
+      "크기",
+      "수정",
+      "작업",
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
@@ -1376,8 +1493,11 @@ test.describe("admin/ops pages", () => {
     await loadButton.click();
 
     await expect.poll(() => requests.load).toBe(1);
-    await expect(page.getByText("Dagster load 실행됨")).toBeVisible();
-    await expect(page.getByText("STARTED")).toBeVisible();
+    const launchAlert = page
+      .getByRole("status")
+      .filter({ hasText: "Dagster load 실행됨" });
+    await expect(launchAlert).toBeVisible();
+    await expect(launchAlert).toContainText("시작됨");
 
     // 진행 중(loading) row는 삭제 버튼이 비활성 (#397 가드 UI)
     await page.getByLabel("offline upload status").selectOption("loading");
@@ -1421,7 +1541,7 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
-    for (const column of ["backup", "created", "status", "size", "action"]) {
+    for (const column of ["백업 ID", "생성", "상태", "크기", "작업"]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
     // 목록 + manifest 상세(선택 없음 시 첫 행을 detail로 노출)
@@ -1438,7 +1558,7 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
 
     // 백업 command plan 생성
-    await page.getByRole("button", { name: "백업" }).click();
+    await page.getByRole("button", { name: "백업", exact: true }).click();
     await expect.poll(() => requests.create).toBe(1);
     await expect(page.getByText("backup command planned")).toBeVisible();
     // T-218e: 성공 결과는 polite live region(role=status)으로 안내된다.
@@ -1469,15 +1589,23 @@ test.describe("admin/ops pages", () => {
       consecutive_failures: 3,
     });
     await page.route("**/v1/ops/providers**", async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname === "/v1/ops/providers") {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && apiPath === "/v1/ops/providers") {
         await fulfillJson(route, {
           data: { items: [kmaDataset, moisDataset] },
           meta: { duration_ms: 1, request_id: "e2e-providers-freshness" },
         });
         return;
       }
-      await fulfillJson(route, makeOpsProviderDetailResponse(kmaDataset));
+      if (
+        request.method() === "GET" &&
+        apiPath === `/v1/ops/providers/${encodeURIComponent(kmaDataset.provider)}`
+      ) {
+        await fulfillJson(route, makeOpsProviderDetailResponse(kmaDataset));
+        return;
+      }
+      throw new Error(`Unhandled providers route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/ops/providers");
@@ -1485,30 +1613,30 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
-    // T-221d 상세 패널의 sync state/update request 테이블이 같은 헤더(last
-    // success 등)를 쓰므로, freshness 테이블에만 있는 `policy` 헤더로 테이블을
+    // T-221d 상세 패널의 sync state/update request 테이블이 같은 헤더를 쓰므로,
+    // freshness 테이블에만 있는 `정책` 헤더로 테이블을
     // 한정해 strict mode 위반을 피한다(#409).
     const freshnessTable = page.getByRole("table").filter({
-      has: page.getByRole("columnheader", { name: "policy" }),
+      has: page.getByRole("columnheader", { name: "정책" }),
     });
     for (const column of [
-      "detail",
-      "provider",
-      "dataset",
-      "scope",
-      "status",
-      "policy",
-      "last success",
-      "next run",
-      "failures",
+      "상세",
+      "제공자",
+      "데이터셋",
+      "범위",
+      "상태",
+      "정책",
+      "마지막 성공",
+      "다음 실행",
+      "실패 횟수",
     ]) {
       await expect(
         freshnessTable.getByRole("columnheader", { name: column }),
       ).toBeVisible();
     }
     // 요약 배지 + 연속 실패 경고(assertive alert)
-    await expect(page.getByText("2 providers")).toBeVisible();
-    await expect(page.getByText("failing 1")).toBeVisible();
+    await expect(page.getByText("제공자 2", { exact: true })).toBeVisible();
+    await expect(page.getByText("실패 1", { exact: true })).toBeVisible();
     await expect(
       page
         .getByRole("alert")
@@ -1522,6 +1650,6 @@ test.describe("admin/ops pages", () => {
         .getByText("3", { exact: true }),
     ).toBeVisible();
     // 첫 행(kma) dataset이 기본 선택되어 T-221d 상세 패널이 뜬다.
-    await expect(page.getByText("Dataset detail")).toBeVisible();
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
   });
 });

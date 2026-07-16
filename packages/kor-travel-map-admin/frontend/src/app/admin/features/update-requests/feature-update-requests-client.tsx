@@ -6,10 +6,12 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 import {
+  type FeatureUpdateRequestPreviewRequest,
   type FeatureUpdateStatus,
   useCancelFeatureUpdateRequestMutation,
   useCreateFeatureUpdateRequestMutation,
   useFeatureUpdateRequests,
+  usePreviewFeatureUpdateRequestMutation,
   useRunFeatureUpdateRequestNowMutation,
 } from "@/api/updateRequests";
 import { useProviders } from "@/api/etl";
@@ -49,6 +51,43 @@ function commaSeparatedValues(value: string): string[] {
   });
 }
 
+type PreviewProviderDataset = {
+  provider: string;
+  datasetKey: string;
+  featureCount: number;
+};
+
+function previewProviderDatasets(
+  matchedScope: Record<string, unknown> | undefined,
+): PreviewProviderDataset[] {
+  const rawGroups =
+    matchedScope?.provider_datasets ?? matchedScope?.deduped_provider_scopes;
+  if (!Array.isArray(rawGroups)) {
+    return [];
+  }
+  return rawGroups.flatMap((group) => {
+    if (
+      typeof group !== "object" ||
+      group === null ||
+      !("provider" in group) ||
+      !("dataset_key" in group) ||
+      !("feature_count" in group) ||
+      typeof group.provider !== "string" ||
+      typeof group.dataset_key !== "string" ||
+      typeof group.feature_count !== "number"
+    ) {
+      return [];
+    }
+    return [
+      {
+        provider: group.provider,
+        datasetKey: group.dataset_key,
+        featureCount: group.feature_count,
+      },
+    ];
+  });
+}
+
 export function FeatureUpdateRequestsClient() {
   const [status, setStatus] = useState<FeatureUpdateStatus | "all">("queued");
   const [lon, setLon] = useState("126.9780");
@@ -56,7 +95,7 @@ export function FeatureUpdateRequestsClient() {
   const [radiusKm, setRadiusKm] = useState("5");
   const [providers, setProviders] = useState<string[]>([]);
   const [datasets, setDatasets] = useState("");
-  const [dryRun, setDryRun] = useState(true);
+  const [previewOnly, setPreviewOnly] = useState(true);
   const [runMode, setRunMode] = useState<"queued" | "now">("queued");
   const [errors, setErrors] = useState<
     Partial<Record<"lon" | "lat" | "radiusKm", string>>
@@ -71,10 +110,30 @@ export function FeatureUpdateRequestsClient() {
   });
   const providersQuery = useProviders();
   const createRequest = useCreateFeatureUpdateRequestMutation();
+  const previewRequest = usePreviewFeatureUpdateRequestMutation();
   const cancelRequest = useCancelFeatureUpdateRequestMutation();
   const runNow = useRunFeatureUpdateRequestNowMutation();
-
+  const cancellation = cancelRequest.data?.data;
   const items = requests.data?.data.items ?? [];
+  const cancelledJob = cancellation?.members.find(
+    (member) => member.operation_kind === "feature_update_request",
+  );
+  const preview = previewRequest.data?.data;
+  const previewFeatureCount =
+    typeof preview?.matched_scope.feature_count === "number"
+      ? preview.matched_scope.feature_count
+      : null;
+  const previewSigunguCodes = Array.isArray(
+    preview?.matched_scope.sigungu_codes,
+  )
+    ? preview.matched_scope.sigungu_codes.filter(
+        (code): code is string => typeof code === "string",
+      )
+    : [];
+  const previewProviderDatasetGroups = previewProviderDatasets(
+    preview?.matched_scope,
+  );
+
   const providerOptions = useMemo(() => {
     const catalogOptions =
       providersQuery.data?.data.providers.map((entry) => ({
@@ -137,7 +196,9 @@ export function FeatureUpdateRequestsClient() {
         header: "작업",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{shortId(row.original.job_id)}</span>
+          <span className="font-mono text-xs">
+            {shortId(row.original.job_id)}
+          </span>
         ),
       },
       {
@@ -155,9 +216,6 @@ export function FeatureUpdateRequestsClient() {
         enableSorting: false,
         cell: ({ row }) => {
           const request = row.original;
-          if (!request.request_id) {
-            return <span className="text-sm text-muted-foreground">dry-run</span>;
-          }
           const requestId = request.request_id;
           return (
             <div className="flex flex-wrap gap-1">
@@ -175,7 +233,7 @@ export function FeatureUpdateRequestsClient() {
                   }
                 >
                   <XIcon data-icon="inline-start" />
-                  cancel
+                  취소
                 </Button>
               ) : null}
               {request.status !== "running" ? (
@@ -191,7 +249,8 @@ export function FeatureUpdateRequestsClient() {
                     })
                   }
                 >
-                  run-now
+                  <PlayIcon data-icon="inline-start" />
+                  즉시 실행
                 </Button>
               ) : null}
             </div>
@@ -211,17 +270,11 @@ export function FeatureUpdateRequestsClient() {
     const result = validateForm(values, [
       {
         field: "lon",
-        validate: combine(
-          required("경도를 입력하세요."),
-          koreaLongitude(),
-        ),
+        validate: combine(required("경도를 입력하세요."), koreaLongitude()),
       },
       {
         field: "lat",
-        validate: combine(
-          required("위도를 입력하세요."),
-          koreaLatitude(),
-        ),
+        validate: combine(required("위도를 입력하세요."), koreaLatitude()),
       },
       {
         field: "radiusKm",
@@ -242,7 +295,7 @@ export function FeatureUpdateRequestsClient() {
     setLon(values.lon);
     setLat(values.lat);
     setRadiusKm(values.radiusKm);
-    createRequest.mutate({
+    const plan = {
       scope: {
         type: "center_radius",
         center: {
@@ -253,10 +306,17 @@ export function FeatureUpdateRequestsClient() {
       },
       providers,
       dataset_keys: commaSeparatedValues(datasets),
-      dry_run: dryRun,
       run_mode: runMode,
-      operator: "local-admin",
-      reason: dryRun ? "admin ui dry-run" : "admin ui request",
+    } satisfies FeatureUpdateRequestPreviewRequest;
+    createRequest.reset();
+    previewRequest.reset();
+    if (previewOnly) {
+      previewRequest.mutate(plan);
+      return;
+    }
+    createRequest.mutate({
+      ...plan,
+      reason: "admin ui request",
     });
   };
 
@@ -313,10 +373,16 @@ export function FeatureUpdateRequestsClient() {
             <ComboboxMultiple
               disabled={providersQuery.isLoading}
               emptyMessage="일치하는 제공자가 없습니다."
-              error={providersQuery.isError ? providersQuery.error.message : undefined}
+              error={
+                providersQuery.isError
+                  ? providersQuery.error.message
+                  : undefined
+              }
               label="제공자"
               options={providerOptions}
-              placeholder={providersQuery.isLoading ? "불러오는 중" : "전체 제공자"}
+              placeholder={
+                providersQuery.isLoading ? "불러오는 중" : "전체 제공자"
+              }
               searchPlaceholder="제공자 검색"
               value={providers}
               onChange={setProviders}
@@ -331,56 +397,150 @@ export function FeatureUpdateRequestsClient() {
             <FormSelect
               label="실행 모드"
               value={runMode}
-              onChange={(event) => setRunMode(event.target.value as "queued" | "now")}
+              onChange={(event) =>
+                setRunMode(event.target.value as "queued" | "now")
+              }
             >
-              <NativeSelectOption value="queued">예약(queued)</NativeSelectOption>
+              <NativeSelectOption value="queued">
+                예약(queued)
+              </NativeSelectOption>
               <NativeSelectOption value="now">즉시(now)</NativeSelectOption>
             </FormSelect>
             <label className="flex items-center gap-2 text-sm">
               <input
-                checked={dryRun}
+                checked={previewOnly}
                 type="checkbox"
-                onChange={(event) => setDryRun(event.target.checked)}
+                onChange={(event) => setPreviewOnly(event.target.checked)}
               />
-              dry-run(실제 적용 없이 시험 실행)
+              미리보기(요청을 저장하거나 실행하지 않음)
             </label>
             <Button
-              disabled={createRequest.isPending}
+              disabled={createRequest.isPending || previewRequest.isPending}
               type="button"
               onClick={submit}
             >
               <PlayIcon data-icon="inline-start" />
-              요청 생성
+              {previewOnly ? "미리보기" : "요청 생성"}
             </Button>
-            {createRequest.data ? (
+            {createRequest.data || previewRequest.data ? (
               <Alert>
                 <AlertTitle>요청 처리 완료</AlertTitle>
                 <AlertDescription>
-                  {createRequest.data.data.request_id ?? "dry-run"} ·{" "}
-                  {statusLabel(createRequest.data.data.status)}
+                  {createRequest.data?.data.result_kind === "request" ? (
+                    `${createRequest.data.data.request_id} · ${statusLabel(createRequest.data.data.status)}`
+                  ) : preview ? (
+                    <div className="space-y-1">
+                      <div>미리보기 완료</div>
+                      <div>
+                        대상 Feature{" "}
+                        {previewFeatureCount === null
+                          ? "확인 불가"
+                          : `${previewFeatureCount}개`}
+                        {" · "}시군구 {previewSigunguCodes.length}개
+                      </div>
+                      <div>
+                        범위 {preview.scope_type}
+                        {" · "}실행 모드 {preview.run_mode}
+                      </div>
+                      <div>
+                        요청 필터 · 제공자{" "}
+                        {preview.providers.join(", ") || "전체"}
+                        {" · "}데이터셋{" "}
+                        {preview.dataset_keys.join(", ") || "전체"}
+                      </div>
+                      <div>
+                        실제 적재 그룹 {previewProviderDatasetGroups.length}개
+                      </div>
+                      {previewProviderDatasetGroups.length > 0 ? (
+                        <ul className="list-disc pl-5">
+                          {previewProviderDatasetGroups.map((group) => (
+                            <li key={`${group.provider}:${group.datasetKey}`}>
+                              {group.provider} / {group.datasetKey}
+                              {" · "}Feature {group.featureCount}개
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {previewSigunguCodes.length > 0 ? (
+                        <div>시군구 코드 {previewSigunguCodes.join(", ")}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </AlertDescription>
               </Alert>
             ) : null}
             {createRequest.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>요청 생성 실패</AlertTitle>
-                <AlertDescription>{createRequest.error.message}</AlertDescription>
+                <AlertDescription>
+                  {createRequest.error.message}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {previewRequest.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>미리보기 실패</AlertTitle>
+                <AlertDescription>
+                  {previewRequest.error.message}
+                </AlertDescription>
               </Alert>
             ) : null}
           </div>
         </div>
 
         <div className="flex flex-col gap-4">
-          {(requests.isError || cancelRequest.isError || runNow.isError) && (
+          {requests.isError ? (
             <Alert variant="destructive">
-              <AlertTitle>요청 처리 실패</AlertTitle>
+              <AlertTitle>요청 목록 조회 실패</AlertTitle>
+              <AlertDescription>{requests.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {cancelRequest.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>요청 취소 실패</AlertTitle>
+              <AlertDescription>{cancelRequest.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {cancellation ? (
+            <Alert>
+              <AlertTitle>요청 취소 처리 결과</AlertTitle>
               <AlertDescription>
-                {requests.error?.message ??
-                  cancelRequest.error?.message ??
-                  runNow.error?.message}
+                원 요청{" "}
+                <Link
+                  className="break-all font-mono underline underline-offset-2"
+                  href={`/admin/features/update-requests/${cancellation.root.id}`}
+                >
+                  {cancellation.root.id}
+                </Link>
+                {" · "}원 요청 상태{" "}
+                {cancelledJob?.terminal_status ??
+                  cancelledJob?.result ??
+                  "확인 중"}
+                {" · "}취소 처리 상태 {cancellation.status}
               </AlertDescription>
             </Alert>
-          )}
+          ) : null}
+          {runNow.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>즉시 실행 요청 생성 실패</AlertTitle>
+              <AlertDescription>{runNow.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {runNow.data ? (
+            <Alert>
+              <AlertTitle>즉시 실행 요청 생성 완료</AlertTitle>
+              <AlertDescription>
+                원본 요청은 변경되지 않았습니다. 새 요청{" "}
+                <Link
+                  className="break-all font-mono underline underline-offset-2"
+                  href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
+                >
+                  {runNow.data.data.request_id}
+                </Link>
+                을 확인하세요.
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <NativeSelect
               aria-label="요청 상태 필터"

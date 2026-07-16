@@ -251,7 +251,7 @@ def _definitive_failure_member(
 
 def _validate_finish_invariants(
     detail: PipelineCancellationDetail,
-    base_by_key: Mapping[tuple[str, str], PipelineCancellationScopeMember],
+    base_by_key: Mapping[str, PipelineCancellationScopeMember],
     *,
     status: PipelineCancellationStatus,
     error: Mapping[str, Any] | None,
@@ -279,7 +279,7 @@ def _validate_finish_invariants(
         and member.initial_status != "done"
     )
     for member in resolved_members:
-        base = base_by_key[(member.member_kind, member.member_id)]
+        base = base_by_key[member.job_id]
         if (
             base.cancellation_id != detail.attempt.cancellation_id
             or base.dagster_run_id != member.dagster_run_id
@@ -333,7 +333,7 @@ def _validate_finish_invariants(
             _base_matches_frozen_member(
                 detail,
                 member,
-                base_by_key[(member.member_kind, member.member_id)],
+                base_by_key[member.job_id],
             )
             and _retry_capable_member(member, run_by_id)
             for member in failed_members
@@ -360,7 +360,7 @@ def _validate_finish_invariants(
                 raise PipelineCancellationInvariantError(
                     "cancel_failed is restricted to running or run-backed active members"
                 )
-            base = base_by_key[(member.member_kind, member.member_id)]
+            base = base_by_key[member.job_id]
             if _retry_capable_member(member, run_by_id) and _base_matches_frozen_member(
                 detail,
                 member,

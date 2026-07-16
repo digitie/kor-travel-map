@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -103,12 +104,11 @@ function makeUpdateRequest(
     request_id: REQUEST_ID,
     job_id: JOB_ID,
     dagster_run_id: null,
-    status: "succeeded",
+    status: "done",
     run_mode: "queued",
-    dry_run: false,
     status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
     created_at: MOCK_NOW,
-    updated_at: MOCK_NOW,
+    generation: 1,
     ...overrides,
   };
 }
@@ -173,16 +173,24 @@ async function mockOpsProviders(
   const detailPaths: string[] = [];
 
   await page.route("**/v1/ops/providers**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === "/v1/ops/providers") {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() !== "GET") {
+      throw new Error(`Unexpected provider method: ${request.method()} ${url}`);
+    }
+    const apiPath = bffApiPath(url.toString());
+    if (apiPath === "/v1/ops/providers") {
       counts.list += 1;
       await fulfillJson(route, makeProvidersResponse(options.items));
       return;
     }
+    if (!/^\/v1\/ops\/providers\/[^/]+$/.test(apiPath)) {
+      throw new Error(`Unexpected provider detail path: ${apiPath}`);
+    }
     counts.detail += 1;
-    detailPaths.push(url.pathname);
+    detailPaths.push(apiPath);
     const provider = decodeURIComponent(
-      url.pathname.replace("/v1/ops/providers/", ""),
+      apiPath.replace("/v1/ops/providers/", ""),
     );
     const datasets = options.details?.[provider] ?? [];
     await fulfillJson(route, makeDetailResponse(provider, datasets));
@@ -203,7 +211,7 @@ async function mockPolicyUpsert(page: Page) {
         throw new Error(`Unexpected policy method: ${request.method()} ${url}`);
       }
       const body = request.postDataJSON() as ProviderRefreshPolicyUpsertRequest;
-      puts.push({ path: url.pathname, body });
+      puts.push({ path: bffApiPath(url.toString()), body });
       // 응답 record는 보낸 body를 반영하되 record 필수 필드를 채워 contract를 맞춘다.
       await fulfillJson(
         route,
@@ -214,11 +222,17 @@ async function mockPolicyUpsert(page: Page) {
             source_kind: body.source_kind,
             targeted_policy: body.targeted_policy,
             system_interval_seconds: body.system_interval_seconds ?? null,
+            optimal_interval_seconds: body.optimal_interval_seconds ?? null,
+            min_interval_seconds: body.min_interval_seconds ?? null,
             max_requests_per_minute: body.max_requests_per_minute ?? null,
+            max_requests_per_hour: body.max_requests_per_hour ?? null,
+            max_requests_per_day: body.max_requests_per_day ?? null,
             max_concurrent: body.max_concurrent,
+            burst_size: body.burst_size ?? null,
             config_source: body.config_source,
             enabled: body.enabled,
             rate_limit_source: body.rate_limit_source ?? {},
+            stale_after_minutes: body.stale_after_minutes ?? null,
           }),
         ),
       );
@@ -229,6 +243,58 @@ async function mockPolicyUpsert(page: Page) {
 }
 
 test.describe("/ops/providers refresh policy depth", () => {
+  test("detail 응답의 기존 policy로 editor draft를 초기화한다", async ({
+    page,
+  }) => {
+    const existingPolicy = makeRefreshPolicy({
+      targeted_policy: "disabled",
+      system_interval_seconds: 7200,
+      optimal_interval_seconds: 3600,
+      min_interval_seconds: 1800,
+      max_requests_per_minute: 12,
+      max_concurrent: 3,
+      burst_size: 4,
+      rate_limit_source: { source: "provider-doc" },
+    });
+    const { counts } = await mockOpsProviders(page, {
+      items: [makeOpsProviderDataset({ refresh_policy: existingPolicy })],
+      details: {
+        [KMA_PROVIDER]: [
+          makeDatasetDetail({ refresh_policy: existingPolicy }),
+        ],
+      },
+    });
+
+    await page.goto("/ops/providers");
+    await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(1);
+
+    await expect(
+      page.getByLabel("타깃 갱신 정책", { exact: true }),
+    ).toHaveValue("disabled");
+    await expect(
+      page.getByLabel("시스템 주기(초)", { exact: true }),
+    ).toHaveValue("7200");
+    await expect(
+      page.getByLabel("최적 주기(초)", { exact: true }),
+    ).toHaveValue("3600");
+    await expect(
+      page.getByLabel("최소 주기(초)", { exact: true }),
+    ).toHaveValue("1800");
+    await expect(page.getByLabel("분당 요청 수", { exact: true })).toHaveValue(
+      "12",
+    );
+    await expect(page.getByLabel("최대 동시 실행", { exact: true })).toHaveValue(
+      "3",
+    );
+
+    await page.getByLabel("시스템 주기(초)", { exact: true }).fill("8100");
+    await page.getByRole("button", { name: "새로고침" }).click();
+    await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(2);
+    await expect(
+      page.getByLabel("시스템 주기(초)", { exact: true }),
+    ).toHaveValue("8100");
+  });
+
   test("policy edit fires PUT with coerced body and shows saved badge", async ({
     page,
   }) => {
@@ -245,12 +311,14 @@ test.describe("/ops/providers refresh policy depth", () => {
       page.getByRole("heading", { level: 1, name: "Provider 상태" }),
     ).toBeVisible();
     // 첫 행(kma)이 자동 선택되어 PolicyEditor가 빈 draft로 뜬다.
-    await expect(page.getByText("Refresh policy")).toBeVisible();
+    await expect(page.getByText("갱신 정책", { exact: true })).toBeVisible();
     await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(1);
 
-    await page.getByLabel("targeted policy").selectOption("allow_targeted");
-    await page.getByLabel("system interval sec").fill("3600");
-    await page.getByLabel("requests / min").fill("30");
+    await page
+      .getByLabel("타깃 갱신 정책", { exact: true })
+      .selectOption("allow_targeted");
+    await page.getByLabel("시스템 주기(초)", { exact: true }).fill("172800");
+    await page.getByLabel("분당 요청 수", { exact: true }).fill("30");
 
     await page.getByRole("button", { name: "저장" }).click();
 
@@ -258,23 +326,26 @@ test.describe("/ops/providers refresh policy depth", () => {
     expect(policy.puts[0].path).toBe(
       `/v1/admin/provider-refresh-policies/${KMA_PROVIDER}/${KMA_DATASET}`,
     );
-    // buildPolicyBody: 빈 numeric → undefined(=JSON에서 생략), max_concurrent 기본 1,
-    // rate_limit_source는 textarea seed `{}`에서 파싱.
+    // buildPolicyBody: 운영 기본값과 사용자가 수정한 값을 모두 양의 정수로 변환하고,
+    // rate_limit_source는 textarea seed `{}`에서 파싱한다.
     expect(policy.puts[0].body).toMatchObject({
       source_kind: "openapi",
       targeted_policy: "allow_targeted",
-      system_interval_seconds: 3600,
+      system_interval_seconds: 172800,
+      optimal_interval_seconds: 86400,
+      min_interval_seconds: 3600,
       max_requests_per_minute: 30,
+      max_requests_per_hour: 1000,
+      max_requests_per_day: 10000,
       max_concurrent: 1,
+      burst_size: 10,
       config_source: "db",
       enabled: true,
       rate_limit_source: {},
     });
-    expect(policy.puts[0].body.optimal_interval_seconds).toBeUndefined();
-    expect(policy.puts[0].body.burst_size).toBeUndefined();
 
     // 200 후 saved Badge(updated_at → formatDateTime).
-    await expect(page.getByText(/^saved /)).toBeVisible();
+    await expect(page.getByText(/^저장됨 /)).toBeVisible();
   });
 
   test("invalid positive-int field blocks PUT (client validation)", async ({
@@ -287,21 +358,14 @@ test.describe("/ops/providers refresh policy depth", () => {
     const policy = await mockPolicyUpsert(page);
 
     await page.goto("/ops/providers");
-    await expect(page.getByText("Refresh policy")).toBeVisible();
+    await expect(page.getByText("갱신 정책", { exact: true })).toBeVisible();
     await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(1);
 
-    // 0은 양의 정수가 아니므로 optionalPositiveInt가 throw → 네트워크 호출 없음.
-    await page.getByLabel("requests / hour").fill("0");
+    // 0은 양의 정수가 아니므로 제출 전 field validation에서 차단된다.
+    await page.getByLabel("시간당 요청 수", { exact: true }).fill("0");
     await page.getByRole("button", { name: "저장" }).click();
 
-    await expect(
-      page.getByText("requests/hour 값은 양의 정수여야 합니다."),
-    ).toBeVisible();
-    await expect(
-      page
-        .getByRole("alert")
-        .filter({ hasText: "policy 저장 실패" }),
-    ).toBeVisible();
+    await expect(page.getByText("양의 정수를 입력하세요.")).toBeVisible();
     await expect.poll(() => policy.puts.length).toBe(0);
   });
 
@@ -313,18 +377,22 @@ test.describe("/ops/providers refresh policy depth", () => {
     const policy = await mockPolicyUpsert(page);
 
     await page.goto("/ops/providers");
-    await expect(page.getByText("Refresh policy")).toBeVisible();
+    await expect(page.getByText("갱신 정책", { exact: true })).toBeVisible();
     await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(1);
 
     // `[]`는 array(object 아님) → buildPolicyBody가 동기 throw → PUT 미발생.
-    await page.getByLabel("rate limit source").fill("[]");
+    await page
+      .getByLabel("rate limit 출처(JSON)", { exact: true })
+      .fill("[]");
     await page.getByRole("button", { name: "저장" }).click();
 
     await expect(
-      page.getByText("rate_limit_source 값은 JSON object여야 합니다."),
+      page.getByText(
+        "rate limit 출처(JSON): rate limit 출처은(는) JSON object여야 합니다.",
+      ),
     ).toBeVisible();
     await expect(
-      page.getByRole("alert").filter({ hasText: "policy 저장 실패" }),
+      page.getByRole("alert").filter({ hasText: "정책 저장 실패" }),
     ).toBeVisible();
     await expect.poll(() => policy.puts.length).toBe(0);
   });
@@ -341,14 +409,14 @@ test.describe("/ops/providers refresh policy depth", () => {
     });
 
     await page.goto("/ops/providers");
-    await expect(page.getByText("Dataset detail")).toBeVisible();
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
 
     // recent-requests 테이블만 `job`/`link` 헤더로 한정(다른 테이블과 헤더 충돌 회피).
     const recentTable = page.getByRole("table").filter({
-      has: page.getByRole("columnheader", { name: "job" }),
+      has: page.getByRole("columnheader", { name: "잡" }),
     });
     await expect(
-      recentTable.getByRole("columnheader", { name: "link" }),
+      recentTable.getByRole("columnheader", { name: "링크" }),
     ).toBeVisible();
 
     const requestRow = recentTable.getByRole("row", {
@@ -364,23 +432,36 @@ test.describe("/ops/providers refresh policy depth", () => {
     ).toHaveAttribute("href", `/ops/import-jobs/${JOB_ID}`);
   });
 
-  test("sync_state cursor JSON renders in Cursor block", async ({ page }) => {
+  test("선택한 sync_scope의 cursor JSON을 표시한다", async ({ page }) => {
     const detail = makeDatasetDetail({
       sync_states: [
         makeSyncState({
+          sync_scope: "scope-a",
           cursor: { last_id: "abc123", updated_at: "2026-06-08T00:00:00Z" },
+        }),
+        makeSyncState({
+          sync_scope: "scope-b",
+          cursor: { last_id: "def456", updated_at: "2026-06-08T01:00:00Z" },
         }),
       ],
     });
     await mockOpsProviders(page, {
-      items: [makeOpsProviderDataset()],
+      items: [
+        makeOpsProviderDataset({ sync_scope: "scope-a" }),
+        makeOpsProviderDataset({ sync_scope: "scope-b" }),
+      ],
       details: { [KMA_PROVIDER]: [detail] },
     });
 
     await page.goto("/ops/providers");
-    // Cursor 카드 + JSON.stringify(cursor, null, 2) 직렬화 확인.
-    await expect(page.getByText("Cursor")).toBeVisible();
-    await expect(page.getByText(/"last_id": "abc123"/)).toBeVisible();
+    const freshnessTable = page.getByRole("table").filter({
+      has: page.getByRole("columnheader", { name: "정책" }),
+    });
+    await freshnessTable.getByRole("row", { name: /scope-b/ }).click();
+
+    await expect(page.getByText("커서 · scope-b")).toBeVisible();
+    await expect(page.getByText(/"last_id": "def456"/)).toBeVisible();
+    await expect(page.getByText(/"last_id": "abc123"/)).toHaveCount(0);
   });
 
   test("row click re-selects dataset and re-keys detail/policy panels", async ({
@@ -415,13 +496,13 @@ test.describe("/ops/providers refresh policy depth", () => {
 
     // freshness 테이블의 mois 행 클릭(아이콘 detail 버튼 대신 row click = house idiom).
     const freshnessTable = page.getByRole("table").filter({
-      has: page.getByRole("columnheader", { name: "policy" }),
+      has: page.getByRole("columnheader", { name: "정책" }),
     });
     await freshnessTable.getByRole("row", { name: /python-mois-api/ }).click();
 
     // 상세 GET이 mois로 발화(URL-encoded provider 세그먼트).
     await expect
-      .poll(() => detailPaths.some((p) => p.includes(MOIS_PROVIDER)))
+      .poll(() => detailPaths.includes(`/v1/ops/providers/${MOIS_PROVIDER}`))
       .toBe(true);
     // 패널이 provider/dataset 키로 remount → mono subheading 갱신.
     await expect(
@@ -446,14 +527,21 @@ test.describe("/ops/providers refresh policy depth", () => {
     await expect(
       page.getByText("선택된 provider dataset이 없습니다."),
     ).toBeVisible();
-    await expect(page.getByText("0 providers")).toBeVisible();
-    await expect(page.getByText("failing 0")).toBeVisible();
+    await expect(page.getByText("제공자 0")).toBeVisible();
+    await expect(page.getByText("실패 0")).toBeVisible();
     // useOpsProvider는 provider null이면 disabled → 상세 GET 미발생.
     await expect.poll(() => counts.detail).toBe(0);
   });
 
   test("provider list fetch error shows destructive alert", async ({ page }) => {
     await page.route("**/v1/ops/providers**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET" || apiPath !== "/v1/ops/providers") {
+        throw new Error(
+          `Unexpected provider list request: ${request.method()} ${apiPath}`,
+        );
+      }
       await fulfillJson(
         route,
         {

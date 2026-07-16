@@ -649,7 +649,11 @@ def _patch_offline_job_repos(
 
     monkeypatch.setattr(offline_upload_mod, "try_advisory_lock", _try_advisory_lock)
     monkeypatch.setattr(offline_upload_mod, "get_offline_upload", _get_offline_upload)
-    monkeypatch.setattr(offline_upload_mod, "start_import_job", _start_import_job)
+    monkeypatch.setattr(
+        offline_upload_mod,
+        "start_provider_dataset_import_job",
+        _start_import_job,
+    )
     monkeypatch.setattr(offline_upload_mod, "heartbeat_import_job", _heartbeat_import_job)
     monkeypatch.setattr(offline_upload_mod, "finish_import_job", _finish_import_job)
     monkeypatch.setattr(offline_upload_mod, "update_import_job_payload", _update_import_job_payload)

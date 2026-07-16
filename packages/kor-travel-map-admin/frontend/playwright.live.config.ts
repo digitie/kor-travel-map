@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
-import { STORAGE_STATE } from "./e2e/live/_auth-state";
+import { LIVE_STORAGE_STATE } from "./e2e/_auth-state";
 
 const artifactRoot =
   process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
@@ -115,7 +115,7 @@ export default defineConfig({
     {
       name: "chromium",
       testIgnore: /auth\.setup\.ts/,
-      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE },
+      use: { ...devices["Desktop Chrome"], storageState: LIVE_STORAGE_STATE },
       dependencies: ["setup"],
     },
   ],

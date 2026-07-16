@@ -2,12 +2,11 @@ import type { components } from "../src/api/types";
 
 type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
-type PipelineCancellationMemberKind =
+type PipelineCancellationRootKind =
   components["schemas"]["PipelineCancellationRootRecord"]["kind"];
 
 type CancellationFixtureMember = {
-  memberKind: PipelineCancellationMemberKind;
-  memberId: string;
+  jobId: string;
   initialStatus?: string;
   dagsterRunId?: string | null;
   operationKind?: string | null;
@@ -15,7 +14,7 @@ type CancellationFixtureMember = {
 };
 
 type CancellationFixtureOptions = {
-  rootKind: PipelineCancellationMemberKind;
+  rootKind: PipelineCancellationRootKind;
   rootId: string;
   initialStatus?: string;
   dagsterRunId?: string | null;
@@ -35,8 +34,7 @@ export function makePipelineCancellationResponse({
   const now = "2026-07-14T00:00:00.000Z";
   const memberFixtures = members ?? [
     {
-      memberId: rootId,
-      memberKind: rootKind,
+      jobId: rootId,
     },
   ];
   const memberInitialStatus = (member: CancellationFixtureMember): string =>
@@ -105,8 +103,7 @@ export function makePipelineCancellationResponse({
         dagster_run_id: memberRunId(member),
         error: null,
         initial_status: memberInitialStatus(member),
-        member_id: member.memberId,
-        member_kind: member.memberKind,
+        job_id: member.jobId,
         operation_kind: memberOperationKind(member),
         requires_run_termination: requiresRunTermination(member),
         result: "cancelled",

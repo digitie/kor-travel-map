@@ -103,7 +103,7 @@ async def test_batch_gate_plan_only_reads_children_without_writes(
         raise AssertionError("plan_only must not create import jobs")
 
     monkeypatch.setattr(batch_dag, "list_import_jobs_by_ids", fake_list)
-    monkeypatch.setattr(batch_dag, "start_import_job", fail_start)
+    monkeypatch.setattr(batch_dag, "start_unpaired_import_job", fail_start)
 
     result = await _run_phases(
         _session(),
@@ -312,7 +312,7 @@ def _install_fakes(
         calls["locks"].append(job_ids)
         return ()
 
-    monkeypatch.setattr(batch_dag, "start_import_job", fake_start)
+    monkeypatch.setattr(batch_dag, "start_unpaired_import_job", fake_start)
     monkeypatch.setattr(batch_dag, "attach_import_jobs_to_batch", fake_attach)
     monkeypatch.setattr(batch_dag, "update_import_job_payload", fake_update)
     monkeypatch.setattr(batch_dag, "finish_import_job", fake_finish)

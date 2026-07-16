@@ -3,6 +3,42 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin ops 통합 기반 (2026-07-14~15, `T-ADM-C1`~`C3c`)
+
+- [x] **T-ADM-C1 — 플랜·ADR-064·task 분해.** Dagster job/provider 운영 표면을
+  `/ops/pipeline`과 `/ops/datasets` 두 페이지로 통합하는 정본 계획과 병렬 PR 경계를 확정했다.
+- [x] **T-ADM-C2 / C2R — datasets backend와 차단 계약 보강** (PR #676/#688,
+  issue #678). 그리드·상세·refresh policy·typed preview, 서버 계산 freshness,
+  schedule 시각 분리, canonical latest batch, provider/dataset 이슈 분리, orphan mutation
+  차단을 완결했다.
+- [x] **T-ADM-C3 — pipeline backend** (PR #677). overview·root execution·detail/cancel·
+  event·Dagster run·schedule·request API와 `dagster_run_id` 실컬럼을 추가했다.
+- [x] **T-ADM-C3a — 공용 application service/schema 추출** (issue #682, PR #687).
+  삭제 예정 router의 private symbol 의존을 제거하고 신·구 표면의 공용 경계를 만들었다.
+- [x] **T-ADM-C3b — canonical root projection** (issue #679, PR #689). recursive lineage,
+  nearest request owner, standalone partition, deterministic projected job과 keyset cursor를
+  구현했다. C3e가 typed identity 정본으로 후속 강화한다.
+- [x] **T-ADM-C3c — Dagster run detail/failure 계약 이식** (issue #681, PR #687/#690).
+  opaque event cursor, failure 구조, 404/502/503 RFC7807과 공용 query service를 완결했다.
+
+## C3e canonical operation 영속화 (2026-07-15, `T-ADM-C3e-A1`)
+
+- [x] **T-ADM-C3e-A1 — 0051·operation repository frozen 계약**.
+  `ops.import_jobs`에 exact pair·trigger·registry version·raw Dagster status와 feature operation
+  구조 제약·partial index를 추가하고, payload를 읽지 않는 보수적 backfill을 적용했다. frozen
+  repository/client lifecycle, direct writer identity, feature operation의 authoritative engine 시각,
+  C3d run-backed queued 취소 경계를 적대 리뷰 2회와 전체 로컬 gate로 고정했다. 상세 구현·검증
+  기록은 `docs/journal.md`와 `docs/resume.md`의 2026-07-15 A1 항목을 따른다.
+
+## C3e 공용 projection·request/job 단일 정본 (2026-07-16, `T-ADM-C3e-A2`)
+
+- [x] **T-ADM-C3e-A2 — canonical root/exact-pair projection과 0052 clean-cut.**
+  pipeline/grid/detail/overview를 같은 cycle-safe root와 typed pair member에 연결하고,
+  feature update request lifecycle을 canonical import job 한 행으로 통합했다. request/job 양방향
+  1:1, 6종 scope·typed filter·update policy, 격리 component, 전용 writer/CAS를 DB와 Python에서
+  함께 강제한다. event 감사 부분 index와 statement-level live revision clock을 추가했으며,
+  두 적대 리뷰어 승인 뒤 전체 Python/DB/frontend gate와 n150 mocked E2E 501건을 통과했다.
+
 ## C3e canonical operation 문서 gate (2026-07-15, `T-ADM-C3e-D`)
 
 - [x] **T-ADM-C3e-D — canonical provider operation 문서 계약** (#679, PR #696).

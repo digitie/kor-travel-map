@@ -153,7 +153,10 @@ export function useCancelImportJobMutation() {
     mutationFn: cancelImportJob,
     onSettled: (data) => {
       // 409/502/503도 durable cancellation attempt를 만들 수 있으므로 항상 reload한다.
-      for (const queryKey of pipelineCancellationQueryKeys(data?.data.members)) {
+      for (const queryKey of pipelineCancellationQueryKeys(
+        data?.data.members,
+        data?.data.root,
+      )) {
         void queryClient.invalidateQueries({
           queryKey,
         });

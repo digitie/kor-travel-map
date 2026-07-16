@@ -78,6 +78,7 @@ SELECT {_ROOT_COLUMNS}
 FROM ops.import_jobs AS root
 WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
   AND root.dagster_run_id = :dagster_run_id
+  AND root.quarantined_at IS NULL
 FOR UPDATE
 """
 
@@ -95,10 +96,12 @@ SELECT
   child.cancellation_id AS child_cancellation_id
 FROM ops.import_jobs AS root
 LEFT JOIN ops.import_jobs AS child
-  ON child.parent_job_id = root.job_id
+ ON child.parent_job_id = root.job_id
  AND child.kind = '{FEATURE_OPERATION_MEMBER_KIND}'
+ AND child.quarantined_at IS NULL
 WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
   AND root.dagster_run_id = :dagster_run_id
+  AND root.quarantined_at IS NULL
 ORDER BY child.provider, child.dataset_key, child.job_id
 """
 
@@ -146,6 +149,7 @@ WHERE job_id = CAST(:root_job_id AS uuid)
   AND kind = 'provider_feature_load_run'
   AND status = 'queued'
   AND cancellation_id IS NULL
+  AND quarantined_at IS NULL
 RETURNING job_id
 """
 
@@ -159,6 +163,7 @@ WHERE parent_job_id = CAST(:root_job_id AS uuid)
   AND kind = 'provider_feature_load'
   AND status = 'queued'
   AND cancellation_id IS NULL
+  AND quarantined_at IS NULL
 RETURNING job_id
 """
 
@@ -170,6 +175,7 @@ WHERE job_id = CAST(:root_job_id AS uuid)
   AND status = 'queued'
   AND dagster_run_status IN ('QUEUED','NOT_STARTED','MANAGED')
   AND :dagster_run_status = 'STARTING'
+  AND quarantined_at IS NULL
 RETURNING job_id
 """
 
@@ -181,6 +187,7 @@ WHERE job_id = CAST(:root_job_id AS uuid)
   AND status = 'running'
   AND dagster_run_status = 'STARTED'
   AND :dagster_run_status = 'CANCELING'
+  AND quarantined_at IS NULL
 RETURNING job_id
 """
 
@@ -198,6 +205,7 @@ WHERE parent_job_id = CAST(:root_job_id AS uuid)
   AND dataset_key = :dataset_key
   AND status IN ('queued','running')
   AND cancellation_id IS NULL
+  AND quarantined_at IS NULL
 RETURNING job_id
 """
 
@@ -209,12 +217,14 @@ WITH counts AS (
   FROM ops.import_jobs
   WHERE parent_job_id = CAST(:root_job_id AS uuid)
     AND kind = 'provider_feature_load'
+    AND quarantined_at IS NULL
 )
 UPDATE ops.import_jobs AS root
 SET progress = CASE WHEN counts.total = 0 THEN 0
                     ELSE floor(100.0 * counts.done / counts.total)::integer END
 FROM counts
 WHERE root.job_id = CAST(:root_job_id AS uuid)
+  AND root.quarantined_at IS NULL
 RETURNING root.job_id
 """
 
@@ -225,6 +235,7 @@ WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
   AND root.parent_job_id IS NULL
   AND root.status IN ('queued','running')
   AND root.cancellation_id IS NULL
+  AND root.quarantined_at IS NULL
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
     OR (root.created_at, root.job_id) > (
@@ -516,7 +527,13 @@ async def ensure_dagster_feature_operation(
             await session.execute(
                 text(_LOCK_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
             )
-        ).one()
+        ).one_or_none()
+        if root_row is None:
+            raise FeatureOperationInvariantConflict(
+                "Dagster run belongs to a quarantined provider feature operation",
+                dagster_run_id=normalized_run_id,
+                details={"reason": "quarantined"},
+            )
     root_job_id = str(root_row.root_job_id)
     await lock_pipeline_cancellation_root(
         session, root_kind="import_job", root_id=root_job_id
@@ -554,7 +571,8 @@ async def ensure_dagster_feature_operation(
         for row in (await session.execute(
             text(
                 "SELECT cancellation_id FROM ops.import_jobs "
-                "WHERE parent_job_id = CAST(:root_job_id AS uuid)"
+                "WHERE parent_job_id = CAST(:root_job_id AS uuid) "
+                "AND quarantined_at IS NULL"
             ),
             {"root_job_id": root_job_id},
         )).all()
@@ -925,6 +943,7 @@ async def reconcile_dagster_feature_run(
                 WHERE parent_job_id = CAST(:root_job_id AS uuid)
                   AND kind = 'provider_feature_load'
                   AND cancellation_id IS NULL
+                  AND quarantined_at IS NULL
                 """
             ),
             {
@@ -947,6 +966,7 @@ async def reconcile_dagster_feature_run(
                   AND kind = 'provider_feature_load'
                   AND status IN ('queued','running')
                   AND cancellation_id IS NULL
+                  AND quarantined_at IS NULL
                 """
             ),
             {
@@ -977,6 +997,7 @@ async def reconcile_dagster_feature_run(
               AND kind = 'provider_feature_load_run'
               AND status IN ('queued','running')
               AND cancellation_id IS NULL
+              AND quarantined_at IS NULL
             """
         ),
         {

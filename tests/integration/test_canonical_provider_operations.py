@@ -17,6 +17,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationKey,
 )
 from kortravelmap.infra.feature_operation_repo import (
+    append_dagster_feature_attempt_event,
     ensure_dagster_feature_operation,
     finish_dagster_feature_pair,
     list_reconcilable_dagster_feature_runs,
@@ -24,7 +25,7 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.jobs_repo import (
     claim_next_import_job,
-    enqueue_import_job,
+    enqueue_unpaired_import_job,
     heartbeat_import_job,
     record_import_job_event,
     recover_stale_running_jobs,
@@ -449,7 +450,7 @@ async def test_reserved_feature_tree_rejects_generic_writers(
     child = operation.operation.members[0]
 
     with pytest.raises(FeatureOperationInvariantConflict):
-        await enqueue_import_job(
+        await enqueue_unpaired_import_job(
             migrated_session,
             kind="generic_child",
             parent_job_id=root_id,
@@ -465,6 +466,44 @@ async def test_reserved_feature_tree_rejects_generic_writers(
             provider="other-provider",
             dataset_key="other-dataset",
         )
+
+
+async def test_attempt_event_inherits_pair_without_mutating_member_identity(
+    migrated_session: AsyncSession,
+) -> None:
+    pair = ProviderDatasetOperationKey("provider", "dataset")
+    operation = await ensure_dagster_feature_operation(
+        migrated_session,
+        dagster_run_id="run-c3e-attempt-audit",
+        trigger_kind="manual",
+        selected_pairs=(pair,),
+        registry_version="registry-v1",
+        engine_created_at=datetime(2026, 7, 15, 6, tzinfo=UTC),
+        engine_started_at=None,
+        observed_status="QUEUED",
+    )
+    job_id = operation.operation.members[0].job_id
+
+    event = await append_dagster_feature_attempt_event(
+        migrated_session,
+        dagster_run_id="run-c3e-attempt-audit",
+        pair=pair,
+        attempt_number=1,
+        outcome="retryable_failure",
+        error={"code": "timeout"},
+    )
+    stored = (
+        await migrated_session.execute(
+            text(
+                "SELECT provider, dataset_key FROM ops.import_jobs "
+                "WHERE job_id=CAST(:job_id AS uuid)"
+            ),
+            {"job_id": job_id},
+        )
+    ).one()
+
+    assert (event.provider, event.dataset_key) == (pair.provider, pair.dataset_key)
+    assert (stored.provider, stored.dataset_key) == (pair.provider, pair.dataset_key)
 
 
 async def test_run_backed_queued_cancellation_freezes_one_run_and_all_pairs(
@@ -506,8 +545,7 @@ async def test_run_backed_queued_cancellation_freezes_one_run_and_all_pairs(
         await cancel_queued_pipeline_cancellation_member(
             migrated_session,
             cancellation_id=detail.attempt.cancellation_id,
-            member_kind=detail.members[0].member_kind,
-            member_id=detail.members[0].member_id,
+            job_id=detail.members[0].job_id,
         )
 
 

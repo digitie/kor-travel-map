@@ -181,9 +181,7 @@ async def test_sync_dedup_candidates_persists(
 ) -> None:
     await _seed_temples(migrated_engine, "cli-knps-1", "cli-krh-1")
 
-    sync = await map_client.sync_dedup_candidates(
-        [_stub("cli-knps-1")], [_stub("cli-krh-1")]
-    )
+    sync = await map_client.sync_dedup_candidates([_stub("cli-knps-1")], [_stub("cli-krh-1")])
     assert len(sync.candidates) == 1
     assert sync.candidates[0].decision == "auto_merge"  # 완전 동일 → auto_merge
     assert sync.queue.inserted == 1
@@ -214,10 +212,9 @@ async def test_sync_dedup_excludes_auto_merge_when_disabled(
 async def test_feature_update_request_client_lifecycle(
     map_client: AsyncKorTravelMapClient,
 ) -> None:
-    preview = await map_client.enqueue_feature_update_request(
+    preview = await map_client.preview_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
         providers=["python-mois-api"],
-        dry_run=True,
     )
     assert isinstance(preview, FeatureUpdateRequestPreview)
     assert preview.matched_scope == {"feature_count": 0, "sigungu_codes": []}
@@ -233,6 +230,7 @@ async def test_feature_update_request_client_lifecycle(
     assert isinstance(request, FeatureUpdateRequest)
     assert request.status == "queued"
     assert request.job_id is not None
+    assert request.generation == 1
 
     loaded = await map_client.get_update_request(request.request_id)
     assert loaded is not None
@@ -260,14 +258,14 @@ async def test_feature_update_request_client_lifecycle(
     assert isinstance(pre_start_failure, FeatureUpdateRequest)
     retried = await map_client.fail_update_request(
         pre_start_failure.request_id,
-        expected_dagster_run_id="dagster-run-before-start",
-        expected_request_updated_at=pre_start_failure.updated_at,
+        owner_dagster_run_id="dagster-run-before-start",
+        expected_request_generation=pre_start_failure.generation,
         error_message="resource initialization failed",
     )
     assert retried is not None
     assert retried.status == "queued"
     assert retried.dagster_run_id is None
-    assert retried.updated_at > pre_start_failure.updated_at
+    assert retried.generation == pre_start_failure.generation + 1
 
     to_fail = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
@@ -275,42 +273,37 @@ async def test_feature_update_request_client_lifecycle(
         priority=80,
     )
     assert isinstance(to_fail, FeatureUpdateRequest)
+    with pytest.raises(ValueError, match="trimmed non-empty"):
+        await map_client.mark_update_request_started(
+            to_fail.request_id,
+            dagster_run_id=None,  # type: ignore[arg-type]
+            expected_generation=to_fail.generation,
+        )
+    still_queued = await map_client.get_update_request(to_fail.request_id)
+    assert still_queued == to_fail
+
     started_to_fail = await map_client.mark_update_request_started(
         to_fail.request_id,
         dagster_run_id="dagster-run-client-test",
-        expected_updated_at=to_fail.updated_at,
+        expected_generation=to_fail.generation,
     )
     assert started_to_fail is not None
     wrong_owner = await map_client.mark_update_request_started(
         to_fail.request_id,
         dagster_run_id="dagster-run-other",
+        expected_generation=started_to_fail.generation,
     )
     assert wrong_owner is None
     failed = await map_client.fail_update_request(
         to_fail.request_id,
-        expected_dagster_run_id="dagster-run-client-test",
-        expected_request_updated_at=to_fail.updated_at,
+        owner_dagster_run_id="dagster-run-client-test",
+        expected_request_generation=started_to_fail.generation,
         error_message="client test failure",
     )
     assert failed is not None
     assert failed.status == "failed"
     assert failed.dagster_run_id == "dagster-run-client-test"
     assert failed.error_message == "client test failure"
-
-    cancelled = await map_client.cancel_update_request(
-        request.request_id, error_message="client test cancel"
-    )
-    assert cancelled is not None
-    assert cancelled.status == "cancelled"
-    assert cancelled.error_message == "client test cancel"
-
-    cancelled_page = await map_client.list_update_requests(
-        status="cancelled", limit=10
-    )
-    assert tuple(item.request_id for item in cancelled_page.items) == (
-        request.request_id,
-    )
-
 
 # -- T-RV-52c: festival enrichment review --------------------------------------
 
@@ -447,13 +440,9 @@ async def test_load_air_quality_commits_station_and_values(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     fetched = datetime(2026, 6, 8, 9, 0, tzinfo=_KST)
-    station = _AirStation(
-        station_name="중구", addr="서울 중구", lat=37.5640, lon=126.9750
-    )
+    station = _AirStation(station_name="중구", addr="서울 중구", lat=37.5640, lon=126.9750)
     bundles = await air_quality_stations_to_bundles([station], fetched_at=fetched)
-    station_feature_ids = {
-        b.source_record.source_entity_id: b.feature.feature_id for b in bundles
-    }
+    station_feature_ids = {b.source_record.source_entity_id: b.feature.feature_id for b in bundles}
     measurement = _AirMeasurement(
         station_name="중구",
         data_time=datetime(2026, 6, 8, 8, 0, tzinfo=_KST),
@@ -462,9 +451,7 @@ async def test_load_air_quality_commits_station_and_values(
         pm25_value=18.0,
         pm25_grade=1,
     )
-    values = air_quality_to_weather_values(
-        [measurement], station_feature_ids=station_feature_ids
-    )
+    values = air_quality_to_weather_values([measurement], station_feature_ids=station_feature_ids)
 
     result = await map_client.load_air_quality(bundles, values)
     assert result.stations.features_inserted == 1
@@ -474,19 +461,14 @@ async def test_load_air_quality_commits_station_and_values(
     async with AsyncSession(migrated_engine) as session:
         kind = (
             await session.execute(
-                text(
-                    "SELECT kind FROM feature.features WHERE feature_id = :f"
-                ),
+                text("SELECT kind FROM feature.features WHERE feature_id = :f"),
                 {"f": bundles[0].feature.feature_id},
             )
         ).scalar_one()
         assert kind == "weather"
         value_count = (
             await session.execute(
-                text(
-                    "SELECT count(*) FROM feature.feature_weather_values "
-                    "WHERE feature_id = :f"
-                ),
+                text("SELECT count(*) FROM feature.feature_weather_values WHERE feature_id = :f"),
                 {"f": bundles[0].feature.feature_id},
             )
         ).scalar_one()

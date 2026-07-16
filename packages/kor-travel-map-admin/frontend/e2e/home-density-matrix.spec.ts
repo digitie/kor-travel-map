@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 type Meta = components["schemas"]["Meta"];
 type PageMeta = components["schemas"]["PageMeta"];
@@ -266,14 +267,22 @@ async function routeEndpoint(
   body: () => unknown,
 ) {
   await page.route(glob, async (route) => {
-    if (route.request().method() !== "GET") {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (
+      request.resourceType() === "document" ||
+      url.pathname.startsWith("/_next/") ||
+      url.pathname === "/favicon.ico" ||
+      url.searchParams.has("_rsc")
+    ) {
       await route.continue();
       return;
     }
-    const url = new URL(route.request().url());
-    if (url.pathname !== pathname) {
-      await route.continue();
-      return;
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== pathname) {
+      throw new Error(
+        `Unhandled home ${endpoint} route: ${request.method()} ${apiPath}`,
+      );
     }
     counts[endpoint] += 1;
     const status = options.fail?.[endpoint];
@@ -450,9 +459,9 @@ test.describe("home/shell dense matrix", () => {
   for (const shellCase of [
     { text: "kor-travel-map", role: "link" },
     { text: "/", role: "text" },
-    { text: "Overview", role: "text" },
+    { text: "개요", role: "text" },
     {
-      text: "feature, import job, consistency, Dagster 상태를 한 화면에서 확인합니다.",
+      text: "운영 상태를 한 화면에서 확인합니다.",
       role: "text",
     },
     { text: "새로고침", role: "button" },
@@ -548,7 +557,7 @@ test.describe("home metrics dense matrix", () => {
       const activeJobs = (item.counts.queued ?? 0) + (item.counts.running ?? 0);
       const expectedDescription =
         activeJobs > 0
-          ? `${activeJobs.toLocaleString("ko-KR")} queued/running`
+          ? `${activeJobs.toLocaleString("ko-KR")}건 진행 중`
           : "대기 중인 작업 없음";
       await gotoHome(page, {
         metrics: makeMetrics({
@@ -659,18 +668,20 @@ test.describe("home metrics dense matrix", () => {
 
 test.describe("home import job and dedup dense matrix", () => {
   for (const item of [
-    { status: "queued", progress: 0, kind: "festival_sync" },
-    { status: "running", progress: 7, kind: "weather_sync" },
-    { status: "done", progress: 100, kind: "rest_area_sync" },
-    { status: "failed", progress: 66, kind: "oil_price_sync" },
-    { status: "cancelled", progress: 13, kind: "manual_upload" },
-    { status: "blocked", progress: 50, kind: "consistency_check" },
+    { status: "queued", statusLabel: "대기", progress: 0, kind: "festival_sync" },
+    { status: "running", statusLabel: "실행중", progress: 7, kind: "weather_sync" },
+    { status: "done", statusLabel: "완료", progress: 100, kind: "rest_area_sync" },
+    { status: "failed", statusLabel: "실패", progress: 66, kind: "oil_price_sync" },
+    { status: "cancelled", statusLabel: "취소됨", progress: 13, kind: "manual_upload" },
+    { status: "blocked", statusLabel: "blocked", progress: 50, kind: "consistency_check" },
   ]) {
     test(`import job row status badge: ${item.status}`, async ({ page }) => {
       await gotoHome(page, {
         importJobs: [makeImportJob(item)],
       });
-      await expect(card(page, "최근 적재 작업").getByText(item.status, { exact: true })).toBeVisible();
+      await expect(
+        card(page, "최근 적재 작업").getByText(item.statusLabel, { exact: true }),
+      ).toBeVisible();
     });
 
     test(`import job row progress: ${item.status}`, async ({ page }) => {
@@ -793,17 +804,18 @@ test.describe("home backend/dagster/error dense matrix", () => {
   }
 
   for (const [index, item] of ([
-    { status: "ok", assets: 0, schedules: 0 },
-    { status: "ok", assets: 2, schedules: 1 },
-    { status: "unavailable", assets: 0, schedules: 0 },
-    { status: "error", assets: 99, schedules: 12 },
-    { status: "ok", assets: 1000, schedules: 100 },
-    { status: "unavailable", assets: 5, schedules: 0 },
-    { status: "error", assets: 1, schedules: 1 },
-    { status: "unavailable", assets: 42, schedules: 6 },
-    { status: "ok", assets: 8, schedules: 8 },
+    { status: "ok", statusLabel: "정상", assets: 0, schedules: 0 },
+    { status: "ok", statusLabel: "정상", assets: 2, schedules: 1 },
+    { status: "unavailable", statusLabel: "사용불가", assets: 0, schedules: 0 },
+    { status: "error", statusLabel: "오류", assets: 99, schedules: 12 },
+    { status: "ok", statusLabel: "정상", assets: 1000, schedules: 100 },
+    { status: "unavailable", statusLabel: "사용불가", assets: 5, schedules: 0 },
+    { status: "error", statusLabel: "오류", assets: 1, schedules: 1 },
+    { status: "unavailable", statusLabel: "사용불가", assets: 42, schedules: 6 },
+    { status: "ok", statusLabel: "정상", assets: 8, schedules: 8 },
   ] satisfies Array<{
     status: components["schemas"]["DagsterSummaryData"]["status"];
+    statusLabel: string;
     assets: number;
     schedules: number;
   }>).entries()) {
@@ -815,7 +827,9 @@ test.describe("home backend/dagster/error dense matrix", () => {
           status: item.status,
         }),
       });
-      await expect(card(page, "Dagster").getByText(item.status, { exact: true })).toBeVisible();
+      await expect(
+        card(page, "Dagster").getByText(item.statusLabel, { exact: true }),
+      ).toBeVisible();
     });
 
     test(`dagster asset count badge ${index}: ${item.assets}`, async ({ page }) => {
@@ -925,6 +939,10 @@ test.describe("home refresh dense matrix", () => {
             })
           : page.getByRole("link", { exact: true, name: item.label }).first();
       await expect(link).toHaveAttribute("href", item.href);
+      if (item.name === "header Dagster link") {
+        await expect(link).toHaveAttribute("target", "_blank");
+        await expect(link).toHaveAttribute("rel", "noreferrer");
+      }
     });
   }
 });

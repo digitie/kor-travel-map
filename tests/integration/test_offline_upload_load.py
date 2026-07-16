@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap import offline_upload as offline_upload_module
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -32,7 +33,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra.jobs_repo import start_import_job
+from kortravelmap.infra.jobs_repo import start_provider_dataset_import_job
 from kortravelmap.infra.offline_upload_repo import (
     OfflineUploadStatusConflict,
     create_offline_upload,
@@ -136,9 +137,12 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
     upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
+            provider_dataset=ProviderDatasetOperationKey(
+                "offline-test-provider", "offline_jsonl"
+            ),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )
@@ -178,9 +182,12 @@ async def test_preclaimed_run_owner_mismatch_stops_before_object_io(
     upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
+            provider_dataset=ProviderDatasetOperationKey(
+                "offline-test-provider", "offline_jsonl"
+            ),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
             dagster_run_id="owner-run",
@@ -224,9 +231,12 @@ async def test_preclaimed_marker_race_stops_before_object_and_feature_io(
     upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
+            provider_dataset=ProviderDatasetOperationKey(
+                "offline-test-provider", "offline_jsonl"
+            ),
             payload={"upload_id": upload_id},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )
@@ -463,7 +473,13 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
         assert finish_conflict.value.current_status == "uploaded"
         assert finish_conflict.value.allowed_statuses == frozenset({"loading"})
 
-        job = await start_import_job(session, kind="offline_upload_load")
+        job = await start_provider_dataset_import_job(
+            session,
+            kind="offline_upload_load",
+            provider_dataset=ProviderDatasetOperationKey(
+                "offline-test-provider", "offline_jsonl"
+            ),
+        )
         loading = await mark_offline_upload_loading(
             session,
             upload_id=upload_id,
@@ -654,9 +670,12 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
     )
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        job = await start_import_job(
+        job = await start_provider_dataset_import_job(
             session,
             kind="offline_upload_load",
+            provider_dataset=ProviderDatasetOperationKey(
+                "offline-test-provider", "offline_jsonl"
+            ),
             payload={"upload_id": upload_id, "dagster_run_id": None},
             source_checksum=hashlib.sha256(body).hexdigest(),
         )

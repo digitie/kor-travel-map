@@ -941,22 +941,43 @@ CREATE TABLE ops.import_job_events (
   code        TEXT,
   message     TEXT NOT NULL,
   payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  quarantined_at TIMESTAMPTZ,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ck_import_job_events_level
     CHECK (level IN ('debug','info','warning','error','critical'))
 );
 
 CREATE INDEX idx_import_job_events_job_time
-  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC);
+  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC)
+  WHERE quarantined_at IS NULL;
 CREATE INDEX idx_import_job_events_provider_time
   ON ops.import_job_events (provider, occurred_at DESC, event_id DESC)
-  WHERE provider IS NOT NULL;
+  WHERE provider IS NOT NULL AND quarantined_at IS NULL;
 CREATE INDEX idx_import_job_events_level_time
-  ON ops.import_job_events (level, occurred_at DESC, event_id DESC);
+  ON ops.import_job_events (level, occurred_at DESC, event_id DESC)
+  WHERE quarantined_at IS NULL;
+
+CREATE TABLE ops.import_job_event_clock (
+  clock_id  BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
+  revision  BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 ```
 
 `ops.import_job_events`는 `ops.import_jobs` lifecycle과 provider/Dagster/offline upload
-작업 단계 event를 저장한다. REST 조회 정렬은 `(occurred_at DESC, event_id DESC)`다.
+작업 단계 event를 저장한다. REST 조회 정렬은 `(occurred_at DESC, event_id DESC)`다. 0052
+migration이 격리한 component의 기존 event는 보존하되 같은 시각을 `quarantined_at`에 기록한다.
+이 marker는 migration 전용 불변값이며, 운영 조회와 모든 시간순 인덱스는
+`quarantined_at IS NULL`인 event만 대상으로 한다.
+
+`ops.import_job_event_clock`은 event INSERT/UPDATE/DELETE 성공 statement의 AFTER trigger가
+singleton `revision`을 한 번 올리는 live invalidation projection이다. 같은 row update가 동시 event
+transaction을 commit 전에 직렬화하므로 transaction 시작 시각이 오래된 late commit도 놓치지
+않고, rollback이면 event와 revision 증가가 함께 취소된다. `updated_at=clock_timestamp()`은 진단
+정보일 뿐 변경 판정의 정본은 `revision`이다. Row마다 clock을 갱신하지 않고 event row lock을 모두
+얻은 statement 끝에서 한 번만 갱신해 bulk WAL/dead tuple과 교차 row deadlock을 피한다. Clock UPDATE는 event
+AFTER trigger 안의 정확한 `revision+1`만 허용하며 DELETE/TRUNCATE를 금지한다. Event table
+TRUNCATE는 허용하되 같은 AFTER STATEMENT trigger가 revision을 한 번 증가시킨다.
 
 ### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 
@@ -1184,7 +1205,7 @@ CREATE INDEX idx_reports_batch   ON ops.feature_consistency_reports (batch_id);
 CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
 ```
 
-### 9.8 `ops.feature_update_requests` (ADR-045 accepted — alembic 0008)
+### 9.8 `ops.feature_update_requests` (ADR-045 accepted — alembic 0008+0052)
 
 OpenAPI로 들어온 feature update request를 저장한다. `center_radius`,
 `sigungu_by_radius`, `provider_dataset`, `cache_target_keys` 같은 scope를 Dagster
@@ -1196,25 +1217,67 @@ run/import job으로 연결한다. 상세 계약은 `docs/architecture/openapi-a
 |------|------|
 | `request_id` | UUID PK, `x_extension.gen_random_uuid()` 기본값 |
 | `scope_type` / `scope` | 요청 범위 종류와 JSONB payload |
-| `providers` / `dataset_keys` | 제한할 provider/dataset 목록(JSONB array) |
-| `update_policy` | 재적재/중복/정합성 정책 JSONB |
+| `providers` / `dataset_keys` | 제한할 provider/dataset 목록(1차원 unique `TEXT[]`, 최대 32/64개, 항목당 trimmed non-empty 128자 이하) |
+| `update_policy` | 허용 키·값 타입을 DB CHECK와 repository가 함께 강제하는 canonical 재적재/중복/정합성 정책 JSONB |
 | `run_mode` | `queued` 또는 `now` |
 | `priority` | queue 우선순위, 기본 50 |
-| `status` | `queued`/`running`/`done`/`failed`/`cancelled` |
-| `dry_run` | 영향 범위만 계산한 요청 여부 |
 | `matched_scope` | scope resolver가 계산한 feature/provider/sigungu 요약 |
-| `job_id` | `ops.import_jobs(job_id)` FK, job 삭제 시 `NULL` |
-| `dagster_run_id` | Dagster run 추적 id |
+| `job_id` | non-null unique `ops.import_jobs(job_id)` FK, job 삭제 `RESTRICT`; canonical job과 양방향 1:1 |
+| `generation` | 양수 queue 세대; requeue/pre-start retry에서만 증가 |
 
 인덱스:
 
-- `idx_feature_update_status_priority` — queued/running claim과 목록.
+- `idx_feature_update_priority` — queued canonical job seed와 JOIN한 뒤 priority 순서.
 - `idx_feature_update_created` — 최신 요청 목록.
-- `idx_feature_update_job` — import job에서 request 역추적.
+- `uq_feature_update_requests_job_id` — request당 canonical job 한 건과 job당 request 한 건을 위한 unique 역추적.
 
 T-205a는 테이블/ORM 매핑까지만 구현했다. scope resolver, enqueue/claim/peek
 repository, client 표면은 T-206a/b/c와 T-208e에서 구현했고, admin API와 Dagster
 sensor는 T-207/T-208에서 연결했다.
+
+0052부터 모든 request는 canonical job을 반드시 가지며 canonical
+`feature_update_request` job도 정확히 한 request를 가져야 한다. request→job FK와 `job_id`
+UNIQUE에 더해 canonical job INSERT의 deferred reverse-pair trigger가 commit 시 request 존재까지
+검사한다.
+따라서 job/request를 따로 commit하거나 request만 삭제해 orphan을 만드는 경로는 없다. generic
+import job writer는 이 kind를 reserved로 거부하고 전용 enqueue 경계만 같은 transaction에서 두 행을
+만든다. request 테이블은 scope/filter/policy/run mode/priority/operator/reason/matched scope와
+양수 `generation`만 소유한다. status, Dagster run, cancellation marker, error, 시작/종료 시각은
+삭제하고 canonical `import_jobs` 한 행을 lifecycle 단일 정본으로 사용한다. request 목록·상세·claim은
+unique job JOIN으로 lifecycle을 읽고 cancellation root는 request ID correlation을 유지하되 canonical
+job만 member로 동결·종결한다. `generation`은 requeue/pre-start retry에서만 증가하며 timestamp
+microsecond hack 없이 Dagster run key와 CAS를 만든다. canonical job runtime payload는 빈 object이고
+relation/scope/policy/matched scope를 복제하지 않는다. migration audit만 별도 source job ID를
+보존한다. request의 identity/scope/filter/policy/
+run mode/priority/operator/reason/created_at은 INSERT 뒤 불변이고 `matched_scope`와 `generation`만
+linked job의 active·unmarked 조건 아래 변경할 수 있다. request와 canonical job은 cancellation
+root/audit correlation을 보존하기 위해 append-only이며 DELETE를 거부한다. immutable DB 함수
+`ops.is_valid_feature_update_scope`는 `feature_ids`, `center_radius`, `sigungu_by_radius`,
+`bbox`, `provider_dataset`, `cache_target_keys` 여섯 scope의 exact key, JSON type, 배열
+크기, trimmed non-empty 문자열, 좌표·반경·bbox 범위를 OpenAPI와 동일하게 강제한다.
+`match`/`scope_mode`는 저장 전 기본값을 채우고 optional `sync_scope`/`radius_km`는
+JSON `null` 대신 키를 생략한 canonical shape만 저장한다. `provider_dataset` scope의 pair는
+연결 job의 typed pair와 정확히 같아야 하며 다른 scope는 unpaired job만 가리킨다.
+0052는 `providers`/`dataset_keys`를 JSONB에서 typed `TEXT[]`로 clean cut한다.
+`ops.is_valid_feature_update_filter_array`는 1차원·중복 없음, 32/64개 상한과 trimmed
+non-empty string 128자 이하를 강제한다. DB CHECK와 trigger는 연결 job의
+`kind=feature_update_request`, `parent_job_id/load_batch_id IS NULL`, `trigger_kind='update_request'`,
+registry/raw Dagster status 부재와 `queued → run-id NULL`, `running → trimmed non-empty run-id`까지
+강제하며 import job의 kind/provider/dataset은 insert 뒤
+불변이다. `update_policy`도 sparse object의 허용 key와 strict non-null 값 타입을 repository와
+DB CHECK가 함께 강제한다. migration은 기존 jobless·공유·pair 불일치·reserved Dagster kind
+request마다 request별 새 canonical job을 만들어 재연결한다. request와 연결되지 않은 기존
+`feature_update_request` job의 양방향 parent/child component 전체에는 `quarantined_at`과
+`quarantine_reason='unlinked_feature_update_component'`를 기록한다. 원래 `kind`·`payload`는 변경하지
+않으며 filtered/unfiltered/detail projection, legacy import-job list/detail/status/live와 Dagster engine
+read에서 제외한다. generic enqueue/lifecycle/payload/batch/event writer, runtime 격리 표식
+INSERT/UPDATE, 격리 행 UPDATE/DELETE와 격리 parent 아래 새 child attach를
+DB trigger가 거부해 migration 감사 계보를 보존한다. component에 다른 request가
+하나라도 연결돼 있으면 terminal이어도 자동 격리하지 않고 migration을 중단한다. request가 running이거나 source job과 양방향 parent/child로 연결된 어떤 job이든
+DB/Dagster active 상태이거나 cancellation scope가 동결됐으면 중복 실행·취소 우회를 피하려고
+request ID와 함께 중단한다. malformed scope/filter/policy와 persisted `dry_run=true`도 같은 방식으로
+중단한다. 0052는 DB `dry_run` 컬럼을 제거한다. HTTP는 실제 생성 endpoint(201)와
+비영속 preview endpoint(200)를 분리하고, 각 결과를 `result_kind`로 명시한다.
 
 #### 9.8.1 Pipeline root projection (T-ADM-C3b, 이슈 #679)
 
@@ -1225,23 +1288,22 @@ sensor는 T-207/T-208에서 연결했다.
 - import job은 `parent_job_id`를 위로 따라 component를 만든다. 정상 hierarchy의
   최상위 job이 component root다. parent row가 없으면 현재 job을 self-root로 삼고,
   cycle은 `uuid[] path`로 감지·종료한 뒤 cycle member의 최소 `job_id`를 root로 쓴다.
-- 각 job은 ancestry에서 가장 가까운 request anchor(`request.job_id`)에 귀속한다.
-  nested request anchor를 만나면 그 지점부터 별도 branch가 되므로 상위 request가
-  무관한 sibling/descendant까지 소유하지 않는다. 같은 anchor를 가리키는 request가
-  여러 개면 `request.created_at ASC, request_id ASC` 첫 행만 owner다.
-- request anchor가 없는 job은 component의 standalone partition에 귀속한다. batch root와
-  미소유 sibling은 최상위 import job 한 행에 남고, 각 request는 자기 branch만 한 행으로
-  노출한다. owner가 아닌 request도 진단 root로 남지만 job을 공유하지 않는다.
+- canonical request job은 항상 hierarchy root이고 request와 양방향 1:1이다. 따라서 request
+  branch는 자기 root와 descendants 전부이며 중첩 request anchor와 같은 anchor의 다중 request는
+  정상 저장 상태가 아니다.
+- request hierarchy에 속하지 않은 component만 standalone partition에 귀속한다.
 - 화면에 대표로 보일 job은 각 partition 안에서
   `anchor/root depth DESC, created_at DESC, job_id DESC` 첫 행이다.
   root 상태와 대표 job 상태는 서로 덮어쓰지 않으며 `linked_job_count`로 해당
   request branch 또는 standalone partition의 job 수를 함께 보존한다.
-- request identity는 저장된 `providers`/`dataset_keys`의 순서·중복을 유지하되,
-  `provider_dataset` direct scope 값이 배열에 없으면 끝에 보완한 effective 배열이다.
-  direct scope의 provider/dataset/sync_scope pair는 별도 typed object로 보존한다.
-  standalone import identity는 미소유 partition 전체
-  `ops.import_job_events.provider`/`dataset_key`의 NULL·빈 문자열을 제거한 정렬 DISTINCT
-  배열이다. `ops.import_jobs.payload`는 identity·상관관계·filter에 사용하지 않는다.
+- C3e 이후 표시용 `providers`/`dataset_keys`는 저장 배열과 canonical exact pair의 유효값을
+  합쳐 정렬·중복 제거한다. provider-only/dataset-only filter에는 쓸 수 있지만 두 배열을
+  cross-product로 pair 복원하지 않는다. exact pair 정본은 required `provider_datasets[]`다.
+  pair 근거는 import member의 typed `ops.import_jobs.provider`/`dataset_key`뿐이다. direct
+  `provider_dataset` request scope는 linked pair와 같은 business target/`sync_scope` metadata이며
+  독립 identity를 만들지 않는다. `ops.import_job_events`는 감사·타임라인 전용이며
+  runtime identity·상관관계·filter에 사용하지 않는다. `ops.import_jobs.payload`도 identity 근거가
+  아니다.
 
 이 projection은 read contract만 정의한다. schedule/manual/update/import 실행을 같은
 영속 operation row에 기록하는 모델·백필·migration은 T-ADM-C3e 범위다.
@@ -1251,8 +1313,9 @@ sensor는 T-207/T-208에서 연결했다.
 Pipeline 취소는 기존 lifecycle `status`에 중간 상태를 추가하지 않는다. 취소 요청을
 base row의 **marker**로 먼저 차단하고, 시도·대상·Dagster run 결과는 정규화한 별도
 테이블에 영속한다. 따라서 `ops.import_jobs.status`와
-`ops.feature_update_requests.status`의 기존 CHECK
-(`queued`/`running`/`done`/`failed`/`cancelled`)는 그대로 유지한다.
+canonical `ops.import_jobs.status`의 기존 CHECK
+(`queued`/`running`/`done`/`failed`/`cancelled`)는 그대로 유지한다. request table에는 lifecycle
+status나 cancellation marker를 중복 저장하지 않는다.
 
 ```sql
 CREATE TABLE ops.pipeline_cancellations (
@@ -1325,9 +1388,8 @@ CREATE TABLE ops.pipeline_cancellation_runs (
 CREATE TABLE ops.pipeline_cancellation_members (
   cancellation_id UUID NOT NULL REFERENCES ops.pipeline_cancellations(cancellation_id)
                   ON DELETE RESTRICT,
-  member_kind     TEXT NOT NULL
-                  CHECK (member_kind IN ('import_job', 'update_request')),
-  member_id       UUID NOT NULL,
+  job_id          UUID NOT NULL REFERENCES ops.import_jobs(job_id)
+                  ON DELETE RESTRICT,
   dagster_run_id  TEXT,
   initial_status  TEXT NOT NULL,
   result          TEXT NOT NULL DEFAULT 'pending'
@@ -1344,15 +1406,15 @@ CREATE TABLE ops.pipeline_cancellation_members (
     (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL AND
       jsonb_typeof(error) = 'object')
   ),
-  PRIMARY KEY (cancellation_id, member_kind, member_id),
+  PRIMARY KEY (cancellation_id, job_id),
   FOREIGN KEY (cancellation_id, dagster_run_id)
     REFERENCES ops.pipeline_cancellation_runs(cancellation_id, dagster_run_id)
     ON DELETE RESTRICT
 );
 
-CREATE INDEX idx_pipeline_cancellation_members_member
+CREATE INDEX idx_pipeline_cancellation_members_job
   ON ops.pipeline_cancellation_members
-     (member_kind, member_id, updated_at DESC, cancellation_id DESC);
+     (job_id, updated_at DESC, cancellation_id DESC);
 
 ALTER TABLE ops.import_jobs
   ADD COLUMN cancellation_id UUID
@@ -1367,21 +1429,12 @@ ALTER TABLE ops.import_jobs
      cancellation_requested_by IS NOT NULL)
   );
 
-ALTER TABLE ops.feature_update_requests
-  ADD COLUMN cancellation_id UUID
-    REFERENCES ops.pipeline_cancellations(cancellation_id) ON DELETE RESTRICT,
-  ADD COLUMN cancellation_requested_at TIMESTAMPTZ,
-  ADD COLUMN cancellation_requested_by TEXT,
-  ADD COLUMN cancellation_reason TEXT,
-  ADD CONSTRAINT ck_feature_update_requests_cancellation_marker CHECK (
-    (cancellation_id IS NULL AND cancellation_requested_at IS NULL AND
-     cancellation_requested_by IS NULL AND cancellation_reason IS NULL) OR
-    (cancellation_id IS NOT NULL AND cancellation_requested_at IS NOT NULL AND
-     cancellation_requested_by IS NOT NULL)
-  );
 ```
 
-`pipeline_cancellation_members`가 취소 대상과 대상별 결과의 정본이고,
+`pipeline_cancellation_members`가 import job 취소 대상과 대상별 결과의 정본이다.
+member 종류는 상수 `import_job`이므로 컬럼으로 중복 저장하지 않고 `job_id` FK로
+정체성을 강제한다. 요청은 `pipeline_cancellations.root_kind='update_request'`와
+`root_id`로 상관관계만 보존하며 member로 복제하지 않는다.
 `pipeline_cancellation_runs`가 실제 terminate 호출과 run별 결과의 정본이다. 같은
 `dagster_run_id`를 여러 member가 공유해도 run 행과 terminate 호출은 시도당 하나이며,
 그 결과를 연결된 member에 전파한다. 응답용 summary/JSON snapshot은 이 정규화 행에서
@@ -1418,8 +1471,8 @@ SUCCESS/FAILURE reconcile 불가 모두 member `cancel_failed`일 수 있지만,
 
 취소 scope는 9.8.1의 root projection과 정확히 같다.
 
-- owner update request는 가장 가까운 anchor branch만 소유하고 nested request branch를
-  포함하지 않는다. 같은 anchor의 non-owner request는 자기 request 행만 대상이다.
+- update request는 자기 canonical root와 descendants 전체를 소유한다. request root가 다른
+  request 아래에 있거나 같은 job을 공유하는 상태는 DB가 거부한다.
 - standalone import root는 component의 미소유 partition만 포함한다. request branch의
   import job에서 취소하면 해당 owner request root로 canonicalize한다.
 - cycle은 member 최소 UUID, 부모 누락은 self-root 규칙을 그대로 쓴다. root가 이미
@@ -1448,10 +1501,12 @@ claim/start/scope write/heartbeat/finish SQL도 모두 `cancellation_requested_a
 요구한다. marker commit 뒤에만 외부 Dagster terminate를 호출하며, 외부 호출 동안 DB
 transaction을 열어 두지 않는다.
 
-marker guard는 위 lifecycle 함수 목록에 한정하지 않는다. `ops.import_jobs`와
-`ops.feature_update_requests`의 **모든 status/progress/stage/heartbeat/payload/run-id/
-matched-scope/lineage(`parent_job_id`, `load_batch_id`, `job_id`) mutation**은 marker NULL 또는
-취소 coordinator가 소유한 동일 `cancellation_id` CAS를 요구한다. 여기에는
+marker guard는 위 lifecycle 함수 목록에 한정하지 않는다. lifecycle 단일 정본인
+`ops.import_jobs`의 **모든 status/progress/stage/heartbeat/payload/run-id/
+lineage(`parent_job_id`, `load_batch_id`) mutation**은 marker NULL 또는 취소 coordinator가 소유한
+동일 `cancellation_id` CAS를 요구한다. `ops.feature_update_requests`에는 lifecycle·marker가 없으며,
+유일한 가변 필드인 `matched_scope`와 `generation`은 연결 job이 active이고 marker가 없을 때만
+변경한다. 여기에는
 `update_import_job_payload`, `attach_import_jobs_to_batch`, stale recovery,
 batch/load-batch attach, legacy cancel/requeue와 feature update의 내부 job start/finish가
 포함된다. legacy REST cancel은 계층형 coordinator에 위임하고 직접 base status를 바꿀 수
@@ -1489,7 +1544,7 @@ terminate 뒤에는 Dagster terminal 상태와 marker/attempt를 다시 확인�
   marker를 유지한다.
 
 일반 coordinator writer는 attempt 행을 `FOR UPDATE`로 먼저 잠그고
-`status='in_progress'`를 확인한 뒤 member→해당 run→request/job base 행 순서로 잠근다.
+`status='in_progress'`를 확인한 뒤 member→해당 run→canonical import job 순서로 잠근다.
 성공 결과를 쓰는 범용 member setter는 두지 않는다. run-termination-required member는 먼저 run 행이
 `CANCELED`/`SUCCESS`/`FAILURE`로 종결된 뒤에만 각각
 `cancelled`/`done`/`failed`로 전이한다. generic queued member만 외부 terminate 호출이 없는 전용
@@ -1555,29 +1610,28 @@ rollback하지 않는다. provider scope 동시 실행 창을 만들지 않기 �
 `AsyncConnection` 하나에 session-level scope advisory lock을 잡고 prepare/probe/scope/finalize의
 짧은 transaction을 모두 같은 물리 connection에 bind한다. 같은 connection에서 unlock한 뒤
 pool에 반환하며, pin하지 않은 pooled `AsyncSession`에서 scope 사이 commit을 반복하지 않는다.
-각 scope data transaction은 provider 결과를 쓰기 전에 대상 request/job row를 잠그고 marker
-NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit까지는 취소가 기다리고,
-취소 marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
+각 scope data transaction은 provider 결과를 쓰기 전에 request와 canonical job을 잠그고 job
+marker NULL을 확인한다. scope transaction이 먼저 잠갔다면 그 scope commit까지는 취소가 기다리고,
+job marker가 먼저 commit됐다면 scope data write를 시작하지 않는다.
 queue sensor는 상태를 바꾸지 않고 peek만 하며, executor가 request별 session lease와 scope
-session lease를 얻은 뒤 request/job을 CAS start한다. scope 경합이면 request/job의 stale run
-identity·progress·timestamp를 같은 transaction에서 초기화해 queued로 돌리고 새 run key를
-만든다. request lease 경합의 queued loser는 run key만 단조 증가시키며 running owner는
-건드리지 않는다. sensor는 request의 timezone-aware `updated_at`을 실행 generation으로 삼아
-run key·op config·run tag에 같은 값을 고정한다. start는 `queued + generation 동일 + run-id
-NULL` 또는 `running + 동일 run owner`만 허용하고, 연결 import job owner CAS가 실패하면
-request start도 savepoint에서 rollback한다. CAS start 전 resource 초기화 실패는
-`queued + run-id NULL + generation 동일 + marker NULL` 행의 `updated_at`만 전진시켜 Dagster
-중복 제거와 다른 새 run key를 만든다. running owner, 더 최신 generation, terminal/marker 행은
-변경하지 않는다. 예전 Dagster run의 지연 failure sensor는 실제 실패 run id를
-`expected_dagster_run_id`로 전달하고 request와 연결 job 모두 같은 generation일 때만 failed로
-닫는다. 어느 한쪽 CAS라도 실패하면 전체 terminal write를 rollback한다. 각 provider scope의
+session lease를 얻은 뒤 canonical job을 CAS start한다. scope 경합이면 canonical job의 stale run
+identity·progress·timestamp를 초기화해 queued로 돌리고 request의 양수 정수 `generation`을
+정확히 1 증가시킨다. request lease 경합의 queued loser도
+`(request_id, expected_generation)` CAS에 처음 성공한 한 run만 generation을 1 증가시키며 running
+owner는 건드리지 않는다. sensor는 이 정수를 run key·op config·run tag에 고정한다. start 호출은
+trimmed non-empty Dagster run owner를 필수로 받고,
+`queued + generation 동일 + run-id NULL` 또는 `running + 동일 non-null run owner`만 허용한다. CAS start 전
+resource 초기화 실패도 같은 queued generation에서 처음 성공한 호출만 +1하고, 더 최신
+generation·terminal·marker 행은 변경하지 않는다. 예전 Dagster run의 지연 failure sensor는 실제
+run id를 단일 `owner_dagster_run_id`로 전달하고 canonical job owner가 정확히 같을 때만 failed로
+닫는다. 각 provider scope의
 data write와 `matched_scope.executed_provider_scopes` checkpoint는 같은 transaction에 commit한다.
 production asset이 사용하는 `AsyncKorTravelMapClient`도 executor session의 physical connection에
 bind하고 내부 session은 outer transaction을 commit하지 못하게 한다. bind 뒤 원본 client의
 engine으로 새 connection을 여는 public 경로는 fail-closed로 거부한다. 따라서 asset chunk
 적재·`provider_sync_state`·checkpoint가 하나의 scope transaction이고, checkpoint 전 crash가
 data-only commit을 남기지 않는다. 이후 취소·실패·process 종료에도 이미 반영된 scope를
-식별할 수 있다. marker 없는 `CancelledError`는 request/job을 failed로 닫고 원 예외를
+식별할 수 있다. marker 없는 `CancelledError`는 canonical job을 failed로 닫고 원 예외를
 재전파하며, marker가 있으면 coordinator가 상태 전이를 우선한다.
 
 full-load batch consistency gate도 같은 원칙을 사용한다. 호출별 전용
@@ -1624,9 +1678,9 @@ Dagster feature-load run은 다음 두 단계다.
 표시용 `providers[]`/`dataset_keys[]`의 cross-product로 만들지 않는다. C3d 취소는 root와
 모든 child를 같은 frozen scope에 넣고 공유 Dagster run을 한 번 terminate한다. dataset
 하나에서 시작했더라도 같은 run의 다른 pair만 살리는 부분 취소는 지원하지 않는다.
-update request root는 owned import child 실컬럼 pair를 우선하고 direct
-`scope.type='provider_dataset'` pair를 fallback으로 보완한다. 같은 pair는 child 항목 하나로
-접으며 fallback만 남은 항목은 member id가 NULL이고 request root status를 사용한다.
+update request root도 owned import member 실컬럼 pair만 사용한다. direct
+`scope.type='provider_dataset'`은 DB에서 linked typed pair와 일치하므로 같은 pair의 nullable
+`sync_scope` metadata만 보강한다. pair는 항상 non-null member id와 member status를 가진다.
 
 C3b 공용 root projection은 pipeline timeline, datasets grid/detail뿐 아니라 pipeline overview
 status count와 최근 24시간 failure도 소유한다. overview는 raw `import_jobs`를 세지 않고 request
@@ -1705,10 +1759,9 @@ UPDATE ops.pipeline_cancellation_members AS member
    SET operation_kind = CASE
      WHEN job.kind = btrim(job.kind) AND job.kind <> '' THEN job.kind
      ELSE NULL
-   END
+  END
   FROM ops.import_jobs AS job
- WHERE member.member_kind = 'import_job'
-   AND member.member_id = job.job_id;
+ WHERE member.job_id = job.job_id;
 
 UPDATE ops.pipeline_cancellation_members
    SET requires_run_termination = true
@@ -1723,8 +1776,7 @@ UPDATE ops.pipeline_cancellation_members
 ALTER TABLE ops.pipeline_cancellation_members
   ADD CONSTRAINT ck_pipeline_cancellation_members_operation_kind CHECK (
     operation_kind IS NULL OR (
-      member_kind = 'import_job' AND operation_kind = btrim(operation_kind) AND
-      operation_kind <> ''
+      operation_kind = btrim(operation_kind) AND operation_kind <> ''
     )
   ),
   ADD CONSTRAINT ck_pipeline_cancellation_members_run_termination CHECK (
@@ -1817,10 +1869,40 @@ CREATE INDEX idx_import_jobs_provider_created
   WHERE provider IS NOT NULL;
 ```
 
-direct request backfill은 연결된 request 전체가 정확히 1건이고 그 행이 string·trimmed non-empty
-`provider_dataset` exact pair일 때만 허용한다. 연결 request가 하나라도 있으면 ambiguous/partial/
-다른 scope 여부와 무관하게 event fallback을 금지한다. event exact fallback은 request linkage가 0인
-legacy job에서 identity-bearing event 전체가 같은 완전 pair일 때만 허용한다.
+0052는 선택적 pipeline list/detail이 전체 graph를 먼저 투영하지 않도록 request
+provider/dataset `TEXT[]`에 GIN seed access path를 추가한다. exact/direct pair는 별도
+expression index 없이 위 0051 typed job index만 쓴다. seed job에서 `parent_job_id` PK/FK index를 양방향으로 따라
+connected component를 만든 뒤 그 component의 request만 공용 canonical projection에 공급한다.
+event는 projection에서 읽지 않는다. event의 migration-owned `quarantined_at` marker와 여섯
+visible-only partial index는 각각 무필터→`idx_import_job_events_time`, job→
+`idx_import_job_events_job_time`, provider→`idx_import_job_events_provider_time`, dataset→
+`idx_import_job_events_dataset_time`, provider+dataset exact pair→
+`idx_import_job_events_provider_dataset_time`, level→`idx_import_job_events_level_time` 감사
+타임라인을 담당하며 identity seed가 아니다. 모든 조합은 `quarantined_at IS NULL`을 event에
+직접 적용한다. Parent 상태를 page-time에 join하지 않으므로 최신 격리 event 수와 무관하게
+page 크기만큼 bounded scan을 유지한다. 감사 조회는 filter가 실제로 있을 때만 해당 고정
+predicate를 SQL에 넣어 prepared/generic plan에서도 partial index를 쓸 수 있게 한다.
+
+또한 `feature_update_requests.job_id`를 `NOT NULL ON DELETE RESTRICT`로 바꾸고 direct scope와
+provider/dataset filter shape CHECK, request/canonical job kind·pair 교차검증 trigger, 전역
+import job kind/pair 불변 trigger를 추가한다.
+upgrade/downgrade 첫 동작으로 cancellation→request→import job→event→event clock(존재 시)
+순서의 `ACCESS EXCLUSIVE` lock을
+하나의 `NOWAIT` 문장으로 잡아 repair와 제약 설치 사이에 구 writer/reader가 들어오지 못하게
+한다. 일부 relation만 잡힌 시도는 savepoint rollback으로 모두 풀고 30초 안에서 재시도한다.
+jobless, scope와 pair가 불일치하거나 reserved Dagster
+kind에 연결된 request는 request별 새 canonical job에 재연결하고 이전 job ID를 migration audit
+payload에 보존한다. cancellation marker나
+frozen member가 있는 후보는 동결 집합을 바꾸지 않고 request ID와 함께 중단한다.
+upgrade는 기존 non-unique `idx_feature_update_job`을 제거하고
+`uq_feature_update_requests_job_id`의 unique B-tree를 역추적 access path로 사용한다. downgrade는
+unique·양방향 trigger·deferred FK를 제거하고 nullable/`SET NULL` 및 원래 partial index를 복원하되
+생성된 canonical job과 격리 component의 원래 `kind`·`payload`는 보존한다.
+
+0051의 일회성 backfill만 과거 event를 읽는다. direct request backfill은 연결된 request 전체가
+정확히 1건이고 그 행이 string·trimmed non-empty `provider_dataset` exact pair일 때만 허용한다.
+연결 request가 없을 때만 identity-bearing event 전체가 같은 완전 pair인 job을 typed column으로
+옮긴다. multi-pair·partial·blank·ambiguous 행은 `(NULL,NULL)`로 남으며 runtime에서 되살리지 않는다.
 
 0051은 malformed legacy import kind를 trim해 다른 identity로 바꾸지 않고 NULL로 남기며 그 건수를
 migration 진단 로그에 기록한다. 신규 cancellation snapshot writer는 trim된 non-empty
@@ -1929,8 +2011,9 @@ row의 `trigger_kind`도 NULL이다.
 `engine_started_at`/`engine_finished_at`을 추측해 백필하지 않고 NULL로 유지한다. 0051 이후
 terminal observation을 기록하는 cancellation writer만 실제 관측값을 채운다.
 
-신규 `enqueue_import_job`/`start_import_job`은 payload를 해석하지 않고 optional typed pair와
-trigger를 실컬럼에 쓴다. offline validate/load/reserve, MOIS bulk/incremental/closed, exact
+신규 import job writer는 payload를 해석하지 않고 pair operation과 unpaired orchestration을
+repository 경계에서 명시적으로 구분한다. pair operation은 required typed pair와 trigger를
+실컬럼에 쓴다. offline validate/load/reserve, MOIS bulk/incremental/closed, exact
 provider-dataset update member는 pair를 반드시 넘긴다. multi-scope update, batch aggregate,
 consistency/MV처럼 단일 pair가 아닌 행은 NULL이고 batch attach는 child identity를 추론하거나
 덮지 않는다. event append는 job 실컬럼 pair를 기본 상속하며 다른 non-NULL pair를 거부한다.

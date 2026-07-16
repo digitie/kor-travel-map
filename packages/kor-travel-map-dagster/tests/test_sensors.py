@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from dagster import (
@@ -50,7 +50,6 @@ class _Client:
     executed: list[dict[str, Any]] = field(default_factory=list)
     failed: list[dict[str, Any]] = field(default_factory=list)
     peek_limits: list[int] = field(default_factory=list)
-    claim_limits: list[int] = field(default_factory=list)
     started: list[dict[str, Any]] = field(default_factory=list)
     fail_raises: Exception | None = None
     execute_raises: Exception | None = None
@@ -69,23 +68,13 @@ class _Client:
             return ()
         return (self.request,)
 
-    async def claim_update_requests(
-        self, *, limit: int = 10
-    ) -> tuple[FeatureUpdateRequest, ...]:
-        self.claim_limits.append(limit)
-        if self.requests is not None:
-            return self.requests[:limit]
-        if self.request is None:
-            return ()
-        return (self.request,)
-
     async def execute_feature_update_request(
         self,
         request_id: str,
         *,
         runner: object,
-        dagster_run_id: str | None = None,
-        expected_request_updated_at: datetime | None = None,
+        dagster_run_id: str,
+        expected_request_generation: int | None = None,
         sigungu_resolver: object | None = None,
     ) -> FeatureUpdateExecutionResult | None:
         if self.execute_raises is not None:
@@ -95,7 +84,7 @@ class _Client:
                 "request_id": request_id,
                 "runner": runner,
                 "dagster_run_id": dagster_run_id,
-                "expected_request_updated_at": expected_request_updated_at,
+                "expected_request_generation": expected_request_generation,
                 "sigungu_resolver": sigungu_resolver,
             }
         )
@@ -105,10 +94,15 @@ class _Client:
         self,
         request_id: str,
         *,
-        dagster_run_id: str | None = None,
+        dagster_run_id: str,
+        expected_generation: int,
     ) -> FeatureUpdateRequest | None:
         self.started.append(
-            {"request_id": request_id, "dagster_run_id": dagster_run_id}
+            {
+                "request_id": request_id,
+                "dagster_run_id": dagster_run_id,
+                "expected_generation": expected_generation,
+            }
         )
         return self.request
 
@@ -116,8 +110,8 @@ class _Client:
         self,
         request_id: str,
         *,
-        expected_dagster_run_id: str,
-        expected_request_updated_at: datetime,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
         error_message: str | None = None,
     ) -> FeatureUpdateRequest | None:
         if self.fail_raises is not None:
@@ -125,15 +119,15 @@ class _Client:
         self.failed.append(
             {
                 "request_id": request_id,
-                "expected_dagster_run_id": expected_dagster_run_id,
-                "expected_request_updated_at": expected_request_updated_at,
+                "owner_dagster_run_id": owner_dagster_run_id,
+                "expected_request_generation": expected_request_generation,
                 "error_message": error_message,
             }
         )
         if self.advance_generation_on_failure and self.request is not None:
             self.request = replace(
                 self.request,
-                updated_at=expected_request_updated_at + timedelta(microseconds=1),
+                generation=expected_request_generation + 1,
             )
         return self.request
 
@@ -152,13 +146,12 @@ def _request(
             "provider": "demo",
             "dataset_key": "places",
         },
-        providers=("demo",),
-        dataset_keys=("places",),
+        providers=(),
+        dataset_keys=(),
         update_policy={"prevent_provider_reactivation": True},
         run_mode=run_mode,
         priority=50,
         status=state,
-        dry_run=False,
         matched_scope={},
         job_id="job-1",
         dagster_run_id=None,
@@ -168,7 +161,7 @@ def _request(
         created_at=_NOW,
         started_at=None,
         finished_at=None,
-        updated_at=_NOW,
+        generation=1,
     )
 
 
@@ -229,7 +222,6 @@ def test_queue_sensor_skips_empty_queue() -> None:
     assert isinstance(result, SkipReason)
     assert result.skip_message == "queued feature update request 없음"
     assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
-    assert client.claim_limits == []
 
 
 def test_queue_sensor_emits_request_run_config_and_tags() -> None:
@@ -240,22 +232,21 @@ def test_queue_sensor_emits_request_run_config_and_tags() -> None:
     result = feature_update_request_queue_sensor(context)
 
     assert isinstance(result, RunRequest)
-    assert result.run_key == f"feature-update:{request.request_id}:{_NOW.isoformat()}"
+    assert result.run_key == f"feature-update:{request.request_id}:1"
     assert result.run_config == {
         "ops": {
             "execute_feature_update_request": {
                 "config": {
                     "request_id": request.request_id,
-                    "request_updated_at": _NOW.isoformat(),
+                    "request_generation": 1,
                 }
             }
         }
     }
     assert result.tags[FEATURE_UPDATE_REQUEST_ID_TAG] == request.request_id
-    assert result.tags[FEATURE_UPDATE_REQUEST_GENERATION_TAG] == _NOW.isoformat()
+    assert result.tags[FEATURE_UPDATE_REQUEST_GENERATION_TAG] == "1"
     assert result.tags["kor_travel_map.feature_update_run_mode"] == "now"
     assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
-    assert client.claim_limits == []
 
 
 def test_queue_sensor_emits_batch_run_requests() -> None:
@@ -268,8 +259,8 @@ def test_queue_sensor_emits_batch_run_requests() -> None:
 
     assert isinstance(result, list)
     assert [item.run_key for item in result] == [
-        f"feature-update:{first.request_id}:{_NOW.isoformat()}",
-        f"feature-update:{second.request_id}:{_NOW.isoformat()}",
+        f"feature-update:{first.request_id}:1",
+        f"feature-update:{second.request_id}:1",
     ]
     assert [
         item.run_config["ops"]["execute_feature_update_request"]["config"]
@@ -277,15 +268,14 @@ def test_queue_sensor_emits_batch_run_requests() -> None:
     ] == [
         {
             "request_id": first.request_id,
-            "request_updated_at": _NOW.isoformat(),
+            "request_generation": 1,
         },
         {
             "request_id": second.request_id,
-            "request_updated_at": _NOW.isoformat(),
+            "request_generation": 1,
         },
     ]
     assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
-    assert client.claim_limits == []
 
 
 def test_worker_job_executes_configured_request() -> None:
@@ -299,7 +289,7 @@ def test_worker_job_executes_configured_request() -> None:
                 "execute_feature_update_request": {
                     "config": {
                         "request_id": request.request_id,
-                        "request_updated_at": _NOW.isoformat(),
+                        "request_generation": 1,
                     }
                 }
             }
@@ -314,7 +304,7 @@ def test_worker_job_executes_configured_request() -> None:
             "request_id": request.request_id,
             "runner": runner,
             "dagster_run_id": result.run_id,
-            "expected_request_updated_at": _NOW,
+            "expected_request_generation": 1,
             "sigungu_resolver": None,
         }
     ]
@@ -334,7 +324,7 @@ def test_worker_job_treats_scope_lock_contention_as_retryable_success() -> None:
                 "execute_feature_update_request": {
                     "config": {
                         "request_id": request.request_id,
-                        "request_updated_at": _NOW.isoformat(),
+                        "request_generation": 1,
                     }
                 }
             }
@@ -367,14 +357,14 @@ def test_worker_job_raises_failure_for_failed_request_result() -> None:
                 "execute_feature_update_request": {
                     "config": {
                         "request_id": request.request_id,
-                        "request_updated_at": _NOW.isoformat(),
+                        "request_generation": 1,
                     }
                 }
             }
         },
         tags={
             FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
-            FEATURE_UPDATE_REQUEST_GENERATION_TAG: _NOW.isoformat(),
+            FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
         },
         resources={"kor_travel_map_client": client, "feature_update_runner": object()},
         raise_on_error=False,
@@ -393,14 +383,14 @@ def test_failure_sensor_marks_request_failed() -> None:
                     "execute_feature_update_request": {
                         "config": {
                             "request_id": request.request_id,
-                            "request_updated_at": _NOW.isoformat(),
+                            "request_generation": 1,
                         }
                     }
                 }
             },
             tags={
                 FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
-                FEATURE_UPDATE_REQUEST_GENERATION_TAG: _NOW.isoformat(),
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
             },
             resources={
                 "kor_travel_map_client": _Client(
@@ -430,8 +420,8 @@ def test_failure_sensor_marks_request_failed() -> None:
     assert client.failed == [
         {
             "request_id": request.request_id,
-            "expected_dagster_run_id": failed_run.run_id,
-            "expected_request_updated_at": _NOW,
+            "owner_dagster_run_id": failed_run.run_id,
+            "expected_request_generation": 1,
             "error_message": (
                 "Dagster feature update worker failed: "
                 f"run_id={failed_run.run_id} request_id={request.request_id}"
@@ -461,14 +451,14 @@ def test_pre_start_failure_advances_generation_and_next_sensor_emits_run() -> No
                     "execute_feature_update_request": {
                         "config": {
                             "request_id": request.request_id,
-                            "request_updated_at": _NOW.isoformat(),
+                            "request_generation": 1,
                         }
                     }
                 }
             },
             tags={
                 FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
-                FEATURE_UPDATE_REQUEST_GENERATION_TAG: _NOW.isoformat(),
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
             },
             resources={
                 "kor_travel_map_client": _Client(request=request),
@@ -490,19 +480,19 @@ def test_pre_start_failure_advances_generation_and_next_sensor_emits_run() -> No
 
     advanced = client.request
     assert advanced is not None
-    assert advanced.updated_at > request.updated_at
+    assert advanced.generation == request.generation + 1
     next_context = build_sensor_context(resources={"kor_travel_map_client": client})
     next_run = feature_update_request_queue_sensor(next_context)
 
     assert isinstance(next_run, RunRequest)
     assert next_run.run_key == (
-        f"feature-update:{request.request_id}:{advanced.updated_at.isoformat()}"
+        f"feature-update:{request.request_id}:{advanced.generation}"
     )
     assert next_run.run_key != (
-        f"feature-update:{request.request_id}:{request.updated_at.isoformat()}"
+        f"feature-update:{request.request_id}:{request.generation}"
     )
     assert next_run.tags[FEATURE_UPDATE_REQUEST_GENERATION_TAG] == (
-        advanced.updated_at.isoformat()
+        str(advanced.generation)
     )
 
 
@@ -521,14 +511,14 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
                     "execute_feature_update_request": {
                         "config": {
                             "request_id": request.request_id,
-                            "request_updated_at": _NOW.isoformat(),
+                            "request_generation": 1,
                         }
                     }
                 }
             },
             tags={
                 FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
-                FEATURE_UPDATE_REQUEST_GENERATION_TAG: _NOW.isoformat(),
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
             },
             resources={
                 "kor_travel_map_client": _Client(

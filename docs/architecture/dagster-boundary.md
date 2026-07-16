@@ -312,8 +312,9 @@ POST /admin/features/update-requests
 
 1. API가 scope를 검증하고 대상 feature/provider/dataset을 계산한다.
 2. API가 `ops.feature_update_requests`와 `ops.import_jobs` row를 만든다.
-3. `run_mode=queued`이면 Dagster sensor가 queued request를 peek하고 worker run을
-   만든다. 실제 request/import job 상태 전이는 worker가 수행한다.
+3. `run_mode=queued`이면 Dagster sensor가 canonical job이 queued인 request를 JOIN으로
+   peek하고 `(request_id, generation)` worker run을 만든다. lifecycle 상태 전이는 canonical
+   job 한 행에서만 수행한다.
 4. `run_mode=now`도 request/job row를 먼저 저장하고, 같은 sensor queue에서 감지한다.
 5. Dagster run은 provider 호출, DTO 변환, 적재, dedup refresh, consistency check를
    수행하고 progress를 `ops.import_jobs`에 갱신한다.
@@ -671,11 +672,16 @@ feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_ru
 - `.load_feature_bundles(bundles, *, prune_existing=False) -> FeatureLoadResult`
 - `.record_sync_success(provider, dataset_key, sync_scope='default', cursor, ...) -> SyncState` (cursor 전진; `upsert_sync_state`는 후속 PR 미구현)
 - `.get_sync_state(provider, dataset_key, sync_scope='default') -> SyncState | None`
-- `.enqueue_import_job(kind, payload, load_batch_id=None, parent_job_id=None) -> ImportJob`
 - `.claim_next_import_job() -> ImportJob | None`
 - `.update_import_job(job_id, *, state, progress, current_stage, error_message) -> None`
 - `.run_batch_dag_consistency_gate(child_job_ids, ..., plan_only=False) -> BatchDagRunResult`
 - `.healthz() -> HealthCheck`
+
+`kortravelmap.infra.jobs_repo`의 쓰기 경계:
+
+- `enqueue_unpaired_import_job` / `start_unpaired_import_job` — 단일 pair가 없는 orchestration
+- `enqueue_provider_dataset_import_job` / `start_provider_dataset_import_job` — required typed
+  `ProviderDatasetOperationKey`를 가진 실행
 
 dataclasses:
 - `FeatureBundle`, `FeatureLoadResult` (with `.as_metadata()`)

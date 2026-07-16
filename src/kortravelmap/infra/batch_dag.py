@@ -27,7 +27,7 @@ from kortravelmap.infra.jobs_repo import (
     finish_import_job,
     get_import_job,
     list_import_jobs_by_ids,
-    start_import_job,
+    start_unpaired_import_job,
     update_import_job_payload,
 )
 from kortravelmap.infra.pipeline_cancellation_repo import (
@@ -230,7 +230,7 @@ async def prepare_batch_dag(
 ) -> BatchDagPrepared | BatchDagRunResult:
     """root attach와 consistency child 생성을 짧은 transaction에 고정한다."""
     payload = _root_payload(request)
-    root = await start_import_job(
+    root = await start_unpaired_import_job(
         session,
         kind=request.root_kind,
         payload=payload,
@@ -271,7 +271,7 @@ async def prepare_batch_dag(
             missing_child_job_ids=missing,
             error_message=child_error,
         )
-    consistency_job = await start_import_job(
+    consistency_job = await start_unpaired_import_job(
         session,
         kind=CONSISTENCY_GATE_JOB_KIND,
         payload={
@@ -357,7 +357,7 @@ async def start_batch_mv_phase(
         prepared.consistency_job,
         expected_phase_status="done",
     )
-    mv_job = await start_import_job(
+    mv_job = await start_unpaired_import_job(
         session,
         kind=MV_REFRESH_JOB_KIND,
         payload={

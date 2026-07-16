@@ -365,14 +365,8 @@ async def _hard_invalidate_connection(
 def _ordered_members(
     detail: PipelineCancellationDetail,
 ) -> tuple[PipelineCancellationMember, ...]:
-    """repo의 request→job writer 순서와 같은 deterministic member 순서."""
-    kind_order = {"update_request": 0, "import_job": 1}
-    return tuple(
-        sorted(
-            detail.members,
-            key=lambda member: (kind_order[member.member_kind], member.member_id),
-        )
-    )
+    """canonical import job member를 UUID 순서로 반환한다."""
+    return tuple(sorted(detail.members, key=lambda member: member.job_id))
 
 
 async def _current_detail_for_root(
@@ -730,8 +724,7 @@ async def _cancel_queued_members(
                 changed = await cancel_queued_pipeline_cancellation_member(
                     session,
                     cancellation_id=detail.attempt.cancellation_id,
-                    member_kind=member.member_kind,
-                    member_id=member.member_id,
+                    job_id=member.job_id,
                 )
                 _require_cancellation_write(
                     changed,
@@ -786,8 +779,7 @@ async def _record_run_failure(
                 changed = await set_pipeline_cancellation_member_result(
                     session,
                     cancellation_id=detail.attempt.cancellation_id,
-                    member_kind=member.member_kind,
-                    member_id=member.member_id,
+                    job_id=member.job_id,
                     result="cancel_failed",
                     terminal_status=None,
                     error=failure.payload(),
@@ -936,8 +928,7 @@ async def _record_terminal_run(
                 changed = await transition_pipeline_cancellation_member(
                     session,
                     cancellation_id=detail.attempt.cancellation_id,
-                    member_kind=member.member_kind,
-                    member_id=member.member_id,
+                    job_id=member.job_id,
                     dagster_run_id=run_id,
                     expected_status=member.initial_status,
                     target_status="failed",
@@ -968,7 +959,7 @@ async def _record_terminal_run(
                         "non_done_members": {
                             "expected": 0,
                             "actual": [
-                                member.member_id
+                                member.job_id
                                 for member in detail.members
                                 if member.dagster_run_id == run_id
                                 and member.operation_kind == "provider_feature_load"
@@ -992,8 +983,7 @@ async def _record_terminal_run(
                 changed = await transition_pipeline_cancellation_member(
                     session,
                     cancellation_id=detail.attempt.cancellation_id,
-                    member_kind=member.member_kind,
-                    member_id=member.member_id,
+                    job_id=member.job_id,
                     dagster_run_id=run_id,
                     expected_status=member.initial_status,
                     target_status=target_status,
@@ -1021,8 +1011,7 @@ async def _record_terminal_run(
                 (
                     item
                     for item in current.members
-                    if item.member_kind == member.member_kind
-                    and item.member_id == member.member_id
+                    if item.job_id == member.job_id
                 ),
                 None,
             )
@@ -1051,8 +1040,7 @@ async def _record_terminal_run(
             failure_changed = await set_pipeline_cancellation_member_result(
                 session,
                 cancellation_id=detail.attempt.cancellation_id,
-                member_kind=member.member_kind,
-                member_id=member.member_id,
+                job_id=member.job_id,
                 result="cancel_failed",
                 terminal_status=None,
                 error=definitive.payload(),
@@ -1301,8 +1289,7 @@ async def _record_missing_run_members(
             changed = await set_pipeline_cancellation_member_result(
                 session,
                 cancellation_id=detail.attempt.cancellation_id,
-                member_kind=member.member_kind,
-                member_id=member.member_id,
+                job_id=member.job_id,
                 result="cancel_failed",
                 terminal_status=None,
                 error=failure.payload(),

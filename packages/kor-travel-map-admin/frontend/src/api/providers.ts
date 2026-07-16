@@ -2,7 +2,7 @@
  * `/v1/ops/providers*` provider 운영 상세 hooks.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 
 import { getJson } from "./client";
 import type { components } from "./types";
@@ -20,6 +20,11 @@ export type OpsProviderDatasetDetail =
 export type OpsProviderDetailResponse =
   ProviderSchemas["OpsProviderDetailResponse"];
 export type OpsProvidersResponse = ProviderSchemas["OpsProvidersResponse"];
+
+export function invalidateOpsProviderQueries(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
+  void queryClient.invalidateQueries({ queryKey: ["ops-provider"] });
+}
 
 function fetchOpsProviders(
   signal?: AbortSignal,

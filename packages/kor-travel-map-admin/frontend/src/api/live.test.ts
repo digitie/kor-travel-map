@@ -14,25 +14,35 @@ describe("ops live invalidation", () => {
     const featureMapKey = ["features", "viewport", "6/54/24", "", "summary", 500];
     const featureDetailKey = ["feature", "f_1111011100_p_mock"];
     const adminFeaturesKey = ["admin-features", { page_size: 50 }];
+    const opsProvidersKey = ["ops-providers"];
+    const opsProviderDetailKey = ["ops-provider", "python-kma-api"];
 
     seedQuery(queryClient, featureMapKey);
     seedQuery(queryClient, featureDetailKey);
     seedQuery(queryClient, adminFeaturesKey);
+    seedQuery(queryClient, opsProvidersKey);
+    seedQuery(queryClient, opsProviderDetailKey);
 
     __testing.invalidateLiveTopic(queryClient, "feature_update_requests");
 
     expect(queryClient.getQueryState(featureMapKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(featureDetailKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(adminFeaturesKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(opsProvidersKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(opsProviderDetailKey)?.isInvalidated).toBe(
+      true,
+    );
   });
 
   it("feature_update_request 단건 topic도 feature surface를 갱신 대상으로 만든다", () => {
     const queryClient = new QueryClient();
     const featureMapKey = ["features", "viewport", "6/54/24", "", "summary", 500];
     const featureDetailKey = ["feature", "f_1111011100_p_mock"];
+    const opsProviderDetailKey = ["ops-provider", "python-kma-api"];
 
     seedQuery(queryClient, featureMapKey);
     seedQuery(queryClient, featureDetailKey);
+    seedQuery(queryClient, opsProviderDetailKey);
 
     __testing.invalidateLiveTopic(
       queryClient,
@@ -41,5 +51,8 @@ describe("ops live invalidation", () => {
 
     expect(queryClient.getQueryState(featureMapKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(featureDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(opsProviderDetailKey)?.isInvalidated).toBe(
+      true,
+    );
   });
 });

@@ -14,6 +14,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.infra.feature_update_repo import (
+    FeatureUpdateRequest,
     FeatureUpdateRequestPage,
     get_update_request,
     list_update_requests,
@@ -25,16 +26,20 @@ from kortravelmap.api import feature_update_service, pipeline_cancellation_servi
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.dagster_http import dagster_http_dependencies
 from kortravelmap.api.db import get_engine, get_session
-from kortravelmap.api.feature_update_http import to_http_exception
+from kortravelmap.api.feature_update_http import LOCK_CONFLICT_RESPONSE, to_http_exception
 from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
     FeatureUpdateRequestDetailResponse,
     FeatureUpdateRequestListData,
     FeatureUpdateRequestListResponse,
+    FeatureUpdateRequestMutationResponse,
+    FeatureUpdateRequestPreviewRequest,
+    FeatureUpdateRequestPreviewResponse,
     FeatureUpdateRequestRecord,
     FeatureUpdateRequestRunNowRequest,
     FeatureUpdateState,
+    ScopeType,
 )
 from kortravelmap.api.pipeline_cancellation_http import (
     error_responses as cancellation_error_responses,
@@ -50,26 +55,21 @@ from kortravelmap.api.response import make_meta
 
 __all__ = [
     "router",
-    "feature_router",
     "FeatureUpdateRequestCreateRequest",
     "FeatureUpdateRequestRecord",
     "FeatureUpdateRequestCreateResponse",
+    "FeatureUpdateRequestMutationResponse",
+    "FeatureUpdateRequestPreviewRequest",
+    "FeatureUpdateRequestPreviewResponse",
     "FeatureUpdateRequestListResponse",
 ]
 
 
-ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX = "/admin/feature-update-requests"
-ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX = "/v1/admin/feature-update-requests"
-ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_ROUTE_PREFIX = "/admin/features/update-requests"
-ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_URL_PREFIX = "/v1/admin/features/update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX = "/admin/features/update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX = "/v1/admin/features/update-requests"
 
 router = APIRouter(
     prefix=ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX,
-    tags=["admin-update-requests"],
-    include_in_schema=False,
-)
-feature_router = APIRouter(
-    prefix=ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_ROUTE_PREFIX,
     tags=["admin-update-requests"],
 )
 
@@ -78,13 +78,28 @@ async def _create_request_response(
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
     *,
-    status_url_prefix: str,
+    operator: str,
 ) -> FeatureUpdateRequestCreateResponse:
     try:
         return await feature_update_service.create_feature_update_request(
             body,
             session,
-            status_url_prefix=status_url_prefix,
+            operator=operator,
+            status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
+            settings=KorTravelMapSettings(),
+        )
+    except feature_update_service.FeatureUpdateServiceError as exc:
+        raise to_http_exception(exc) from exc
+
+
+async def _preview_request_response(
+    body: FeatureUpdateRequestPreviewRequest,
+    session: AsyncSession,
+) -> FeatureUpdateRequestPreviewResponse:
+    try:
+        return await feature_update_service.preview_feature_update_request(
+            body,
+            session,
             settings=KorTravelMapSettings(),
         )
     except feature_update_service.FeatureUpdateServiceError as exc:
@@ -95,43 +110,34 @@ async def _create_request_response(
     "",
     response_model=FeatureUpdateRequestCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="feature update request 생성 또는 dry-run",
-    responses={409: {"description": ("run_mode=now 요청의 동일 scope advisory lock 경합")}},
+    summary="feature update request 생성",
+    responses=LOCK_CONFLICT_RESPONSE,
 )
 async def create_feature_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
     return await _create_request_response(
         body,
         session,
-        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
+        operator=context.actor,
     )
 
 
-@feature_router.post(
-    "",
-    response_model=FeatureUpdateRequestCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="feature update request 생성 또는 dry-run",
-    responses={409: {"description": ("run_mode=now 요청의 동일 scope advisory lock 경합")}},
+@router.post(
+    "/preview",
+    response_model=FeatureUpdateRequestPreviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="feature update request 비영속 미리보기",
 )
-async def create_feature_update_request_feature_route(
-    body: FeatureUpdateRequestCreateRequest,
+async def preview_feature_update_request(
+    body: FeatureUpdateRequestPreviewRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureUpdateRequestCreateResponse:
-    return await _create_request_response(
-        body,
-        session,
-        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_FEATURE_URL_PREFIX,
-    )
+) -> FeatureUpdateRequestPreviewResponse:
+    return await _preview_request_response(body, session)
 
 
-@feature_router.get(
-    "",
-    response_model=FeatureUpdateRequestListResponse,
-    summary="feature update request 목록",
-)
 @router.get(
     "",
     response_model=FeatureUpdateRequestListResponse,
@@ -140,7 +146,7 @@ async def create_feature_update_request_feature_route(
 async def list_feature_update_requests(
     session: Annotated[AsyncSession, Depends(get_session)],
     status_filter: Annotated[FeatureUpdateState | None, Query(alias="status")] = None,
-    scope_type: Annotated[str | None, Query()] = None,
+    scope_type: Annotated[ScopeType | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
     created_from: Annotated[datetime | None, Query()] = None,
@@ -175,12 +181,6 @@ async def list_feature_update_requests(
     )
 
 
-@feature_router.get(
-    "/{request_id}",
-    response_model=FeatureUpdateRequestDetailResponse,
-    summary="feature update request 단건 조회",
-    responses={404: {"description": "request_id 없음"}},
-)
 @router.get(
     "/{request_id}",
     response_model=FeatureUpdateRequestDetailResponse,
@@ -188,11 +188,11 @@ async def list_feature_update_requests(
     responses={404: {"description": "request_id 없음"}},
 )
 async def get_feature_update_request(
-    request_id: str,
+    request_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureUpdateRequestDetailResponse:
     started_at = perf_counter()
-    row = await get_update_request(session, request_id)
+    row = await get_update_request(session, str(request_id))
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -204,12 +204,6 @@ async def get_feature_update_request(
     )
 
 
-@feature_router.post(
-    "/{request_id}/cancel",
-    response_model=PipelineCancellationResponse,
-    summary="feature update request 계층 취소",
-    responses=cancellation_error_responses(not_found_description="request_id 없음"),
-)
 @router.post(
     "/{request_id}/cancel",
     response_model=PipelineCancellationResponse,
@@ -243,34 +237,25 @@ async def cancel_feature_update_request(
     )
 
 
-@feature_router.post(
-    "/{request_id}/run-now",
-    response_model=FeatureUpdateRequestCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="기존 request payload를 run_mode=now로 재큐잉",
-    responses={
-        404: {"description": "request_id 없음"},
-        409: {"description": "이미 running 상태 또는 동일 scope lock 경합"},
-    },
-)
 @router.post(
     "/{request_id}/run-now",
-    response_model=FeatureUpdateRequestCreateResponse,
+    response_model=FeatureUpdateRequestMutationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="기존 request payload를 run_mode=now로 재큐잉",
     responses={
         404: {"description": "request_id 없음"},
-        409: {"description": "이미 running 상태 또는 동일 scope lock 경합"},
+        **LOCK_CONFLICT_RESPONSE,
     },
 )
 async def run_feature_update_request_now(
-    request_id: str,
+    request_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     body: FeatureUpdateRequestRunNowRequest | None = None,
-) -> FeatureUpdateRequestCreateResponse:
+) -> FeatureUpdateRequestMutationResponse:
     started_at = perf_counter()
     async with session.begin():
-        existing = await get_update_request(session, request_id)
+        existing = await get_update_request(session, str(request_id))
         if existing is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -290,19 +275,16 @@ async def run_feature_update_request_now(
                 update_policy=existing.update_policy,
                 run_mode="now",
                 priority=(
-                    body.priority
-                    if body and body.priority is not None
-                    else existing.priority
+                    body.priority if body and body.priority is not None else existing.priority
                 ),
-                dry_run=False,
-                operator=body.operator if body and body.operator else existing.operator,
+                operator=context.actor,
                 reason=(
-                    body.reason
-                    if body and body.reason
-                    else f"run-now from {existing.request_id}"
+                    body.reason if body and body.reason else f"run-now from {existing.request_id}"
                 ),
                 settings=KorTravelMapSettings(),
             )
         except feature_update_service.FeatureUpdateServiceError as exc:
             raise to_http_exception(exc) from exc
-    return feature_update_service.create_response(result, started_at=started_at)
+    if not isinstance(result, FeatureUpdateRequest):
+        raise RuntimeError("run-now must persist a feature update request")
+    return feature_update_service.persisted_response(result, started_at=started_at)

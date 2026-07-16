@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import pytest
 from sqlalchemy import text
@@ -12,7 +13,6 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.infra.dataset_status_repo import (
     count_open_integrity_issues_by_dataset,
     list_latest_dataset_executions,
-    list_ops_import_jobs_by_ids,
 )
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
@@ -23,10 +23,11 @@ from kortravelmap.infra.integrity_violation_repo import (
     set_data_integrity_violation_status,
 )
 from kortravelmap.infra.jobs_repo import (
-    enqueue_import_job,
+    enqueue_provider_dataset_import_job,
     record_import_job_event,
-    start_import_job,
+    start_unpaired_import_job,
 )
+from kortravelmap.infra.pipeline_repo import list_pipeline_executions
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,26 +151,7 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
-    child = await start_import_job(
-        migrated_session,
-        kind="provider_dataset_child",
-        payload={
-            "request_id": request.request_id,
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
-        parent_job_id=request.job_id,
-    )
-    grandchild = await start_import_job(
-        migrated_session,
-        kind="provider_dataset_grandchild",
-        payload={
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
-        parent_job_id=child.job_id,
-    )
-    await start_import_job(
+    await start_unpaired_import_job(
         migrated_session,
         kind="payload_linked_job",
         payload={
@@ -187,16 +169,13 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
         if (item.provider, item.dataset_key)
         == ("python-mois-api", "mois_license_features_bulk")
     )
-    assert linked_root.kind == "update_request"
-    assert linked_root.execution_id == request.request_id
-    assert linked_root.request_id == request.request_id
-    # root status는 request가 정본이고 job_*는 가장 깊은 descendant projection이다.
-    assert linked_root.job_id == grandchild.job_id
-    assert linked_root.status_source == "update_request"
-    assert linked_root.job_status == "running"
+    assert linked_root.execution.kind == "update_request"
+    assert linked_root.execution.id == request.request_id
+    assert linked_root.execution.projected_job.id == request.job_id
+    assert linked_root.pair_status == "queued"
 
     # 자유 payload의 request_id가 UUID가 아니어도 projection이 cast 때문에 깨지지 않는다.
-    independent = await enqueue_import_job(
+    independent = await enqueue_provider_dataset_import_job(
         migrated_session,
         kind="manual_provider_sync",
         payload={"request_id": "not-a-uuid"},
@@ -229,12 +208,19 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     by_key = {(item.provider, item.dataset_key): item for item in latest}
 
     job = by_key[("python-mois-api", "mois_license_features_bulk")]
-    assert job.kind == "import_job"
-    assert job.execution_id == independent.job_id
-    assert job.request_id == "not-a-uuid"
-    assert job.status_source == "import_job"
+    assert job.execution.kind == "import_job"
+    assert job.execution.id == independent.job_id
+    assert job.execution.trigger_kind == "manual"
+    timeline = await list_pipeline_executions(
+        migrated_session,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+    )
+    assert job.execution.id == timeline.items[0].id
+    assert job.execution.status == timeline.items[0].status
+    assert job.execution.projected_job == timeline.items[0].projected_job
 
-    # created_at 동률에서는 source_rank(import_job), execution_id 순으로 total order다.
+    # created_at 동률에서는 canonical root id/kind total order를 그대로 쓴다.
     await migrated_session.execute(
         text(
             "UPDATE ops.import_jobs SET created_at = :created_at "
@@ -249,40 +235,5 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
         if (item.provider, item.dataset_key)
         == ("python-mois-api", "mois_license_features_bulk")
     )
-    assert tied_root.kind == "import_job"
-    assert tied_root.execution_id == independent.job_id
-
-
-async def test_list_ops_import_jobs_by_ids_roundtrip(
-    migrated_session: AsyncSession,
-) -> None:
-    queued = await enqueue_import_job(
-        migrated_session,
-        kind="feature_update_request",
-        payload={"request_id": "req-queued"},
-    )
-    running = await start_import_job(
-        migrated_session,
-        kind="feature_update_request",
-        payload={"request_id": "req-running"},
-    )
-    await migrated_session.flush()
-
-    jobs = await list_ops_import_jobs_by_ids(
-        migrated_session,
-        [
-            queued.job_id,
-            running.job_id,
-            # 존재하지 않는 id는 조용히 빠진다.
-            "99999999-9999-9999-9999-999999999999",
-        ],
-    )
-    by_id = {job.job_id: job for job in jobs}
-    assert set(by_id) == {queued.job_id, running.job_id}
-    assert by_id[queued.job_id].status == "queued"
-    assert by_id[queued.job_id].payload == {"request_id": "req-queued"}
-    assert by_id[queued.job_id].created_at is not None
-    assert by_id[running.job_id].status == "running"
-    assert by_id[running.job_id].started_at is not None
-
-    assert await list_ops_import_jobs_by_ids(migrated_session, []) == ()
+    expected_id = max(UUID(request.request_id), UUID(independent.job_id))
+    assert UUID(tied_root.execution.id) == expected_id

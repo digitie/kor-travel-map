@@ -7,9 +7,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from kortravelmap.api.ops_operation_schema import OperationState
+from kortravelmap.api.pipeline_cancellation_schema import (
+    PipelineCancellationSummaryRecord,
+)
 from kortravelmap.api.provider_refresh_schema import ProviderRefreshPolicyRecord
 from kortravelmap.api.response import Meta
 
@@ -88,25 +93,64 @@ class OpsDatasetScheduleSummary(BaseModel):
     )
 
 
-class OpsDatasetLatestExecution(BaseModel):
-    """그리드 N+1 없이 붙이는 최신 DB-recorded execution."""
+class OpsDatasetProjectedJob(BaseModel):
+    """canonical root branch의 deterministic job projection."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["import_job", "update_request"]
-    execution_id: str
-    status: str
-    status_source: Literal["import_job", "update_request"]
-    job_status: str | None
+    id: UUID
+    job_kind: str
+    status: OperationState
+    progress: int
+    current_stage: str | None
+    error_message: str | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
     dagster_run_id: str | None
-    job_id: str | None
-    request_id: str | None
-    progress: int | None
-    current_stage: str | None
+    dagster_run_status: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
+    depth: int
+    detail_url: str
+
+
+class OpsDatasetProviderDataset(BaseModel):
+    """canonical root의 exact provider/dataset member 상태."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    dataset_key: str
+    sync_scope: str | None
+    operation_member_id: UUID
+    status: OperationState
+
+
+class OpsDatasetLatestExecution(BaseModel):
+    """그리드 N+1 없이 붙이는 최신 canonical operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["import_job", "update_request"]
+    id: UUID
+    detail_url: str
+    status: OperationState
+    pair_status: OperationState
+    operation_member_id: UUID
+    providers: list[str]
+    dataset_keys: list[str]
+    provider_datasets: list[OpsDatasetProviderDataset]
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    dagster_run_id: str | None
+    dagster_run_status: str | None
+    trigger_kind: str | None
+    operation_registry_version: str | None
     error_message: str | None
+    projected_job: OpsDatasetProjectedJob
+    cancellation: PipelineCancellationSummaryRecord | None
 
 
 class OpsIssueSummary(BaseModel):
@@ -142,7 +186,7 @@ class OpsDatasetGridRow(BaseModel):
     orphan_reason: str | None
     mutable: bool
     catalog: OpsDatasetCatalogInfo | None
-    refresh_policy: ProviderRefreshPolicyRecord | None = None
+    refresh_policy: ProviderRefreshPolicyRecord | None
     dataset_issues: OpsIssueSummary
     provider_issues: OpsIssueSummary
 
@@ -152,12 +196,11 @@ class OpsDatasetsGridData(BaseModel):
 
     items: list[OpsDatasetGridRow]
     schedule_source_status: ScheduleSourceStatus
-    schedule_source_errors: list[str] = Field(default_factory=list)
-    latest_execution_coverage: Literal["db_recorded"] = Field(
-        default="db_recorded",
+    schedule_source_errors: list[str]
+    latest_execution_coverage: Literal["db_recorded_canonical_operations"] = Field(
+        default="db_recorded_canonical_operations",
         description=(
-            "import job event와 provider_dataset update request로 DB identity가 남은 "
-            "실행만 포함. schedule/manual 전체 operation 정본은 #679 범위."
+            "DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다."
         ),
     )
 
@@ -184,39 +227,11 @@ class OpsDatasetScopeState(BaseModel):
     freshness: OpsDatasetFreshness
 
 
-class OpsDatasetRunSummary(BaseModel):
-    """기존 update request + 연결 import job 상세 요약.
-
-    schedule/manual 전체 operation 정본은 #679에서 교체한다.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    request_id: str
-    status: str
-    run_mode: str
-    scope_type: str
-    dry_run: bool
-    priority: int
-    job_id: str | None = None
-    dagster_run_id: str | None = None
-    job_status: str | None = None
-    job_progress: int | None = None
-    job_current_stage: str | None = None
-    operator: str | None = None
-    reason: str | None = None
-    error_message: str | None = None
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    updated_at: datetime
-
-
 class OpsDatasetEventRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    event_id: str
-    job_id: str
+    event_id: UUID
+    job_id: UUID
     stage: str | None
     level: str
     code: str | None
@@ -236,13 +251,15 @@ class OpsDatasetDetailData(BaseModel):
     scopes: list[OpsDatasetScopeState]
     schedule: OpsDatasetScheduleSummary
     schedule_source_status: ScheduleSourceStatus
-    schedule_source_errors: list[str] = Field(default_factory=list)
-    refresh_policy: ProviderRefreshPolicyRecord | None = None
-    recent_runs: list[OpsDatasetRunSummary]
-    recent_runs_coverage: Literal["update_requests_only"] = Field(
-        default="update_requests_only",
-        description="schedule/manual 전체 operation 통합은 #679 범위.",
+    schedule_source_errors: list[str]
+    refresh_policy: ProviderRefreshPolicyRecord | None
+    recent_runs: list[OpsDatasetLatestExecution]
+    recent_runs_coverage: Literal["db_recorded_canonical_operations"] = Field(
+        default="db_recorded_canonical_operations",
+        description="DB에 영속된 exact pair canonical operation 이력.",
     )
+    recent_runs_next_cursor: str | None
+    pipeline_history_url: str
     recent_events: list[OpsDatasetEventRecord]
     dataset_issues: OpsIssueSummary
     provider_issues: OpsIssueSummary

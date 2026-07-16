@@ -698,10 +698,25 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_import_jobs_status(status, created_at, queue_sequence)` — claim FIFO tie-breaker
   - `idx_import_jobs_kind_status(kind, status, created_at DESC, job_id DESC)`
 - `ops.import_job_events`
+  - `idx_import_job_events_time(occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_job_time(job_id, occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_provider_time(provider, occurred_at DESC, event_id DESC)`
-    partial `provider IS NOT NULL`
+    partial `provider IS NOT NULL AND quarantined_at IS NULL`
+  - `idx_import_job_events_dataset_time(dataset_key, occurred_at DESC, event_id DESC)`
+    partial `dataset_key IS NOT NULL AND quarantined_at IS NULL`
+  - `idx_import_job_events_provider_dataset_time(provider, dataset_key, occurred_at DESC,
+    event_id DESC)` partial
+    `provider IS NOT NULL AND dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_level_time(level, occurred_at DESC, event_id DESC)`
+
+  모든 event 시간순 인덱스는 `quarantined_at IS NULL` partial predicate를 가진다. 0052에서
+  격리한 기존 event는 보존하되 marker를 비정규화하므로, 조회 시 parent job을 join하거나 최신
+  격리 event를 건너뛰지 않고 visible page만 bounded scan한다. `/ops/live`의 전역 revision은
+  최신 event 1건, job event revision은 최근 5건만 읽으며 매 polling마다 exact 전체 건수를
+  다시 세지 않는다. late commit과 최근 page 밖 UPDATE/DELETE는 singleton
+  `ops.import_job_event_clock.revision`의 transactional 증가로 감지한다. AFTER STATEMENT에서 DML
+  statement당 한 번만 global clock을 갱신해 bulk row별 WAL/dead tuple과 교차 row deadlock을
+  피하며, timestamp는 진단에만 쓴다.
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
@@ -735,19 +750,29 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   접고 각 job의 가장 가까운 request anchor를 선택해 branch/standalone partition을
   만든 뒤 root filter와
   `(created_at DESC, id DESC, kind DESC)` keyset을 적용한다. recursive walk는
-  `uuid[] path` cycle guard로 반드시 종료한다. standalone provider/dataset identity는
-  request branch가 소유한 job을 제외한 standalone partition에서
-  `import_job_events` 실컬럼만 정렬 DISTINCT 집계하고,
-  `import_jobs.payload` JSONB를 읽지 않는다.
+  `uuid[] path` cycle guard로 반드시 종료한다. provider/dataset 선택 조회는 typed job과
+  request 배열의 indexed seed에서 양방향 parent/child component와 관련 request만
+  먼저 좁힌 뒤 같은 root projection을 적용한다. UUID detail도 요청 또는 member가 속한
+  component만 투영한다. 따라서 selective 조회에서 전체 job/request graph를 먼저 순회하면
+  회귀다. 실행 identity는 `import_jobs` typed pair만 사용하고 `import_jobs.payload`와
+  `import_job_events`를 projection에서 읽지 않는다.
 - C3e canonical provider operation: overview/timeline/datasets grid/detail은 위 root CTE를
   공유한다. exact pair latest/history는
   `idx_import_jobs_provider_dataset_created(provider,dataset_key,created_at DESC,job_id DESC)`,
   dataset-only 조회는 `idx_import_jobs_dataset_created(dataset_key,created_at DESC,job_id DESC)`를
   사용한다. provider-only history는 composite pair index의 두 번째 key 때문에 정렬축을
   만족하지 못하므로 `idx_import_jobs_provider_created(provider,created_at DESC,job_id DESC)`를
-  사용한다. provider/dataset 독립 배열의 cross-product와 paginated timeline 첫 page 기반 전
-  dataset latest 계산은 금지한다. overview count/24시간 failure는 raw child가 아니라 canonical
-  root를 집계한다.
+  사용한다. direct scope도 linked typed job index로 찾고 별도 JSON expression index는 두지
+  않는다. provider-only/dataset-only request 배열만 각 GIN access path를 사용한다.
+  provider/dataset 독립 배열의 cross-product와 paginated timeline 첫 page 기반 전 dataset latest
+  계산은 금지한다. overview count/24시간 failure는 raw child가 아니라 canonical root를 센다.
+  event의 provider/dataset은 감사 API filter 메타데이터다. 감사 목록 SQL은 nullable-OR 한 문장을
+  쓰지 않고 실제 입력 filter의 고정 clause만 bind와 함께 조합한다. 대표 REST filter와 인덱스는
+  무필터→`idx_import_job_events_time`, job→`idx_import_job_events_job_time`, provider→
+  `idx_import_job_events_provider_time`, dataset→`idx_import_job_events_dataset_time`,
+  provider+dataset exact pair→`idx_import_job_events_provider_dataset_time`, level→
+  `idx_import_job_events_level_time`이다. 모든 조합은 event의 `quarantined_at IS NULL`을 직접
+  포함한다. projection seed용 event index는 두지 않는다.
 
 ### 14.3 회귀 테스트
 
@@ -765,18 +790,27 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 - `/admin/features` `sort=name`의 `idx_features_lower_name_keyset`
 - dedup/enrichment review cursor 전체 순회 gap/중복 없음
 - pipeline root projection은 전체 partition에서 `job_id`가 정확히 한 번 귀속되는지,
-  batch sibling/nested anchor/cycle/부모 누락/동일 anchor 다중 request에서도 branch가
-  섞이지 않는지 검증한다. EXPLAIN은
+  canonical request root/standalone/cycle/부모 누락에서도 branch가 섞이지 않는지 검증한다.
+  중첩 request root와 동일 job 다중 request는 정상 projection 사례가 아니라 DB constraint 위반
+  회귀로 검증한다. EXPLAIN은
   `idx_import_jobs_parent_created`, `idx_import_jobs_created_keyset`,
-  `idx_feature_update_job`, `idx_import_job_events_job_time` 네 access path의 사용·미사용과
-  recursive/event 비용을 점검한다. 소규모 fixture에서 planner 선택이 흔들리는 앞의
-  세 index는 억지 assert하지 않는다. stable gate는 `Recursive Union`, event의
-  `idx_import_job_events_job_time`, plan 크기·temp I/O·실측 비용이다. 전체 hierarchy/event
-  materialization이 page 크기와 무관하게 커지는 plan이면 구현을 중단하고
-  schema/index 변경을 별도 판단한다.
-- C3e pair/provider-only/dataset-only 조회는 각 전용 index를 EXPLAIN하고, 1,000개
+  `uq_feature_update_requests_job_id` access path와 recursive 비용을 점검한다. selective plan에는
+  `import_job_events` relation 자체가 없어야 한다. 소규모 fixture에서 planner 선택이 흔들리는
+  index는 억지 assert하지 않되 plan 크기·temp I/O·실측 비용과 base table Seq Scan을 gate로 둔다.
+  전체 hierarchy materialization이 page 크기와 무관하게 커지는 plan이면 구현을 중단하고
+  schema/index 변경을 다시 판단한다.
+- C3e pair/provider-only/dataset-only 조회는 direct typed job seed와 request 배열 GIN seed를
+  `UNION ALL` 후보 집합으로 구성한다. 각 전용 index를 EXPLAIN하고, 1,000개
   이상의 root와 multi-pair child에서도 grid latest 누락 0, overview count의 child fan-out 0,
   pipeline/detail cursor 누락·중복 0을 검증한다.
+- feature update queue는 request 테이블에 lifecycle 상태를 복제하지 않는다. partial
+  `idx_import_jobs_feature_update_queue`로 queued canonical job만 seed한 뒤 unique `job_id`로 request를
+  JOIN하고 priority를 정렬한다. 완료 이력이 늘어나도 request history 전체를 순회하지 않는지 natural
+  planner EXPLAIN으로 검증한다.
+- event 감사 조회는 same-dataset/different-provider 4,000행과
+  same-provider/different-dataset 4,000행을 둔 natural planner에서 무필터·dataset-only·exact pair의
+  첫/후속 page가 각 시간순 index를 사용하고 Seq Scan·Sort·64행 초과 residual을 만들지 않는지
+  검증한다.
 
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,

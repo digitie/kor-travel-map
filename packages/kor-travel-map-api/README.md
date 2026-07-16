@@ -118,7 +118,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 메인 라이브러리 환경변수(`KOR_TRAVEL_MAP_PG_DSN`, `KOR_TRAVEL_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. API 패키지는 메인 라이브러리의 settings를 함께 사용한다.
 
-## 엔드포인트 (계획)
+## 주요 엔드포인트
 
 자세한 패키지 사양은 `../../docs/architecture/debug-ui-package.md`, admin 운영 콘솔 구현 사양은
 `../../docs/debug-ui-admin-workflows.md`. 요약:
@@ -128,7 +128,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 - `/admin/features`, `/admin/features/{id}`, `/admin/features/{id}/deactivate`,
   `/admin/features/change-requests`
 - `/admin/providers`, `/admin/providers/{provider}/datasets/{dataset_key}/runs`
-- `/admin/feature-update-requests` (좌표/반경/시군구/provider 기준 업데이트 생성/조회/취소/run-now 재큐잉)
+- `/admin/features/update-requests` (6종 scope 기준 preview/생성/조회/취소/run-now 재큐잉)
 - `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
 - `/admin/provider-refresh-policies` (provider별 update 주기/rate limit 정책)
@@ -139,7 +139,8 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 - `/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load), `/ops/error-logs`
 - `/debug/explain`, `/debug/fixtures`
 
-모두 인증 없음. 런타임 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
+admin/ops 엔드포인트는 admin frontend proxy 인증 context를 요구한다. 런타임
+`OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
 PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.
 

@@ -6,9 +6,21 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isfinite
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StringConstraints,
+    model_validator,
+    with_config,
+)
+from typing_extensions import TypedDict
 
 from kortravelmap.api.response import Meta
 
@@ -18,25 +30,38 @@ __all__ = [
     "CenterRadiusScope",
     "FeatureIdsScope",
     "FeatureUpdatePolicy",
-    "FeatureUpdateRequestCancelRequest",
     "FeatureUpdateRequestCreateRequest",
+    "FeatureUpdateRequestCreatedRecord",
     "FeatureUpdateRequestCreateResponse",
     "FeatureUpdateRequestDetailResponse",
     "FeatureUpdateRequestListData",
     "FeatureUpdateRequestListResponse",
+    "FeatureUpdateRequestMutationResponse",
+    "FeatureUpdateRequestPreviewRequest",
+    "FeatureUpdateRequestPreviewRecord",
+    "FeatureUpdateRequestPreviewResponse",
     "FeatureUpdateRequestRecord",
     "FeatureUpdateRequestRunNowRequest",
     "FeatureUpdateScope",
     "FeatureUpdateState",
     "ProviderDatasetScope",
     "RunMode",
+    "ScopeType",
     "SigunguByRadiusScope",
 ]
 
 FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
 RunMode = Literal["queued", "now"]
+ScopeType = Literal[
+    "feature_ids",
+    "center_radius",
+    "sigungu_by_radius",
+    "bbox",
+    "provider_dataset",
+    "cache_target_keys",
+]
 ScopeMode = Literal["center_radius", "sigungu_by_radius"]
-SigunguRadiusMatch = Literal["intersects", "contains_center", "feature_sigungu"]
+SigunguRadiusMatch = Literal["intersects"]
 FeatureUpdatePolicyMode = Literal["refresh_existing"]
 NonEmptyString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
@@ -47,6 +72,9 @@ FeatureIdString = Annotated[
 TargetKeyString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
 ]
+AuditReason = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
 MAX_PROVIDER_FILTERS = 32
 MAX_DATASET_FILTERS = 64
 MAX_SCOPE_FEATURE_IDS = 1000
@@ -54,13 +82,44 @@ MAX_SCOPE_TARGET_KEYS = 500
 MAX_RADIUS_KM = 500.0
 
 
+def _strict_json_number(value: Any) -> float:
+    """JSON int/float만 받고 bool·문자열 coercion은 금지한다."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("value must be a JSON number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("value must be a finite JSON number") from exc
+    if not isfinite(number):
+        raise ValueError("value must be finite")
+    return number
+
+
+Longitude = Annotated[
+    float,
+    Field(ge=-180, le=180, allow_inf_nan=False),
+    BeforeValidator(_strict_json_number),
+]
+Latitude = Annotated[
+    float,
+    Field(ge=-90, le=90, allow_inf_nan=False),
+    BeforeValidator(_strict_json_number),
+]
+RadiusKm = Annotated[
+    float,
+    Field(gt=0, le=MAX_RADIUS_KM, allow_inf_nan=False),
+    BeforeValidator(_strict_json_number),
+]
+RequestPriority = Annotated[int, Field(strict=True, ge=0, le=1000)]
+
+
 class FeatureUpdatePoint(BaseModel):
     """WGS84 lon/lat 좌표."""
 
     model_config = ConfigDict(extra="forbid")
 
-    lon: float = Field(ge=-180, le=180)
-    lat: float = Field(ge=-90, le=90)
+    lon: Longitude
+    lat: Latitude
 
 
 class FeatureIdsScope(BaseModel):
@@ -69,7 +128,16 @@ class FeatureIdsScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["feature_ids"]
-    feature_ids: list[FeatureIdString] = Field(max_length=MAX_SCOPE_FEATURE_IDS)
+    feature_ids: list[FeatureIdString] = Field(
+        max_length=MAX_SCOPE_FEATURE_IDS,
+        json_schema_extra={"uniqueItems": True},
+    )
+
+    @model_validator(mode="after")
+    def _validate_unique_feature_ids(self) -> FeatureIdsScope:
+        if len(self.feature_ids) != len(set(self.feature_ids)):
+            raise ValueError("feature_ids items must be unique")
+        return self
 
 
 class CenterRadiusScope(BaseModel):
@@ -79,7 +147,7 @@ class CenterRadiusScope(BaseModel):
 
     type: Literal["center_radius"]
     center: FeatureUpdatePoint
-    radius_km: float = Field(gt=0, le=MAX_RADIUS_KM)
+    radius_km: RadiusKm
 
 
 class SigunguByRadiusScope(BaseModel):
@@ -89,7 +157,7 @@ class SigunguByRadiusScope(BaseModel):
 
     type: Literal["sigungu_by_radius"]
     center: FeatureUpdatePoint
-    radius_km: float = Field(gt=0, le=MAX_RADIUS_KM)
+    radius_km: RadiusKm
     match: SigunguRadiusMatch = "intersects"
 
 
@@ -99,10 +167,10 @@ class BboxScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["bbox"]
-    min_lon: float = Field(ge=-180, le=180)
-    min_lat: float = Field(ge=-90, le=90)
-    max_lon: float = Field(ge=-180, le=180)
-    max_lat: float = Field(ge=-90, le=90)
+    min_lon: Longitude
+    min_lat: Latitude
+    max_lon: Longitude
+    max_lat: Latitude
 
     @model_validator(mode="after")
     def _validate_order(self) -> BboxScope:
@@ -129,9 +197,18 @@ class CacheTargetKeysScope(BaseModel):
 
     type: Literal["cache_target_keys"]
     external_system: NonEmptyString
-    target_keys: list[TargetKeyString] = Field(max_length=MAX_SCOPE_TARGET_KEYS)
-    radius_km: float | None = Field(default=None, gt=0, le=MAX_RADIUS_KM)
+    target_keys: list[TargetKeyString] = Field(
+        max_length=MAX_SCOPE_TARGET_KEYS,
+        json_schema_extra={"uniqueItems": True},
+    )
+    radius_km: RadiusKm | None = None
     scope_mode: ScopeMode = "center_radius"
+
+    @model_validator(mode="after")
+    def _validate_unique_target_keys(self) -> CacheTargetKeysScope:
+        if len(self.target_keys) != len(set(self.target_keys)):
+            raise ValueError("target_keys items must be unique")
+        return self
 
 
 FeatureUpdateScope = Annotated[
@@ -145,21 +222,20 @@ FeatureUpdateScope = Annotated[
 ]
 
 
-class FeatureUpdatePolicy(BaseModel):
-    """Provider refresh 실행 정책 override."""
+@with_config(ConfigDict(extra="forbid"))
+class FeatureUpdatePolicy(TypedDict, total=False):
+    """존재하는 key만 직렬화하는 strict provider refresh 정책."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    mode: FeatureUpdatePolicyMode | None = None
-    include_inactive: bool | None = None
-    force_provider_call: bool | None = None
-    dedup_after_load: bool | None = None
-    consistency_check_after_load: bool | None = None
-    prevent_provider_reactivation: bool | None = None
+    mode: FeatureUpdatePolicyMode
+    include_inactive: StrictBool
+    force_provider_call: StrictBool
+    dedup_after_load: StrictBool
+    consistency_check_after_load: StrictBool
+    prevent_provider_reactivation: StrictBool
 
 
-class FeatureUpdateRequestCreateRequest(BaseModel):
-    """feature update request 생성 요청."""
+class _FeatureUpdateRequestPlan(BaseModel):
+    """영속 요청과 미리보기가 공유하는 실행 계획."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -167,49 +243,123 @@ class FeatureUpdateRequestCreateRequest(BaseModel):
     providers: list[NonEmptyString] = Field(
         default_factory=list,
         max_length=MAX_PROVIDER_FILTERS,
+        json_schema_extra={"uniqueItems": True},
     )
     dataset_keys: list[NonEmptyString] = Field(
         default_factory=list,
         max_length=MAX_DATASET_FILTERS,
+        json_schema_extra={"uniqueItems": True},
     )
     update_policy: FeatureUpdatePolicy = Field(default_factory=FeatureUpdatePolicy)
     run_mode: RunMode = "queued"
-    priority: int = Field(default=50, ge=0, le=1000)
-    dry_run: bool = False
-    operator: str | None = None
-    reason: str | None = None
+    priority: RequestPriority = 50
+
+    @model_validator(mode="after")
+    def _validate_unique_filters(self) -> _FeatureUpdateRequestPlan:
+        if len(self.providers) != len(set(self.providers)):
+            raise ValueError("providers items must be unique")
+        if len(self.dataset_keys) != len(set(self.dataset_keys)):
+            raise ValueError("dataset_keys items must be unique")
+        if self.scope.type == "provider_dataset" and (
+            self.providers or self.dataset_keys
+        ):
+            raise ValueError(
+                "provider_dataset scope must not repeat providers or dataset_keys filters"
+            )
+        return self
+
+
+class FeatureUpdateRequestCreateRequest(_FeatureUpdateRequestPlan):
+    """DB와 import job을 반드시 생성하는 feature update 요청."""
+
+    reason: AuditReason | None = None
+
+
+class FeatureUpdateRequestPreviewRequest(_FeatureUpdateRequestPlan):
+    """DB write 없이 scope 해석 결과만 계산하는 요청."""
 
 
 class FeatureUpdateRequestRecord(BaseModel):
-    """feature update request 행/preview의 HTTP 표현."""
+    """DB에 저장된 feature update request의 HTTP 표현."""
 
     model_config = ConfigDict(extra="forbid")
 
-    request_id: str | None = None
-    scope_type: str
-    scope: dict[str, Any]
+    request_id: UUID
+    scope_type: ScopeType
+    scope: FeatureUpdateScope
     providers: list[str]
     dataset_keys: list[str]
-    update_policy: dict[str, Any]
+    update_policy: FeatureUpdatePolicy
     run_mode: RunMode
     priority: int
-    status: str
-    dry_run: bool
+    status: FeatureUpdateState
     matched_scope: dict[str, Any]
-    job_id: str | None = None
-    dagster_run_id: str | None = None
-    operator: str | None = None
-    reason: str | None = None
-    error_message: str | None = None
-    created_at: datetime | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    updated_at: datetime | None = None
-    status_url: str | None = None
+    job_id: UUID
+    dagster_run_id: str | None
+    operator: str | None
+    reason: AuditReason | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    generation: int = Field(ge=1)
+    status_url: str
+
+    @model_validator(mode="after")
+    def _validate_scope_type(self) -> FeatureUpdateRequestRecord:
+        if self.scope_type != self.scope.type:
+            raise ValueError("scope_type must equal scope.type")
+        return self
+
+
+class FeatureUpdateRequestCreatedRecord(FeatureUpdateRequestRecord):
+    """생성 API가 영속 요청을 반환했음을 나타내는 판별형."""
+
+    result_kind: Literal["request"]
+
+
+class FeatureUpdateRequestPreviewRecord(BaseModel):
+    """DB write 없이 scope 해석 결과만 반환하는 preview 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    result_kind: Literal["preview"]
+    scope_type: ScopeType
+    scope: FeatureUpdateScope
+    providers: list[str]
+    dataset_keys: list[str]
+    update_policy: FeatureUpdatePolicy
+    run_mode: RunMode
+    priority: int
+    matched_scope: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _validate_scope_type(self) -> FeatureUpdateRequestPreviewRecord:
+        if self.scope_type != self.scope.type:
+            raise ValueError("scope_type must equal scope.type")
+        return self
 
 
 class FeatureUpdateRequestCreateResponse(BaseModel):
-    """생성/취소/run-now 응답."""
+    """새 영속 요청 생성 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureUpdateRequestCreatedRecord
+    meta: Meta
+
+
+class FeatureUpdateRequestPreviewResponse(BaseModel):
+    """비영속 scope 미리보기 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureUpdateRequestPreviewRecord
+    meta: Meta
+
+
+class FeatureUpdateRequestMutationResponse(BaseModel):
+    """run-now처럼 반드시 새 영속 요청을 만드는 mutation 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -243,22 +393,10 @@ class FeatureUpdateRequestListResponse(BaseModel):
     meta: Meta
 
 
-class FeatureUpdateRequestCancelRequest(BaseModel):
-    """취소 요청 body."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    error_message: str | None = Field(
-        default=None,
-        description="취소 사유. 미지정 시 기본 메시지를 저장한다.",
-    )
-
-
 class FeatureUpdateRequestRunNowRequest(BaseModel):
     """기존 request payload를 run_mode=now로 재큐잉할 때의 override."""
 
     model_config = ConfigDict(extra="forbid")
 
-    priority: int | None = Field(default=None, ge=0, le=1000)
-    operator: str | None = None
-    reason: str | None = None
+    priority: RequestPriority | None = None
+    reason: AuditReason | None = None

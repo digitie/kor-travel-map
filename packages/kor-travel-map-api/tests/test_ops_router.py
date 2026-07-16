@@ -68,6 +68,7 @@ def _job(
         kind="feature_update_request",
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
+        update_request_id="22222222-2222-2222-2222-222222222222",
         payload=payload or {"request_id": "req-1"},
         status=status,
         progress=40,
@@ -100,8 +101,7 @@ def _cancellation_detail() -> PipelineCancellationDetailRecord:
             "unresolved_member_count": 0,
             "members": [
                 {
-                    "member_kind": "import_job",
-                    "member_id": job_id,
+                    "job_id": job_id,
                     "dagster_run_id": "run-1",
                     "operation_kind": "provider_feature_load_run",
                     "requires_run_termination": True,
@@ -249,6 +249,22 @@ def test_ops_live_websocket_initial_snapshot(
 
 
 @pytest.mark.unit
+def test_ops_live_sql_excludes_quarantined_import_jobs() -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    assert live_mod._IMPORT_JOBS_LIVE_SQL.count("quarantined_at IS NULL") >= 4
+    assert live_mod._IMPORT_JOB_EVENTS_LIVE_SQL.count("quarantined_at IS NULL") >= 1
+    assert "event.quarantined_at IS NULL" in live_mod._IMPORT_JOBS_LIVE_SQL
+    assert "event.quarantined_at IS NULL" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "ops.import_job_event_clock" in live_mod._IMPORT_JOBS_LIVE_SQL
+    assert "ops.import_job_event_clock" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "ops.import_jobs" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "COUNT(" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUNS_LIVE_SQL
+    assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUN_LIVE_SQL
+
+
+@pytest.mark.unit
 def test_ops_live_websocket_subscribe_command(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -380,6 +396,12 @@ def test_import_jobs_list_passes_filters(
     assert body["data"]["items"][0]["links"][0]["rel"] == "self"
     assert any(
         link["rel"] == "feature_update_request"
+        for link in body["data"]["items"][0]["links"]
+    )
+    assert any(
+        link["href"].endswith(
+            "/executions/update_request/22222222-2222-2222-2222-222222222222"
+        )
         for link in body["data"]["items"][0]["links"]
     )
     assert body["meta"]["page"] == {

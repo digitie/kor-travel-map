@@ -297,10 +297,11 @@ POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
-GET/POST /v1/admin/features/update-requests             # 재적재(admin 단일, legacy alias 제거됨)
+GET/POST /v1/admin/features/update-requests             # 재적재 조회/영속 생성(201)
+POST   /v1/admin/features/update-requests/preview       # 비영속 실행 계획 미리보기(200)
 GET    /v1/admin/features/update-requests/{request_id}
 POST   /v1/admin/features/update-requests/{request_id}/cancel
-POST   /v1/admin/features/update-requests/{request_id}/run-now    # kill-switch
+POST   /v1/admin/features/update-requests/{request_id}/run-now    # 201 새 now 요청 생성, 원본 불변
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
@@ -328,6 +329,10 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+- **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
+  받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의
+  `AdminProxyContext.actor`에서만 파생한다. 실행 계획 필드 외에 create body는 `reason`,
+  run-now body는 nullable `priority`/`reason`만 요청별 override로 허용한다.
 - **version 0/1 모델(#317)**: provider 적재=`data_origin='provider', data_version=0`,
   사용자 요청=`'user_request', data_version=1`, `feature.feature_versions` snapshot +
   `ops.feature_change_requests`. `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE=require_review|
@@ -382,6 +387,8 @@ GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
                                                       # root 상세 + current member/run 결과
 POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
+POST /v1/ops/pipeline/requests                        # 영속 갱신 요청 생성(201)
+POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
 ```
 
@@ -396,7 +403,7 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
 - **Execution 응답 어휘**: root와 pair child lifecycle은 각각
   `queued|running|done|failed|cancelled`, C3d cancellation workflow/result, raw Dagster status,
   freshness, `trigger_kind`는 별도 필드다. `provider_datasets[]`는 exact pair와 nullable selected
-  member id, status, `status_source=member|root`를 보존한다. feature-load run의
+  `sync_scope`, non-null selected member id와 status를 보존한다. feature-load run의
   `projected_job`은 root 자체로 고정하고 pair별 상태는 이 배열에서만 읽는다. datasets coverage는
   `db_recorded_canonical_operations`이며 detail은 pipeline과
   같은 total order의 `recent_runs_next_cursor`와 pair-filtered `pipeline_history_url`을 준다.
@@ -425,7 +432,7 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
 - **응답 정본**: 200 `data`는 `cancellation_id`, `previous_cancellation_id`, canonical
   `root {kind,id}`, attempt `status`, `members[]`, `dagster_runs[]`,
   `committed_data_rolled_back:false`, `warnings[]`를 반환한다. 각 member/run은
-  member는 `member_kind`, `member_id`, nullable `operation_kind`,
+  member는 canonical import job을 가리키는 `job_id`, nullable `operation_kind`,
   `requires_run_termination`, nullable `dagster_run_id`, `initial_status`,
   `result`(`pending`/`cancelled`/`already_terminal`/`cancel_failed`), `terminal_status`, nullable
   structured `error`를 갖는다. run은 `dagster_run_id`, nullable `initial_status`, nullable
@@ -496,8 +503,7 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   사용하므로 `pending`을 반환할 수 있다. 실패 attempt와 대상별 error는 응답 전에 영속되며
   marker는 유지된다.
 - **legacy/mutator 차단**: 신규 pipeline action, legacy `/ops/import-jobs/{job_id}/cancel`,
-  `/admin/features/update-requests/{request_id}/cancel`과 hidden
-  `/admin/feature-update-requests/{request_id}/cancel`은 모두 reason-only body,
+  `/admin/features/update-requests/{request_id}/cancel`은 모두 reason-only body,
   endpoint의 `AdminProxyContext.actor`, 같은 coordinator/DTO/error adapter에 위임한다. 세 route는
   direct `cancel_import_job`/`cancel_update_request`를 호출하지 않는다. 특히 legacy ops route도
   endpoint 자체에서 admin frontend context를 요구한다. main-library

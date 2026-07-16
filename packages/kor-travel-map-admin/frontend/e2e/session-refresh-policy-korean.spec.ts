@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 // 이번 세션 admin UI 작업의 live UI e2e (route-mock; live n150에서 실행):
@@ -89,16 +90,20 @@ async function mockOpsProviders(
   },
 ) {
   await page.route("**/v1/ops/providers**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === "/v1/ops/providers") {
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "GET" && apiPath === "/v1/ops/providers") {
       await fulfillJson(route, makeProvidersResponse(options.items));
       return;
     }
-    const provider = decodeURIComponent(
-      url.pathname.replace("/v1/ops/providers/", ""),
-    );
-    const datasets = options.details?.[provider] ?? [];
-    await fulfillJson(route, makeDetailResponse(provider, datasets));
+    const detailMatch = apiPath.match(/^\/v1\/ops\/providers\/([^/]+)$/);
+    if (request.method() === "GET" && detailMatch) {
+      const provider = decodeURIComponent(detailMatch[1]);
+      const datasets = options.details?.[provider] ?? [];
+      await fulfillJson(route, makeDetailResponse(provider, datasets));
+      return;
+    }
+    throw new Error(`Unhandled provider route: ${request.method()} ${apiPath}`);
   });
 }
 
@@ -119,16 +124,29 @@ test.describe("/ops/providers — Refresh policy 기본값 + 한국어 (#608)", 
     await page.goto("/ops/providers");
 
     // 폼이 렌더되면 소스 종류 필드가 보인다 — read-only(사람이 고르는 드롭다운 아님).
-    const sourceKind = page.getByLabel("소스 종류");
+    const sourceKind = page.getByRole("textbox", {
+      name: "소스 종류",
+      exact: true,
+    });
     await expect(sourceKind).toBeVisible();
     await expect(sourceKind).not.toBeEditable();
 
     // rate-limit·동시·버스트 기본값이 비어 있지 않고 보수적 기본값으로 채워져 있다.
-    await expect(page.getByLabel("분당 요청 수")).toHaveValue("60");
-    await expect(page.getByLabel("시간당 요청 수")).toHaveValue("1000");
-    await expect(page.getByLabel("일일 요청 수")).toHaveValue("10000");
-    await expect(page.getByLabel("최대 동시 실행")).toHaveValue("1");
-    await expect(page.getByLabel("버스트 크기")).toHaveValue("10");
+    await expect(
+      page.getByRole("textbox", { name: "분당 요청 수", exact: true }),
+    ).toHaveValue("60");
+    await expect(
+      page.getByRole("textbox", { name: "시간당 요청 수", exact: true }),
+    ).toHaveValue("1000");
+    await expect(
+      page.getByRole("textbox", { name: "일일 요청 수", exact: true }),
+    ).toHaveValue("10000");
+    await expect(
+      page.getByRole("textbox", { name: "최대 동시 실행", exact: true }),
+    ).toHaveValue("1");
+    await expect(
+      page.getByRole("textbox", { name: "버스트 크기", exact: true }),
+    ).toHaveValue("10");
   });
 
   test("providers 페이지 폼 라벨·필드 설명이 한국어로 표기된다", async ({
@@ -143,20 +161,35 @@ test.describe("/ops/providers — Refresh policy 기본값 + 한국어 (#608)", 
     await page.goto("/ops/providers");
 
     // 우선 페이지(providers) 한국어 라벨 + 한 문장 필드 설명(hint).
+    await expect(
+      page.getByRole("textbox", { name: "소스 종류", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("combobox", { name: "타깃 갱신 정책", exact: true }),
+    ).toBeVisible();
     for (const label of [
-      "소스 종류",
-      "타깃 갱신 정책",
       "분당 요청 수",
       "시간당 요청 수",
       "일일 요청 수",
       "최대 동시 실행",
       "버스트 크기",
     ]) {
-      await expect(page.getByText(label, { exact: false }).first()).toBeVisible();
+      await expect(
+        page.getByRole("textbox", { name: label, exact: true }),
+      ).toBeVisible();
     }
-    // 필드 설명(hint) 한국어 — 일일 요청 수 설명 문장.
+    // 필드 설명은 도움말 popover에서 사용자에게 노출된다.
+    await page
+      .getByRole("button", {
+        name: "도움말: 일일 요청 수",
+        exact: true,
+      })
+      .click();
     await expect(
-      page.getByText("하루 동안 보낼 수 있는 최대 요청 수", { exact: false }),
+      page.getByText(
+        "무료키 일일 쿼터 보호 한도 — 초과 시 이후 요청이 차단됩니다.",
+        { exact: true },
+      ),
     ).toBeVisible();
   });
 });
