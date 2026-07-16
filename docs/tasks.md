@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C3e-I2` — n150 migration·sensor/cursor·4종 동일-root 증거·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
@@ -35,10 +34,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C3e-I2` — **C3e n150 운영 종결** (codex, 의존 C3e-I1): maintenance drain 뒤
-  0051/0052 migration과 0048 수렴을 검증하고 8개 tracking sensor·cursor를 readback한다.
-  일정/수동/갱신/import 4종 실행이 datasets/pipeline에서 같은 canonical root로 보이는 증거를
-  이슈 #679에 남긴 뒤 닫는다. 이 task는 n150/prod에서만 완료한다.
 - [ ] `T-ADM-C4R` — **C4 UI 소비 계약 수정** (agent **A**, issue **#684**,
   **PR 1개**, 의존 C2R·C3e): freshness/schedule/latest operation/orphan/preview의
   보강 계약을 UI 상태·조작 모델에 반영한다. `T-ADM-C4` 완료 전에 반드시 머지한다.
@@ -82,10 +77,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트.
 
-현재 codex 실행 순서는 사용자 지시로 **C3e-I2 → C45X·C4R 차단 계약 → 기존
+현재 codex 실행 순서는 사용자 지시로 **C45X·C4R 차단 계약 → 기존
 C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
-worktree의 C45X/C4R 구현이 정본이다. C3e-B1/B2/B3/C는 완료했으며, C3e 종료 뒤 해당
-worktree와 PR을 가져와 적대적 상세 리뷰
+worktree의 C45X/C4R 구현이 출발점이다. C3e 전체와 n150 운영 종결은 완료했으며, 해당
+worktree와 PR을 가져와 현재 0052 typed identity 정본 기준으로 적대적 상세 리뷰
 후 개선을 반영한다. C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다.
 C6 착수 전 원격에서 C4/C5와 관련 차단 PR의 실제 merge·CI 상태를 확인한다.
 

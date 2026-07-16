@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (codex) — C3e-I2 n150 prod 일방향 전환·live UI 종결
+
+- 배포 전 pg_dump와 SHA-256을 기록하고 maintenance drain 뒤 0051/0052를 적용했다. 취소된
+  Dagster run에 연결된 legacy active request 1건은 감사 row를 삭제하지 않고 request/job을
+  `cancelled`로 명시 정리해 migration preflight를 통과시켰다. 0048 재수렴 변경 0, 0051 예상 밖
+  exact untyped 0, request validation/identity/quarantine 불일치 0, event clock singleton과
+  constraint/trigger/index를 readback했다.
+- Dagster webserver와 daemon을 각각 새 이미지로 재빌드하고 sensor 10개를 RUNNING으로 복원했다.
+  reconciliation cursor는 maintenance anchor 5160에서 5175로 전진했으며 최근 5개 tick 모두
+  `dagster_panel_only=0`, `database_observation_errors=0`이다. schedule snapshot도 34 RUNNING·3
+  STOPPED로 정확히 복원했다.
+- admin manual KMA, 자연 schedule KREX, feature update KMA, standalone MOIS import 네 실행이
+  terminal로 끝나고 datasets/pipeline 상세의 `execution/root(kind,id)`가 일치했다. 공식
+  Playwright 1.60.0·worker 1로 prod provider consistency 112건, Dagster 4건, update request 8건,
+  offline upload 6건, import action 3건, home dashboard 5건을 통과했다(전제 미충족 2건 skip).
+  로그인 POST/Set-Cookie와 오답 401도 반복 확인했다.
+- 최종 DB/Dagster active run 0과 서비스 상태를 확인한 뒤 상세 증거를 이슈 #679에 남기고 닫았다.
+  `T-ADM-C3e-I2`를 완료 이력으로 옮겼으며 다음 작업은 C45X #701과 C4R #698/#712의 적대적
+  리뷰·0052 정본 보강이다.
+
 ## 2026-07-16 (codex) — C3e-I1 B2→B3 실제 PostGIS 교차 회귀
 
 - production 코드를 바꾸지 않고 실제 migration 0001→0052가 적용된 PostGIS에서 B2 public
