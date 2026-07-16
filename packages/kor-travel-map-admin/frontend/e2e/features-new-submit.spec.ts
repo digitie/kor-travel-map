@@ -2,6 +2,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
 import type { KorTravelGeoResponse } from "../src/api/korTravelGeo";
+import { bffApiPath } from "./bff-api-path";
 
 /**
  * `/admin/features/new` — route-mocked depth specs (T-AUDIT-0616 후속).
@@ -11,7 +12,7 @@ import type { KorTravelGeoResponse } from "../src/api/korTravelGeo";
  * 분리한다:
  *   - POST /v1/admin/features 성공 → 변경 요청 생성 알림 + 생성 요청 섹션
  *   - GET /v1/features/nearby 자동 조회(유효 좌표) → 중복 후보 렌더 / 빈 응답 / 재조회
- *   - POST /v1/admin/features 422·409 → 'feature 작성 실패' 알림
+ *   - POST /v1/admin/features 422·409 → 'Feature 작성 실패' 알림
  *   - POST :12501/v2/geocode, /v2/reverse → 후보 적용으로 좌표·주소 채움 / 실패 알림
  *
  * 모든 backend mock body는 생성 OpenAPI 스키마(`components["schemas"]`)에 바인딩해
@@ -116,8 +117,8 @@ function makeNearbyResponse(
 
 /**
  * `v1/admin/features` glob은 페이지의 RSC document/navigation 요청과도 매칭된다.
- * admin-ops.spec의 가드를 그대로 미러해 document/_rsc는 continue하고, mutation만
- * method+pathname으로 분기한다.
+ * admin-ops.spec의 가드를 그대로 미러해 document/_rsc/정적 자산만 continue하고,
+ * mutation은 method+정규화된 API path로 분기한다.
  */
 async function mockCreateRoute(
   page: Page,
@@ -131,18 +132,25 @@ async function mockCreateRoute(
       return;
     }
     const url = new URL(request.url());
-    if (url.searchParams.has("_rsc")) {
+    if (
+      url.pathname.startsWith("/_next/") ||
+      url.pathname === "/favicon.ico" ||
+      url.searchParams.has("_rsc")
+    ) {
       await route.continue();
       return;
     }
-    if (request.method() === "POST" && url.pathname === "/v1/admin/features") {
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "POST" && apiPath === "/v1/admin/features") {
       state.count += 1;
       const body = request.postDataJSON() as AdminFeatureCreateRequest;
       state.bodies.push(body);
       await handler(route, body);
       return;
     }
-    await route.continue();
+    throw new Error(
+      `Unhandled feature create route: ${request.method()} ${apiPath}`,
+    );
   });
   return state;
 }
@@ -155,11 +163,20 @@ async function mockNearbyRoute(
   const state = { count: 0, urls: [] as URL[] };
   await page.route("**/v1/features/nearby**", async (route) => {
     const request = route.request();
-    if (request.method() !== "GET") {
+    const url = new URL(request.url());
+    if (
+      request.resourceType() === "document" ||
+      url.pathname.startsWith("/_next/") ||
+      url.pathname === "/favicon.ico" ||
+      url.searchParams.has("_rsc")
+    ) {
       await route.continue();
       return;
     }
-    const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/features/nearby") {
+      throw new Error(`Unhandled nearby route: ${request.method()} ${apiPath}`);
+    }
     state.count += 1;
     state.urls.push(url);
     await fulfillJson(route, response(url));
@@ -189,8 +206,8 @@ async function mockGeoRoute(
 
 /** 좌표 입력으로 coord 활성화(지도 클릭 대신 — risk 항목 참고). */
 async function fillCoord(page: Page, lon = "126.978", lat = "37.5665") {
-  await page.getByLabel("lon", { exact: true }).fill(lon);
-  await page.getByLabel("lat", { exact: true }).fill(lat);
+  await page.getByRole("textbox", { name: "경도", exact: true }).fill(lon);
+  await page.getByRole("textbox", { name: "위도", exact: true }).fill(lat);
 }
 
 test.describe("/admin/features/new (mocked routes)", () => {
@@ -217,8 +234,8 @@ test.describe("/admin/features/new (mocked routes)", () => {
 
     await page.goto("/admin/features/new");
 
-    await page.getByLabel("name", { exact: true }).fill("새 장소");
-    await page.getByLabel("reason", { exact: true }).fill("e2e 수동 생성");
+    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
+    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
     // category 기본값 '01070300' 그대로 유효. 유효 좌표 입력 → nearby 자동 발화.
     await fillCoord(page);
     await expect.poll(() => nearby.count).toBeGreaterThanOrEqual(1);
@@ -299,7 +316,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     await expect(page.getByText("후보 없음")).toBeVisible();
   });
 
-  test("422 검증 오류 — 서버 422 응답이 'feature 작성 실패' 알림으로 노출", async ({
+  test("422 검증 오류 — 서버 422 응답이 'Feature 작성 실패' 알림으로 노출", async ({
     page,
   }) => {
     await mockNearbyRoute(page, () => makeNearbyResponse([]));
@@ -321,29 +338,29 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     await page.goto("/admin/features/new");
-    await page.getByLabel("name", { exact: true }).fill("새 장소");
-    await page.getByLabel("reason", { exact: true }).fill("e2e 수동 생성");
+    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
+    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
     await fillCoord(page);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => create.count).toBe(1);
-    await expect(page.getByText("feature 작성 실패")).toBeVisible();
+    await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     // 클라이언트가 만든 메시지: `POST /v1/admin/features 실패 (HTTP 422) <body>`.
     // 422는 detail("category invalid")이 필드 에러도 트리거하므로 role=alert가
     // 두 개(상단 페이지 알림 + 필드 에러) 렌더된다. 상단 알림(AlertTitle
-    // "feature 작성 실패")으로 한정해 strict-mode 위반을 피한다.
+    // "Feature 작성 실패")으로 한정해 strict-mode 위반을 피한다.
     await expect(
       page
         .getByRole("alert")
-        .filter({ hasText: "feature 작성 실패" })
+        .filter({ hasText: "Feature 작성 실패" })
         .filter({ hasText: "(HTTP 422)" }),
     ).toBeVisible();
     // 성공 섹션은 렌더되지 않음.
     await expect(page.getByText("변경 요청 생성됨")).toHaveCount(0);
   });
 
-  test("409 충돌 — 서버 409 응답이 'feature 작성 실패' 알림으로 노출", async ({
+  test("409 충돌 — 서버 409 응답이 'Feature 작성 실패' 알림으로 노출", async ({
     page,
   }) => {
     await mockNearbyRoute(page, () => makeNearbyResponse([]));
@@ -363,14 +380,14 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     await page.goto("/admin/features/new");
-    await page.getByLabel("name", { exact: true }).fill("새 장소");
-    await page.getByLabel("reason", { exact: true }).fill("e2e 수동 생성");
+    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
+    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
     await fillCoord(page);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => create.count).toBe(1);
-    await expect(page.getByText("feature 작성 실패")).toBeVisible();
+    await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     await expect(
       page.getByRole("alert").filter({ hasText: "(HTTP 409)" }),
     ).toBeVisible();
@@ -418,15 +435,18 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     // applyCandidate가 첫 후보 자동 적용: updateCoord(toFixed(6)).
-    await expect(page.getByLabel("lon", { exact: true })).toHaveValue(
+    await expect(page.getByRole("textbox", { name: "경도", exact: true })).toHaveValue(
       "126.978400",
     );
-    await expect(page.getByLabel("lat", { exact: true })).toHaveValue(
+    await expect(page.getByRole("textbox", { name: "위도", exact: true })).toHaveValue(
       "37.566500",
     );
-    await expect(page.getByLabel("road", { exact: true })).toHaveValue(
-      "서울특별시 중구 세종대로 110",
-    );
+    await expect(
+      page.getByRole("textbox", {
+        name: "create road address",
+        exact: true,
+      }),
+    ).toHaveValue("서울특별시 중구 세종대로 110");
 
     // 후보 버튼 리스트 + 배지 카운트.
     await expect(
@@ -475,15 +495,18 @@ test.describe("/admin/features/new (mocked routes)", () => {
       radius_m: 100,
     });
 
-    await expect(page.getByLabel("road", { exact: true })).toHaveValue(
-      "서울특별시 중구 세종대로 110",
-    );
+    await expect(
+      page.getByRole("textbox", {
+        name: "create road address",
+        exact: true,
+      }),
+    ).toHaveValue("서울특별시 중구 세종대로 110");
     await expect(
       page.getByRole("button", { name: /세종대로/ }),
     ).toBeVisible();
   });
 
-  test("정지오코딩 실패 — :12501 5xx 응답이 'feature 작성 실패' 알림으로 노출", async ({
+  test("정지오코딩 실패 — :12501 5xx 응답이 'Feature 작성 실패' 알림으로 노출", async ({
     page,
   }) => {
     const geocode = await mockGeoRoute(
@@ -499,7 +522,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
 
     await expect.poll(() => geocode.count).toBe(1);
     // 동일 destructive Alert; formError가 null이면 AlertDescription = korTravelGeoError.
-    await expect(page.getByText("feature 작성 실패")).toBeVisible();
+    await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     await expect(
       page
         .getByRole("alert")

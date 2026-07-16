@@ -377,14 +377,13 @@ async def test_cycle_scope_has_identical_canonical_root_from_both_start_nodes(
     assert {member.job_id for member in cycle.members} == {_GRANDCHILD, _LOSER}
 
 
-async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
+async def test_attempt_freezes_generic_marker_and_deduplicates_runs(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(
         migrated_session,
         _ROOT,
-        kind="feature_update_request",
-        status="queued",
+        status="running",
         dagster_run_id="shared-run",
     )
     await _job(
@@ -394,11 +393,17 @@ async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
         status="running",
         dagster_run_id="shared-run",
     )
-    await _request(migrated_session, _OWNER, job_id=_ROOT)
+    await _job(
+        migrated_session,
+        _GRANDCHILD,
+        parent_job_id=_CHILD,
+        status="running",
+        dagster_run_id="shared-run",
+    )
     scope = await _scope(
         migrated_session,
-        kind="update_request",
-        execution_id=_OWNER,
+        kind="import_job",
+        execution_id=_ROOT,
     )
 
     detail = await create_pipeline_cancellation_attempt(
@@ -409,7 +414,7 @@ async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
     )
 
     assert detail.attempt.status == "in_progress"
-    assert len(detail.members) == 2
+    assert len(detail.members) == 3
     assert {run.dagster_run_id for run in detail.runs} == {"shared-run"}
     assert next(
         run for run in detail.runs if run.dagster_run_id == "shared-run"
@@ -418,19 +423,20 @@ async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
         await migrated_session.execute(
             text(
                 "SELECT cancellation_id FROM ops.import_jobs "
-                "WHERE job_id IN (CAST(:root AS uuid), CAST(:child AS uuid))"
+                "WHERE job_id IN (CAST(:root AS uuid), CAST(:child AS uuid), "
+                "CAST(:grandchild AS uuid))"
             ),
-            {"root": _ROOT, "child": _CHILD},
+            {"root": _ROOT, "child": _CHILD, "grandchild": _GRANDCHILD},
         )
     ).scalars().all()
     assert {str(value) for value in markers} == {detail.attempt.cancellation_id}
 
     page = await list_pipeline_executions(migrated_session)
-    execution = next(item for item in page.items if item.id == _OWNER)
-    assert execution.status == "queued"
+    execution = next(item for item in page.items if item.id == _ROOT)
+    assert execution.status == "running"
     assert execution.cancellation is not None
     assert execution.cancellation.status == "in_progress"
-    assert execution.cancellation.unresolved_member_count == 2
+    assert execution.cancellation.unresolved_member_count == 3
     assert await set_pipeline_cancellation_run_result(
         migrated_session,
         cancellation_id=detail.attempt.cancellation_id,
@@ -443,12 +449,68 @@ async def test_attempt_freezes_marker_deduplicates_runs_and_projects_overlay(
     assert await transition_pipeline_cancellation_member(
         migrated_session,
         cancellation_id=detail.attempt.cancellation_id,
+        job_id=_ROOT,
+        dagster_run_id="shared-run",
+        expected_status="running",
+        target_status="cancelled",
+        result="cancelled",
+    ) is True
+    assert await transition_pipeline_cancellation_member(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
         job_id=_CHILD,
         dagster_run_id="shared-run",
         expected_status="running",
         target_status="cancelled",
         result="cancelled",
     ) is True
+    assert await transition_pipeline_cancellation_member(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        job_id=_GRANDCHILD,
+        dagster_run_id="shared-run",
+        expected_status="running",
+        target_status="cancelled",
+        result="cancelled",
+    ) is True
+    assert await finish_pipeline_cancellation_attempt(
+        migrated_session,
+        cancellation_id=detail.attempt.cancellation_id,
+        status="completed",
+        error=None,
+    ) is not None
+
+
+async def test_update_request_attempt_projects_canonical_single_job_overlay(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(
+        migrated_session,
+        _ROOT,
+        kind="feature_update_request",
+        status="queued",
+    )
+    await _request(migrated_session, _OWNER, job_id=_ROOT)
+
+    detail = await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="update_request",
+            execution_id=_OWNER,
+        ),
+        requested_by="admin:test",
+        reason="통합 테스트",
+    )
+
+    assert [member.job_id for member in detail.members] == [_ROOT]
+    assert detail.runs == ()
+    page = await list_pipeline_executions(migrated_session)
+    execution = next(item for item in page.items if item.id == _OWNER)
+    assert execution.status == "queued"
+    assert execution.cancellation is not None
+    assert execution.cancellation.status == "in_progress"
+    assert execution.cancellation.unresolved_member_count == 1
     assert await cancel_queued_pipeline_cancellation_member(
         migrated_session,
         cancellation_id=detail.attempt.cancellation_id,
@@ -562,7 +624,61 @@ async def test_retry_copies_only_unresolved_frozen_members_without_rediscovery(
     assert retried.runs[0].dagster_run_id == f"run-{_CHILD[:8]}"
 
 
-async def test_marked_rows_reject_mutators_but_allow_events(
+async def test_marked_generic_rows_reject_mutators_but_allow_events(
+    migrated_session: AsyncSession,
+) -> None:
+    await _job(migrated_session, _ROOT, status="queued")
+    await _job(migrated_session, _CHILD, parent_job_id=_ROOT, status="running")
+    await _job(
+        migrated_session,
+        _GRANDCHILD,
+        parent_job_id=_CHILD,
+        status="running",
+    )
+    await create_pipeline_cancellation_attempt(
+        migrated_session,
+        scope=await _scope(
+            migrated_session,
+            kind="import_job",
+            execution_id=_ROOT,
+        ),
+        requested_by="admin:test",
+        reason=None,
+    )
+
+    assert await update_import_job_payload(
+        migrated_session,
+        _CHILD,
+        payload={"changed": True},
+    ) is None
+    assert await heartbeat_import_job(migrated_session, _CHILD, progress=90) is None
+    assert await finish_import_job(migrated_session, _CHILD, status="done") is None
+    assert await cancel_import_job(migrated_session, _CHILD) is None
+    assert await recover_stale_running_jobs(migrated_session, stale_after=None) == 0
+    assert await claim_next_import_job(migrated_session) is None
+    assert await attach_import_jobs_to_batch(
+        migrated_session,
+        (_GRANDCHILD,),
+        load_batch_id="77777777-7777-4777-8777-777777777777",
+        parent_job_id=_CHILD,
+    ) == ()
+    with pytest.raises(PipelineCancellationConflict):
+        await enqueue_unpaired_import_job(
+            migrated_session,
+            kind="provider_load",
+            parent_job_id=_CHILD,
+        )
+
+    event = await record_import_job_event(
+        migrated_session,
+        _ROOT,
+        code="cancellation.observed",
+        message="marker 뒤 event append",
+    )
+    assert event is not None
+
+
+async def test_marked_update_request_rejects_lifecycle_but_allows_events(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(
@@ -571,7 +687,6 @@ async def test_marked_rows_reject_mutators_but_allow_events(
         kind="feature_update_request",
         status="queued",
     )
-    await _job(migrated_session, _CHILD, parent_job_id=_ROOT, status="running")
     await _request(migrated_session, _OWNER, job_id=_ROOT)
     await create_pipeline_cancellation_attempt(
         migrated_session,
@@ -583,29 +698,6 @@ async def test_marked_rows_reject_mutators_but_allow_events(
         requested_by="admin:test",
         reason=None,
     )
-
-    assert await update_import_job_payload(
-        migrated_session,
-        _ROOT,
-        payload={"changed": True},
-    ) is None
-    assert await heartbeat_import_job(migrated_session, _CHILD, progress=90) is None
-    assert await finish_import_job(migrated_session, _CHILD, status="done") is None
-    assert await cancel_import_job(migrated_session, _ROOT) is None
-    assert await recover_stale_running_jobs(migrated_session, stale_after=None) == 0
-    assert await claim_next_import_job(migrated_session) is None
-    assert await attach_import_jobs_to_batch(
-        migrated_session,
-        (_CHILD,),
-        load_batch_id="77777777-7777-4777-8777-777777777777",
-        parent_job_id=_ROOT,
-    ) == ()
-    with pytest.raises(PipelineCancellationConflict):
-        await enqueue_unpaired_import_job(
-            migrated_session,
-            kind="provider_load",
-            parent_job_id=_ROOT,
-        )
 
     assert (
         await start_update_request(

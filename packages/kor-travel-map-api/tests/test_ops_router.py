@@ -253,7 +253,13 @@ def test_ops_live_sql_excludes_quarantined_import_jobs() -> None:
     from kortravelmap.api.routers import ops_live as live_mod
 
     assert live_mod._IMPORT_JOBS_LIVE_SQL.count("quarantined_at IS NULL") >= 4
-    assert live_mod._IMPORT_JOB_EVENTS_LIVE_SQL.count("quarantined_at IS NULL") >= 2
+    assert live_mod._IMPORT_JOB_EVENTS_LIVE_SQL.count("quarantined_at IS NULL") >= 1
+    assert "event.quarantined_at IS NULL" in live_mod._IMPORT_JOBS_LIVE_SQL
+    assert "event.quarantined_at IS NULL" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "ops.import_job_event_clock" in live_mod._IMPORT_JOBS_LIVE_SQL
+    assert "ops.import_job_event_clock" in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "ops.import_jobs" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
+    assert "COUNT(" not in live_mod._IMPORT_JOB_EVENTS_LIVE_SQL
     assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUNS_LIVE_SQL
     assert "WHERE quarantined_at IS NULL" in live_mod._DAGSTER_RUN_LIVE_SQL
 

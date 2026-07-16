@@ -941,22 +941,43 @@ CREATE TABLE ops.import_job_events (
   code        TEXT,
   message     TEXT NOT NULL,
   payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  quarantined_at TIMESTAMPTZ,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ck_import_job_events_level
     CHECK (level IN ('debug','info','warning','error','critical'))
 );
 
 CREATE INDEX idx_import_job_events_job_time
-  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC);
+  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC)
+  WHERE quarantined_at IS NULL;
 CREATE INDEX idx_import_job_events_provider_time
   ON ops.import_job_events (provider, occurred_at DESC, event_id DESC)
-  WHERE provider IS NOT NULL;
+  WHERE provider IS NOT NULL AND quarantined_at IS NULL;
 CREATE INDEX idx_import_job_events_level_time
-  ON ops.import_job_events (level, occurred_at DESC, event_id DESC);
+  ON ops.import_job_events (level, occurred_at DESC, event_id DESC)
+  WHERE quarantined_at IS NULL;
+
+CREATE TABLE ops.import_job_event_clock (
+  clock_id  BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
+  revision  BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
 ```
 
 `ops.import_job_events`는 `ops.import_jobs` lifecycle과 provider/Dagster/offline upload
-작업 단계 event를 저장한다. REST 조회 정렬은 `(occurred_at DESC, event_id DESC)`다.
+작업 단계 event를 저장한다. REST 조회 정렬은 `(occurred_at DESC, event_id DESC)`다. 0052
+migration이 격리한 component의 기존 event는 보존하되 같은 시각을 `quarantined_at`에 기록한다.
+이 marker는 migration 전용 불변값이며, 운영 조회와 모든 시간순 인덱스는
+`quarantined_at IS NULL`인 event만 대상으로 한다.
+
+`ops.import_job_event_clock`은 event INSERT/UPDATE/DELETE 성공 statement의 AFTER trigger가
+singleton `revision`을 한 번 올리는 live invalidation projection이다. 같은 row update가 동시 event
+transaction을 commit 전에 직렬화하므로 transaction 시작 시각이 오래된 late commit도 놓치지
+않고, rollback이면 event와 revision 증가가 함께 취소된다. `updated_at=clock_timestamp()`은 진단
+정보일 뿐 변경 판정의 정본은 `revision`이다. Row마다 clock을 갱신하지 않고 event row lock을 모두
+얻은 statement 끝에서 한 번만 갱신해 bulk WAL/dead tuple과 교차 row deadlock을 피한다. Clock UPDATE는 event
+AFTER trigger 안의 정확한 `revision+1`만 허용하며 DELETE/TRUNCATE를 금지한다. Event table
+TRUNCATE는 허용하되 같은 AFTER STATEMENT trigger가 revision을 한 번 증가시킨다.
 
 ### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 
@@ -1852,17 +1873,24 @@ CREATE INDEX idx_import_jobs_provider_created
 provider/dataset `TEXT[]`에 GIN seed access path를 추가한다. exact/direct pair는 별도
 expression index 없이 위 0051 typed job index만 쓴다. seed job에서 `parent_job_id` PK/FK index를 양방향으로 따라
 connected component를 만든 뒤 그 component의 request만 공용 canonical projection에 공급한다.
-event는 projection에서 읽지 않는다. 별도 `idx_import_job_events_time`,
-`idx_import_job_events_dataset_time`, `idx_import_job_events_provider_dataset_time`은 무필터·dataset-only·
-exact pair 감사 타임라인을 위한 인덱스이며 identity seed가 아니다. 감사 조회는 filter가 실제로
-있을 때만 해당 고정 predicate를 SQL에 넣어 prepared/generic plan에서도 partial index를 쓸 수 있게
-한다.
+event는 projection에서 읽지 않는다. event의 migration-owned `quarantined_at` marker와 여섯
+visible-only partial index는 각각 무필터→`idx_import_job_events_time`, job→
+`idx_import_job_events_job_time`, provider→`idx_import_job_events_provider_time`, dataset→
+`idx_import_job_events_dataset_time`, provider+dataset exact pair→
+`idx_import_job_events_provider_dataset_time`, level→`idx_import_job_events_level_time` 감사
+타임라인을 담당하며 identity seed가 아니다. 모든 조합은 `quarantined_at IS NULL`을 event에
+직접 적용한다. Parent 상태를 page-time에 join하지 않으므로 최신 격리 event 수와 무관하게
+page 크기만큼 bounded scan을 유지한다. 감사 조회는 filter가 실제로 있을 때만 해당 고정
+predicate를 SQL에 넣어 prepared/generic plan에서도 partial index를 쓸 수 있게 한다.
 
 또한 `feature_update_requests.job_id`를 `NOT NULL ON DELETE RESTRICT`로 바꾸고 direct scope와
 provider/dataset filter shape CHECK, request/canonical job kind·pair 교차검증 trigger, 전역
 import job kind/pair 불변 trigger를 추가한다.
-upgrade 첫 동작으로 import job→request 순서의 `ACCESS EXCLUSIVE` lock을 잡아 repair와 제약 설치
-사이에 구 writer가 들어오지 못하게 한다. jobless, scope와 pair가 불일치하거나 reserved Dagster
+upgrade/downgrade 첫 동작으로 cancellation→request→import job→event→event clock(존재 시)
+순서의 `ACCESS EXCLUSIVE` lock을
+하나의 `NOWAIT` 문장으로 잡아 repair와 제약 설치 사이에 구 writer/reader가 들어오지 못하게
+한다. 일부 relation만 잡힌 시도는 savepoint rollback으로 모두 풀고 30초 안에서 재시도한다.
+jobless, scope와 pair가 불일치하거나 reserved Dagster
 kind에 연결된 request는 request별 새 canonical job에 재연결하고 이전 job ID를 migration audit
 payload에 보존한다. cancellation marker나
 frozen member가 있는 후보는 동결 집합을 바꾸지 않고 request ID와 함께 중단한다.

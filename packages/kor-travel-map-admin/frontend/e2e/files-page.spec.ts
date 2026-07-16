@@ -1,6 +1,7 @@
 import { expect, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 /**
  * `/admin/files` 관리 파일 레지스트리 — route-mocked smoke spec (개편 D).
@@ -9,7 +10,7 @@ import type { components } from "../src/api/types";
  * 백엔드 DTO drift 시 컴파일 실패로 mock-실계약 drift를 잡는다.
  *
  * `**​/v1/admin/files**` glob으로 목록/요약/상세/이벤트/재스캔을 가로채고
- * url.pathname + method로 분기한다. 페이지 document·RSC(_rsc)는 continue().
+ * normalized API path + method로 분기한다.
  *
  * NOTE: Playwright는 Windows 호스트에서만 실행된다(라이브 검증은 Windows/n150 런).
  */
@@ -157,11 +158,11 @@ async function installFilesMocks(
   file: ManagedFileModel,
 ) {
   await page.route("**/v1/admin/files**", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const method = route.request().method();
+    const request = route.request();
+    const path = bffApiPath(request.url());
+    const method = request.method();
 
-    if (path === "/v1/admin/files/summary") {
+    if (method === "GET" && path === "/v1/admin/files/summary") {
       await fulfillJson(route, makeSummary());
       return;
     }
@@ -169,15 +170,15 @@ async function installFilesMocks(
       await fulfillJson(route, makeRescan());
       return;
     }
-    if (path === "/v1/admin/files") {
+    if (method === "GET" && path === "/v1/admin/files") {
       await fulfillJson(route, makeList([file]));
       return;
     }
-    if (path === `/v1/admin/files/${file.file_id}`) {
+    if (method === "GET" && path === `/v1/admin/files/${file.file_id}`) {
       await fulfillJson(route, makeDetail(file));
       return;
     }
-    await route.continue();
+    throw new Error(`Unhandled files route: ${method} ${path}`);
   });
 }
 
@@ -199,17 +200,25 @@ test.describe("/admin/files — 파일 관리 (mocked)", () => {
     await expect(page.getByText("festival-2026.csv")).toBeVisible();
 
     // 행 클릭 → 상세 패널의 provenance 링크
-    await page.getByText("festival-2026.csv").first().click();
+    await page.getByRole("row", { name: /festival-2026\.csv/ }).click();
     await expect(
-      page.getByRole("link", { name: "적재 작업" }),
+      page
+        .getByRole("link", { name: "적재 작업", exact: true })
+        .and(page.locator('a[href="/ops/import-jobs/job-a"]')),
     ).toHaveAttribute("href", "/ops/import-jobs/job-a");
     await expect(
-      page.getByRole("link", { name: "오프라인 업로드" }),
+      page
+        .getByRole("link", { name: "오프라인 업로드", exact: true })
+        .and(page.locator('a[href="/admin/offline-uploads/upload-77"]')),
     ).toHaveAttribute("href", "/admin/offline-uploads/upload-77");
 
     // 이력 타임라인
-    await expect(page.getByText("다운로드").first()).toBeVisible();
-    await expect(page.getByText("적재").first()).toBeVisible();
+    await expect(
+      page.getByRole("listitem").filter({ hasText: "다운로드" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("listitem").filter({ hasText: "적재" }),
+    ).toBeVisible();
   });
 
   test("재스캔 버튼이 결과와 deferred 안내를 표시한다", async ({ page }) => {
@@ -219,8 +228,8 @@ test.describe("/admin/files — 파일 관리 (mocked)", () => {
     let rescanPosted = false;
     page.on("request", (request) => {
       if (
-        request.url().includes("/v1/admin/files/rescan") &&
-        request.method() === "POST"
+        request.method() === "POST" &&
+        bffApiPath(request.url()) === "/v1/admin/files/rescan"
       ) {
         rescanPosted = true;
       }

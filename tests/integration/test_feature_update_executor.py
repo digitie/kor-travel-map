@@ -286,12 +286,22 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     async def record_guard(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         assert session.in_transaction()
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-run-1"
         phase_pids.append(
             int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
         )
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     async def record_release(
         session: AsyncSession,
@@ -1370,7 +1380,7 @@ async def test_hard_invalidation_raises_unsafe_when_no_backend_can_be_closed() -
         )
 
 
-async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
+async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runner(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -1430,12 +1440,22 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     async def guarded_phase(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         nonlocal guard_calls
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-mid-scope-cancellation"
         guard_calls += 1
         if guard_calls == 4:
             await asyncio.wait_for(cancellation_finished.wait(), timeout=5)
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     monkeypatch.setattr(executor_mod, "build_feature_update_execution_plan", fake_plan)
     monkeypatch.setattr(executor_mod, "_guard_execution_phase", guarded_phase)
@@ -1443,8 +1463,10 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     runner_calls: list[str] = []
     loaded_feature_id: str | None = None
     cancellation_task: asyncio.Task[None] | None = None
+    cancellation_detail: Any = None
 
     async def cancel_after_first_scope() -> None:
+        nonlocal cancellation_detail
         try:
             async with (
                 AsyncSession(migrated_engine) as cancel_session,
@@ -1456,7 +1478,7 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
                     execution_id=request.request_id,
                 )
                 assert scope is not None
-                await create_pipeline_cancellation_attempt(
+                cancellation_detail = await create_pipeline_cancellation_attempt(
                     cancel_session,
                     scope=scope,
                     requested_by="admin:test",
@@ -1495,8 +1517,13 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     await cancellation_task
 
     assert result is not None
-    assert result.status == "cancelled"
-    assert result.request.status == "cancelled"
+    assert cancellation_detail is not None
+    assert result.status == "running"
+    assert result.request.status == "running"
+    assert (
+        result.request.cancellation_id
+        == cancellation_detail.attempt.cancellation_id
+    )
     assert [item.dataset_key for item in result.results] == ["phase-a"]
     assert runner_calls == ["phase-a"]
     assert loaded_feature_id is not None
@@ -1509,6 +1536,8 @@ async def test_cancellation_preserves_committed_scope_and_skips_next_runner(
     assert persisted is not None
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
+    assert stored.status == "running"
+    assert stored.cancellation_id == cancellation_detail.attempt.cancellation_id
     assert [
         item["dataset_key"]
         for item in stored.matched_scope["executed_provider_scopes"]
@@ -1703,12 +1732,22 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
     async def wait_for_marker_before_finalize(
         session: AsyncSession,
         request_id: str,
+        *,
+        expected_generation: int,
+        owner_dagster_run_id: str,
     ) -> FeatureUpdateRequest:
         nonlocal guard_calls
+        assert expected_generation == request.generation
+        assert owner_dagster_run_id == "dagster-finalize-cancel-race"
         guard_calls += 1
         if guard_calls == 4:
             await asyncio.wait_for(marker_finished.wait(), timeout=5)
-        return await original_guard(session, request_id)
+        return await original_guard(
+            session,
+            request_id,
+            expected_generation=expected_generation,
+            owner_dagster_run_id=owner_dagster_run_id,
+        )
 
     monkeypatch.setattr(executor_mod, "build_feature_update_execution_plan", fake_plan)
     monkeypatch.setattr(

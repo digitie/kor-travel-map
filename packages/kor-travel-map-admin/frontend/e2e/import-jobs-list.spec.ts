@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
@@ -10,9 +11,9 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  * 화면 route는 `/ops/import-jobs`지만 backend 목록 계약은 bare path
  * `/v1/ops/import-jobs`(trailing segment 없음)다. 따라서 detail spec의
  * `**​/v1/ops/import-jobs/**`(trailing slash) glob은 목록을 잡지 못한다 — 여기서는
- * `**​/v1/ops/import-jobs**`로 가로채고 url.pathname === "/v1/ops/import-jobs"
- * 분기로만 목록 GET을 처리한다. 페이지 document·RSC(_rsc)·기타 경로는
- * route.continue() (admin-ops.spec.ts mockOfflineUploadMutations passthrough idiom).
+ * `**​/v1/ops/import-jobs**`로 가로채고 apiPath === "/v1/ops/import-jobs"
+ * 분기로만 목록 GET을 처리한다. 페이지 document·RSC(_rsc)·정적 자산만
+ * route.continue() 하고, 그 외 method/path는 즉시 실패한다.
  * ops-live WS(`/v1/ops/live`)는 이 glob에 잡히지 않으므로 `beforeEach`의
  * `installInertOpsLiveWebSocket`(#503)로 inert로 만들어, 라이브 백엔드 snapshot/update가
  * 추가 목록 GET을 유발해 "정확히 1회"류 단언을 흔들지 않게 한다.
@@ -20,7 +21,7 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  * 모든 mock body는 생성 OpenAPI 타입(components["schemas"][...])에 바인딩 →
  * 백엔드 DTO drift 시 컴파일 실패.
  *
- * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 검증은 Windows 런 필요.
+ * NOTE: Playwright는 n150 Linux에서 우선 실행하고 Windows 호스트는 fallback으로만 쓴다.
  *
  * BLOCKING REFRAME (recon §risks): ImportJobsClient에는 cursor 페이지네이션 UI가
  * 없다. useImportJobs(src/api/importJobs.ts)는 page_size:100 단일 useQuery이고
@@ -85,9 +86,9 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 /**
  * 목록 GET만 mock한다. bare path(`/v1/ops/import-jobs`)인 GET만 응답하고, 페이지
- * document·_rsc prefetch·WS upgrade·`/v1/ops/metrics` 등 그 외 요청은
- * route.continue() 한다. 가로챈 모든 목록 GET의 searchParams를 push해 호출자가
- * 쿼리 계약을 검사할 수 있게 한다.
+ * document·_rsc prefetch·정적 자산만 route.continue() 한다. 그 외 method/path는
+ * 즉시 실패한다. 가로챈 모든 목록 GET의 searchParams를 push해 호출자가 쿼리 계약을
+ * 검사할 수 있게 한다.
  */
 async function mockImportJobsList(
   page: Page,
@@ -113,14 +114,19 @@ async function mockImportJobsList(
       return;
     }
     const url = new URL(request.url());
-    // bare 목록 경로 GET이 아니면(=문서·RSC·WS·다른 v1 경로) 통과시킨다.
     if (
-      request.method() !== "GET" ||
-      url.pathname !== LIST_PATH ||
+      url.pathname.startsWith("/_next/") ||
+      url.pathname === "/favicon.ico" ||
       url.searchParams.has("_rsc")
     ) {
       await route.continue();
       return;
+    }
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== LIST_PATH) {
+      throw new Error(
+        `Unhandled import-jobs list route: ${request.method()} ${apiPath}`,
+      );
     }
     listQueries.push(url.searchParams);
     if (options.status && options.status >= 400) {
@@ -166,7 +172,9 @@ test.describe("/ops/import-jobs list", () => {
       page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     // 행이 그려진 뒤(테이블 준비) 행 수를 단언한다.
-    await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "작업", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "job-a" })).toBeVisible();
 
     // 페이지가 목록을 폴링/리페치할 수 있어 정확한 GET 횟수는 단언하지 않는다.
@@ -195,9 +203,11 @@ test.describe("/ops/import-jobs list", () => {
       page.getByRole("heading", { level: 1, name: "적재 작업" }),
     ).toBeVisible();
     // import-jobs-client.tsx의 emptyMessage prop 문자열 그대로.
-    await expect(page.getByText("import job이 없습니다.")).toBeVisible();
+    await expect(page.getByText("적재 작업이 없습니다.")).toBeVisible();
     // DataTable은 비어도 thead를 렌더한다.
-    await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "작업", exact: true }),
+    ).toBeVisible();
     // 빈 목록에는 row deeplink가 없다 — admin-shell nav의 role=link와 충돌하지
     // 않도록 테이블 영역으로 한정한다.
     await expect(page.getByRole("table").getByRole("link")).toHaveCount(0);
@@ -216,13 +226,13 @@ test.describe("/ops/import-jobs list", () => {
     // variant="destructive" Alert만 role=alert (default는 role=status — Wave 1).
     // 다른 alert와 충돌하지 않도록 AlertTitle 텍스트로 한정한다.
     await expect(
-      page.getByRole("alert").filter({ hasText: "import job 조회 실패" }),
+      page.getByRole("alert").filter({ hasText: "적재 작업 조회 실패" }),
     ).toBeVisible();
     // AlertDescription은 jobs.error.message — ApiClientError가 HTTP status를 임베드.
     await expect(page.getByText(/실패 \(HTTP 500\)/)).toBeVisible();
     // 에러 시 jobs.data는 undefined → items=[] → empty message도 같이 보인다
     // (페이지는 DataTable.isError를 wiring하지 않음, top-level Alert만 렌더).
-    await expect(page.getByText("import job이 없습니다.")).toBeVisible();
+    await expect(page.getByText("적재 작업이 없습니다.")).toBeVisible();
     // NOTE: react-query retry 횟수는 시간 기반이라 flaky → UI(alert)만 단언한다.
   });
 
@@ -234,15 +244,17 @@ test.describe("/ops/import-jobs list", () => {
     });
 
     await page.goto("/ops/import-jobs");
-    await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "작업", exact: true }),
+    ).toBeVisible();
 
     // fetchImportJobs는 loadBatchId.trim()이 비어있지 않을 때만 load_batch_id 전송.
-    await page.getByPlaceholder("load_batch_id").fill("batch-77");
+    await page.getByPlaceholder("배치 ID").fill("batch-77");
     await expect
       .poll(() => mock.lastListQuery()?.get("load_batch_id"))
       .toBe("batch-77");
 
-    await page.getByPlaceholder("parent_job_id").fill("parent-9");
+    await page.getByPlaceholder("상위 작업 ID").fill("parent-9");
     await expect
       .poll(() => mock.lastListQuery()?.get("parent_job_id"))
       .toBe("parent-9");
@@ -262,8 +274,8 @@ test.describe("/ops/import-jobs list", () => {
     // 안 나가고 lastListQuery()는 직전(parent-9) 쿼리에 머문다. 그래서 parent를
     // 비우는 동시에 load_batch_id를 새 값으로 바꿔 한 번도 fetch된 적 없는 queryKey를
     // 만들어 실제 네트워크 GET을 강제하고, 그 GET이 parent_job_id를 생략하는지 본다.
-    await page.getByPlaceholder("load_batch_id").fill("batch-88");
-    await page.getByPlaceholder("parent_job_id").fill("");
+    await page.getByPlaceholder("배치 ID").fill("batch-88");
+    await page.getByPlaceholder("상위 작업 ID").fill("");
     await expect
       .poll(() => {
         const q = mock.lastListQuery();
@@ -272,7 +284,7 @@ test.describe("/ops/import-jobs list", () => {
       .toBe("batch-88|false");
 
     // status 'all'은 생략, 'running'은 status 파라미터로 매핑.
-    await page.getByLabel("status").selectOption("running");
+    await page.getByRole("combobox", { name: "상태", exact: true }).selectOption("running");
     await expect.poll(() => mock.lastListQuery()?.get("status")).toBe("running");
 
     // RISK NOTE: 제어 Input에 debounce가 없어 키 입력마다 queryKey가 바뀔 수 있다 →
@@ -290,12 +302,14 @@ test.describe("/ops/import-jobs list", () => {
     );
 
     // 컨트롤이 URL 값을 반영(page.tsx → initialFilters → useState 시드).
-    await expect(page.getByLabel("status")).toHaveValue("failed");
-    await expect(page.getByPlaceholder("kind filter")).toHaveValue(
+    await expect(
+      page.getByRole("combobox", { name: "상태", exact: true }),
+    ).toHaveValue("failed");
+    await expect(page.getByPlaceholder("작업 종류")).toHaveValue(
       "provider_sync",
     );
-    await expect(page.getByPlaceholder("load_batch_id")).toHaveValue("batch-1");
-    await expect(page.getByPlaceholder("parent_job_id")).toHaveValue("parent-1");
+    await expect(page.getByPlaceholder("배치 ID")).toHaveValue("batch-1");
+    await expect(page.getByPlaceholder("상위 작업 ID")).toHaveValue("parent-1");
 
     // 첫 목록 GET이 4개 필터를 모두 싣는다.
     await expect
@@ -321,9 +335,13 @@ test.describe("/ops/import-jobs list", () => {
 
     await page.goto("/ops/import-jobs?status=bogus");
 
-    await expect(page.getByLabel("status")).toHaveValue("all");
+    await expect(
+      page.getByRole("combobox", { name: "상태", exact: true }),
+    ).toHaveValue("all");
     // 'all' → status 미전송. 첫 쿼리에 status 파라미터가 없어야 한다.
-    await expect(page.getByRole("columnheader", { name: "job" })).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "작업", exact: true }),
+    ).toBeVisible();
     await expect.poll(() => mock.lastListQuery()?.has("status")).toBe(false);
   });
 

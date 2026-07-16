@@ -1,6 +1,7 @@
 import { expect, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -109,7 +110,7 @@ function isListPath(pathname: string) {
   return pathname === LIST_PATH;
 }
 function isDetailPath(pathname: string) {
-  return pathname.startsWith(`${LIST_PATH}/`);
+  return /^\/v1\/admin\/issues\/[^/]+$/.test(pathname);
 }
 
 test.describe("admin/issues actions + pagination + errors", () => {
@@ -128,24 +129,25 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      if (request.method() === "GET" && isListPath(apiPath)) {
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
         await fulfillJson(route, listResponse([issue], null, pageSize));
         return;
       }
-      if (request.method() === "GET" && isDetailPath(url.pathname)) {
+      if (request.method() === "GET" && isDetailPath(apiPath)) {
         await fulfillJson(route, detailResponse(issue, feature));
         return;
       }
-      if (request.method() === "PATCH" && isDetailPath(url.pathname)) {
-        const issueId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      if (request.method() === "PATCH" && isDetailPath(apiPath)) {
+        const issueId = decodeURIComponent(apiPath.split("/").at(-1) ?? "");
         const body = request.postDataJSON() as AdminIssuePatchRequest;
         patchBodies.push({ body, issueId });
         await fulfillJson(route, actionResponse(issue, feature));
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
@@ -174,14 +176,14 @@ test.describe("admin/issues actions + pagination + errors", () => {
 
     // DETAIL actions — row 클릭 → detail 쿼리가 끝나 'Issue detail'이 뜬 뒤
     // detail-only 버튼(reopen/retry geocode/retry reverse/apply kraddr)만 사용한다.
-    await row.click();
+    await row.getByText("missing_address", { exact: true }).click();
     await expect(page.getByText("이슈 상세")).toBeVisible();
 
     const detailActions: Array<[string, AdminIssuePatchRequest["action"]]> = [
-      ["reopen", "reopen"],
-      ["retry geocode", "retry_geocode"],
-      ["retry reverse", "retry_reverse_geocode"],
-      ["apply kraddr", "apply_kor_travel_geo_address"],
+      ["다시 열기", "reopen"],
+      ["주소로 좌표 재검색", "retry_geocode"],
+      ["좌표로 주소 재검색", "retry_reverse_geocode"],
+      ["추천 주소 적용", "apply_kor_travel_geo_address"],
     ];
     let expected = patchBodies.length;
     for (const [label, action] of detailActions) {
@@ -213,7 +215,8 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && isListPath(apiPath)) {
         const cursor = url.searchParams.get("cursor");
         lastCursorParam = cursor;
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
@@ -224,7 +227,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
         await fulfillJson(route, listResponse([page1], "cursor-2", pageSize));
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
@@ -260,14 +263,14 @@ test.describe("admin/issues actions + pagination + errors", () => {
   test("list-query 500 surfaces the top destructive alert", async ({ page }) => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && isListPath(apiPath)) {
         // 에러 경로: client.ts는 response.text()로 detail을 읽고 ApiClientError를
         // throw한다(스키마 파싱 없음). body shape은 무관 — 던져진 메시지만 단언.
         await fulfillJson(route, { detail: "boom" }, 500);
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
@@ -287,23 +290,24 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && isListPath(apiPath)) {
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
         await fulfillJson(route, listResponse([issue], null, pageSize));
         return;
       }
-      if (request.method() === "GET" && isDetailPath(url.pathname)) {
+      if (request.method() === "GET" && isDetailPath(apiPath)) {
         await fulfillJson(route, { detail: "boom" }, 500);
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
 
     const row = page.getByRole("row", { name: /detail_err_token/ });
     await expect(row).toBeVisible();
-    await row.click();
+    await row.getByText("detail_err_token", { exact: true }).click();
 
     // detail card chrome('Issue detail')는 에러여도 렌더된다. in-panel alert는
     // AlertTitle 'issue 상세 조회 실패'로 top alert와 구분한다.
@@ -330,14 +334,15 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && isListPath(apiPath)) {
         // status=open이 기본값이라 두 행 모두 open이어야 목록에 남는다.
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
         await fulfillJson(route, listResponse([critical, info], null, pageSize));
         return;
       }
-      if (request.method() === "GET" && isDetailPath(url.pathname)) {
-        const issueId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      if (request.method() === "GET" && isDetailPath(apiPath)) {
+        const issueId = decodeURIComponent(apiPath.split("/").at(-1) ?? "");
         if (issueId === "issue-info") {
           // feature_id 없는 이슈 → feature 스냅샷 없음.
           await fulfillJson(route, detailResponse(info, null));
@@ -353,7 +358,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
         );
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
@@ -363,11 +368,11 @@ test.describe("admin/issues actions + pagination + errors", () => {
     // severity 문자열을 substring으로 포함하므로 exact match로 severity badge만 집는다.
     const criticalRow = page.getByRole("row", { name: /token_a/ });
     const infoRow = page.getByRole("row", { name: /token_b/ });
-    await expect(criticalRow.getByText("critical", { exact: true })).toBeVisible();
-    await expect(infoRow.getByText("info", { exact: true })).toBeVisible();
+    await expect(criticalRow.getByText("심각", { exact: true })).toBeVisible();
+    await expect(infoRow.getByText("정보", { exact: true })).toBeVisible();
 
     // feature_id 있는 이슈: Feature 상세 link 노출 + snapshot, 좌표 null → '없음'.
-    await criticalRow.click();
+    await criticalRow.getByText("token_a", { exact: true }).click();
     await expect(page.getByText("이슈 상세")).toBeVisible();
     const featureDetailLink = page.getByRole("link", { name: "Feature 상세" });
     await expect(featureDetailLink).toBeVisible();
@@ -380,7 +385,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await expect(page.getByText("없음")).toBeVisible();
 
     // feature_id 없는 이슈: 지도 link 없음 + snapshot 블록 없음.
-    await infoRow.click();
+    await infoRow.getByText("token_b", { exact: true }).click();
     await expect(page.getByText("이슈 상세")).toBeVisible();
     await expect(page.getByRole("link", { name: "Feature 상세" })).toHaveCount(0);
     await expect(page.getByText("Feature 스냅샷")).toHaveCount(0);
@@ -394,12 +399,13 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (request.method() === "GET" && isListPath(url.pathname)) {
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && isListPath(apiPath)) {
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
         await fulfillJson(route, listResponse([issue], null, pageSize));
         return;
       }
-      if (request.method() === "GET" && isDetailPath(url.pathname)) {
+      if (request.method() === "GET" && isDetailPath(apiPath)) {
         await fulfillJson(
           route,
           detailResponse(
@@ -409,13 +415,13 @@ test.describe("admin/issues actions + pagination + errors", () => {
         );
         return;
       }
-      throw new Error(`Unhandled issue route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled issue route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/issues");
     const row = page.getByRole("row", { name: /coord_token/ });
     await expect(row).toBeVisible();
-    await row.click();
+    await row.getByText("coord_token", { exact: true }).click();
 
     await expect(page.getByText("이슈 상세")).toBeVisible();
     await expect(page.getByRole("link", { name: "Feature 상세" })).toBeVisible();

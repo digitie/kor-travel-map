@@ -117,7 +117,7 @@ async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
     await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     await migrated_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
 
-    with pytest.raises(IntegrityError):
+    async def insert_unpaired_feature_update_job() -> None:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
@@ -134,6 +134,9 @@ async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
             await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
     with pytest.raises(IntegrityError):
+        await insert_unpaired_feature_update_job()
+
+    async def delete_linked_request() -> None:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
@@ -143,6 +146,9 @@ async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
                 {"request_id": request_id},
             )
             await migrated_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
+    with pytest.raises(IntegrityError):
+        await delete_linked_request()
 
     other_job_id = "93000000-0000-4000-8000-000000000003"
     await migrated_session.execute(
@@ -183,7 +189,8 @@ async def test_feature_update_request_job_pair_is_bidirectional_and_immutable(
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
-                    "UPDATE ops.import_jobs SET payload = '{\"duplicate\":true}'::jsonb "
+                    "UPDATE ops.import_jobs "
+                    "SET payload = jsonb_build_object('duplicate', true) "
                     "WHERE job_id = :job_id"
                 ),
                 {"job_id": job_id},
@@ -222,7 +229,8 @@ async def test_feature_update_request_mutation_guard_and_generation_cas(
     await migrated_session.execute(
         text(
             "UPDATE ops.feature_update_requests "
-            "SET matched_scope = '{\"feature_count\":0}'::jsonb, generation = generation + 1 "
+            "SET matched_scope = jsonb_build_object('feature_count', 0), "
+            "generation = generation + 1 "
             "WHERE request_id = :request_id"
         ),
         {"request_id": request_id},

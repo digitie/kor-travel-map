@@ -148,6 +148,7 @@ def _empty_detail() -> OpsDatasetDetailData:
             next_scheduled_at=None,
         ),
         schedule_source_status="ok",
+        schedule_source_errors=[],
         refresh_policy=None,
         recent_runs=[],
         recent_runs_next_cursor=None,

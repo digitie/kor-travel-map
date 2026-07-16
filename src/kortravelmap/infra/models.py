@@ -94,6 +94,7 @@ __all__ = [
     "EnrichmentReviewQueueRow",
     "ImportJobRow",
     "ImportJobEventRow",
+    "ImportJobEventClockRow",
     "OfflineUploadRow",
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
@@ -1935,26 +1936,32 @@ class ImportJobEventRow(Base):
             "idx_import_job_events_time",
             text("occurred_at DESC"),
             text("event_id DESC"),
+            postgresql_where=text("quarantined_at IS NULL"),
         ),
         Index(
             "idx_import_job_events_job_time",
             "job_id",
             text("occurred_at DESC"),
             text("event_id DESC"),
+            postgresql_where=text("quarantined_at IS NULL"),
         ),
         Index(
             "idx_import_job_events_provider_time",
             "provider",
             text("occurred_at DESC"),
             text("event_id DESC"),
-            postgresql_where=text("provider IS NOT NULL"),
+            postgresql_where=text(
+                "provider IS NOT NULL AND quarantined_at IS NULL"
+            ),
         ),
         Index(
             "idx_import_job_events_dataset_time",
             "dataset_key",
             text("occurred_at DESC"),
             text("event_id DESC"),
-            postgresql_where=text("dataset_key IS NOT NULL"),
+            postgresql_where=text(
+                "dataset_key IS NOT NULL AND quarantined_at IS NULL"
+            ),
         ),
         Index(
             "idx_import_job_events_provider_dataset_time",
@@ -1962,13 +1969,17 @@ class ImportJobEventRow(Base):
             "dataset_key",
             text("occurred_at DESC"),
             text("event_id DESC"),
-            postgresql_where=text("provider IS NOT NULL AND dataset_key IS NOT NULL"),
+            postgresql_where=text(
+                "provider IS NOT NULL AND dataset_key IS NOT NULL "
+                "AND quarantined_at IS NULL"
+            ),
         ),
         Index(
             "idx_import_job_events_level_time",
             "level",
             text("occurred_at DESC"),
             text("event_id DESC"),
+            postgresql_where=text("quarantined_at IS NULL"),
         ),
         {"schema": "ops"},
     )
@@ -1995,10 +2006,46 @@ class ImportJobEventRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    quarantined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.import_job_event_clock  (0052 live revision projection)
+# =============================================================================
+
+
+class ImportJobEventClockRow(Base):
+    """Event DML commit을 누락 없이 감지하는 singleton revision projection."""
+
+    __tablename__ = "import_job_event_clock"
+    __table_args__ = (
+        CheckConstraint("clock_id", name="ck_import_job_event_clock_singleton"),
+        CheckConstraint(
+            "revision >= 0",
+            name="ck_import_job_event_clock_revision_nonnegative",
+        ),
+        {"schema": "ops"},
+    )
+
+    clock_id: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        server_default=text("true"),
+    )
+    revision: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
     )
 
 

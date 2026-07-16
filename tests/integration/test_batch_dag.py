@@ -82,13 +82,6 @@ async def _cleanup_committed_batch_state(
             )
             await cleanup.execute(
                 text(
-                    "DELETE FROM ops.import_jobs "
-                    "WHERE job_id <> ALL(CAST(:job_ids AS uuid[]))"
-                ),
-                {"job_ids": list(job_ids)},
-            )
-            await cleanup.execute(
-                text(
                     "DELETE FROM ops.pipeline_cancellation_members "
                     "WHERE cancellation_id <> ALL(CAST(:ids AS uuid[]))"
                 ),
@@ -100,6 +93,13 @@ async def _cleanup_committed_batch_state(
                     "WHERE cancellation_id <> ALL(CAST(:ids AS uuid[]))"
                 ),
                 {"ids": list(cancellation_ids)},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.import_jobs "
+                    "WHERE job_id <> ALL(CAST(:job_ids AS uuid[]))"
+                ),
+                {"job_ids": list(job_ids)},
             )
             await cleanup.execute(
                 text(

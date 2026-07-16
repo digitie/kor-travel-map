@@ -206,9 +206,12 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_import_jobs_dataset_created` | (dataset_key, created_at DESC, job_id DESC) | dataset-only timeline/latest (0051) |
 | `idx_import_jobs_provider_created` | (provider, created_at DESC, job_id DESC) | provider-only timeline/latest (0051) |
 | `idx_import_jobs_quarantined` | (quarantined_at DESC, job_id DESC) WHERE quarantined_at non-NULL | 격리 component 감사 조회 (0052) |
-| `idx_import_job_events_time` | (occurred_at DESC, event_id DESC) | 무필터 감사 polling (0052) |
-| `idx_import_job_events_dataset_time` | (dataset_key, occurred_at DESC, event_id DESC) WHERE dataset non-NULL | dataset-only 감사 타임라인 (0052, identity projection에는 사용 금지) |
-| `idx_import_job_events_provider_dataset_time` | (provider, dataset_key, occurred_at DESC, event_id DESC) WHERE pair non-NULL | exact pair 감사 타임라인 (0052, identity projection에는 사용 금지) |
+| `idx_import_job_events_time` | (occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | 무필터 감사 polling (0052) |
+| `idx_import_job_events_job_time` | (job_id, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | job 감사 타임라인과 bounded live snapshot (0052에서 partial 전환) |
+| `idx_import_job_events_provider_time` | (provider, occurred_at DESC, event_id DESC) WHERE provider non-NULL AND `quarantined_at IS NULL` | provider-only 감사 타임라인 (0052에서 partial 전환) |
+| `idx_import_job_events_dataset_time` | (dataset_key, occurred_at DESC, event_id DESC) WHERE dataset non-NULL AND `quarantined_at IS NULL` | dataset-only 감사 타임라인 (0052, identity projection에는 사용 금지) |
+| `idx_import_job_events_provider_dataset_time` | (provider, dataset_key, occurred_at DESC, event_id DESC) WHERE pair non-NULL AND `quarantined_at IS NULL` | exact pair 감사 타임라인 (0052, identity projection에는 사용 금지) |
+| `idx_import_job_events_level_time` | (level, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | level 감사 타임라인 (0052에서 partial 전환) |
 | `idx_feature_update_providers_gin` | GIN(providers) | request provider `TEXT[]` membership selective seed (0052) |
 | `idx_feature_update_dataset_keys_gin` | GIN(dataset_keys) | request dataset `TEXT[]` membership selective seed (0052) |
 | `uq_feature_update_requests_job_id` | UNIQUE (job_id) | request→job 유일성과 역추적 B-tree; deferred 양방향 trigger와 함께 canonical 1:1 보장 (0052) |
@@ -276,7 +279,9 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `import_jobs` | `trg_import_jobs_identity_immutable` | 모든 generic/feature job의 kind/provider/dataset identity는 insert 뒤 변경 금지 (0052) |
 | `import_jobs` | `ck_import_jobs_quarantine_shape` | 두 격리 컬럼이 모두 NULL이거나 시각과 고정 사유 `unlinked_feature_update_component`가 함께 존재 (0052) |
 | `import_jobs` | `trg_import_jobs_quarantine_immutable` | runtime 격리 표식 생성·변경, 격리 행 UPDATE/DELETE와 격리 parent 아래 child attach 금지 (0052) |
-| `import_job_events` | `trg_import_job_events_quarantine_immutable` | 격리 job의 기존 event UPDATE/DELETE와 신규 event append 금지 (0052) |
+| `import_job_events` | `quarantined_at` + `trg_import_job_events_quarantine_immutable` | 0052 migration이 parent 격리 시각을 backfill하며 runtime marker INSERT/UPDATE, 격리 job의 기존 event UPDATE/DELETE와 신규 event append를 금지 |
+| `import_job_event_clock` | singleton PK/CHECK + nonnegative revision CHECK | event DML AFTER STATEMENT trigger 내부의 statement당 revision+1만 허용하는 bounded live projection; 직접 UPDATE/DELETE/TRUNCATE 금지 (0052) |
+| `import_job_events` | `trg_import_job_events_clock` | INSERT/UPDATE/DELETE/TRUNCATE statement마다 event clock revision을 한 번 증가 (0052) |
 | `pipeline_cancellation_members` | `trg_pipeline_cancellation_members_reject_quarantine` | 격리 job을 신규/변경 cancellation member로 연결하지 못하게 차단 (0052) |
 | `feature_update_requests` | `ck_feature_update_requests_scope_shape` | immutable `ops.is_valid_feature_update_scope`로 6종 scope의 exact key/type/길이/범위·`scope.type=scope_type`을 OpenAPI와 동일하게 강제 (0052) |
 | `feature_update_requests` | `ck_feature_update_requests_providers_shape` | 1차원 unique `TEXT[]`, 최대 32개, 각 항목 trimmed non-empty string 128자 이하를 강제 (0052) |

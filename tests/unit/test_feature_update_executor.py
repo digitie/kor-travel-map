@@ -76,7 +76,8 @@ async def test_execution_entrypoints_reject_missing_or_untrimmed_owner(
     owner: str | None,
 ) -> None:
     connection = _IdleConnection()
-    with pytest.raises(ValueError, match="trimmed non-empty"):
+
+    async def execute() -> None:
         if entrypoint == "specific":
             await executor.execute_feature_update_request(
                 connection,  # type: ignore[arg-type]
@@ -84,12 +85,15 @@ async def test_execution_entrypoints_reject_missing_or_untrimmed_owner(
                 runner=object(),  # type: ignore[arg-type]
                 dagster_run_id=owner,  # type: ignore[arg-type]
             )
-        else:
-            await executor.execute_next_feature_update_request(
-                connection,  # type: ignore[arg-type]
-                runner=object(),  # type: ignore[arg-type]
-                dagster_run_id=owner,  # type: ignore[arg-type]
-            )
+            return
+        await executor.execute_next_feature_update_request(
+            connection,  # type: ignore[arg-type]
+            runner=object(),  # type: ignore[arg-type]
+            dagster_run_id=owner,  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(ValueError, match="trimmed non-empty"):
+        await execute()
 
 
 def _policy(
@@ -118,7 +122,7 @@ def _policy(
         config_source="unit",
         enabled=enabled,
         created_at=now,
-        generation=1,
+        updated_at=now,
     )
 
 

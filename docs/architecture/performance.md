@@ -701,12 +701,22 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_import_job_events_time(occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_job_time(job_id, occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_provider_time(provider, occurred_at DESC, event_id DESC)`
-    partial `provider IS NOT NULL`
+    partial `provider IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_dataset_time(dataset_key, occurred_at DESC, event_id DESC)`
-    partial `dataset_key IS NOT NULL`
+    partial `dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_provider_dataset_time(provider, dataset_key, occurred_at DESC,
-    event_id DESC)` partial `provider IS NOT NULL AND dataset_key IS NOT NULL`
+    event_id DESC)` partial
+    `provider IS NOT NULL AND dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_level_time(level, occurred_at DESC, event_id DESC)`
+
+  모든 event 시간순 인덱스는 `quarantined_at IS NULL` partial predicate를 가진다. 0052에서
+  격리한 기존 event는 보존하되 marker를 비정규화하므로, 조회 시 parent job을 join하거나 최신
+  격리 event를 건너뛰지 않고 visible page만 bounded scan한다. `/ops/live`의 전역 revision은
+  최신 event 1건, job event revision은 최근 5건만 읽으며 매 polling마다 exact 전체 건수를
+  다시 세지 않는다. late commit과 최근 page 밖 UPDATE/DELETE는 singleton
+  `ops.import_job_event_clock.revision`의 transactional 증가로 감지한다. AFTER STATEMENT에서 DML
+  statement당 한 번만 global clock을 갱신해 bulk row별 WAL/dead tuple과 교차 row deadlock을
+  피하며, timestamp는 진단에만 쓴다.
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
@@ -757,9 +767,12 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   provider/dataset 독립 배열의 cross-product와 paginated timeline 첫 page 기반 전 dataset latest
   계산은 금지한다. overview count/24시간 failure는 raw child가 아니라 canonical root를 센다.
   event의 provider/dataset은 감사 API filter 메타데이터다. 감사 목록 SQL은 nullable-OR 한 문장을
-  쓰지 않고 실제 입력 filter의 고정 clause만 bind와 함께 조합한다. 무필터 polling은
-  `idx_import_job_events_time`, dataset-only는 `idx_import_job_events_dataset_time`, exact pair는
-  `idx_import_job_events_provider_dataset_time`을 사용한다. projection seed용 event index는 두지 않는다.
+  쓰지 않고 실제 입력 filter의 고정 clause만 bind와 함께 조합한다. 대표 REST filter와 인덱스는
+  무필터→`idx_import_job_events_time`, job→`idx_import_job_events_job_time`, provider→
+  `idx_import_job_events_provider_time`, dataset→`idx_import_job_events_dataset_time`,
+  provider+dataset exact pair→`idx_import_job_events_provider_dataset_time`, level→
+  `idx_import_job_events_level_time`이다. 모든 조합은 event의 `quarantined_at IS NULL`을 직접
+  포함한다. projection seed용 event index는 두지 않는다.
 
 ### 14.3 회귀 테스트
 

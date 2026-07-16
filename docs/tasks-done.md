@@ -30,6 +30,15 @@
   C3d run-backed queued 취소 경계를 적대 리뷰 2회와 전체 로컬 gate로 고정했다. 상세 구현·검증
   기록은 `docs/journal.md`와 `docs/resume.md`의 2026-07-15 A1 항목을 따른다.
 
+## C3e 공용 projection·request/job 단일 정본 (2026-07-16, `T-ADM-C3e-A2`)
+
+- [x] **T-ADM-C3e-A2 — canonical root/exact-pair projection과 0052 clean-cut.**
+  pipeline/grid/detail/overview를 같은 cycle-safe root와 typed pair member에 연결하고,
+  feature update request lifecycle을 canonical import job 한 행으로 통합했다. request/job 양방향
+  1:1, 6종 scope·typed filter·update policy, 격리 component, 전용 writer/CAS를 DB와 Python에서
+  함께 강제한다. event 감사 부분 index와 statement-level live revision clock을 추가했으며,
+  두 적대 리뷰어 승인 뒤 전체 Python/DB/frontend gate와 n150 mocked E2E 501건을 통과했다.
+
 ## C3e canonical operation 문서 gate (2026-07-15, `T-ADM-C3e-D`)
 
 - [x] **T-ADM-C3e-D — canonical provider operation 문서 계약** (#679, PR #696).

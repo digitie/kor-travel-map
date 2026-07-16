@@ -1,6 +1,7 @@
 import { expect, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -256,9 +257,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       }
       const request = route.request();
       const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         const status = url.searchParams.get("status");
         const items = status
           ? uploads.filter((item) => item.status === status)
@@ -266,7 +268,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         await fulfillJson(route, makeListResponse(items));
         return;
       }
-      if (method === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
         expect(request.headers()["content-type"]).toContain(
           "multipart/form-data",
         );
@@ -275,18 +277,18 @@ test.describe("admin/offline-uploads edge depth", () => {
         await fulfillJson(route, makeWriteResponse(upload), 201);
         return;
       }
-      if (method === "GET" && url.pathname === uploadPath) {
+      if (method === "GET" && apiPath === uploadPath) {
         await fulfillJson(route, makeDetailResponse(upload));
         return;
       }
-      if (method === "GET" && url.pathname === `${uploadPath}/preview`) {
+      if (method === "GET" && apiPath === `${uploadPath}/preview`) {
         await fulfillJson(route, makePreviewResponse(upload));
         return;
       }
       // validate POST가 validation_job_id를 채우면 detail refetch로 selected에
       // 반영되고 useOfflineUploadValidation(GET /validation)이 enabled 된다.
       // 같은 실패 잡(error_rows=2, issues[])을 그대로 돌려줘 round-trip을 보존한다.
-      if (method === "GET" && url.pathname === `${uploadPath}/validation`) {
+      if (method === "GET" && apiPath === `${uploadPath}/validation`) {
         const failed = upload.status === "validation_failed";
         await fulfillJson(
           route,
@@ -316,7 +318,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         );
         return;
       }
-      if (method === "POST" && url.pathname === `${uploadPath}/validate`) {
+      if (method === "POST" && apiPath === `${uploadPath}/validate`) {
         expect(request.postData()).toContain("column_mapping");
         // 잡 자체가 실패: data.status='validation_failed', error_rows>0, issues[].
         upload = {
@@ -352,7 +354,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -368,27 +370,41 @@ test.describe("admin/offline-uploads edge depth", () => {
     // (variant attr가 아니라 보이는 텍스트로 단언 — house gotcha.)
     await expect(page.getByText("1 valid / 2 error")).toBeVisible();
 
+    // 기본 uploaded 필터에서는 validation_failed 행이 숨는다. 실패 상태를 명시해
+    // 목록의 round-trip 배지와 상세 validation 결과를 같은 상태에서 검증한다.
+    const statusFilter = page.getByLabel("offline upload status");
+    await statusFilter.selectOption("validation_failed");
+    await expect(statusFilter).toHaveValue("validation_failed");
+
     // 이슈 DataTable: 각 이슈는 semantic <tr role=row>로 렌더되고(non-virtual
     // DataTable → shadcn Table primitive) row 접근성 이름은 셀 텍스트 concat이라
     // `code` 셀('invalid_coordinate' / 'required field missing')을 그대로 포함한다.
     // 이 코드 문자열은 페이지 어디에도 중복되지 않으므로 brittle div-filter scope
     // 없이 role=row 이름 매칭만으로 strict-mode 충돌 없이 고유 매칭된다.
-    await expect(
-      page.getByRole("row", { name: /invalid_coordinate/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("row", { name: /required field missing/ }),
-    ).toBeVisible();
+    const invalidCoordinateRow = page.getByRole("row", {
+      name: /invalid_coordinate/,
+    });
+    const requiredFieldRow = page.getByRole("row", {
+      name: /required field missing/,
+    });
+    await expect(invalidCoordinateRow).toBeVisible();
+    await expect(requiredFieldRow).toBeVisible();
     await expect(page.getByText("2 issues")).toBeVisible();
-    // severity 셀은 StatusBadge가 raw 'error' 텍스트를 그대로 렌더한다.
-    // 정확히 'error'인 cell은 이슈 테이블 severity 컬럼뿐(preview/목록 테이블엔 없음).
+    // severity 셀은 StatusBadge의 사용자 가시 한글 라벨로 렌더한다.
+    // 정확히 '오류'인 cell은 이슈 테이블 severity 컬럼뿐이다.
     await expect(
-      page.getByRole("cell", { name: "error", exact: true }).first(),
+      invalidCoordinateRow.getByRole("cell", { name: "오류", exact: true }),
+    ).toBeVisible();
+    await expect(
+      requiredFieldRow.getByRole("cell", { name: "오류", exact: true }),
     ).toBeVisible();
 
-    // status='validation_failed'가 round-trip 되어 StatusBadge로 노출된다
-    // (UploadDetail 패널 + 행). 적어도 하나는 보여야 한다.
-    await expect(page.getByText("validation_failed").first()).toBeVisible();
+    // status='validation_failed'가 round-trip 되어 목록 StatusBadge로 노출된다.
+    await expect(
+      page
+        .getByTestId("offline-upload-row")
+        .getByText("검증실패", { exact: true }),
+    ).toBeVisible();
 
     // NEGATIVE: 잡 실패는 isError가 아니므로 transport 실패용 destructive Alert
     // 'validation 처리 실패'는 절대 뜨면 안 된다 (두 에러 표면 구분).
@@ -410,15 +426,15 @@ test.describe("admin/offline-uploads edge depth", () => {
         return;
       }
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         // create는 실패하므로 목록은 계속 비어 있다.
         await fulfillJson(route, makeListResponse([]));
         return;
       }
-      if (method === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
         createCount += 1;
         // 413은 components 스키마가 아니라 literal text 바디(에러 envelope 없음).
         await route.fulfill({
@@ -428,7 +444,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         });
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -469,9 +485,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       }
       const request = route.request();
       const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         const status = url.searchParams.get("status");
         const items = status
           ? uploads.filter((item) => item.status === status)
@@ -479,18 +496,18 @@ test.describe("admin/offline-uploads edge depth", () => {
         await fulfillJson(route, makeListResponse(items));
         return;
       }
-      if (method === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
         uploads = [upload];
         await fulfillJson(route, makeWriteResponse(upload), 201);
         return;
       }
-      if (method === "GET" && url.pathname === uploadPath) {
+      if (method === "GET" && apiPath === uploadPath) {
         await fulfillJson(route, makeDetailResponse(upload));
         return;
       }
       // 비-tabular는 preview를 enabled=false로 두므로 호출되지 않지만,
       // 혹시 모를 호출에 대비해 빈 preview를 돌려준다(헤더 0개).
-      if (method === "GET" && url.pathname === `${uploadPath}/preview`) {
+      if (method === "GET" && apiPath === `${uploadPath}/preview`) {
         await fulfillJson(
           route,
           makePreviewResponse(upload, {
@@ -503,7 +520,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -578,23 +595,23 @@ test.describe("admin/offline-uploads edge depth", () => {
         return;
       }
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         await fulfillJson(route, makeListResponse(uploads));
         return;
       }
-      if (method === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
         uploads = [upload];
         await fulfillJson(route, makeWriteResponse(upload), 201);
         return;
       }
-      if (method === "GET" && url.pathname === uploadPath) {
+      if (method === "GET" && apiPath === uploadPath) {
         await fulfillJson(route, makeDetailResponse(upload));
         return;
       }
-      if (method === "GET" && url.pathname === `${uploadPath}/preview`) {
+      if (method === "GET" && apiPath === `${uploadPath}/preview`) {
         await fulfillJson(
           route,
           makePreviewResponse(upload, {
@@ -604,7 +621,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -651,9 +668,10 @@ test.describe("admin/offline-uploads edge depth", () => {
       }
       const request = route.request();
       const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         listCount += 1;
         lastStatusParam = url.searchParams.get("status");
         // 초기 필터는 컴포넌트 기본값 'uploaded'. active phase의 seeded 행은
@@ -670,11 +688,11 @@ test.describe("admin/offline-uploads edge depth", () => {
         await fulfillJson(route, makeListResponse([item]));
         return;
       }
-      if (method === "GET" && url.pathname === uploadPath) {
+      if (method === "GET" && apiPath === uploadPath) {
         await fulfillJson(route, makeDetailResponse(detailUpload));
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -683,10 +701,10 @@ test.describe("admin/offline-uploads edge depth", () => {
     const uploadRow = page.getByTestId("offline-upload-row");
     await expect(uploadRow).toBeVisible();
     await expect(page.getByText("1 rows")).toBeVisible();
-    // active(loading) status 배지가 보인다. bare getByText('loading')은 status
+    // active(loading) status의 사용자 가시 라벨이 보인다. bare getByText는 status
     // 필터 <select>의 숨은 <option value="loading">와도 매칭되므로 row scope으로
     // 좁혀 행의 StatusBadge만 단언한다(option은 hidden → toBeVisible 실패).
-    await expect(uploadRow.getByText("loading")).toBeVisible();
+    await expect(uploadRow.getByText("로딩중", { exact: true })).toBeVisible();
 
     // POLLING: loading 항목이 있으면 2s 폴링이 돈다 — 정확한 횟수가 아니라 >=2만 단언.
     await expect.poll(() => listCount, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
@@ -695,7 +713,7 @@ test.describe("admin/offline-uploads edge depth", () => {
     // 여기서도 row scope — 'loaded'는 status 필터 <select>의 숨은 <option>과도
     // 충돌하므로 행의 StatusBadge만 단언한다.
     active = false;
-    await expect(uploadRow.getByText("loaded")).toBeVisible();
+    await expect(uploadRow.getByText("적재됨", { exact: true })).toBeVisible();
     // 플래토 단언(타이머가 아니라 카운트 안정으로 refetch-stop 검증):
     // 한 번 더 폴링이 진행 중일 수 있으므로 안정 지점을 잡고 delta<=1 확인.
     const settled = listCount;
@@ -735,23 +753,23 @@ test.describe("admin/offline-uploads edge depth", () => {
         return;
       }
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
       const method = request.method();
 
-      if (method === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
         await fulfillJson(route, makeListResponse(uploads));
         return;
       }
-      if (method === "POST" && url.pathname === "/v1/admin/offline-uploads") {
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
         uploads = [upload];
         await fulfillJson(route, makeWriteResponse(upload), 201);
         return;
       }
-      if (method === "GET" && url.pathname === uploadPath) {
+      if (method === "GET" && apiPath === uploadPath) {
         await fulfillJson(route, makeDetailResponse(upload));
         return;
       }
-      if (method === "GET" && url.pathname === `${uploadPath}/preview`) {
+      if (method === "GET" && apiPath === `${uploadPath}/preview`) {
         await fulfillJson(
           route,
           makePreviewResponse(upload, {
@@ -763,7 +781,7 @@ test.describe("admin/offline-uploads edge depth", () => {
         );
         return;
       }
-      throw new Error(`Unhandled route: ${method} ${url.pathname}`);
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
     });
 
     await page.goto("/admin/offline-uploads");
@@ -777,7 +795,11 @@ test.describe("admin/offline-uploads edge depth", () => {
     // GAP: UploadDetail은 format DetailRow는 보여주지만 encoding은 어디에도 없다.
     const row = page.getByTestId("offline-upload-row");
     await row.click();
-    await expect(page.getByText("format").first()).toBeVisible();
+    const formatTerm = page.locator("dt").filter({ hasText: /^형식$/ });
+    await expect(formatTerm).toHaveText("형식");
+    await expect(
+      formatTerm.locator("xpath=following-sibling::dd[1]"),
+    ).toHaveText("csv");
     // 'cp949'는 component 어디에도 렌더되지 않는다(인디케이터 미존재 — 정직한 gap).
     await expect(page.getByText("cp949")).toHaveCount(0);
   });

@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-16 (codex, agent A) — T-ADM-C3e-A2 로컬 gate 단계
+## 2026-07-16 (codex, agent A) — T-ADM-C3e-A2 구현·로컬 gate 완료(PR 전)
 
 - **공용 projection**: C3b cycle-safe lineage 위에서 canonical root와 exact
   `provider_datasets[]`를 한 번 계산하도록 executions, 단건 detail, overview, datasets latest
@@ -13,7 +13,7 @@
   `operations_by_status`/`active_operations`/`failed_operations_24h`로 교체했다.
 - **UI clean-cut**: 구 `/admin/feature-update-requests` 목록·상세 redirect route를 삭제했다.
   갱신 요청 client 구현은 정본 `/admin/features/update-requests` route 아래에서만 소유한다.
-  이 수정 뒤 frontend build/e2e와 최신 diff 최종 재리뷰는 재실행 대상이다.
+  n150 격리 checkout의 mocked E2E에서 인증 BFF와 현재 한국어 UI 계약을 함께 검증했다.
 - **영향도·회귀 준비**: codegraph 영향 19/7/11/11/9/12/34개 symbol을 확인하고 all-dataset
   latest, timeline/grid/detail 동일 root, feature root 고정, pair 교차곱 금지와
   pair/provider-only/dataset-only identity-index EXPLAIN 회귀를 작성했다. 1차 적대 리뷰에서
@@ -66,15 +66,20 @@
   canonical 0051 root/child shape로 고쳤고 active preflight truth table은 source/raw
   Dagster/request/jobless/child 조건을 서로 격리했다. SQLAlchemy text SQL의 `:null` test bind
   해석을 제거하고, direct-exact EXPLAIN seed의 배경 분포도 실제 선택성을 검증하도록 강화했다.
-  이 수정들은 아직 두 적대 리뷰어의 최종 snapshot 승인을 받지 않았다.
-- **gate 상태**: 아래에 기록했던 migration 5건, focused repository 90건, main unit 1,314건,
-  API 491건, Dagster 270건(1 skip), frontend unit 82건, mocked Playwright 결과는 그 뒤 product/DB/UI
-  변경으로 무효화됐다. 최신 source·generated artifact 적대 리뷰 2인 승인 후 전 구간을 다시 실행한다.
-- **다음 한 작업**: 문서·생성 산출물을 정렬하고 적대 리뷰 2인의 S1/S2 0을 확인한 뒤 전체
-  로컬 정적·통합·mocked UI gate와 보안 감사를 수행하고 A2 PR을 올려 CI와
-  review approval을 통과시킨다. A2는 아직 PR·CI·merge 전이므로 완료로 기록하지 않으며,
-  `docs/tasks.md` 항목은 PR 직전까지 유지하고 `docs/tasks-done.md`로 이동하지 않는다. live
-  n150/prod 검증은 C3e-I/C7 최종 gate에서 수행한다.
+  event 감사 조회는 격리 marker가 부모 join 없이 직접 필터되며, statement-level event clock이
+  late commit·rollback·TRUNCATE·zero-job invalidation을 누락 없이 표현한다. 같은 transaction의
+  `now()` 동률 event는 인과 최신을 가정하지 않고 heartbeat의 exact code/stage/payload를 검증한다.
+- **리뷰·gate 완료**: DB/REST/UI 최종 diff와 이후 로직 수정마다 적대 리뷰 2인의
+  S1/S2/S3 0건 승인을 받았다. Ruff, strict mypy(main 112/API 55/Dagster 21), import 계약 4/4,
+  OpenAPI/admin type drift, frontend type/lint(오류 0), unit 1,366, API 502, Dagster 270
+  (optional `mois.db` 1 skip), non-live integration 518, frontend unit 82, production build를
+  통과했다. n150 Linux 격리 checkout의 11개 mocked spec은 **501/501 통과**했고 prod
+  checkout/container는 변경하지 않았다. 로컬 reverse geocoder가 400을 반환하는 live 전용 5건은
+  C3e-I/C7의 n150 prod gate로 분리했다.
+- **다음 한 작업**: remote push 전 보안 감사와 문서-only origin/main rebase를 마치고 A2 PR을
+  CI green·review approval 뒤 병합한다. 사용자 지시에 따라 PR 제출 직전에 A2를
+  `docs/tasks-done.md`로 이동했다. 이후 C3e-B/C/I를 진행해 #679를 닫고 C45X/C4R 리뷰·개선으로
+  넘어간다. 파괴적 live UI E2E와 prod 최종 검증은 C3e-I/C7에서 수행한다.
 
 ## 2026-07-15 (codex, agent A) — T-ADM-C3e-A1 구현·로컬 gate 완료
 

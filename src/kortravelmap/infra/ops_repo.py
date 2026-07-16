@@ -262,11 +262,7 @@ def _list_import_job_events_sql(
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
-    clauses: list[str] = [
-        "EXISTS (SELECT 1 FROM ops.import_jobs AS job "
-        "WHERE job.job_id = ops.import_job_events.job_id "
-        "AND job.quarantined_at IS NULL)"
-    ]
+    clauses: list[str] = ["quarantined_at IS NULL"]
     if job_id is not None:
         clauses.append("job_id = CAST(:job_id AS uuid)")
     if level is not None:

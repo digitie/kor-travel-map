@@ -283,7 +283,7 @@ test.describe("/ops/providers refresh policy depth", () => {
     await expect(page.getByLabel("분당 요청 수", { exact: true })).toHaveValue(
       "12",
     );
-    await expect(page.getByLabel("동시 실행 수", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("최대 동시 실행", { exact: true })).toHaveValue(
       "3",
     );
 

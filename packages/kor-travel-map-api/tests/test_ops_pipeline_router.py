@@ -378,7 +378,7 @@ def _execution(
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
                 sync_scope="default",
-                operation_job_id="11111111-1111-1111-1111-111111111111",
+                operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
         ),
@@ -1244,7 +1244,9 @@ def test_cancel_execution_maps_typed_failures_to_problem_details(
         assert response.json()["code"] == expected_code
         assert response.headers.get("retry-after") == retry_after
         if expected_status != 404:
-            assert response.json()["details"]["cancellation_id"] == (detail.cancellation_id)
+            assert response.json()["details"]["cancellation_id"] == str(
+                detail.cancellation_id
+            )
 
 
 @pytest.mark.unit

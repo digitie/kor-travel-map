@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-16 (agent A) — C3e-A2 로컬 gate 단계
+## 2026-07-16 (agent A) — C3e-A2 구현·로컬 gate 완료(PR 전)
 
 - lifecycle 이중 정본을 제거해 request 테이블에는 immutable 입력/감사, `matched_scope`, 양수
   `generation`만 남겼다. status/Dagster owner/cancellation/error/timeline은 canonical job 한 행만
@@ -21,8 +21,7 @@
   금지한다. generic job writer는 이 kind의 생성·일반 lifecycle을 거부하며 전용 enqueue/lifecycle/
   heartbeat 경계만 사용한다. canonical job은 parent와 load batch가 없는 root다.
 - UI clean-cut 재리뷰의 S2를 반영해 구 `/admin/feature-update-requests` 목록·상세 redirect route를
-  삭제하고 client 구현을 정본 `/admin/features/update-requests` route 내부로 이동했다. 이 변경 뒤
-  frontend build/e2e와 최신 diff 최종 재리뷰는 다시 수행해야 한다.
+  삭제하고 client 구현을 정본 `/admin/features/update-requests` route 내부로 이동했다.
 - 이 UI/DB S2 이전 snapshot의 승인은 최신 diff의 최종 gate로 사용하지 않는다.
 - 0052 migration 실DB 검증에서 SQLAlchemy naming convention이 생성한 실제 FK 이름이
   `fk_feature_update_requests_job_id_import_jobs`임을 확인해 upgrade/downgrade가 같은 이름을
@@ -34,12 +33,18 @@
 - SQLAlchemy text SQL에서 `:null`이 bind parameter로 해석되던 테스트를 안전한 literal 표현으로
   수정했다. selective EXPLAIN은 direct-exact seed가 실제로 선택적인 분포를 갖도록 배경 데이터와
   통계를 보강해 planner access path 회귀가 우연한 fixture 분포에 기대지 않게 했다.
-- 과거 migration 5건, focused repository 90건, main unit 1,314건, API 491건, Dagster 270건
-  (1 skip), frontend unit 82건, build/mocked Playwright 결과는 이후 product/DB/UI 변경으로
-  무효화했다. 최신 source·generated artifact에 대한 적대 리뷰 2인 승인 뒤 전 구간을 재실행한다.
-- live n150/prod 검증은 C3e-I/C7의 최종 gate로 남겨 두었다.
-- A2는 아직 PR·CI·merge 전이다. 따라서 완료 처리하지 않았고 `docs/tasks.md`의 A2 항목도
-  제거하거나 `docs/tasks-done.md`로 옮기지 않았다.
+- 격리 component의 event에도 직접 `quarantined_at`을 두고 여섯 감사 조회용 부분 index를
+  visible event만 대상으로 재구성했다. statement-level singleton event clock은 INSERT/UPDATE/
+  DELETE/TRUNCATE마다 transaction 안에서 revision을 한 번 올려 late commit, rollback, cascade,
+  zero-job snapshot에서도 live invalidation을 보존한다. direct clock 변조는 DB trigger로 막았다.
+- 최종 DB/REST/UI 및 이후 로직 수정은 매번 적대 리뷰 2인의 S1/S2/S3 0건 승인을 받은 뒤
+  검증했다. Ruff, strict mypy(main 112/API 55/Dagster 21), import 계약 4/4, OpenAPI/admin type
+  drift, frontend type/lint(오류 0), unit 1,366, API 502, Dagster 270(1 skip), non-live integration
+  518, frontend unit 82와 production build가 통과했다. n150 격리 checkout의 mocked E2E 11개
+  spec은 501/501 통과했고 prod checkout/container는 변경하지 않았다.
+- 로컬 reverse geocoder HTTP 400인 live 전용 5건은 C3e-I/C7의 n150 prod gate로 분리했다.
+  사용자 지시에 따라 A2 PR 제출 직전에 `docs/tasks.md`에서 제거해 `docs/tasks-done.md`로
+  아카이브했다. 다음은 보안 감사·문서-only main rebase·PR CI/review/merge다.
 
 ## 2026-07-15 (agent A) — C3e-A2 canonical root/exact-pair projection 구현
 

@@ -26,21 +26,31 @@ _IDENTITY_LOCK_RETRY_SECONDS = 0.05
 
 def _lock_identity_writers() -> None:
     """repair와 제약 설치 사이에 구 writer가 끼어들지 못하게 한다."""
-    # runtime writer 순서(attempt→member→run→request→job)를 그대로 잡는다.
+    # runtime writer 순서(attempt→member→run→request→job→event→clock)를 그대로 잡는다.
     # migration이 첫 lock을 보유한 채 뒤 lock을 기다리면 deadlock cycle이
     # 가능하다. savepoint 안에서 전체 lock을 NOWAIT로 시도해
     # 하나라도 경합하면 부분 lock을 모두 풀고 제한적으로 재시도한다.
     connection = op.get_bind()
+    clock_exists = bool(
+        connection.scalar(
+            sa.text("SELECT to_regclass('ops.import_job_event_clock') IS NOT NULL")
+        )
+    )
+    relations = (
+        "ops.pipeline_cancellations, "
+        "ops.pipeline_cancellation_members, "
+        "ops.pipeline_cancellation_runs, "
+        "ops.feature_update_requests, ops.import_jobs, "
+        "ops.import_job_events"
+    )
+    if clock_exists:
+        relations = f"{relations}, ops.import_job_event_clock"
     for attempt in range(_IDENTITY_LOCK_RETRIES):
         savepoint = connection.begin_nested()
         try:
             connection.execute(
                 sa.text(
-                    "LOCK TABLE ops.pipeline_cancellations, "
-                    "ops.pipeline_cancellation_members, "
-                    "ops.pipeline_cancellation_runs, "
-                    "ops.feature_update_requests, ops.import_jobs "
-                    "IN ACCESS EXCLUSIVE MODE NOWAIT"
+                    f"LOCK TABLE {relations} IN ACCESS EXCLUSIVE MODE NOWAIT"
                 )
             )
         except sa.exc.DBAPIError as exc:
@@ -1438,7 +1448,7 @@ def _repair_request_job_identity() -> None:
                        ON request_job.root_job_id = branch.root_job_id
                       AND request.job_id = request_job.job_id
                   )
-                ORDER BY branch.root_job_id
+                ORDER BY branch.root_job_id::text
                 LIMIT 20
                 """
             )
@@ -1552,17 +1562,14 @@ def _simplify_cancellation_member_identity() -> None:
         table_name="pipeline_cancellation_members",
         schema="ops",
     )
-    for constraint_name, constraint_type in (
-        ("ck_pipeline_cancellation_members_kind", "check"),
-        ("ck_pipeline_cancellation_members_operation_kind", "check"),
-        ("pk_pipeline_cancellation_members", "primary"),
-    ):
-        op.drop_constraint(
-            op.f(constraint_name),
-            "pipeline_cancellation_members",
-            schema="ops",
-            type_=constraint_type,
-        )
+    op.drop_constraint(
+        op.f("pk_pipeline_cancellation_members"),
+        "pipeline_cancellation_members",
+        schema="ops",
+        type_="primary",
+    )
+    # member_kind를 참조하는 legacy kind/operation_kind CHECK는 column 제거와
+    # 함께 정리한다. 과거 naming convention으로 잘린 이름에 의존하지 않는다.
     op.drop_column("pipeline_cancellation_members", "member_kind", schema="ops")
     op.alter_column(
         "pipeline_cancellation_members",
@@ -1868,6 +1875,16 @@ def _create_identity_invariants() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
+          IF TG_OP = 'INSERT' AND NEW.quarantined_at IS NOT NULL THEN
+            RAISE EXCEPTION
+              'import job event quarantine marker is migration-owned: %', NEW.event_id
+              USING ERRCODE = 'check_violation';
+          ELSIF TG_OP = 'UPDATE'
+             AND NEW.quarantined_at IS DISTINCT FROM OLD.quarantined_at THEN
+            RAISE EXCEPTION
+              'import job event quarantine marker is migration-owned: %', OLD.event_id
+              USING ERRCODE = 'check_violation';
+          END IF;
           IF TG_OP <> 'INSERT' AND EXISTS (
             SELECT 1
             FROM ops.import_jobs AS job
@@ -1901,6 +1918,71 @@ def _create_identity_invariants() -> None:
         CREATE TRIGGER trg_import_job_events_quarantine_immutable
         BEFORE INSERT OR UPDATE OR DELETE ON ops.import_job_events
         FOR EACH ROW EXECUTE FUNCTION ops.reject_quarantined_import_job_event_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.guard_import_job_event_clock_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
+            RAISE EXCEPTION 'import job event clock singleton cannot be %', TG_OP
+              USING ERRCODE = 'check_violation';
+          END IF;
+          IF pg_trigger_depth() < 2
+             OR NEW.clock_id IS DISTINCT FROM OLD.clock_id
+             OR NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN
+            RAISE EXCEPTION
+              'import job event clock is event-trigger-owned: revision % -> %',
+              OLD.revision, NEW.revision
+              USING ERRCODE = 'check_violation';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_import_job_event_clock_mutation_guard
+        BEFORE UPDATE OR DELETE ON ops.import_job_event_clock
+        FOR EACH ROW EXECUTE FUNCTION ops.guard_import_job_event_clock_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_import_job_event_clock_truncate_guard
+        BEFORE TRUNCATE ON ops.import_job_event_clock
+        FOR EACH STATEMENT EXECUTE FUNCTION ops.guard_import_job_event_clock_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.bump_import_job_event_clock()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          INSERT INTO ops.import_job_event_clock AS clock (
+            clock_id, revision, updated_at
+          ) VALUES (
+            TRUE, 1, clock_timestamp()
+          )
+          ON CONFLICT (clock_id) DO UPDATE
+             SET revision = clock.revision + 1,
+                 updated_at = clock_timestamp();
+          RETURN NULL;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_import_job_events_clock
+        AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON ops.import_job_events
+        FOR EACH STATEMENT EXECUTE FUNCTION ops.bump_import_job_event_clock()
         """
     )
     op.execute(
@@ -2130,7 +2212,61 @@ def upgrade() -> None:
         sa.Column("quarantine_reason", sa.Text(), nullable=True),
         schema="ops",
     )
+    op.add_column(
+        "import_job_events",
+        sa.Column("quarantined_at", sa.DateTime(timezone=True), nullable=True),
+        schema="ops",
+    )
+    op.create_table(
+        "import_job_event_clock",
+        sa.Column(
+            "clock_id",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("true"),
+        ),
+        sa.Column(
+            "revision",
+            sa.BigInteger(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("clock_timestamp()"),
+        ),
+        sa.CheckConstraint(
+            "clock_id",
+            name=op.f("ck_import_job_event_clock_singleton"),
+        ),
+        sa.CheckConstraint(
+            "revision >= 0",
+            name=op.f("ck_import_job_event_clock_revision_nonnegative"),
+        ),
+        sa.PrimaryKeyConstraint(
+            "clock_id",
+            name=op.f("pk_import_job_event_clock"),
+        ),
+        schema="ops",
+    )
+    op.execute(
+        """
+        INSERT INTO ops.import_job_event_clock (clock_id, revision, updated_at)
+        VALUES (TRUE, 0, clock_timestamp())
+        """
+    )
     _repair_request_job_identity()
+    op.execute(
+        """
+        UPDATE ops.import_job_events AS event
+           SET quarantined_at = job.quarantined_at
+          FROM ops.import_jobs AS job
+         WHERE job.job_id = event.job_id
+           AND job.quarantined_at IS NOT NULL
+        """
+    )
     _validate_request_lifecycle_mirror()
     op.add_column(
         "feature_update_requests",
@@ -2157,18 +2293,8 @@ def upgrade() -> None:
         table_name="feature_update_requests",
         schema="ops",
     )
-    op.drop_constraint(
-        op.f("ck_feature_update_status"),
-        "feature_update_requests",
-        schema="ops",
-        type_="check",
-    )
-    op.drop_constraint(
-        op.f("ck_feature_update_requests_cancellation_marker"),
-        "feature_update_requests",
-        schema="ops",
-        type_="check",
-    )
+    # PostgreSQL은 참조 column을 제거할 때 해당 CHECK도 함께 제거한다. 과거
+    # naming convention으로 잘린 실제 constraint 이름에 의존하지 않는다.
     op.drop_constraint(
         "fk_feature_update_requests_cancellation",
         "feature_update_requests",
@@ -2235,18 +2361,47 @@ def upgrade() -> None:
         postgresql_where=sa.text("quarantined_at IS NOT NULL"),
     )
 
+    for index_name in (
+        "idx_import_job_events_job_time",
+        "idx_import_job_events_provider_time",
+        "idx_import_job_events_level_time",
+    ):
+        op.drop_index(
+            index_name,
+            table_name="import_job_events",
+            schema="ops",
+        )
     op.create_index(
         "idx_import_job_events_time",
         "import_job_events",
         [sa.text("occurred_at DESC"), sa.text("event_id DESC")],
         schema="ops",
+        postgresql_where=sa.text("quarantined_at IS NULL"),
+    )
+    op.create_index(
+        "idx_import_job_events_job_time",
+        "import_job_events",
+        ["job_id", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
+        schema="ops",
+        postgresql_where=sa.text("quarantined_at IS NULL"),
+    )
+    op.create_index(
+        "idx_import_job_events_provider_time",
+        "import_job_events",
+        ["provider", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
+        schema="ops",
+        postgresql_where=sa.text(
+            "provider IS NOT NULL AND quarantined_at IS NULL"
+        ),
     )
     op.create_index(
         "idx_import_job_events_dataset_time",
         "import_job_events",
         ["dataset_key", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
         schema="ops",
-        postgresql_where=sa.text("dataset_key IS NOT NULL"),
+        postgresql_where=sa.text(
+            "dataset_key IS NOT NULL AND quarantined_at IS NULL"
+        ),
     )
     op.create_index(
         "idx_import_job_events_provider_dataset_time",
@@ -2258,7 +2413,17 @@ def upgrade() -> None:
             sa.text("event_id DESC"),
         ],
         schema="ops",
-        postgresql_where=sa.text("provider IS NOT NULL AND dataset_key IS NOT NULL"),
+        postgresql_where=sa.text(
+            "provider IS NOT NULL AND dataset_key IS NOT NULL "
+            "AND quarantined_at IS NULL"
+        ),
+    )
+    op.create_index(
+        "idx_import_job_events_level_time",
+        "import_job_events",
+        ["level", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
+        schema="ops",
+        postgresql_where=sa.text("quarantined_at IS NULL"),
     )
     op.create_index(
         "idx_feature_update_providers_gin",
@@ -2433,6 +2598,19 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION ops.reject_quarantined_import_job_event_mutation()")
     op.execute(
+        "DROP TRIGGER trg_import_job_events_clock ON ops.import_job_events"
+    )
+    op.execute("DROP FUNCTION ops.bump_import_job_event_clock()")
+    op.execute(
+        "DROP TRIGGER trg_import_job_event_clock_truncate_guard "
+        "ON ops.import_job_event_clock"
+    )
+    op.execute(
+        "DROP TRIGGER trg_import_job_event_clock_mutation_guard "
+        "ON ops.import_job_event_clock"
+    )
+    op.execute("DROP FUNCTION ops.guard_import_job_event_clock_mutation()")
+    op.execute(
         "DROP TRIGGER trg_import_jobs_feature_update_append_only ON ops.import_jobs"
     )
     op.execute("DROP FUNCTION ops.reject_canonical_feature_update_job_delete()")
@@ -2451,21 +2629,40 @@ def downgrade() -> None:
             table_name="feature_update_requests",
             schema="ops",
         )
-    op.drop_index(
+    for index_name in (
         "idx_import_job_events_provider_dataset_time",
-        table_name="import_job_events",
-        schema="ops",
-    )
-    op.drop_index(
         "idx_import_job_events_dataset_time",
-        table_name="import_job_events",
-        schema="ops",
-    )
-    op.drop_index(
+        "idx_import_job_events_provider_time",
+        "idx_import_job_events_level_time",
+        "idx_import_job_events_job_time",
         "idx_import_job_events_time",
-        table_name="import_job_events",
+    ):
+        op.drop_index(
+            index_name,
+            table_name="import_job_events",
+            schema="ops",
+        )
+    op.create_index(
+        "idx_import_job_events_job_time",
+        "import_job_events",
+        ["job_id", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
         schema="ops",
     )
+    op.create_index(
+        "idx_import_job_events_provider_time",
+        "import_job_events",
+        ["provider", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
+        schema="ops",
+        postgresql_where=sa.text("provider IS NOT NULL"),
+    )
+    op.create_index(
+        "idx_import_job_events_level_time",
+        "import_job_events",
+        ["level", sa.text("occurred_at DESC"), sa.text("event_id DESC")],
+        schema="ops",
+    )
+    op.drop_column("import_job_events", "quarantined_at", schema="ops")
+    op.drop_table("import_job_event_clock", schema="ops")
     op.execute("DROP TRIGGER trg_import_jobs_feature_update_pair ON ops.import_jobs")
     op.execute("DROP FUNCTION ops.enforce_feature_update_job_pair()")
     op.execute("DROP FUNCTION ops.assert_feature_update_job_pair(uuid)")

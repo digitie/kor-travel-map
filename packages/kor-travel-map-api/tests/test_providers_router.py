@@ -56,7 +56,7 @@ def _policy(
         config_source="db",
         enabled=True,
         created_at=now,
-        generation=1,
+        updated_at=now,
     )
 
 

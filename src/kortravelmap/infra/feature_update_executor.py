@@ -54,6 +54,7 @@ from kortravelmap.infra.scope_repo import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from kortravelmap.infra.scope_repo import ScopeType

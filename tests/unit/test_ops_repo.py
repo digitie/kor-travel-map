@@ -133,7 +133,8 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
         dataset_key=None,
         cursor_occurred_at=None,
     )
-    assert "job.quarantined_at IS NULL" in events_sql
+    assert "quarantined_at IS NULL" in events_sql
+    assert "ops.import_jobs" not in events_sql
 
 
 @pytest.mark.unit

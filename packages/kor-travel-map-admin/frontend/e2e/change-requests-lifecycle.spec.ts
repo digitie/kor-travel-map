@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -84,6 +85,11 @@ function categoriesResponse(): CategoriesResponse {
 
 async function mockCategories(page: Page) {
   await page.route("**/v1/categories**", async (route) => {
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/categories") {
+      throw new Error(`Unhandled category route: ${request.method()} ${apiPath}`);
+    }
     await fulfillJson(route, categoriesResponse());
   });
 }
@@ -187,10 +193,14 @@ async function mockChangeList(
   await page.route("**/v1/admin/features**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const apiPath = bffApiPath(request.url());
+    const reviewMatch = apiPath.match(
+      /^\/v1\/admin\/features\/change-requests\/([^/]+)\/(approve|reject)$/,
+    );
 
     if (
       request.method() === "GET" &&
-      url.pathname === "/v1/admin/features/change-requests"
+      apiPath === "/v1/admin/features/change-requests"
     ) {
       requests.list += 1;
       requests.lastListQ = url.searchParams.get("q");
@@ -205,11 +215,11 @@ async function mockChangeList(
       return;
     }
 
-    if (request.method() === "POST" && url.pathname.endsWith("/reject")) {
+    if (request.method() === "POST" && reviewMatch?.[2] === "reject") {
       requests.reject += 1;
       const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
       requests.reviewBodies.push(body);
-      const requestId = url.pathname.split("/").at(-2);
+      const requestId = decodeURIComponent(reviewMatch[1]);
       const target = changes.find((item) => item.request_id === requestId);
       if (!target) {
         await fulfillJson(route, { detail: "not found" }, 404);
@@ -225,11 +235,11 @@ async function mockChangeList(
       return;
     }
 
-    if (request.method() === "POST" && url.pathname.endsWith("/approve")) {
+    if (request.method() === "POST" && reviewMatch?.[2] === "approve") {
       requests.approve += 1;
       const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
       requests.reviewBodies.push(body);
-      const requestId = url.pathname.split("/").at(-2);
+      const requestId = decodeURIComponent(reviewMatch[1]);
       const target = changes.find((item) => item.request_id === requestId);
       if (!target) {
         await fulfillJson(route, { detail: "not found" }, 404);
@@ -246,7 +256,9 @@ async function mockChangeList(
       return;
     }
 
-    throw new Error(`Unhandled feature change route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled feature change route: ${request.method()} ${apiPath}`,
+    );
   });
 
   return requests;
@@ -289,7 +301,7 @@ test.describe("admin feature change-requests lifecycle", () => {
       page.locator("aside").getByText("change-pending-1"),
     ).toBeVisible();
 
-    await pendingRow.getByRole("button", { name: "reject" }).click();
+    await pendingRow.getByRole("button", { name: "반려", exact: true }).click();
 
     await expect.poll(() => requests.reject).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
@@ -298,13 +310,13 @@ test.describe("admin feature change-requests lifecycle", () => {
     });
 
     // StatusBadge는 raw status 문자열을 텍스트로 렌더한다.
-    await expect(pendingRow.getByText("rejected")).toBeVisible();
+    await expect(pendingRow.getByText("거절됨", { exact: true })).toBeVisible();
     // status !== 'pending'이면 actions 셀은 버튼 대신 '완료' 텍스트만 렌더한다.
     await expect(
-      pendingRow.getByRole("button", { name: "approve" }),
+      pendingRow.getByRole("button", { name: "승인", exact: true }),
     ).toHaveCount(0);
     await expect(
-      pendingRow.getByRole("button", { name: "reject" }),
+      pendingRow.getByRole("button", { name: "반려", exact: true }),
     ).toHaveCount(0);
   });
 
@@ -325,11 +337,11 @@ test.describe("admin feature change-requests lifecycle", () => {
 
     await page.route("**/v1/admin/features**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
       if (
         request.method() === "GET" &&
-        url.pathname === "/v1/admin/features/change-requests"
+        apiPath === "/v1/admin/features/change-requests"
       ) {
         await fulfillJson(
           route,
@@ -338,7 +350,10 @@ test.describe("admin feature change-requests lifecycle", () => {
         return;
       }
 
-      if (request.method() === "POST" && url.pathname.endsWith("/approve")) {
+      if (
+        request.method() === "POST" &&
+        apiPath === "/v1/admin/features/change-requests/change-pending-1/approve"
+      ) {
         approveCount += 1;
         await route.fulfill({
           status: 409,
@@ -348,7 +363,7 @@ test.describe("admin feature change-requests lifecycle", () => {
         return;
       }
 
-      throw new Error(`Unhandled route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/features/change-reviews");
@@ -356,7 +371,7 @@ test.describe("admin feature change-requests lifecycle", () => {
     // 기본 'pending' 필터가 이 행을 그대로 보여주므로 selectOption 불필요.
     const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
     await expect(pendingRow).toBeVisible();
-    await pendingRow.getByRole("button", { name: "approve" }).click();
+    await pendingRow.getByRole("button", { name: "승인", exact: true }).click();
 
     await expect.poll(() => approveCount).toBe(1);
 
@@ -374,10 +389,10 @@ test.describe("admin feature change-requests lifecycle", () => {
     // 'pending'으로 남았음만 단언하려면 StatusBadge가 렌더한 정확한 텍스트
     // 노드만 노린다 → exact 매칭으로 name 셀의 substring을 배제한다.
     await expect(
-      pendingRow.getByText("pending", { exact: true }),
+      pendingRow.getByText("대기", { exact: true }),
     ).toBeVisible();
     await expect(
-      pendingRow.getByRole("button", { name: "approve" }),
+      pendingRow.getByRole("button", { name: "승인", exact: true }),
     ).toBeVisible();
   });
 
@@ -388,11 +403,11 @@ test.describe("admin feature change-requests lifecycle", () => {
 
     await page.route("**/v1/admin/features**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
       if (
         request.method() === "GET" &&
-        url.pathname === "/v1/admin/features/change-requests"
+        apiPath === "/v1/admin/features/change-requests"
       ) {
         await fulfillJson(
           route,
@@ -403,7 +418,7 @@ test.describe("admin feature change-requests lifecycle", () => {
 
       if (
         request.method() === "POST" &&
-        url.pathname === "/v1/admin/features"
+        apiPath === "/v1/admin/features"
       ) {
         postCount += 1;
         await route.fulfill({
@@ -414,7 +429,7 @@ test.describe("admin feature change-requests lifecycle", () => {
         return;
       }
 
-      throw new Error(`Unhandled route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/features/change-requests");
@@ -442,11 +457,11 @@ test.describe("admin feature change-requests lifecycle", () => {
   }) => {
     await page.route("**/v1/admin/features**", async (route) => {
       const request = route.request();
-      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
 
       if (
         request.method() === "GET" &&
-        url.pathname === "/v1/admin/features/change-requests"
+        apiPath === "/v1/admin/features/change-requests"
       ) {
         await fulfillJson(
           route,
@@ -455,14 +470,14 @@ test.describe("admin feature change-requests lifecycle", () => {
         return;
       }
 
-      throw new Error(`Unhandled route: ${request.method()} ${url}`);
+      throw new Error(`Unhandled route: ${request.method()} ${apiPath}`);
     });
 
     await page.goto("/admin/features/change-reviews");
 
     // DataTable emptyMessage prop.
     await expect(
-      page.getByText("feature change request가 없습니다."),
+      page.getByText("변경 요청이 없습니다."),
     ).toBeVisible();
     // 데이터 행 0개 확인.
     await expect(page.getByRole("row", { name: /Mock|feature-/ })).toHaveCount(

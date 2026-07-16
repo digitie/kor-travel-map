@@ -294,7 +294,8 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
       .getByRole("status")
       .filter({ hasText: "요청 취소 처리 결과" });
     await expect(successAlert).toContainText(REQUEST_ID);
-    await expect(successAlert).toContainText("원 요청 상태 cancelled");
+    // 요청 lifecycle은 연결된 import job이 정본이므로 결과도 job 상태로 표현한다.
+    await expect(successAlert).toContainText("연결 작업 상태 cancelled");
     await expect(successAlert).toContainText("취소 처리 상태 completed");
     // 성공 → status=cancelled(terminal) → cancel 버튼 사라짐 + 상세 re-fetch.
     await expect(cancel).toBeHidden();

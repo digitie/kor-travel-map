@@ -151,25 +151,6 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
-    child = await start_unpaired_import_job(
-        migrated_session,
-        kind="provider_dataset_child",
-        payload={
-            "request_id": request.request_id,
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
-        parent_job_id=request.job_id,
-    )
-    grandchild = await start_unpaired_import_job(
-        migrated_session,
-        kind="provider_dataset_grandchild",
-        payload={
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-        },
-        parent_job_id=child.job_id,
-    )
     await start_unpaired_import_job(
         migrated_session,
         kind="payload_linked_job",
@@ -190,8 +171,7 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     )
     assert linked_root.execution.kind == "update_request"
     assert linked_root.execution.id == request.request_id
-    # root status는 request가 정본이고 job_*는 가장 깊은 descendant projection이다.
-    assert linked_root.execution.projected_job.id == grandchild.job_id
+    assert linked_root.execution.projected_job.id == request.job_id
     assert linked_root.pair_status == "queued"
 
     # 자유 payload의 request_id가 UUID가 아니어도 projection이 cast 때문에 깨지지 않는다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event as ThreadEvent
 from typing import Any
@@ -11,6 +12,11 @@ from uuid import uuid4
 
 import pytest
 from alembic.config import Config
+from kortravelmap.api.routers.ops_live import (
+    _import_job_events_snapshot,
+    _import_jobs_snapshot,
+    collect_live_topic_snapshots,
+)
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.jobs_repo import record_import_job_event
+from kortravelmap.infra.ops_repo import list_ops_import_job_events
 from kortravelmap.infra.pipeline_cancellation_repo import (
     resolve_pipeline_cancellation_scope,
 )
@@ -31,7 +38,12 @@ pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0051_canonical_provider_ops"
 _TARGET_REVISION = "0052_pipeline_projection_access"
-_EXPECTED_INDEX_NAMES = {
+_PRE_REVISION_EVENT_INDEX_NAMES = {
+    "idx_import_job_events_job_time",
+    "idx_import_job_events_provider_time",
+    "idx_import_job_events_level_time",
+}
+_EXPECTED_INDEX_NAMES = _PRE_REVISION_EVENT_INDEX_NAMES | {
     "idx_import_job_events_time",
     "idx_import_job_events_dataset_time",
     "idx_import_job_events_provider_dataset_time",
@@ -47,6 +59,10 @@ _REMOVED_DIRECT_INDEX_NAMES = {
     "idx_feature_update_direct_dataset",
 }
 _INDEX_NAMES = _EXPECTED_INDEX_NAMES | _REMOVED_DIRECT_INDEX_NAMES
+_PRE_REVISION_INDEX_NAMES = {
+    "idx_feature_update_created",
+    *_PRE_REVISION_EVENT_INDEX_NAMES,
+}
 _REQUEST_LIFECYCLE_COLUMNS = {
     "status",
     "dagster_run_id",
@@ -86,6 +102,17 @@ _QUARANTINE_CANCELLATION_ID = "83400000-0000-4000-9000-000000000010"
 _RUNNING_OWNER_REQUEST = "84000000-0000-4000-8000-000000000011"
 _RUNNING_OWNER_JOB = "84000000-0000-4000-9000-000000000011"
 _RUNNING_OWNER_RUN_ID = "legacy-running-owner"
+_EXPECTED_IDENTITY_LOCK_SQL = (
+    "lock table ops.pipeline_cancellations, "
+    "ops.pipeline_cancellation_members, "
+    "ops.pipeline_cancellation_runs, "
+    "ops.feature_update_requests, ops.import_jobs, "
+    "ops.import_job_events in access exclusive mode nowait"
+)
+_EXPECTED_IDENTITY_LOCK_SQL_WITH_CLOCK = _EXPECTED_IDENTITY_LOCK_SQL.replace(
+    " in access exclusive",
+    ", ops.import_job_event_clock in access exclusive",
+)
 
 
 def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
@@ -112,6 +139,24 @@ async def _index_definitions(connection: Any) -> dict[str, str]:
         {"index_names": sorted(_INDEX_NAMES)},
     )
     return {str(row.indexname): str(row.indexdef) for row in rows}
+
+
+def _assert_pre_revision_index_definitions(definitions: dict[str, str]) -> None:
+    assert set(definitions) == _PRE_REVISION_INDEX_NAMES
+    created = definitions["idx_feature_update_created"]
+    assert "(created_at DESC)" in created
+    assert "request_id" not in created
+    assert "(job_id, occurred_at DESC, event_id DESC)" in definitions[
+        "idx_import_job_events_job_time"
+    ]
+    provider = definitions["idx_import_job_events_provider_time"]
+    assert "(provider, occurred_at DESC, event_id DESC)" in provider
+    assert "provider IS NOT NULL" in provider
+    assert "(level, occurred_at DESC, event_id DESC)" in definitions[
+        "idx_import_job_events_level_time"
+    ]
+    for index_name in _PRE_REVISION_EVENT_INDEX_NAMES:
+        assert "quarantined_at" not in definitions[index_name]
 
 
 async def _feature_update_job_index_definition(
@@ -208,6 +253,57 @@ async def _import_job_columns(connection: Any) -> set[str]:
             )
         )
     )
+
+
+async def _import_job_event_columns(connection: Any) -> set[str]:
+    return set(
+        await connection.scalars(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'ops'
+                  AND table_name = 'import_job_events'
+                """
+            )
+        )
+    )
+
+
+async def _import_job_event_clock_row(
+    connection: Any,
+) -> tuple[bool, int, Any] | None:
+    if not bool(
+        await connection.scalar(
+            text("SELECT to_regclass('ops.import_job_event_clock') IS NOT NULL")
+        )
+    ):
+        return None
+    row = (
+        await connection.execute(
+            text(
+                """
+                SELECT clock_id, revision, updated_at
+                FROM ops.import_job_event_clock
+                """
+            )
+        )
+    ).one()
+    return bool(row.clock_id), int(row.revision), row.updated_at
+
+
+async def _import_job_event_clock_constraints(connection: Any) -> dict[str, str]:
+    rows = await connection.execute(
+        text(
+            """
+            SELECT conname, pg_get_constraintdef(oid) AS definition
+            FROM pg_constraint
+            WHERE connamespace = 'ops'::regnamespace
+              AND conrelid = to_regclass('ops.import_job_event_clock')
+            """
+        )
+    )
+    return {str(row.conname): str(row.definition) for row in rows}
 
 
 async def _identity_constraints(connection: Any) -> dict[str, str]:
@@ -343,6 +439,9 @@ async def _identity_triggers(connection: Any) -> set[str]:
                 'trg_import_jobs_feature_update_append_only',
                 'trg_import_jobs_quarantine_immutable',
                 'trg_import_job_events_quarantine_immutable',
+                'trg_import_job_events_clock',
+                'trg_import_job_event_clock_mutation_guard',
+                'trg_import_job_event_clock_truncate_guard',
                 'trg_pipeline_cancellation_members_reject_quarantine'
               )
             """
@@ -507,7 +606,9 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
     try:
         await asyncio.to_thread(_run_alembic, target_dsn, _PRE_REVISION)
         async with target_engine.begin() as connection:
-            assert await _index_definitions(connection) == {}
+            _assert_pre_revision_index_definitions(
+                await _index_definitions(connection)
+            )
             assert await _request_job_contract(connection) == ("YES", "SET NULL")
             assert "WHERE (job_id IS NOT NULL)" in (
                 await _feature_update_job_index_definition(connection)
@@ -517,6 +618,7 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 "providers": ("jsonb", "jsonb", "'[]'::jsonb"),
                 "dataset_keys": ("jsonb", "jsonb", "'[]'::jsonb"),
             }
+            assert await _import_job_event_clock_row(connection) is None
             await connection.execute(
                 text(
                     """
@@ -554,7 +656,9 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                     ),
                     (
                       :shared_source_job, 'feature_update_request', NULL,
-                      jsonb_build_object('request_id', :shared_loser), 'done', NULL, NULL,
+                      jsonb_build_object(
+                        'request_id', CAST(:shared_loser AS text)
+                      ), 'done', NULL, NULL,
                       NULL, 'update_request', NULL, NULL
                     ),
                     (
@@ -603,10 +707,13 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 text(
                     """
                     INSERT INTO ops.import_job_events (
-                      event_id, job_id, level, code, message, payload
+                      event_id, job_id, level, code, message, payload,
+                      occurred_at
                     ) VALUES (
                       :event_id, :job_id, 'info', 'legacy.component.audit',
-                      'quarantine component audit', '{"preserved":true}'::jsonb
+                      'quarantine component audit',
+                      jsonb_build_object('preserved', true),
+                      TIMESTAMPTZ '2099-01-01 00:00:00+00'
                     )
                     """
                 ),
@@ -818,6 +925,11 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
             assert set(definitions) == _EXPECTED_INDEX_NAMES
             assert _REMOVED_DIRECT_INDEX_NAMES.isdisjoint(definitions)
             assert "(occurred_at DESC, event_id DESC)" in definitions["idx_import_job_events_time"]
+            job_audit = definitions["idx_import_job_events_job_time"]
+            assert "(job_id, occurred_at DESC, event_id DESC)" in job_audit
+            provider_audit = definitions["idx_import_job_events_provider_time"]
+            assert "(provider, occurred_at DESC, event_id DESC)" in provider_audit
+            assert "provider IS NOT NULL" in provider_audit
             dataset_audit = definitions["idx_import_job_events_dataset_time"]
             assert "(dataset_key, occurred_at DESC, event_id DESC)" in dataset_audit
             assert "dataset_key IS NOT NULL" in dataset_audit
@@ -825,6 +937,17 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
             assert "(provider, dataset_key, occurred_at DESC, event_id DESC)" in pair_audit
             assert "provider IS NOT NULL" in pair_audit
             assert "dataset_key IS NOT NULL" in pair_audit
+            level_audit = definitions["idx_import_job_events_level_time"]
+            assert "(level, occurred_at DESC, event_id DESC)" in level_audit
+            for index_name in (
+                "idx_import_job_events_time",
+                "idx_import_job_events_job_time",
+                "idx_import_job_events_provider_time",
+                "idx_import_job_events_dataset_time",
+                "idx_import_job_events_provider_dataset_time",
+                "idx_import_job_events_level_time",
+            ):
+                assert "quarantined_at IS NULL" in definitions[index_name]
             assert (
                 "USING gin (providers)"
                 in definitions["idx_feature_update_providers_gin"]
@@ -856,6 +979,7 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
             assert {"quarantined_at", "quarantine_reason"} <= (
                 await _import_job_columns(connection)
             )
+            assert "quarantined_at" in await _import_job_event_columns(connection)
             assert member_columns == {"job_id"}
             assert "PRIMARY KEY (cancellation_id, job_id)" in member_constraints[
                 "pk_pipeline_cancellation_members"
@@ -894,8 +1018,24 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 "trg_import_jobs_feature_update_append_only",
                 "trg_import_jobs_quarantine_immutable",
                 "trg_import_job_events_quarantine_immutable",
+                "trg_import_job_events_clock",
+                "trg_import_job_event_clock_mutation_guard",
+                "trg_import_job_event_clock_truncate_guard",
                 "trg_pipeline_cancellation_members_reject_quarantine",
             }
+            event_clock_before = await _import_job_event_clock_row(connection)
+            assert event_clock_before is not None
+            assert event_clock_before[:2] == (True, 0)
+            event_clock_constraints = await _import_job_event_clock_constraints(connection)
+            assert "PRIMARY KEY (clock_id)" in event_clock_constraints[
+                "pk_import_job_event_clock"
+            ]
+            assert "CHECK (clock_id)" in event_clock_constraints[
+                "ck_import_job_event_clock_singleton"
+            ]
+            assert "revision >= 0" in event_clock_constraints[
+                "ck_import_job_event_clock_revision_nonnegative"
+            ]
             assert await _cancellation_quarantine_guard_function_exists(connection)
             assert await _scope_validator_exists(connection)
             assert await _filter_validator_exists(connection)
@@ -1347,6 +1487,30 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 )
                 for page in pages:
                     assert component_ids.isdisjoint(item.id for item in page.items)
+
+                global_event_ids: set[str] = set()
+                event_cursor: str | None = None
+                while True:
+                    event_page = await list_ops_import_job_events(
+                        session,
+                        limit=100,
+                        cursor=event_cursor,
+                    )
+                    global_event_ids.update(item.event_id for item in event_page.items)
+                    if event_page.next_cursor is None:
+                        break
+                    event_cursor = event_page.next_cursor
+                assert _QUARANTINE_EVENT_ID not in global_event_ids
+
+                quarantined_job_events = await list_ops_import_job_events(
+                    session,
+                    _VALID_ORPHAN_JOB,
+                    limit=100,
+                )
+                assert quarantined_job_events.items == ()
+                live_snapshot = await _import_jobs_snapshot(session)
+                assert live_snapshot["event_clock_revision"] == 0
+                assert live_snapshot["latest_event_id"] != _QUARANTINE_EVENT_ID
                 for job_id in sorted(component_ids):
                     assert (
                         await get_pipeline_execution(
@@ -1382,7 +1546,8 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 await connection.execute(
                     text(
                         """
-                        SELECT event_id, job_id, code, message, payload, occurred_at
+                        SELECT event_id, job_id, code, message, payload,
+                               quarantined_at, occurred_at
                         FROM ops.import_job_events
                         WHERE event_id = :event_id
                         """
@@ -1390,6 +1555,9 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                     {"event_id": _QUARANTINE_EVENT_ID},
                 )
             ).one()
+            assert preserved_event_before.quarantined_at == (
+                quarantined_job_before.quarantined_at
+            )
 
             with pytest.raises(IntegrityError):
                 async with connection.begin_nested():
@@ -1424,7 +1592,7 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
 
             quarantined_updates = (
                 "UPDATE ops.import_jobs "
-                "SET payload = payload || '{\"tampered\":true}'::jsonb "
+                "SET payload = payload || jsonb_build_object('tampered', true) "
                 "WHERE job_id = :job_id",
                 "UPDATE ops.import_jobs SET status = 'failed' WHERE job_id = :job_id",
                 "UPDATE ops.import_jobs SET parent_job_id = :parent_job_id "
@@ -1462,6 +1630,122 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                             """
                         ),
                         {"job_id": _VALID_ORPHAN_JOB},
+                    )
+            with pytest.raises(IntegrityError):
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO ops.import_job_events (
+                              event_id, job_id, level, message, quarantined_at
+                            ) VALUES (
+                              'b2100000-0000-4000-9000-000000000010',
+                              :job_id, 'info', 'runtime marker must fail', now()
+                            )
+                            """
+                        ),
+                        {"job_id": _RESERVED_DIRECT_ROOT_JOB},
+                    )
+            active_event_id = "b2200000-0000-4000-9000-000000000011"
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_job_events (
+                      event_id, job_id, level, message
+                    ) VALUES (
+                      :event_id, :job_id, 'info', 'active event marker guard'
+                    )
+                    """
+                ),
+                {
+                    "event_id": active_event_id,
+                    "job_id": _RESERVED_DIRECT_ROOT_JOB,
+                },
+            )
+            event_clock_after_insert = await _import_job_event_clock_row(connection)
+            assert event_clock_after_insert is not None
+            assert event_clock_after_insert[1] == event_clock_before[1] + 1
+            assert event_clock_after_insert[2] >= event_clock_before[2]
+            with pytest.raises(IntegrityError):
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text("DELETE FROM ops.import_job_event_clock WHERE clock_id")
+                    )
+            for statement in (
+                "UPDATE ops.import_job_event_clock "
+                "SET revision = revision + 1 WHERE clock_id",
+                "TRUNCATE TABLE ops.import_job_event_clock",
+            ):
+                with pytest.raises(IntegrityError):
+                    async with connection.begin_nested():
+                        await connection.execute(text(statement))
+            async def truncate_events_and_force_rollback() -> None:
+                async with connection.begin_nested():
+                    clock_before_truncate = await _import_job_event_clock_row(connection)
+                    await connection.execute(text("TRUNCATE TABLE ops.import_job_events"))
+                    clock_after_truncate = await _import_job_event_clock_row(connection)
+                    assert clock_before_truncate is not None
+                    assert clock_after_truncate is not None
+                    assert clock_after_truncate[1] == clock_before_truncate[1] + 1
+                    raise RuntimeError("force event truncate rollback")
+
+            with pytest.raises(RuntimeError, match="force event truncate rollback"):
+                await truncate_events_and_force_rollback()
+            assert await _import_job_event_clock_row(connection) == event_clock_after_insert
+            rollback_event_id = "b2300000-0000-4000-9000-000000000012"
+
+            async def insert_event_and_force_rollback() -> None:
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO ops.import_job_events (
+                              event_id, job_id, level, message
+                            ) VALUES (
+                              :event_id, :job_id, 'info', 'rollback event clock'
+                            )
+                            """
+                        ),
+                        {
+                            "event_id": rollback_event_id,
+                            "job_id": _RESERVED_DIRECT_ROOT_JOB,
+                        },
+                    )
+                    raise RuntimeError("force event rollback")
+
+            with pytest.raises(RuntimeError, match="force event rollback"):
+                await insert_event_and_force_rollback()
+            assert await _import_job_event_clock_row(connection) == event_clock_after_insert
+            assert not bool(
+                await connection.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM ops.import_job_events WHERE event_id = :event_id"
+                        ")"
+                    ),
+                    {"event_id": rollback_event_id},
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE ops.import_job_events "
+                    "SET message = 'active event clock update' "
+                    "WHERE event_id = :event_id"
+                ),
+                {"event_id": active_event_id},
+            )
+            event_clock_after_update = await _import_job_event_clock_row(connection)
+            assert event_clock_after_update is not None
+            assert event_clock_after_update[1] == event_clock_after_insert[1] + 1
+            with pytest.raises(IntegrityError):
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            "UPDATE ops.import_job_events "
+                            "SET quarantined_at = now() "
+                            "WHERE event_id = :event_id"
+                        ),
+                        {"event_id": active_event_id},
                     )
             for statement in (
                 "UPDATE ops.import_job_events SET message = 'tampered' "
@@ -1656,7 +1940,8 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 await connection.execute(
                     text(
                         """
-                        SELECT event_id, job_id, code, message, payload, occurred_at
+                        SELECT event_id, job_id, code, message, payload,
+                               quarantined_at, occurred_at
                         FROM ops.import_job_events
                         WHERE event_id = :event_id
                         """
@@ -1781,7 +2066,9 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                         text(
                             """
                             UPDATE ops.import_jobs
-                               SET payload = jsonb_build_object('request_id', :request_id)
+                               SET payload = jsonb_build_object(
+                                 'request_id', CAST(:request_id AS text)
+                               )
                              WHERE job_id = :job_id
                             """
                         ),
@@ -2087,7 +2374,9 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
         await asyncio.to_thread(_run_alembic, target_dsn, _PRE_REVISION, downgrade=True)
         target_engine = make_async_engine(target_dsn)
         async with target_engine.begin() as connection:
-            assert await _index_definitions(connection) == {}
+            _assert_pre_revision_index_definitions(
+                await _index_definitions(connection)
+            )
             revision = (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
             ).scalar_one()
@@ -2118,11 +2407,13 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 in legacy_member_index
             )
             restored_request_columns = await _request_columns(connection)
-            assert _REQUEST_LIFECYCLE_COLUMNS <= restored_request_columns
+            assert restored_request_columns >= _REQUEST_LIFECYCLE_COLUMNS
             assert "generation" not in restored_request_columns
             assert {"quarantined_at", "quarantine_reason"}.isdisjoint(
                 await _import_job_columns(connection)
             )
+            assert "quarantined_at" not in await _import_job_event_columns(connection)
+            assert await _import_job_event_clock_row(connection) is None
             assert not await _scope_validator_exists(connection)
             assert not await _filter_validator_exists(connection)
             assert not await _policy_validator_exists(connection)
@@ -2575,7 +2866,9 @@ async def test_pipeline_projection_access_paths_rejects_malformed_direct_scope(
                     )
                 ).scalar_one()
                 assert revision == _PRE_REVISION
-                assert await _index_definitions(connection) == {}
+                _assert_pre_revision_index_definitions(
+                    await _index_definitions(connection)
+                )
                 assert await _request_job_contract(connection) == (
                     "YES",
                     "SET NULL",
@@ -2828,6 +3121,8 @@ async def test_pipeline_projection_access_paths_rejects_malformed_direct_scope(
                     row.sync_scope_type,
                     row.provider,
                     row.dataset_key,
+                    int(row.provider_count),
+                    int(row.dataset_key_count),
                 )
                 for row in await connection.execute(
                     text(
@@ -2840,8 +3135,8 @@ async def test_pipeline_projection_access_paths_rejects_malformed_direct_scope(
                             AS sync_scope_type,
                           job.provider,
                           job.dataset_key,
-                          cardinality(request.providers),
-                          cardinality(request.dataset_keys)
+                          cardinality(request.providers) AS provider_count,
+                          cardinality(request.dataset_keys) AS dataset_key_count
                         FROM ops.feature_update_requests AS request
                         JOIN ops.import_jobs AS job ON job.job_id = request.job_id
                         WHERE request.request_id IN (
@@ -2872,7 +3167,12 @@ async def test_pipeline_projection_access_paths_rejects_malformed_direct_scope(
                     0,
                 ),
             }
-            assert " WHERE " not in (await _feature_update_job_index_definition(connection))
+            assert " WHERE " not in (
+                await _feature_update_job_index_definition(
+                    connection,
+                    index_name="uq_feature_update_requests_job_id",
+                )
+            )
             assert await _dry_run_column_contract(connection) is None
     finally:
         await target_engine.dispose()
@@ -3154,6 +3454,8 @@ async def test_pipeline_projection_rejects_request_linked_orphan_component(
             assert {"quarantined_at", "quarantine_reason"}.isdisjoint(
                 await _import_job_columns(connection)
             )
+            assert "quarantined_at" not in await _import_job_event_columns(connection)
+            assert await _import_job_event_clock_row(connection) is None
             persisted = (
                 await connection.execute(
                     text(
@@ -3215,14 +3517,15 @@ async def test_pipeline_projection_access_paths_merges_request_cancellation_into
                 text(
                     """
                     INSERT INTO ops.feature_update_requests (
-                      request_id, scope_type, scope, run_mode, job_id
+                      request_id, scope_type, scope, run_mode, status,
+                      dagster_run_id, job_id
                     ) VALUES (
                       :request_id, 'bbox',
                       jsonb_build_object(
                         'type', 'bbox', 'min_lon', 126, 'min_lat', 37,
                         'max_lon', 127, 'max_lat', 38
                       ),
-                      'queued', NULL
+                      'queued', 'done', 'canonical-run', NULL
                     )
                     """
                 ),
@@ -4092,10 +4395,18 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
         completed_statements.append(normalized)
         if not normalized.startswith("lock table"):
             return
-        for table_name in ("feature_update_requests", "import_jobs"):
+        for table_name in (
+            "feature_update_requests",
+            "import_jobs",
+            "import_job_events",
+        ):
             if f"ops.{table_name}" in normalized:
                 locked_tables_seen.add(table_name)
-        if locked_tables_seen != {"feature_update_requests", "import_jobs"}:
+        if locked_tables_seen != {
+            "feature_update_requests",
+            "import_jobs",
+            "import_job_events",
+        }:
             return
         driver_connection = connection.connection.driver_connection
         backend_pid = (
@@ -4145,7 +4456,9 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
         identity_statements = [
             statement
             for statement in completed_statements
-            if "ops.feature_update_requests" in statement or "ops.import_jobs" in statement
+            if "ops.feature_update_requests" in statement
+            or "ops.import_jobs" in statement
+            or "ops.import_job_events" in statement
         ]
         assert identity_statements
         assert identity_statements[0].startswith("lock table")
@@ -4165,7 +4478,8 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
                         WHERE lock_row.pid = :migration_pid
                           AND namespace_row.nspname = 'ops'
                           AND relation_row.relname IN (
-                            'feature_update_requests', 'import_jobs'
+                            'feature_update_requests', 'import_jobs',
+                            'import_job_events'
                           )
                         """
                     ),
@@ -4175,6 +4489,7 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
             assert {
                 ("feature_update_requests", "AccessExclusiveLock", True),
                 ("import_jobs", "AccessExclusiveLock", True),
+                ("import_job_events", "AccessExclusiveLock", True),
             } <= held_locks
             revision = (
                 await observer.execute(text("SELECT version_num FROM alembic_version"))
@@ -4262,7 +4577,12 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
             assert revision == _TARGET_REVISION
             assert linked_job_id is not None
             assert concurrent_job_count == 1
-            assert " WHERE " not in (await _feature_update_job_index_definition(connection))
+            assert " WHERE " not in (
+                await _feature_update_job_index_definition(
+                    connection,
+                    index_name="uq_feature_update_requests_job_id",
+                )
+            )
     finally:
         release_lock.set()
         started_tasks = [task for task in (migration_task, writer_task) if task is not None]
@@ -4279,6 +4599,382 @@ async def test_pipeline_projection_access_paths_lock_blocks_concurrent_writer(
             )
         await target_engine.dispose()
         await observer_engine.dispose()
+        await writer_engine.dispose()
+        async with admin_engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+        await admin_engine.dispose()
+
+
+async def test_import_job_event_clock_detects_late_commit_and_rollback(
+    pg_container: Any,
+) -> None:
+    """Top-N 밖 late commit도 clock revision으로 감지하고 rollback은 되돌린다."""
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database = f"pipeline_projection_event_clock_{uuid4().hex}"
+    target_dsn = make_url(admin_dsn).set(database=database).render_as_string(
+        hide_password=False
+    )
+    admin_engine = make_async_engine(admin_dsn)
+    async with admin_engine.connect() as connection:
+        autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+        await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
+
+    job_id = "e1000000-0000-4000-8000-000000000001"
+    target_engine = make_async_engine(target_dsn)
+    old_connection: Any | None = None
+    rollback_connection: Any | None = None
+    try:
+        await asyncio.to_thread(_run_alembic, target_dsn, _TARGET_REVISION)
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_jobs (job_id, kind, payload, status)
+                    VALUES (:job_id, 'event_clock_fixture', '{}'::jsonb, 'running')
+                    """
+                ),
+                {"job_id": job_id},
+            )
+
+        async with AsyncSession(target_engine) as session:
+            empty_job = await _import_job_events_snapshot(session, job_id)
+            empty_global = await _import_jobs_snapshot(session)
+        assert empty_job == {
+            "job_id": job_id,
+            "event_clock_revision": 0,
+            "latest_event_at": None,
+            "recent_events": [],
+        }
+        assert empty_global["event_clock_revision"] == 0
+        assert empty_global["latest_event_id"] is None
+        assert empty_global["latest_event_at"] is None
+
+        old_connection = await target_engine.connect()
+        old_transaction = await old_connection.begin()
+        old_started_at = await old_connection.scalar(text("SELECT now()"))
+        assert old_started_at is not None
+        newer_occurred_at = old_started_at + timedelta(hours=1)
+
+        async with target_engine.begin() as newer:
+            await newer.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_job_events (
+                      event_id, job_id, level, message, occurred_at
+                    )
+                    SELECT
+                      ('e3000000-0000-4000-8000-'
+                        || lpad(seed.n::text, 12, '0'))::uuid,
+                      CAST(:job_id AS uuid), 'info',
+                      'newer event ' || seed.n::text,
+                      CAST(:occurred_at AS timestamptz)
+                    FROM generate_series(1, 6) AS seed(n)
+                    """
+                ),
+                {"job_id": job_id, "occurred_at": newer_occurred_at},
+            )
+
+        async with AsyncSession(target_engine) as session:
+            after_newer_job = await _import_job_events_snapshot(session, job_id)
+            after_newer_global = await _import_jobs_snapshot(session)
+        expected_recent_ids = [
+            f"e3000000-0000-4000-8000-{number:012d}"
+            for number in range(6, 1, -1)
+        ]
+        assert after_newer_job["event_clock_revision"] == 1
+        assert [
+            event_row["event_id"] for event_row in after_newer_job["recent_events"]
+        ] == expected_recent_ids
+        assert after_newer_job["latest_event_at"] == newer_occurred_at.isoformat()
+        assert after_newer_global["event_clock_revision"] == 1
+        assert after_newer_global["latest_event_id"] == expected_recent_ids[0]
+        for event_row in after_newer_job["recent_events"]:
+            assert isinstance(event_row["occurred_at"], str)
+            assert datetime.fromisoformat(event_row["occurred_at"]) == newer_occurred_at
+        live_topics = {"import_jobs", f"import_job_events:{job_id}"}
+        async with AsyncSession(target_engine) as session:
+            snapshots_after_newer = await collect_live_topic_snapshots(
+                session,
+                live_topics,
+            )
+        for snapshot in snapshots_after_newer.values():
+            assert isinstance(json.dumps(snapshot.data), str)
+
+        await old_connection.execute(
+            text(
+                """
+                INSERT INTO ops.import_job_events (
+                  event_id, job_id, level, message
+                ) VALUES (
+                  'e4000000-0000-4000-8000-000000000001',
+                  :job_id, 'warning', 'late committed older event'
+                )
+                """
+            ),
+            {"job_id": job_id},
+        )
+        await old_transaction.commit()
+        await old_connection.close()
+        old_connection = None
+
+        async with AsyncSession(target_engine) as session:
+            after_late_job = await _import_job_events_snapshot(session, job_id)
+            after_late_global = await _import_jobs_snapshot(session)
+        assert after_late_job["event_clock_revision"] == 2
+        assert [
+            event_row["event_id"] for event_row in after_late_job["recent_events"]
+        ] == expected_recent_ids
+        assert after_late_global["event_clock_revision"] == 2
+        assert after_late_global["latest_event_id"] == expected_recent_ids[0]
+        async with AsyncSession(target_engine) as session:
+            snapshots_after_late = await collect_live_topic_snapshots(
+                session,
+                live_topics,
+            )
+        for topic in live_topics:
+            assert (
+                snapshots_after_late[topic].revision
+                != snapshots_after_newer[topic].revision
+            )
+            assert isinstance(json.dumps(snapshots_after_late[topic].data), str)
+        assert [
+            event_row["event_id"]
+            for event_row in snapshots_after_late[
+                f"import_job_events:{job_id}"
+            ].data["recent_events"]
+        ] == expected_recent_ids
+
+        rollback_connection = await target_engine.connect()
+        rollback_transaction = await rollback_connection.begin()
+        await rollback_connection.execute(
+            text(
+                """
+                INSERT INTO ops.import_job_events (
+                  event_id, job_id, level, message
+                ) VALUES (
+                  'e5000000-0000-4000-8000-000000000001',
+                  :job_id, 'info', 'rolled back event'
+                )
+                """
+            ),
+            {"job_id": job_id},
+        )
+        assert int(
+            await rollback_connection.scalar(
+                text("SELECT revision FROM ops.import_job_event_clock WHERE clock_id")
+            )
+        ) == 3
+        await rollback_transaction.rollback()
+        await rollback_connection.close()
+        rollback_connection = None
+
+        async with AsyncSession(target_engine) as session:
+            after_rollback = await _import_job_events_snapshot(session, job_id)
+        assert after_rollback["event_clock_revision"] == 2
+        assert [
+            event_row["event_id"] for event_row in after_rollback["recent_events"]
+        ] == expected_recent_ids
+
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM ops.import_jobs WHERE job_id = :job_id"),
+                {"job_id": job_id},
+            )
+        async with AsyncSession(target_engine) as session:
+            after_last_job_delete = await _import_jobs_snapshot(session)
+        assert after_last_job_delete["event_clock_revision"] == 3
+        assert after_last_job_delete["latest_event_id"] is None
+        assert after_last_job_delete["latest_event_at"] is None
+        assert after_last_job_delete["counts_by_status"] == {}
+        assert after_last_job_delete["active_jobs"] == []
+        assert after_last_job_delete["latest_job_created_at"] is None
+    finally:
+        if old_connection is not None:
+            await old_connection.close()
+        if rollback_connection is not None:
+            await rollback_connection.close()
+        await target_engine.dispose()
+        async with admin_engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+        await admin_engine.dispose()
+
+
+async def test_pipeline_projection_lock_retry_allows_event_reader(
+    pg_container: Any,
+) -> None:
+    """event/clock reader 경합 때 migration은 앞선 job lock을 남기지 않는다."""
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database = f"pipeline_projection_event_lock_{uuid4().hex}"
+    target_dsn = make_url(admin_dsn).set(database=database).render_as_string(
+        hide_password=False
+    )
+    admin_engine = make_async_engine(admin_dsn)
+    async with admin_engine.connect() as connection:
+        autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+        await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
+
+    writer_job_id = "e2000000-0000-4000-8000-000000000002"
+    downgrade_writer_job_id = "e2100000-0000-4000-8000-000000000003"
+    target_engine = make_async_engine(target_dsn)
+    reader_engine = make_async_engine(target_dsn)
+    writer_engine = make_async_engine(target_dsn)
+    migration_retried = ThreadEvent()
+    migration_lock_attempts: list[int] = []
+    migration_task: asyncio.Task[None] | None = None
+    listener_installed = False
+
+    def _capture_migration_lock_attempt(
+        connection: Any,
+        _cursor: Any,
+        statement: str,
+        _parameters: Any,
+        _context: Any,
+        _executemany: bool,
+    ) -> None:
+        if connection.engine.url.database != database:
+            return
+        normalized = " ".join(statement.lower().replace('"', "").split())
+        if normalized not in {
+            _EXPECTED_IDENTITY_LOCK_SQL,
+            _EXPECTED_IDENTITY_LOCK_SQL_WITH_CLOCK,
+        }:
+            return
+        migration_lock_attempts.append(1)
+        if len(migration_lock_attempts) >= 2:
+            migration_retried.set()
+
+    try:
+        await asyncio.to_thread(_run_alembic, target_dsn, _PRE_REVISION)
+        await target_engine.dispose()
+        event.listen(Engine, "before_cursor_execute", _capture_migration_lock_attempt)
+        listener_installed = True
+
+        async with reader_engine.begin() as reader:
+            await reader.execute(text("SELECT count(*) FROM ops.import_job_events"))
+            migration_task = asyncio.create_task(
+                asyncio.to_thread(_run_alembic, target_dsn, _TARGET_REVISION)
+            )
+            assert await asyncio.to_thread(migration_retried.wait, 10)
+            assert len(migration_lock_attempts) >= 2
+            assert migration_task is not None
+            assert not migration_task.done()
+
+            async with writer_engine.begin() as writer:
+                await writer.execute(text("SET LOCAL lock_timeout = '5s'"))
+                await writer.execute(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          job_id, kind, payload, status
+                        ) VALUES (
+                          :job_id, 'event_lock_concurrent_writer',
+                          '{}'::jsonb, 'queued'
+                        )
+                        """
+                    ),
+                    {"job_id": writer_job_id},
+                )
+
+            assert not migration_task.done()
+
+        assert migration_task is not None
+        await asyncio.wait_for(migration_task, timeout=30)
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.connect() as connection:
+            revision, writer_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT version.version_num, count(job.job_id)
+                        FROM alembic_version AS version
+                        LEFT JOIN ops.import_jobs AS job
+                          ON job.job_id = CAST(:job_id AS uuid)
+                        GROUP BY version.version_num
+                        """
+                    ),
+                    {"job_id": writer_job_id},
+                )
+            ).one()
+            assert revision == _TARGET_REVISION
+            assert writer_count == 1
+
+        migration_task = None
+        migration_lock_attempts.clear()
+        migration_retried.clear()
+        async with reader_engine.begin() as reader:
+            await reader.execute(
+                text("SELECT revision FROM ops.import_job_event_clock WHERE clock_id")
+            )
+            migration_task = asyncio.create_task(
+                asyncio.to_thread(
+                    _run_alembic,
+                    target_dsn,
+                    _PRE_REVISION,
+                    downgrade=True,
+                )
+            )
+            assert await asyncio.to_thread(migration_retried.wait, 10)
+            assert len(migration_lock_attempts) >= 2
+            assert not migration_task.done()
+
+            async with writer_engine.begin() as writer:
+                await writer.execute(text("SET LOCAL lock_timeout = '5s'"))
+                await writer.execute(
+                    text(
+                        """
+                        INSERT INTO ops.import_jobs (
+                          job_id, kind, payload, status
+                        ) VALUES (
+                          :job_id, 'clock_lock_concurrent_writer',
+                          '{}'::jsonb, 'queued'
+                        )
+                        """
+                    ),
+                    {"job_id": downgrade_writer_job_id},
+                )
+
+            assert not migration_task.done()
+
+        await asyncio.wait_for(migration_task, timeout=30)
+        async with target_engine.connect() as connection:
+            revision, writer_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT version.version_num, count(job.job_id)
+                        FROM alembic_version AS version
+                        LEFT JOIN ops.import_jobs AS job
+                          ON job.job_id IN (
+                            CAST(:upgrade_job_id AS uuid),
+                            CAST(:downgrade_job_id AS uuid)
+                          )
+                        GROUP BY version.version_num
+                        """
+                    ),
+                    {
+                        "upgrade_job_id": writer_job_id,
+                        "downgrade_job_id": downgrade_writer_job_id,
+                    },
+                )
+            ).one()
+            assert revision == _PRE_REVISION
+            assert writer_count == 2
+    finally:
+        if migration_task is not None:
+            await asyncio.wait_for(
+                asyncio.gather(migration_task, return_exceptions=True),
+                timeout=30,
+            )
+        if listener_installed:
+            event.remove(
+                Engine,
+                "before_cursor_execute",
+                _capture_migration_lock_attempt,
+            )
+        await target_engine.dispose()
+        await reader_engine.dispose()
         await writer_engine.dispose()
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
@@ -4320,13 +5016,10 @@ async def test_pipeline_projection_lock_retry_allows_cancellation_writer(
         if connection.engine.url.database != database:
             return
         normalized = " ".join(statement.lower().replace('"', "").split())
-        if normalized != (
-            "lock table ops.pipeline_cancellations, "
-            "ops.pipeline_cancellation_members, "
-            "ops.pipeline_cancellation_runs, "
-            "ops.feature_update_requests, ops.import_jobs "
-            "in access exclusive mode nowait"
-        ):
+        if normalized not in {
+            _EXPECTED_IDENTITY_LOCK_SQL,
+            _EXPECTED_IDENTITY_LOCK_SQL_WITH_CLOCK,
+        }:
             return
         driver_connection = connection.connection.driver_connection
         backend_pid = (
@@ -4397,6 +5090,20 @@ async def test_pipeline_projection_lock_retry_allows_cancellation_writer(
             )
             await writer.execute(
                 text(
+                    """
+                    INSERT INTO ops.pipeline_cancellation_members (
+                      cancellation_id, member_kind, member_id,
+                      initial_status, result
+                    ) VALUES (
+                      :cancellation_id, 'import_job', :job_id,
+                      'queued', 'pending'
+                    )
+                    """
+                ),
+                {"cancellation_id": cancellation_id, "job_id": job_id},
+            )
+            await writer.execute(
+                text(
                     "SELECT cancellation_id FROM ops.pipeline_cancellations "
                     "WHERE cancellation_id = :cancellation_id FOR UPDATE"
                 ),
@@ -4409,7 +5116,8 @@ async def test_pipeline_projection_lock_retry_allows_cancellation_writer(
             assert await asyncio.to_thread(migration_retried.wait, 10)
             assert migration_backend_pid
             assert len(migration_lock_attempts) >= 2
-            assert migration_task is not None and not migration_task.done()
+            assert migration_task is not None
+            assert not migration_task.done()
 
             job_rows = (
                 await writer.execute(
@@ -4483,13 +5191,10 @@ async def test_pipeline_projection_lock_retry_allows_enqueue_writer(
         if connection.engine.url.database != database:
             return
         normalized = " ".join(statement.lower().replace('"', "").split())
-        if normalized != (
-            "lock table ops.pipeline_cancellations, "
-            "ops.pipeline_cancellation_members, "
-            "ops.pipeline_cancellation_runs, "
-            "ops.feature_update_requests, ops.import_jobs "
-            "in access exclusive mode nowait"
-        ):
+        if normalized not in {
+            _EXPECTED_IDENTITY_LOCK_SQL,
+            _EXPECTED_IDENTITY_LOCK_SQL_WITH_CLOCK,
+        }:
             return
         migration_lock_attempts.append(1)
         if len(migration_lock_attempts) >= 2:
@@ -4523,7 +5228,8 @@ async def test_pipeline_projection_lock_retry_allows_enqueue_writer(
             )
             assert await asyncio.to_thread(migration_retried.wait, 10)
             assert len(migration_lock_attempts) >= 2
-            assert migration_task is not None and not migration_task.done()
+            assert migration_task is not None
+            assert not migration_task.done()
 
             await writer.execute(
                 text(
@@ -4613,7 +5319,7 @@ async def test_pipeline_projection_lock_retry_allows_enqueue_writer(
             assert str(linked_job_id) == job_id
             request_columns = await _request_columns(connection)
             assert "generation" not in request_columns
-            assert _REQUEST_LIFECYCLE_COLUMNS <= request_columns
+            assert request_columns >= _REQUEST_LIFECYCLE_COLUMNS
     finally:
         if migration_task is not None:
             await asyncio.wait_for(

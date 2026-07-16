@@ -1105,7 +1105,7 @@ async def _seed_selective_projection_cardinality(
                 'projection_exact_axis_noise', '{}'::jsonb, 'queued',
                 'typed-provider',
                 'typed-other-dataset-' || seed.n::text,
-                CAST(:created_at AS timestamptz)
+                'update_request', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 2000) AS seed(n)
 
             UNION ALL
@@ -1118,7 +1118,7 @@ async def _seed_selective_projection_cardinality(
                 'projection_exact_axis_noise', '{}'::jsonb, 'queued',
                 'typed-other-provider-' || seed.n::text,
                 'typed-dataset',
-                CAST(:created_at AS timestamptz)
+                'update_request', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 2000) AS seed(n)
             """
         ),

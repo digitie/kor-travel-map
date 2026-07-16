@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C3e-A2` — 공용 root/exact-pair projection·batch query (agent A)
   - [ ] `T-ADM-C3e-B` — Dagster tracking registry·wrapper·run status sensor (agent B)
   - [ ] `T-ADM-C3e-C` — datasets REST/OpenAPI/admin types canonical 소비 (agent A)
   - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
@@ -38,24 +37,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C3e-A2` — **공용 root/exact-pair projection** (agent **A**, 의존 C3e-A1):
-  C3b lineage CTE를 확장해 pipeline/grid/detail이 같은 deterministic pair member/status를
-  쓰고 전 dataset latest batch query와 pair/dataset-only EXPLAIN을 구현한다. feature run
-  projected job은 root로 고정하고 pipeline overview를 canonical `operations_by_status`/
-  `active_operations`/`failed_operations_24h`로 원자 전환한다. 이 PR이 overview router/schema와 OpenAPI/admin generated
-  type, nullable `dagster_run_status`와 authoritative engine 시각까지 함께 바꿔 독립 CI를
-  green으로 유지한다. provider/dataset 선택 목록과 UUID 상세는 indexed identity/member에서
-  connected component와 관련 request를 먼저 좁히며, production-like EXPLAIN에서 전체 import
-  job/request scan과 event relation 접근을 금지한다. import 실행 identity는 typed job column만
-  정본이며 event는 감사 전용이다. pair/unpaired writer를 별도 함수로 fail-closed하고 무필터·
-  dataset-only·exact pair event 감사 조회에는 고정-clause SQL과 각 시간순 index를 둔다.
-  request는 canonical job FK를 `NOT NULL/RESTRICT`로 소유하며 DB trigger가
-  `kind=feature_update_request`, direct scope와 typed pair의 일치, non-direct unpaired shape,
-  import kind/pair identity 불변성을 강제한다. provider/dataset 필터는 JSONB에서 typed
-  `TEXT[]`로 전환하고 DB와 Python에서 1차원·중복 없음·32/64개·trimmed non-empty 문자열 규칙을 동일하게
-  강제한다. 6종 scope는
-  OpenAPI/main-library/DB가 같은 canonical validator 계약을 사용하고 persisted dry-run 없이
-  201 생성과 200 preview endpoint를 분리한다.
 - [ ] `T-ADM-C3e-B` — **Dagster canonical tracking** (agent **B**, 의존 C3e-A1,
   C3e-A2와 병렬): 모든 public feature-load wrapper와 KMA/MCST를 immutable registry에 연결하고
   definition trigger tag 오분류를 제거한다. event-backed QUEUED/STARTING/STARTED/CANCELING 각 sensor가
@@ -117,7 +98,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트.
 
-현재 codex 실행 순서는 사용자 지시로 **C3e-D/A1/A2/B/C/I → C45X·C4R 차단 계약 → 기존
+현재 codex 실행 순서는 사용자 지시로 **C3e-B/C/I → C45X·C4R 차단 계약 → 기존
 C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
 worktree의 C45X/C4R 구현이 정본이다. C3e 종료 뒤 해당 worktree와 PR을 가져와 적대적 상세 리뷰
 후 개선을 반영한다. C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다.

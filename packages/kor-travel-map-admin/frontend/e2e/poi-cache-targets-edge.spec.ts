@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 
 /**
  * `/admin/poi-cache-targets` (`poi-cache-targets-client.tsx`) — route-mocked
@@ -109,7 +110,7 @@ async function routeListAndUpsert(
   page: Page,
   handlers: {
     onGet: (route: Route, url: URL) => Promise<void>;
-    onPut?: (route: Route, url: URL) => Promise<void>;
+    onPut?: (route: Route, apiPath: string) => Promise<void>;
   },
 ) {
   await page.route("**/admin/poi-cache-targets**", async (route) => {
@@ -128,18 +129,19 @@ async function routeListAndUpsert(
       await route.continue();
       return;
     }
-    if (request.method() === "GET" && url.pathname === LIST_PATH) {
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "GET" && apiPath === LIST_PATH) {
       await handlers.onGet(route, url);
       return;
     }
-    if (request.method() === "PUT" && url.pathname === UPSERT_PATH) {
+    if (request.method() === "PUT" && apiPath === UPSERT_PATH) {
       if (handlers.onPut) {
-        await handlers.onPut(route, url);
+        await handlers.onPut(route, apiPath);
         return;
       }
     }
     throw new Error(
-      `Unhandled POI cache target route: ${request.method()} ${url.pathname}`,
+      `Unhandled POI cache target route: ${request.method()} ${apiPath}`,
     );
   });
 }
@@ -309,7 +311,15 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     let nearbyExternal: string | null = null;
     let nearbyTargetKey: string | null = null;
     await page.route("**/v1/features/nearby/by-target**", async (route) => {
-      const url = new URL(route.request().url());
+      const request = route.request();
+      const url = new URL(request.url());
+      const apiPath = bffApiPath(request.url());
+      if (
+        request.method() !== "GET" ||
+        apiPath !== "/v1/features/nearby/by-target"
+      ) {
+        throw new Error(`Unhandled nearby route: ${request.method()} ${apiPath}`);
+      }
       nearbyExternal = url.searchParams.get("external_system");
       nearbyTargetKey = url.searchParams.get("target_key");
       await fulfillJson(route, { detail: "nope" }, 500);
@@ -361,10 +371,10 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
           ),
         );
       },
-      onPut: async (route, url) => {
+      onPut: async (route, apiPath) => {
         upsertCount += 1;
         // external_system 기본 'external-app', target_key path-encoded.
-        expect(url.pathname).toBe(UPSERT_PATH);
+        expect(apiPath).toBe(UPSERT_PATH);
         // scope_mode select가 sigungu_by_radius로 전달 + on_conflict는 하드코딩 'move'.
         expect(route.request().postDataJSON()).toMatchObject({
           coord: { lon: 126.978, lat: 37.5665 },
@@ -389,11 +399,13 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
 
     await page.goto("/admin/poi-cache-targets");
 
-    await page.getByLabel("target key").fill("mock-target-1");
-    await page.getByLabel("target name").fill("Sigungu target");
+    await page.getByRole("textbox", { name: "대상 키", exact: true }).fill("mock-target-1");
+    await page.getByRole("textbox", { name: "이름", exact: true }).fill("Sigungu target");
     // lon/lat/radius km는 기본값(126.9780 / 37.5665 / 5) 유지.
     // FormSelect(NativeSelect)에서 'sigungu_by_radius' 옵션 선택.
-    await page.getByLabel("scope mode").selectOption("sigungu_by_radius");
+    await page
+      .getByRole("combobox", { name: "대상 범위", exact: true })
+      .selectOption("sigungu_by_radius");
 
     await page.getByRole("button", { name: "저장" }).click();
 

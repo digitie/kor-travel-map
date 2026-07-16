@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -81,10 +81,6 @@ async def committed_running_job(
                     {"job_id": job_id},
                 )
             )
-            await session.execute(
-                text("DELETE FROM ops.import_jobs WHERE job_id=CAST(:job_id AS uuid)"),
-                {"job_id": job_id},
-            )
             if cancellation_ids:
                 await session.execute(
                     text(
@@ -107,6 +103,19 @@ async def committed_running_job(
                     ),
                     {"ids": cancellation_ids},
                 )
+                await session.execute(
+                    text(
+                        "UPDATE ops.pipeline_cancellations "
+                        "SET previous_cancellation_id=NULL "
+                        "WHERE cancellation_id=ANY(CAST(:ids AS uuid[]))"
+                    ),
+                    {"ids": cancellation_ids},
+                )
+            await session.execute(
+                text("DELETE FROM ops.import_jobs WHERE job_id=CAST(:job_id AS uuid)"),
+                {"job_id": job_id},
+            )
+            if cancellation_ids:
                 await session.execute(
                     text(
                         "DELETE FROM ops.pipeline_cancellations "
@@ -700,7 +709,7 @@ async def test_orphan_reserved_attempt_polls_without_second_mutation(
             reason="resume orphan",
         )
 
-    assert result.cancellation_id == attempt.attempt.cancellation_id
+    assert result.cancellation_id == UUID(attempt.attempt.cancellation_id)
     assert result.status == "completed"
     assert calls == {"status": 2, "terminate": 0}
 
@@ -743,7 +752,7 @@ async def test_partial_run_failure_resumes_member_copy_without_dagster_call(
             )
 
     assert raised.value.detail is not None
-    assert raised.value.detail.cancellation_id == attempt.attempt.cancellation_id
+    assert raised.value.detail.cancellation_id == UUID(attempt.attempt.cancellation_id)
     assert raised.value.detail.status == "retryable"
     assert raised.value.detail.members[0].error is not None
     assert raised.value.detail.members[0].error.code == "DAGSTER_UNAVAILABLE"
@@ -793,7 +802,7 @@ async def test_partial_finish_resume_completes_without_external_call(
             reason=None,
         )
 
-    assert result.cancellation_id == attempt.attempt.cancellation_id
+    assert result.cancellation_id == UUID(attempt.attempt.cancellation_id)
     assert result.status == "completed"
 
 
@@ -966,6 +975,13 @@ async def test_shared_and_multi_run_hierarchy_dispatches_once_per_run(
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
             await cleanup.execute(
                 text(
+                    "DELETE FROM ops.pipeline_cancellation_members "
+                    "WHERE job_id=ANY(CAST(:ids AS uuid[]))"
+                ),
+                {"ids": [grandchild_id, child_id]},
+            )
+            await cleanup.execute(
+                text(
                     "DELETE FROM ops.import_jobs "
                     "WHERE job_id=ANY(CAST(:ids AS uuid[]))"
                 ),
@@ -1025,7 +1041,7 @@ async def test_definitive_terminate_http_failure_exposes_reloaded_5xx_detail(
     async with AsyncSession(migrated_engine) as probe:
         stored = await get_pipeline_cancellation_detail(
             probe,
-            raised.value.detail.cancellation_id,
+            str(raised.value.detail.cancellation_id),
         )
     assert stored is not None
     assert stored.attempt.status == "retryable"
@@ -1341,7 +1357,9 @@ async def test_ownership_loss_prefers_canonical_current_over_exact_old_attempt(
         )
 
     assert raised.value.detail is not None
-    assert raised.value.detail.cancellation_id == current.attempt.cancellation_id
+    assert raised.value.detail.cancellation_id == UUID(
+        current.attempt.cancellation_id
+    )
 
 
 async def test_unexpected_service_close_keeps_pending_facts(
@@ -1639,7 +1657,7 @@ async def test_resolve_to_lease_root_drift_retries_before_attempt_mutation(
             reason=None,
         )
 
-    assert result.root.id == actual_scope.root_id
+    assert result.root.id == UUID(actual_scope.root_id)
     assert result.status == "completed"
     assert resolve_calls == 4
     assert mutation_calls == 1
@@ -1738,10 +1756,6 @@ async def test_different_roots_coordinate_independently(
                     {"job_id": second_job_id},
                 )
             )
-            await cleanup.execute(
-                text("DELETE FROM ops.import_jobs WHERE job_id=CAST(:job_id AS uuid)"),
-                {"job_id": second_job_id},
-            )
             if cancellation_ids:
                 await cleanup.execute(
                     text(
@@ -1764,6 +1778,11 @@ async def test_different_roots_coordinate_independently(
                     ),
                     {"ids": cancellation_ids},
                 )
+            await cleanup.execute(
+                text("DELETE FROM ops.import_jobs WHERE job_id=CAST(:job_id AS uuid)"),
+                {"job_id": second_job_id},
+            )
+            if cancellation_ids:
                 await cleanup.execute(
                     text(
                         "DELETE FROM ops.pipeline_cancellations "

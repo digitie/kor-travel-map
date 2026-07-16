@@ -45,6 +45,9 @@
 - **ADDED**: 무필터·dataset-only·exact pair import job event 감사 조회에 각 시간순 index와
   고정-clause query shape를 추가했다. projection용 event identity index와 runtime event fallback은
   제거했다. direct scope JSON expression index도 typed job index로 통합했다.
+- **ADDED**: import job event에 직접 격리 marker를 저장하고 visible event 전용 부분 index 여섯
+  개를 사용한다. statement-level singleton event clock은 event DML·TRUNCATE commit마다 revision을
+  한 번 증가시켜 late commit과 zero-job snapshot도 WebSocket invalidation에서 누락하지 않는다.
 
 ### canonical provider operation 영속화 (2026-07-15, ADR-064 T-ADM-C3e-A1)
 

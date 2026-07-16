@@ -18,7 +18,8 @@ from sqlalchemy import text
 
 from kortravelmap.core.feature_operation import FeatureOperationInvariantConflict
 from kortravelmap.infra.advisory_lock import advisory_lock
-from kortravelmap.infra.feature_update_repo import (
+from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 대상 SQL
+    _LIST_PROVIDER_DATASET_REQUESTS_SQL,
     FEATURE_UPDATE_JOB_KIND,
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
@@ -38,18 +39,15 @@ from kortravelmap.infra.feature_update_repo import (
     set_update_request_matched_scope,
     start_update_request,
 )
-from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 대상 SQL
-    _LIST_PROVIDER_DATASET_REQUESTS_SQL,
-)
-from kortravelmap.infra.pipeline_cancellation_repo import (
-    create_pipeline_cancellation_attempt,
-    resolve_pipeline_cancellation_scope,
-)
 from kortravelmap.infra.jobs_repo import (
     claim_next_import_job,
     enqueue_unpaired_import_job,
     heartbeat_import_job,
     recover_stale_running_jobs,
+)
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    create_pipeline_cancellation_attempt,
+    resolve_pipeline_cancellation_scope,
 )
 
 if TYPE_CHECKING:
@@ -375,16 +373,22 @@ async def test_generic_job_lifecycle_cannot_claim_or_mutate_feature_update_job(
         progress=20,
         current_stage="provider-refresh",
     )
-    event_code = (
+    heartbeat_events = (
         await migrated_session.execute(
             text(
-                "SELECT code FROM ops.import_job_events "
-                "WHERE job_id = :job_id ORDER BY occurred_at DESC, event_id DESC LIMIT 1"
+                "SELECT code, stage, payload FROM ops.import_job_events "
+                "WHERE job_id = :job_id AND code = 'job.heartbeat'"
             ),
             {"job_id": request.job_id},
         )
-    ).scalar_one()
-    assert event_code == "job.heartbeat"
+    ).mappings().all()
+    assert len(heartbeat_events) == 1
+    heartbeat_event = heartbeat_events[0]
+    assert heartbeat_event["stage"] == "provider-refresh"
+    assert _json_obj(heartbeat_event["payload"]) == {
+        "status": "running",
+        "progress": 20,
+    }
 
 
 async def test_peek_next_update_request_does_not_claim(

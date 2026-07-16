@@ -10,7 +10,7 @@ from kortravelmap.api import feature_update_service
 
 __all__ = ["LOCK_CONFLICT_RESPONSE", "to_http_exception"]
 
-LOCK_CONFLICT_RESPONSE: Final[dict[int, dict[str, Any]]] = {
+LOCK_CONFLICT_RESPONSE: Final[dict[int | str, dict[str, Any]]] = {
     409: {
         "description": "동일 scope 즉시 실행 lock 경합",
         "headers": {

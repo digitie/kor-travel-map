@@ -191,34 +191,54 @@ active_jobs AS (
     LIMIT 20
   ) j
 ),
+event_clock AS (
+  SELECT COALESCE(MAX(revision), 0)::bigint AS event_clock_revision
+  FROM ops.import_job_event_clock
+  WHERE clock_id
+),
 event_stats AS (
-  SELECT COUNT(*)::int AS events_total, MAX(occurred_at) AS latest_event_at
-  FROM ops.import_job_events AS event
-  JOIN ops.import_jobs AS event_job ON event_job.job_id = event.job_id
-  WHERE event_job.quarantined_at IS NULL
+  SELECT
+    MAX(latest.event_id::text) AS latest_event_id,
+    MAX(latest.occurred_at) AS latest_event_at
+  FROM (
+    SELECT event_id, occurred_at
+    FROM ops.import_job_events AS event
+    WHERE event.quarantined_at IS NULL
+    ORDER BY occurred_at DESC, event_id DESC
+    LIMIT 1
+  ) AS latest
+),
+job_stats AS (
+  SELECT
+    MAX(created_at) AS latest_job_created_at,
+    MAX(heartbeat_at) AS latest_job_heartbeat_at,
+    MAX(finished_at) AS latest_job_finished_at
+  FROM ops.import_jobs
+  WHERE quarantined_at IS NULL
 )
 SELECT
   status_counts.counts_by_status,
   active_jobs.active_jobs,
-  event_stats.events_total,
+  event_clock.event_clock_revision,
+  event_stats.latest_event_id,
   event_stats.latest_event_at,
-  MAX(ops.import_jobs.created_at) AS latest_job_created_at,
-  MAX(ops.import_jobs.heartbeat_at) AS latest_job_heartbeat_at,
-  MAX(ops.import_jobs.finished_at) AS latest_job_finished_at
-FROM ops.import_jobs
-CROSS JOIN status_counts
+  job_stats.latest_job_created_at,
+  job_stats.latest_job_heartbeat_at,
+  job_stats.latest_job_finished_at
+FROM status_counts
 CROSS JOIN active_jobs
+CROSS JOIN event_clock
 CROSS JOIN event_stats
-WHERE ops.import_jobs.quarantined_at IS NULL
-GROUP BY
-  status_counts.counts_by_status,
-  active_jobs.active_jobs,
-  event_stats.events_total,
-  event_stats.latest_event_at
+CROSS JOIN job_stats
 """
 
 _IMPORT_JOB_EVENTS_LIVE_SQL: Final[str] = """
-WITH recent AS (
+WITH event_clock AS (
+  SELECT COALESCE(MAX(revision), 0)::bigint AS event_clock_revision
+  FROM ops.import_job_event_clock
+  WHERE clock_id
+),
+recent AS (
   SELECT
     event_id::text AS event_id,
     level,
@@ -226,31 +246,22 @@ WITH recent AS (
     message,
     stage,
     occurred_at
-  FROM ops.import_job_events
-  WHERE job_id = CAST(:job_id AS uuid)
-    AND EXISTS (
-      SELECT 1
-      FROM ops.import_jobs AS job
-      WHERE job.job_id = ops.import_job_events.job_id
-        AND job.quarantined_at IS NULL
-    )
-  ORDER BY occurred_at DESC, event_id DESC
+  FROM ops.import_job_events AS event
+  WHERE event.job_id = CAST(:job_id AS uuid)
+    AND event.quarantined_at IS NULL
+  ORDER BY event.occurred_at DESC, event.event_id DESC
   LIMIT 5
 )
 SELECT
-  COUNT(e.event_id)::int AS events_total,
-  MAX(e.occurred_at) AS latest_event_at,
-  COALESCE(jsonb_agg(to_jsonb(recent) ORDER BY recent.occurred_at DESC)
-    FILTER (WHERE recent.event_id IS NOT NULL), '[]'::jsonb) AS recent_events
-FROM ops.import_job_events e
-LEFT JOIN recent ON recent.event_id = e.event_id::text
-WHERE e.job_id = CAST(:job_id AS uuid)
-  AND EXISTS (
-    SELECT 1
-    FROM ops.import_jobs AS job
-    WHERE job.job_id = e.job_id
-      AND job.quarantined_at IS NULL
+  event_clock.event_clock_revision,
+  MAX(recent.occurred_at) AS latest_event_at,
+  COALESCE(jsonb_agg(
+    to_jsonb(recent) ORDER BY recent.occurred_at DESC, recent.event_id DESC
   )
+    FILTER (WHERE recent.event_id IS NOT NULL), '[]'::jsonb) AS recent_events
+FROM event_clock
+LEFT JOIN recent ON TRUE
+GROUP BY event_clock.event_clock_revision
 """
 
 _FEATURE_UPDATE_REQUESTS_LIVE_SQL: Final[str] = """
@@ -450,7 +461,8 @@ async def _import_jobs_snapshot(session: AsyncSession) -> dict[str, Any]:
     return {
         "counts_by_status": _json_dict(row.get("counts_by_status")),
         "active_jobs": _json_list(row.get("active_jobs")),
-        "events_total": int(row.get("events_total") or 0),
+        "event_clock_revision": int(row.get("event_clock_revision") or 0),
+        "latest_event_id": row.get("latest_event_id"),
         "latest_event_at": _iso(row.get("latest_event_at")),
         "latest_job_created_at": _iso(row.get("latest_job_created_at")),
         "latest_job_heartbeat_at": _iso(row.get("latest_job_heartbeat_at")),
@@ -483,7 +495,7 @@ async def _import_job_events_snapshot(session: AsyncSession, job_id: str) -> dic
     row = await _row_mapping(session, _IMPORT_JOB_EVENTS_LIVE_SQL, {"job_id": job_id})
     return {
         "job_id": job_id,
-        "events_total": int(row.get("events_total") or 0),
+        "event_clock_revision": int(row.get("event_clock_revision") or 0),
         "latest_event_at": _iso(row.get("latest_event_at")),
         "recent_events": _json_list(row.get("recent_events")),
     }

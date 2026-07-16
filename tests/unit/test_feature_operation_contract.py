@@ -86,7 +86,7 @@ def test_generic_writer_sql_excludes_reserved_feature_kinds() -> None:
         jobs_repo._CANCEL_SQL,
         jobs_repo._RECOVER_STALE_SQL,
     )
-    assert jobs_repo._GENERIC_IMPORT_RESERVED_KINDS == frozenset(_RESERVED_JOB_KINDS)
+    assert frozenset(_RESERVED_JOB_KINDS) == jobs_repo._GENERIC_IMPORT_RESERVED_KINDS
     assert all(
         all(f"'{kind}'" in statement for kind in _RESERVED_JOB_KINDS)
         for statement in lifecycle_sql
