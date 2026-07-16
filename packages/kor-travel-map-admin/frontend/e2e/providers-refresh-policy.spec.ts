@@ -231,7 +231,7 @@ async function mockPolicyUpsert(page: Page) {
             burst_size: body.burst_size ?? null,
             config_source: body.config_source,
             enabled: body.enabled,
-            rate_limit_source: body.rate_limit_source ?? {},
+            rate_limit_source: {},
             stale_after_minutes: body.stale_after_minutes ?? null,
           }),
         ),
@@ -286,6 +286,13 @@ test.describe("/ops/providers refresh policy depth", () => {
     await expect(page.getByLabel("최대 동시 실행", { exact: true })).toHaveValue(
       "3",
     );
+    const provenance = page.getByLabel("rate limit 출처(서버 기록)", {
+      exact: true,
+    });
+    await expect(provenance).toHaveValue(
+      JSON.stringify({ source: "provider-doc" }, null, 2),
+    );
+    await expect(provenance).toHaveAttribute("readonly", "");
 
     await page.getByLabel("시스템 주기(초)", { exact: true }).fill("8100");
     await page.getByRole("button", { name: "새로고침" }).click();
@@ -326,8 +333,8 @@ test.describe("/ops/providers refresh policy depth", () => {
     expect(policy.puts[0].path).toBe(
       `/v1/admin/provider-refresh-policies/${KMA_PROVIDER}/${KMA_DATASET}`,
     );
-    // buildPolicyBody: 운영 기본값과 사용자가 수정한 값을 모두 양의 정수로 변환하고,
-    // rate_limit_source는 textarea seed `{}`에서 파싱한다.
+    // buildPolicyBody: 운영 기본값과 사용자가 수정한 값을 모두 양의 정수로 변환한다.
+    // provenance는 server-owned 필드이므로 operator PUT body에 포함하지 않는다.
     expect(policy.puts[0].body).toMatchObject({
       source_kind: "openapi",
       targeted_policy: "allow_targeted",
@@ -341,8 +348,8 @@ test.describe("/ops/providers refresh policy depth", () => {
       burst_size: 10,
       config_source: "db",
       enabled: true,
-      rate_limit_source: {},
     });
+    expect(policy.puts[0].body).not.toHaveProperty("rate_limit_source");
 
     // 200 후 saved Badge(updated_at → formatDateTime).
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
@@ -366,34 +373,6 @@ test.describe("/ops/providers refresh policy depth", () => {
     await page.getByRole("button", { name: "저장" }).click();
 
     await expect(page.getByText("양의 정수를 입력하세요.")).toBeVisible();
-    await expect.poll(() => policy.puts.length).toBe(0);
-  });
-
-  test("rate_limit_source non-object JSON blocks PUT", async ({ page }) => {
-    const { counts } = await mockOpsProviders(page, {
-      items: [makeOpsProviderDataset()],
-      details: { [KMA_PROVIDER]: [makeDatasetDetail()] },
-    });
-    const policy = await mockPolicyUpsert(page);
-
-    await page.goto("/ops/providers");
-    await expect(page.getByText("갱신 정책", { exact: true })).toBeVisible();
-    await expect.poll(() => counts.detail).toBeGreaterThanOrEqual(1);
-
-    // `[]`는 array(object 아님) → buildPolicyBody가 동기 throw → PUT 미발생.
-    await page
-      .getByLabel("rate limit 출처(JSON)", { exact: true })
-      .fill("[]");
-    await page.getByRole("button", { name: "저장" }).click();
-
-    await expect(
-      page.getByText(
-        "rate limit 출처(JSON): rate limit 출처은(는) JSON object여야 합니다.",
-      ),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("alert").filter({ hasText: "정책 저장 실패" }),
-    ).toBeVisible();
     await expect.poll(() => policy.puts.length).toBe(0);
   });
 

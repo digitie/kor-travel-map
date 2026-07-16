@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent A) — T-ADM-C4R/C4 구현·로컬 gate 완료
+
+- `/ops/datasets`를 provider×dataset×`sync_scope` 3원 그리드와 상세 drawer로 통합했다.
+  정책 편집·fixture preview·지금 갱신·scope별 최근 실행을 한 화면에서 조작하며, canonical
+  mutable capability와 stale/orphan scope는 fail-closed한다. dataset-wide 기본 state는
+  unscoped 실행 이력을 사용하고 external scope 이력은 exact filter로 격리한다.
+- pipeline 목록도 선택 scope를 SQL cursor/LIMIT 전에 거르며 datasets detail의 history 링크가
+  같은 scope를 보존한다. active operation은 POST 전 선제 재사용하고 200 재사용·409 충돌·terminal
+  해제를 같은 인라인 상태로 표시한다. URL 선택은 native History API를 사용해 back/forward와
+  focused grid DOM을 보존하며 X/Escape·대상 행 소실 시 초점 복귀를 보장한다.
+- API/UI 적대 리뷰 2인이 반복 검토했고 최종 S1/S2/S3는 모두 0건이다. unit 1,398건, API
+  534건, 관련 실제 DB 통합 28건, Ruff, strict mypy(main 115/API 55), import 계약 4/4,
+  OpenAPI/admin/user type drift, frontend type-check·lint(기존 warning 2)·Vitest 96건,
+  production build와 mocked Playwright 47건을 통과했다.
+- **다음 한 작업**: PR #698을 최신 main에 rebase하고 보안 감사·CI·승인 뒤 병합한다. 병행
+  중인 C5는 2차 적대 리뷰 지적을 수정하고, C7A는 C4/C5 query-key 결선 전 독립 인증/transport
+  범위를 유지한다. #684/#686/#712는 C7 n150 live 증거 뒤 닫는다.
+
 ## 2026-07-16 (codex, agent A) — T-ADM-C45X-B 구현·로컬 gate 완료
 
 - Alembic 0053으로 direct feature update job의 canonical `sync_scope`와

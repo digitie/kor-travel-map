@@ -249,6 +249,7 @@ def _update_request(
             "type": "provider_dataset",
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "default",
         },
         providers=(),
         dataset_keys=(),
@@ -867,6 +868,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "status": "running",
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "default",
             "created_from": "2026-07-01T00:00:00Z",
             "page_size": 2,
         },
@@ -877,6 +879,11 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert captured["status"] == "running"
     assert captured["provider"] == MOIS_PROVIDER_NAME
     assert captured["dataset_key"] == DATASET_KEY_BULK
+    assert captured["dataset_sync_scopes"] == (
+        "default",
+        "dataset_wide",
+        None,
+    )
     assert captured["limit"] == 2
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "cursor-next"
@@ -919,6 +926,17 @@ def test_executions_list_invalid_cursor_maps_to_422(
     response = client.get("/v1/ops/pipeline/executions?cursor=broken")
 
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_executions_list_scope_requires_provider_and_dataset(client: TestClient) -> None:
+    response = client.get(
+        "/v1/ops/pipeline/executions",
+        params={"provider": MOIS_PROVIDER_NAME, "sync_scope": "default"},
+    )
+
+    assert response.status_code == 422
+    assert "sync_scope requires both provider and dataset_key" in response.text
 
 
 @pytest.mark.unit
@@ -2256,7 +2274,11 @@ def test_create_request_rejects_different_plan_on_active_effective_scope(
     response = client.post(
         "/v1/ops/pipeline/requests",
         json={
-            "scope": existing.scope,
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+            },
             "priority": 51,
             "reason": "same",
         },

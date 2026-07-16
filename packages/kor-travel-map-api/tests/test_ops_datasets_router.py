@@ -235,10 +235,15 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         ("put", "/v1/ops/datasets/refresh-policy"),
     ):
         parameters = spec["paths"][path][method]["parameters"]
-        assert {(item["name"], item["in"]) for item in parameters} == {
+        expected_parameters = {
             ("provider", "query"),
             ("dataset_key", "query"),
         }
+        if path.endswith("/detail"):
+            expected_parameters.add(("sync_scope", "query"))
+        assert {(item["name"], item["in"]) for item in parameters} == (
+            expected_parameters
+        )
     row = spec["components"]["schemas"]["OpsDatasetGridRow"]
     assert {
         "detail_url",
@@ -367,12 +372,17 @@ def test_detail_endpoint_uses_application_service(
     async def _detail(*_args: object, **kwargs: object) -> OpsDatasetDetailData:
         assert kwargs["provider"] == provider
         assert kwargs["dataset_key"] == dataset_key
+        assert kwargs["sync_scope"] == "external_system:concierge"
         return _empty_detail()
 
     monkeypatch.setattr(router_module, "load_dataset_detail", _detail)
     response = client.get(
         "/v1/ops/datasets/detail",
-        params={"provider": provider, "dataset_key": dataset_key},
+        params={
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": "external_system:concierge",
+        },
     )
     assert response.status_code == 200
     assert (
@@ -432,6 +442,26 @@ def test_policy_mutation_accepts_explicit_stale_sla(
     )
     assert response.status_code == 200
     assert response.json()["data"]["stale_after_minutes"] == 90
+
+
+@pytest.mark.unit
+def test_policy_mutation_rejects_server_owned_rate_limit_provenance(
+    client: TestClient,
+) -> None:
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+        },
+        json={
+            "source_kind": "openapi",
+            "rate_limit_source": {"forged": "operator-body"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit
@@ -670,7 +700,7 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     assert row.eligible_after == eligible_after
     assert row.detail_url == (
         "/v1/ops/datasets/detail?provider=python-mois-api&"
-        "dataset_key=mois_license_features_bulk"
+        "dataset_key=mois_license_features_bulk&sync_scope=default"
     )
     assert row.schedule.next_scheduled_at == next_scheduled_at
     assert row.freshness.state == "fresh"
@@ -836,7 +866,11 @@ async def test_detail_materializes_all_catalog_target_scopes(
     async def _none(_session: object, **_kwargs: object) -> None:
         return None
 
-    async def _empty_page(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    async def _empty_page(*_args: object, **kwargs: object) -> SimpleNamespace:
+        if "dataset_sync_scopes" in kwargs:
+            assert kwargs["dataset_sync_scopes"] == (
+                "external_system:concierge",
+            )
         return SimpleNamespace(items=(), next_cursor=None)
 
     async def _empty(_session: object, **_kwargs: object) -> tuple[object, ...]:
@@ -866,6 +900,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
         dagster_client=cast(Any, object()),
         provider=provider,
         dataset_key=dataset_key,
+        sync_scope="external_system:concierge",
         now=_NOW,
     )
     scopes = {scope.sync_scope: scope for scope in detail.scopes}

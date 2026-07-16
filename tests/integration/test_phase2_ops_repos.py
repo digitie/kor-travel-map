@@ -126,17 +126,34 @@ async def test_provider_refresh_policy_upsert_get_list(
     assert updated.system_interval_seconds == 900
     assert updated.enabled is False
     assert updated.stale_after_minutes == 90
+    assert updated.rate_limit_source == created.rate_limit_source
+
+    explicitly_replaced = await upsert_provider_refresh_policy(
+        migrated_session,
+        provider="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        source_kind="openapi",
+        targeted_policy="follow_system",
+        system_interval_seconds=900,
+        max_concurrent=1,
+        enabled=False,
+        stale_after_minutes=90,
+        rate_limit_source={"provider_contract": "2026-07-17"},
+    )
+    assert explicitly_replaced.rate_limit_source == {
+        "provider_contract": "2026-07-17"
+    }
 
     loaded = await get_provider_refresh_policy(
         migrated_session,
         provider="python-kma-api",
         dataset_key="kma_weather_alerts",
     )
-    assert loaded == updated
+    assert loaded == explicitly_replaced
 
     assert await list_provider_refresh_policies(
         migrated_session, provider="python-kma-api", enabled=False
-    ) == (updated,)
+    ) == (explicitly_replaced,)
     assert (
         await list_provider_refresh_policies(
             migrated_session, provider="python-kma-api", enabled=True

@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### datasets 운영 화면 통합 (2026-07-17, ADR-064 T-ADM-C4R/C4)
+
+- **ADDED**: `/ops/datasets`에 provider×dataset×`sync_scope` 3원 상태 그리드와 상세
+  drawer를 추가했다. 정책 편집, fixture ETL preview, 지금 갱신, scope별 실행 이력과
+  Feature/issue 링크를 한 화면에서 확인·조작한다.
+- **CHANGED**: dataset-wide 기본 state와 exact external scope의 이력을 분리하고, active
+  operation 재사용·충돌·terminal 전이를 인라인으로 추적한다. canonical capability가 없거나
+  stale/orphan인 scope의 변경·실행은 fail-closed한다.
+- **FIXED**: URL 딥링크와 back/forward로 선택·탭을 복원하면서 query-only 전환이 화면 DOM을
+  다시 만들지 않게 했다. 상세를 X/Escape로 닫으면 원래 행으로, 행이 사라졌으면 검색 입력으로
+  초점이 복귀한다.
+
 ### direct update scope·dispatch 정본 (2026-07-16, ADR-064 T-ADM-C45X-B)
 
 - **ADDED**: direct feature update job의 effective `sync_scope`와

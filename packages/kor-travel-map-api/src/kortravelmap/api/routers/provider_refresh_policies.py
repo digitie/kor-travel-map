@@ -140,7 +140,6 @@ async def upsert_provider_refresh_policy_route(
                 max_requests_per_day=body.max_requests_per_day,
                 max_concurrent=body.max_concurrent,
                 burst_size=body.burst_size,
-                rate_limit_source=body.rate_limit_source,
                 config_source=body.config_source,
                 enabled=body.enabled,
             )

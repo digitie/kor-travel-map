@@ -22,6 +22,7 @@ from kortravelmap.api.provider_catalog import (
     catalog_refreshable_entries,
     find_catalog_entry,
     list_catalog_providers,
+    resolve_dataset_history_sync_scopes,
 )
 
 
@@ -77,6 +78,30 @@ def test_no_duplicate_catalog_entries() -> None:
     """(provider, dataset_key)는 카탈로그에서 유일해야 한다."""
     keys = [(e.provider, e.dataset_key) for e in PROVIDER_DATASET_CATALOG]
     assert len(keys) == len(set(keys))
+
+
+@pytest.mark.unit
+def test_dataset_history_scope_aliases_are_canonical_and_fail_closed() -> None:
+    assert resolve_dataset_history_sync_scopes(
+        "python-mois-api",
+        "mois_license_features_bulk",
+        "default",
+    ) == ("default", "dataset_wide", None)
+    assert resolve_dataset_history_sync_scopes(
+        "python-kma-api",
+        "kma_short_forecast",
+        "external_system:concierge",
+    ) == ("external_system:concierge",)
+    assert resolve_dataset_history_sync_scopes(
+        "removed-provider",
+        "removed-dataset",
+        "default",
+    ) == ("default", "dataset_wide", None)
+    assert resolve_dataset_history_sync_scopes(
+        "removed-provider",
+        "removed-dataset",
+        "legacy-scope",
+    ) == ("legacy-scope",)
 
 
 @pytest.mark.unit

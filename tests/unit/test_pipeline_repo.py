@@ -247,6 +247,9 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     assert params["status"] == "running"
     assert params["provider"] == "python-kma-api"
     assert params["dataset_key"] is None
+    assert params["filter_sync_scopes"] is False
+    assert params["sync_scopes"] == []
+    assert params["include_unscoped_scope"] is False
     assert params["page_limit"] == 2
 
 
@@ -307,4 +310,16 @@ async def test_list_rejects_invalid_cursor_before_query() -> None:
         await list_pipeline_executions(
             _NoQuerySession(),  # type: ignore[arg-type]
             cursor="broken",
+        )
+
+
+async def test_list_requires_exact_dataset_identity_for_scope_filter() -> None:
+    with pytest.raises(
+        ValueError,
+        match="dataset_sync_scopes requires both provider and dataset_key",
+    ):
+        await list_pipeline_executions(
+            _NoQuerySession(),  # type: ignore[arg-type]
+            provider="python-kma-api",
+            dataset_sync_scopes=("target_grids",),
         )

@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex) — C4R datasets 통합·scope UI 폐루프
+
+- Claude Code PR #698의 `/ops/datasets` 구현을 C45X typed scope 정본에 맞춰 재작성했다.
+  grid/detail/pipeline history는 `(provider,dataset_key,sync_scope)`를 끝까지 보존하고,
+  dataset-wide 기본 state와 orphan/stale external scope, active request 재사용과 409 충돌을
+  조작 capability에 연결했다. 정책·preview·refresh now·Feature/issue 링크를 한 drawer에 모았다.
+- 적대 리뷰에서 exact history의 SQL pre-limit 필터, dataset-wide scope 해석, URL canonicalization,
+  draft 보존, stale scope fail-closed, focus 복귀 경쟁을 보강했다. focus E2E 계측 과정에서 이전
+  production build를 재사용한 테스트 오류를 분리했고, 최신 build에서는 native History API와
+  stable cell DOM으로 X/Escape/fallback 초점이 모두 유지됐다. 최종 두 리뷰 판정은 S1/S2/S3 0건이다.
+- unit 1,398, API 534, 관련 PostGIS/FastAPI 통합 28, frontend Vitest 96, mocked Playwright 47와
+  production build를 통과했다. Ruff·strict mypy·import 계약·OpenAPI/admin/user 생성 drift도
+  green이다. 다음은 #698 rebase·보안 감사·CI·병합이며 #684/#686/#712 운영 종결은 C7 n150에 남긴다.
+
 ## 2026-07-16 (codex) — C45X typed scope·active idempotency 완결
 
 - Claude Code PR #701을 0052 typed identity 정본 위에서 재작성했다. 0053 migration은 direct

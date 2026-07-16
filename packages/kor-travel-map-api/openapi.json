@@ -20387,11 +20387,6 @@
             ],
             "title": "Optimal Interval Seconds"
           },
-          "rate_limit_source": {
-            "additionalProperties": true,
-            "title": "Rate Limit Source",
-            "type": "object"
-          },
           "source_kind": {
             "enum": [
               "openapi",
@@ -35215,6 +35210,16 @@
               "title": "Dataset Key",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "sync_scope",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Sync Scope",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -36426,7 +36431,7 @@
     },
     "/v1/ops/pipeline/executions": {
       "get": {
-        "description": "import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다.",
+        "description": "import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다.",
         "operationId": "list_executions_v1_ops_pipeline_executions_get",
         "parameters": [
           {
@@ -36502,6 +36507,25 @@
                 }
               ],
               "title": "Dataset Key"
+            }
+          },
+          {
+            "description": "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
+            "in": "query",
+            "name": "sync_scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다.",
+              "title": "Sync Scope"
             }
           },
           {

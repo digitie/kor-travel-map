@@ -27,6 +27,9 @@ from kortravelmap.core.feature_operation import (
 )
 from kortravelmap.infra.feature_operation_repo import ensure_dagster_feature_operation
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
+from kortravelmap.infra.provider_refresh_policy_repo import (
+    upsert_provider_refresh_policy,
+)
 from kortravelmap.infra.sync_state_repo import record_sync_success
 from kortravelmap.providers.feature_operation_registry import (
     feature_operation_launch_tags,
@@ -617,6 +620,15 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             dataset_service, "find_catalog_entry", _policy_catalog
         )
 
+        async with AsyncSession(migrated_engine) as policy_seed, policy_seed.begin():
+            await upsert_provider_refresh_policy(
+                policy_seed,
+                provider=policy_provider,
+                dataset_key=policy_dataset_key,
+                source_kind="manual",
+                rate_limit_source={"proof": "server-provider-contract"},
+            )
+
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(_dagster_schedule),
         ) as dagster_client:
@@ -638,6 +650,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": PROVIDER_NAME,
                         "dataset_key": DATASET_KEY_BULK,
+                        "sync_scope": "default",
                     },
                 )
                 pipeline_first_response = await client.get(
@@ -646,6 +659,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": PROVIDER_NAME,
                         "dataset_key": DATASET_KEY_BULK,
+                        "sync_scope": "default",
                         "page_size": _PAGE_SIZE,
                     },
                 )
@@ -684,7 +698,6 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                         "targeted_policy": "allow_targeted",
                         "stale_after_minutes": 137,
                         "max_concurrent": 3,
-                        "rate_limit_source": {"proof": "slash-query"},
                         "config_source": "c3e-c-integration",
                         "enabled": False,
                     },
@@ -744,7 +757,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 assert policy_data["stale_after_minutes"] == 137
                 assert policy_data["max_concurrent"] == 3
                 assert policy_data["rate_limit_source"] == {
-                    "proof": "slash-query"
+                    "proof": "server-provider-contract"
                 }
                 assert policy_data["config_source"] == "c3e-c-integration"
                 assert policy_data["enabled"] is False
@@ -776,7 +789,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     "targeted_policy": "allow_targeted",
                     "stale_after_minutes": 137,
                     "max_concurrent": 3,
-                    "rate_limit_source": {"proof": "slash-query"},
+                    "rate_limit_source": {"proof": "server-provider-contract"},
                     "config_source": "c3e-c-integration",
                     "enabled": False,
                 }
@@ -796,6 +809,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 assert history_query == {
                     "provider": [PROVIDER_NAME],
                     "dataset_key": [DATASET_KEY_BULK],
+                    "sync_scope": ["default"],
                 }
                 pipeline_second_response = await client.get(
                     history.path,
@@ -803,6 +817,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": history_query["provider"][0],
                         "dataset_key": history_query["dataset_key"][0],
+                        "sync_scope": history_query["sync_scope"][0],
                         "page_size": _PAGE_SIZE,
                         "cursor": detail_cursor,
                     },
@@ -814,6 +829,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": seed.orphan_provider,
                         "dataset_key": seed.orphan_dataset_key,
+                        "sync_scope": "default",
                     },
                 )
                 assert orphan_detail_response.status_code == 200, (
@@ -833,6 +849,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 assert orphan_history_query == {
                     "provider": [seed.orphan_provider],
                     "dataset_key": [seed.orphan_dataset_key],
+                    "sync_scope": ["default"],
                 }
                 orphan_pipeline_response = await client.get(
                     orphan_history.path,
@@ -840,6 +857,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": orphan_history_query["provider"][0],
                         "dataset_key": orphan_history_query["dataset_key"][0],
+                        "sync_scope": orphan_history_query["sync_scope"][0],
                         "page_size": _PAGE_SIZE,
                     },
                 )
@@ -896,6 +914,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert parse_qs(orphan_grid_detail.query, strict_parsing=True) == {
             "provider": [seed.orphan_provider],
             "dataset_key": [seed.orphan_dataset_key],
+            "sync_scope": ["default"],
         }
         assert len(orphan_detail["recent_runs"]) == 1
         _assert_dataset_projection(
@@ -931,6 +950,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert parse_qs(target_detail_url.query, strict_parsing=True) == {
             "provider": [PROVIDER_NAME],
             "dataset_key": [DATASET_KEY_BULK],
+            "sync_scope": ["default"],
         }
         grid_latest = target_rows[0]["latest_execution"]
         assert grid_latest is not None

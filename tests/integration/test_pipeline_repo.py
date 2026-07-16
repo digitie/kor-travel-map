@@ -12,6 +12,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra import pipeline_repo
+from kortravelmap.infra.feature_update_repo import (
+    finish_update_request,
+    start_update_request,
+)
 from kortravelmap.infra.pipeline_repo import (
     get_pipeline_execution,
     get_pipeline_status_counts,
@@ -982,6 +986,115 @@ async def test_latest_dataset_execution_keeps_direct_scopes_separate(
     assert by_scope["external_system:concierge"].execution.id == requests[1][0]
 
 
+async def test_dataset_scope_filter_is_applied_before_page_limit(
+    migrated_session: AsyncSession,
+) -> None:
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    selected_scope = "external_system:retired"
+    selected_request_ids: list[str] = []
+    for index in range(11):
+        selected_request_id = str(
+            uuid5(_REQUEST_JOB_NAMESPACE, f"selected-retired-scope-{index}")
+        )
+        selected_request_ids.append(selected_request_id)
+        selected_created_at = _T0 + timedelta(minutes=index * 2)
+        await _request(
+            migrated_session,
+            selected_request_id,
+            job_id=None,
+            created_at=selected_created_at,
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": selected_scope,
+            },
+        )
+        selected_job_id = str(
+            uuid5(_REQUEST_JOB_NAMESPACE, selected_request_id)
+        )
+        if index == 0:
+            await _job(
+                migrated_session,
+                str(uuid5(_REQUEST_JOB_NAMESPACE, "selected-multi-pair-child")),
+                parent_job_id=selected_job_id,
+                created_at=selected_created_at,
+                status="done",
+                progress=100,
+                provider="python-other-api",
+                dataset_key="other-dataset",
+            )
+        owner = f"selected-scope-run-{index}"
+        started = await start_update_request(
+            migrated_session,
+            selected_request_id,
+            dagster_run_id=owner,
+            expected_generation=1,
+        )
+        assert started is not None
+        finished = await finish_update_request(
+            migrated_session,
+            selected_request_id,
+            status="done",
+            owner_dagster_run_id=owner,
+            expected_generation=1,
+        )
+        assert finished is not None
+        await _request(
+            migrated_session,
+            str(uuid5(_REQUEST_JOB_NAMESPACE, f"interleaved-other-scope-{index}")),
+            job_id=None,
+            created_at=selected_created_at + timedelta(minutes=1),
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": f"external_system:other-{index}",
+            },
+        )
+
+    unscoped_page = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        limit=10,
+    )
+    exact_first_page = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        dataset_sync_scopes=(selected_scope,),
+        limit=10,
+    )
+    assert exact_first_page.next_cursor is not None
+    exact_second_page = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        dataset_sync_scopes=(selected_scope,),
+        limit=10,
+        cursor=exact_first_page.next_cursor,
+    )
+
+    exact_ids = [
+        item.id for item in (*exact_first_page.items, *exact_second_page.items)
+    ]
+    assert len(unscoped_page.items) == 10
+    assert exact_ids == list(reversed(selected_request_ids))
+    assert len(exact_ids) == len(set(exact_ids)) == 11
+    assert exact_second_page.next_cursor is None
+    multi_pair_root = exact_second_page.items[0]
+    assert multi_pair_root.id == selected_request_ids[0]
+    assert {
+        (pair.provider, pair.dataset_key, pair.sync_scope)
+        for pair in multi_pair_root.provider_datasets
+    } == {
+        (provider, dataset_key, selected_scope),
+        ("python-other-api", "other-dataset", None),
+    }
+
+
 async def test_status_counts_for_overview(migrated_session: AsyncSession) -> None:
     await _job(
         migrated_session,
@@ -1413,6 +1526,9 @@ async def test_selective_projection_plans_use_natural_bounded_access_paths(
             "status": None,
             "provider": provider,
             "dataset_key": dataset_key,
+            "filter_sync_scopes": False,
+            "sync_scopes": [],
+            "include_unscoped_scope": False,
             "created_from": None,
             "created_to": None,
             "cursor_created_at": None,

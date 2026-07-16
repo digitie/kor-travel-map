@@ -10,6 +10,7 @@ import pytest
 
 from kortravelmap.infra.provider_refresh_policy_repo import (
     list_all_provider_refresh_policies,
+    upsert_provider_refresh_policy,
 )
 
 
@@ -29,6 +30,27 @@ class _Session:
     async def execute(self, _statement: Any) -> _Result:
         self.calls += 1
         return _Result(self.rows)
+
+
+class _OneResult:
+    def __init__(self, row: SimpleNamespace) -> None:
+        self._row = row
+
+    def one(self) -> SimpleNamespace:
+        return self._row
+
+
+class _UpsertSession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute(
+        self,
+        statement: Any,
+        params: dict[str, Any],
+    ) -> _OneResult:
+        self.calls.append((str(statement), params))
+        return _OneResult(_row(0))
 
 
 def _row(index: int) -> SimpleNamespace:
@@ -64,3 +86,30 @@ async def test_list_all_policies_does_not_apply_admin_list_limit() -> None:
     assert len(policies) == 501
     assert policies[-1].provider == "provider-500"
     assert session.calls == 1
+
+
+@pytest.mark.unit
+async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
+    session = _UpsertSession()
+
+    await upsert_provider_refresh_policy(
+        cast(Any, session),
+        provider="provider-000",
+        dataset_key="dataset-000",
+        source_kind="openapi",
+    )
+    await upsert_provider_refresh_policy(
+        cast(Any, session),
+        provider="provider-000",
+        dataset_key="dataset-000",
+        source_kind="openapi",
+        rate_limit_source={},
+    )
+
+    sql, omitted_params = session.calls[0]
+    _, explicit_params = session.calls[1]
+    assert "ELSE ops.provider_refresh_policies.rate_limit_source" in sql
+    assert omitted_params["rate_limit_source"] == "{}"
+    assert omitted_params["rate_limit_source_provided"] is False
+    assert explicit_params["rate_limit_source"] == "{}"
+    assert explicit_params["rate_limit_source_provided"] is True

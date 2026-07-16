@@ -166,7 +166,6 @@ function recordToUpsert(
     max_requests_per_day: record.max_requests_per_day ?? null,
     max_concurrent: record.max_concurrent,
     burst_size: record.burst_size ?? null,
-    rate_limit_source: record.rate_limit_source,
     config_source: record.config_source,
     enabled: record.enabled,
   };

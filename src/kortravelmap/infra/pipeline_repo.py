@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -778,6 +779,14 @@ filtered_roots AS (
               AND pair.root_id = root.id
               AND pair.provider = CAST(:provider AS text)
               AND pair.dataset_key = CAST(:dataset_key AS text)
+              AND (
+                NOT CAST(:filter_sync_scopes AS boolean)
+                OR pair.sync_scope = ANY(CAST(:sync_scopes AS text[]))
+                OR (
+                  CAST(:include_unscoped_scope AS boolean)
+                  AND pair.sync_scope IS NULL
+                )
+              )
           )
         )
         OR (
@@ -1221,6 +1230,7 @@ async def list_pipeline_executions(
     status: str | None = None,
     provider: str | None = None,
     dataset_key: str | None = None,
+    dataset_sync_scopes: Collection[str | None] | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
     limit: int = 50,
@@ -1229,6 +1239,19 @@ async def list_pipeline_executions(
     """root 실행 목록 — ``(created_at DESC, id DESC, kind DESC)`` cursor."""
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
+    if dataset_sync_scopes is not None and (provider is None or dataset_key is None):
+        raise ValueError(
+            "dataset_sync_scopes requires both provider and dataset_key"
+        )
+    sync_scopes = tuple(
+        dict.fromkeys(
+            scope for scope in (dataset_sync_scopes or ()) if scope is not None
+        )
+    )
+    include_unscoped_scope = bool(
+        dataset_sync_scopes is not None and None in dataset_sync_scopes
+    )
+    filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(cursor)
     query = (
@@ -1244,6 +1267,9 @@ async def list_pipeline_executions(
                 "status": status,
                 "provider": provider,
                 "dataset_key": dataset_key,
+                "filter_sync_scopes": filter_sync_scopes,
+                "sync_scopes": list(sync_scopes),
+                "include_unscoped_scope": include_unscoped_scope,
                 "created_from": created_from,
                 "created_to": created_to,
                 "cursor_created_at": cursor_created_at,

@@ -66,6 +66,7 @@ from kortravelmap.api.provider_catalog import (
     PROVIDER_DATASET_CATALOG,
     ProviderDatasetCatalogEntry,
     find_catalog_entry,
+    resolve_dataset_history_sync_scopes,
 )
 from kortravelmap.api.provider_refresh_schema import (
     ProviderRefreshPolicyUpsertRequest,
@@ -86,11 +87,15 @@ _RECENT_RUNS_LIMIT = 10
 _RECENT_EVENTS_LIMIT = 20
 
 
-def _dataset_detail_url(provider: str, dataset_key: str) -> str:
+def _dataset_detail_url(provider: str, dataset_key: str, sync_scope: str) -> str:
     return (
         "/v1/ops/datasets/detail?"
         + urlencode(
-            {"provider": provider, "dataset_key": dataset_key},
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
             quote_via=quote,
         )
     )
@@ -353,11 +358,12 @@ def _grid_row(
     now: datetime,
 ) -> OpsDatasetGridRow:
     canonical = entry is not None
+    row_sync_scope = state.sync_scope if state is not None else sync_scope
     return OpsDatasetGridRow(
         provider=provider,
         dataset_key=dataset_key,
-        detail_url=_dataset_detail_url(provider, dataset_key),
-        sync_scope=state.sync_scope if state is not None else sync_scope,
+        detail_url=_dataset_detail_url(provider, dataset_key, row_sync_scope),
+        sync_scope=row_sync_scope,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
         last_success_at=state.last_success_at if state is not None else None,
         last_failure_at=state.last_failure_at if state is not None else None,
@@ -441,7 +447,11 @@ async def load_datasets_grid(
             return exact
         candidates = tuple(
             item
-            for item in (exact, latest_by_key.get((provider, dataset_key, None)))
+            for item in (
+                exact,
+                latest_by_key.get((provider, dataset_key, "dataset_wide")),
+                latest_by_key.get((provider, dataset_key, None)),
+            )
             if item is not None
         )
         if not candidates:
@@ -594,6 +604,7 @@ async def load_dataset_detail(
     dagster_client: httpx.AsyncClient,
     provider: str,
     dataset_key: str,
+    sync_scope: str,
     now: datetime | None = None,
 ) -> OpsDatasetDetailData:
     reference = now or kst_now()
@@ -624,6 +635,11 @@ async def load_dataset_detail(
         detail_scopes = (*expected_scopes, *stale_scopes)
     else:
         detail_scopes = tuple(state.sync_scope for state in states) or ("default",)
+    if sync_scope not in detail_scopes:
+        raise DatasetNotFoundError(
+            "ops dataset scope 없음: "
+            f"{provider!r}/{dataset_key!r}/{sync_scope!r}"
+        )
     scopes = [
         (
             _scope_state(state, policy, now=reference)
@@ -642,10 +658,16 @@ async def load_dataset_detail(
         for sync_scope in detail_scopes
     ]
 
+    history_sync_scopes = resolve_dataset_history_sync_scopes(
+        provider,
+        dataset_key,
+        sync_scope,
+    )
     executions_page = await list_pipeline_executions(
         session,
         provider=provider,
         dataset_key=dataset_key,
+        dataset_sync_scopes=history_sync_scopes,
         limit=_RECENT_RUNS_LIMIT,
     )
     events_page = await list_ops_import_job_events(
@@ -707,7 +729,9 @@ async def load_dataset_detail(
             )
             for item in executions_page.items
             for pair in item.provider_datasets
-            if pair.provider == provider and pair.dataset_key == dataset_key
+            if pair.provider == provider
+            and pair.dataset_key == dataset_key
+            and pair.sync_scope in history_sync_scopes
         ],
         recent_runs_next_cursor=executions_page.next_cursor,
         pipeline_history_url=(
@@ -716,6 +740,7 @@ async def load_dataset_detail(
                 {
                     "provider": provider,
                     "dataset_key": dataset_key,
+                    "sync_scope": sync_scope,
                 },
                 quote_via=quote,
             )
@@ -764,7 +789,6 @@ async def upsert_dataset_refresh_policy(
             max_requests_per_day=body.max_requests_per_day,
             max_concurrent=body.max_concurrent,
             burst_size=body.burst_size,
-            rate_limit_source=body.rate_limit_source,
             config_source=body.config_source,
             enabled=body.enabled,
             stale_after_minutes=body.stale_after_minutes,
