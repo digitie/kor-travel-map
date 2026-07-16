@@ -1150,3 +1150,122 @@ history를 복원하는 방식도 허용하지 않는다.
 검사하고, 100만+ fixture의 p95/buffer/byte budget과 N150 실측은 release·schema cutover gate로
 실행한다. 이 순서라면 목표 구조의 정합성을 낮추지 않으면서도 운영 현실 때문에 legacy 계약을
 영구 보존하는 결과를 피할 수 있다.
+
+---
+
+## 13. §11↔§12 대질 판정과 수렴 결론 (2026-07-16 추가)
+
+> §11(Claude 다관점)과 §12(Codex 재검토)가 충돌한 지점을 **실코드로 대질 검증**하고(기준 KTM
+> `main@9ef008b2`, PinVi `48085afb`), 진행 중인 canonical operation 구현 브랜치까지 확인해 **최종
+> 합의 위치**를 확정한다. 이 절은 §11·§12 중 어느 쪽도 무효화하지 않고, 충돌 쟁점의 **코드 사실**을
+> 판정한 뒤 두 리뷰가 실제로 수렴하는 지점을 못박는다. 사실 판정이 갈리는 항목은 §13이 정본이다.
+
+### 13.1 대질 판정 — §12가 옳은 것(§11 정정)
+
+실코드 검증 결과, §11이 과신했던 두 지점은 **repo 레이어 능력과 실제 HTTP 엔드포인트 동작을
+혼동**한 것으로 확인됐다.
+
+- **[P0-5c retired→missing] §12가 옳다.** §11은 "KTM이 D-12로 retired(inactive) vs missing을 이미
+  구별해 주고 PinVi가 status만 안 읽는다"고 했으나, **공개·서비스 소비 경로는 애초에 status를 안
+  보낸다**: 서비스 batch `get_features_batch`(`features.py:1224-1268`, service-token 게이트)가
+  `get_feature_rows_by_ids`로 받은 rows를 `_is_public_feature`(`features.py:487-492`)로 재필터하는데
+  이 헬퍼가 `deleted_at is None`을 요구하고, soft-delete가 `status='inactive' + deleted_at=now()`를
+  함께 세팅하므로 **inactive는 전부 탈락→`missing`으로 합쳐진다**. D-12(inactive+status 반환)는
+  **repo 함수·admin/raw read 한정**이다. 따라서 원 리뷰 P0-5와 §12의 **item-state 계약(found·retired·
+  suppressed·missing·unchanged)이 실제로 필요**하다 — §11.3의 "반증"은 철회한다.
+- **[create 멱등성] §12가 옳다.** §11(PinVi 관점)의 "create idempotency가 이미 결정적 구현"은
+  (a) 파생 feature_id와 (b) feature-row upsert에만 참이고, **change-request lifecycle은 비멱등**이다:
+  `submit_feature_change_request`가 매 호출 새 `gen_random_uuid()` row를 insert(`admin_feature_repo.py:1502,2029-2065`),
+  `feature_change_requests`에 idempotency/dedup UNIQUE 전무(`0021`). 같은 요청 재시도가 검수모드에선
+  중복 pending, 즉시모드에선 conflict를 만든다. 원 리뷰 P1-14와 §12가 옳다 — request-level
+  Idempotency-Key + replay가 실제 갭이다.
+- **[weather UNIQUE `NOT VALID`] §12가 옳다.** PostgreSQL 16에서 `ADD CONSTRAINT … NOT VALID`는
+  **CHECK/FK만** 허용하고 UNIQUE는 불가하다. §11이 "제약을 NOT VALID→VALIDATE로 재적재 없이 강제"에
+  weather UNIQUE를 뭉뚱그린 것은 PG 사실상 오류 — UNIQUE는 `CREATE UNIQUE INDEX CONCURRENTLY`
+  (트랜잭션 밖 `autocommit_block`) + 선택적 `ADD CONSTRAINT … USING INDEX`로 분리해야 한다.
+  CHECK/FK에 대한 §11의 NOT VALID 권고 자체는 유효하다.
+- **[coord_5179/effective_at STORED] §12가 옳다.** 기존 대형 table에 `ADD COLUMN … GENERATED ALWAYS
+  AS … STORED`는 **full table rewrite + WAL**을 유발한다(≈30M weather). "rewrite 비의존 additive"로
+  분류할 수 없다 — online 전환은 expression index concurrently 또는 작은 current-summary table
+  선행이 맞다.
+- **[64-bit hash] §12의 새 지적이 정확하다(§11 미커버).** `FEATURE_ID_HASH_LENGTH=16`은 64-bit SHA-1
+  prefix이고, 코드 주석의 "10^9건에도 충돌확률 ~3e-11"은 birthday bound(≈**2.7%**)가 아니라 단건 삽입
+  확률을 오인한 것이다. P1-1의 안정 surrogate 근거를 **주석 오류 정정 + 충돌 관측**으로 보강한다.
+
+### 13.2 대질 판정 — 비충돌(둘 다 코드 사실)
+
+- **[P1-4] 둘 다 코드 사실이나 §12의 원문 독해가 충실하다.** (a) head-pointer FK는 **존재**한다
+  (`source_entities.(source_entity_key, current_source_record_key)→source_records` deferrable —
+  §11 맞음). (b) 그러나 `source_records→source_entities` FK는 **단일 컬럼뿐**이고 denorm
+  provider/dataset/type/id 4튜플이 부모 identity와 일치하도록 강제하는 composite FK는 **없다**
+  (entity A에 provider B record 연결 가능 — §12 맞음, 원 P1-4의 주 결함). §11도 본문에서 "record
+  denorm 미정합은 그대로"라 자인했으므로 실질 충돌은 없다. **P1-4의 핵심 결함(denorm 정합 FK 부재)은
+  미해결**로 확정한다.
+
+### 13.3 §11이 여전히 유효한 것 / §12가 과교정한 것
+
+- **[integration-map = PinVi live 근거]** §12는 "integration-map은 연동 방향의 정본이지 runtime
+  배포 증거가 아니다"라 했다. 문서 자체만으로는 맞다. 다만 **PinVi가 n150 공유 노드에서 실제
+  가동 중**이라는 별도 증거(운영 노트·`docs/improvement-roadmap` 계열의 "실소비자 pull 중"·n150이
+  concierge/pinvi/geo 공유 호스트)가 있으므로 "라이브 소비자 존재"라는 전제 자체는 유지된다.
+  그러나 이 차이는 **결론을 바꾸지 않는다** — §12.6의 개정 순서(복구 선행 검증 → shadow 구축 →
+  검증 후 동시 cutover + rollback window)가 라이브 소비자를 이미 안전하게 다루기 때문이다.
+- **[롤백]** "streaming replication 없음 ≠ rollback 불능"이라는 §12 지적은 옳다(cold backup·staging
+  restore·hot-swap 존재). §11의 "온라인 롤백 불능"은 "**무중단** 롤백 불능"으로 정정한다 —
+  maintenance window + 검증된 snapshot 보존이라는 §12.6 방식이면 유중단 롤백은 가능하다.
+- **[MVT·cursor HMAC·100만 fixture]** §12가 "측정 후"로 수용 → §11과 일치. 이견 소멸.
+
+### 13.4 진행 중 구현(canonical operation)이 논쟁에 주는 실증
+
+두 리뷰의 "목표 구조(§6)로 어떻게 가느냐"(big-bang vs parallel-change) 논쟁은 **이미 코드로
+답이 나오고 있다**. 진행 중인 admin-ops C3e가 문서 권고의 일부를 실제 구현 중이다:
+
+- **operation 정본화 = 구현됨(alembic 0051, 리뷰 base에 이미 존재)**: 별도 operations 테이블이
+  아니라 **`ops.import_jobs`를 typed canonical operation으로 승격** — `provider`/`dataset_key`/
+  `trigger_kind`/`operation_registry_version`/`dagster_run_status` 컬럼, operation identity를 partial
+  UNIQUE + 불변성 트리거로 강제, provider/dataset 쌍 정합 CHECK, 신규 `core/feature_operation.py`.
+  0052(진행 중)는 `feature_update_requests`를 그 operation의 **순수 projection**(1:1 FK + generation
+  낙관적 동시성)으로 재편.
+- **방식은 엄격한 점진(additive)**: 0051·0052 모두 신규 CREATE TABLE·재적재 **없이** 기존 0050
+  그래프 위에 `add_column`/CHECK/partial UNIQUE + in-place backfill로 이관한다. 이는 **§11.5의
+  parallel-change 입장을 실증**하고, 동시에 **§8/P1-9의 "새 baseline + 재적재" 및 §12.3.2의 온라인
+  DDL 권고(NOT VALID/CONCURRENTLY 미사용, `LOCK TABLE` 사용)와는 상반**된다 → 진행 중 구현은
+  §12.3.2의 online-safe DDL을 **채택하지 않았으므로**, 대형 table 확장 시 그 절차를 별도 게이트로
+  강제할 필요가 여기서 확인된다.
+- **여전히 미구현(문서 권고 대비)**: `provider_datasets` **정규화 참조 테이블**(§6.1의
+  provider_datasets→source_entities→source_records)과 §13.2의 record-denorm 정합 FK는 C3e가
+  손대지 않는다. import_jobs의 first-class 컬럼+CHECK로 "canonical화"했으나 정규화 FK는 아니다.
+  **source-lineage 도메인의 P1-4는 별도 작업으로 남는다.**
+
+### 13.5 수렴된 최종 위치 (§11·§12 합의)
+
+대질 결과 두 리뷰는 **거의 완전히 수렴**한다. 남은 차이는 실행 순서의 뉘앙스뿐이며, 아래가 합의
+정본이다.
+
+1. **즉시(P0)**: 모든 route fail-closed + **route policy matrix를 코드 생성해 미분류 시 CI 실패**
+   (§12.2가 §11의 "3개 라우터"를 5개+`/metrics`+debug ETL live+WebSocket으로 확장 — 이 확장이
+   맞다), 공개 predicate 단일화, raw payload 경계, notice 방어적 cast, no-op 옵션 삭제, actor를
+   **인증 principal에서만** 파생(body operator 제거), PinVi transport 실패↔missing 분리 + **service
+   batch item-state 계약**(retired가 missing으로 합쳐지는 KTM 결함까지 — §13.1 확정).
+2. **조기(P1, rewrite 비의존)**: true Idempotency-Key(replay) + PATCH/DELETE base-revision/If-Match
+   (둘은 대안이 아니라 서로 다른 실패를 막음 — §12.5), `include_total` repo 전달, cursor fingerprint
+   +version(HMAC 아님), 지도 completeness(`mode`/`truncated`/`coverage`/cluster 렌더 — MVT 전),
+   weather set-based batch + 단건 부모 404 + `issued_at<=known_at` bitemporal, weather
+   UNIQUE(**CONCURRENTLY**)/CHECK/FK, 중복 GiST 제거, CHECK/FK는 `NOT VALID→VALIDATE`.
+3. **구조 전환(parallel-change, side-by-side)**: 안정 UUID + natural UNIQUE(64-bit hash 정본 폐기),
+   typed subtype/range, **`provider_datasets` 정규화 정본 + record-denorm 정합 FK**(C3e 미구현분),
+   effective/public projection(view 정본 + current-summary는 별도 enrichment — §12.3.4대로 **대체
+   아닌 병존**), target sync+outbox(PinVi delivery ↔ KTM orchestration은 별개 계층 — §12.4.4).
+   방식은 §12.6: 복구 선행 검증 → shadow vNext(UUID 컬럼+alias, text PK 영구화 금지) → 새 schema에서
+   검증 → maintenance window 동시 cutover(KTM+PinVi) + rollback window → soak 후 legacy 제거.
+   **upstream 전량 재취득은 금지**(재취득 불가 데이터 손실 — §11.5, §12.0 공동 확정). 대형 table
+   DDL은 **online-safe 절차(CONCURRENTLY/autocommit_block)를 강제**(진행 중 C3e가 이를 안 써서 확인된
+   갭 — §13.4).
+4. **측정 후**: 별도 listener/process 분리, MVT, cursor HMAC, weather partition/hypertable, 매 PR
+   100만 fixture. 성능 gate 계층화(CI=planner-기본 EXPLAIN·query-count·shape 회귀 / release=100만
+   p95·N150 실측).
+
+핵심 합의: **목표 구조(§6)는 유지, 도달은 side-by-side parallel-change + 동시 cutover(영구
+dual-serve 아님, 전량 재취득 아님)**. §11의 "재취득·검증순서 리스크"와 §12의 "clean-cut 가능·
+online-safe DDL·item-state 계약"이 이 순서에서 모두 성립한다. 이견이 남는 유일한 표면은 **별도
+물리 listener 분리 시점**(P0 필수 아님·측정 후 — 양측 합의)뿐이다.
