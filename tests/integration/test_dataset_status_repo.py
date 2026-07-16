@@ -148,6 +148,7 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -205,9 +206,18 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     await migrated_session.flush()
 
     latest = await list_latest_dataset_executions(migrated_session)
-    by_key = {(item.provider, item.dataset_key): item for item in latest}
+    by_scope = {
+        (item.provider, item.dataset_key, item.sync_scope): item for item in latest
+    }
+    assert len(latest) == len(by_scope)
 
-    job = by_key[("python-mois-api", "mois_license_features_bulk")]
+    request_scope = by_scope[
+        ("python-mois-api", "mois_license_features_bulk", "dataset_wide")
+    ]
+    assert request_scope.execution.kind == "update_request"
+    assert request_scope.execution.id == request.request_id
+
+    job = by_scope[("python-mois-api", "mois_license_features_bulk", None)]
     assert job.execution.kind == "import_job"
     assert job.execution.id == independent.job_id
     assert job.execution.trigger_kind == "manual"
@@ -220,7 +230,9 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     assert job.execution.status == timeline.items[0].status
     assert job.execution.projected_job == timeline.items[0].projected_job
 
-    # created_at 동률에서는 canonical root id/kind total order를 그대로 쓴다.
+    # scope가 다르면 created_at 동률이어도 dataset latest는 각각의 root를 보존한다.
+    # 전체 pipeline 목록은 이 fixture에서 created_at/id 순서를 적용한다. 동일 UUID의
+    # kind 최종 tie-break는 test_cursor_kind_breaks_same_timestamp_and_uuid_tie가 맡는다.
     await migrated_session.execute(
         text(
             "UPDATE ops.import_jobs SET created_at = :created_at "
@@ -229,11 +241,27 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
         {"job_id": independent.job_id, "created_at": request.created_at},
     )
     tied = await list_latest_dataset_executions(migrated_session)
-    tied_root = next(
-        item
-        for item in tied
-        if (item.provider, item.dataset_key)
-        == ("python-mois-api", "mois_license_features_bulk")
+    tied_by_scope = {
+        (item.provider, item.dataset_key, item.sync_scope): item for item in tied
+    }
+    assert len(tied) == len(tied_by_scope)
+    assert (
+        tied_by_scope[
+            ("python-mois-api", "mois_license_features_bulk", "dataset_wide")
+        ].execution.id
+        == request.request_id
+    )
+    assert (
+        tied_by_scope[
+            ("python-mois-api", "mois_license_features_bulk", None)
+        ].execution.id
+        == independent.job_id
+    )
+
+    tied_timeline = await list_pipeline_executions(
+        migrated_session,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
     )
     expected_id = max(UUID(request.request_id), UUID(independent.job_id))
-    assert UUID(tied_root.execution.id) == expected_id
+    assert UUID(tied_timeline.items[0].id) == expected_id

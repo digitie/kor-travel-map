@@ -8,9 +8,10 @@
 ``WeatherValue``를 만들어 적재한다(계획 정본
 `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.3).
 
-같은 base 중복 호출 회피는 ``provider_sync_state`` cursor(``base_datetime``)로
-한다(`docs/etl/kma-weather-etl.md` §6). KMA 호출 실패 시 cursor를 전진시키지 않고
-``record_sync_failure``만 남긴다(신선도 대시보드 T-217g 신호).
+같은 base 중복 호출 회피는 ``provider_sync_state`` cursor의
+``base_datetime``과 target/grid ``membership_fingerprint``가 모두 같을 때만 한다.
+KMA 호출 실패 시 cursor를 전진시키지 않고 ``record_sync_failure``만 남긴다
+(신선도 대시보드 T-217g 신호).
 
 provider client는 ADR-006대로 wrapper 없이 직접 사용한다. ``KmaClient``의
 ``ForecastItem``/``WeatherSnapshot``은 base/forecast를 ``datetime``으로 정규화한
@@ -21,15 +22,22 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 
 # NOTE: `from __future__ import annotations` 금지 — dagster가 asset 함수의
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
+import hashlib
 import importlib
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
 
+from kortravelmap.core.sync_scope import (
+    TARGET_GRIDS_SYNC_SCOPE,
+    parse_canonical_sync_scope,
+)
 from kortravelmap.dto import kst_now
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra.feature_repo import FeatureLoadResult, NoticeFeatureLoadResult
+from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFailure
 from kortravelmap.providers.kma import (
     KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
@@ -79,6 +87,8 @@ __all__ = [
     "KmaMidLandRow",
     "KmaMidTempRow",
     "KmaNowcastRow",
+    "KmaWeatherTargetScopeEmptyError",
+    "KmaWeatherGridLimitExceeded",
     "KmaWeatherLoadResult",
     "feature_notice_kma_weather_alerts",
     "feature_weather_kma_mid_forecast",
@@ -253,6 +263,25 @@ class KmaGridTargets:
     grids_dropped: int
     """run 상한 초과로 제외된 격자 수 (운영 로그용 — silent cap 금지)."""
 
+    membership_fingerprint: str
+    """target 좌표·extra 좌표·dedupe 전량 격자 membership의 SHA-256."""
+
+
+def _grid_membership_fingerprint(
+    *,
+    target_coords: Sequence[tuple[float, float]],
+    extra_points: Sequence[tuple[float, float]],
+    grids: Sequence[tuple[int, int]],
+) -> str:
+    payload = {
+        "version": 1,
+        "target_coords": sorted((lon.hex(), lat.hex()) for lon, lat in target_coords),
+        "extra_points": sorted((lon.hex(), lat.hex()) for lon, lat in extra_points),
+        "grids": sorted(grids),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
 
 def map_grid_targets(
     *,
@@ -281,6 +310,11 @@ def map_grid_targets(
     return KmaGridTargets(
         grids=tuple(capped),
         grids_dropped=dropped,
+        membership_fingerprint=_grid_membership_fingerprint(
+            target_coords=target_coords,
+            extra_points=extra_points,
+            grids=ordered,
+        ),
     )
 
 
@@ -297,13 +331,18 @@ class KmaWeatherLoadResult:
     """이번 run의 최신 발표 base (``YYYYMMDDHHMM``)."""
 
     skipped: bool
-    """``provider_sync_state`` cursor와 base가 같아 호출 없이 끝났으면 True."""
+    """cursor의 base와 membership이 모두 같아 호출 없이 끝났으면 True."""
 
     grids_total: int
     grids_fetched: int
     grids_dropped: int
     features_total: int
     values_loaded: int
+    membership_fingerprint: str
+    """이번 실행의 target/grid membership fingerprint."""
+
+    sync_scope: str = TARGET_GRIDS_SYNC_SCOPE
+    """실제 target 선택과 provider sync state에 사용한 canonical scope."""
 
     def as_metadata(self) -> dict[str, object]:
         return {
@@ -316,10 +355,43 @@ class KmaWeatherLoadResult:
             "grids_dropped": self.grids_dropped,
             "features_total": self.features_total,
             "values_loaded": self.values_loaded,
+            "membership_fingerprint": self.membership_fingerprint,
+            "sync_scope": self.sync_scope,
         }
 
 
 # -- 공통 runner ----------------------------------------------------------
+
+
+class KmaWeatherTargetScopeEmptyError(ProviderDatasetRefreshFailure):
+    """external-system scope에 실행 가능한 active target이 없다."""
+
+
+class KmaWeatherGridLimitExceeded(ProviderDatasetRefreshFailure):
+    """KMA target 격자가 실행 상한을 초과해 전체 실행을 거부했다."""
+
+
+async def _raise_kma_refresh_failure(
+    context: AssetExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    failure: ProviderDatasetRefreshFailure,
+    *,
+    cause: Exception | None = None,
+) -> NoReturn:
+    managed_by_executor = await _resource_value(
+        context,
+        "kma_weather_sync_failure_managed_by_executor",
+        default=False,
+    )
+    if managed_by_executor is not True:
+        await client.record_sync_failure(
+            provider=failure.provider,
+            dataset_key=failure.dataset_key,
+            sync_scope=failure.sync_scope,
+        )
+    if cause is not None:
+        raise failure from cause
+    raise failure
 
 
 async def _run_kma_weather_asset(
@@ -341,34 +413,45 @@ async def _run_kma_weather_asset(
     kor_travel_map_client = cast(
         "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
     )
-    base_date, base_time = latest_base()
-    base_key = f"{base_date}{base_time}"
-
-    state = await kor_travel_map_client.get_sync_state(
-        provider=KMA_PROVIDER_NAME, dataset_key=dataset_key
+    raw_sync_scope = await _resource_value(
+        context,
+        "kma_weather_sync_scope",
+        default=TARGET_GRIDS_SYNC_SCOPE,
     )
-    if state is not None and state.cursor.get("base_datetime") == base_key:
-        context.log.info(
-            "KMA %s base %s 이미 적재됨 — skip (provider_sync_state cursor).",
-            dataset_key,
-            base_key,
+    if not isinstance(raw_sync_scope, str):
+        raise ValueError("kma_weather_sync_scope must be a string")
+    sync_scope = parse_canonical_sync_scope(raw_sync_scope)
+    if sync_scope.kind == "dataset_wide":
+        raise ValueError(
+            "KMA grid datasets require target_grids or external_system:<name> sync_scope"
         )
-        result = KmaWeatherLoadResult(
-            provider=KMA_PROVIDER_NAME,
-            dataset_key=dataset_key,
-            base_datetime=base_key,
-            skipped=True,
-            grids_total=0,
-            grids_fetched=0,
-            grids_dropped=0,
-            features_total=0,
-            values_loaded=0,
-        )
-        _add_output_metadata(context, result.as_metadata())
-        return result
 
-    extra_raw = await _resource_value(context, "kma_weather_extra_points", default=None)
-    extra_points = parse_weather_extra_points(cast("str | None", extra_raw))
+    target_coords = await kor_travel_map_client.list_poi_cache_target_coords(
+        external_system=sync_scope.external_system,
+    )
+    if sync_scope.kind == "external_system" and not target_coords:
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            KmaWeatherTargetScopeEmptyError(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope.value,
+                message=(
+                    "KMA external-system scope has no active POI cache targets: "
+                    f"{sync_scope.external_system!r}"
+                ),
+            ),
+        )
+
+    extra_points: Sequence[tuple[float, float]] = ()
+    if sync_scope.kind == "target_grids":
+        extra_raw = await _resource_value(
+            context,
+            "kma_weather_extra_points",
+            default=None,
+        )
+        extra_points = parse_weather_extra_points(cast("str | None", extra_raw))
     max_grids = int(
         cast(
             "int",
@@ -376,7 +459,6 @@ async def _run_kma_weather_asset(
         )
     )
 
-    target_coords = await kor_travel_map_client.list_poi_cache_target_coords()
     targets = map_grid_targets(
         target_coords=target_coords,
         extra_points=extra_points,
@@ -384,13 +466,59 @@ async def _run_kma_weather_asset(
         max_grids=max_grids,
     )
     if targets.grids_dropped:
-        context.log.warning(
-            "KMA %s 대상 격자 %d개가 run 상한(%d) 초과로 제외됨 — "
-            "KMA_WEATHER_MAX_GRIDS_PER_RUN 조정 또는 대상 분할 필요.",
-            dataset_key,
-            targets.grids_dropped,
-            max_grids,
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            KmaWeatherGridLimitExceeded(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope.value,
+                message=(
+                    "KMA target grid count exceeds max_grids; partial execution is forbidden: "
+                    f"total={len(targets.grids) + targets.grids_dropped}, "
+                    f"max_grids={max_grids}"
+                ),
+            ),
         )
+
+    base_date, base_time = latest_base()
+    base_key = f"{base_date}{base_time}"
+    membership_fingerprint = targets.membership_fingerprint
+
+    state = await kor_travel_map_client.get_sync_state(
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        sync_scope=sync_scope.value,
+    )
+    if (
+        state is not None
+        and state.cursor.get("base_datetime") == base_key
+        and state.cursor.get("membership_fingerprint") == membership_fingerprint
+    ):
+        context.log.info(
+            "KMA %s base %s, membership %s 이미 적재됨 — skip "
+            "(provider_sync_state cursor, scope=%s).",
+            dataset_key,
+            base_key,
+            membership_fingerprint,
+            sync_scope.value,
+        )
+        result = KmaWeatherLoadResult(
+            provider=KMA_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            base_datetime=base_key,
+            skipped=True,
+            grids_total=len(targets.grids),
+            grids_fetched=0,
+            grids_dropped=0,
+            features_total=0,
+            values_loaded=0,
+            membership_fingerprint=membership_fingerprint,
+            sync_scope=sync_scope.value,
+        )
+        _add_output_metadata(context, result.as_metadata())
+        return result
+
     if not targets.grids:
         context.log.warning(
             "KMA %s 대상 격자 없음 — poi_cache_targets/KMA_WEATHER_EXTRA_POINTS가 "
@@ -432,17 +560,30 @@ async def _run_kma_weather_asset(
             grid_values: list[WeatherValue] = list(to_values(rows, anchor))
             values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
             matched_features.add(anchor)
-    except Exception:
-        await kor_travel_map_client.record_sync_failure(
-            provider=KMA_PROVIDER_NAME, dataset_key=dataset_key
-        )
+    except ProviderDatasetRefreshFailure:
         raise
+    except Exception as exc:
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            ProviderDatasetRefreshFailure(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope.value,
+                message=f"KMA provider refresh failed: {exc}",
+            ),
+            cause=exc,
+        )
 
     if grids_fetched:
         await kor_travel_map_client.record_sync_success(
             provider=KMA_PROVIDER_NAME,
             dataset_key=dataset_key,
-            cursor={"base_datetime": base_key},
+            sync_scope=sync_scope.value,
+            cursor={
+                "base_datetime": base_key,
+                "membership_fingerprint": membership_fingerprint,
+            },
         )
 
     result = KmaWeatherLoadResult(
@@ -455,6 +596,8 @@ async def _run_kma_weather_asset(
         grids_dropped=targets.grids_dropped,
         features_total=len(matched_features),
         values_loaded=values_loaded,
+        membership_fingerprint=membership_fingerprint,
+        sync_scope=sync_scope.value,
     )
     _add_output_metadata(context, result.as_metadata())
     return result

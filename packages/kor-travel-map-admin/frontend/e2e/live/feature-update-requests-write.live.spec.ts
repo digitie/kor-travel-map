@@ -12,6 +12,10 @@ type FeatureUpdateRequestMutationResponse =
   components["schemas"]["FeatureUpdateRequestMutationResponse"];
 type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
+type ScopeDispatchFeatureUpdateRequestRecord =
+  FeatureUpdateRequestMutationResponse["data"] & {
+    dispatch_requested_at: string | null;
+  };
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -26,17 +30,16 @@ const T = { timeout: UI_TIMEOUT } as const;
 // 모든 생성 엔티티 식별자에 박아 parallel/재실행 충돌을 막는다.
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const RUN_STARTED_AT = new Date(Date.now() - 5_000).toISOString();
-// SAFE 선택: API는 refreshable catalog pair만 queue에 넣도록 검증한다. 실제 pair를 쓰되
-// 한국 남서쪽 경계 근처의 극소 반경으로 제한해 scope match/runner 부담을 낮춘다.
+// SAFE 선택: legacy center_radius 폼은 target-selector dataset을 요청할 수 없으므로
+// non-selector KMA pair를 쓰고, 한국 남서쪽 경계의 극소 반경으로 runner 부담을 낮춘다.
 const SAFE_LON = "124.0001";
 const SAFE_LAT = "33.0001";
 const SAFE_RADIUS_KM = "0.1";
 const PROVIDER = "python-kma-api";
-const DATASET = "kma_short_forecast";
+const DATASET = "kma_mid_forecast";
 const MULTI_DATASETS = [
-  "kma_ultra_short_nowcast",
-  "kma_ultra_short_forecast",
-  "kma_short_forecast",
+  "kma_mid_forecast",
+  "kma_weather_alerts",
 ] as const;
 const BASE_REASON = `live ui e2e feature update ${RUN_ID}`;
 
@@ -139,8 +142,8 @@ async function readCreateResponse(
 async function readMutationResponse(
   response: Response,
 ): Promise<FeatureUpdateRequestMutationResponse> {
-  // run-now는 새 request/job을 반환하지만 create의 result_kind는 없다.
-  expect(response.status()).toBe(201);
+  // run-now는 같은 canonical request/job의 즉시 dispatch 결과를 200으로 반환한다.
+  expect(response.status()).toBe(200);
   return (await response.json()) as FeatureUpdateRequestMutationResponse;
 }
 
@@ -289,7 +292,6 @@ test.describe("/admin/features/update-requests live write workflow", () => {
     test.setTimeout(FLOW_TIMEOUT);
 
     let requestId: string | null = null;
-    let runNowRequestId: string | null = null;
     let sourceJobId: string | null = null;
 
     try {
@@ -415,30 +417,44 @@ test.describe("/admin/features/update-requests live write workflow", () => {
       });
 
       if (RUN_NOW) {
-        await test.step("run-now로 재큐잉하고 새 request의 status 전이를 폴링한다", async () => {
-          // 상세 페이지의 run-now 버튼 → run_mode=now로 신규 row를 enqueue(201).
-          // 새 request_id는 응답에서만 얻을 수 있어 waitForApiResponse로 캡처한다.
+        await test.step("run-now로 같은 request를 dispatch하고 status 전이를 폴링한다", async () => {
           const responsePromise = waitForApiResponse(
             page,
             "POST",
             runNowPath(requestId as string),
           );
           await page.getByRole("button", { name: "즉시 실행" }).click();
-          const runResponse = await readMutationResponse(await responsePromise);
-          runNowRequestId = runResponse.data.request_id ?? null;
-          expect(runNowRequestId).not.toBeNull();
-          expect(runNowRequestId).not.toBe(requestId);
-          expect(runResponse.data.job_id).not.toBe(sourceJobId);
-          expect(runResponse.data.run_mode).toBe("now");
+          const response = await responsePromise;
+          expect(response.request().postDataJSON()).toEqual({});
+          const runResponse = await readMutationResponse(response);
+          expect(runResponse.data.request_id).toBe(requestId);
+          expect(runResponse.data.job_id).toBe(sourceJobId);
+          expect(runResponse.data.run_mode).toBe("queued");
           expect(runResponse.data.providers).toContain(PROVIDER);
+          const dispatched =
+            runResponse.data as ScopeDispatchFeatureUpdateRequestRecord;
+          if (dispatched.status === "queued") {
+            expect(dispatched.dispatch_requested_at).not.toBeNull();
+          }
+          const successAlert = page
+            .getByRole("status")
+            .filter({ hasText: "즉시 실행 요청 완료" });
+          await expect(successAlert).toContainText(
+            "기존 요청의 즉시 dispatch를 요청했습니다.",
+          );
+          await expect(
+            successAlert.getByRole("link", { name: requestId as string }),
+          ).toHaveAttribute(
+            "href",
+            `/admin/features/update-requests/${requestId as string}`,
+          );
 
-          // run_mode=now도 실제 실행은 Dagster sensor/job이 맡는다(라우터 docstring).
-          // E2E_FEATURE_UPDATE_RUN opt-in은 runner가 활성이라는 전제 → queued를 벗어남.
+          // 같은 request_id의 dispatch intent를 Dagster sensor/job이 소비한다.
           await expect
             .poll(async () => {
               const res = await fetchDetailByApi(
                 page,
-                runNowRequestId as string,
+                requestId as string,
               );
               return res.body?.data.status ?? `http:${res.status}`;
             }, { timeout: FLOW_TIMEOUT })
@@ -446,16 +462,12 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         });
       }
     } finally {
-      // 생성한 모든 request를 API로 cancel(있을 때만). terminal이면 409 → 무시.
-      for (const id of [runNowRequestId, requestId]) {
-        if (id) {
-          await cancelByApi(page, id);
-        }
-      }
+      // canonical request 하나만 존재한다. terminal이면 cleanup cancel 409를 무시한다.
+      if (requestId) await cancelByApi(page, requestId);
     }
   });
 
-  test("한 요청에 다중 refreshable dataset_keys를 넣으면 응답·목록·상세에 모두 반영된다", async ({
+  test("한 요청의 non-selector KMA 2종이 응답·목록·상세에 모두 반영된다", async ({
     page,
   }) => {
     test.skip(
@@ -464,24 +476,24 @@ test.describe("/admin/features/update-requests live write workflow", () => {
     );
     test.setTimeout(FLOW_TIMEOUT);
 
-    const [datasetA, datasetB, datasetC] = MULTI_DATASETS;
+    const [datasetA, datasetB] = MULTI_DATASETS;
     let requestId: string | null = null;
 
     try {
       await gotoUpdateRequests(page);
 
-      await test.step("comma-separated 다중 dataset로 queued 요청을 생성한다", async () => {
+      await test.step("comma-separated KMA 2종으로 queued 요청을 생성한다", async () => {
         const created = await createRefreshableQueuedRequest(page, {
           provider: PROVIDER,
-          dataset: `${datasetA},${datasetB},${datasetC}`,
+          dataset: `${datasetA},${datasetB}`,
         });
         requestId = created.requestId;
-        // 생성 응답이 한 provider/세 dataset을 그대로 담는다(동기 캡처).
+        // 생성 응답이 한 provider/두 dataset을 그대로 담는다(동기 캡처).
         expect(created.create.data.providers).toEqual([PROVIDER]);
         expect(created.create.data.dataset_keys).toEqual(
-          expect.arrayContaining([datasetA, datasetB, datasetC]),
+          expect.arrayContaining([datasetA, datasetB]),
         );
-        expect(created.create.data.dataset_keys).toHaveLength(3);
+        expect(created.create.data.dataset_keys).toHaveLength(2);
         expect(created.create.data.status).toBe("queued");
 
         const successAlert = page
@@ -498,7 +510,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         await expect(row).toContainText(PROVIDER);
       });
 
-      await test.step("detail/list API가 다중 dataset를 모두 반환한다", async () => {
+      await test.step("detail/list API가 KMA 2종을 모두 반환한다", async () => {
         await expect
           .poll(
             async () =>
@@ -509,11 +521,11 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         const detail = await fetchDetailByApi(page, requestId as string);
         expect(detail.body?.data.providers).toEqual([PROVIDER]);
         expect(detail.body?.data.dataset_keys).toEqual(
-          expect.arrayContaining([datasetA, datasetB, datasetC]),
+          expect.arrayContaining([datasetA, datasetB]),
         );
 
         // dataset_key 각각으로 필터해도 같은 row를 찾는다(@> 멤버십 매칭).
-        for (const dataset of [datasetA, datasetB, datasetC]) {
+        for (const dataset of [datasetA, datasetB]) {
           const list = await fetchListByProviderApi(
             page,
             PROVIDER,
@@ -809,7 +821,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
     }
   });
 
-  test("목록 actions의 run-now 버튼이 run_mode=now로 재큐잉하고 status가 전이된다", async ({
+  test("목록 actions의 run-now 버튼이 같은 canonical 요청을 dispatch한다", async ({
     page,
   }) => {
     test.skip(
@@ -819,7 +831,6 @@ test.describe("/admin/features/update-requests live write workflow", () => {
     test.setTimeout(FLOW_TIMEOUT);
 
     let requestId: string | null = null;
-    let runNowRequestId: string | null = null;
     let sourceJobId: string | null = null;
 
     try {
@@ -834,7 +845,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
         sourceJobId = created.create.data.job_id;
       });
 
-      await test.step("run-now 버튼이 run_mode=now 신규 row를 201로 enqueue한다", async () => {
+      await test.step("run-now 버튼이 기존 row를 200으로 dispatch한다", async () => {
         await page.getByLabel("요청 상태 필터").selectOption("all");
         const row = requestRowById(page, requestId as string);
         await expect(row).toBeVisible(T);
@@ -845,22 +856,33 @@ test.describe("/admin/features/update-requests live write workflow", () => {
           runNowPath(requestId as string),
         );
         await row.getByRole("button", { name: "즉시 실행" }).click();
-        const runResponse = await readMutationResponse(await responsePromise);
-        runNowRequestId = runResponse.data.request_id ?? null;
-        expect(runNowRequestId).not.toBeNull();
-        expect(runNowRequestId).not.toBe(requestId);
-        expect(runResponse.data.job_id).not.toBe(sourceJobId);
-        expect(runResponse.data.run_mode).toBe("now");
+        const response = await responsePromise;
+        expect(response.request().postDataJSON()).toEqual({});
+        const runResponse = await readMutationResponse(response);
+        expect(runResponse.data.request_id).toBe(requestId);
+        expect(runResponse.data.job_id).toBe(sourceJobId);
+        expect(runResponse.data.run_mode).toBe("queued");
         expect(runResponse.data.providers).toContain(PROVIDER);
+        const dispatched =
+          runResponse.data as ScopeDispatchFeatureUpdateRequestRecord;
+        if (dispatched.status === "queued") {
+          expect(dispatched.dispatch_requested_at).not.toBeNull();
+        }
+        const successAlert = page
+          .getByRole("status")
+          .filter({ hasText: "즉시 실행 요청 완료" });
+        await expect(successAlert).toContainText(
+          "기존 요청의 즉시 dispatch를 요청했습니다.",
+        );
       });
 
-      await test.step("새 now 요청의 status가 queued를 벗어난다(runner 활성 전제)", async () => {
+      await test.step("같은 요청의 status가 queued를 벗어난다(runner 활성 전제)", async () => {
         await expect
           .poll(
             async () => {
               const res = await fetchDetailByApi(
                 page,
-                runNowRequestId as string,
+                requestId as string,
               );
               return res.body?.data.status ?? `http:${res.status}`;
             },
@@ -869,9 +891,7 @@ test.describe("/admin/features/update-requests live write workflow", () => {
           .not.toBe("queued");
       });
     } finally {
-      for (const id of [runNowRequestId, requestId]) {
-        if (id) await cancelByApi(page, id);
-      }
+      if (requestId) await cancelByApi(page, requestId);
     }
   });
 });

@@ -130,10 +130,11 @@ class PipelineStatusCounts:
 
 @dataclass(frozen=True)
 class PipelineDatasetLatestExecution:
-    """provider/dataset별 최신 canonical root와 해당 pair 상태."""
+    """provider/dataset/scope별 최신 canonical root와 해당 pair 상태."""
 
     provider: str
     dataset_key: str
+    sync_scope: str | None
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
@@ -306,7 +307,7 @@ direct_request_pairs AS (
         request.request_id AS root_id,
         request.scope->>'provider' AS provider,
         request.scope->>'dataset_key' AS dataset_key,
-        request.scope->>'sync_scope' AS sync_scope
+        request.effective_sync_scope AS sync_scope
     FROM pipeline_requests AS request
     WHERE request.scope_type = 'provider_dataset'
       AND jsonb_typeof(request.scope->'provider') = 'string'
@@ -636,6 +637,7 @@ pipeline_requests AS MATERIALIZED (
         request.priority,
         identity_job.status,
         request.job_id,
+        identity_job.sync_scope AS effective_sync_scope,
         identity_job.dagster_run_id,
         request.operator,
         identity_job.error_message,
@@ -665,6 +667,7 @@ pipeline_requests AS MATERIALIZED (
         request.priority,
         identity_job.status,
         request.job_id,
+        identity_job.sync_scope AS effective_sync_scope,
         identity_job.dagster_run_id,
         request.operator,
         identity_job.error_message,
@@ -949,10 +952,11 @@ ranked_dataset_roots AS (
         root.*,
         pair.provider AS selected_provider,
         pair.dataset_key AS selected_dataset_key,
+        pair.sync_scope AS selected_sync_scope,
         pair.operation_member_id AS selected_operation_member_id,
         pair.status AS selected_pair_status,
         ROW_NUMBER() OVER (
-            PARTITION BY pair.provider, pair.dataset_key
+            PARTITION BY pair.provider, pair.dataset_key, pair.sync_scope
             ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
         ) AS dataset_rank
     FROM roots_with_identity AS root
@@ -978,7 +982,7 @@ SELECT
     page.projected_trigger_kind, page.projected_operation_registry_version,
     page.projected_load_batch_id, page.projected_parent_job_id,
     page.projected_depth,
-    page.selected_provider, page.selected_dataset_key,
+    page.selected_provider, page.selected_dataset_key, page.selected_sync_scope,
     page.selected_operation_member_id, page.selected_pair_status,
     cancellation.cancellation_id,
     cancellation.cancellation_status,
@@ -1283,6 +1287,11 @@ async def list_latest_dataset_pipeline_executions(
         PipelineDatasetLatestExecution(
             provider=str(row.selected_provider),
             dataset_key=str(row.selected_dataset_key),
+            sync_scope=(
+                str(row.selected_sync_scope)
+                if row.selected_sync_scope is not None
+                else None
+            ),
             execution=_row_to_execution(row),
             operation_member_id=str(row.selected_operation_member_id),
             pair_status=str(row.selected_pair_status),

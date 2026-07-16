@@ -120,6 +120,27 @@ def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "metadata" in upsert_props
     assert "metadata_" not in upsert_props
     assert upsert_props["provider_overrides"]["maxProperties"] == 64
+    path_parameters = spec["paths"][
+        "/v1/admin/poi-cache-targets/{external_system}/{target_key}"
+    ]["put"]["parameters"]
+    external_system = next(
+        item for item in path_parameters if item["name"] == "external_system"
+    )
+    assert external_system["schema"]["maxLength"] == 112
+
+
+@pytest.mark.unit
+def test_put_poi_cache_target_rejects_impossible_external_system_before_transaction(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.put(
+        f"/v1/admin/poi-cache-targets/{'x' * 113}/poi-1",
+        json={"coord": {"lon": 126.978, "lat": 37.5665}},
+    )
+
+    assert response.status_code == 422
+    assert session.begin_count == 0
 
 
 @pytest.mark.unit

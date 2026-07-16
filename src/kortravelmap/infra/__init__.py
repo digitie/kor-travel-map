@@ -104,6 +104,12 @@ from kortravelmap.infra.feature_repo import (
     upsert_source_link,
     upsert_source_record,
 )
+from kortravelmap.infra.feature_update_active_repo import (
+    FeatureUpdateDispatchConflict,
+    find_active_provider_dataset_request,
+    is_active_provider_dataset_unique_violation,
+    request_feature_update_dispatch,
+)
 from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateExecutionPlan,
     FeatureUpdateExecutionResult,
@@ -397,6 +403,11 @@ __all__ = [
     "finish_update_request",
     "get_update_request",
     "list_update_requests",
+    # feature_update_active_repo (#686 active identity + dispatch intent)
+    "FeatureUpdateDispatchConflict",
+    "find_active_provider_dataset_request",
+    "is_active_provider_dataset_unique_violation",
+    "request_feature_update_dispatch",
     # pipeline_cancellation_repo (ADR-064 T-ADM-C3d)
     "PipelineCancellationAttempt",
     "PipelineCancellationConflict",

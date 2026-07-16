@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (codex) — C45X typed scope·active idempotency 완결
+
+- Claude Code PR #701을 0052 typed identity 정본 위에서 재작성했다. 0053 migration은 direct
+  request job의 effective scope/dispatch intent를 열로 추가하고 active partial unique index,
+  request↔job identity trigger, POI/external-system 112자와 locale 독립 Unicode trim CHECK를
+  설치한다. legacy direct KMA grid는 `target_grids`, 나머지는 `dataset_wide`로 clean-cut한다.
+- API는 requested/effective scope를 분리하고 같은 active plan을 200으로 재사용하며, run-now는
+  canonical request/job identity를 유지한다. cancellation-requested/terminal은 typed 409로
+  거절한다. KMA runner는 typed scope 누락을 fail-close하고 exact target membership fingerprint,
+  cap 초과 전량 실패, scope별 durable failure를 적용한다. datasets projection은 scope별
+  first-run/stale/orphan/latest/recent를 완결했다.
+- 두 적대 리뷰에서 발견한 running+cancellation 200, request JSON/default KMA fallback,
+  PostgreSQL locale별 NBSP 허용을 수정했다. 서비스 실제 unique 충돌은 독립 migration DB와
+  2-party barrier로 검증했다. 테스트 과정에서 0052 migration 전용 DB가 현재 0053 repository를
+  호출하던 세대 혼용은 0052 physical invariant 검사로 바꿨으며 구 schema 호환 코드는 넣지 않았다.
+- API 530, Dagster 444(+1 skip), unit 1,396, 관련 PostGIS/migration, frontend Vitest 82와
+  C45X Playwright 27, production build를 통과했다. Ruff/mypy/import-linter/OpenAPI/type drift도
+  green이다. 외부 geo live 5건의 HTTP 400과 C4R/C6 이전 legacy mocked selector 실패는 별도
+  후속 경계로 기록했다. 다음은 #701 rebase·보안 감사·CI·병합 후 #698 C4R 개선이다.
+
 ## 2026-07-16 (codex) — C3e-I2 n150 prod 일방향 전환·live UI 종결
 
 - 배포 전 pg_dump와 SHA-256을 기록하고 maintenance drain 뒤 0051/0052를 적용했다. 취소된

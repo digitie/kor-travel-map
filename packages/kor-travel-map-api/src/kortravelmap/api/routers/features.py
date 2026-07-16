@@ -25,6 +25,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra import (
     curation_repo,
     feature_repo,
@@ -884,7 +885,11 @@ async def list_features_nearby_by_target(
     session: Annotated[AsyncSession, Depends(get_session)],
     external_system: Annotated[
         str,
-        Query(description="외부 시스템 이름. 예: external-app"),
+        Query(
+            min_length=1,
+            max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
+            description="외부 시스템 이름. 예: external-app",
+        ),
     ],
     target_key: Annotated[str, Query(description="외부 POI 고유 key.")],
     radius_km: Annotated[

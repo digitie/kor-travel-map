@@ -49,16 +49,30 @@ class OpsDatasetPreviewCapability(BaseModel):
     )
 
 
+class OpsDatasetScopeRefreshCapability(BaseModel):
+    """직접 갱신 요청에서 선택 가능한 effective sync scope 계약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    supported: bool
+    selector: Literal["none", "poi_cache_targets"]
+    effect: Literal["dataset_wide", "sync_scope"]
+    default_sync_scope: str
+    allowed_sync_scopes: list[str]
+    reason: str | None = None
+
+
 class OpsDatasetCatalogInfo(BaseModel):
     """ETL 카탈로그가 아는 dataset 메타."""
 
     model_config = ConfigDict(extra="forbid")
 
     feature_kind: str
-    default_sync_scope: str
+    provider_state_default_scope: str
     label: str
     is_feature_load: bool
     is_refreshable: bool
+    scope_refresh: OpsDatasetScopeRefreshCapability
     preview: OpsDatasetPreviewCapability
 
 
@@ -138,6 +152,7 @@ class OpsDatasetLatestExecution(BaseModel):
     status: OperationState
     pair_status: OperationState
     operation_member_id: UUID
+    sync_scope: str | None
     providers: list[str]
     dataset_keys: list[str]
     provider_datasets: list[OpsDatasetProviderDataset]

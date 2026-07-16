@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
 
 from sqlalchemy import text
 
+from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -257,7 +259,7 @@ def canonicalize_feature_update_scope(scope: Mapping[str, Any]) -> dict[str, Any
             "external_system": _canonical_scope_text(
                 scope["external_system"],
                 field_name="external_system",
-                max_length=128,
+                max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
             ),
             "target_keys": target_keys,
             "scope_mode": scope_mode,

@@ -367,6 +367,9 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
     "status": "queued",
     "job_id": "uuid",
     "dagster_run_id": null,
+    "requested_sync_scope": null,
+    "effective_sync_scope": null,
+    "dispatch_requested_at": null,
     "operator": "local-admin",
     "reason": "광화문 주변 데이터 즉시 갱신",
     "error_message": null,
@@ -380,12 +383,14 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
     "generation": 1,
     "status_url": "/v1/admin/features/update-requests/uuid"
   },
+  "reused_active_request": false,
   "meta": {"duration_ms": 34}
 }
 ```
 
-`POST /admin/features/update-requests`는 항상 영속 요청을 만들고 `201`과
-`data.result_kind="request"`를 반환한다. 비영속 계산은 같은 실행 계획 본문에서
+`POST /admin/features/update-requests`는 새 영속 요청이면 `201`, 같은 direct effective
+scope의 활성 요청과 전체 계획이 같아 재사용하면 `200`을 반환한다. 두 경우 모두
+`data.result_kind="request"`이며 `reused_active_request`로 구분한다. 비영속 계산은 같은 실행 계획 본문에서
 `reason`을 제외해 `POST /admin/features/update-requests/preview`로 보내며,
 `200`과 `data.result_kind="preview"`를 반환한다. preview에는 저장 identity와 lifecycle이 없으므로
 `request_id`, `job_id`, `status`,
@@ -395,8 +400,16 @@ create와 run-now 요청 body는 `operator`/`actor`를 받지 않으며 포함�
 `422 VALIDATION_ERROR`다. 저장 행과 응답의 `operator`는 서버가 인증된
 `AdminProxyContext.actor`에서만 파생한다.
 
-`run_mode="now"`에서 동일 scope advisory lock이 이미 점유되어 있으면 queued fallback
-없이 `409`를 반환한다. 응답은 공통 RFC7807 `application/problem+json`을 사용한다(§3).
+target-selector KMA grid dataset은 `provider_dataset` scope에서만 명시적으로
+선택할 수 있다. provider/dataset filter가 이 pair를 포함한 non-direct 요청은
+provider I/O 전 `422`로 거절한다. non-direct 요청은 source record의
+비지원 pair가 worker에서 늦게 실패하지 않도록 provider 또는 dataset_key filter를
+하나 이상 반드시 지정한다.
+
+서로 다른 계획이 같은 direct effective scope의 active identity를 점유하면 기존
+`request_id`/상태/상세 링크를 포함한 `409 ACTIVE_SCOPE_CONFLICT`를 반환한다. `run_mode="now"`의
+scope advisory lock 경합도 queued fallback 없이 `409`다. 응답은 공통 RFC7807
+`application/problem+json`을 사용한다(§3).
 
 ```json
 {
@@ -603,15 +616,16 @@ request를 canonical `update_request` pipeline root로 해석하고, 연결된 r
 
 #### `POST /admin/features/update-requests/{request_id}/run-now`
 
-선택 요청 body:
+선택 요청 body는 빈 strict object다.
 
 ```json
-{"priority": 100, "reason": "실패 원인 수정 후 즉시 재실행"}
+{}
 ```
 
-기존 request payload를 복사해 `run_mode=now`인 **새 request/job row**를 만들고 `201`을
-반환한다. 응답 `data.request_id`와 `data.job_id`는 원본과 다른 새 identity이며 원본 request의
-상태·내용은 변경하지 않는다. 원본이 이미 running이거나 동일 scope lock이 경합하면 `409`다.
+새 request/job을 만들지 않고 기존 queued canonical job의 `dispatch_requested_at`을 최초 한 번
+기록해 일반 queue보다 먼저 선택되게 하고 `200`을 반환한다. 같은 queued 요청 재호출은 원래
+timestamp를 보존하고, running은 같은 identity/상태를 그대로 반환한다. terminal 또는 cancellation
+요청 중인 작업은 `409 REQUEST_NOT_DISPATCHABLE`이다. priority/reason override는 허용하지 않는다.
 
 ## 6. Dagster 큐잉 방식
 
@@ -624,8 +638,9 @@ request를 canonical `update_request` pipeline root로 해석하고, 연결된 r
    canonical job만 `running`으로 바꾸고 progress를 갱신. `NULL` run owner는 허용하지 않는다.
 4. 완료 시 canonical job만 terminal로 갱신하고 request 응답은 JOIN으로 같은 상태를 읽는다.
 
-즉시 실행(`run_mode=now`)도 request와 job row를 먼저 저장한다. 현재 구현은 API가
-Dagster run을 직접 만들지 않고, sensor가 같은 queue에서 감지해 worker run을 만든다.
+최초 생성의 `run_mode=now`와 기존 요청 run-now 모두 canonical job의
+`dispatch_requested_at`을 설정한다. API가 Dagster run을 직접 만들지 않고 sensor가
+dispatch marker 우선, priority, 생성 순서로 같은 queue에서 worker run을 만든다.
 
 ### 6.1 테이블
 
@@ -695,7 +710,8 @@ CREATE INDEX idx_feature_update_dataset_keys_gin
 추가 키 금지, JSON type, 문자열 trim/길이, 배열 크기, 좌표·반경·bbox 범위를
 위 OpenAPI 입력 계약과 동일하게 강제한다. 기본값이 있는 `match`/`scope_mode`는 저장 전
 canonical 값으로 채우고, nullable `sync_scope`/`radius_km`는 `NULL` JSON을 저장하지 않고
-키를 생략한다. 0052는 `providers`/`dataset_keys`를 JSONB에서 typed `TEXT[]`로 전환한다.
+키를 생략한다. 0053은 cache-target scope의 `external_system`을 POI target natural key와
+같은 112자로 제한한다. 0052는 `providers`/`dataset_keys`를 JSONB에서 typed `TEXT[]`로 전환한다.
 `ops.is_valid_feature_update_filter_array`는 1차원·중복 없음과 각각 최대 32/64개의
 trimmed non-empty string(항목당 128자 이하)을 강제한다.
 `ops.is_valid_feature_update_policy`는 object만 허용하고 `mode='refresh_existing'`와
@@ -715,7 +731,15 @@ source job ID를 별도로 보존한다. request 입력·
 cancellation marker가 없을 때 변경한다. request/canonical job은 cancellation root와 audit correlation을
 보존하는 append-only identity라 DELETE할 수 없다.
 
-구현 상태: Alembic `0008_feature_update_requests`와 `0052_pipeline_projection_access`,
+0053은 `ops.import_jobs`에 nullable `sync_scope`와 `dispatch_requested_at`을 추가한다. direct
+`feature_update_request` job은 sync scope가 필수이고 non-direct job은 null이다. queued/running
+direct job의 `(provider,dataset_key,sync_scope)`에는 partial unique index가 있어 active identity를
+DB에서 최종 방어한다. request JSON은 requested scope, typed job column은 effective scope다.
+명시 requested scope가 있으면 둘은 같아야 하지만 생략된 KMA target request는 typed job에
+`target_grids`를 저장할 수 있다.
+
+구현 상태: Alembic `0008_feature_update_requests`, `0052_pipeline_projection_access`,
+`0053_update_scope_dispatch`,
 `FeatureUpdateRequestRow`가 이 DDL을 반영한다. `infra.feature_update_repo`는
 preview, request/import job enqueue, priority peek와 generation/owner CAS start/finish,
 단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKorTravelMapClient`는
@@ -789,8 +813,21 @@ T-221d 구현 상태:
 - `latest_execution`: typed `import_jobs.provider/dataset_key`가 있는 canonical root
   projection이다. 연결 request/job 쌍은 FK와 lineage로 request 한 행에 접고 payload나
   event를 identity/계보 근거로 읽지 않는다. 선택된 pair member 상태와 root/대표 job
-  상태·진척은 별도 속성으로 보존하며
+  상태·진척은 별도 속성으로 보존한다. direct request는
+  `(provider, dataset_key, sync_scope)`별로 최신 root를 계산해 KMA external-system
+  행 사이에 active/상세 링크가 섞이지 않게 하고, scope가 없는 일반
+  scheduled/import 실행은 해당 dataset 행의 fallback으로만 사용한다. 이 fallback은
+  exact scope 실행과 NULL-scope 실행을 같은 total order로 비교하며, `target_grids`와
+  `external_system:*` 및 카탈로그가 없어 의미를 증명할 수 없는 state/policy-only orphan
+  scope에는 적용하지 않는다.
   `latest_execution_coverage=db_recorded_canonical_operations`를 함께 준다.
+- `catalog.provider_state_default_scope`는 provider cursor/state namespace의 기본값이고,
+  직접 갱신 조작이 제출할 기본 effective scope는
+  `catalog.scope_refresh.default_sync_scope`만이 정본이다. 일반 provider의 init/bind/run/
+  teardown 실패도 성공 writer와 같은 `default`에 기록하고 KMA grid 3종만 선택된
+  effective scope를 실패 namespace로 사용한다. target selector는 catalog 기본 scope와
+  활성 `external_system:*` scope를 DB state 유무와 관계없이 grid/detail에 `never_run`으로
+  구체화하고, 삭제된 system의 잔존 state도 감사 목적으로 유지한다.
 - integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
 - 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
@@ -842,6 +879,7 @@ provider-only/dataset-only filter는 request 저장 배열 membership과 canonic
 provider/dataset/sync_scope와 pair별 member/status는 required 배열인
 `provider_datasets[]`가 정본이다. pair가 없는 root도 필드를 생략하지 않고 빈 배열을 반환한다.
 각 pair의 `operation_member_id`는 필수 UUID이고, nullable `sync_scope`도 필드를 생략하지 않는다.
+direct update request pair의 값은 request JSON이 아니라 canonical job의 effective typed column이다.
 `projected_job`은 일반 hierarchy에서 `depth DESC, created_at DESC, job_id DESC` 규칙으로 고른
 대표 job이며 root와 별도의 status/progress/error/times/Dagster run/detail URL을 가진다. 단,
 C3e `provider_feature_load_run`은 임의 pair child를 대표로 고르지 않고 root 자체를
@@ -859,7 +897,8 @@ Dagster run 상세는 T-ADM-C3c, 계층 취소는 C3d가 소유한다.
 
 ## 7.2.1 Canonical operation REST 계약 (T-ADM-C3e)
 
-갱신 조작은 admin 정본과 동일하게 `POST /v1/ops/pipeline/requests` 영속 생성(201)과
+갱신 조작은 admin 정본과 동일하게 `POST /v1/ops/pipeline/requests` 신규 영속 생성(201) 또는
+동일 활성 계획 재사용(200)과
 `POST /v1/ops/pipeline/requests/preview` 비영속 미리보기(200)로 분리한다. 생성 본문은
 `dry_run`을 받지 않으며 미리보기 응답에는 request/job identity와 lifecycle이 없다.
 
@@ -884,8 +923,9 @@ pair가 두 값을 모두 만족해야 하며 다른 event/독립 배열의 교�
 - `status`: 해당 pair의 `queued|running|done|failed|cancelled`
 
 update request root도 연결된 import job/descendant의 실컬럼 pair만 사용한다. direct
-`provider_dataset` scope는 연결된 typed job pair와 DB trigger로 항상 같고, `sync_scope`를
-보강하는 request metadata일 뿐 독립 identity나 fallback을 만들지 않는다. 독립
+`provider_dataset` scope의 provider/dataset은 연결 typed pair와 같고, optional request
+`sync_scope`는 requested metadata다. 실행·active identity·projection은 canonical job의 required
+effective `sync_scope`만 사용한다. 독립
 provider/dataset 배열은 표시와 단일 필터용일 뿐 exact pair 생성 근거가 아니다.
 
 pair 배열은 `(provider ASC, dataset_key ASC)`로 정렬한다. 같은 pair의 typed member가 여러

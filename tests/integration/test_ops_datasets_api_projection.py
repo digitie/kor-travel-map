@@ -66,6 +66,7 @@ class _ExpectedOperation:
     id: str
     provider: str
     dataset_key: str
+    sync_scope: str | None
     status: str
     created_at: datetime
     started_at: datetime | None
@@ -150,7 +151,7 @@ def _assert_common_projection(
         {
             "provider": expected.provider,
             "dataset_key": expected.dataset_key,
-            "sync_scope": None,
+            "sync_scope": expected.sync_scope,
             "operation_member_id": expected.operation_member_id,
             "status": expected.pair_status,
         }
@@ -251,6 +252,7 @@ def _feature_expectation(
         id=operation.root_job_id,
         provider=pair.provider,
         dataset_key=pair.dataset_key,
+        sync_scope=None,
         status="running",
         created_at=engine_created_at,
         started_at=engine_created_at,
@@ -299,6 +301,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
                 "provider": pair.provider,
                 "dataset_key": pair.dataset_key,
             },
+            effective_sync_scope="dataset_wide",
             operator=_OPERATOR,
             reason="canonical REST projection proof",
         )
@@ -308,6 +311,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
                 id=update_request.request_id,
                 provider=pair.provider,
                 dataset_key=pair.dataset_key,
+                sync_scope="dataset_wide",
                 status="queued",
                 created_at=update_request.created_at,
                 started_at=None,

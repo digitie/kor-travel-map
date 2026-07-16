@@ -44,6 +44,7 @@ pipeline_requests AS MATERIALIZED (
         priority,
         identity_job.status,
         request.job_id,
+        identity_job.sync_scope AS effective_sync_scope,
         identity_job.dagster_run_id,
         request.operator,
         identity_job.error_message,

@@ -114,6 +114,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         cancellation_unresolved_member_count=None,
         selected_provider="python-kma-api",
         selected_dataset_key="kma_short_forecast",
+        selected_sync_scope="target_grids",
         selected_operation_member_id=job_id,
         selected_pair_status="running",
     )
@@ -279,6 +280,7 @@ async def test_latest_dataset_batch_maps_common_root_and_selected_pair() -> None
     assert len(items) == 1
     assert items[0].provider == "python-kma-api"
     assert items[0].dataset_key == "kma_short_forecast"
+    assert items[0].sync_scope == "target_grids"
     assert items[0].execution.id == "11111111-1111-1111-1111-111111111111"
     assert items[0].operation_member_id == items[0].execution.id
     assert items[0].pair_status == "running"

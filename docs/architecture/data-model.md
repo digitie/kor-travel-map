@@ -1205,7 +1205,7 @@ CREATE INDEX idx_reports_batch   ON ops.feature_consistency_reports (batch_id);
 CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
 ```
 
-### 9.8 `ops.feature_update_requests` (ADR-045 accepted — alembic 0008+0052)
+### 9.8 `ops.feature_update_requests` (ADR-045 accepted — alembic 0008+0052+0053)
 
 OpenAPI로 들어온 feature update request를 저장한다. `center_radius`,
 `sigungu_by_radius`, `provider_dataset`, `cache_target_keys` 같은 scope를 Dagster
@@ -1258,6 +1258,44 @@ root/audit correlation을 보존하기 위해 append-only이며 DELETE를 거부
 `match`/`scope_mode`는 저장 전 기본값을 채우고 optional `sync_scope`/`radius_km`는
 JSON `null` 대신 키를 생략한 canonical shape만 저장한다. `provider_dataset` scope의 pair는
 연결 job의 typed pair와 정확히 같아야 하며 다른 scope는 unpaired job만 가리킨다.
+
+0053부터 direct `provider_dataset` canonical job은 `ops.import_jobs.sync_scope`를 non-null
+typed identity로 소유한다. request JSON의 optional `sync_scope`는 **requested 값**이므로 생략을
+`dataset_wide`로 덮어쓰지 않는다. API/catalog가 계산한 **effective 값**은 job에만 저장하며 일반
+dataset은 `dataset_wide`, target 선택형 KMA grid는 `target_grids` 또는
+`external_system:<exact-name>`다. pipeline exact pair projection도 request JSON이 아니라 이 typed
+column만 읽는다. scope별 최신 실행 projection은
+`(provider, dataset_key, sync_scope)`를 identity로 삼고, non-direct request job의
+`sync_scope`는 null이다. target 선택형 dataset은 실제 대상 subset이 typed
+identity에 반영되지 않는 non-direct scope로 요청할 수 없다.
+
+operation의 `dataset_wide`는 요청 중복 실행을 막는 조작 identity이고,
+`provider_sync_state.sync_scope`는 provider cursor/failure namespace다. 일반 provider asset은
+성공 writer와 동일한 `default` namespace에 실패를 기록하며, 실제 target subset마다 cursor가
+갈리는 KMA grid 3종만 operation effective scope(`target_grids` 또는
+`external_system:<name>`)를 provider state namespace로 그대로 사용한다.
+
+queued/running direct job에는 `(provider, dataset_key, sync_scope)` partial unique index
+`uq_import_jobs_active_feature_update_scope`를 적용한다. 같은 identity의 계획이 scope/filter/policy/
+priority/operator/reason까지 같으면 API는 기존 request를 재사용하고, 다르면 조용히 덮지 않고
+409로 기존 operation을 가리킨다. `dispatch_requested_at`은 run-now가 새 request를 만들지 않고
+같은 queued job의 우선 dispatch 의도를 최초 한 번 기록하는 시각이다. queue PEEK는 이 값이 있는
+행을 일반 priority queue보다 먼저 선택하며 재호출은 timestamp와 generation을 바꾸지 않는다.
+running은 같은 request를 반환하고 terminal/cancellation-requested는 dispatch를 거부한다.
+
+0053 migration은 feature update request/job writer를 같은 `ACCESS EXCLUSIVE NOWAIT` 문장으로 잠근다.
+기존 direct row는 raw requested 문자열을 identity로 승격하지 않는다.
+`python-kma-api`의 short/ultra-short nowcast/ultra-short forecast 3종은 `target_grids`,
+나머지 direct dataset은 `dataset_wide`로 일괄 backfill하며 active duplicate나 running
+ambiguity를 이 canonical 매핑 후 임의 취소하지 않고 진단과 함께 중단한다.
+`run_mode=now`의 dispatch 이력은 direct 여부와 관계없이 분리 backfill한다. job sync
+scope와 request/job pair identity는 trigger로 불변이며 raw requested scope는 감사
+JSON으로만 보존한다. migration이 보존한 legacy raw alias는 typed identity로
+승격하지 않지만, 0053 이후 신규 direct writer가 requested `sync_scope`를 명시하면
+canonical linked job scope와 정확히 같아야 한다. POI target과 `cache_target_keys` request의
+`external_system`은 trimmed non-empty 112자 이하를 OpenAPI·core·DB·repository 경계에서
+강제하고, 기존 위반 행은 자동 정리하지 않고
+target ID·값·길이를 진단한 뒤 migration을 중단한다.
 0052는 `providers`/`dataset_keys`를 JSONB에서 typed `TEXT[]`로 clean cut한다.
 `ops.is_valid_feature_update_filter_array`는 1차원·중복 없음, 32/64개 상한과 trimmed
 non-empty string 128자 이하를 강제한다. DB CHECK와 trigger는 연결 job의

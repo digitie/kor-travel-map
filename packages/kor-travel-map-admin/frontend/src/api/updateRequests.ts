@@ -53,7 +53,7 @@ export type FeatureUpdateRequestCreateResponse =
 export type FeatureUpdateRequestPreviewResponse =
   FeatureUpdateSchemas["FeatureUpdateRequestPreviewResponse"];
 export type FeatureUpdateRequestMutationResponse =
-  paths["/v1/admin/features/update-requests/{request_id}/run-now"]["post"]["responses"][201]["content"]["application/json"];
+  FeatureUpdateSchemas["FeatureUpdateRequestMutationResponse"];
 export type FeatureUpdateRequestListResponse =
   FeatureUpdateSchemas["FeatureUpdateRequestListResponse"];
 export type FeatureUpdateRequestDetailResponse =
@@ -244,12 +244,11 @@ export function useRunFeatureUpdateRequestNowMutation() {
   >({
     mutationFn: ({ requestId, body }) =>
       runFeatureUpdateRequestNow(requestId, body),
-    onSuccess: (data) => {
-      const createdRequestId = data.data.request_id;
-      // run-now는 원 요청을 갱신하지 않고 새 요청을 만든다. 응답을 새 상세 캐시에
-      // 바로 심고 목록만 무효화해 원 요청 상세의 불필요한 재조회를 피한다.
+    onSuccess: (data, variables) => {
+      // run-now는 새 요청을 만들지 않고 기존 canonical request의
+      // dispatch 의도를 갱신한다. 동일 identity의 상세 cache를 즉시 교체한다.
       queryClient.setQueryData<FeatureUpdateRequestDetailResponse>(
-        ["feature-update-request", createdRequestId],
+        ["feature-update-request", variables.requestId],
         data,
       );
       void queryClient.invalidateQueries({

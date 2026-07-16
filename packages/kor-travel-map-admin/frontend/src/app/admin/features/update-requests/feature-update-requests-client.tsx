@@ -97,6 +97,7 @@ export function FeatureUpdateRequestsClient() {
   const [datasets, setDatasets] = useState("");
   const [previewOnly, setPreviewOnly] = useState(true);
   const [runMode, setRunMode] = useState<"queued" | "now">("queued");
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const [errors, setErrors] = useState<
     Partial<Record<"lon" | "lat" | "radiusKm", string>>
   >({});
@@ -236,7 +237,7 @@ export function FeatureUpdateRequestsClient() {
                   취소
                 </Button>
               ) : null}
-              {request.status !== "running" ? (
+              {["queued", "running"].includes(request.status) ? (
                 <Button
                   disabled={runNow.isPending}
                   size="sm"
@@ -245,7 +246,7 @@ export function FeatureUpdateRequestsClient() {
                   onClick={() =>
                     runNow.mutate({
                       requestId,
-                      body: { reason: "run-now from admin ui" },
+                      body: {},
                     })
                   }
                 >
@@ -295,6 +296,12 @@ export function FeatureUpdateRequestsClient() {
     setLon(values.lon);
     setLat(values.lat);
     setRadiusKm(values.radiusKm);
+    const datasetKeys = commaSeparatedValues(datasets);
+    if (providers.length === 0 && datasetKeys.length === 0) {
+      setSelectionError("제공자 또는 데이터셋 키를 하나 이상 선택하세요.");
+      return;
+    }
+    setSelectionError(null);
     const plan = {
       scope: {
         type: "center_radius",
@@ -305,7 +312,7 @@ export function FeatureUpdateRequestsClient() {
         radius_km: Number(values.radiusKm),
       },
       providers,
-      dataset_keys: commaSeparatedValues(datasets),
+      dataset_keys: datasetKeys,
       run_mode: runMode,
     } satisfies FeatureUpdateRequestPreviewRequest;
     createRequest.reset();
@@ -381,19 +388,36 @@ export function FeatureUpdateRequestsClient() {
               label="제공자"
               options={providerOptions}
               placeholder={
-                providersQuery.isLoading ? "불러오는 중" : "전체 제공자"
+                providersQuery.isLoading
+                  ? "불러오는 중"
+                  : "제공자 선택(또는 데이터셋 키 입력)"
               }
               searchPlaceholder="제공자 검색"
               value={providers}
-              onChange={setProviders}
+              onChange={(value) => {
+                setProviders(value);
+                if (value.length > 0) {
+                  setSelectionError(null);
+                }
+              }}
             />
             <FormField
               label="데이터셋 키"
-              hint="특정 dataset_key만 갱신할 때 쉼표로 구분해 입력합니다."
-              placeholder="예: kma_short_grid"
+              hint="제공자 또는 dataset_key 중 하나는 필수입니다. 여러 키는 쉼표로 구분합니다."
+              placeholder="예: mois_license_features_bulk"
               value={datasets}
-              onChange={(e) => setDatasets(e.target.value)}
+              onChange={(event) => {
+                setDatasets(event.target.value);
+                if (commaSeparatedValues(event.target.value).length > 0) {
+                  setSelectionError(null);
+                }
+              }}
             />
+            {selectionError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {selectionError}
+              </p>
+            ) : null}
             <FormSelect
               label="실행 모드"
               value={runMode}
@@ -522,22 +546,24 @@ export function FeatureUpdateRequestsClient() {
           ) : null}
           {runNow.isError ? (
             <Alert variant="destructive">
-              <AlertTitle>즉시 실행 요청 생성 실패</AlertTitle>
+              <AlertTitle>즉시 실행 요청 실패</AlertTitle>
               <AlertDescription>{runNow.error.message}</AlertDescription>
             </Alert>
           ) : null}
           {runNow.data ? (
             <Alert>
-              <AlertTitle>즉시 실행 요청 생성 완료</AlertTitle>
+              <AlertTitle>즉시 실행 요청 완료</AlertTitle>
               <AlertDescription>
-                원본 요청은 변경되지 않았습니다. 새 요청{" "}
+                {runNow.data.data.status === "running"
+                  ? "요청이 이미 실행 중입니다."
+                  : "기존 요청의 즉시 dispatch를 요청했습니다."}{" "}
                 <Link
                   className="break-all font-mono underline underline-offset-2"
                   href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
                 >
                   {runNow.data.data.request_id}
                 </Link>
-                을 확인하세요.
+                상태를 확인하세요.
               </AlertDescription>
             </Alert>
           ) : null}

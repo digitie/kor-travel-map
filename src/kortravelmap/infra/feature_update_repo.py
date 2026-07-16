@@ -32,6 +32,7 @@ from kortravelmap.core.feature_operation import (
     FEATURE_UPDATE_REQUEST_JOB_KIND,
     ProviderDatasetOperationKey,
 )
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.jobs_repo import (
     enqueue_feature_update_request_job,
@@ -77,6 +78,7 @@ FEATURE_UPDATE_LOCK_RETRY_AFTER_SECONDS: Final[int] = 15
 MAX_FEATURE_UPDATE_PROVIDERS: Final[int] = 32
 MAX_FEATURE_UPDATE_DATASET_KEYS: Final[int] = 64
 MAX_FEATURE_UPDATE_FILTER_LENGTH: Final[int] = 128
+DATASET_WIDE_SYNC_SCOPE: Final[str] = "dataset_wide"
 
 _RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})
 _FEATURE_UPDATE_POLICY_MODE: Final[str] = "refresh_existing"
@@ -101,7 +103,8 @@ _REQUEST_RETURN_COLUMNS: Final[str] = (
     "job.cancellation_id, job.cancellation_requested_at, "
     "job.cancellation_requested_by, job.cancellation_reason, request.operator, "
     "request.reason, job.error_message, request.created_at, job.started_at, "
-    "job.finished_at, request.generation"
+    "job.finished_at, request.generation, "
+    "job.sync_scope AS effective_sync_scope, job.dispatch_requested_at"
 )
 
 
@@ -132,6 +135,8 @@ class FeatureUpdateRequest:
     cancellation_requested_at: datetime | None = None
     cancellation_requested_by: str | None = None
     cancellation_reason: str | None = None
+    effective_sync_scope: str | None = None
+    dispatch_requested_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +236,8 @@ def _row_to_request(row: Any) -> FeatureUpdateRequest:
         started_at=row.started_at,
         finished_at=row.finished_at,
         generation=int(row.generation),
+        effective_sync_scope=row.effective_sync_scope,
+        dispatch_requested_at=row.dispatch_requested_at,
     )
 
 
@@ -272,6 +279,36 @@ def _normalize_strings(
 def _validate_run_mode(run_mode: str) -> None:
     if run_mode not in _RUN_MODES:
         raise ValueError(f"run_mode must be one of {sorted(_RUN_MODES)}")
+
+
+def _effective_sync_scope(
+    *,
+    scope_type: str,
+    scope: Mapping[str, Any],
+    supplied: str | None,
+) -> str | None:
+    """request JSON과 typed job identity가 공유할 canonical sync scope를 검증한다."""
+    if scope_type != "provider_dataset":
+        if supplied is not None:
+            raise ValueError("effective_sync_scope is only valid for provider_dataset scope")
+        return None
+
+    explicit = scope.get("sync_scope")
+    if supplied is None:
+        raise ValueError("provider_dataset scope requires an explicit effective_sync_scope")
+    value = supplied
+    try:
+        parse_canonical_sync_scope(value)
+    except ValueError as exc:
+        raise ValueError(
+            "effective_sync_scope must be dataset_wide, target_grids, or "
+            "external_system:<exact trimmed non-empty name>"
+        ) from exc
+    if len(value) > 128:
+        raise ValueError("effective_sync_scope must contain at most 128 characters")
+    if isinstance(explicit, str) and value != explicit:
+        raise ValueError("effective_sync_scope must equal an explicit requested sync_scope")
+    return value
 
 
 def canonicalize_feature_update_policy(
@@ -452,7 +489,11 @@ WHERE job.kind = 'feature_update_request'
   AND job.status = 'queued'
   AND job.dagster_run_id IS NULL
   AND job.cancellation_id IS NULL
-ORDER BY request.priority DESC, request.created_at, request.request_id
+ORDER BY (job.dispatch_requested_at IS NOT NULL) DESC,
+         request.priority DESC,
+         job.dispatch_requested_at NULLS LAST,
+         request.created_at,
+         request.request_id
 LIMIT :limit
 """
 
@@ -849,6 +890,7 @@ async def enqueue_feature_update_request(
     session: AsyncSession,
     *,
     scope: Mapping[str, Any],
+    effective_sync_scope: str | None = None,
     providers: Sequence[str] | None = None,
     dataset_keys: Sequence[str] | None = None,
     update_policy: Mapping[str, Any] | None = None,
@@ -875,6 +917,11 @@ async def enqueue_feature_update_request(
     dataset_values = plan.dataset_keys
     policy = plan.update_policy
     matched_scope = plan.matched_scope
+    canonical_sync_scope = _effective_sync_scope(
+        scope_type=scope_type,
+        scope=scope_payload,
+        supplied=effective_sync_scope,
+    )
 
     scope_lock_key = feature_update_scope_advisory_key(
         scope_type=scope_type,
@@ -898,6 +945,8 @@ async def enqueue_feature_update_request(
     job = await enqueue_feature_update_request_job(
         session,
         provider_dataset=provider_dataset,
+        effective_sync_scope=canonical_sync_scope,
+        dispatch_requested=plan.run_mode == "now",
     )
     row = (
         await session.execute(

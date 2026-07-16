@@ -53,10 +53,11 @@ class DatasetIntegrityIssueCount:
 
 @dataclass(frozen=True)
 class DatasetLatestExecution:
-    """provider×dataset의 최신 canonical root와 exact pair 상태."""
+    """provider×dataset×scope의 최신 canonical root와 exact pair 상태."""
 
     provider: str
     dataset_key: str
+    sync_scope: str | None
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
@@ -140,6 +141,7 @@ async def list_latest_dataset_executions(
         DatasetLatestExecution(
             provider=row.provider,
             dataset_key=row.dataset_key,
+            sync_scope=row.sync_scope,
             execution=row.execution,
             operation_member_id=row.operation_member_id,
             pair_status=row.pair_status,

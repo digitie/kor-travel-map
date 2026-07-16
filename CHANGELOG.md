@@ -5,6 +5,33 @@
 
 ## [Unreleased]
 
+### direct update scope·dispatch 정본 (2026-07-16, ADR-064 T-ADM-C45X-B)
+
+- **ADDED**: direct feature update job의 effective `sync_scope`와
+  `dispatch_requested_at`을 typed DB 열로 승격했다. active identity는
+  `(provider, dataset_key, sync_scope)`로 유일하며 같은 계획은 기존 request를
+  `200` 재사용하고 다른 계획은 상세 링크가 있는 `409`로 거절한다.
+- **CHANGED**: run-now는 새 request/job을 만들지 않고 기존 queued canonical
+  job의 우선 dispatch를 멱등 요청한다. running은 같은 identity를 반환하고
+  terminal/cancellation 상태는 거절한다. 목록·상세 UI도 빈 body/200/동일
+  request cache 계약으로 전환했다.
+- **CHANGED**: KMA grid는 `target_grids` 또는 exact
+  `external_system:<name>` target만 조회하고 scope별 cursor와 target membership
+  fingerprint를 유지한다. 격자 상한 초과는 provider I/O 전 전체 실패하며,
+  실패 상태는 provider transaction rollback 후 별도 transaction에 영속한다.
+- **CHANGED**: datasets latest projection을 `(provider, dataset_key, sync_scope)`로
+  분리하고 provider state 기본 scope와 조작용 default scope 필드명을 분리했다.
+  target scope에는 unscoped 실행을 연결하지 않고, 일반 dataset은 exact/unscoped 후보 중
+  실제 최신 실행을 고른다. 의미를 증명할 카탈로그가 없는 orphan scope는 exact-only다.
+  target selector의 기본/활성 external-system scope는 state가 없어도 grid/detail에
+  `never_run` 행으로 노출한다.
+  POI target 및 cache-target request `external_system`은
+  trimmed non-empty 112자 이하를 OpenAPI·core·DB·repository에서 강제한다.
+- **FIXED**: provider resource init/bind/run/teardown 실패를 typed failure로 통일하고,
+  일반 asset은 성공과 같은 `default` state namespace, KMA grid만 선택된 effective
+  scope에 실패 상태를 영속한다. non-direct 요청은 provider 또는 dataset filter를
+  하나 이상 요구하며 admin UI도 빈 선택을 제출 전에 차단한다.
+
 ### Dagster provider guard·public wrapper tracking (2026-07-16, ADR-064 T-ADM-C3e-B2)
 
 - **ADDED**: 모든 live provider resource가 authoritative Dagster run record의 job·asset selection·
@@ -190,7 +217,8 @@
   + `PATCH`(**`cron_schedule: null` = override 삭제** — 구 default 명령 대체) +
   `commands`(`run|start|stop|reset` 4종 enum), requests(6-type scope union·카탈로그
   refreshable 검증·kor-travel-geo resolver·advisory lock 409/Retry-After·operator/
-  reason 계약 전량 승계) + `run-now`(201 + 새 request), nux-seen. 신규 그룹은
+  reason 계약 전량 승계) + `run-now`(기존 canonical request 우선 dispatch,
+  200), nux-seen. 신규 그룹은
   `ops_routes_enabled` + `require_admin_frontend` 게이트로 마운트한다(조작 포함 —
   무인증 ops 패턴 배제). UNION 조회는 `kortravelmap.infra.pipeline_repo`에 있다.
 - **ADDED**: Alembic 0048 — `ops.import_jobs.dagster_run_id` TEXT 실컬럼 +
@@ -204,8 +232,8 @@
   재실행 SQL은 0048 docstring에 명기했다 — 순수 실컬럼 전환은 T-ADM-C6b 재검토.
 - **FIXED**: 리뷰 반영 — executions/cancel/run-now의 id·cursor key·events job_id
   UUID 검증(비정형 입력 500→422), PATCH override 삭제·update request cancel의
-  operator/reason 구조화 로그(감사 필드 유령 수용 해소), requests·run-now 409
-  응답의 `Retry-After` 헤더 OpenAPI 명문화, datasets 그룹 `dataset_status_repo`에
+  operator/reason 구조화 로그(감사 필드 유령 수용 해소), scope advisory
+  lock 경합 `409`의 `Retry-After` 런타임 계약, datasets 그룹 `dataset_status_repo`에
   `dagster_run_id` 전파(최근 실행 요약 None 누락 방지).
 
 ### Concierge export 소비 계약 정렬 (2026-07-14)

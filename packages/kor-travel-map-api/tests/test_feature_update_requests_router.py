@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,10 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
+)
+from kortravelmap.providers.kma import (
+    KMA_PROVIDER_NAME,
+    KMA_SHORT_FORECAST_DATASET_KEY,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
@@ -26,9 +31,7 @@ from kortravelmap.api.settings import ApiSettings
 
 _REQUEST_ID = "22222222-2222-4222-8222-222222222222"
 _MISSING_REQUEST_ID = "33333333-3333-4333-8333-333333333333"
-_RUN_NOW_REQUEST_ID = "44444444-4444-4444-8444-444444444444"
 _JOB_ID = "55555555-5555-4555-8555-555555555555"
-_RUN_NOW_JOB_ID = "66666666-6666-4666-8666-666666666666"
 
 
 class _Tx:
@@ -47,6 +50,9 @@ class _FakeSession:
         self.begin_count += 1
         return _Tx()
 
+    def begin_nested(self) -> _Tx:
+        return _Tx()
+
 
 @pytest.fixture
 def session() -> _FakeSession:
@@ -54,13 +60,21 @@ def session() -> _FakeSession:
 
 
 @pytest.fixture
-def client(session: _FakeSession) -> TestClient:
+def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = create_app(ApiSettings(admin_proxy_secret=None))
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
 
+    async def _no_active_request(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
     app.dependency_overrides[get_session] = _fake_session
+    monkeypatch.setattr(
+        service_mod,
+        "find_active_provider_dataset_request",
+        _no_active_request,
+    )
     return TestClient(app)
 
 
@@ -70,6 +84,7 @@ def _request(
     job_id: str = _JOB_ID,
     state: str = "queued",
     run_mode: str = "queued",
+    dispatch_requested_at: datetime | None = None,
 ) -> FeatureUpdateRequest:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return FeatureUpdateRequest(
@@ -92,6 +107,7 @@ def _request(
         started_at=None,
         finished_at=None,
         generation=1,
+        dispatch_requested_at=dispatch_requested_at,
     )
 
 
@@ -164,6 +180,9 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         "request_id",
         "job_id",
         "dagster_run_id",
+        "requested_sync_scope",
+        "effective_sync_scope",
+        "dispatch_requested_at",
         "created_at",
         "started_at",
         "finished_at",
@@ -192,13 +211,17 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         "properties"
     ]["data"]
     assert create_data_schema["$ref"].endswith("/FeatureUpdateRequestCreatedRecord")
+    reused_response = spec["paths"]["/v1/admin/features/update-requests"]["post"][
+        "responses"
+    ]["200"]["content"]["application/json"]["schema"]
+    assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
     preview_response = spec["paths"]["/v1/admin/features/update-requests/preview"]["post"][
         "responses"
     ]["200"]["content"]["application/json"]["schema"]
     assert preview_response["$ref"].endswith("/FeatureUpdateRequestPreviewResponse")
     run_now_response = spec["paths"]["/v1/admin/features/update-requests/{request_id}/run-now"][
         "post"
-    ]["responses"]["201"]["content"]["application/json"]["schema"]
+    ]["responses"]["200"]["content"]["application/json"]["schema"]
     assert run_now_response["$ref"].endswith("/FeatureUpdateRequestMutationResponse")
     request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert "dry_run" not in request_schema["properties"]
@@ -256,6 +279,9 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"][
         "target_keys"
     ]["uniqueItems"] is True
+    assert spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"][
+        "external_system"
+    ]["maxLength"] == 112
     update_policy_schema = spec["components"]["schemas"]["FeatureUpdatePolicy"]
     assert update_policy_schema["additionalProperties"] is False
     assert "required" not in update_policy_schema
@@ -297,7 +323,7 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         "/v1/admin/features/update-requests/{request_id}/run-now",
     ):
         conflict = spec["paths"][path]["post"]["responses"]["409"]
-        assert conflict["headers"]["Retry-After"]["schema"] == {"type": "integer"}
+        assert "headers" not in conflict
 
 
 @pytest.mark.unit
@@ -339,6 +365,34 @@ def test_preview_returns_preview_without_transaction(
 
 
 @pytest.mark.unit
+def test_unfiltered_non_direct_preview_is_rejected_before_resolution(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _unexpected_preview(
+        _session: Any,
+        **_kwargs: Any,
+    ) -> FeatureUpdateRequestPreview:
+        raise AssertionError("unbounded non-direct request must fail before resolution")
+
+    monkeypatch.setattr(
+        service_mod,
+        "preview_feature_update_request_repo",
+        _unexpected_preview,
+    )
+
+    response = client.post(
+        "/v1/admin/features/update-requests/preview",
+        json={"scope": {"type": "feature_ids", "feature_ids": ["feature-1"]}},
+    )
+
+    assert response.status_code == 422
+    assert "filter를 하나 이상" in response.json()["detail"]
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_create_rejects_dry_run_flag(client: TestClient, session: _FakeSession) -> None:
     response = client.post(
         "/v1/admin/features/update-requests",
@@ -369,6 +423,8 @@ def test_create_actual_request_uses_transaction(
         "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
             "run_mode": "queued",
             "priority": 75,
         },
@@ -380,10 +436,182 @@ def test_create_actual_request_uses_transaction(
     assert data["job_id"] == _JOB_ID
     assert data["created_at"] is not None
     assert data["generation"] == 1
+    assert response.json()["reused_active_request"] is False
     assert data["status_url"] == (
         f"/v1/admin/features/update-requests/{_REQUEST_ID}"
     )
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_kma_default_scope_records_requested_and_effective_scope_separately(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        assert kwargs["effective_sync_scope"] == "target_grids"
+        return replace(
+            _request(),
+            scope_type="provider_dataset",
+            scope={
+                "type": "provider_dataset",
+                "provider": KMA_PROVIDER_NAME,
+                "dataset_key": KMA_SHORT_FORECAST_DATASET_KEY,
+            },
+            providers=(),
+            dataset_keys=(),
+            effective_sync_scope="target_grids",
+        )
+
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": KMA_PROVIDER_NAME,
+                "dataset_key": KMA_SHORT_FORECAST_DATASET_KEY,
+            }
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["requested_sync_scope"] is None
+    assert response.json()["data"]["effective_sync_scope"] == "target_grids"
+
+
+@pytest.mark.unit
+def test_kma_explicit_default_reuses_omitted_default_active_request(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = replace(
+        _request(),
+        scope_type="provider_dataset",
+        scope={
+            "type": "provider_dataset",
+            "provider": KMA_PROVIDER_NAME,
+            "dataset_key": KMA_SHORT_FORECAST_DATASET_KEY,
+        },
+        providers=(),
+        dataset_keys=(),
+        update_policy={},
+        operator="local-dev",
+        reason="same",
+        effective_sync_scope="target_grids",
+    )
+
+    async def _active(*_args: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        assert kwargs["sync_scope"] == "target_grids"
+        return existing
+
+    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise AssertionError("canonical default scope must reuse the active request")
+
+    monkeypatch.setattr(service_mod, "find_active_provider_dataset_request", _active)
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _unexpected_enqueue)
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": KMA_PROVIDER_NAME,
+                "dataset_key": KMA_SHORT_FORECAST_DATASET_KEY,
+                "sync_scope": "target_grids",
+            },
+            "reason": "same",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reused_active_request"] is True
+    assert response.json()["data"]["request_id"] == existing.request_id
+
+
+@pytest.mark.unit
+def test_non_direct_kma_selection_is_rejected_before_enqueue(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise AssertionError("non-direct KMA selection must not enqueue")
+
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _unexpected_enqueue)
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [KMA_PROVIDER_NAME],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provider_dataset scope" in response.json()["detail"]
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_kma_external_system_scope_requires_active_targets(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def _has_targets(
+        _session: Any,
+        *,
+        external_system: str,
+    ) -> bool:
+        calls.append(external_system)
+        return external_system == "concierge"
+
+    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        return replace(
+            _request(),
+            scope_type="provider_dataset",
+            scope=dict(kwargs["scope"]),
+            providers=(),
+            dataset_keys=(),
+            effective_sync_scope=kwargs["effective_sync_scope"],
+        )
+
+    monkeypatch.setattr(
+        service_mod,
+        "has_active_poi_cache_targets_for_external_system",
+        _has_targets,
+    )
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+    scope = {
+        "type": "provider_dataset",
+        "provider": KMA_PROVIDER_NAME,
+        "dataset_key": KMA_SHORT_FORECAST_DATASET_KEY,
+        "sync_scope": "external_system:concierge",
+    }
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={"scope": scope},
+    )
+
+    assert response.status_code == 201
+    assert calls == ["concierge"]
+    assert response.json()["data"]["requested_sync_scope"] == (
+        "external_system:concierge"
+    )
+    assert response.json()["data"]["effective_sync_scope"] == (
+        "external_system:concierge"
+    )
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={"scope": {**scope, "sync_scope": "external_system:missing"}},
+    )
+    assert response.status_code == 422
+    assert "활성 POI cache target이 없는" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -595,6 +823,64 @@ def test_request_rejects_duplicate_scope_items(
 
 
 @pytest.mark.unit
+def test_cache_target_scope_accepts_max_external_system_identity(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    external_system = "x" * 112
+
+    async def _preview_request(
+        _session: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestPreview:
+        assert kwargs["scope"]["external_system"] == external_system
+        return _preview()
+
+    monkeypatch.setattr(
+        service_mod,
+        "preview_feature_update_request_repo",
+        _preview_request,
+    )
+
+    response = client.post(
+        "/v1/admin/features/update-requests/preview",
+        json={
+            "scope": {
+                "type": "cache_target_keys",
+                "external_system": external_system,
+                "target_keys": ["target-1"],
+            },
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
+        },
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.unit
+def test_cache_target_scope_rejects_impossible_external_system_identity(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.post(
+        "/v1/admin/features/update-requests/preview",
+        json={
+            "scope": {
+                "type": "cache_target_keys",
+                "external_system": "x" * 113,
+                "target_keys": ["target-1"],
+            },
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
+        },
+    )
+
+    assert response.status_code == 422
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_request_rejects_redundant_provider_dataset_filters(
     client: TestClient,
     session: _FakeSession,
@@ -700,6 +986,8 @@ def test_preview_sigungu_scope_without_kor_travel_geo_returns_503(
                 "center": {"lon": 127.0, "lat": 37.0},
                 "radius_km": 5,
             },
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
         },
     )
 
@@ -862,7 +1150,7 @@ def test_cancel_request_rejects_actor_override(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_run_now_requeues_existing_request(
+def test_run_now_dispatches_same_canonical_request(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -870,32 +1158,50 @@ def test_run_now_requeues_existing_request(
         assert request_id == _REQUEST_ID
         return _request()
 
-    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
-        assert kwargs["run_mode"] == "now"
-        assert kwargs["priority"] == 90
-        assert kwargs["operator"] == "local-dev"
-        assert kwargs["reason"] == "force"
+    async def _dispatch(_session: Any, request_id: str) -> FeatureUpdateRequest:
+        assert request_id == _REQUEST_ID
         return _request(
-            request_id=_RUN_NOW_REQUEST_ID,
-            job_id=_RUN_NOW_JOB_ID,
-            run_mode="now",
+            dispatch_requested_at=datetime(2026, 6, 3, 1, tzinfo=UTC),
         )
 
-    monkeypatch.setattr(router_mod, "get_update_request", _get)
-    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(service_mod, "get_update_request", _get)
+    monkeypatch.setattr(service_mod, "request_feature_update_dispatch", _dispatch)
 
     response = client.post(
         f"/v1/admin/features/update-requests/{_REQUEST_ID}/run-now",
-        json={"priority": 90, "reason": "force"},
+        json={},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     body = response.json()
-    assert body["data"]["request_id"] == _RUN_NOW_REQUEST_ID
-    assert body["data"]["job_id"] == _RUN_NOW_JOB_ID
-    assert body["data"]["job_id"] != _request().job_id
-    assert body["data"]["run_mode"] == "now"
+    assert body["data"]["request_id"] == _REQUEST_ID
+    assert body["data"]["job_id"] == _JOB_ID
+    assert body["data"]["run_mode"] == "queued"
+    assert body["data"]["dispatch_requested_at"] is not None
     assert body["data"]["generation"] == 1
+
+
+@pytest.mark.unit
+def test_run_now_rejects_running_request_with_cancellation_requested(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _get(_session: Any, _request_id: str) -> FeatureUpdateRequest:
+        return replace(
+            _request(state="running"),
+            cancellation_id="77777777-7777-4777-8777-777777777777",
+        )
+
+    monkeypatch.setattr(service_mod, "get_update_request", _get)
+
+    response = client.post(
+        f"/v1/admin/features/update-requests/{_REQUEST_ID}/run-now",
+        json={},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "REQUEST_NOT_DISPATCHABLE"
+    assert response.json()["details"]["status"] == "cancellation_requested"
 
 
 @pytest.mark.unit
@@ -912,6 +1218,8 @@ def test_create_run_now_lock_busy_returns_retry_after(
         "/v1/admin/features/update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
             "run_mode": "now",
         },
     )
@@ -935,7 +1243,11 @@ def test_create_unknown_enqueue_error_hides_internal_message(
 
     response = client.post(
         "/v1/admin/features/update-requests",
-        json={"scope": {"type": "feature_ids", "feature_ids": ["feature-1"]}},
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
+        },
     )
 
     assert response.status_code == 500

@@ -24,15 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from kortravelmap.infra.jobs_repo import record_import_job_event
 from kortravelmap.infra.ops_repo import list_ops_import_job_events
-from kortravelmap.infra.pipeline_cancellation_repo import (
-    resolve_pipeline_cancellation_scope,
-)
-from kortravelmap.infra.pipeline_repo import (
-    get_pipeline_execution,
-    list_pipeline_executions,
-)
 
 pytestmark = pytest.mark.integration
 
@@ -1465,29 +1457,18 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 == "unlinked_feature_update_component"
             )
 
-            async with AsyncSession(target_engine) as session:
-                pages = (
-                    await list_pipeline_executions(session, limit=200),
-                    await list_pipeline_executions(
-                        session,
-                        provider=_QUARANTINE_PROVIDER,
-                        limit=200,
-                    ),
-                    await list_pipeline_executions(
-                        session,
-                        dataset_key=_QUARANTINE_DATASET,
-                        limit=200,
-                    ),
-                    await list_pipeline_executions(
-                        session,
-                        provider=_QUARANTINE_PROVIDER,
-                        dataset_key=_QUARANTINE_DATASET,
-                        limit=200,
-                    ),
+            visible_job_ids = {
+                str(row.job_id)
+                for row in await connection.execute(
+                    text(
+                        "SELECT job_id FROM ops.import_jobs "
+                        "WHERE quarantined_at IS NULL"
+                    )
                 )
-                for page in pages:
-                    assert component_ids.isdisjoint(item.id for item in page.items)
+            }
+            assert component_ids.isdisjoint(visible_job_ids)
 
+            async with AsyncSession(target_engine) as session:
                 global_event_ids: set[str] = set()
                 event_cursor: str | None = None
                 while True:
@@ -1511,23 +1492,26 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                 live_snapshot = await _import_jobs_snapshot(session)
                 assert live_snapshot["event_clock_revision"] == 0
                 assert live_snapshot["latest_event_id"] != _QUARANTINE_EVENT_ID
-                for job_id in sorted(component_ids):
-                    assert (
-                        await get_pipeline_execution(
-                            session,
-                            kind="import_job",
-                            execution_id=job_id,
-                        )
-                        is None
-                    )
-                    assert (
-                        await resolve_pipeline_cancellation_scope(
-                            session,
-                            kind="import_job",
-                            execution_id=job_id,
-                        )
-                        is None
-                    )
+
+            cancellation_linked_ids = {
+                str(row.job_id)
+                for row in await connection.execute(
+                    text(
+                        """
+                        SELECT cancellation.root_id AS job_id
+                        FROM ops.pipeline_cancellations AS cancellation
+                        WHERE cancellation.root_kind = 'import_job'
+                          AND cancellation.root_id = ANY(CAST(:job_ids AS uuid[]))
+                        UNION
+                        SELECT member.job_id
+                        FROM ops.pipeline_cancellation_members AS member
+                        WHERE member.job_id = ANY(CAST(:job_ids AS uuid[]))
+                        """
+                    ),
+                    {"job_ids": sorted(component_ids)},
+                )
+            }
+            assert cancellation_linked_ids == set()
 
             quarantined_job_before = (
                 await connection.execute(
@@ -1758,17 +1742,6 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
                             text(statement),
                             {"event_id": _QUARANTINE_EVENT_ID},
                         )
-            async with AsyncSession(target_engine) as session:
-                assert (
-                    await record_import_job_event(
-                        session,
-                        _VALID_ORPHAN_JOB,
-                        code="quarantine.repo.append.forbidden",
-                        message="must not append",
-                    )
-                    is None
-                )
-
             with pytest.raises(IntegrityError):
                 async with connection.begin_nested():
                     await connection.execute(

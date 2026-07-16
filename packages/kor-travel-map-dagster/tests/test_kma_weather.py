@@ -93,6 +93,7 @@ def test_map_grid_targets_dedupes_and_caps() -> None:
     # 각 격자가 자체 weather feature로 적재되므로).
     assert targets.grids == ((126, 37), (129, 35))
     assert targets.grids_dropped == 1
+    assert len(targets.membership_fingerprint) == 64
 
 
 def test_map_grid_targets_rejects_nonpositive_cap() -> None:
@@ -178,25 +179,49 @@ class _FakeKrtourClient:
         self,
         *,
         sync_state: Any | None = None,
+        sync_states: dict[str, Any | None] | None = None,
         target_coords: list[tuple[float, float]] | None = None,
+        target_coords_by_external_system: (dict[str, list[tuple[float, float]]] | None) = None,
         place_coords: list[tuple[str, float, float]] | None = None,
         load_error: Exception | None = None,
     ) -> None:
         self.sync_state = sync_state
+        self.sync_states = sync_states
         self.target_coords = target_coords or []
+        self.target_coords_by_external_system = target_coords_by_external_system or {}
         self.place_coords = place_coords or []
         self.load_error = load_error
         self.loaded_values: list[Any] = []
         self.loaded_bundles: list[Any] = []
+        self.get_state_calls: list[dict[str, Any]] = []
+        self.target_coord_calls: list[str | None] = []
         self.success_calls: list[dict[str, Any]] = []
+        self.success_scope_calls: list[dict[str, Any]] = []
         self.failure_calls: list[dict[str, Any]] = []
+        self.failure_scope_calls: list[dict[str, Any]] = []
 
     async def get_sync_state(
         self, *, provider: str, dataset_key: str, sync_scope: str = "default"
     ) -> Any | None:
+        self.get_state_calls.append(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            }
+        )
+        if self.sync_states is not None:
+            return self.sync_states.get(sync_scope)
         return self.sync_state
 
-    async def list_poi_cache_target_coords(self) -> list[tuple[float, float]]:
+    async def list_poi_cache_target_coords(
+        self,
+        *,
+        external_system: str | None = None,
+    ) -> list[tuple[float, float]]:
+        self.target_coord_calls.append(external_system)
+        if external_system is not None:
+            return list(self.target_coords_by_external_system.get(external_system, []))
         return list(self.target_coords)
 
     async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
@@ -228,6 +253,16 @@ class _FakeKrtourClient:
         self.success_calls.append(
             {"provider": provider, "dataset_key": dataset_key, "cursor": cursor}
         )
+        self.success_scope_calls.append(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "cursor": cursor,
+                "sync_scope": sync_scope,
+            }
+        )
+        if self.sync_states is not None:
+            self.sync_states[sync_scope] = SimpleNamespace(cursor=dict(cursor))
 
     async def record_sync_failure(
         self,
@@ -238,6 +273,13 @@ class _FakeKrtourClient:
         next_run_after: Any = None,
     ) -> None:
         self.failure_calls.append({"provider": provider, "dataset_key": dataset_key})
+        self.failure_scope_calls.append(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            }
+        )
 
 
 class _FakeForecastService:
@@ -305,17 +347,30 @@ def _forecast_item(category: str, value: str) -> SimpleNamespace:
     )
 
 
-def _context(kor_travel_map_client: _FakeKrtourClient, forecast: _FakeForecastService) -> Any:
-    return build_asset_context(
-        resources={
-            "kor_travel_map_client": kor_travel_map_client,
-            "kma_weather_client": SimpleNamespace(forecast=forecast),
-            "kma_weather_extra_points": None,
-            "kma_weather_max_grids_per_run": 50,
-            # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
-            "reverse_geocoder": None,
-        }
-    )
+def _context(
+    kor_travel_map_client: _FakeKrtourClient,
+    forecast: _FakeForecastService,
+    *,
+    sync_scope: str | None = None,
+    extra_points: str | None = None,
+    max_grids: int = 50,
+    failure_managed_by_executor: bool | None = None,
+) -> Any:
+    resource_values: dict[str, object] = {
+        "kor_travel_map_client": kor_travel_map_client,
+        "kma_weather_client": SimpleNamespace(forecast=forecast),
+        "kma_weather_extra_points": extra_points,
+        "kma_weather_max_grids_per_run": max_grids,
+        # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
+        "reverse_geocoder": None,
+    }
+    if sync_scope is not None:
+        resource_values["kma_weather_sync_scope"] = sync_scope
+    if failure_managed_by_executor is not None:
+        resource_values["kma_weather_sync_failure_managed_by_executor"] = (
+            failure_managed_by_executor
+        )
+    return build_asset_context(resources=resource_values)
 
 
 def _patch_grid_and_bases(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,7 +438,10 @@ async def test_nowcast_asset_loads_values_per_feature_and_advances_cursor(
         {
             "provider": "python-kma-api",
             "dataset_key": "kma_ultra_short_nowcast",
-            "cursor": {"base_datetime": "202606110500"},
+            "cursor": {
+                "base_datetime": "202606110500",
+                "membership_fingerprint": result.membership_fingerprint,
+            },
         }
     ]
     assert kor_travel_map_client.failure_calls == []
@@ -393,8 +451,19 @@ async def test_asset_skips_when_cursor_matches_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_grid_and_bases(monkeypatch)
+    membership_fingerprint = map_grid_targets(
+        target_coords=[(126.978, 37.5665)],
+        extra_points=[],
+        to_grid=_int_grid,
+        max_grids=50,
+    ).membership_fingerprint
     kor_travel_map_client = _FakeKrtourClient(
-        sync_state=SimpleNamespace(cursor={"base_datetime": "202606110500"}),
+        sync_state=SimpleNamespace(
+            cursor={
+                "base_datetime": "202606110500",
+                "membership_fingerprint": membership_fingerprint,
+            }
+        ),
         target_coords=[(126.978, 37.5665)],
         place_coords=[("f1", 126.978, 37.5665)],
     )
@@ -408,6 +477,197 @@ async def test_asset_skips_when_cursor_matches_base(
     assert result.values_loaded == 0
     assert forecast.calls == []
     assert kor_travel_map_client.success_calls == []
+
+
+async def test_external_system_scopes_isolate_targets_and_sync_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A/B external system은 provider 호출 격자와 sync state를 서로 공유하지 않는다."""
+    _patch_grid_and_bases(monkeypatch)
+    untouched_b = SimpleNamespace(cursor={"base_datetime": "202606100500"})
+    sync_states: dict[str, Any | None] = {
+        "external_system:system-a": None,
+        "external_system:system-b": untouched_b,
+    }
+    kor_travel_map_client = _FakeKrtourClient(
+        sync_states=sync_states,
+        target_coords_by_external_system={
+            "system-a": [(126.9, 37.5)],
+            "system-b": [(129.1, 35.2)],
+        },
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    result_a = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(
+            kor_travel_map_client,
+            forecast,
+            sync_scope="external_system:system-a",
+            # global extra point는 external-system scope에 섞이면 안 된다.
+            extra_points="130.1,36.1",
+        )
+    )
+
+    assert result_a.sync_scope == "external_system:system-a"
+    assert forecast.calls == [("now", 126, 37)]
+    assert sync_states["external_system:system-b"] is untouched_b
+    assert kor_travel_map_client.success_scope_calls[-1]["sync_scope"] == (
+        "external_system:system-a"
+    )
+
+    result_b = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(
+            kor_travel_map_client,
+            forecast,
+            sync_scope="external_system:system-b",
+            extra_points="130.1,36.1",
+        )
+    )
+
+    assert result_b.sync_scope == "external_system:system-b"
+    assert forecast.calls == [("now", 126, 37), ("now", 129, 35)]
+    assert kor_travel_map_client.target_coord_calls == ["system-a", "system-b"]
+    assert [call["sync_scope"] for call in kor_travel_map_client.get_state_calls] == [
+        "external_system:system-a",
+        "external_system:system-b",
+    ]
+    assert [call["sync_scope"] for call in kor_travel_map_client.success_scope_calls] == [
+        "external_system:system-a",
+        "external_system:system-b",
+    ]
+    assert sync_states["external_system:system-a"].cursor["base_datetime"] == "202606110500"
+    assert sync_states["external_system:system-b"].cursor["base_datetime"] == "202606110500"
+    assert len(sync_states["external_system:system-a"].cursor["membership_fingerprint"]) == 64
+    assert len(sync_states["external_system:system-b"].cursor["membership_fingerprint"]) == 64
+
+
+async def test_external_system_scope_without_active_target_fails_before_provider_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords_by_external_system={"other-system": [(126.9, 37.5)]}
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    with pytest.raises(
+        kma_weather.KmaWeatherTargetScopeEmptyError,
+        match="no active POI cache targets",
+    ):
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(
+                kor_travel_map_client,
+                forecast,
+                sync_scope="external_system:missing-system",
+            )
+        )
+
+    assert forecast.calls == []
+    assert kor_travel_map_client.get_state_calls == []
+    assert kor_travel_map_client.failure_scope_calls == [
+        {
+            "provider": "python-kma-api",
+            "dataset_key": "kma_ultra_short_nowcast",
+            "sync_scope": "external_system:missing-system",
+        }
+    ]
+
+
+async def test_target_grids_default_includes_global_extra_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """schedule/resource 미지정 기본은 target_grids이며 global extra도 포함한다."""
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5)])
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    result = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(
+            kor_travel_map_client,
+            forecast,
+            extra_points="129.1,35.2",
+        )
+    )
+
+    assert result.sync_scope == "target_grids"
+    assert result.as_metadata()["sync_scope"] == "target_grids"
+    assert kor_travel_map_client.target_coord_calls == [None]
+    assert forecast.calls == [("now", 126, 37), ("now", 129, 35)]
+    assert kor_travel_map_client.success_scope_calls[-1]["sync_scope"] == "target_grids"
+
+
+async def test_grid_limit_max_plus_one_fails_before_provider_or_cursor_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.9, 37.5), (129.1, 35.2)]
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    with pytest.raises(kma_weather.KmaWeatherGridLimitExceeded) as exc_info:
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(kor_travel_map_client, forecast, max_grids=1)
+        )
+
+    assert exc_info.value.provider == "python-kma-api"
+    assert exc_info.value.dataset_key == "kma_ultra_short_nowcast"
+    assert exc_info.value.sync_scope == "target_grids"
+    assert forecast.calls == []
+    assert kor_travel_map_client.get_state_calls == []
+    assert kor_travel_map_client.success_calls == []
+    assert kor_travel_map_client.failure_scope_calls == [
+        {
+            "provider": "python-kma-api",
+            "dataset_key": "kma_ultra_short_nowcast",
+            "sync_scope": "target_grids",
+        }
+    ]
+
+
+async def test_same_base_refreshes_when_target_membership_is_added_or_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    sync_states: dict[str, Any | None] = {"target_grids": None}
+    kor_travel_map_client = _FakeKrtourClient(
+        sync_states=sync_states,
+        target_coords=[(126.9, 37.5)],
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    first = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(kor_travel_map_client, forecast)
+    )
+    kor_travel_map_client.target_coords.append((129.1, 35.2))
+    second = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(kor_travel_map_client, forecast)
+    )
+    unchanged = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(kor_travel_map_client, forecast)
+    )
+    kor_travel_map_client.target_coords.pop(0)
+    removed = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(kor_travel_map_client, forecast)
+    )
+
+    assert first.skipped is False
+    assert second.skipped is False
+    assert unchanged.skipped is True
+    assert removed.skipped is False
+    assert first.membership_fingerprint != second.membership_fingerprint
+    assert unchanged.membership_fingerprint == second.membership_fingerprint
+    assert removed.membership_fingerprint != second.membership_fingerprint
+    assert second.as_metadata()["membership_fingerprint"] == (
+        second.membership_fingerprint
+    )
+    assert forecast.calls == [
+        ("now", 126, 37),
+        ("now", 126, 37),
+        ("now", 129, 35),
+        ("now", 129, 35),
+    ]
+    assert len(kor_travel_map_client.success_scope_calls) == 3
 
 
 async def test_asset_creates_grid_feature_without_place_features(
@@ -441,7 +701,10 @@ async def test_asset_creates_grid_feature_without_place_features(
         {
             "provider": "python-kma-api",
             "dataset_key": "kma_ultra_short_nowcast",
-            "cursor": {"base_datetime": "202606110500"},
+            "cursor": {
+                "base_datetime": "202606110500",
+                "membership_fingerprint": result.membership_fingerprint,
+            },
         }
     ]
     assert kor_travel_map_client.failure_calls == []
