@@ -13,7 +13,15 @@
   S1/S2 0건 승인 뒤 main unit 1,366건, API 513건, Dagster 308건(1 skip), focused 159건,
   Ruff·strict mypy·import 계약 4/4를 통과했다. 실제 Dagster context의 override guard와
   provider tracking은 B2로 이관했다.
+## C3e REST canonical 교차 통합 (2026-07-16, `T-ADM-C3e-C`)
 
+- [x] **T-ADM-C3e-C — datasets/pipeline 실제 DB·REST 교차 증거.** 실제 migration을 적용한
+  PostgreSQL에 canonical operation을 commit하고 요청별 새 FastAPI session으로 datasets grid/detail과
+  pipeline 2페이지가 같은 root·member·상태·engine 시각·projected job을 반환함을 고정했다.
+  exact-pair decoy, 인증, cursor, schedule, slash·예약문자 복합키도 검증한다. detail/preview/
+  refresh-policy는 고정 path와 `provider`/`dataset_key` query로 clean-cut 전환했으며 OpenAPI와
+  admin 생성 타입을 함께 갱신했다. 적대 리뷰 2인 S1/S2 0건 승인 뒤 API 503건, router 13건,
+  실제 DB 통합 1건, Ruff·strict mypy·OpenAPI/type drift·frontend type/lint gate를 통과했다.
 ## C3e 실행 재분할 문서화 (2026-07-16, `T-ADM-C3e-D2`)
 
 - [x] **T-ADM-C3e-D2 — C3e-B 복구 감사와 병렬 PR 재분할.** Claude Code의 branch,

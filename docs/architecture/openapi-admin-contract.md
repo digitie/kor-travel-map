@@ -773,7 +773,8 @@ T-221d 구현 상태:
 
 ## 7.1 통합 datasets 운영 계약 (ADR-064, T-ADM-C2R)
 
-`GET /ops/datasets`와 `GET /ops/datasets/{provider}/{dataset}`은 다음 의미를
+`GET /ops/datasets`와
+`GET /ops/datasets/detail?provider=...&dataset_key=...`은 다음 의미를
 명시적으로 분리한다.
 
 - `eligible_after`: `provider_sync_state.next_run_after`의 backoff/rate-limit상 재호출
@@ -795,7 +796,7 @@ T-221d 구현 상태:
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
   `details.mutation_disabled_reason`으로 거부한다.
 
-`POST /ops/datasets/{provider}/{dataset}/preview`는 fixture capability만 제공한다.
+`POST /ops/datasets/preview?provider=...&dataset_key=...`는 fixture capability만 제공한다.
 요청은 `source=fixture`, `max_items(1..100)`이며 응답은 `total_items`,
 `returned_items`, `truncated`, timeout과 `external_call_budget=0`을 포함한다. raw live
 HTTP preview는 ADR-044 provider public client/typed model 경계를 만족하지 않으므로 이
@@ -909,7 +910,8 @@ feature-load root는 identity 진단용 nullable `operation_registry_version`도
 legacy/update root에서는 NULL이며 이 값은 cursor나 correlation key가 아니다.
 
 `GET /v1/ops/datasets`의 `latest_execution_coverage`와
-`GET /v1/ops/datasets/{provider}/{dataset}`의 `recent_runs_coverage`는 모두
+`GET /v1/ops/datasets/detail?provider=...&dataset_key=...`의
+`recent_runs_coverage`는 모두
 `db_recorded_canonical_operations`다. 이는 0051 이후 DB 기록 범위이며 과거
 GraphQL-only run이나 #686의 requested/effective sync scope를 포함한다고 주장하지 않는다.
 detail의 `recent_runs`는 pipeline과 같은 total order의 첫 page이고

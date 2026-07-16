@@ -45,7 +45,51 @@
   focused 159건, API 전체 513건, Dagster 전체 308건(1 skip), Ruff, strict mypy와 import 계약
   4/4를 통과했고 task를 완료 이력으로 아카이브했다. 첫 pytest capture 임시 파일 오류는
   테스트 0건 실행 전 환경 문제였으며 capture를 끈 동일 명령으로 재실행해 전부 통과했다.
+## 2026-07-16 (agent A) — C3e-C REST 교차 통합 회귀·slash identity 보강
 
+- 제품 수정 전 전용 worktree codegraph를 신규 동기화했다(785 files, 19,093 nodes,
+  60,659 edges). `get_dataset_detail` route/function 영향은 2개, `load_dataset_detail`은
+  5개, `run_dataset_fixture_preview`는 5개, `upsert_dataset_refresh_policy`는 10개,
+  `OpsDatasetGridRow`는 6개, `OpsDatasetPreviewData`는 5개 symbol이다. 실제 frontend
+  호출자는 아직 없고 생성된 admin OpenAPI type만 소비 경계로 확인됐다.
+- 후속 적대 리뷰에서 provider와 dataset identity가 `/`를 허용하지만 동적 path segment로는
+  표현할 수 없는 계약 결함을 확인했다. detail/preview/refresh-policy를 각각 고정 path와
+  `provider`/`dataset_key` query 복합키로 원자 전환하고 구 동적 route는 삭제했다. grid
+  `detail_url`, preview 응답의 `dataset_key`, admin OpenAPI/type, 설정·계약 문서도 같은
+  clean-cut 경계로 맞췄다. 현재 branch에는 실제 C4 frontend 호출자가 없어 별도 caller 변경은 없다.
+- 최종 type 재리뷰에서 수동 patch가 `detail_url`을 `OpsDatasetGridRow`가 아니라
+  `OpsDatasetDetailData`에 넣은 생성 drift를 확인했다. canonical `openapi.json`에서
+  `openapi-typescript 7.13.0`을 frontend workdir 기준으로 다시 실행해 grid row에만 필드를
+  생성했다. OpenAPI 구조 회귀는 grid의 required `detail_url`과 detail의 필드 부재를 함께
+  단언하고, 기존 `gen:types:check`가 이 spec↔type drift를 검출하는 단일 gate로 남는다.
+- 실제 migrated PostgreSQL에 별도 session으로
+  seed를 commit한 뒤 각 FastAPI 요청도 새 `AsyncSession`을 사용한다. `ASGITransport` 호출은
+  datasets grid/detail과 pipeline executions router·service·repository를 모두 통과하며,
+  seed 호출 자체부터 `try/finally`로 보호한다. append-only 행은 integration 관례의 별도
+  `TRUNCATE ... CASCADE` transaction으로 정리한다.
+- 같은 exact provider/dataset에 update request 1개와 manual Dagster feature root 11개를 넣고,
+  동률 `created_at`과 10개 page 경계를 만든다. provider만 같은 member와 dataset만 같은 member를
+  한 root에 둔 최신 cross-product decoy도 추가해 exact-pair AND를 검증한다. feature oracle은
+  호출 입력과 고정 lifecycle 계약을 사용하고 DB 생성 root/member UUID만 mutation 반환값에서
+  취한다. root/member 비중복, status/raw Dagster/engine 시각/projected job, request/job 접힘과
+  detail cursor를 이용한 pipeline 2페이지 무누락 순서를 고정한다.
+- 실제 proxy secret/actor 인증 성공과 무인증 403, history URL query round-trip, 현실적인 tagged
+  Dagster schedule 응답도 포함한다. provider와 dataset 양쪽에 `/`·예약문자·한글을 포함한 orphan
+  identity를 고정 detail path의 query로 조회하고 상대 history URL query가 원본 복합키로
+  복원되는지도 확인한다.
+- 세 구 동적 detail/preview/policy URL은 인증 ASGI에서 모두 404임을 고정한다. preview는 slash와
+  예약문자가 있는 pair가 정적 catalog/fixture에 없으므로 catalog authorization과 fixture 실행
+  경계만 명시 주입하고 실제 인증·query parsing·response schema를 통과한다. provider 실행이나
+  fixture registry까지 실제라고 과장하지 않는다. refresh-policy는 catalog authorization만 주입하고
+  실제 service/repository/DB transaction으로 upsert한 뒤 별도 session의 SQL로 exact identity와
+  저장값을 독립 확인한다. cleanup은 `ops.provider_refresh_policies`도 포함한다.
+  외부 호출은 schedule GraphQL만 `MockTransport`로 격리한다.
+- `TRUNCATE` 격리는 현재 disposable testcontainer DB와 순차 integration 실행 전제다. 동일 DB를
+  공유하는 병렬 실행을 도입할 때는 test별 DB 격리 또는 행 단위 정리 전략으로 바꿔야 한다.
+  최종 적대 리뷰 2인은 S1/S2 0건으로 승인했다. API 전체 503건, router focused 13건,
+  실제 migration·PostgreSQL/FastAPI 통합 1건, Ruff, strict mypy, admin/user OpenAPI drift와
+  admin generated type drift, frontend type-check와 lint(오류 0, 기존 warning 2)를 통과했다.
+  `T-ADM-C3e-C`는 완료 이력으로 아카이브했다.
 ## 2026-07-16 (codex) — C3e-B 복구 감사·PR 단위 재분할
 
 - PR #705 병합과 main CI green을 확인한 뒤 Claude Code의 C3e-B branch/worktree를 reflog,

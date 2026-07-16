@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -167,8 +168,27 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     spec = client.get("/openapi.json").json()
     operation_states = {"queued", "running", "done", "failed", "cancelled"}
     assert "/v1/ops/datasets" in spec["paths"]
+    assert "/v1/ops/datasets/detail" in spec["paths"]
+    assert "/v1/ops/datasets/preview" in spec["paths"]
+    assert "/v1/ops/datasets/refresh-policy" in spec["paths"]
+    assert not any(
+        "{provider}" in path or "{dataset}" in path
+        for path in spec["paths"]
+        if path.startswith("/v1/ops/datasets/")
+    )
+    for method, path in (
+        ("get", "/v1/ops/datasets/detail"),
+        ("post", "/v1/ops/datasets/preview"),
+        ("put", "/v1/ops/datasets/refresh-policy"),
+    ):
+        parameters = spec["paths"][path][method]["parameters"]
+        assert {(item["name"], item["in"]) for item in parameters} == {
+            ("provider", "query"),
+            ("dataset_key", "query"),
+        }
     row = spec["components"]["schemas"]["OpsDatasetGridRow"]
     assert {
+        "detail_url",
         "eligible_after",
         "freshness",
         "schedule",
@@ -179,9 +199,14 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "provider_issues",
     } <= set(row["properties"])
     preview = spec["components"]["schemas"]["OpsDatasetPreviewData"]
-    assert {"truncated", "total_items", "returned_items", "budget"} <= set(
-        preview["properties"]
-    )
+    assert {
+        "dataset_key",
+        "truncated",
+        "total_items",
+        "returned_items",
+        "budget",
+    } <= set(preview["properties"])
+    assert "dataset" not in preview["properties"]
     latest = spec["components"]["schemas"]["OpsDatasetLatestExecution"]
     assert {
         "id",
@@ -221,6 +246,7 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert {"recent_runs_next_cursor", "pipeline_history_url"} <= set(
         detail["properties"]
     )
+    assert "detail_url" not in detail["properties"]
     assert "recent_runs_next_cursor" in detail["required"]
     cursor_schema = detail["properties"]["recent_runs_next_cursor"]
     assert {item["type"] for item in cursor_schema["anyOf"]} == {
@@ -260,12 +286,18 @@ def test_detail_endpoint_uses_application_service(
 ) -> None:
     from kortravelmap.api.routers import ops_datasets as router_module
 
-    async def _detail(*_args: object, **_kwargs: object) -> OpsDatasetDetailData:
+    provider = "provider/with/slash"
+    dataset_key = "dataset/with/slash"
+
+    async def _detail(*_args: object, **kwargs: object) -> OpsDatasetDetailData:
+        assert kwargs["provider"] == provider
+        assert kwargs["dataset_key"] == dataset_key
         return _empty_detail()
 
     monkeypatch.setattr(router_module, "load_dataset_detail", _detail)
     response = client.get(
-        "/v1/ops/datasets/python-mois-api/mois_license_features_bulk"
+        "/v1/ops/datasets/detail",
+        params={"provider": provider, "dataset_key": dataset_key},
     )
     assert response.status_code == 200
     assert (
@@ -285,7 +317,8 @@ def test_orphan_policy_mutation_is_409_with_reason(
 
     monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
     response = client.put(
-        "/v1/ops/datasets/legacy/removed/refresh-policy",
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": "legacy", "dataset_key": "removed"},
         json={"source_kind": "openapi", "stale_after_minutes": 60},
     )
     assert response.status_code == 409
@@ -302,14 +335,24 @@ def test_policy_mutation_accepts_explicit_stale_sla(
 ) -> None:
     from kortravelmap.api.routers import ops_datasets as router_module
 
+    provider = "provider/with/slash"
+    dataset_key = "dataset/with/slash"
+
     async def _upsert(*_args: object, **kwargs: object) -> ProviderRefreshPolicy:
+        assert kwargs["provider"] == provider
+        assert kwargs["dataset_key"] == dataset_key
         body = kwargs["body"]
         assert body.stale_after_minutes == 90
-        return _policy(stale_after_minutes=90)
+        return _policy(
+            provider=provider,
+            dataset_key=dataset_key,
+            stale_after_minutes=90,
+        )
 
     monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
     response = client.put(
-        "/v1/ops/datasets/python-mois-api/mois_license_features_bulk/refresh-policy",
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": provider, "dataset_key": dataset_key},
         json={"source_kind": "openapi", "stale_after_minutes": 90},
     )
     assert response.status_code == 200
@@ -319,8 +362,11 @@ def test_policy_mutation_accepts_explicit_stale_sla(
 @pytest.mark.unit
 def test_fixture_preview_enforces_response_budget(client: TestClient) -> None:
     response = client.post(
-        "/v1/ops/datasets/data.go.kr-standard/"
-        "datagokr_cultural_festivals/preview",
+        "/v1/ops/datasets/preview",
+        params={
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_cultural_festivals",
+        },
         json={"source": "fixture", "max_items": 1},
     )
     assert response.status_code == 200
@@ -338,8 +384,11 @@ def test_fixture_preview_enforces_response_budget(client: TestClient) -> None:
 @pytest.mark.unit
 def test_live_preview_request_is_typed_422(client: TestClient) -> None:
     response = client.post(
-        "/v1/ops/datasets/data.go.kr-standard/"
-        "datagokr_cultural_festivals/preview",
+        "/v1/ops/datasets/preview",
+        params={
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_cultural_festivals",
+        },
         json={"source": "live", "max_items": 1},
     )
     assert response.status_code == 422
@@ -348,7 +397,11 @@ def test_live_preview_request_is_typed_422(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_without_fixture_capability_is_409(client: TestClient) -> None:
     response = client.post(
-        "/v1/ops/datasets/python-mois-api/mois_license_features_bulk/preview",
+        "/v1/ops/datasets/preview",
+        params={
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+        },
         json={"source": "fixture", "max_items": 1},
     )
     assert response.status_code == 409
@@ -369,14 +422,65 @@ def test_fixture_registry_mismatch_is_structured_409(
         router_module, "run_dataset_fixture_preview", _missing_fixture
     )
     response = client.post(
-        "/v1/ops/datasets/data.go.kr-standard/"
-        "datagokr_cultural_festivals/preview",
+        "/v1/ops/datasets/preview",
+        params={
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_cultural_festivals",
+        },
         json={"source": "fixture", "max_items": 1},
     )
 
     assert response.status_code == 409
     assert response.json()["code"] == "PREVIEW_REGISTRY_MISMATCH"
     assert response.json()["details"]["capability"] == "fixture"
+
+
+@pytest.mark.unit
+def test_preview_passes_slash_identity_to_service_exactly(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    provider = "provider/with/slash"
+    dataset_key = "dataset/with/slash"
+
+    def _entry(actual_provider: str, actual_dataset_key: str) -> object:
+        assert actual_provider == provider
+        assert actual_dataset_key == dataset_key
+        return SimpleNamespace(preview="fixture")
+
+    async def _preview(
+        actual_provider: str,
+        actual_dataset_key: str,
+        *,
+        max_items: int,
+    ) -> object:
+        assert actual_provider == provider
+        assert actual_dataset_key == dataset_key
+        assert max_items == 1
+        return SimpleNamespace(
+            provider=provider,
+            dataset=dataset_key,
+            variant="slash-identity",
+            description="slash identity round-trip",
+            items=(),
+            total_items=0,
+            truncated=False,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "find_catalog_entry", _entry)
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+
+    response = client.post(
+        "/v1/ops/datasets/preview",
+        params={"provider": provider, "dataset_key": dataset_key},
+        json={"source": "fixture", "max_items": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["provider"] == provider
+    assert response.json()["data"]["dataset_key"] == dataset_key
 
 
 @pytest.mark.unit
@@ -504,6 +608,10 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         if (item.provider, item.dataset_key) == (state.provider, state.dataset_key)
     )
     assert row.eligible_after == eligible_after
+    assert row.detail_url == (
+        "/v1/ops/datasets/detail?provider=python-mois-api&"
+        "dataset_key=mois_license_features_bulk"
+    )
     assert row.schedule.next_scheduled_at == next_scheduled_at
     assert row.freshness.state == "fresh"
     assert row.freshness.due_at == _NOW + timedelta(minutes=60)

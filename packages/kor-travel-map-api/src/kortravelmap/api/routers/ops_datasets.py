@@ -9,7 +9,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.dagster_http import dagster_http_dependencies
@@ -80,15 +80,15 @@ async def list_datasets_grid(
 
 
 @router.get(
-    "/{provider}/{dataset}",
+    "/detail",
     response_model=OpsDatasetDetailResponse,
     summary="dataset 상세 — scope 상태·실행·이벤트·정책",
     responses={404: {"description": "카탈로그·sync state·policy 모두 없음"}},
 )
 async def get_dataset_detail(
     request: Request,
-    provider: str,
-    dataset: str,
+    provider: Annotated[str, Query(min_length=1)],
+    dataset_key: Annotated[str, Query(min_length=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetDetailResponse:
     started_at = perf_counter()
@@ -99,7 +99,7 @@ async def get_dataset_detail(
             settings=settings,
             dagster_client=dagster_client,
             provider=provider,
-            dataset_key=dataset,
+            dataset_key=dataset_key,
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -110,7 +110,7 @@ async def get_dataset_detail(
 
 
 @router.put(
-    "/{provider}/{dataset}/refresh-policy",
+    "/refresh-policy",
     response_model=OpsDatasetRefreshPolicyResponse,
     summary="canonical dataset refresh policy upsert",
     responses={
@@ -123,8 +123,8 @@ async def get_dataset_detail(
     },
 )
 async def put_dataset_refresh_policy(
-    provider: str,
-    dataset: str,
+    provider: Annotated[str, Query(min_length=1)],
+    dataset_key: Annotated[str, Query(min_length=1)],
     body: ProviderRefreshPolicyUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetRefreshPolicyResponse:
@@ -133,7 +133,7 @@ async def put_dataset_refresh_policy(
         policy = await upsert_dataset_refresh_policy(
             session,
             provider=provider,
-            dataset_key=dataset,
+            dataset_key=dataset_key,
             body=body,
         )
     except DatasetNotFoundError as exc:
@@ -158,7 +158,7 @@ async def put_dataset_refresh_policy(
 
 
 @router.post(
-    "/{provider}/{dataset}/preview",
+    "/preview",
     response_model=OpsDatasetPreviewResponse,
     summary="fixture ETL 변환 preview",
     description=(
@@ -172,16 +172,16 @@ async def put_dataset_refresh_policy(
     },
 )
 async def post_dataset_preview(
-    provider: str,
-    dataset: str,
+    provider: Annotated[str, Query(min_length=1)],
+    dataset_key: Annotated[str, Query(min_length=1)],
     body: Annotated[OpsDatasetPreviewRequest, Body()],
 ) -> OpsDatasetPreviewResponse:
     started_at = perf_counter()
-    entry = find_catalog_entry(provider, dataset)
+    entry = find_catalog_entry(provider, dataset_key)
     if entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"등록되지 않은 dataset: {provider!r}/{dataset!r}",
+            detail=f"등록되지 않은 dataset: {provider!r}/{dataset_key!r}",
         )
     if entry.preview != "fixture":
         raise HTTPException(
@@ -195,7 +195,7 @@ async def post_dataset_preview(
     try:
         result = await run_dataset_fixture_preview(
             provider,
-            dataset,
+            dataset_key,
             max_items=body.max_items,
         )
     except KeyError as exc:
@@ -217,7 +217,7 @@ async def post_dataset_preview(
     return OpsDatasetPreviewResponse(
         data=OpsDatasetPreviewData(
             provider=result.provider,
-            dataset=result.dataset,
+            dataset_key=result.dataset,
             source="fixture",
             variant=result.variant,
             description=result.description,
