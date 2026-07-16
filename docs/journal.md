@@ -2,6 +2,50 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (agent B) — C3e-B1 operation registry 구현 준비
+
+- 수정 전에 worktree 전용 codegraph를 초기화했다. `FeatureLoadScheduleSpec`의 직접 caller는
+  `_datagokr_file_data_schedule_specs`, `_feature_load_run_tags`의 caller는
+  `_coalescing_execution_fn`이며, `schedules.py` 변경 영향 파일은 자체와
+  `test_definitions.py`로 확인했다. request trigger tag 정본 이동 영향은
+  `feature_update_request_failure_sensor`, `_tags_for_request`, `_failure_message`,
+  `test_sensors.py`로 확인했다. 적대 리뷰 보강 전 `run_schedule_now` caller와 service file
+  impact는 Dagster router, ops pipeline command, schedule override integration까지 확인했고,
+  `ops_dataset_schedule.py` impact는 dataset service/router와 두 API 회귀 파일까지 확인했다.
+- 33개 schedule job을 canonical provider 상수 기반 immutable registry로 옮겼다. 구성은
+  static singleton 26개, 고정 fileData singleton 4개, KNPS runtime singleton 2개, MCST
+  13-pair 1개이며 가능한 exact pair는 53개다. 기존 provider alias 11건, KNPS placeholder,
+  MCST pseudo dataset은 identity에서 제거했다.
+- registry version과 canonical redacted identity tag를 분리했다. job definition에는 identity만,
+  schedule launch에는 `trigger_kind=schedule`만 추가해 UI/CLI manual 실행의 system/schedule
+  오분류를 없앴다. 등록 job의 selection/config/version/tag drift는 typed conflict로 막고,
+  비등록 user-code job만 panel-only로 둔다.
+- 적대 리뷰 2인의 S1/S2를 반영해 registry를 main provider 계층의 공용 canonical manifest로
+  이동하고 manifest 전체의 SHA-256 digest를 `v1-<12자리>` version에 결합했다. API의 admin
+  schedule 수동 실행도 이 manifest가 만든 KNPS snapshot과 fileData 4종의 두 resource config,
+  `manual` identity tag를 실제 GraphQL launch에 전달한다. datasets schedule projection은
+  `pipelineName`과 identity job의 일치까지 검증한 뒤 MCST 13 pair를 모두 펼친다. scalar pair
+  fallback은 제거했다. MCST 13-pair JSON tag 크기는 현재 비차단 S3로 두되 canonical byte
+  parse와 manifest digest/version 검증 없이는 소비하지 않는다.
+- coalescing은 `NOT_STARTED`/`MANAGED`를 포함하고 job/version/identity 전체가 같은 run만 막는다.
+  배포 시 구 alias pair tag만 가진 active run은 새 coalescing 정본과 일치하지 않으므로, schedule
+  활성화 전에 기존 run이 자연 종료됐는지 확인하고 남은 run은 운영 절차에 따라 취소한다.
+- KNPS는 전체 settings를 import 시 검증하지 않는 두 필드 전용 settings로 공식 env prefix와
+  `.env`를 읽고, launch 값을 run config에 복사한다. 비기본 point/geometry로 실제 provider
+  fetcher resource와 asset dataset resource를 초기화해 양쪽이 같은 snapshot을 소비함을
+  회귀로 고정했다. `FeatureUpdateAssetRunner` direct raw 경로의 동일 오염 수정은 B2에 인계한다.
+- 전체 schedule/asset과 MCST 13종, KNPS 10개 runtime 선택지, fileData 두 config 및 admin
+  Run-now 4종, immutable/version/selection/tag drift, trigger 우선순위/manual fallback,
+  arbitrary panel-only 회귀를 작성했다. API package에서 `catalog_refreshable_entries`와 main
+  registry의 exact equality를 검증해 Dagster test의 sibling API 역의존은 제거했다.
+- B1은 manifest compile target과 schedule/admin/projection launch consumer까지만 완결한다.
+  provider I/O 전 guard/public wrapper는 B2, run-status/reconcile caller는 B3에서 이 strict parser를
+  연결한다. `FeatureUpdateAssetRunner`의 비기본 KNPS direct raw fetcher 오염 수정도 B2 범위다.
+- 최종 적대 리뷰 2인은 B1 경계에서 S1/S2 0건으로 승인했다. main unit 1,366건,
+  focused 159건, API 전체 513건, Dagster 전체 308건(1 skip), Ruff, strict mypy와 import 계약
+  4/4를 통과했고 task를 완료 이력으로 아카이브했다. 첫 pytest capture 임시 파일 오류는
+  테스트 0건 실행 전 환경 문제였으며 capture를 끈 동일 명령으로 재실행해 전부 통과했다.
+
 ## 2026-07-16 (codex) — C3e-B 복구 감사·PR 단위 재분할
 
 - PR #705 병합과 main CI green을 확인한 뒤 Claude Code의 C3e-B branch/worktree를 reflog,

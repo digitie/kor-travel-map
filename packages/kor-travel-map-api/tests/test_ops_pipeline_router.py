@@ -34,6 +34,13 @@ from kortravelmap.infra.pipeline_repo import (
     PipelineProviderDatasetIdentity,
     PipelineStatusCounts,
 )
+from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
+from kortravelmap.providers.feature_operation_registry import (
+    ADMIN_MANUAL_TRIGGER_TAG,
+    FEATURE_OPERATION_TRIGGER_TAG,
+    parse_feature_operation_identity_tags,
+    validate_feature_operation_identity,
+)
 from kortravelmap.providers.mois import DATASET_KEY_BULK
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
@@ -439,7 +446,7 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
                         {
                             "name": ("feature_weather_kma_short_forecast_hourly_schedule"),
                             "cronSchedule": "20 * * * *",
-                            "pipelineName": "kma_short_forecast_job",
+                            "pipelineName": "feature_weather_kma_short_forecast_job",
                             "mode": "default",
                             "executionTimezone": "Asia/Seoul",
                             "defaultStatus": "RUNNING",
@@ -469,6 +476,40 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
         }
     }
 }
+
+
+def _single_schedule_payload(schedule_name: str, job_name: str) -> dict[str, Any]:
+    return {
+        "data": {
+            "repositoriesOrError": {
+                "__typename": "RepositoryConnection",
+                "nodes": [
+                    {
+                        "name": "__repository__",
+                        "location": {"name": "kortravelmap.dagster.definitions"},
+                        "schedules": [
+                            {
+                                "name": schedule_name,
+                                "cronSchedule": "0 0 * * *",
+                                "pipelineName": job_name,
+                                "mode": "default",
+                                "executionTimezone": "Asia/Seoul",
+                                "defaultStatus": "STOPPED",
+                                "canReset": True,
+                                "scheduleState": {
+                                    "status": "STOPPED",
+                                    "repositoryName": "__repository__",
+                                    "repositoryLocationName": (
+                                        "kortravelmap.dagster.definitions"
+                                    ),
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    }
 
 _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
     "data": {
@@ -1826,7 +1867,7 @@ def test_schedule_command_run_launches_job(
                     "run": {
                         "runId": "run-99",
                         "status": "QUEUED",
-                        "jobName": "kma_short_forecast_job",
+                        "jobName": "feature_weather_kma_short_forecast_job",
                         "startTime": None,
                         "endTime": None,
                         "updateTime": None,
@@ -1850,6 +1891,159 @@ def test_schedule_command_run_launches_job(
     assert data["run_id"] == "run-99"
     assert data["run_status"] == "QUEUED"
     assert len(launches) == 1
+    execution_params = launches[0]["executionParams"]
+    tags = {
+        tag["key"]: tag["value"]
+        for tag in execution_params["executionMetadata"]["tags"]
+    }
+    assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
+    assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
+    assert "kor_travel_map.trigger" not in tags
+    identity = parse_feature_operation_identity_tags(tags)
+    assert identity is not None
+    assert identity.job_name == "feature_weather_kma_short_forecast_job"
+    assert (
+        validate_feature_operation_identity(
+            job_name=identity.job_name,
+            selected_asset_keys=identity.asset_keys,
+            run_config=execution_params["runConfigData"],
+            tags=tags,
+        )
+        == identity
+    )
+
+
+@pytest.mark.unit
+def test_schedule_command_knps_manual_launch_persists_resolved_config_and_tags(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schedule_name = "feature_place_knps_points_monthly_schedule"
+    job_name = "feature_place_knps_points_job"
+    launches: list[dict[str, Any]] = []
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_KNPS_POINT_DATASET_KEY",
+        "knps_restrooms",
+    )
+
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            return _single_schedule_payload(schedule_name, job_name)
+        launches.append(kwargs["variables"])
+        return {
+            "data": {
+                "launchRun": {
+                    "__typename": "LaunchRunSuccess",
+                    "run": {"runId": "run-knps", "status": "QUEUED"},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/{schedule_name}/commands",
+        json={"command": "run", "operator": "tester", "reason": "수동 재적재"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "ok"
+    assert len(launches) == 1
+    execution_params = launches[0]["executionParams"]
+    run_config = execution_params["runConfigData"]
+    assert run_config == {
+        "resources": {
+            "knps_point_dataset_key": {
+                "config": {"dataset_key": "knps_restrooms"}
+            },
+            "knps_point_records": {"config": {"dataset_key": "knps_restrooms"}},
+        }
+    }
+    tags = {
+        tag["key"]: tag["value"]
+        for tag in execution_params["executionMetadata"]["tags"]
+    }
+    identity = parse_feature_operation_identity_tags(tags)
+    assert identity is not None
+    assert identity.pairs[0].dataset_key == "knps_restrooms"
+    assert (
+        validate_feature_operation_identity(
+            job_name=job_name,
+            selected_asset_keys=identity.asset_keys,
+            run_config=run_config,
+            tags=tags,
+        )
+        == identity
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dataset_key", tuple(DATAGOKR_FILEDATA_DATASETS))
+def test_schedule_command_filedata_manual_launch_persists_exact_config_and_tags(
+    dataset_key: str,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schedule_name = f"feature_place_{dataset_key}_monthly_schedule"
+    job_name = f"feature_place_{dataset_key}_job"
+    launches: list[dict[str, Any]] = []
+
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            return _single_schedule_payload(schedule_name, job_name)
+        assert kwargs["query"] == dagster_schedule._DAGSTER_LAUNCH_RUN_MUTATION
+        launches.append(kwargs["variables"])
+        return {
+            "data": {
+                "launchRun": {
+                    "__typename": "LaunchRunSuccess",
+                    "run": {"runId": "run-filedata", "status": "QUEUED"},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/{schedule_name}/commands",
+        json={"command": "run"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "ok"
+    assert len(launches) == 1
+    execution_params = launches[0]["executionParams"]
+    run_config = execution_params["runConfigData"]
+    assert run_config == {
+        "resources": {
+            "datagokr_file_data_dataset_key": {
+                "config": {"dataset_key": dataset_key}
+            },
+            "datagokr_file_data_records": {
+                "config": {"dataset_key": dataset_key}
+            },
+        }
+    }
+    tags = {
+        tag["key"]: tag["value"]
+        for tag in execution_params["executionMetadata"]["tags"]
+    }
+    assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
+    assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
+    identity = parse_feature_operation_identity_tags(tags)
+    assert identity is not None
+    assert identity.job_name == job_name
+    assert identity.pairs[0].dataset_key == dataset_key
+    assert (
+        validate_feature_operation_identity(
+            job_name=job_name,
+            selected_asset_keys=identity.asset_keys,
+            run_config=run_config,
+            tags=tags,
+        )
+        == identity
+    )
 
 
 @pytest.mark.unit

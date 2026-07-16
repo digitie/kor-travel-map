@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (agent B) — T-ADM-C3e-B1 로컬 gate 완료
+
+- 33개 Dagster feature-load job과 asset selection을 canonical exact pair registry로 고정했다.
+  MCST는 한 root의 13 pair, KNPS는 launch 시점 settings/run-config/fetcher·asset resource가
+  일치하는 runtime singleton, fileData는 job별 고정 singleton이다. possible pair 53개 전체를
+  refreshable catalog와 대조하는 회귀를 추가했다.
+- registry version과 redacted canonical identity를 job definition에 두고 trigger는 schedule/
+  manual/sensor/update/backfill/system launch 신호에서 별도로 판정한다. 등록 identity의 누락·drift는
+  fail-closed, 비등록 arbitrary job은 panel-only다. 구 alias/placeholder/pseudo identity와
+  feature job의 `schedule_scope=system` tag는 제거했다.
+- 적대 리뷰 S1/S2 반영으로 main provider 계층의 canonical manifest digest가 version을 자동
+  결정한다. admin schedule 수동 실행은 KNPS와 fileData 4종의 effective config 및 canonical
+  manual tag를 GraphQL `runConfigData`/metadata에 영속한다. dataset schedule projection은
+  `pipelineName`과 identity job이 같은 validated MCST 13 pair만 같은 상태/next tick으로 펼친다.
+  coalescing은 `NOT_STARTED`/`MANAGED`와 exact job/version/identity를 함께 검사한다. KNPS 두
+  필드 전용 settings는 공식 env prefix/`.env`를 읽되 unrelated malformed 설정은 검증하지 않는다.
+- B1은 manifest compile target과 schedule/admin/projection launch consumer까지만 완결한다.
+  실제 provider guard/public wrapper와 비기본 KNPS direct runner의 `settings.model_copy` 수정은
+  B2, run-status/reconcile caller는 B3 소유다.
+- 적대 리뷰어 2명의 최종 판정은 S1/S2 0건이다. main unit 1,366건, focused 159건,
+  API 전체 513건, Dagster 전체 308건(1 skip), Ruff, strict mypy 7개 변경 소스와 import 계약
+  4/4를 통과했다. pytest capture의 WSL 임시 파일 오류는 `-s`로 분리했으며 실제 회귀는
+  전부 통과했다. 완료 task는 `tasks-done.md`로 옮겼다.
+- **다음 한 작업**: 문서-only PR #707을 반영하도록 origin/main에 rebase한 뒤 보안 감사,
+  PR CI·approval·merge를 완료하고 B2/B3를 최신 main에서 병렬 시작한다.
+
 ## 2026-07-16 (codex) — C3e-B 실행 재분할·C3e-C 잔여 범위 확정
 
 - PR #705로 A2가 병합됐고 main·CI가 green임을 확인했다. datasets grid/detail과 pipeline은

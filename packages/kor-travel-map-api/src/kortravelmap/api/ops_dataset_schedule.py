@@ -1,8 +1,8 @@
 """dataset grid용 Dagster schedule projection (#678).
 
-전체 schedule을 GraphQL 한 번으로 읽고 definition tags의
-``kor_travel_map.provider``/``kor_travel_map.dataset_key``만 identity로 사용한다.
-provider tag는 공용 alias 정본으로 canonicalize하며 schedule 이름 추론은 금지한다.
+전체 schedule을 GraphQL 한 번으로 읽고 공용 registry version/digest로 검증한
+canonical identity tag의 exact pair만 사용한다. 등록 feature job은 ``pipelineName``과
+identity job까지 같아야 한다. scalar provider/dataset fallback과 schedule 이름 추론은 금지한다.
 """
 
 from __future__ import annotations
@@ -12,7 +12,13 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
-from kortravelmap.core import normalize_provider_name
+from kortravelmap.providers.feature_operation_registry import (
+    FEATURE_OPERATION_IDENTITY_TAG,
+    FEATURE_OPERATION_REGISTRY_BY_JOB,
+    FEATURE_OPERATION_REGISTRY_VERSION_TAG,
+    FeatureOperationRegistryError,
+    parse_feature_operation_identity_tags,
+)
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.settings import ApiSettings
@@ -33,6 +39,7 @@ query KorTravelMapDatasetSchedules {
       nodes {
         schedules {
           name
+          pipelineName
           tags { key value }
           scheduleState { status }
           futureTicks(limit: 1) { results { timestamp } }
@@ -124,6 +131,7 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
         )
 
     grouped: dict[tuple[str, str], list[tuple[str, str | None, datetime | None]]] = {}
+    identity_errors: list[str] = []
     for node in _list(connection.get("nodes")):
         for raw_schedule in _list(_dict(node).get("schedules")):
             schedule = _dict(raw_schedule)
@@ -133,14 +141,33 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
                 if (tag_key := _text(_dict(raw_tag).get("key"))) is not None
                 and (tag_value := _text(_dict(raw_tag).get("value"))) is not None
             }
-            provider_tag = tags.get("kor_travel_map.provider")
-            dataset_key = tags.get("kor_travel_map.dataset_key")
             name = _text(schedule.get("name"))
-            if provider_tag is None or dataset_key is None or name is None:
+            if name is None:
+                continue
+            pipeline_name = _text(schedule.get("pipelineName"))
+            has_identity_tag = FEATURE_OPERATION_IDENTITY_TAG in tags
+            has_version_tag = FEATURE_OPERATION_REGISTRY_VERSION_TAG in tags
+            if pipeline_name is None:
+                identity_errors.append(f"{name}: pipelineName 누락")
+                continue
+            if not has_identity_tag and not has_version_tag:
+                if pipeline_name in FEATURE_OPERATION_REGISTRY_BY_JOB:
+                    identity_errors.append(
+                        f"{name}: 등록 feature job의 canonical identity/version tag 누락"
+                    )
                 continue
             try:
-                provider = normalize_provider_name(provider_tag)
-            except ValueError:
+                identity = parse_feature_operation_identity_tags(tags)
+            except FeatureOperationRegistryError as exc:
+                identity_errors.append(f"{name}: {exc.reason}")
+                continue
+            if identity is None:
+                identity_errors.append(f"{name}: canonical identity 누락")
+                continue
+            if identity.job_name != pipeline_name:
+                identity_errors.append(
+                    f"{name}: identity job/pipelineName 불일치"
+                )
                 continue
             status = _text(_dict(schedule.get("scheduleState")).get("status"))
             next_tick: datetime | None = None
@@ -150,9 +177,10 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
                 )
                 if future_results:
                     next_tick = _timestamp(_dict(future_results[0]).get("timestamp"))
-            grouped.setdefault((provider, dataset_key), []).append(
-                (name, status, next_tick)
-            )
+            for pair in identity.pairs:
+                grouped.setdefault((pair.provider, pair.dataset_key), []).append(
+                    (name, status, next_tick)
+                )
 
     by_dataset: dict[tuple[str, str], DatasetScheduleState] = {}
     for group_key, schedules in grouped.items():
@@ -181,7 +209,11 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             active_schedule_names=active_names,
             next_scheduled_at=min(next_ticks) if next_ticks else None,
         )
-    return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset=by_dataset)
+    return DatasetScheduleIndex(
+        source_status="error" if identity_errors else "ok",
+        errors=tuple(identity_errors),
+        by_dataset=by_dataset,
+    )
 
 
 async def load_dataset_schedule_index(

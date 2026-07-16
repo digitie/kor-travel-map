@@ -6,6 +6,9 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
+from kortravelmap.providers.feature_operation_registry import (
+    FEATURE_UPDATE_REQUEST_ID_TAG,
+)
 
 from dagster import (
     DefaultSensorStatus,
@@ -37,7 +40,6 @@ FEATURE_UPDATE_SENSOR_INTERVAL_SECONDS: Final[int] = 15
 FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
 """sensor tick 1회에 요청할 feature update worker run 상한."""
 
-FEATURE_UPDATE_REQUEST_ID_TAG: Final[str] = "kor_travel_map.feature_update_request_id"
 FEATURE_UPDATE_REQUEST_GENERATION_TAG: Final[str] = (
     "kor_travel_map.feature_update_request_generation"
 )

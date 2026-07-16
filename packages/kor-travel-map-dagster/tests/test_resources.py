@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import asyncio
+import sys
+from collections.abc import AsyncIterator, Callable, Iterator
 from io import BytesIO
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 import pytest
@@ -12,6 +15,7 @@ from dagster import build_init_resource_context
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
+from kortravelmap.dagster import definitions as dagster_definitions
 from kortravelmap.dagster import resources
 from kortravelmap.dagster.resources import (
     PROVIDER_RECORD_RESOURCE_SPECS,
@@ -72,6 +76,36 @@ class _FakeHttpClient:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class _FakeKnpsFiles:
+    def __init__(self) -> None:
+        self.point_calls: list[str] = []
+        self.geometry_calls: list[str] = []
+
+    async def read_place_records(self, dataset_key: str) -> tuple[object, ...]:
+        self.point_calls.append(dataset_key)
+        return (object(),)
+
+    async def read_geo_records(self, dataset_key: str) -> tuple[object, ...]:
+        self.geometry_calls.append(dataset_key)
+        return (object(),)
+
+
+class _FakeKnpsClient:
+    instances: list[_FakeKnpsClient] = []
+
+    def __init__(self) -> None:
+        self.files = _FakeKnpsFiles()
+        self.closed = False
+        type(self).instances.append(self)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def _collect_async(records: AsyncIterator[object]) -> list[object]:
+    return [record async for record in records]
 
 
 async def test_build_offline_upload_store_uses_offline_upload_bucket() -> None:
@@ -235,6 +269,81 @@ def test_datagokr_file_data_records_resource_uses_configured_dataset_key(
 
     assert result is sentinel
     assert calls == ["datagokr_ansan_world_restaurants"]
+
+
+@pytest.mark.parametrize(
+    (
+        "provider_resource_key",
+        "asset_resource_key",
+        "settings_attr",
+        "dataset_key",
+        "call_attr",
+    ),
+    [
+        (
+            "knps_point_records",
+            "knps_point_dataset_key",
+            "knps_point_dataset_key",
+            "knps_restrooms",
+            "point_calls",
+        ),
+        (
+            "knps_geometry_records",
+            "knps_geometry_dataset_key",
+            "knps_geometry_dataset_key",
+            "knps_hazard_zones",
+            "geometry_calls",
+        ),
+    ],
+)
+def test_knps_non_default_snapshot_initializes_provider_and_asset_resources(
+    provider_resource_key: str,
+    asset_resource_key: str,
+    settings_attr: str,
+    dataset_key: str,
+    call_attr: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = KorTravelMapSettings(
+        knps_point_dataset_key="knps_visitor_centers",
+        knps_geometry_dataset_key="knps_trails",
+    )
+    assert getattr(baseline, settings_attr) != dataset_key
+    monkeypatch.setattr(resources, "KorTravelMapSettings", lambda: baseline)
+    monkeypatch.setattr(
+        dagster_definitions,
+        "KorTravelMapSettings",
+        lambda: baseline,
+    )
+    _FakeKnpsClient.instances = []
+    knps_module = ModuleType("knps")
+    knps_module.__dict__["KnpsClient"] = _FakeKnpsClient
+    monkeypatch.setitem(sys.modules, "knps", knps_module)
+
+    provider_def = resources.PROVIDER_RECORD_RESOURCE_DEFINITIONS[
+        provider_resource_key
+    ]
+    provider_fn = cast("Callable[[object], object]", provider_def.resource_fn)
+    records = provider_fn(
+        build_init_resource_context(config={"dataset_key": dataset_key})
+    )
+    assert asyncio.run(_collect_async(cast("AsyncIterator[object]", records)))
+
+    asset_def = (
+        dagster_definitions.defs.get_repository_def()
+        .get_top_level_resources()[asset_resource_key]
+    )
+    asset_fn = cast("Callable[[object], object]", asset_def.resource_fn)
+    asset_value = asset_fn(
+        build_init_resource_context(config={"dataset_key": dataset_key})
+    )
+
+    assert len(_FakeKnpsClient.instances) == 1
+    client = _FakeKnpsClient.instances[0]
+    assert getattr(client.files, call_attr) == [dataset_key]
+    assert client.closed is True
+    assert asset_value == dataset_key
+    assert getattr(baseline, settings_attr) != dataset_key
 
 
 def test_mois_license_records_resource_syncs_source_db_before_fetch(
