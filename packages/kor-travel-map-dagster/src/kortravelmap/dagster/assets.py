@@ -134,6 +134,7 @@ from .etl import (
     _add_output_metadata,
     load_feature_bundles_for_dagster,
 )
+from .feature_operation_tracking import run_tracked_feature_asset
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -166,6 +167,7 @@ MOIS_RECORD_BATCH_SIZE: Final[int] = 1000
 _KST = timezone(timedelta(hours=9))
 _MISSING: Final = object()
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
+    "feature_operation_guard",
     "kor_travel_map_client",
     "reverse_geocoder",
     "fetched_at",
@@ -200,7 +202,9 @@ async def run_feature_event_datagokr_cultural_festivals(
 async def feature_event_datagokr_cultural_festivals(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_event_datagokr_cultural_festivals(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_event_datagokr_cultural_festivals
+    )
 
 
 async def run_feature_place_opinet_stations(
@@ -258,7 +262,7 @@ async def _run_feature_place_opinet_stations_locked(
 async def feature_place_opinet_stations(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_opinet_stations(context)
+    return await run_tracked_feature_asset(context, run_feature_place_opinet_stations)
 
 
 async def run_feature_price_opinet_stations(
@@ -462,7 +466,7 @@ def _aware_datetime_or_none(value: object) -> datetime | None:
 async def feature_price_opinet_stations(
     context: AssetExecutionContext,
 ) -> PriceFeatureLoadResult:
-    return await run_feature_price_opinet_stations(context)
+    return await run_tracked_feature_asset(context, run_feature_price_opinet_stations)
 
 
 async def run_feature_place_krex_rest_areas(
@@ -492,7 +496,7 @@ async def run_feature_place_krex_rest_areas(
 async def feature_place_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_krex_rest_areas(context)
+    return await run_tracked_feature_asset(context, run_feature_place_krex_rest_areas)
 
 
 async def run_feature_price_krex_rest_areas(
@@ -553,7 +557,7 @@ async def run_feature_price_krex_rest_areas(
 async def feature_price_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> PriceFeatureLoadResult:
-    return await run_feature_price_krex_rest_areas(context)
+    return await run_tracked_feature_asset(context, run_feature_price_krex_rest_areas)
 
 
 async def run_feature_notice_krex_traffic_notices(
@@ -738,7 +742,9 @@ def _parse_snapshot_watermark(value: object) -> datetime:
 async def feature_notice_krex_traffic_notices(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_notice_krex_traffic_notices(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_notice_krex_traffic_notices
+    )
 
 
 async def run_feature_place_krheritage_items(
@@ -780,7 +786,7 @@ async def run_feature_place_krheritage_items(
 async def feature_place_krheritage_items(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_krheritage_items(context)
+    return await run_tracked_feature_asset(context, run_feature_place_krheritage_items)
 
 
 async def run_feature_event_krheritage_events(
@@ -810,7 +816,7 @@ async def run_feature_event_krheritage_events(
 async def feature_event_krheritage_events(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_event_krheritage_events(context)
+    return await run_tracked_feature_asset(context, run_feature_event_krheritage_events)
 
 
 async def run_feature_place_mois_licenses(
@@ -864,7 +870,7 @@ async def run_feature_place_mois_licenses(
 async def feature_place_mois_licenses(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_mois_licenses(context)
+    return await run_tracked_feature_asset(context, run_feature_place_mois_licenses)
 
 
 async def run_feature_place_knps_points(
@@ -900,7 +906,7 @@ async def run_feature_place_knps_points(
 async def feature_place_knps_points(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_knps_points(context)
+    return await run_tracked_feature_asset(context, run_feature_place_knps_points)
 
 
 async def run_feature_geometry_knps_records(
@@ -937,7 +943,7 @@ async def run_feature_geometry_knps_records(
 async def feature_geometry_knps_records(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_geometry_knps_records(context)
+    return await run_tracked_feature_asset(context, run_feature_geometry_knps_records)
 
 
 async def run_feature_place_krforest_recreation_forests(
@@ -967,7 +973,9 @@ async def run_feature_place_krforest_recreation_forests(
 async def feature_place_krforest_recreation_forests(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_krforest_recreation_forests(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_place_krforest_recreation_forests
+    )
 
 
 async def run_feature_place_krforest_arboretums(
@@ -997,7 +1005,7 @@ async def run_feature_place_krforest_arboretums(
 async def feature_place_krforest_arboretums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_krforest_arboretums(context)
+    return await run_tracked_feature_asset(context, run_feature_place_krforest_arboretums)
 
 
 async def run_feature_place_standard_museums(
@@ -1027,7 +1035,7 @@ async def run_feature_place_standard_museums(
 async def feature_place_standard_museums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_standard_museums(context)
+    return await run_tracked_feature_asset(context, run_feature_place_standard_museums)
 
 
 async def run_feature_place_standard_tourist_attractions(
@@ -1057,7 +1065,9 @@ async def run_feature_place_standard_tourist_attractions(
 async def feature_place_standard_tourist_attractions(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_standard_tourist_attractions(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_place_standard_tourist_attractions
+    )
 
 
 async def run_feature_place_standard_parking_lots(
@@ -1087,7 +1097,9 @@ async def run_feature_place_standard_parking_lots(
 async def feature_place_standard_parking_lots(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_standard_parking_lots(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_place_standard_parking_lots
+    )
 
 
 async def run_feature_place_standard_special_streets(
@@ -1117,7 +1129,9 @@ async def run_feature_place_standard_special_streets(
 async def feature_place_standard_special_streets(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_standard_special_streets(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_place_standard_special_streets
+    )
 
 
 async def run_feature_place_datagokr_file_data(
@@ -1150,7 +1164,7 @@ async def run_feature_place_datagokr_file_data(
 async def feature_place_datagokr_file_data(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_datagokr_file_data(context)
+    return await run_tracked_feature_asset(context, run_feature_place_datagokr_file_data)
 
 
 async def run_feature_place_khoa_beaches(
@@ -1180,7 +1194,7 @@ async def run_feature_place_khoa_beaches(
 async def feature_place_khoa_beaches(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_khoa_beaches(context)
+    return await run_tracked_feature_asset(context, run_feature_place_khoa_beaches)
 
 
 async def run_feature_place_krairport_airports(
@@ -1210,7 +1224,7 @@ async def run_feature_place_krairport_airports(
 async def feature_place_krairport_airports(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_krairport_airports(context)
+    return await run_tracked_feature_asset(context, run_feature_place_krairport_airports)
 
 
 async def run_feature_place_kor_travel_concierge_youtube(
@@ -1263,7 +1277,9 @@ async def run_feature_place_kor_travel_concierge_youtube(
 async def feature_place_kor_travel_concierge_youtube(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_kor_travel_concierge_youtube(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_place_kor_travel_concierge_youtube
+    )
 
 
 async def run_feature_event_visitkorea_enrichment(
@@ -1300,7 +1316,9 @@ async def run_feature_event_visitkorea_enrichment(
 async def feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
 ) -> "FestivalEnrichmentReviewRefreshResult":
-    return await run_feature_event_visitkorea_enrichment(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_event_visitkorea_enrichment
+    )
 
 
 async def run_feature_weather_airkorea_air_quality(
@@ -1353,7 +1371,9 @@ async def run_feature_weather_airkorea_air_quality(
 async def feature_weather_airkorea_air_quality(
     context: AssetExecutionContext,
 ) -> AirQualityLoadResult:
-    return await run_feature_weather_airkorea_air_quality(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_weather_airkorea_air_quality
+    )
 
 
 async def run_feature_weather_krex_rest_areas(
@@ -1408,7 +1428,7 @@ async def run_feature_weather_krex_rest_areas(
 async def feature_weather_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> AirQualityLoadResult:
-    return await run_feature_weather_krex_rest_areas(context)
+    return await run_tracked_feature_asset(context, run_feature_weather_krex_rest_areas)
 
 
 FEATURE_LOAD_ASSETS: Final = [

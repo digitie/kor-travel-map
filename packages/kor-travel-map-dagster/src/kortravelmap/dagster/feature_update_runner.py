@@ -490,9 +490,12 @@ def _knps_point_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    resolved_settings = settings.model_copy(
+        update={"knps_point_dataset_key": scope.dataset_key}
+    )
     return RunnerResources(
         {
-            "knps_point_records": fetch_knps_point_records(settings),
+            "knps_point_records": fetch_knps_point_records(resolved_settings),
             "knps_point_dataset_key": scope.dataset_key,
         }
     )
@@ -502,9 +505,12 @@ def _knps_geometry_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    resolved_settings = settings.model_copy(
+        update={"knps_geometry_dataset_key": scope.dataset_key}
+    )
     return RunnerResources(
         {
-            "knps_geometry_records": fetch_knps_geometry_records(settings),
+            "knps_geometry_records": fetch_knps_geometry_records(resolved_settings),
             "knps_geometry_dataset_key": scope.dataset_key,
         }
     )
@@ -623,8 +629,8 @@ def _mcst_resources(
     return RunnerResources({"mcst_culture_records": fetch_mcst_culture_records(settings)})
 
 
-async def _run_kma_grid_weather(context: Any, resources: object) -> object:
-    dataset_key = cast(Any, resources).feature_update_dataset_key
+async def _run_kma_grid_weather(context: Any) -> object:
+    dataset_key = cast(Any, context.resources).feature_update_dataset_key
     if dataset_key == KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY:
         return await run_feature_weather_kma_ultra_short_nowcast(context)
     if dataset_key == KMA_ULTRA_SHORT_FORECAST_DATASET_KEY:
@@ -844,7 +850,7 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
                 KMA_SHORT_FORECAST_DATASET_KEY,
             }
         ),
-        run=lambda context: _run_kma_grid_weather(context, context.resources),
+        run=_run_kma_grid_weather,
         resources=_kma_grid_resources,
         asset_key="feature_weather_kma_grid_dispatch",
     ),

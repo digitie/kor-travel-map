@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e Dagster provider guard·public wrapper tracking (2026-07-16, `T-ADM-C3e-B2`)
+
+- [x] **T-ADM-C3e-B2 — authoritative provider guard와 exact-pair tracking.** 모든 live
+  provider resource가 I/O 전에 실제 Dagster run record의 job·asset selection·run config·tag와
+  B1 registry identity를 대조하고, 각 public asset/KMA wrapper가 마지막 ensure와 자기 exact pair
+  완료를 소유하게 했다. MCST는 nullable pair-completion callback으로 부분 성공을 보존하며 direct
+  `FeatureUpdateAssetRunner`는 tracking 0을 유지한다. 취소 marker·identity drift·naive timestamp는
+  fail-closed하고, 비기본 KNPS point/geometry 설정은 provider fetcher와 asset resource가 같은
+  `model_copy` snapshot을 사용한다. 적대 리뷰어 2명의 최종 판정은 S1/S2/S3 0건이다. focused
+  260건(1 skip), 실제 PostGIS canonical operation 30건, Dagster 전체 428건(1 skip), main unit
+  1,366건과 Ruff·strict mypy 136개 소스·import 계약 4/4를 통과했다. B2→B3 실제 terminal DB
+  연쇄, 이슈 #679 종결과 n150 증거는 `T-ADM-C3e-I`에 남겼다.
+
 ## C3e Dagster run sensor·양방향 복구 (2026-07-16, `T-ADM-C3e-B3`)
 
 - [x] **T-ADM-C3e-B3 — active/terminal sensor·양방향 reconcile.** QUEUED부터

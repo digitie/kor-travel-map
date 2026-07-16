@@ -15,6 +15,7 @@ from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_DATASETS,
     DATAGOKR_FILEDATA_PROVIDER_NAME,
 )
+from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.providers.mois import (
     DATASET_KEY_BULK,
     DATASET_KEY_CLOSED,
@@ -30,11 +31,14 @@ from kortravelmap.providers.opinet import (
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import feature_update_runner as runner_mod
+from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS
 from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateAssetRunner,
     FeatureUpdateRunnerSpec,
     RunnerResources,
 )
+from kortravelmap.dagster.kma_weather import KMA_WEATHER_ASSETS
+from kortravelmap.dagster.mcst_features import MCST_FEATURE_ASSETS
 from kortravelmap.dagster.provider_fetchers import ProviderCredentialMissing
 
 
@@ -154,6 +158,63 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
     assert result.metadata is not None
     assert result.metadata["features_inserted"] == 1
     assert result.metadata["seen"] is True
+
+
+async def test_feature_update_asset_runner_direct_raw_path_has_zero_tracking() -> None:
+    class _ForbiddenGuard:
+        def __init__(self) -> None:
+            self.ensure_calls = 0
+
+        async def ensure(self) -> None:
+            self.ensure_calls += 1
+            raise AssertionError("direct raw runner가 Dagster operation tracking을 호출함")
+
+    guard = _ForbiddenGuard()
+
+    async def _raw(context: object) -> _FakeAssetResult:
+        assert cast(Any, context).resources.feature_operation_guard is guard
+        return _FakeAssetResult(
+            provider="demo",
+            dataset_key="places",
+            feature_ids=("feature-1",),
+        )
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={"feature_operation_guard": guard},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider="demo",
+                dataset_keys=frozenset({"places"}),
+                run=_raw,
+                resources=lambda _settings, _scope: RunnerResources({}),
+                asset_key="feature_demo_places",
+            ),
+        ),
+    )
+
+    result = await runner(object(), _scope())
+
+    assert result.status == "done"
+    assert guard.ensure_calls == 0
+
+
+def test_default_specs_reference_only_module_raw_symbols() -> None:
+    public_wrappers = {
+        cast(Any, asset_def.op.compute_fn).decorated_fn
+        for asset_def in (
+            *FEATURE_LOAD_ASSETS,
+            *KMA_WEATHER_ASSETS,
+            *MCST_FEATURE_ASSETS,
+        )
+    }
+
+    assert runner_mod._DEFAULT_SPECS  # noqa: SLF001 - production dispatch contract
+    for spec in runner_mod._DEFAULT_SPECS:  # noqa: SLF001
+        assert spec.run not in public_wrappers
+        assert getattr(runner_mod, spec.run.__name__, None) is spec.run
+        assert spec.run.__name__.startswith(("run_feature_", "_run_kma_grid_"))
 
 
 async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
@@ -398,6 +459,59 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
     assert resources.values["mois_license_records"] is sentinel
     assert resources.values["mois_dataset_key"] == DATASET_KEY_BULK
     assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
+
+
+@pytest.mark.parametrize(
+    ("factory_name", "fetch_name", "settings_attr", "records_key", "dataset_key"),
+    [
+        (
+            "_knps_point_resources",
+            "fetch_knps_point_records",
+            "knps_point_dataset_key",
+            "knps_point_records",
+            "knps_restrooms",
+        ),
+        (
+            "_knps_geometry_resources",
+            "fetch_knps_geometry_records",
+            "knps_geometry_dataset_key",
+            "knps_geometry_records",
+            "knps_hazard_zones",
+        ),
+    ],
+)
+def test_knps_direct_runner_freezes_same_non_default_dataset_for_fetch_and_asset(
+    factory_name: str,
+    fetch_name: str,
+    settings_attr: str,
+    records_key: str,
+    dataset_key: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = KorTravelMapSettings(
+        knps_point_dataset_key="knps_visitor_centers",
+        knps_geometry_dataset_key="knps_trails",
+    )
+    fetched_settings: list[KorTravelMapSettings] = []
+    records = [object()]
+
+    def _fetch(actual_settings: KorTravelMapSettings) -> list[object]:
+        fetched_settings.append(actual_settings)
+        return records
+
+    monkeypatch.setattr(runner_mod, fetch_name, _fetch)
+    factory = cast(Any, getattr(runner_mod, factory_name))
+
+    resources = factory(
+        settings,
+        _scope(provider=KNPS_PROVIDER_NAME, dataset_key=dataset_key),
+    )
+
+    assert resources.values[records_key] is records
+    assert resources.values[settings_attr] == dataset_key
+    assert len(fetched_settings) == 1
+    assert getattr(fetched_settings[0], settings_attr) == dataset_key
+    assert getattr(settings, settings_attr) != dataset_key
 
 
 def test_default_runner_accepts_datagokr_file_data_datasets() -> None:

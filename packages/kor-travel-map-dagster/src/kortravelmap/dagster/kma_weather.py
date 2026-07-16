@@ -64,6 +64,7 @@ from .assets import (
     _reverse_geocoder,
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
+from .feature_operation_tracking import run_tracked_feature_asset
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -100,6 +101,7 @@ __all__ = [
 _KST: Final = timezone(timedelta(hours=9))
 
 _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
+    "feature_operation_guard",
     "kor_travel_map_client",
     "kma_weather_client",
     "kma_weather_extra_points",
@@ -486,7 +488,9 @@ async def run_feature_weather_kma_ultra_short_nowcast(
 async def feature_weather_kma_ultra_short_nowcast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    return await run_feature_weather_kma_ultra_short_nowcast(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_weather_kma_ultra_short_nowcast
+    )
 
 
 async def run_feature_weather_kma_ultra_short_forecast(
@@ -517,7 +521,9 @@ async def run_feature_weather_kma_ultra_short_forecast(
 async def feature_weather_kma_ultra_short_forecast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    return await run_feature_weather_kma_ultra_short_forecast(context)
+    return await run_tracked_feature_asset(
+        context, run_feature_weather_kma_ultra_short_forecast
+    )
 
 
 async def run_feature_weather_kma_short_forecast(
@@ -547,7 +553,7 @@ async def run_feature_weather_kma_short_forecast(
 async def feature_weather_kma_short_forecast(
     context: AssetExecutionContext,
 ) -> KmaWeatherLoadResult:
-    return await run_feature_weather_kma_short_forecast(context)
+    return await run_tracked_feature_asset(context, run_feature_weather_kma_short_forecast)
 
 
 # =========================================================================
@@ -705,6 +711,7 @@ class KmaMidForecastLoadResult:
 
 
 _KMA_MID_RESOURCE_KEYS: Final[set[str]] = {
+    "feature_operation_guard",
     "kor_travel_map_client",
     "kma_datagokr_client",
     "kma_mid_region_features",
@@ -820,7 +827,7 @@ async def run_feature_weather_kma_mid_forecast(
 async def feature_weather_kma_mid_forecast(
     context: AssetExecutionContext,
 ) -> KmaMidForecastLoadResult:
-    return await run_feature_weather_kma_mid_forecast(context)
+    return await run_tracked_feature_asset(context, run_feature_weather_kma_mid_forecast)
 
 
 # -- 특보 (getWthrWrnList record → notice FeatureBundle) -------------------
@@ -1047,7 +1054,7 @@ async def run_feature_notice_kma_weather_alerts(
 async def feature_notice_kma_weather_alerts(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_notice_kma_weather_alerts(context)
+    return await run_tracked_feature_asset(context, run_feature_notice_kma_weather_alerts)
 
 
 KMA_WEATHER_ASSETS: Final = [

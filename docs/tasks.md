@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C3e-B2` — provider guard·public wrapper·MCST pair callback (agent A)
   - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
@@ -36,17 +35,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C3e-B2` — **provider guard·public wrapper tracking** (agent **A**, 의존
-  C3e-B1, C3e-B3와 병렬): 모든 live provider resource 앞에 DB-only operation guard를 두고,
-  실제 Dagster context의 job·asset selection·run config·run tag를 B1 registry와 대조해
-  Launchpad·직접 GraphQL override 및 API/Dagster version 불일치를 provider I/O 전에 차단한다.
-  모든 public feature-load asset/KMA wrapper가 raw runner 직전 마지막 ensure와 자기 exact pair
-  success를 기록하게 한다. MCST raw runner에는 nullable async pair-completion callback을 주입하되
-  `FeatureUpdateAssetRunner` direct raw 경로는 tracking 0을 유지한다. marker 선점 시 provider I/O와
-  child 생성 0, ensure 선점 시 selection 전체 freeze, step retry·partial success·shared run과
-  MCST 전반 성공/후반 실패를 회귀로 고정한다. 알려진 KNPS direct runner 오염도 이 PR에서
-  수정한다. 비기본 point/geometry scope dataset을 `settings.model_copy(update=...)`로 고정해
-  fetcher와 asset resource 양쪽에 같은 값을 전달하고 fetch/record mismatch 회귀를 추가한다.
 - [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B1/B2/B3/C): 선행 merge마다
   origin/main rebase하고 교차 회귀·적대 리뷰 2인·전체 CI를 통과시킨다. 일정/수동/갱신/import
   실행과 datasets/pipeline 동일 root 증거를 이슈 #679에 남긴 뒤 닫는다.
@@ -93,10 +81,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트.
 
-현재 codex 실행 순서는 사용자 지시로 **C3e-B1과 C3e-C 병렬 → C3e-B2와 B3 병렬 → C3e-I
-→ C45X·C4R 차단 계약 → 기존
+현재 codex 실행 순서는 사용자 지시로 **C3e-I → C45X·C4R 차단 계약 → 기존
 C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
-worktree의 C45X/C4R 구현이 정본이다. C3e 종료 뒤 해당 worktree와 PR을 가져와 적대적 상세 리뷰
+worktree의 C45X/C4R 구현이 정본이다. C3e-B1/B2/B3/C는 완료했으며, C3e 종료 뒤 해당
+worktree와 PR을 가져와 적대적 상세 리뷰
 후 개선을 반영한다. C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다.
 C6 착수 전 원격에서 C4/C5와 관련 차단 PR의 실제 merge·CI 상태를 확인한다.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,13 @@ from kortravelmap.dagster.feature_operation_sensors import (
     FeatureOperationReconcileCursor,
     _apply_run_record,
     _reconcile_tick,
+)
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+    append_failed_multi_pair_attempt,
+    ensure_tracked_multi_pair_asset,
+    finish_tracked_feature_pair,
+    run_tracked_feature_asset,
 )
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -47,7 +55,9 @@ from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationInvariantError,
 )
 from kortravelmap.providers.feature_operation_registry import (
+    feature_operation_definition_tags,
     feature_operation_launch_tags,
+    resolve_feature_operation_identity,
     resolve_feature_operation_launch,
 )
 
@@ -55,6 +65,98 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 pytestmark = pytest.mark.integration
+
+
+class _RecordingOperationClient:
+    """실제 client/repo 결과를 변조 없이 기록하는 test probe."""
+
+    def __init__(self, client: AsyncKorTravelMapClient) -> None:
+        self.client = client
+        self.ensure_mutations: list[Any] = []
+        self.finish_mutations: list[Any] = []
+        self.attempt_events: list[Any] = []
+
+    async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
+        mutation = await self.client.ensure_dagster_feature_operation(**kwargs)
+        self.ensure_mutations.append(mutation)
+        return mutation
+
+    async def finish_dagster_feature_pair(self, **kwargs: Any) -> Any:
+        mutation = await self.client.finish_dagster_feature_pair(**kwargs)
+        self.finish_mutations.append(mutation)
+        return mutation
+
+    async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> Any:
+        event = await self.client.append_dagster_feature_attempt_event(**kwargs)
+        self.attempt_events.append(event)
+        return event
+
+
+def _tracking_guard(
+    client: _RecordingOperationClient,
+    *,
+    identity: Any,
+    run_id: str,
+) -> FeatureOperationExecutionGuard:
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    run = SimpleNamespace(
+        job_name=identity.job_name,
+        run_id=run_id,
+        run_config={},
+        tags=feature_operation_definition_tags(identity),
+        asset_selection=None,
+        resolved_op_selection=None,
+        status=SimpleNamespace(value="STARTED"),
+    )
+    record = SimpleNamespace(
+        dagster_run=run,
+        create_timestamp=created_at,
+        start_time=started_at.timestamp(),
+    )
+    instance = SimpleNamespace(
+        run=run,
+        get_run_record_by_id=lambda _run_id: record,
+    )
+    return FeatureOperationExecutionGuard(
+        client=client,  # type: ignore[arg-type]
+        instance=instance,
+        identity=identity,
+        dagster_run_id=run_id,
+        trigger_kind="manual",
+    )
+
+
+def _tracking_context(
+    guard: FeatureOperationExecutionGuard,
+    *,
+    retry_number: int,
+) -> Any:
+    identity = guard.identity
+    assert identity is not None
+    asset_key = AssetKey(identity.asset_keys[0])
+    return SimpleNamespace(
+        resources=SimpleNamespace(
+            feature_operation_guard=guard,
+            kor_travel_map_client=guard.client,
+        ),
+        instance=guard.instance,
+        run=guard.instance.run,
+        run_id=guard.dagster_run_id,
+        selected_asset_keys={asset_key},
+        asset_key=asset_key,
+        job_name=identity.job_name,
+        retry_number=retry_number,
+    )
+
+
+def _event_payload(value: object) -> dict[str, object]:
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        assert isinstance(decoded, dict)
+        return decoded
+    assert isinstance(value, dict)
+    return value
 
 
 async def _delete_committed_feature_tree(
@@ -165,6 +267,291 @@ class _PeriodicContext:
 
     def update_cursor(self, cursor: str) -> None:
         self.updated_cursors.append(cursor)
+
+
+async def test_marker_block_keeps_canonical_child_count_unchanged(
+    migrated_engine: AsyncEngine,
+) -> None:
+    client = AsyncKorTravelMapClient(migrated_engine)
+    run_id = f"run-c3e-b2-marker-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 2, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    pairs = (
+        ProviderDatasetOperationKey("provider", "first"),
+        ProviderDatasetOperationKey("provider", "second"),
+    )
+    initial = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="manual",
+        selected_pairs=pairs,
+        registry_version="registry-v1",
+        engine_created_at=created_at,
+        engine_started_at=None,
+        observed_status="QUEUED",
+    )
+    root_id = initial.operation.root_job_id
+    cancellation_id: str | None = None
+
+    async def _child_count() -> int:
+        async with AsyncSession(migrated_engine) as probe:
+            value = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM ops.import_jobs "
+                    "WHERE parent_job_id=CAST(:root_id AS uuid) "
+                    "AND kind='provider_feature_load'"
+                ),
+                {"root_id": root_id},
+            )
+        return int(value or 0)
+
+    try:
+        before_marker = await _child_count()
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            scope = await resolve_pipeline_cancellation_scope(
+                session,
+                kind="import_job",
+                execution_id=root_id,
+            )
+            assert scope is not None
+            detail = await create_pipeline_cancellation_attempt(
+                session,
+                scope=scope,
+                requested_by="admin:b2-acceptance",
+                reason="provider I/O barrier",
+            )
+            cancellation_id = detail.attempt.cancellation_id
+        after_marker = await _child_count()
+        blocked = await client.ensure_dagster_feature_operation(
+            dagster_run_id=run_id,
+            trigger_kind="manual",
+            selected_pairs=pairs,
+            registry_version="registry-v1",
+            engine_created_at=created_at,
+            engine_started_at=started_at,
+            observed_status="STARTED",
+        )
+        after_blocked_ensure = await _child_count()
+
+        assert initial.outcome == "applied"
+        assert blocked.outcome == "blocked"
+        assert blocked.block_reason == "cancellation"
+        assert before_marker == after_marker == after_blocked_ensure == len(pairs)
+    finally:
+        await _delete_committed_feature_tree(
+            migrated_engine,
+            root_id=root_id,
+            cancellation_id=cancellation_id,
+        )
+
+
+async def test_real_db_single_retry_and_shared_wrapper_are_idempotent(
+    migrated_engine: AsyncEngine,
+) -> None:
+    identity = resolve_feature_operation_identity(
+        job_name="feature_place_mois_licenses_job"
+    )
+    assert identity is not None
+    base_client = AsyncKorTravelMapClient(migrated_engine)
+    retry_probe = _RecordingOperationClient(base_client)
+    retry_guard = _tracking_guard(
+        retry_probe,
+        identity=identity,
+        run_id=f"run-c3e-b2-single-retry-{uuid4()}",
+    )
+    retry_root_id: str | None = None
+    shared_root_id: str | None = None
+
+    async def _fail(_context: object) -> None:
+        raise RuntimeError("retry")
+
+    async def _succeed(_context: object) -> str:
+        return "done"
+
+    try:
+        with pytest.raises(RuntimeError, match="retry"):
+            await run_tracked_feature_asset(
+                _tracking_context(retry_guard, retry_number=0),
+                _fail,
+            )
+        retry_root_id = retry_probe.ensure_mutations[0].operation.root_job_id
+        assert (
+            await run_tracked_feature_asset(
+                _tracking_context(retry_guard, retry_number=1),
+                _succeed,
+            )
+            == "done"
+        )
+        assert [item.outcome for item in retry_probe.ensure_mutations] == [
+            "applied",
+            "noop",
+        ]
+        assert [item.outcome for item in retry_probe.finish_mutations] == ["applied"]
+        assert [
+            (event.provider, event.dataset_key)
+            for event in retry_probe.attempt_events
+        ] == [(identity.pairs[0].provider, identity.pairs[0].dataset_key)]
+
+        async with AsyncSession(migrated_engine) as probe:
+            attempts = (
+                await probe.execute(
+                    text(
+                        "SELECT event.provider, event.dataset_key, "
+                        "event.payload "
+                        "FROM ops.import_job_events AS event "
+                        "JOIN ops.import_jobs AS child ON child.job_id=event.job_id "
+                        "WHERE child.parent_job_id=CAST(:root_id AS uuid) "
+                        "AND event.code='feature_operation.attempt'"
+                    ),
+                    {"root_id": retry_root_id},
+                )
+            ).all()
+        assert [(row.provider, row.dataset_key) for row in attempts] == [
+            (identity.pairs[0].provider, identity.pairs[0].dataset_key)
+        ]
+        assert [_event_payload(row.payload) for row in attempts] == [
+            {
+                "attempt_number": 1,
+                "outcome": "failed",
+                "error": {
+                    "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
+                    "type": "RuntimeError",
+                },
+            }
+        ]
+
+        shared_probe = _RecordingOperationClient(base_client)
+        shared_guard = _tracking_guard(
+            shared_probe,
+            identity=identity,
+            run_id=f"run-c3e-b2-shared-{uuid4()}",
+        )
+        await run_tracked_feature_asset(
+            _tracking_context(shared_guard, retry_number=0),
+            _succeed,
+        )
+        shared_root_id = shared_probe.ensure_mutations[0].operation.root_job_id
+        await run_tracked_feature_asset(
+            _tracking_context(shared_guard, retry_number=0),
+            _succeed,
+        )
+        assert [item.outcome for item in shared_probe.ensure_mutations] == [
+            "applied",
+            "noop",
+        ]
+        assert [item.outcome for item in shared_probe.finish_mutations] == [
+            "applied",
+            "noop",
+        ]
+        assert all(
+            len(item.operation.members) == 1
+            for item in (
+                *shared_probe.ensure_mutations,
+                *shared_probe.finish_mutations,
+            )
+        )
+    finally:
+        if retry_root_id is not None:
+            await _delete_committed_feature_tree(
+                migrated_engine,
+                root_id=retry_root_id,
+            )
+        if shared_root_id is not None:
+            await _delete_committed_feature_tree(
+                migrated_engine,
+                root_id=shared_root_id,
+            )
+
+
+async def test_real_db_mcst_same_run_retry_preserves_pair_and_attempts(
+    migrated_engine: AsyncEngine,
+) -> None:
+    identity = resolve_feature_operation_identity(
+        job_name="feature_place_mcst_culture_job"
+    )
+    assert identity is not None
+    probe = _RecordingOperationClient(AsyncKorTravelMapClient(migrated_engine))
+    guard = _tracking_guard(
+        probe,
+        identity=identity,
+        run_id=f"run-c3e-b2-mcst-{uuid4()}",
+    )
+    done_pair, failed_pair = identity.pairs[:2]
+    root_id: str | None = None
+    try:
+        first_context = _tracking_context(guard, retry_number=0)
+        assert await ensure_tracked_multi_pair_asset(first_context) is guard
+        root_id = probe.ensure_mutations[0].operation.root_job_id
+        await finish_tracked_feature_pair(guard, done_pair)
+        await append_failed_multi_pair_attempt(
+            first_context,
+            guard,
+            failed_pair,
+            RuntimeError("first attempt"),
+        )
+
+        second_context = _tracking_context(guard, retry_number=1)
+        assert await ensure_tracked_multi_pair_asset(second_context) is guard
+        await finish_tracked_feature_pair(guard, done_pair)
+        await append_failed_multi_pair_attempt(
+            second_context,
+            guard,
+            failed_pair,
+            RuntimeError("second attempt"),
+        )
+        assert [item.outcome for item in probe.ensure_mutations] == [
+            "applied",
+            "noop",
+        ]
+        assert [item.outcome for item in probe.finish_mutations] == [
+            "applied",
+            "noop",
+        ]
+        assert [
+            (event.provider, event.dataset_key) for event in probe.attempt_events
+        ] == [
+            (failed_pair.provider, failed_pair.dataset_key),
+            (failed_pair.provider, failed_pair.dataset_key),
+        ]
+        async with AsyncSession(migrated_engine) as session:
+            stored_attempts = (
+                await session.execute(
+                    text(
+                        "SELECT event.provider, event.dataset_key, "
+                        "event.payload "
+                        "FROM ops.import_job_events AS event "
+                        "JOIN ops.import_jobs AS child ON child.job_id=event.job_id "
+                        "WHERE child.parent_job_id=CAST(:root_id AS uuid) "
+                        "AND event.code='feature_operation.attempt' "
+                        "ORDER BY event.occurred_at, event.event_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        assert [(row.provider, row.dataset_key) for row in stored_attempts] == [
+            (failed_pair.provider, failed_pair.dataset_key),
+            (failed_pair.provider, failed_pair.dataset_key),
+        ]
+        assert [_event_payload(row.payload) for row in stored_attempts] == [
+            {
+                "attempt_number": 1,
+                "outcome": "failed",
+                "error": {
+                    "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
+                    "type": "RuntimeError",
+                },
+            },
+            {
+                "attempt_number": 2,
+                "outcome": "failed",
+                "error": {
+                    "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
+                    "type": "RuntimeError",
+                },
+            },
+        ]
+    finally:
+        if root_id is not None:
+            await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
 
 
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(

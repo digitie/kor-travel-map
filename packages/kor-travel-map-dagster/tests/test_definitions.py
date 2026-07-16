@@ -203,14 +203,28 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
 def test_feature_load_provider_guard_resources_registered() -> None:
     top_level_resources = defs.get_repository_def().get_top_level_resources()
 
+    operation_guard = top_level_resources["feature_operation_guard"]
+    assert operation_guard.required_resource_keys == {"kor_travel_map_client"}
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
+        assert "feature_operation_guard" in spec.asset.required_resource_keys
+
     for spec in PROVIDER_RECORD_RESOURCE_SPECS:
         resource_def = top_level_resources[spec.resource_key]
         assert resource_def.description
         if spec.resource_key in _LIVE_PROVIDER_RESOURCE_KEYS:
             assert "live fetcher" in resource_def.description
+            assert {
+                "feature_operation_guard",
+                "kor_travel_map_client",
+            } <= resource_def.required_resource_keys
         else:
             assert "provider record guard" in resource_def.description
 
+    for resource_key in ("kma_weather_client", "kma_datagokr_client"):
+        assert {
+            "feature_operation_guard",
+            "kor_travel_map_client",
+        } <= top_level_resources[resource_key].required_resource_keys
     assert top_level_resources["reverse_geocoder"]
 
 

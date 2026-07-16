@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (agent A) — T-ADM-C3e-B2 로컬 gate 완료
+
+- 모든 live provider resource와 public asset/KMA wrapper가 B1 registry를 기준으로 실제 Dagster
+  run record의 job·selection·config·identity/version·trigger를 provider I/O 전에 검증한다.
+  resource 초기화와 wrapper의 마지막 ensure가 취소 marker·terminal·runtime drift를 멱등하게
+  fail-closed한다.
+- wrapper는 자기 exact pair 완료만 소유하고 MCST는 nullable async callback으로 부분 성공을
+  보존한다. direct `FeatureUpdateAssetRunner`는 tracking 0이다. 비기본 KNPS point/geometry
+  설정은 fetcher와 asset resource가 동일한 `model_copy` snapshot을 사용한다.
+- 적대 리뷰어 2명의 최종 판정은 각각 S1/S2/S3 0건이다. focused 260건(1 skip), 실제 PostGIS
+  canonical operation 30건, Dagster 전체 428건(1 skip), main unit 1,366건, Ruff, strict mypy
+  136개 소스와 import 계약 4/4를 통과했다.
+- **다음 한 작업**: B2 PR을 CI green·승인 뒤 병합하고 C3e-I에서 B2→B3 실제 terminal DB 연쇄,
+  일정·수동·갱신·import 교차 회귀와 이슈 #679 종결 증거를 확인한다. n150/prod와 C45X/C4R은
+  아직 완료하지 않았다.
+
 ## 2026-07-16 (agent B) — T-ADM-C3e-B3 로컬 gate 완료
 
 - QUEUED/STARTING/STARTED/CANCELING/SUCCESS/FAILURE/CANCELED를 각각 받는 7개

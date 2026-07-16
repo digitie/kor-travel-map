@@ -7,7 +7,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from io import BytesIO
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -17,6 +17,9 @@ from pydantic import SecretStr
 
 from kortravelmap.dagster import definitions as dagster_definitions
 from kortravelmap.dagster import resources
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 from kortravelmap.dagster.resources import (
     PROVIDER_RECORD_RESOURCE_SPECS,
     build_offline_upload_store_from_settings,
@@ -27,6 +30,32 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
     ".*:dagster_shared.utils.warnings.BetaWarning"
 )
+
+_PANEL_CLIENT = object()
+_PANEL_INSTANCE = object()
+_PANEL_RUN_ID = "panel-test"
+_PANEL_GUARD = FeatureOperationExecutionGuard(
+    client=cast(Any, _PANEL_CLIENT),
+    instance=_PANEL_INSTANCE,
+    identity=None,
+    dagster_run_id=_PANEL_RUN_ID,
+    trigger_kind=None,
+)
+
+
+def _guarded_init_resource_context(
+    *,
+    config: dict[str, object] | None = None,
+) -> Any:
+    return SimpleNamespace(
+        resource_config=config or {},
+        resources=SimpleNamespace(
+            feature_operation_guard=_PANEL_GUARD,
+            kor_travel_map_client=_PANEL_CLIENT,
+        ),
+        instance=_PANEL_INSTANCE,
+        run=SimpleNamespace(job_name="panel_only_job", run_id=_PANEL_RUN_ID),
+    )
 
 
 class _FakeS3Client:
@@ -234,7 +263,7 @@ def test_datagokr_file_data_dataset_key_resource_prefers_run_config() -> None:
     )
 
     result = resource_fn(
-        build_init_resource_context(
+        _guarded_init_resource_context(
             config={"dataset_key": "datagokr_jeju_local_restaurants"}
         )
     )
@@ -262,7 +291,7 @@ def test_datagokr_file_data_records_resource_uses_configured_dataset_key(
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
     result = resource_fn(
-        build_init_resource_context(
+        _guarded_init_resource_context(
             config={"dataset_key": "datagokr_ansan_world_restaurants"}
         )
     )
@@ -325,7 +354,7 @@ def test_knps_non_default_snapshot_initializes_provider_and_asset_resources(
     ]
     provider_fn = cast("Callable[[object], object]", provider_def.resource_fn)
     records = provider_fn(
-        build_init_resource_context(config={"dataset_key": dataset_key})
+        _guarded_init_resource_context(config={"dataset_key": dataset_key})
     )
     assert asyncio.run(_collect_async(cast("AsyncIterator[object]", records)))
 
@@ -370,7 +399,7 @@ def test_mois_license_records_resource_syncs_source_db_before_fetch(
     ]
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
-    result = resource_fn(build_init_resource_context())
+    result = resource_fn(_guarded_init_resource_context())
 
     assert result is sentinel
     assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
@@ -417,7 +446,7 @@ def test_provider_record_guard_message_hides_secret(
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
     with pytest.raises(RuntimeError) as exc_info:
-        resource_fn(build_init_resource_context())
+        resource_fn(_guarded_init_resource_context())
 
     message = str(exc_info.value)
     assert "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in message
