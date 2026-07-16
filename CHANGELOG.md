@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Dagster canonical operation registry (2026-07-16, ADR-064 T-ADM-C3e-B1)
+
+- **CHANGED**: 33개 feature-load job의 asset selection과 53개 provider/dataset 선택지를
+  내용 기반 digest version의 immutable manifest로 고정했다. KNPS와 fileData admin Run-now는
+  실제 resource config와 canonical manual identity를 Dagster launch에 영속한다.
+- **CHANGED**: datasets schedule projection은 실제 `pipelineName`과 canonical identity가
+  일치할 때만 MCST 13개 exact pair에 schedule 상태를 펼친다. 등록 job의 누락·교차 identity는
+  fail-closed하고 비등록 임의 job만 panel-only로 남긴다.
+
 ### canonical root/exact-pair projection (2026-07-15, ADR-064 T-ADM-C3e-A2)
 
 - **CHANGED**: pipeline timeline·detail·overview와 datasets grid/detail이 C3b lineage를

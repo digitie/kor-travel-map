@@ -6,7 +6,15 @@ from typing import Any, Final, cast
 
 from kortravelmap.settings import KorTravelMapSettings
 
-from dagster import Definitions, ResourceDefinition, resource
+from dagster import (
+    Definitions,
+    InitResourceContext,
+    ResourceDefinition,
+    resource,
+)
+from dagster import (
+    Field as DagsterField,
+)
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
@@ -138,6 +146,31 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
 
 
 def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
+    if attr in {"knps_point_dataset_key", "knps_geometry_dataset_key"}:
+
+        @resource(
+            config_schema={
+                "dataset_key": DagsterField(
+                    str,
+                    default_value="",
+                    is_required=False,
+                    description=(
+                        "operation registry가 launch 시 고정한 KNPS dataset key. "
+                        "비어 있으면 settings 값을 사용한다."
+                    ),
+                )
+            },
+            description=(
+                f"{key} resource 값을 run snapshot 또는 "
+                f"KorTravelMapSettings.{attr}에서 읽는다."
+            ),
+        )
+        def _knps_resource(context: InitResourceContext) -> object:
+            configured = context.resource_config.get("dataset_key")
+            return configured or getattr(KorTravelMapSettings(), attr)
+
+        return _knps_resource
+
     @resource(description=f"{key} resource 값을 ``KorTravelMapSettings.{attr}``에서 읽는다.")
     def _resource() -> object:
         return getattr(KorTravelMapSettings(), attr)

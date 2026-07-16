@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C3e-B1` — Dagster immutable operation registry·run identity tag (agent B)
   - [ ] `T-ADM-C3e-B2` — provider guard·public wrapper·MCST pair callback (agent A)
   - [ ] `T-ADM-C3e-B3` — active/terminal run sensor·양방향 reconcile (agent B)
   - [ ] `T-ADM-C3e-C` — datasets/pipeline REST canonical 교차 통합 증거 (agent A)
@@ -39,20 +38,17 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C3e-B1` — **Dagster immutable operation registry·run identity** (agent
-  **B**, 의존 C3e-A1): schedule/job/asset selection을 canonical catalog의 exact pair와 연결하는
-  immutable registry와 version을 만든다. KNPS run-config snapshot과 MCST 13 pair를 명시하고,
-  registry가 생성한 redacted identity tag만 신뢰한다. job definition에서 schedule trigger tag를
-  제거해 UI/CLI manual 실행 오분류를 막고, 등록 identity의 누락·불일치는 fail-closed,
-  비등록 arbitrary job은 panel-only로 구분한다. 전체 schedule/asset pair catalog coverage,
-  registry version/selection/config drift, trigger 우선순위와 definition readiness를 회귀로 고정한다.
 - [ ] `T-ADM-C3e-B2` — **provider guard·public wrapper tracking** (agent **A**, 의존
   C3e-B1, C3e-B3와 병렬): 모든 live provider resource 앞에 DB-only operation guard를 두고,
+  실제 Dagster context의 job·asset selection·run config·run tag를 B1 registry와 대조해
+  Launchpad·직접 GraphQL override 및 API/Dagster version 불일치를 provider I/O 전에 차단한다.
   모든 public feature-load asset/KMA wrapper가 raw runner 직전 마지막 ensure와 자기 exact pair
   success를 기록하게 한다. MCST raw runner에는 nullable async pair-completion callback을 주입하되
   `FeatureUpdateAssetRunner` direct raw 경로는 tracking 0을 유지한다. marker 선점 시 provider I/O와
   child 생성 0, ensure 선점 시 selection 전체 freeze, step retry·partial success·shared run과
-  MCST 전반 성공/후반 실패를 회귀로 고정한다.
+  MCST 전반 성공/후반 실패를 회귀로 고정한다. 알려진 KNPS direct runner 오염도 이 PR에서
+  수정한다. 비기본 point/geometry scope dataset을 `settings.model_copy(update=...)`로 고정해
+  fetcher와 asset resource 양쪽에 같은 값을 전달하고 fetch/record mismatch 회귀를 추가한다.
 - [ ] `T-ADM-C3e-B3` — **run-status sensor·양방향 reconcile** (agent **B**, 의존
   C3e-B1, C3e-B2와 병렬): QUEUED/STARTING/STARTED/CANCELING event sensor, SUCCESS/FAILURE/
   CANCELED terminal sensor와 NOT_STARTED/MANAGED·missed event periodic scan을 provider-resource-free로

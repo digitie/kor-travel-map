@@ -7,6 +7,14 @@ from time import perf_counter
 from typing import Final, Literal
 
 import httpx
+from kortravelmap.providers.feature_operation_registry import (
+    ADMIN_MANUAL_TRIGGER_TAG,
+    FeatureOperationRegistryError,
+    feature_operation_launch_tags,
+    resolve_feature_operation_launch,
+    resolve_feature_operation_runtime_snapshot,
+    validate_feature_operation_identity,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,17 +172,32 @@ mutation KorTravelMapLaunchRun($executionParams: ExecutionParams!) {
 """
 
 
-_RUN_CONFIG_REQUIRED_SCHEDULES: frozenset[str] = frozenset(
-    {
-        "feature_place_datagokr_seoul_bookstores_monthly_schedule",
-        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
-        "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
-        "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
-    }
-)
-
-
 _MIN_CRON_MINUTE_STEP: Final[int] = 10
+
+
+def _admin_feature_operation_launch(
+    job_name: str,
+) -> tuple[dict[str, object], dict[str, str]]:
+    """등록 feature job의 canonical manual run config/tag를 만든 뒤 자체 검증한다."""
+    runtime_snapshot = resolve_feature_operation_runtime_snapshot()
+    launch = resolve_feature_operation_launch(
+        job_name=job_name,
+        runtime_snapshot=runtime_snapshot,
+    )
+    if launch is None:
+        return {}, {}
+    identity, run_config = launch
+    tags = {
+        **feature_operation_launch_tags(identity, trigger_kind="manual"),
+        ADMIN_MANUAL_TRIGGER_TAG: "admin-ui",
+    }
+    validate_feature_operation_identity(
+        job_name=job_name,
+        selected_asset_keys=identity.asset_keys,
+        run_config=run_config,
+        tags=tags,
+    )
+    return run_config, tags
 
 
 def _cron_part_is_valid(part: str, *, min_value: int, max_value: int) -> bool:
@@ -794,22 +817,29 @@ async def run_schedule_now(
             ),
             started_at=started_at,
         )
-    if schedule_name in _RUN_CONFIG_REQUIRED_SCHEDULES:
+    operator = body.operator if body else None
+    reason = body.reason if body else None
+    try:
+        run_config, operation_tags = _admin_feature_operation_launch(
+            schedule.pipeline_name
+        )
+    except FeatureOperationRegistryError as exc:
         return _schedule_command_response(
             _command_error_data(
                 dagster_urls=urls,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command="run",
-                error=(
-                    "이 스케줄은 run_config(dataset_key)로 동작해 즉시 실행이 잘못된 "
-                    "dataset을 적재할 수 있어 지원하지 않습니다 — 스케줄 tick으로 실행됩니다."
-                ),
+                error=f"등록 feature operation launch identity 불일치: {exc.reason}",
             ),
             started_at=started_at,
         )
-    operator = body.operator if body else None
-    reason = body.reason if body else None
+    metadata_tags = {
+        **operation_tags,
+        "kor_travel_map.schedule_name": schedule_name,
+        "kor_travel_map.operator": operator or "admin-ui",
+        "kor_travel_map.reason": reason or "manual run",
+    }
     execution_params = {
         "selector": {
             "jobName": schedule.pipeline_name,
@@ -819,13 +849,11 @@ async def run_schedule_now(
             ),
         },
         "mode": schedule.mode or "default",
-        "runConfigData": {},
+        "runConfigData": run_config,
         "executionMetadata": {
             "tags": [
-                {"key": "kor_travel_map.trigger", "value": "admin-ui"},
-                {"key": "kor_travel_map.schedule_name", "value": schedule_name},
-                {"key": "kor_travel_map.operator", "value": operator or "admin-ui"},
-                {"key": "kor_travel_map.reason", "value": reason or "manual run"},
+                {"key": key, "value": value}
+                for key, value in sorted(metadata_tags.items())
             ]
         },
     }

@@ -23,6 +23,10 @@ from kortravelmap.infra.file_store import (
     build_s3_object_store,
     create_s3_client,
 )
+from kortravelmap.providers.knps import (
+    KNPS_GEOMETRY_DATASET_KEYS,
+    KNPS_POINT_DATASET_KEYS,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import Field as DagsterField
@@ -421,6 +425,51 @@ _DATAGOKR_FILE_DATA_CONFIG_SCHEMA = {
     )
 }
 
+_KNPS_DATASET_CONFIG_SCHEMA = {
+    "dataset_key": DagsterField(
+        str,
+        default_value="",
+        is_required=False,
+        description=(
+            "operation registry가 launch 시 고정한 KNPS dataset key. "
+            "비어 있으면 settings 값을 사용한다."
+        ),
+    )
+}
+
+
+def _build_knps_record_resource(
+    spec: ProviderRecordResourceSpec,
+    fetch: Callable[[KorTravelMapSettings], Iterable[Any] | AsyncIterator[Any]],
+    *,
+    setting_name: str,
+    allowed_dataset_keys: frozenset[str],
+) -> ResourceDefinition:
+    """registry가 고정한 KNPS dataset snapshot으로 fetcher를 실행한다."""
+
+    @resource(
+        config_schema=_KNPS_DATASET_CONFIG_SCHEMA,
+        description=(
+            f"{spec.resource_key} provider record live fetcher "
+            f"({spec.provider_package}, launch-time dataset snapshot)."
+        ),
+    )
+    def _resource(context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
+        settings = KorTravelMapSettings()
+        configured = context.resource_config.get("dataset_key")
+        dataset_key = str(configured or getattr(settings, setting_name))
+        if dataset_key not in allowed_dataset_keys:
+            raise RuntimeError(
+                f"KNPS operation registry에 없는 dataset snapshot: {dataset_key!r}"
+            )
+        resolved_settings = settings.model_copy(update={setting_name: dataset_key})
+        records = fetch(resolved_settings)
+        if isinstance(records, Iterator):
+            return _ProviderRecordIterable(records)
+        return records
+
+    return _resource
+
 
 def _datagokr_file_data_dataset_key(
     context: InitResourceContext, settings: KorTravelMapSettings
@@ -617,15 +666,19 @@ _KNPS_GEOMETRY_RECORDS_SPEC: ProviderRecordResourceSpec = next(
 # 헤더 정규화 typed record(KnpsPlaceRecord/KnpsGeoRecord)를 노출하므로 krtour는
 # best-guess 컬럼 매핑 없이 그대로 소비한다.
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_point_records"] = (
-    build_provider_record_live_resource(
+    _build_knps_record_resource(
         _KNPS_POINT_RECORDS_SPEC,
         fetch_knps_point_records,
+        setting_name="knps_point_dataset_key",
+        allowed_dataset_keys=KNPS_POINT_DATASET_KEYS,
     )
 )
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_geometry_records"] = (
-    build_provider_record_live_resource(
+    _build_knps_record_resource(
         _KNPS_GEOMETRY_RECORDS_SPEC,
         fetch_knps_geometry_records,
+        setting_name="knps_geometry_dataset_key",
+        allowed_dataset_keys=KNPS_GEOMETRY_DATASET_KEYS,
     )
 )
 

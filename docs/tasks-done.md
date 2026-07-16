@@ -3,6 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e Dagster operation registry (2026-07-16, `T-ADM-C3e-B1`)
+
+- [x] **T-ADM-C3e-B1 — immutable registry·run identity.** 33개 feature-load job과
+  53개 exact provider/dataset 선택지를 canonical manifest와 내용 기반 digest version으로
+  고정했다. KNPS launch snapshot, fileData 4종의 두 resource config, MCST 13-pair identity,
+  trigger 분리와 exact coalescing을 schedule/admin/projection 경계에 연결했다. 등록 job의
+  누락·교차 identity는 fail-closed하고 비등록 job만 panel-only로 유지한다. 적대 리뷰 2인
+  S1/S2 0건 승인 뒤 main unit 1,366건, API 513건, Dagster 308건(1 skip), focused 159건,
+  Ruff·strict mypy·import 계약 4/4를 통과했다. 실제 Dagster context의 override guard와
+  provider tracking은 B2로 이관했다.
+
 ## C3e 실행 재분할 문서화 (2026-07-16, `T-ADM-C3e-D2`)
 
 - [x] **T-ADM-C3e-D2 — C3e-B 복구 감사와 병렬 PR 재분할.** Claude Code의 branch,

@@ -8,6 +8,10 @@ source로 쓰도록, 카탈로그가 fixture-backed 9종을 넘어 mois/knps/krh
 from __future__ import annotations
 
 import pytest
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
+from kortravelmap.providers.feature_operation_registry import (
+    all_feature_operation_registry_pairs,
+)
 
 from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
 from kortravelmap.api.etl_live import LIVE_LOADER_REGISTRY
@@ -73,6 +77,17 @@ def test_no_duplicate_catalog_entries() -> None:
     """(provider, dataset_key)는 카탈로그에서 유일해야 한다."""
     keys = [(e.provider, e.dataset_key) for e in PROVIDER_DATASET_CATALOG]
     assert len(keys) == len(set(keys))
+
+
+@pytest.mark.unit
+def test_refreshable_catalog_exactly_matches_feature_operation_registry() -> None:
+    """API 카탈로그와 main registry의 실행 가능한 exact pair는 완전히 같다."""
+    catalog_pairs = {
+        ProviderDatasetOperationKey(entry.provider, entry.dataset_key)
+        for entry in catalog_refreshable_entries()
+    }
+
+    assert catalog_pairs == set(all_feature_operation_registry_pairs())
 
 
 @pytest.mark.unit
