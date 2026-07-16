@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (codex) — C3e-I1 B2→B3 실제 PostGIS 교차 회귀
+
+- production 코드를 바꾸지 않고 실제 migration 0001→0052가 적용된 PostGIS에서 B2 public
+  wrapper 결과를 B3 terminal record가 닫는 경계를 통합 테스트 2건으로 고정했다. 단일 provider
+  성공은 root/member 완료와 engine 시각·수동 trigger를, MCST 부분 실패는 13개 exact pair의
+  identity·job·완료 시각과 redacted attempt event 보존을 검증한다.
+- 1차 적대 리뷰의 명시적 manual seam, event identity, MCST 전체 pair freeze, 실패 cleanup 지적을
+  반영했다. 보강 후 두 리뷰어의 최종 판정은 각각 S1/S2/S3 0건이다.
+- focused 32건, live 제외 전체 1,902건(5 deselected), Ruff, strict mypy 136개 소스, import 계약
+  4/4를 통과했다. raw 전체 실행은 외부 `kor-travel-geo` reverse endpoint의 HTTP 400 때문에
+  live 5건만 실패했고 191건 통과 시점에 중단했으므로 green 결과로 기록하지 않는다.
+- 다음 단계 `T-ADM-C3e-I2`는 n150 maintenance drain·0051/0052 migration과 0048 수렴,
+  8개 sensor/cursor readback, 일정/수동/갱신/import 4종 동일-root 증거를 완료한 뒤 이슈 #679를
+  닫는다.
+
 ## 2026-07-16 (agent A) — C3e-B2 provider guard·public wrapper tracking 완결
 
 - B1 canonical registry를 모든 live provider resource와 public asset/KMA wrapper에 연결했다.
