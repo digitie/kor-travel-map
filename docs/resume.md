@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (codex) — T-ADM-C3e-I1 로컬 gate 완료
+
+- 실제 migration 0001→0052가 적용된 PostGIS에서 B2 public wrapper와 B3 terminal record의
+  lifecycle을 통합 테스트 2건으로 연결했다. 단일 provider 성공과 MCST 13-pair 부분 실패 모두
+  root/member identity·상태·engine 시각·redacted event 불변식을 보존하며 production 변경은 없다.
+- 두 적대 리뷰어의 최종 판정은 각각 S1/S2/S3 0건이다. focused 32건, live 제외 전체
+  1,902건(5 deselected), Ruff, strict mypy 136개 소스, import 계약 4/4를 통과했다. raw 전체의
+  live 5건은 외부 `kor-travel-geo` reverse HTTP 400으로 실패해 로컬 green과 분리했다.
+- **다음 한 작업**: I1 PR을 CI green·승인 뒤 병합하고 `T-ADM-C3e-I2`에서 n150 maintenance
+  migration, sensor/cursor readback, 일정/수동/갱신/import 4종 동일-root 증거와 이슈 #679 종결을
+  완료한다. C45X/C4R 적대 리뷰와 후속 작업은 그 다음이며 아직 완료하지 않았다.
+
 ## 2026-07-16 (agent A) — T-ADM-C3e-B2 로컬 gate 완료
 
 - 모든 live provider resource와 public asset/KMA wrapper가 B1 registry를 기준으로 실제 Dagster

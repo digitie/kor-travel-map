@@ -31,6 +31,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import (
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationKey,
+    TriggerKind,
 )
 from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event,
@@ -97,6 +98,7 @@ def _tracking_guard(
     *,
     identity: Any,
     run_id: str,
+    trigger_kind: TriggerKind | None = None,
 ) -> FeatureOperationExecutionGuard:
     created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=1)
@@ -104,7 +106,14 @@ def _tracking_guard(
         job_name=identity.job_name,
         run_id=run_id,
         run_config={},
-        tags=feature_operation_definition_tags(identity),
+        tags=(
+            feature_operation_definition_tags(identity)
+            if trigger_kind is None
+            else feature_operation_launch_tags(
+                identity,
+                trigger_kind=trigger_kind,
+            )
+        ),
         asset_selection=None,
         resolved_op_selection=None,
         status=SimpleNamespace(value="STARTED"),
@@ -123,7 +132,7 @@ def _tracking_guard(
         instance=instance,
         identity=identity,
         dagster_run_id=run_id,
-        trigger_kind="manual",
+        trigger_kind=trigger_kind or "manual",
     )
 
 
@@ -213,6 +222,7 @@ def _tracking_record(
     started_at: datetime | None,
     finished_at: datetime | None,
     storage_id: int = 1,
+    trigger_kind: TriggerKind = "schedule",
 ) -> Any:
     launch = resolve_feature_operation_launch(job_name=job_name)
     assert launch is not None
@@ -225,7 +235,7 @@ def _tracking_record(
             status=status,
             run_config=run_config,
             tags=feature_operation_launch_tags(
-                identity, trigger_kind="schedule"
+                identity, trigger_kind=trigger_kind
             ),
             asset_selection=frozenset(
                 AssetKey.from_user_string(key) for key in identity.asset_keys
@@ -552,6 +562,327 @@ async def test_real_db_mcst_same_run_retry_preserves_pair_and_attempts(
     finally:
         if root_id is not None:
             await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+
+
+async def test_b2_single_wrapper_success_is_closed_by_b3_terminal_record(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mois_licenses_job"
+    identity = resolve_feature_operation_identity(job_name=job_name)
+    assert identity is not None
+    run_id = f"run-c3e-i-single-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    probe = _RecordingOperationClient(AsyncKorTravelMapClient(migrated_engine))
+    guard = _tracking_guard(
+        probe,
+        identity=identity,
+        run_id=run_id,
+        trigger_kind="manual",
+    )
+    root_id: str | None = None
+
+    async def _succeed(_context: object) -> str:
+        return "loaded"
+
+    try:
+        result = await run_tracked_feature_asset(
+            _tracking_context(guard, retry_number=0),
+            _succeed,
+        )
+        root_id = probe.ensure_mutations[0].operation.root_job_id
+        async with AsyncSession(migrated_engine) as before_session:
+            member_before = (
+                await before_session.execute(
+                    text(
+                        "SELECT job_id, provider, dataset_key, created_at, "
+                        "started_at, finished_at FROM ops.import_jobs "
+                        "WHERE parent_job_id=CAST(:root_id AS uuid) "
+                        "AND kind='provider_feature_load'"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).one()
+        assert member_before.finished_at is not None
+        terminal_finished_at = member_before.finished_at + timedelta(seconds=1)
+
+        outcome = await _apply_run_record(
+            _tracking_record(
+                job_name=job_name,
+                run_id=run_id,
+                status=DagsterRunStatus.SUCCESS,
+                created_at=created_at,
+                started_at=started_at,
+                finished_at=terminal_finished_at,
+                trigger_kind="manual",
+            ),
+            probe.client,
+        )
+
+        async with AsyncSession(migrated_engine) as after_session:
+            rows = (
+                await after_session.execute(
+                    text(
+                        "SELECT job_id, parent_job_id, provider, dataset_key, status, "
+                        "progress, current_stage, dagster_run_status, trigger_kind, "
+                        "created_at, started_at, finished_at FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, job_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+            active_count = await after_session.scalar(
+                text(
+                    "SELECT count(*) FROM ops.import_jobs "
+                    "WHERE (job_id=CAST(:root_id AS uuid) "
+                    "OR parent_job_id=CAST(:root_id AS uuid)) "
+                    "AND status IN ('queued','running')"
+                ),
+                {"root_id": root_id},
+            )
+
+        root, member = rows
+        assert result == "loaded"
+        assert outcome == "applied"
+        assert int(active_count or 0) == 0
+        assert {root.status, member.status} == {"done"}
+        assert {root.progress, member.progress} == {100}
+        assert {root.current_stage, member.current_stage} == {"completed"}
+        assert root.dagster_run_status == "SUCCESS"
+        assert root.trigger_kind == "manual"
+        assert root.created_at == member.created_at == created_at
+        assert root.started_at == member.started_at == started_at
+        assert root.finished_at == terminal_finished_at
+        assert member.job_id == member_before.job_id
+        assert (member.provider, member.dataset_key) == (
+            member_before.provider,
+            member_before.dataset_key,
+        )
+        assert member.finished_at == member_before.finished_at
+    finally:
+        cleanup_root_id = root_id
+        if cleanup_root_id is None and probe.ensure_mutations:
+            cleanup_root_id = probe.ensure_mutations[0].operation.root_job_id
+        if cleanup_root_id is not None:
+            await _delete_committed_feature_tree(
+                migrated_engine,
+                root_id=cleanup_root_id,
+            )
+
+
+async def test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mcst_culture_job"
+    identity = resolve_feature_operation_identity(job_name=job_name)
+    assert identity is not None
+    done_pair, failed_pair = identity.pairs[:2]
+    run_id = f"run-c3e-i-mcst-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    probe = _RecordingOperationClient(AsyncKorTravelMapClient(migrated_engine))
+    guard = _tracking_guard(
+        probe,
+        identity=identity,
+        run_id=run_id,
+        trigger_kind="manual",
+    )
+    context = _tracking_context(guard, retry_number=0)
+    root_id: str | None = None
+    raw_error = "raw-upstream-detail-42"
+
+    try:
+        assert await ensure_tracked_multi_pair_asset(context) is guard
+        root_id = probe.ensure_mutations[0].operation.root_job_id
+        await finish_tracked_feature_pair(guard, done_pair)
+        await append_failed_multi_pair_attempt(
+            context,
+            guard,
+            failed_pair,
+            RuntimeError(raw_error),
+        )
+
+        async with AsyncSession(migrated_engine) as before_session:
+            children_before = (
+                await before_session.execute(
+                    text(
+                        "SELECT job_id, provider, dataset_key, status, progress, "
+                        "current_stage, created_at, started_at, finished_at "
+                        "FROM ops.import_jobs "
+                        "WHERE parent_job_id=CAST(:root_id AS uuid) "
+                        "AND kind='provider_feature_load' "
+                        "ORDER BY provider, dataset_key"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+            attempt_before = (
+                await before_session.execute(
+                    text(
+                        "SELECT event.event_id, event.job_id, event.provider, "
+                        "event.dataset_key, event.payload, "
+                        "pg_typeof(event.payload)::text AS payload_type, "
+                        "event.occurred_at FROM ops.import_job_events AS event "
+                        "JOIN ops.import_jobs AS child ON child.job_id=event.job_id "
+                        "WHERE child.parent_job_id=CAST(:root_id AS uuid) "
+                        "AND event.code='feature_operation.attempt'"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).one()
+        children_before_by_pair = {
+            (row.provider, row.dataset_key): row for row in children_before
+        }
+        assert len(children_before) == len(identity.pairs)
+        assert len(children_before_by_pair) == len(children_before)
+        assert set(children_before_by_pair) == {
+            (pair.provider, pair.dataset_key) for pair in identity.pairs
+        }
+        done_before = children_before_by_pair[
+            (done_pair.provider, done_pair.dataset_key)
+        ]
+        assert done_before.finished_at is not None
+        terminal_finished_at = max(
+            done_before.finished_at,
+            attempt_before.occurred_at,
+        ) + timedelta(seconds=1)
+
+        outcome = await _apply_run_record(
+            _tracking_record(
+                job_name=job_name,
+                run_id=run_id,
+                status=DagsterRunStatus.FAILURE,
+                created_at=created_at,
+                started_at=started_at,
+                finished_at=terminal_finished_at,
+                trigger_kind="manual",
+            ),
+            probe.client,
+        )
+
+        async with AsyncSession(migrated_engine) as after_session:
+            rows = (
+                await after_session.execute(
+                    text(
+                        "SELECT job_id, parent_job_id, provider, dataset_key, status, "
+                        "progress, current_stage, dagster_run_status, trigger_kind, "
+                        "created_at, started_at, finished_at "
+                        "FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, provider, dataset_key"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+            attempt_after = (
+                await after_session.execute(
+                    text(
+                        "SELECT event.event_id, event.job_id, event.provider, "
+                        "event.dataset_key, event.payload, "
+                        "pg_typeof(event.payload)::text AS payload_type, "
+                        "event.occurred_at FROM ops.import_job_events AS event "
+                        "JOIN ops.import_jobs AS child ON child.job_id=event.job_id "
+                        "WHERE child.parent_job_id=CAST(:root_id AS uuid) "
+                        "AND event.code='feature_operation.attempt'"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).one()
+            active_count = await after_session.scalar(
+                text(
+                    "SELECT count(*) FROM ops.import_jobs "
+                    "WHERE (job_id=CAST(:root_id AS uuid) "
+                    "OR parent_job_id=CAST(:root_id AS uuid)) "
+                    "AND status IN ('queued','running')"
+                ),
+                {"root_id": root_id},
+            )
+
+        root = rows[0]
+        children = rows[1:]
+        children_after_by_pair = {
+            (row.provider, row.dataset_key): row for row in children
+        }
+        done_after = children_after_by_pair[
+            (done_pair.provider, done_pair.dataset_key)
+        ]
+        failed_after = children_after_by_pair[
+            (failed_pair.provider, failed_pair.dataset_key)
+        ]
+        expected_attempt = {
+            "attempt_number": 1,
+            "outcome": "failed",
+            "error": {
+                "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
+                "type": "RuntimeError",
+            },
+        }
+
+        assert outcome == "applied"
+        assert int(active_count or 0) == 0
+        assert len(children) == len(identity.pairs)
+        assert root.status == "failed"
+        assert root.current_stage == "failed"
+        assert root.dagster_run_status == "FAILURE"
+        assert root.trigger_kind == "manual"
+        assert root.progress == 100 // len(identity.pairs)
+        assert root.finished_at == terminal_finished_at
+        assert done_after.job_id == done_before.job_id
+        assert (done_after.provider, done_after.dataset_key) == (
+            done_before.provider,
+            done_before.dataset_key,
+        )
+        assert done_after.status == "done"
+        assert done_after.progress == 100
+        assert done_after.current_stage == "completed"
+        assert done_after.finished_at == done_before.finished_at
+        assert len([row for row in children if row.status == "failed"]) == (
+            len(identity.pairs) - 1
+        )
+        assert {
+            row.current_stage for row in children if row.status == "failed"
+        } == {"failed"}
+        assert set(children_after_by_pair) == set(children_before_by_pair)
+        for pair, before in children_before_by_pair.items():
+            after = children_after_by_pair[pair]
+            assert after.job_id == before.job_id
+            assert after.created_at == before.created_at
+            assert after.started_at == before.started_at
+            if before.status == "done":
+                assert after.finished_at == before.finished_at
+            else:
+                assert before.status == "running"
+                assert before.finished_at is None
+                assert after.status == "failed"
+                assert after.current_stage == "failed"
+                assert after.finished_at == terminal_finished_at
+        assert failed_after.job_id == attempt_after.job_id
+        assert failed_after.finished_at == terminal_finished_at
+        assert attempt_after.event_id == attempt_before.event_id
+        assert attempt_after.job_id == attempt_before.job_id
+        assert (attempt_after.provider, attempt_after.dataset_key) == (
+            failed_pair.provider,
+            failed_pair.dataset_key,
+        )
+        assert attempt_after.payload_type == attempt_before.payload_type == "jsonb"
+        assert _event_payload(attempt_after.payload) == expected_attempt
+        assert _event_payload(attempt_before.payload) == expected_attempt
+        assert attempt_after.occurred_at == attempt_before.occurred_at
+        assert raw_error not in json.dumps(
+            _event_payload(attempt_after.payload), ensure_ascii=False
+        )
+    finally:
+        cleanup_root_id = root_id
+        if cleanup_root_id is None and probe.ensure_mutations:
+            cleanup_root_id = probe.ensure_mutations[0].operation.root_job_id
+        if cleanup_root_id is not None:
+            await _delete_committed_feature_tree(
+                migrated_engine,
+                root_id=cleanup_root_id,
+            )
 
 
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(

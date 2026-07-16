@@ -1,6 +1,7 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 문서 gate·C3e-A1/A2/B1/B2/B3/C 구현·로컬 gate 완료, C3e-I·#679·n150 미완료
+> 상태: 문서 gate·C3e-A1/A2/B1/B2/B3/C 구현·C3e-I1 actual PostGIS 교차 회귀·로컬 gate 완료,
+> C3e-I2·#679·n150 미완료
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -622,7 +623,8 @@ rollback 호환성은 지원하지 않는다. 배포 중단 시 신규 launch를
 | `T-ADM-C3e-B2` | Agent A | provider guard, public wrapper pair completion, MCST callback | C3e-B1 뒤 B3와 병렬 |
 | `T-ADM-C3e-B3` | Agent B | active/terminal sensors, NOT_STARTED/MANAGED scan, 양방향 reconcile watermark | C3e-B1 뒤 B2와 병렬 |
 | `T-ADM-C3e-C` | Agent A | 실제 DB/FastAPI datasets grid·detail과 pipeline REST의 canonical 동일성 통합 증거 | C3e-A2, B1과 병렬 |
-| `T-ADM-C3e-I` | Codex 통합 | A1/A2/B1/B2/B3/C rebase, 교차 회귀, 두 적대 리뷰, CI, #679 종료 | A1/A2/B1/B2/B3/C |
+| `T-ADM-C3e-I1` | Codex 통합 | 실제 PostGIS B2 wrapper→B3 terminal 교차 회귀, 두 적대 리뷰, 로컬 gate | A1/A2/B1/B2/B3/C |
+| `T-ADM-C3e-I2` | Codex 통합 | n150 migration·sensor/cursor readback, 일정/수동/갱신/import 4종 동일-root 증거, #679 종료 | C3e-I1 |
 
 복구 감사에서 C3e-B 고유 구현이 없음을 확인했으므로 B1과 C를 최신 main에서 먼저 병렬
 작업한다. B1 병합 직후 B2/B3는 origin/main에 rebase하고 Dagster package 안에서도 wrapper와
@@ -696,7 +698,7 @@ typed identity가 없는 event-only sibling은 root timeline에는 남지만 pai
 
 과거 migration/repository/Python/API/Dagster/frontend/build/mocked Playwright 결과는 위 변경으로
 모두 무효화했다. 최신 적대 리뷰 2인 승인 뒤 전체 gate를 재실행해 이 절을 실제 결과로 갱신한다.
-live n150/prod는 C3e-I/C7 최종 gate로 남긴다.
+live n150/prod는 C3e-I2/C7 최종 gate로 남긴다.
 
 A2는 PR #705의 8개 CI gate green 뒤 main에 병합했고 `docs/tasks-done.md`로 이동했다.
 
@@ -719,8 +721,25 @@ asset resource에 같은 snapshot을 전달하고 실제 `Definitions` 구성까
 7개 파일 260건(1 skip), migration 0001→0052를 포함한 실제 PostGIS canonical operation 30건,
 Dagster package 전체 428건(1 skip), main unit 1,366건을 통과했다. Ruff, strict mypy 136개 소스,
 import 계약 4/4와 staged diff check도 통과했다. B2 wrapper 결과를 B3 sensor가 실제 terminal DB
-상태로 닫는 교차 검증, 일정·수동·갱신·import 통합, 이슈 #679 종결과 n150/prod 검증은
-`T-ADM-C3e-I`의 미완료 범위다.
+상태로 닫는 교차 검증은 C3e-I1에서 완료했다. 일정·수동·갱신·import 4종 동일-root 증거,
+이슈 #679 종결과 n150/prod 검증은 `T-ADM-C3e-I2`의 미완료 범위다.
+
+### C3e-I1 실제 PostGIS 교차 회귀·로컬 gate 기록
+
+production 코드는 변경하지 않았다. 실제 migration 0001→0052를 적용한 PostGIS에서
+`test_b2_single_wrapper_success_is_closed_by_b3_terminal_record`는 단일 provider wrapper 성공을
+B3 SUCCESS record가 root/member 완료·진행률 100·engine 시각·수동 trigger를 보존하며 한 번만
+닫는지 검증한다. `test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record`는 MCST 13개
+exact pair의 identity·job·기존 완료 시각을 동결하고 active pair만 실패로 닫으며 redacted attempt
+event의 identity·payload를 보존하고 raw 오류를 노출하지 않는지 검증한다.
+
+적대 리뷰 2인이 명시적 manual seam, event identity, MCST 전체 pair freeze, 실패 cleanup을 보강한
+최종 source를 다시 검토했고 각각 S1/S2/S3 0건으로 판정했다. focused 실제 PostGIS 32건,
+`pytest -m 'not live'` 1,902건(5 deselected), Ruff, strict mypy 136개 소스, import 계약 4/4를
+통과했다. raw 전체 실행은 로컬 외부 `kor-travel-geo` reverse endpoint가 HTTP 400을 반환해 live
+5건이 실패했고 191건 통과 시점에 중단했으므로 not-live green과 명확히 분리한다. n150 migration,
+8개 tracking sensor/cursor readback, 일정/수동/갱신/import 4종의 datasets/pipeline 동일-root 증거와
+이슈 #679 종결은 `T-ADM-C3e-I2`에 남아 있다.
 
 ## 7. 구현 전 수용 테스트
 

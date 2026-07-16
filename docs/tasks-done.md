@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e B2→B3 실제 PostGIS 교차 회귀 (2026-07-16, `T-ADM-C3e-I1`)
+
+- [x] **T-ADM-C3e-I1 — public wrapper 결과와 terminal sensor의 단일 lifecycle 검증.** 실제
+  migration 0001→0052를 적용한 PostGIS에서 단일 provider wrapper 성공과 MCST 부분 성공·실패를
+  B2 public 경계로 기록한 뒤 B3 terminal record로 닫았다. 단일 성공은 root/member 완료·진행률
+  100·engine 시각과 수동 trigger를, MCST 실패는 13개 exact pair의 identity·job·완료 시각 보존,
+  active pair만 실패 처리, redacted attempt event 보존과 raw 오류 비노출을 고정했다. 두 적대
+  리뷰어의 최종 판정은 각각 S1/S2/S3 0건이다. focused 32건, live 제외 전체 1,902건(5 deselected),
+  Ruff, strict mypy 136개 소스, import 계약 4/4를 통과했다. raw 전체 실행에서는 외부
+  `kor-travel-geo` reverse endpoint가 HTTP 400을 반환해 live 5건만 실패했으며 C3e seam 실패와
+  분리했다. n150 migration·sensor/cursor·4종 동일-root 증거와 이슈 #679 종결은
+  `T-ADM-C3e-I2`에 남겼다.
+
 ## C3e Dagster provider guard·public wrapper tracking (2026-07-16, `T-ADM-C3e-B2`)
 
 - [x] **T-ADM-C3e-B2 — authoritative provider guard와 exact-pair tracking.** 모든 live
@@ -14,7 +27,7 @@
   `model_copy` snapshot을 사용한다. 적대 리뷰어 2명의 최종 판정은 S1/S2/S3 0건이다. focused
   260건(1 skip), 실제 PostGIS canonical operation 30건, Dagster 전체 428건(1 skip), main unit
   1,366건과 Ruff·strict mypy 136개 소스·import 계약 4/4를 통과했다. B2→B3 실제 terminal DB
-  연쇄, 이슈 #679 종결과 n150 증거는 `T-ADM-C3e-I`에 남겼다.
+  연쇄는 `T-ADM-C3e-I1`에서 완료했고, 이슈 #679 종결과 n150 증거는 `T-ADM-C3e-I2`에 남겼다.
 
 ## C3e Dagster run sensor·양방향 복구 (2026-07-16, `T-ADM-C3e-B3`)
 
