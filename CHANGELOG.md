@@ -140,10 +140,12 @@
 - **ADDED**: `/v1/ops/datasets/*` 신규 REST 그룹(페이지 ② 백엔드) 4 endpoint —
   `GET /ops/datasets`(ETL 카탈로그 기반 provider×dataset×sync_scope 3원 그리드,
   `never_run` 포함 + sync state·refresh policy·미해결 integrity 이슈 카운트 join),
-  `GET /ops/datasets/{provider}/{dataset}`(scope 배열 상세 — cursor·최근 실행
-  (update request+연결 import job 요약)·최근 이벤트·정책·이슈 카운트),
-  `PUT .../refresh-policy`(2원 정책 upsert — 카탈로그/잔존 sync state에 없는
-  조합은 404), `POST .../preview`(ETL dry-run — 기존 `/debug/etl` 로직 이식).
+  `GET /ops/datasets/detail?provider=...&dataset_key=...`(scope 배열 상세 —
+  cursor·최근 실행(update request+연결 import job 요약)·최근 이벤트·정책·이슈
+  카운트), `PUT /ops/datasets/refresh-policy?provider=...&dataset_key=...`(2원 정책
+  upsert — 카탈로그/잔존 sync state에 없는 조합은 404),
+  `POST /ops/datasets/preview?provider=...&dataset_key=...`(ETL dry-run — 기존
+  `/debug/etl` 로직 이식, 응답 식별자 필드는 `dataset_key`).
   `ops_routes_enabled` + `require_admin_frontend` 의존성의 자체 include 블록으로
   마운트한다(조작 포함 그룹 — 무인증 ops 패턴 미승계, ADR-064 결정 3).
 - **ADDED**: `KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED`(기본 off) — live ETL

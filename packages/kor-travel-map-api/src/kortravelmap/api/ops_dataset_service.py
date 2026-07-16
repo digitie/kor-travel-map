@@ -82,6 +82,16 @@ _RECENT_RUNS_LIMIT = 10
 _RECENT_EVENTS_LIMIT = 20
 
 
+def _dataset_detail_url(provider: str, dataset_key: str) -> str:
+    return (
+        "/v1/ops/datasets/detail?"
+        + urlencode(
+            {"provider": provider, "dataset_key": dataset_key},
+            quote_via=quote,
+        )
+    )
+
+
 class DatasetNotFoundError(LookupError):
     """카탈로그·sync state·policy 어디에도 dataset이 없음."""
 
@@ -284,6 +294,7 @@ def _grid_row(
     return OpsDatasetGridRow(
         provider=provider,
         dataset_key=dataset_key,
+        detail_url=_dataset_detail_url(provider, dataset_key),
         sync_scope=state.sync_scope if state is not None else sync_scope,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
         last_success_at=state.last_success_at if state is not None else None,

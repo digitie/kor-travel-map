@@ -124,9 +124,9 @@ RFC7807 `application/problem+json`으로 승격한다. event cursor는 DB timeli
 | 경로 | 메서드 | 역할 |
 |---|---|---|
 | `/ops/datasets` | GET | provider×dataset×scope 그리드(서버 freshness+실제 schedule+정책+dataset/provider 이슈+최신 DB 실행 batch join) |
-| `/ops/datasets/{provider}/{dataset}` | GET | 상세 — scope 배열 반환(3원 차원), sync states·cursor·최근 실행/이벤트·정책 |
-| `/ops/datasets/{provider}/{dataset}/refresh-policy` | PUT | canonical catalog 정책 upsert(2원, orphan 409) |
-| `/ops/datasets/{provider}/{dataset}/preview` | POST | fixture-only typed ETL dry-run(`max_items`, timeout, 외부 호출 budget 0, `truncated`) |
+| `/ops/datasets/detail?provider=...&dataset_key=...` | GET | 상세 — scope 배열 반환(3원 차원), sync states·cursor·최근 실행/이벤트·정책 |
+| `/ops/datasets/refresh-policy?provider=...&dataset_key=...` | PUT | canonical catalog 정책 upsert(2원, orphan 409) |
+| `/ops/datasets/preview?provider=...&dataset_key=...` | POST | fixture-only typed ETL dry-run(`max_items`, timeout, 외부 호출 budget 0, `truncated`) |
 
 그리드의 시간 필드는 의미를 합치지 않는다. `eligible_after`는 provider 호출 가능
 시각, `schedule.next_scheduled_at`은 RUNNING Dagster schedule의 실제 future tick,

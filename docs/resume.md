@@ -23,8 +23,47 @@
   API 전체 513건, Dagster 전체 308건(1 skip), Ruff, strict mypy 7개 변경 소스와 import 계약
   4/4를 통과했다. pytest capture의 WSL 임시 파일 오류는 `-s`로 분리했으며 실제 회귀는
   전부 통과했다. 완료 task는 `tasks-done.md`로 옮겼다.
-- **다음 한 작업**: 문서-only PR #707을 반영하도록 origin/main에 rebase한 뒤 보안 감사,
-  PR CI·approval·merge를 완료하고 B2/B3를 최신 main에서 병렬 시작한다.
+- **다음 한 작업**: C3e-C를 B1 병합 commit 위에 rebase해 CI·merge를 완료하고 B2/B3를
+  최신 main에서 병렬 시작한다.
+
+## 2026-07-16 (agent A) — T-ADM-C3e-C 로컬 gate 완료
+
+- 전용 worktree codegraph 동기화 결과는 785 files/19,093 nodes/60,659 edges다. 변경 영향은
+  detail route 2개·detail service 5개, preview service 5개, refresh-policy service 10개,
+  grid DTO 6개, preview DTO 5개 symbol이며 실제 frontend 호출자는 아직 없고 생성 admin
+  OpenAPI type만 확인됐다.
+- A2가 완성한 canonical projection은 유지한다. 다만 후속 적대 리뷰가 `/`를 허용하는
+  provider/dataset identity와 동적 path segment의 표현 불가능성을 발견해 detail/preview/
+  refresh-policy를 고정 path + `provider`/`dataset_key` query 복합키로 원자 전환했다. 구 동적
+  route는 호환 shim 없이 삭제하고 grid `detail_url`, preview `dataset_key`, OpenAPI/admin type,
+  설정·계약 문서를 함께 갱신했다. 현재 branch에는 실제 C4 frontend caller가 없다. 신규
+  integration test는 실제 migrated
+  PostgreSQL과 FastAPI dependency를 관통해 `/v1/ops/datasets`, dataset detail,
+  `/v1/ops/pipeline/executions`의 canonical root/exact pair 응답을 독립 oracle로 검증한다.
+- 별도 seed session이 update request 1개와 feature root 11개를 실제 commit하고 API 요청마다 새
+  session을 연다. 같은 `created_at` tie와 10개 cursor 경계를 만든 뒤 detail cursor로 pipeline
+  2페이지를 조회해 정렬·무중복·무누락을 확인한다. provider와 dataset이 서로 다른 두 decoy
+  member에만 존재하는 최신 root로 exact-pair AND도 증명한다. feature oracle은 caller 입력과
+  고정 lifecycle값을 사용하고 mutation에서는 DB 생성 UUID만 취한다. proxy secret/actor 인증,
+  tagged schedule과 provider/dataset 양쪽에 `/`가 있는 orphan의 detail/history query 복원을 포함한다.
+- 최종 재리뷰의 generated type drift는 canonical OpenAPI에서 `openapi-typescript 7.13.0`을 다시
+  실행해 해소했다. `OpsDatasetGridRow.detail_url`만 생성되고 `OpsDatasetDetailData`에는 존재하지
+  않으며, OpenAPI 구조 회귀와 기존 `gen:types:check`가 같은 배치를 지킨다. 세 구 동적 URL의
+  인증 404를 추가했다. preview는 정적 slash pair가 없어 catalog/fixture 실행 경계만 주입한
+  인증 ASGI/query/schema 증거이고, policy는 catalog authorization만 주입한 뒤 실제 service/repo/DB
+  transaction과 별도 session SQL로 exact identity·값을 검증한다.
+- append-only feature update 행은 trigger를 비활성화하지 않고 기존 integration convention의
+  별도 `TRUNCATE ... RESTART IDENTITY CASCADE` transaction으로 정리한다. 이는 현재 disposable
+  testcontainer DB의 순차 실행 전제이며, 공유 DB 병렬 실행에는 별도 격리가 필요하다.
+- 적대 리뷰어 2명의 최종 판정은 S1/S2 0건이다. API 전체 503건, router focused 13건,
+  실제 migration·PostgreSQL/FastAPI 통합 1건을 통과했다. Ruff, strict mypy 4개 변경 소스,
+  admin/user OpenAPI drift, admin generated type drift, frontend type-check와 lint(오류 0,
+  기존 incompatible-library warning 2)도 통과했고 완료 task를 `tasks-done.md`로 옮겼다.
+- B1 병합 뒤 CI가 발견한 구 scalar schedule mock을 실제 MOIS canonical
+  job/schedule/`pipelineName`/registry launch tag로 수정했다. 두 추가 적대 리뷰는 S1/S2/S3
+  0건이며 실제 migration·PostgreSQL/FastAPI 통합 1건과 Ruff가 다시 통과했다.
+- **다음 한 작업**: 수정 head의 PR #710 CI·merge를 완료한다. 이후 B2/B3와 C3e-I 교차 회귀로
+  #679를 닫는다.
 
 ## 2026-07-16 (codex) — C3e-B 실행 재분할·C3e-C 잔여 범위 확정
 

@@ -10,7 +10,6 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C3e-B2` — provider guard·public wrapper·MCST pair callback (agent A)
   - [ ] `T-ADM-C3e-B3` — active/terminal run sensor·양방향 reconcile (agent B)
-  - [ ] `T-ADM-C3e-C` — datasets/pipeline REST canonical 교차 통합 증거 (agent A)
   - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
@@ -56,12 +55,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   keyset sweep은 끝에서 처음으로 wrap한다. sensor default RUNNING/readiness, 중복 delivery,
   pre-resource/direct cancel, terminal selection mismatch, partial success, Dagster unavailable/not-found,
   양방향 watermark 재시작을 회귀로 고정한다.
-- [ ] `T-ADM-C3e-C` — **datasets/pipeline REST canonical 교차 통합 증거** (agent
-  **A**, 의존 C3e-A2, C3e-B1과 병렬): A2에서 완료한 공용 projection·DTO·OpenAPI 구현은
-  중복 수정하지 않는다. 실제 migrated PostgreSQL과 FastAPI dependency를 사용해 datasets grid,
-  dataset detail recent, pipeline executions REST가 같은 `(kind,id)`, exact pair/member UUID,
-  root/pair 상태, raw Dagster 상태, engine 시각과 projected job을 반환하는지 검증한다. detail
-  cursor/history URL과 `db_recorded_canonical_operations` coverage도 같은 통합 테스트로 고정한다.
 - [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B1/B2/B3/C): 선행 merge마다
   origin/main rebase하고 교차 회귀·적대 리뷰 2인·전체 CI를 통과시킨다. 일정/수동/갱신/import
   실행과 datasets/pipeline 동일 root 증거를 이슈 #679에 남긴 뒤 닫는다.

@@ -169,6 +169,7 @@ class OpsDatasetGridRow(BaseModel):
 
     provider: str
     dataset_key: str
+    detail_url: str
     sync_scope: str
     status: str
     last_success_at: datetime | None
@@ -300,7 +301,7 @@ class OpsDatasetPreviewData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str
-    dataset: str
+    dataset_key: str
     source: Literal["fixture"]
     variant: str
     description: str

@@ -14572,6 +14572,10 @@
             "title": "Dataset Key",
             "type": "string"
           },
+          "detail_url": {
+            "title": "Detail Url",
+            "type": "string"
+          },
           "eligible_after": {
             "anyOf": [
               {
@@ -14669,6 +14673,7 @@
         "required": [
           "provider",
           "dataset_key",
+          "detail_url",
           "sync_scope",
           "status",
           "last_success_at",
@@ -14961,8 +14966,8 @@
           "budget": {
             "$ref": "#/components/schemas/OpsDatasetPreviewBudget"
           },
-          "dataset": {
-            "title": "Dataset",
+          "dataset_key": {
+            "title": "Dataset Key",
             "type": "string"
           },
           "description": {
@@ -15005,7 +15010,7 @@
         },
         "required": [
           "provider",
-          "dataset",
+          "dataset_key",
           "source",
           "variant",
           "description",
@@ -35052,25 +35057,27 @@
         ]
       }
     },
-    "/v1/ops/datasets/{provider}/{dataset}": {
+    "/v1/ops/datasets/detail": {
       "get": {
-        "operationId": "get_dataset_detail_v1_ops_datasets__provider___dataset__get",
+        "operationId": "get_dataset_detail_v1_ops_datasets_detail_get",
         "parameters": [
           {
-            "in": "path",
+            "in": "query",
             "name": "provider",
             "required": true,
             "schema": {
+              "minLength": 1,
               "title": "Provider",
               "type": "string"
             }
           },
           {
-            "in": "path",
-            "name": "dataset",
+            "in": "query",
+            "name": "dataset_key",
             "required": true,
             "schema": {
-              "title": "Dataset",
+              "minLength": 1,
+              "title": "Dataset Key",
               "type": "string"
             }
           }
@@ -35123,26 +35130,28 @@
         ]
       }
     },
-    "/v1/ops/datasets/{provider}/{dataset}/preview": {
+    "/v1/ops/datasets/preview": {
       "post": {
         "description": "typed body(`source=fixture`, `max_items`)만 받는다. 외부 provider 호출 budget은 0이다. max_items는 응답 크기 cap이며 변환 CPU budget은 아니다.",
-        "operationId": "post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post",
+        "operationId": "post_dataset_preview_v1_ops_datasets_preview_post",
         "parameters": [
           {
-            "in": "path",
+            "in": "query",
             "name": "provider",
             "required": true,
             "schema": {
+              "minLength": 1,
               "title": "Provider",
               "type": "string"
             }
           },
           {
-            "in": "path",
-            "name": "dataset",
+            "in": "query",
+            "name": "dataset_key",
             "required": true,
             "schema": {
-              "title": "Dataset",
+              "minLength": 1,
+              "title": "Dataset Key",
               "type": "string"
             }
           }
@@ -35225,25 +35234,27 @@
         ]
       }
     },
-    "/v1/ops/datasets/{provider}/{dataset}/refresh-policy": {
+    "/v1/ops/datasets/refresh-policy": {
       "put": {
-        "operationId": "put_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put",
+        "operationId": "put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put",
         "parameters": [
           {
-            "in": "path",
+            "in": "query",
             "name": "provider",
             "required": true,
             "schema": {
+              "minLength": 1,
               "title": "Provider",
               "type": "string"
             }
           },
           {
-            "in": "path",
-            "name": "dataset",
+            "in": "query",
+            "name": "dataset_key",
             "required": true,
             "schema": {
-              "title": "Dataset",
+              "minLength": 1,
+              "title": "Dataset Key",
               "type": "string"
             }
           }

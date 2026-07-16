@@ -1866,7 +1866,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/ops/datasets/{provider}/{dataset}": {
+    "/v1/ops/datasets/detail": {
         parameters: {
             query?: never;
             header?: never;
@@ -1874,7 +1874,7 @@ export interface paths {
             cookie?: never;
         };
         /** dataset 상세 — scope 상태·실행·이벤트·정책 */
-        get: operations["get_dataset_detail_v1_ops_datasets__provider___dataset__get"];
+        get: operations["get_dataset_detail_v1_ops_datasets_detail_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1883,7 +1883,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/ops/datasets/{provider}/{dataset}/preview": {
+    "/v1/ops/datasets/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1896,14 +1896,14 @@ export interface paths {
          * fixture ETL 변환 preview
          * @description typed body(`source=fixture`, `max_items`)만 받는다. 외부 provider 호출 budget은 0이다. max_items는 응답 크기 cap이며 변환 CPU budget은 아니다.
          */
-        post: operations["post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post"];
+        post: operations["post_dataset_preview_v1_ops_datasets_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/ops/datasets/{provider}/{dataset}/refresh-policy": {
+    "/v1/ops/datasets/refresh-policy": {
         parameters: {
             query?: never;
             header?: never;
@@ -1912,7 +1912,7 @@ export interface paths {
         };
         get?: never;
         /** canonical dataset refresh policy upsert */
-        put: operations["put_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put"];
+        put: operations["put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -7559,6 +7559,8 @@ export interface components {
             dataset_issues: components["schemas"]["OpsIssueSummary"];
             /** Dataset Key */
             dataset_key: string;
+            /** Detail Url */
+            detail_url: string;
             /**
              * Eligible After
              * @description provider rate-limit/backoff상 다시 호출 가능한 시각. schedule 시각이 아님.
@@ -7697,8 +7699,8 @@ export interface components {
         /** OpsDatasetPreviewData */
         OpsDatasetPreviewData: {
             budget: components["schemas"]["OpsDatasetPreviewBudget"];
-            /** Dataset */
-            dataset: string;
+            /** Dataset Key */
+            dataset_key: string;
             /** Description */
             description: string;
             /** Items */
@@ -16577,14 +16579,14 @@ export interface operations {
             };
         };
     };
-    get_dataset_detail_v1_ops_datasets__provider___dataset__get: {
+    get_dataset_detail_v1_ops_datasets_detail_get: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 provider: string;
-                dataset: string;
+                dataset_key: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -16627,14 +16629,14 @@ export interface operations {
             };
         };
     };
-    post_dataset_preview_v1_ops_datasets__provider___dataset__preview_post: {
+    post_dataset_preview_v1_ops_datasets_preview_post: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 provider: string;
-                dataset: string;
+                dataset_key: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
@@ -16699,14 +16701,14 @@ export interface operations {
             };
         };
     };
-    put_dataset_refresh_policy_v1_ops_datasets__provider___dataset__refresh_policy_put: {
+    put_dataset_refresh_policy_v1_ops_datasets_refresh_policy_put: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 provider: string;
-                dataset: string;
+                dataset_key: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
