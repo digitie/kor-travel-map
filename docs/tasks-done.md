@@ -3,6 +3,14 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C3e 실행 재분할 문서화 (2026-07-16, `T-ADM-C3e-D2`)
+
+- [x] **T-ADM-C3e-D2 — C3e-B 복구 감사와 병렬 PR 재분할.** Claude Code의 branch,
+  reflog, stash, remote와 고아 worktree blob을 감사해 C3e-B 고유 구현이 없음을 확인했다.
+  B를 registry/run identity, guard/wrapper/MCST, sensor/reconcile의 B1/B2/B3 PR로 나누고,
+  A2에서 제품 구현이 끝난 C는 실제 DB/FastAPI REST 교차 통합 증거 PR로 축소했다. 문서-only
+  변경이므로 사용자 지시에 따라 추가 적대 리뷰 없이 rebase·CI green 뒤 병합한다.
+
 ## Admin ops 통합 기반 (2026-07-14~15, `T-ADM-C1`~`C3c`)
 
 - [x] **T-ADM-C1 — 플랜·ADR-064·task 분해.** Dagster job/provider 운영 표면을

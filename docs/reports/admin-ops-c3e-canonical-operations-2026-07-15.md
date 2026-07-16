@@ -1,6 +1,6 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 문서 gate·C3e-A1 완료, C3e-A2 공용 projection 로컬 gate 단계(PR·CI·merge 전)
+> 상태: 문서 gate·C3e-A1·C3e-A2 완료, C3e-B1/B2/B3·C 구현 전
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -597,15 +597,17 @@ rollback 호환성은 지원하지 않는다. 배포 중단 시 신규 launch를
 |---------|------|------|------|
 | `T-ADM-C3e-A1` | Agent A | 0051, model/jobs writer matrix, frozen repo/client types·method, 멱등 lifecycle, C3d run-backed queued 확장 | 문서 PR |
 | `T-ADM-C3e-A2` | Agent A | 공용 pipeline root/exact-pair projection, overview canonical count/DTO 원자 전환, datasets batch query | C3e-A1 |
-| `T-ADM-C3e-B` | Agent B | Dagster registry/tag, QUEUED/STARTED ensure, guard/wrapper/callback, terminal/reconcile sensors | C3e-A1 뒤 A2와 병렬 |
-| `T-ADM-C3e-C` | Agent A | datasets grid/detail canonical 소비, REST schema, OpenAPI/admin types | C3e-A2 |
-| `T-ADM-C3e-I` | Codex 통합 | A1/A2/B/C rebase, 교차 회귀, 두 적대 리뷰, CI, #679 종료 | A1/A2/B/C |
+| `T-ADM-C3e-B1` | Agent B | immutable operation registry/version, exact selection·run identity tag, trigger 판정 | C3e-A1 |
+| `T-ADM-C3e-B2` | Agent A | provider guard, public wrapper pair completion, MCST callback | C3e-B1 뒤 B3와 병렬 |
+| `T-ADM-C3e-B3` | Agent B | active/terminal sensors, NOT_STARTED/MANAGED scan, 양방향 reconcile watermark | C3e-B1 뒤 B2와 병렬 |
+| `T-ADM-C3e-C` | Agent A | 실제 DB/FastAPI datasets grid·detail과 pipeline REST의 canonical 동일성 통합 증거 | C3e-A2, B1과 병렬 |
+| `T-ADM-C3e-I` | Codex 통합 | A1/A2/B1/B2/B3/C rebase, 교차 회귀, 두 적대 리뷰, CI, #679 종료 | A1/A2/B1/B2/B3/C |
 
-Agent B는 A1에 고정한 interface를 기준으로 A2와 병렬 작업한다. A1 merge 직후 B/A2는
-origin/main에 rebase한다. 모든 branch는 착수, handoff, push 직전과 선행 PR merge 직후 rebase
-상태를 확인한다. 파일 소유는 A1이 migration/main infra와 cancellation API, A2가 공용
-projection과 pipeline overview API/OpenAPI, B가 Dagster package, C가 datasets API/OpenAPI를
-맡도록 분리해 병렬 edit 충돌을 최소화한다.
+복구 감사에서 C3e-B 고유 구현이 없음을 확인했으므로 B1과 C를 최신 main에서 먼저 병렬
+작업한다. B1 병합 직후 B2/B3는 origin/main에 rebase하고 Dagster package 안에서도 wrapper와
+sensor 소유 파일을 분리해 병렬 작업한다. 모든 branch는 착수, handoff, push 직전과 선행 PR
+merge 직후 rebase 상태를 확인한다. C는 A2가 이미 완료한 production REST/OpenAPI를 중복
+수정하지 않고 교차 통합 테스트만 소유한다.
 
 ### C3e-A2 구현 기록
 
@@ -675,8 +677,7 @@ typed identity가 없는 event-only sibling은 root timeline에는 남지만 pai
 모두 무효화했다. 최신 적대 리뷰 2인 승인 뒤 전체 gate를 재실행해 이 절을 실제 결과로 갱신한다.
 live n150/prod는 C3e-I/C7 최종 gate로 남긴다.
 
-A2는 아직 PR·CI·merge 전이므로 이 결과를 완료로 간주하지 않는다. `docs/tasks.md`의 A2
-항목은 유지하며 `docs/tasks-done.md`로 이동하지 않는다.
+A2는 PR #705의 8개 CI gate green 뒤 main에 병합했고 `docs/tasks-done.md`로 이동했다.
 
 ## 7. 구현 전 수용 테스트
 

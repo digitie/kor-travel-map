@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (codex) — C3e-B 복구 감사·PR 단위 재분할
+
+- PR #705 병합과 main CI green을 확인한 뒤 Claude Code의 C3e-B branch/worktree를 reflog,
+  stash, remote PR/branch와 filesystem blob으로 감사했다. 고유 C3e-B 변경은 없었고 의미 있는
+  고아 worktree 파일은 이미 push된 C4R/C45X commit과 동일했다.
+- 구현 결합도를 줄이기 위해 C3e-B를 B1(registry/run identity), B2(guard/wrapper/MCST),
+  B3(active·terminal sensor/reconcile) 세 PR로 분리했다. B1과 C3e-C를 먼저 병렬로 진행하고
+  B1 뒤 B2/B3를 병렬 진행한다.
+- C3e-C의 제품 코드는 A2에서 이미 공용 projection·REST DTO·OpenAPI로 완결돼 있었다. 별도
+  production 구현을 만들지 않고 실제 PostgreSQL과 FastAPI를 관통해 datasets grid/detail과
+  pipeline timeline의 root/pair/status/timestamp가 같은지 검증하는 교차 통합 PR로 축소했다.
+- 이 변경은 문서-only이므로 사용자 지시에 따라 추가 적대 리뷰 없이 rebase·CI green 후
+  병합한다. 코드·DB·테스트 의미 변경에는 기존 적대 리뷰 2인 gate를 유지한다.
+
 ## 2026-07-16 (agent A) — C3e-A2 구현·로컬 gate 완료(PR 전)
 
 - lifecycle 이중 정본을 제거해 request 테이블에는 immutable 입력/감사, `matched_scope`, 양수
