@@ -28,6 +28,10 @@ from kortravelmap.core.feature_operation import (
 from kortravelmap.infra.feature_operation_repo import ensure_dagster_feature_operation
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 from kortravelmap.infra.sync_state_repo import record_sync_success
+from kortravelmap.providers.feature_operation_registry import (
+    feature_operation_launch_tags,
+    resolve_feature_operation_launch,
+)
 from kortravelmap.providers.mois import (
     DATASET_KEY_BULK,
     DATASET_KEY_HISTORY,
@@ -37,7 +41,8 @@ from kortravelmap.providers.mois import (
 pytestmark = pytest.mark.integration
 
 _PAGE_SIZE = 10
-_SCHEDULE_NAME = "c3e-c-rest-proof-schedule"
+_SCHEDULE_JOB_NAME = "feature_place_mois_licenses_job"
+_SCHEDULE_NAME = "feature_place_mois_licenses_monthly_schedule"
 _SCHEDULE_TICK = 2_000_000_000.0
 _PROXY_SECRET = "c3e-c-rest-proof-secret"
 _OPERATOR = "integration-test"
@@ -456,6 +461,13 @@ async def _cleanup_committed_operations(engine: AsyncEngine) -> None:
 
 
 def _schedule_payload() -> dict[str, Any]:
+    launch = resolve_feature_operation_launch(job_name=_SCHEDULE_JOB_NAME)
+    assert launch is not None
+    identity, _ = launch
+    schedule_tags = {
+        **feature_operation_launch_tags(identity, trigger_kind="schedule"),
+        "kor_travel_map.timezone": "Asia/Seoul",
+    }
     return {
         "data": {
             "repositoriesOrError": {
@@ -465,15 +477,12 @@ def _schedule_payload() -> dict[str, Any]:
                         "schedules": [
                             {
                                 "name": _SCHEDULE_NAME,
+                                "pipelineName": _SCHEDULE_JOB_NAME,
                                 "tags": [
-                                    {
-                                        "key": "kor_travel_map.provider",
-                                        "value": PROVIDER_NAME,
-                                    },
-                                    {
-                                        "key": "kor_travel_map.dataset_key",
-                                        "value": DATASET_KEY_BULK,
-                                    },
+                                    {"key": key, "value": value}
+                                    for key, value in sorted(
+                                        schedule_tags.items()
+                                    )
                                 ],
                                 "scheduleState": {"status": "RUNNING"},
                                 "futureTicks": {

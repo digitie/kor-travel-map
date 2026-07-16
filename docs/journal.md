@@ -90,6 +90,12 @@
   실제 migration·PostgreSQL/FastAPI 통합 1건, Ruff, strict mypy, admin/user OpenAPI drift와
   admin generated type drift, frontend type-check와 lint(오류 0, 기존 warning 2)를 통과했다.
   `T-ADM-C3e-C`는 완료 이력으로 아카이브했다.
+- B1 병합 뒤 PR CI에서 구 scalar schedule mock이 strict canonical parser에 거부되는 통합
+  회귀를 확인했다. mock을 실제 MOIS job/schedule 이름, `pipelineName`, registry가 생성한
+  identity/version/schedule trigger/timezone tag로 교체했다. 추가 적대 리뷰 2인은 S1/S2/S3
+  0건으로 승인했고, WSL capture 임시파일 오류로 0건 실행된 첫 시도와 분리해 `-s` 재실행한
+  실제 migration·PostgreSQL/FastAPI 통합 1건과 Ruff를 통과했다.
+
 ## 2026-07-16 (codex) — C3e-B 복구 감사·PR 단위 재분할
 
 - PR #705 병합과 main CI green을 확인한 뒤 Claude Code의 C3e-B branch/worktree를 reflog,

@@ -59,8 +59,11 @@
   실제 migration·PostgreSQL/FastAPI 통합 1건을 통과했다. Ruff, strict mypy 4개 변경 소스,
   admin/user OpenAPI drift, admin generated type drift, frontend type-check와 lint(오류 0,
   기존 incompatible-library warning 2)도 통과했고 완료 task를 `tasks-done.md`로 옮겼다.
-- **다음 한 작업**: B1 병합 commit 위의 CI·merge를 완료한다. 이후 B2/B3와 C3e-I 교차
-  회귀로 #679를 닫는다.
+- B1 병합 뒤 CI가 발견한 구 scalar schedule mock을 실제 MOIS canonical
+  job/schedule/`pipelineName`/registry launch tag로 수정했다. 두 추가 적대 리뷰는 S1/S2/S3
+  0건이며 실제 migration·PostgreSQL/FastAPI 통합 1건과 Ruff가 다시 통과했다.
+- **다음 한 작업**: 수정 head의 PR #710 CI·merge를 완료한다. 이후 B2/B3와 C3e-I 교차 회귀로
+  #679를 닫는다.
 
 ## 2026-07-16 (codex) — C3e-B 실행 재분할·C3e-C 잔여 범위 확정
 
