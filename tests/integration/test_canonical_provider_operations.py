@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
+from dagster import AssetKey, DagsterRunStatus
+from kortravelmap.dagster.feature_operation_sensors import (
+    FeatureOperationReconcileCursor,
+    _apply_run_record,
+    _reconcile_tick,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import (
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationKey,
@@ -37,6 +45,10 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
 )
 from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationInvariantError,
+)
+from kortravelmap.providers.feature_operation_registry import (
+    feature_operation_launch_tags,
+    resolve_feature_operation_launch,
 )
 
 if TYPE_CHECKING:
@@ -88,6 +100,71 @@ async def _delete_committed_feature_tree(
             ),
             {"root_id": root_id},
         )
+
+
+def _tracking_record(
+    *,
+    job_name: str,
+    run_id: str,
+    status: DagsterRunStatus,
+    created_at: datetime,
+    started_at: datetime | None,
+    finished_at: datetime | None,
+    storage_id: int = 1,
+) -> Any:
+    launch = resolve_feature_operation_launch(job_name=job_name)
+    assert launch is not None
+    identity, run_config = launch
+    return SimpleNamespace(
+        storage_id=storage_id,
+        dagster_run=SimpleNamespace(
+            run_id=run_id,
+            job_name=job_name,
+            status=status,
+            run_config=run_config,
+            tags=feature_operation_launch_tags(
+                identity, trigger_kind="schedule"
+            ),
+            asset_selection=frozenset(
+                AssetKey.from_user_string(key) for key in identity.asset_keys
+            ),
+        ),
+        create_timestamp=created_at,
+        start_time=started_at.timestamp() if started_at is not None else None,
+        end_time=finished_at.timestamp() if finished_at is not None else None,
+    )
+
+
+class _PeriodicDagsterInstance:
+    def __init__(self, records: list[Any]) -> None:
+        self._records = {
+            record.dagster_run.run_id: record for record in records
+        }
+
+    def get_run_record_by_id(self, run_id: str) -> Any | None:
+        return self._records.get(run_id)
+
+    def get_run_records(self, **_kwargs: Any) -> list[Any]:
+        return []
+
+
+class _PeriodicLog:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args: object) -> None:
+        self.errors.append(message % args if args else message)
+
+
+class _PeriodicContext:
+    def __init__(self, records: list[Any]) -> None:
+        self.instance = _PeriodicDagsterInstance(records)
+        self.cursor = FeatureOperationReconcileCursor().to_json()
+        self.log = _PeriodicLog()
+        self.updated_cursors: list[str] = []
+
+    def update_cursor(self, cursor: str) -> None:
+        self.updated_cursors.append(cursor)
 
 
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
@@ -154,6 +231,7 @@ async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
     terminal = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id="run-c3e-lifecycle",
+        trigger_kind="schedule",
         terminal_status="SUCCESS",
         selected_pairs=pairs,
         registry_version="registry-v1",
@@ -375,6 +453,574 @@ async def test_started_ensure_and_cancellation_marker_barrier_has_no_escape(
             root_id=root_id,
             cancellation_id=cancellation_id,
         )
+
+
+async def test_terminal_sensor_direct_cancel_is_idempotent_with_real_client(
+    migrated_engine: AsyncEngine,
+) -> None:
+    run_id = f"run-c3e-sensor-direct-cancel-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 1, tzinfo=UTC)
+    finished_at = created_at + timedelta(seconds=1)
+    record = _tracking_record(
+        job_name="feature_place_mois_licenses_job",
+        run_id=run_id,
+        status=DagsterRunStatus.CANCELED,
+        created_at=created_at,
+        started_at=None,
+        finished_at=finished_at,
+    )
+    client = AsyncKorTravelMapClient(migrated_engine)
+
+    first = await _apply_run_record(record, client)
+    second = await _apply_run_record(record, client)
+
+    async with AsyncSession(migrated_engine) as probe:
+        rows = (
+            await probe.execute(
+                text(
+                    "SELECT job_id, parent_job_id, status, current_stage, "
+                    "dagster_run_status, finished_at "
+                    "FROM ops.import_jobs WHERE dagster_run_id=:run_id "
+                    "ORDER BY parent_job_id NULLS FIRST, job_id"
+                ),
+                {"run_id": run_id},
+            )
+        ).all()
+    root_id = str(rows[0].job_id)
+    try:
+        assert first == "applied"
+        assert second == "blocked"
+        assert len(rows) == 2
+        assert {row.status for row in rows} == {"cancelled"}
+        assert {row.current_stage for row in rows} == {"cancelled"}
+        assert rows[0].dagster_run_status == "CANCELED"
+        assert {row.finished_at for row in rows} == {finished_at}
+    finally:
+        await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+
+
+async def test_terminal_sensor_respects_existing_cancellation_marker(
+    migrated_engine: AsyncEngine,
+) -> None:
+    run_id = f"run-c3e-sensor-marker-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 2, tzinfo=UTC)
+    launch = resolve_feature_operation_launch(
+        job_name="feature_place_mois_licenses_job"
+    )
+    assert launch is not None
+    identity, _ = launch
+    client = AsyncKorTravelMapClient(migrated_engine)
+    queued = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="schedule",
+        selected_pairs=identity.pairs,
+        registry_version=identity.registry_version,
+        engine_created_at=created_at,
+        engine_started_at=None,
+        observed_status="QUEUED",
+    )
+    root_id = queued.operation.root_job_id
+    async with AsyncSession(migrated_engine) as marker_session, marker_session.begin():
+        scope = await resolve_pipeline_cancellation_scope(
+            marker_session,
+            kind="import_job",
+            execution_id=root_id,
+        )
+        assert scope is not None
+        detail = await create_pipeline_cancellation_attempt(
+            marker_session,
+            scope=scope,
+            requested_by="admin:sensor-test",
+            reason="marker must own terminal",
+        )
+    cancellation_id = detail.attempt.cancellation_id
+    record = _tracking_record(
+        job_name="feature_place_mois_licenses_job",
+        run_id=run_id,
+        status=DagsterRunStatus.CANCELED,
+        created_at=created_at,
+        started_at=None,
+        finished_at=created_at + timedelta(seconds=1),
+    )
+
+    outcome = await _apply_run_record(record, client)
+
+    try:
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT status, current_stage, dagster_run_status, "
+                        "cancellation_id FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, job_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        assert outcome == "blocked"
+        assert len(rows) == len(identity.pairs) + 1
+        assert {row.status for row in rows} == {"queued"}
+        assert {row.current_stage for row in rows} == {"queued"}
+        assert rows[0].dagster_run_status == "QUEUED"
+        assert {str(row.cancellation_id) for row in rows} == {cancellation_id}
+    finally:
+        await _delete_committed_feature_tree(
+            migrated_engine,
+            root_id=root_id,
+            cancellation_id=cancellation_id,
+        )
+
+
+async def test_terminal_sensor_preserves_partial_success_and_duplicate_delivery(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mcst_culture_job"
+    run_id = f"run-c3e-sensor-partial-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 3, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = started_at + timedelta(seconds=2)
+    launch = resolve_feature_operation_launch(job_name=job_name)
+    assert launch is not None
+    identity, _ = launch
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _apply_run_record(
+        _tracking_record(
+            job_name=job_name,
+            run_id=run_id,
+            status=DagsterRunStatus.STARTED,
+            created_at=created_at,
+            started_at=started_at,
+            finished_at=None,
+        ),
+        client,
+    )
+    first_pair = identity.pairs[0]
+    completed = await client.finish_dagster_feature_pair(
+        dagster_run_id=run_id,
+        pair=first_pair,
+    )
+    root_id = completed.operation.root_job_id
+    terminal_record = _tracking_record(
+        job_name=job_name,
+        run_id=run_id,
+        status=DagsterRunStatus.FAILURE,
+        created_at=created_at,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+    first = await _apply_run_record(terminal_record, client)
+    second = await _apply_run_record(terminal_record, client)
+
+    try:
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT parent_job_id, provider, dataset_key, status, progress, "
+                        "current_stage, dagster_run_status FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, provider, dataset_key"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        root = rows[0]
+        children = rows[1:]
+        assert first == "applied"
+        assert second == "blocked"
+        assert len(children) == len(identity.pairs)
+        assert root.status == "failed"
+        assert root.dagster_run_status == "FAILURE"
+        assert root.progress == 100 // len(identity.pairs)
+        assert [row.status for row in children].count("done") == 1
+        assert [row.status for row in children].count("failed") == (
+            len(identity.pairs) - 1
+        )
+        done = next(row for row in children if row.status == "done")
+        assert (done.provider, done.dataset_key) == (
+            first_pair.provider,
+            first_pair.dataset_key,
+        )
+        assert done.current_stage == "completed"
+        assert {row.current_stage for row in children if row.status == "failed"} == {
+            "failed"
+        }
+    finally:
+        await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+
+
+async def test_periodic_reconcile_real_client_closes_partial_active_page_and_commits_cursor(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mcst_culture_job"
+    run_id = f"run-c3e-periodic-partial-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 5, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    finished_at = started_at + timedelta(seconds=2)
+    launch = resolve_feature_operation_launch(job_name=job_name)
+    assert launch is not None
+    identity, _ = launch
+    client = AsyncKorTravelMapClient(migrated_engine)
+    started = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="schedule",
+        selected_pairs=identity.pairs,
+        registry_version=identity.registry_version,
+        engine_created_at=created_at,
+        engine_started_at=started_at,
+        observed_status="STARTED",
+    )
+    root_id = started.operation.root_job_id
+    first_pair = identity.pairs[0]
+    await client.finish_dagster_feature_pair(
+        dagster_run_id=run_id,
+        pair=first_pair,
+    )
+    context = _PeriodicContext(
+        [
+            _tracking_record(
+                job_name=job_name,
+                run_id=run_id,
+                status=DagsterRunStatus.FAILURE,
+                created_at=created_at,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        ]
+    )
+
+    await _reconcile_tick(context, client)
+
+    try:
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT parent_job_id, provider, dataset_key, status, progress, "
+                        "current_stage, dagster_run_status FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, provider, dataset_key"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        root = rows[0]
+        children = rows[1:]
+        committed = FeatureOperationReconcileCursor.from_json(
+            context.updated_cursors[0]
+        )
+        assert root.status == "failed"
+        assert root.dagster_run_status == "FAILURE"
+        assert root.progress == 100 // len(identity.pairs)
+        assert [row.status for row in children].count("done") == 1
+        assert [row.status for row in children].count("failed") == (
+            len(identity.pairs) - 1
+        )
+        done = next(row for row in children if row.status == "done")
+        assert (done.provider, done.dataset_key) == (
+            first_pair.provider,
+            first_pair.dataset_key,
+        )
+        assert len(context.updated_cursors) == 1
+        assert committed.database is None
+        assert context.log.errors == []
+    finally:
+        await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+
+
+async def test_periodic_reconcile_marker_after_page_read_preserves_base(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mois_licenses_job"
+    run_id = f"run-c3e-periodic-marker-race-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 6, tzinfo=UTC)
+    finished_at = created_at + timedelta(seconds=1)
+    launch = resolve_feature_operation_launch(job_name=job_name)
+    assert launch is not None
+    identity, _ = launch
+
+    class MarkerAfterPageClient(AsyncKorTravelMapClient):
+        cancellation_id: str | None = None
+
+        async def list_reconcilable_dagster_feature_runs(
+            self,
+            *,
+            cursor: Any,
+            page_size: int = 200,
+        ) -> Any:
+            page = await super().list_reconcilable_dagster_feature_runs(
+                cursor=cursor,
+                page_size=page_size,
+            )
+            if self.cancellation_id is None:
+                async with AsyncSession(migrated_engine) as session, session.begin():
+                    scope = await resolve_pipeline_cancellation_scope(
+                        session,
+                        kind="import_job",
+                        execution_id=root_id,
+                    )
+                    assert scope is not None
+                    detail = await create_pipeline_cancellation_attempt(
+                        session,
+                        scope=scope,
+                        requested_by="admin:periodic-race",
+                        reason="marker wins after active page read",
+                    )
+                    self.cancellation_id = detail.attempt.cancellation_id
+            return page
+
+    client = MarkerAfterPageClient(migrated_engine)
+    queued = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="schedule",
+        selected_pairs=identity.pairs,
+        registry_version=identity.registry_version,
+        engine_created_at=created_at,
+        engine_started_at=None,
+        observed_status="QUEUED",
+    )
+    root_id = queued.operation.root_job_id
+    context = _PeriodicContext(
+        [
+            _tracking_record(
+                job_name=job_name,
+                run_id=run_id,
+                status=DagsterRunStatus.CANCELED,
+                created_at=created_at,
+                started_at=None,
+                finished_at=finished_at,
+            )
+        ]
+    )
+
+    await _reconcile_tick(context, client)
+
+    try:
+        assert client.cancellation_id is not None
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT status, current_stage, dagster_run_status, "
+                        "cancellation_id FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, job_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        assert {row.status for row in rows} == {"queued"}
+        assert {row.current_stage for row in rows} == {"queued"}
+        assert rows[0].dagster_run_status == "QUEUED"
+        assert {str(row.cancellation_id) for row in rows} == {
+            client.cancellation_id
+        }
+        assert len(context.updated_cursors) == 1
+        assert context.log.errors == []
+    finally:
+        await _delete_committed_feature_tree(
+            migrated_engine,
+            root_id=root_id,
+            cancellation_id=client.cancellation_id,
+        )
+
+
+@pytest.mark.parametrize("winner", ["marker", "terminal"])
+async def test_terminal_reconcile_and_marker_race_has_single_lock_order_winner(
+    migrated_engine: AsyncEngine,
+    winner: str,
+) -> None:
+    run_id = f"run-c3e-terminal-marker-race-{winner}-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 7, tzinfo=UTC)
+    finished_at = created_at + timedelta(seconds=1)
+    pair = ProviderDatasetOperationKey("provider", "terminal-marker-race")
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        queued = await ensure_dagster_feature_operation(
+            setup,
+            dagster_run_id=run_id,
+            trigger_kind="schedule",
+            selected_pairs=(pair,),
+            registry_version="registry-v1",
+            engine_created_at=created_at,
+            engine_started_at=None,
+            observed_status="QUEUED",
+        )
+    root_id = queued.operation.root_job_id
+    first_write_done = asyncio.Event()
+    release_first = asyncio.Event()
+    second_entered = asyncio.Event()
+
+    async def mark_and_hold(*, entered: asyncio.Event | None = None) -> Any:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            if entered is not None:
+                entered.set()
+            scope = await resolve_pipeline_cancellation_scope(
+                session,
+                kind="import_job",
+                execution_id=root_id,
+            )
+            assert scope is not None
+            detail = await create_pipeline_cancellation_attempt(
+                session,
+                scope=scope,
+                requested_by="admin:terminal-race",
+                reason=winner,
+            )
+            first_write_done.set()
+            await release_first.wait()
+            return detail
+
+    async def terminal_and_hold(*, entered: asyncio.Event | None = None) -> Any:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            if entered is not None:
+                entered.set()
+            mutation = await reconcile_dagster_feature_run(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                terminal_status="CANCELED",
+                selected_pairs=(pair,),
+                registry_version="registry-v1",
+                engine_created_at=created_at,
+                engine_started_at=None,
+                engine_finished_at=finished_at,
+                error={"kind": "terminal-marker-race"},
+            )
+            first_write_done.set()
+            await release_first.wait()
+            return mutation
+
+    if winner == "marker":
+        first_task = asyncio.create_task(mark_and_hold())
+        await first_write_done.wait()
+        second_task = asyncio.create_task(
+            terminal_and_hold(entered=second_entered)
+        )
+    else:
+        first_task = asyncio.create_task(terminal_and_hold())
+        await first_write_done.wait()
+        second_task = asyncio.create_task(mark_and_hold(entered=second_entered))
+    await second_entered.wait()
+    await asyncio.sleep(0)
+    assert not second_task.done()
+    release_first.set()
+    first_result, second_result = await asyncio.wait_for(
+        asyncio.gather(first_task, second_task),
+        timeout=5,
+    )
+    if winner == "marker":
+        detail, mutation = first_result, second_result
+        assert mutation.outcome == "blocked"
+        assert mutation.block_reason == "cancellation"
+        expected_status = "queued"
+        expected_raw_status = "QUEUED"
+    else:
+        mutation, detail = first_result, second_result
+        assert mutation.outcome == "applied"
+        expected_status = "cancelled"
+        expected_raw_status = "CANCELED"
+    cancellation_id = detail.attempt.cancellation_id
+
+    try:
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT status, dagster_run_status, cancellation_id "
+                        "FROM ops.import_jobs WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, job_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+        assert len(rows) == 2
+        assert {row.status for row in rows} == {expected_status}
+        assert rows[0].dagster_run_status == expected_raw_status
+        assert {str(row.cancellation_id) for row in rows} == {cancellation_id}
+    finally:
+        await _delete_committed_feature_tree(
+            migrated_engine,
+            root_id=root_id,
+            cancellation_id=cancellation_id,
+        )
+
+
+async def test_terminal_sensor_selection_mismatch_closes_active_tree(
+    migrated_engine: AsyncEngine,
+) -> None:
+    job_name = "feature_place_mois_licenses_job"
+    run_id = f"run-c3e-sensor-selection-mismatch-{uuid4()}"
+    created_at = datetime(2026, 7, 16, 4, tzinfo=UTC)
+    finished_at = created_at + timedelta(seconds=1)
+    launch = resolve_feature_operation_launch(job_name=job_name)
+    assert launch is not None
+    identity, _ = launch
+    client = AsyncKorTravelMapClient(migrated_engine)
+    stored = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="schedule",
+        selected_pairs=(
+            ProviderDatasetOperationKey(
+                identity.pairs[0].provider,
+                "sensor-selection-drift",
+            ),
+        ),
+        registry_version=identity.registry_version,
+        engine_created_at=created_at,
+        engine_started_at=None,
+        observed_status="NOT_STARTED",
+    )
+    root_id = stored.operation.root_job_id
+
+    outcome = await _apply_run_record(
+        _tracking_record(
+            job_name=job_name,
+            run_id=run_id,
+            status=DagsterRunStatus.SUCCESS,
+            created_at=created_at,
+            started_at=None,
+            finished_at=finished_at,
+        ),
+        client,
+    )
+
+    try:
+        async with AsyncSession(migrated_engine) as probe:
+            rows = (
+                await probe.execute(
+                    text(
+                        "SELECT parent_job_id, status, current_stage, "
+                        "dagster_run_status FROM ops.import_jobs "
+                        "WHERE job_id=CAST(:root_id AS uuid) "
+                        "OR parent_job_id=CAST(:root_id AS uuid) "
+                        "ORDER BY parent_job_id NULLS FIRST, job_id"
+                    ),
+                    {"root_id": root_id},
+                )
+            ).all()
+            tracking_log_count = await probe.scalar(
+                text(
+                    "SELECT count(*) FROM ops.system_log "
+                    "WHERE event='feature_operation.tracking_invariant' "
+                    "AND detail->>'dagster_run_id'=:run_id"
+                ),
+                {"run_id": run_id},
+            )
+        assert outcome == "applied"
+        assert len(rows) == 2
+        assert {row.status for row in rows} == {"failed"}
+        assert {row.current_stage for row in rows} == {"tracking_invariant"}
+        assert rows[0].dagster_run_status == "SUCCESS"
+        assert int(tracking_log_count or 0) == 1
+    finally:
+        await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
 
 
 async def test_generic_claim_and_stale_recovery_ignore_feature_operations(
@@ -635,6 +1281,7 @@ async def test_every_terminal_identity_mismatch_closes_tracking_invariant(
     result = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id=operation.operation.dagster_run_id,
+        trigger_kind="manual",
         terminal_status=terminal_status,
         selected_pairs=(ProviderDatasetOperationKey("provider", "expected"),),
         registry_version="registry-v2",
@@ -661,13 +1308,21 @@ async def test_every_terminal_identity_mismatch_closes_tracking_invariant(
             {"run_id": operation.operation.dagster_run_id},
         )
     ).scalar_one()
-    expected_mismatch_keys = {"registry_version", "selected_pairs"}
+    expected_mismatch_keys = {
+        "registry_version",
+        "selected_pairs",
+        "trigger_kind",
+    }
     if terminal_status == "SUCCESS":
         expected_mismatch_keys.add("non_done_members")
     assert set(log["mismatches"]) == expected_mismatch_keys
     assert log["mismatches"]["registry_version"] == {
         "expected": "registry-v2",
         "actual": "registry-v1",
+    }
+    assert log["mismatches"]["trigger_kind"] == {
+        "expected": "manual",
+        "actual": "sensor",
     }
 
 
@@ -690,6 +1345,7 @@ async def test_terminal_finish_cannot_precede_stored_engine_start(
     reconciled = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id="run-c3e-invalid-finish",
+        trigger_kind="manual",
         terminal_status="FAILURE",
         selected_pairs=(pair,),
         registry_version="registry-v1",
@@ -724,6 +1380,7 @@ async def test_terminal_created_time_drift_closes_without_invented_finish(
     reconciled = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id=ensured.operation.dagster_run_id,
+        trigger_kind="sensor",
         terminal_status="CANCELED",
         selected_pairs=(pair,),
         registry_version="registry-v1",
@@ -780,6 +1437,7 @@ async def test_terminal_detects_divergent_root_and_child_start_times(
     reconciled = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id=ensured.operation.dagster_run_id,
+        trigger_kind="sensor",
         terminal_status="FAILURE",
         selected_pairs=(pair,),
         registry_version="registry-v1",
@@ -833,6 +1491,7 @@ async def test_success_preserves_terminal_non_done_child_and_fails_root_tracking
     reconciled = await reconcile_dagster_feature_run(
         migrated_session,
         dagster_run_id=ensured.operation.dagster_run_id,
+        trigger_kind="sensor",
         terminal_status="SUCCESS",
         selected_pairs=(pair,),
         registry_version="registry-v1",

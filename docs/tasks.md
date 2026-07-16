@@ -9,7 +9,6 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C3e-B2` — provider guard·public wrapper·MCST pair callback (agent A)
-  - [ ] `T-ADM-C3e-B3` — active/terminal run sensor·양방향 reconcile (agent B)
   - [ ] `T-ADM-C3e-I` — 통합 rebase·교차 회귀·#679 종료 (codex)
   - [ ] `T-ADM-C4R` — C4 UI 소비 계약 수정 (agent A, issue #684, PR 1개)
   - [ ] `T-ADM-C45X` — sync_scope 전파+active request 멱등성 (agent A, issue #686, PR 1개)
@@ -48,13 +47,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   MCST 전반 성공/후반 실패를 회귀로 고정한다. 알려진 KNPS direct runner 오염도 이 PR에서
   수정한다. 비기본 point/geometry scope dataset을 `settings.model_copy(update=...)`로 고정해
   fetcher와 asset resource 양쪽에 같은 값을 전달하고 fetch/record mismatch 회귀를 추가한다.
-- [ ] `T-ADM-C3e-B3` — **run-status sensor·양방향 reconcile** (agent **B**, 의존
-  C3e-B1, C3e-B2와 병렬): QUEUED/STARTING/STARTED/CANCELING event sensor, SUCCESS/FAILURE/
-  CANCELED terminal sensor와 NOT_STARTED/MANAGED·missed event periodic scan을 provider-resource-free로
-  구현한다. Dagster→DB total-order watermark는 page commit 뒤 전진하고 DB→Dagster active-root
-  keyset sweep은 끝에서 처음으로 wrap한다. sensor default RUNNING/readiness, 중복 delivery,
-  pre-resource/direct cancel, terminal selection mismatch, partial success, Dagster unavailable/not-found,
-  양방향 watermark 재시작을 회귀로 고정한다.
 - [ ] `T-ADM-C3e-I` — **C3e 통합·종결** (codex, 의존 C3e-A1/A2/B1/B2/B3/C): 선행 merge마다
   origin/main rebase하고 교차 회귀·적대 리뷰 2인·전체 CI를 통과시킨다. 일정/수동/갱신/import
   실행과 datasets/pipeline 동일 root 증거를 이슈 #679에 남긴 뒤 닫는다.

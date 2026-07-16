@@ -203,13 +203,31 @@ event delivery를 놓치거나 daemon이 재시작한 경우에는 주기적 pro
 reconciliation sensor가
 두 방향으로 복구한다.
 
-- Dagster→DB: 등록 job의 run을 `(engine_created_at, run_id)` total order watermark 뒤부터 page로
-  읽어 missing root도 ensure/reconcile한다. page의 모든 DB write가 commit된 뒤에만 명시 sensor
-  cursor를 갱신한다. process crash는 같은 page를 멱등 재생하고 DB 장애는 watermark를 전진시키지
-  않는다. 따라서 run-status sensor 내부 event cursor가 side-effect 예외 뒤 전진해도 유실되지
-  않는다.
+- Dagster→DB: 공개 `get_run_records(cursor=run_id, ascending=True)`의 run storage insertion
+  order(`storage_id`, `run_id`)를 최대 200개 page cursor로 사용해 등록 job의 missing root도
+  ensure/reconcile한다. run 생성 transaction과 Dagster daemon/DB clock skew 상한을 함께 덮는
+  300초 settled lag를 적용한다. insertion page SQL에는 `created_before`를 섞지 않고 ID 연속 page를
+  읽은 뒤, Python에서 첫 unsettled `create_timestamp` 직전의 contiguous settled prefix만 처리·
+  전진한다. 따라서 낮은 storage ID가 clock-ahead이고 높은 ID가 먼저 settled여도 낮은 ID를
+  건너뛰지 않는다. 운영 중 과거 storage ID나 생성 시각을 인위적으로 삽입하는 writer는 금지하고,
+  최초 non-empty cursor는 아래 maintenance drain에서만 설정한다. 빈 storage는 Python clock
+  sentinel 대신 `null` insertion cursor를 유지한다. page의 모든 DB write가 commit된 뒤에만 명시
+  sensor cursor를 갱신한다. process crash는 같은 page를 멱등 재생하고 DB 장애는 cursor를
+  전진시키지 않는다. 따라서 run-status sensor 내부 event cursor가 side-effect 예외 뒤 전진해도
+  유실되지 않는다.
 - DB→Dagster: 이미 DB에 있는 queued/running feature root를 다시 읽어 active/terminal status를
   reconcile한다. Dagster가 unavailable/not-found면 base 상태를 유지하고 관측 오류만 남긴다.
+
+두 sensor의 outer 평가 경계는 Dagster scan/lookup과 DB list/write 예외 원문 및 exception chain을
+framework로 전파하지 않는다. `error_type`만 운영 로그에 남기고 양방향 cursor를 전진시키지 않아
+DSN·credential 유출 없이 다음 tick에서 같은 page를 재시도한다.
+
+non-empty run storage에서 sensor cursor가 `None`이면 자동 latest cutover하지 않고 unready로
+fail-closed한다. 운영자가 maintenance drain에서 명시 cursor JSON을 설정해야 한다. 현재 insertion
+cursor가 가리키는 Dagster run은 삭제·retention 대상에서 제외한다. anchor가 이미 삭제됐으면 sensor를
+정지하고 maintenance drain 뒤 `dagster:null`로 bounded full audit를 시작하거나, 누락 분류를 끝낸
+최신 surviving insertion cursor로 명시 재설정한 다음 readback 후 재개한다. sensor는 anchor의
+존재와 `storage_id` exact 일치를 매 tick 확인하며, 불일치하면 양방향 cursor를 전진시키지 않는다.
 
 generic
 `recover_stale_running_jobs`는 두 feature-load kind를 항상 제외하므로 장시간 정상 run을
@@ -283,7 +301,7 @@ ensure_dagster_feature_operation(*, dagster_run_id, trigger_kind,
 finish_dagster_feature_pair(*, dagster_run_id, pair) -> DagsterFeatureOperationMutation
 append_dagster_feature_attempt_event(*, dagster_run_id, pair, attempt_number,
     outcome, error) -> ImportJobEvent
-reconcile_dagster_feature_run(*, dagster_run_id, terminal_status,
+reconcile_dagster_feature_run(*, dagster_run_id, trigger_kind, terminal_status,
     selected_pairs, registry_version, engine_created_at, engine_started_at,
     engine_finished_at, error
 ) -> DagsterFeatureOperationMutation
@@ -397,7 +415,7 @@ timezone-aware authoritative create timestamp다. child도 같은 값을 사용�
 늦게 reconcile해도 root와 아직 시작/종료 시각이 없는 child의 `started_at`/`finished_at`은
 Dagster authoritative timestamp를 사용한다. wrapper가 이미 완료한 child의 pair 완료 시각은
 덮지 않는다. DB 실제 기록 시각이 필요한 감사에는 `ops.system_log.created_at`을 쓰며
-cursor/timeline은 engine create 시각으로 안정화한다. 필수 engine timestamp가 없거나 유효하지
+timeline은 engine create 시각으로 안정화한다. 필수 engine timestamp가 없거나 유효하지
 않으면 canonical row를 만들지 않고 보조 conflict로 남긴다.
 
 downgrade는 신규 index, feature constraint/identity trigger, cancellation member/import CHECK와
@@ -489,10 +507,13 @@ projection identity에는 사용하지 않는다.
 5. column/CHECK/constraint trigger/index/Alembic single head를 검증하고 첫 backfill을 실행한다.
 6. Dagster 전 구성을 새 image로 재기동하고 same-run/pair 멱등성, catalog identity,
    recent/timeline 일치를 확인한다.
-7. 모든 tracking sensor가 RUNNING인지 확인하고 reconciliation cursor를 maintenance cutover
-   시각으로 명시 초기화한 뒤 첫 tick/page commit과 cursor readback을 확인한다.
-8. 구 writer 소진을 다시 확인하고 0051 backfill 결과와 아래 손실 분류를 기록한다.
-9. API/Dagster readback 뒤 UI를 재기동하고 ingress/schedules를 재개한다.
+7. 모든 tracking sensor가 RUNNING인지 확인하고 reconciliation cursor를 maintenance drain에서
+   관측한 최신 run storage insertion cursor(빈 storage면 `null`)로 초기화한 뒤 첫 tick/page
+   commit과 cursor readback을 확인한다. 300초 settled lag보다 긴 미완료 run 생성 transaction과
+   daemon/DB clock skew가 없음을 함께 확인한다.
+8. Dagster run retention/delete 정책에서 현재 insertion cursor anchor를 제외했는지 확인한다.
+9. 구 writer 소진을 다시 확인하고 0051 backfill 결과와 아래 손실 분류를 기록한다.
+10. API/Dagster readback 뒤 UI를 재기동하고 ingress/schedules를 재개한다.
 
 0052는 첫 동작으로 `ops.import_jobs`, `ops.feature_update_requests`를 그 순서로
 `ACCESS EXCLUSIVE` 잠근 뒤 immutable `ops.is_valid_feature_update_scope`, filter validator,

@@ -23,6 +23,7 @@ from .curated_features import (
     CURATED_FEATURE_JOBS,
     CURATED_FEATURE_SCHEDULES,
 )
+from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
 from .feature_update_runner import feature_update_runner_resource
 from .file_registry_scan import (
     FILE_REGISTRY_SCAN_JOBS,
@@ -205,7 +206,7 @@ defs = Definitions(
         *CURATED_FEATURE_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
     ],
-    sensors=FEATURE_UPDATE_SENSORS,
+    sensors=[*FEATURE_UPDATE_SENSORS, *FEATURE_OPERATION_TRACKING_SENSORS],
     resources={
         key: (
             _value_resource(key, DEFAULT_RESOURCE_VALUES[key])

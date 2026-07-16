@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (agent B) — C3e-B3 run sensor·양방향 reconcile 완결
+
+- 수정 전 `reconcile_dagster_feature_run`의 codegraph 영향과 실제 caller를 확인하고, C3e-B1
+  registry를 compile target으로 삼았다. DB schema 추가보다 기존 canonical operation과 sensor
+  cursor의 책임 분리가 단순하고 우월하다고 판단해 migration은 추가하지 않았다.
+- 7개 active/terminal run-status sensor와 30초 periodic reconcile sensor를 기본 RUNNING으로
+  등록했다. 등록 job은 registry의 job·asset selection·run config·identity/version/trigger를
+  검증하고 비등록 run은 panel-only로 둔다. active 상태는 root/child를 ensure하고 terminal은
+  direct cancel·pre-resource 실패·partial success를 원자 reconcile한다.
+- 두 적대 리뷰어가 발견한 trigger 불일치 active 고착, terminal 전 cursor 선반영, 동일 시각의
+  무한 replay, 실제 DB periodic 증거 부재, 예외 비밀 노출, 삭제된 anchor와 자동 latest cutover,
+  timestamp 조건 때문에 낮은 unsettled ID를 건너뛰는 문제를 모두 보강했다. 최종 cursor는
+  insertion ID page의 연속 settled prefix만 commit 뒤 전진하고 DB keyset은 끝에서 wrap한다.
+  anchor 삭제·변조와 비어 있지 않은 storage의 초기 무cursor는 fail-closed하며 운영 복구 절차를
+  C3e 정본 문서에 기록했다. 두 리뷰어 최종 판정은 S1/S2/S3 0건이다.
+- focused 101건, 실제 migration/PostGIS 27건, Dagster 전체 342건(1 skip), main unit 1,366건을
+  통과했다. Python 3.14 import 위치·import 정렬·타입 주석 같은 기계적 수정 뒤 focused 52건도
+  재통과했고 Ruff, strict mypy 135개 소스, import 계약 4/4를 확인했다. pytest capture의 NTFS
+  임시파일 오류는 테스트 0건임을 확인한 뒤 `-s`로 우회했다.
+- 완료 task는 `docs/tasks-done.md`로 이동했다. 다음 단계는 B3 PR CI·병합과 B2 완료 뒤
+  C3e-I 교차 회귀다.
+
 ## 2026-07-16 (agent B) — C3e-B1 operation registry 구현 준비
 
 - 수정 전에 worktree 전용 codegraph를 초기화했다. `FeatureLoadScheduleSpec`의 직접 caller는

@@ -6,6 +6,7 @@ from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .definitions import defs
 from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
+from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import (
     CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
@@ -38,6 +39,7 @@ __all__ = [
     "BATCH_DAG_JOBS",
     "FEATURE_LOAD_JOBS",
     "FEATURE_LOAD_SCHEDULES",
+    "FEATURE_OPERATION_TRACKING_SENSORS",
     "FEATURE_UPDATE_JOBS",
     "FEATURE_UPDATE_SENSORS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",

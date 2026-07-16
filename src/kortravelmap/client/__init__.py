@@ -550,6 +550,7 @@ class AsyncKorTravelMapClient:
         self,
         *,
         dagster_run_id: str,
+        trigger_kind: str,
         terminal_status: str,
         selected_pairs: Sequence[ProviderDatasetOperationKey],
         registry_version: str,
@@ -564,6 +565,7 @@ class AsyncKorTravelMapClient:
                 return await repo_reconcile_dagster_feature_run(
                     session,
                     dagster_run_id=dagster_run_id,
+                    trigger_kind=trigger_kind,
                     terminal_status=terminal_status,
                     selected_pairs=selected_pairs,
                     registry_version=registry_version,

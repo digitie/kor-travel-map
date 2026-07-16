@@ -756,6 +756,7 @@ async def reconcile_dagster_feature_run(
     session: AsyncSession,
     *,
     dagster_run_id: str,
+    trigger_kind: str,
     terminal_status: str,
     selected_pairs: Sequence[ProviderDatasetOperationKey],
     registry_version: str,
@@ -765,6 +766,7 @@ async def reconcile_dagster_feature_run(
     error: Mapping[str, Any] | None,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
+    normalized_trigger = _validate_trigger(trigger_kind)
     terminal = _validate_run_status(terminal_status)
     if terminal not in DAGSTER_FEATURE_TERMINAL_STATUS_VALUES:
         raise ValueError("terminal_status must be SUCCESS, FAILURE, or CANCELED")
@@ -822,6 +824,11 @@ async def reconcile_dagster_feature_run(
         )
     stored_pairs = tuple(member.pair for member in operation.members)
     mismatches: dict[str, Any] = {}
+    if operation.trigger_kind != normalized_trigger:
+        mismatches["trigger_kind"] = {
+            "expected": normalized_trigger,
+            "actual": operation.trigger_kind,
+        }
     if operation.registry_version != normalized_registry:
         mismatches["registry_version"] = {
             "expected": normalized_registry,
