@@ -46,7 +46,6 @@ class ProviderRefreshPolicyUpsertRequest(BaseModel):
     max_requests_per_day: int | None = Field(default=None, gt=0)
     max_concurrent: int = Field(default=1, gt=0)
     burst_size: int | None = Field(default=None, gt=0)
-    rate_limit_source: dict[str, Any] = Field(default_factory=dict)
     config_source: str = Field(default="db", min_length=1, max_length=64)
     enabled: bool = True
 

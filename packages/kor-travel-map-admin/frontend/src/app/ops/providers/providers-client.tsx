@@ -36,9 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import {
   integerString,
-  jsonObject,
   ordered,
-  parseJsonObjectField,
   validateForm,
 } from "@/lib/form-validation";
 
@@ -68,7 +66,6 @@ type PolicyDraft = {
   max_requests_per_day: string;
   max_concurrent: string;
   burst_size: string;
-  rate_limit_source: string;
   config_source: string;
   enabled: boolean;
 };
@@ -172,7 +169,6 @@ function policyToDraft(
     ),
     max_concurrent: numberText(policy?.max_concurrent ?? POLICY_DEFAULTS.max_concurrent),
     burst_size: numberText(policy?.burst_size ?? POLICY_DEFAULTS.burst_size),
-    rate_limit_source: JSON.stringify(policy?.rate_limit_source ?? {}, null, 2),
     config_source: policy?.config_source ?? "db",
     enabled: policy?.enabled ?? true,
   };
@@ -191,15 +187,6 @@ function optionalPositiveInt(value: string, label: string): number | undefined {
 }
 
 function buildPolicyBody(draft: PolicyDraft): ProviderRefreshPolicyUpsertRequest {
-  // §4: raw SyntaxError 누출 방지 — 한국어 메시지로 통일.
-  const parsedSource = parseJsonObjectField(
-    draft.rate_limit_source || "{}",
-    "rate limit 출처",
-  );
-  if (parsedSource.error) {
-    throw new Error(`rate limit 출처(JSON): ${parsedSource.error}`);
-  }
-  const rateLimitSource: Record<string, unknown> = parsedSource.value ?? {};
   return {
     source_kind: draft.source_kind,
     targeted_policy: draft.targeted_policy,
@@ -229,7 +216,6 @@ function buildPolicyBody(draft: PolicyDraft): ProviderRefreshPolicyUpsertRequest
     ),
     max_concurrent: optionalPositiveInt(draft.max_concurrent, "max concurrent") ?? 1,
     burst_size: optionalPositiveInt(draft.burst_size, "burst size"),
-    rate_limit_source: rateLimitSource,
     config_source: draft.config_source.trim() || "db",
     enabled: draft.enabled,
   };
@@ -283,8 +269,6 @@ function PolicyEditor({
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const jsonError = jsonObject<PolicyDraft>()(draft.rate_limit_source, draft);
-
   const submit = () => {
     setError(null);
     // §4: throw→배너 대신 필드 규칙 일괄 검증 → 인라인 에러(참조 구현: poi-cache-targets).
@@ -307,7 +291,6 @@ function PolicyEditor({
           "최소 ≤ 최적 ≤ 시스템 주기 순서를 지켜야 합니다.",
         ),
       },
-      { field: "rate_limit_source", validate: jsonObject<PolicyDraft>() },
     ]);
     if (!result.isValid) {
       setFieldErrors(result.errors);
@@ -454,12 +437,10 @@ function PolicyEditor({
         </label>
         <FormTextArea
           className="lg:col-span-2"
-          error={fieldErrors.rate_limit_source ?? jsonError ?? undefined}
-          label="rate limit 출처(JSON)"
-          help="provider가 내려준 원본 rate-limit 정보를 JSON으로 보관합니다."
-          placeholder='예: {"daily_quota": 1500}'
-          value={draft.rate_limit_source}
-          onChange={(event) => setField("rate_limit_source", event.target.value)}
+          readOnly
+          label="rate limit 출처(서버 기록)"
+          help="provider 계약 동기화가 기록한 provenance입니다. 운영자 정책 저장으로 수정할 수 없습니다."
+          value={JSON.stringify(policy?.rate_limit_source ?? {}, null, 2)}
         />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">

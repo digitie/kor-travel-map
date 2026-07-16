@@ -8,10 +8,7 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C45X-B` — sync_scope·active request 백엔드 정본 (agent A, issue #686, PR #701)
-  - [ ] `T-ADM-C4R` — C4 UI 소비 계약+C45X UI 폐루프 (agent A, issues #684/#686, PR #698)
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
-  - [ ] `T-ADM-C4` — frontend `/ops/datasets` (agent A)
   - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
   - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
   - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
@@ -34,26 +31,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C45X-B` — **sync_scope·active request 백엔드 정본** (agent **A**,
-  issue **#686**, PR **#701**, 의존 C2R·C3e): typed job identity에 effective
-  `sync_scope`와 dispatch intent를 저장하고, 실제 KMA target 선택·scope별 cursor,
-  활성 요청 유일성·멱등 재사용·같은 작업 run-now를 완결한다. UI 수용은 C45X-U에서
-  닫으므로 #686은 이 PR만으로 닫지 않는다.
-- [ ] `T-ADM-C4R` / `T-ADM-C45X-U` — **C4 UI 소비 계약과 scope 폐루프 수정**
-  (agent **A**, issues **#684/#686**, PR **#698**, 의존 C2R·C3e·C45X-B):
-  freshness/schedule/latest operation/orphan/preview와 `scope_refresh` capability,
-  `reused_active_request`, 기존 활성 작업 링크를 UI 상태·조작 모델에 반영한다.
-  active `external_system:*` scope의 첫 실행도 선택 가능해야 하며 stale scope는 실행을
-  비활성화하고 scope별 recent run을 섞지 않는다.
-  완료·적대적 리뷰·live UI 증거 뒤 #684와 #686을 함께 종결한다.
 - [ ] `T-ADM-C7A` — **ops-live same-origin 인증 + query invalidation** (agent
   **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
   인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
   전에 반드시 머지한다.
-- [ ] `T-ADM-C4` — **frontend `/ops/datasets`**
-  (agent **A**, 의존 C2R·C3e·C4R·C45X-B): 그리드(3원
-  행·never_run/stale 구분·이슈 배지)+drawer(정책 편집·ETL preview·지금 갱신 인라인
-  폐루프·Feature 보기)+mock e2e.
 - [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X-B): 상태
   스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
   패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
@@ -83,13 +64,12 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
   생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
   fingerprint 변화와 grid cap 초과 fail-closed·scope별 durable failure를 검증한다.
+  C4R의 운영 종결 이슈 #684/#686/#712도 이 live 증거를 첨부한 뒤 닫는다.
 
-현재 codex 실행 순서는 사용자 지시로 **C45X·C4R 차단 계약 → 기존
-C4/C5 PR rebase·수정·CI green·merge → C6a → C6b → C7A → C7 n150**이다. Claude Code
-worktree의 C45X/C4R 구현이 출발점이다. C3e 전체와 n150 운영 종결은 완료했으며, 해당
-worktree와 PR을 가져와 현재 0052 typed identity 정본 기준으로 적대적 상세 리뷰
-후 개선을 반영한다. C4/C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다.
-C6 착수 전 원격에서 C4/C5와 관련 차단 PR의 실제 merge·CI 상태를 확인한다.
+현재 codex 실행 순서는 사용자 지시로 **C5 PR 적대 리뷰·수정·merge와 C7A 독립 범위 병행
+→ C6a → C6b → C7A 결선 → C7 n150**이다. C45X-B와 C4/C4R은 완료 이력으로 옮겼다.
+C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다. C7A의 query-key 결선은
+C5 merge 뒤 rebase하고, C6 착수 전 원격에서 관련 PR의 실제 merge·CI 상태를 확인한다.
 
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전

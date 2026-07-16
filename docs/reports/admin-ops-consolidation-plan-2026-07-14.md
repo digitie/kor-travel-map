@@ -124,7 +124,7 @@ RFC7807 `application/problem+json`으로 승격한다. event cursor는 DB timeli
 | 경로 | 메서드 | 역할 |
 |---|---|---|
 | `/ops/datasets` | GET | provider×dataset×scope 그리드(서버 freshness+실제 schedule+정책+dataset/provider 이슈+최신 DB 실행 batch join) |
-| `/ops/datasets/detail?provider=...&dataset_key=...` | GET | 상세 — scope 배열 반환(3원 차원), sync states·cursor·최근 실행/이벤트·정책 |
+| `/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...` | GET | 선택한 3원 행 상세 — scope 배열·exact scope 최근 실행, sync states·cursor·이벤트·정책 |
 | `/ops/datasets/refresh-policy?provider=...&dataset_key=...` | PUT | canonical catalog 정책 upsert(2원, orphan 409) |
 | `/ops/datasets/preview?provider=...&dataset_key=...` | POST | fixture-only typed ETL dry-run(`max_items`, timeout, 외부 호출 budget 0, `truncated`) |
 

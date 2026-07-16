@@ -414,7 +414,10 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   `sync_scope`, non-null selected member id와 status를 보존한다. feature-load run의
   `projected_job`은 root 자체로 고정하고 pair별 상태는 이 배열에서만 읽는다. datasets coverage는
   `db_recorded_canonical_operations`이며 detail은 pipeline과
-  같은 total order의 `recent_runs_next_cursor`와 pair-filtered `pipeline_history_url`을 준다.
+  같은 total order의 `recent_runs_next_cursor`와 논리 scope-filtered
+  `pipeline_history_url`을 준다. 이 URL은 `provider`·`dataset_key`·`sync_scope`를 함께 전달하며,
+  일반 dataset과 orphan 기본 state는 선택 scope·typed `dataset_wide`·NULL pair를 같은 이력으로
+  이어 간다. `sync_scope`만 단독으로 pipeline 목록에 전달하는 요청은 422다.
   상세 계약은 `docs/architecture/openapi-admin-contract.md` §7.2.1이다.
   raw status 필드명은 nullable `dagster_run_status`이며 engine create/start/finish 시각을 응답
   시각으로 사용한다. root progress는 완료 pair 비율, exact SUCCESS는 100이고 partial

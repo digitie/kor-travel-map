@@ -86,6 +86,12 @@ def test_provider_refresh_policy_routes_mounted_in_openapi(client: TestClient) -
     )
     assert "ProviderRefreshPolicyResponse" in spec["components"]["schemas"]
     assert "ProviderRefreshPolicyUpsertRequest" in spec["components"]["schemas"]
+    assert (
+        "rate_limit_source"
+        not in spec["components"]["schemas"]["ProviderRefreshPolicyUpsertRequest"][
+            "properties"
+        ]
+    )
 
 
 @pytest.mark.unit
@@ -147,6 +153,7 @@ def test_upsert_provider_refresh_policy(
         assert kwargs["system_interval_seconds"] == 3600
         assert kwargs["stale_after_minutes"] == 90
         assert kwargs["max_concurrent"] == 2
+        assert "rate_limit_source" not in kwargs
         return _policy(
             enabled=kwargs["enabled"],
             stale_after_minutes=kwargs["stale_after_minutes"],
@@ -166,7 +173,6 @@ def test_upsert_provider_refresh_policy(
             "max_requests_per_minute": 60,
             "max_concurrent": 2,
             "burst_size": 5,
-            "rate_limit_source": {"provider_repo": "F:/dev/python-kma-api"},
             "enabled": False,
         },
     )
@@ -175,6 +181,24 @@ def test_upsert_provider_refresh_policy(
     assert response.json()["data"]["enabled"] is False
     assert response.json()["data"]["stale_after_minutes"] == 90
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_upsert_rejects_server_owned_rate_limit_provenance(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.put(
+        "/v1/admin/provider-refresh-policies/python-kma-api/kma_weather_values",
+        json={
+            "source_kind": "openapi",
+            "rate_limit_source": {"forged": "operator-body"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
 
 
 @pytest.mark.unit

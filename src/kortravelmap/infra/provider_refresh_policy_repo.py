@@ -148,7 +148,11 @@ ON CONFLICT (provider, dataset_key) DO UPDATE SET
     max_requests_per_day = EXCLUDED.max_requests_per_day,
     max_concurrent = EXCLUDED.max_concurrent,
     burst_size = EXCLUDED.burst_size,
-    rate_limit_source = EXCLUDED.rate_limit_source,
+    rate_limit_source = CASE
+        WHEN CAST(:rate_limit_source_provided AS boolean)
+        THEN EXCLUDED.rate_limit_source
+        ELSE ops.provider_refresh_policies.rate_limit_source
+    END,
     config_source = EXCLUDED.config_source,
     enabled = EXCLUDED.enabled,
     stale_after_minutes = EXCLUDED.stale_after_minutes,
@@ -198,7 +202,12 @@ async def upsert_provider_refresh_policy(
     enabled: bool = True,
     stale_after_minutes: int | None = None,
 ) -> ProviderRefreshPolicy:
-    """정책 row를 upsert한다. commit은 호출자 책임."""
+    """정책 row를 upsert한다. commit은 호출자 책임.
+
+    ``rate_limit_source``는 provider 계약을 수집하는 내부 caller가 소유한다.
+    ``None``이면 신규 row에는 빈 object를 기록하고 기존 row에서는 provenance를
+    보존한다. 명시한 mapping(빈 mapping 포함)은 내부 동기화 값으로 교체한다.
+    """
     _validate_policy(
         provider=provider,
         dataset_key=dataset_key,
@@ -224,10 +233,11 @@ async def upsert_provider_refresh_policy(
                 "max_concurrent": max_concurrent,
                 "burst_size": burst_size,
                 "rate_limit_source": json.dumps(
-                    dict(rate_limit_source) if rate_limit_source else {},
+                    dict(rate_limit_source) if rate_limit_source is not None else {},
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
+                "rate_limit_source_provided": rate_limit_source is not None,
                 "config_source": config_source,
                 "enabled": enabled,
                 "stale_after_minutes": stale_after_minutes,

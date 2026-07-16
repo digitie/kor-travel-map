@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin datasets 통합·scope 폐루프 (2026-07-17, `T-ADM-C45X-B`·`C4R`·`C4`)
+
+- [x] **T-ADM-C45X-B — sync_scope·active request 백엔드 정본.** PR #701에서 direct
+  update의 typed scope·dispatch intent, active 유일성·멱등 재사용, KMA exact target과
+  scope별 cursor/failure를 완결하고 병합했다.
+- [x] **T-ADM-C4R / C45X-U — C4 UI 소비 계약과 scope 폐루프.** PR #698에서
+  datasets projection과 pipeline history를 exact 3원 scope로 정렬하고, dataset-wide 기본
+  state와 orphan/stale scope를 구분했다. active `external_system:*` 첫 실행, 기존 active
+  operation 재사용 링크, 정책·preview·freshness·schedule degrade를 fail-closed UI에 연결했다.
+- [x] **T-ADM-C4 — `/ops/datasets` 통합 화면.** 검색·상태 그리드, URL/history 기반 drawer,
+  정책 편집, fixture preview, 지금 갱신과 scope별 이력을 한 화면에 구현했다. 두 적대 리뷰어의
+  최종 판정은 S1/S2/S3 0건이고 mocked production UI E2E 47건이 통과했다. #684/#686/#712의
+  운영 종결은 `T-ADM-C7` n150 live 증거 뒤 수행한다.
+
 ## C3e n150 운영 종결 (2026-07-16, `T-ADM-C3e-I2`)
 
 - [x] **T-ADM-C3e-I2 — migration·sensor/cursor·4종 동일-root·live UI 검증.** 배포 전

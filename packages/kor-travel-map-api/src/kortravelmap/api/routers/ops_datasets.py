@@ -89,6 +89,7 @@ async def get_dataset_detail(
     request: Request,
     provider: Annotated[str, Query(min_length=1)],
     dataset_key: Annotated[str, Query(min_length=1)],
+    sync_scope: Annotated[str, Query(min_length=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsDatasetDetailResponse:
     started_at = perf_counter()
@@ -100,6 +101,7 @@ async def get_dataset_detail(
             dagster_client=dagster_client,
             provider=provider,
             dataset_key=dataset_key,
+            sync_scope=sync_scope,
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

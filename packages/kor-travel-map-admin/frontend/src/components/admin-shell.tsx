@@ -9,6 +9,7 @@ import {
   GaugeIcon,
   GitCompareArrowsIcon,
   HomeIcon,
+  LayersIcon,
   LinkIcon,
   ListChecksIcon,
   MapIcon,
@@ -85,6 +86,8 @@ export const NAV_GROUPS = [
     group: "수집 파이프라인",
     badge: "수집 파이프라인",
     items: [
+      // ADR-064 페이지 ② (T-ADM-C4). 구 항목 제거는 T-ADM-C6b.
+      { href: "/ops/datasets", label: "데이터셋", icon: LayersIcon },
       { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
       { href: "/ops/import-jobs", label: "적재 작업", icon: ListChecksIcon },
       {

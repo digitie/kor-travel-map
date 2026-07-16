@@ -440,7 +440,8 @@ CTE와 exact pair projection을 사용한다.
 - `GET /v1/ops/pipeline/executions`: 기존 keyset `(created_at DESC, id DESC, kind DESC)` 유지.
 - `GET /v1/ops/datasets`: 공용 CTE 위에서 provider/dataset별 최신 root를 한 batch query로
   계산한다. paginated first page를 전체 dataset 최신값으로 오인하지 않는다.
-- `GET /v1/ops/datasets/detail?provider=...&dataset_key=...`: exact pair query로
+- `GET /v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`: 요청한
+  논리 scope를 SQL pagination 전에 제한하는 exact pair query로
   `list_pipeline_executions`를 호출해 최근 canonical root를 반환한다.
 
 `dataset_status_repo`의 독자 recursive SQL과 payload `request_id` 계보는 제거한다. grid와

@@ -798,7 +798,7 @@ T-221d 구현 상태:
 ## 7.1 통합 datasets 운영 계약 (ADR-064, T-ADM-C2R)
 
 `GET /ops/datasets`와
-`GET /ops/datasets/detail?provider=...&dataset_key=...`은 다음 의미를
+`GET /ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`은 다음 의미를
 명시적으로 분리한다.
 
 - `eligible_after`: `provider_sync_state.next_run_after`의 backoff/rate-limit상 재호출
@@ -865,7 +865,9 @@ DB에 기록된 update request와 import job hierarchy를 root 실행 목록으�
 정렬과 cursor 비교는 모두 `(created_at DESC, id DESC, kind DESC)`다. cursor v2는
 `created_at`·UUID `id`·`kind(update_request|import_job)`를 담고, 형식이나 kind가
 잘못되면 DB 조회 전에 `422`다. query는 `kind`, root `status`, `provider`,
-`dataset_key`, `created_from`, `created_to`, `page_size`, `cursor`를 지원한다.
+`dataset_key`, `sync_scope`, `created_from`, `created_to`, `page_size`, `cursor`를 지원한다.
+`sync_scope`는 `provider`·`dataset_key`와 함께 써야 하며 단독 사용은 `422`다. 일반 dataset과
+orphan 기본 state에서는 선택 scope·typed `dataset_wide`·NULL pair를 같은 논리 이력으로 본다.
 provider-only/dataset-only filter는 request 저장 배열 membership과 canonical exact pair를
 함께 본다. provider와 dataset을 모두 주면 배열을 교차 조합하지 않고 같은 canonical
 `provider_datasets[]` member가 정확히 일치할 때만 반환한다. import 실행 identity의 유일한
@@ -950,13 +952,17 @@ feature-load root는 identity 진단용 nullable `operation_registry_version`도
 legacy/update root에서는 NULL이며 이 값은 cursor나 correlation key가 아니다.
 
 `GET /v1/ops/datasets`의 `latest_execution_coverage`와
-`GET /v1/ops/datasets/detail?provider=...&dataset_key=...`의
+`GET /v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`의
 `recent_runs_coverage`는 모두
 `db_recorded_canonical_operations`다. 이는 0051 이후 DB 기록 범위이며 과거
 GraphQL-only run이나 #686의 requested/effective sync scope를 포함한다고 주장하지 않는다.
-detail의 `recent_runs`는 pipeline과 같은 total order의 첫 page이고
-`recent_runs_next_cursor`와 해당 pair filter가 박힌 `pipeline_history_url`을 함께 반환한다.
-다음 cursor는 누락·중복 없이 이어져야 한다.
+detail의 `recent_runs`는 요청한 논리 scope를 DB에서 먼저 제한한 뒤 pipeline과 같은
+total order로 자른 첫 page다. 일반 dataset의 provider-state 기본 scope는 typed
+`dataset_wide`/NULL pair와 같은 논리 범위로 취급한다. 따라서 다른 scope의 최신 실행이
+page를 채워도 stale external/orphan exact-scope 이력이 pagination 뒤에서 사라지지 않는다.
+`recent_runs_next_cursor`와 같은 논리 scope 별칭을 적용한
+`pipeline_history_url`을 함께 반환한다. 다음 cursor는 그 URL에서 다른 scope를 섞지 않고
+누락·중복 없이 이어져야 한다.
 
 Dagster feature-load operation은 run root 하나와 exact pair child들이다. timeline에는 root 한
 행만 보이고 datasets는 같은 `(kind,id)` root와 해당 pair child status를 노출한다. 같은 run의

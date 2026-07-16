@@ -107,6 +107,7 @@ from kortravelmap.api.pipeline_cancellation_schema import (
     cancellation_detail_record,
     cancellation_summary_record,
 )
+from kortravelmap.api.provider_catalog import resolve_dataset_history_sync_scopes
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -982,7 +983,8 @@ def _parse_dagster_overview(
         "import job hierarchy를 job별 nearest request anchor branch와 standalone "
         "partition으로 접어 root만 반환한다. keyset total order는 "
         "`(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 "
-        "`dagster_run_id`로만 연결한다."
+        "`dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 "
+        "함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다."
     ),
 )
 async def list_executions(
@@ -991,6 +993,16 @@ async def list_executions(
     status_filter: Annotated[ExecutionState | None, Query(alias="status")] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
+    sync_scope: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            description=(
+                "provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 "
+                "기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다."
+            ),
+        ),
+    ] = None,
     created_from: Annotated[datetime | None, Query()] = None,
     created_to: Annotated[datetime | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -998,12 +1010,22 @@ async def list_executions(
 ) -> PipelineExecutionsListResponse:
     started_at = perf_counter()
     try:
+        dataset_sync_scopes = None
+        if sync_scope is not None:
+            if provider is None or dataset_key is None:
+                raise ValueError("sync_scope requires both provider and dataset_key")
+            dataset_sync_scopes = resolve_dataset_history_sync_scopes(
+                provider,
+                dataset_key,
+                sync_scope,
+            )
         page = await list_pipeline_executions(
             session,
             kind=kind,
             status=status_filter,
             provider=provider,
             dataset_key=dataset_key,
+            dataset_sync_scopes=dataset_sync_scopes,
             created_from=created_from,
             created_to=created_to,
             limit=page_size,
