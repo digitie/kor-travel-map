@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Dagster provider guard·public wrapper tracking (2026-07-16, ADR-064 T-ADM-C3e-B2)
+
+- **ADDED**: 모든 live provider resource가 authoritative Dagster run record의 job·asset selection·
+  run config·canonical identity/version·trigger를 provider I/O 전에 exact match로 검증한다.
+- **CHANGED**: public asset/KMA wrapper가 마지막 ensure와 자기 exact pair 완료를 소유하고,
+  MCST는 pair-completion callback으로 부분 성공을 보존한다. direct raw runner는 tracking을
+  생성하지 않는다.
+- **FIXED**: 취소 marker·runtime identity drift·naive timestamp를 fail-closed하고, 비기본 KNPS
+  point/geometry 설정이 provider fetcher와 asset resource에서 서로 달라질 수 있던 경로를 같은
+  settings snapshot으로 통일했다.
+
 ### Dagster canonical operation run 추적 (2026-07-16, ADR-064 T-ADM-C3e-B3)
 
 - **ADDED**: QUEUED부터 CANCELED까지 7개 run-status sensor와 NOT_STARTED/MANAGED·누락

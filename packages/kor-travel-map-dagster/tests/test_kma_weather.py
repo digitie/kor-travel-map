@@ -8,7 +8,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import build_asset_context, build_init_resource_context
+from dagster import build_asset_context
 from kortravelmap.dto import ForecastStyle, WeatherDomain
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -19,6 +19,9 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 from kortravelmap.dagster import kma_weather, provider_fetchers, resources
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 from kortravelmap.dagster.kma_weather import (
     KmaForecastRow,
     KmaNowcastRow,
@@ -43,6 +46,29 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
     ".*:dagster_shared.utils.warnings.BetaWarning"
 )
+
+_PANEL_CLIENT = object()
+_PANEL_INSTANCE = object()
+_PANEL_RUN_ID = "panel-test"
+_PANEL_GUARD = FeatureOperationExecutionGuard(
+    client=cast(Any, _PANEL_CLIENT),
+    instance=_PANEL_INSTANCE,
+    identity=None,
+    dagster_run_id=_PANEL_RUN_ID,
+    trigger_kind=None,
+)
+
+
+def _guarded_init_resource_context() -> Any:
+    return SimpleNamespace(
+        resource_config={},
+        resources=SimpleNamespace(
+            feature_operation_guard=_PANEL_GUARD,
+            kor_travel_map_client=_PANEL_CLIENT,
+        ),
+        instance=_PANEL_INSTANCE,
+        run=SimpleNamespace(job_name="panel_only_job", run_id=_PANEL_RUN_ID),
+    )
 
 
 def _int_grid(lat: float, lon: float) -> tuple[int, int]:
@@ -547,7 +573,7 @@ def test_kma_weather_client_resource_yields_client_and_closes(
     resource_fn = cast(
         "Any", resources.kma_weather_client_resource.resource_fn
     )
-    resource_iter = resource_fn(build_init_resource_context())
+    resource_iter = resource_fn(_guarded_init_resource_context())
     client = next(resource_iter)
 
     assert client.service_key == "kma-key"
@@ -573,7 +599,7 @@ def test_kma_weather_client_resource_guard_without_credential(
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        next(resource_fn(build_init_resource_context()))
+        next(resource_fn(_guarded_init_resource_context()))
 
     message = str(exc_info.value)
     assert "kma_weather_client" in message
@@ -1002,7 +1028,7 @@ def test_kma_datagokr_client_resource_yields_client_and_closes(
     )
 
     resource_fn = cast("Any", resources.kma_datagokr_client_resource.resource_fn)
-    resource_iter = resource_fn(build_init_resource_context())
+    resource_iter = resource_fn(_guarded_init_resource_context())
     client = next(resource_iter)
 
     assert client.service_key == "data-key"
@@ -1025,7 +1051,7 @@ def test_kma_datagokr_client_resource_guard_without_credential(
     resource_fn = cast("Any", resources.kma_datagokr_client_resource.resource_fn)
 
     with pytest.raises(RuntimeError) as exc_info:
-        next(resource_fn(build_init_resource_context()))
+        next(resource_fn(_guarded_init_resource_context()))
 
     message = str(exc_info.value)
     assert "kma_datagokr_client" in message

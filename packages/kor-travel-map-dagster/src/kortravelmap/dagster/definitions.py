@@ -37,6 +37,7 @@ from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
     datagokr_file_data_dataset_key_resource,
+    feature_operation_guard_resource,
     kma_datagokr_client_resource,
     kma_weather_client_resource,
     kor_travel_map_client_resource,
@@ -49,6 +50,7 @@ from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
 REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kor_travel_map_client",
+    "feature_operation_guard",
     "reverse_geocoder",
     "feature_update_runner",
     "offline_upload_store",
@@ -116,6 +118,7 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
 
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
+    "feature_operation_guard": feature_operation_guard_resource,
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
     "reverse_geocoder": reverse_geocoder_resource,

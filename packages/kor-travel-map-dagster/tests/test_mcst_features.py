@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType
-from typing import Any
+from datetime import UTC, datetime
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
-from dagster import build_asset_context
+from dagster import AssetKey, build_asset_context
+from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS
+from kortravelmap.providers.feature_operation_registry import (
+    feature_operation_launch_tags,
+    resolve_feature_operation_identity,
+)
+from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PROVIDER_NAME
 from kortravelmap.settings import KorTravelMapSettings
 
+from kortravelmap.dagster import mcst_features as mcst_module
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 from kortravelmap.dagster.mcst_features import (
+    feature_place_mcst_culture,
     group_records_by_slug,
     run_feature_place_mcst_culture,
 )
@@ -118,6 +129,192 @@ async def test_culture_asset_skips_unidentifiable_rows_with_warning() -> None:
     by_key = {r.dataset_key: r for r in result.results}
     assert by_key["mcst_golf_courses_status"].load.bundles_total == 1
     assert result.bundles_total == 1
+
+
+async def test_culture_raw_callback_completes_empty_pairs() -> None:
+    completed: list[tuple[str, str]] = []
+
+    async def _done(provider: str, dataset_key: str) -> None:
+        completed.append((provider, dataset_key))
+
+    result = await run_feature_place_mcst_culture(
+        _context([]),
+        on_pair_done=_done,
+    )
+
+    assert result.results == ()
+    assert completed == [
+        (MCST_PROVIDER_NAME, spec.dataset_key)
+        for spec in MCST_FILE_DATASETS.values()
+    ]
+
+
+async def test_culture_raw_callback_preserves_early_success_on_late_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
+    first_dataset = MCST_FILE_DATASETS[first_slug].dataset_key
+    second_dataset = MCST_FILE_DATASETS[second_slug].dataset_key
+    events: list[tuple[str, str]] = []
+
+    async def _load(
+        _context: object,
+        *,
+        provider: str,
+        dataset_key: str,
+        bundles: object,
+    ) -> Any:
+        del provider, bundles
+        events.append(("load", dataset_key))
+        if dataset_key == second_dataset:
+            raise RuntimeError("late MCST failure")
+        return object()
+
+    async def _done(_provider: str, dataset_key: str) -> None:
+        events.append(("done", dataset_key))
+
+    monkeypatch.setattr(mcst_module, "_load", _load)
+    records = [
+        (first_slug, _common_row("첫 dataset")),
+        (second_slug, _common_row("둘째 dataset")),
+    ]
+
+    with pytest.raises(RuntimeError, match="late MCST failure"):
+        await run_feature_place_mcst_culture(
+            _context(records),
+            on_pair_done=_done,
+        )
+
+    assert events == [
+        ("load", first_dataset),
+        ("done", first_dataset),
+        ("load", second_dataset),
+    ]
+
+
+async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
+    first_dataset = MCST_FILE_DATASETS[first_slug].dataset_key
+    second_dataset = MCST_FILE_DATASETS[second_slug].dataset_key
+    identity = resolve_feature_operation_identity(
+        job_name="feature_place_mcst_culture_job"
+    )
+    assert identity is not None
+
+    class _TrackingClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+            self.done_pairs: set[Any] = set()
+            self.finish_outcomes: list[str] = []
+
+        async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
+            self.calls.append(("ensure", kwargs))
+            return SimpleNamespace(outcome="applied", block_reason=None)
+
+        async def finish_dagster_feature_pair(self, **kwargs: Any) -> Any:
+            self.calls.append(("finish", kwargs))
+            pair = kwargs["pair"]
+            outcome = "noop" if pair in self.done_pairs else "applied"
+            self.done_pairs.add(pair)
+            self.finish_outcomes.append(outcome)
+            return SimpleNamespace(outcome=outcome, block_reason=None)
+
+        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> Any:
+            self.calls.append(("attempt", kwargs))
+            return object()
+
+    tracking_client = _TrackingClient()
+    authoritative_run = SimpleNamespace(
+        job_name=identity.job_name,
+        run_id="mcst-run",
+        run_config={},
+        tags=feature_operation_launch_tags(identity, trigger_kind="schedule"),
+        asset_selection=None,
+        resolved_op_selection=None,
+        status=SimpleNamespace(value="STARTED"),
+    )
+    record = SimpleNamespace(
+        dagster_run=authoritative_run,
+        create_timestamp=datetime(2026, 7, 16, 1, 0, tzinfo=UTC),
+        start_time=datetime(2026, 7, 16, 1, 1, tzinfo=UTC).timestamp(),
+    )
+    instance = SimpleNamespace(
+        run=authoritative_run,
+        get_run_record_by_id=lambda _run_id: record,
+    )
+    guard = FeatureOperationExecutionGuard(
+        client=cast(AsyncKorTravelMapClient, tracking_client),
+        instance=instance,
+        identity=identity,
+        dagster_run_id="mcst-run",
+        trigger_kind="schedule",
+    )
+
+    async def _load(
+        _context: object,
+        *,
+        provider: str,
+        dataset_key: str,
+        bundles: object,
+    ) -> Any:
+        del provider, bundles
+        if dataset_key == second_dataset:
+            raise RuntimeError("late MCST failure")
+        return object()
+
+    monkeypatch.setattr(mcst_module, "_load", _load)
+    base = _context(
+        [
+            (first_slug, _common_row("첫 dataset")),
+            (second_slug, _common_row("둘째 dataset")),
+        ]
+    )
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+
+    def _wrapper_context(retry_number: int) -> Any:
+        return SimpleNamespace(
+            resources=SimpleNamespace(
+                feature_operation_guard=guard,
+                kor_travel_map_client=tracking_client,
+                mcst_culture_records=base.resources.mcst_culture_records,
+                reverse_geocoder=base.resources.reverse_geocoder,
+                fetched_at=None,
+            ),
+            log=base.log,
+            add_output_metadata=base.add_output_metadata,
+            instance=instance,
+            run=authoritative_run,
+            run_id=authoritative_run.run_id,
+            selected_asset_keys={AssetKey("feature_place_mcst_culture")},
+            asset_key=AssetKey("feature_place_mcst_culture"),
+            job_name="feature_place_mcst_culture_job",
+            retry_number=retry_number,
+        )
+
+    with pytest.raises(RuntimeError, match="late MCST failure"):
+        await wrapper(_wrapper_context(0))
+    with pytest.raises(RuntimeError, match="late MCST failure"):
+        await wrapper(_wrapper_context(1))
+
+    assert [name for name, _kwargs in tracking_client.calls] == [
+        "ensure",
+        "finish",
+        "attempt",
+        "ensure",
+        "finish",
+        "attempt",
+    ]
+    assert tracking_client.calls[0][1]["selected_pairs"] == identity.pairs
+    assert tracking_client.calls[1][1]["pair"].dataset_key == first_dataset
+    assert tracking_client.calls[2][1]["pair"].dataset_key == second_dataset
+    assert tracking_client.calls[4][1]["pair"] == tracking_client.calls[1][1]["pair"]
+    assert tracking_client.calls[5][1]["pair"] == tracking_client.calls[2][1]["pair"]
+    assert [
+        tracking_client.calls[index][1]["attempt_number"] for index in (2, 5)
+    ] == [1, 2]
+    assert tracking_client.finish_outcomes == ["applied", "noop"]
 
 
 # -- fetcher ------------------------------------------------------------------

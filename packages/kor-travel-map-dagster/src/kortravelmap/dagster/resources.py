@@ -32,6 +32,10 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
+from .feature_operation_tracking import (
+    ensure_feature_operation_guard_for_provider,
+    feature_operation_guard_resource,
+)
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     fetch_airkorea_air_quality,
@@ -72,6 +76,7 @@ __all__ = [
     "build_provider_record_live_resource",
     "create_s3_client_from_settings",
     "datagokr_file_data_dataset_key_resource",
+    "feature_operation_guard_resource",
     "kma_datagokr_client_resource",
     "kma_weather_client_resource",
     "kor_travel_map_client_resource",
@@ -355,12 +360,20 @@ def build_provider_record_guard_resource(
     """Provider record resource의 env 매핑을 보존하는 비실행 guard."""
 
     @resource(
+        required_resource_keys={
+            "feature_operation_guard",
+            "kor_travel_map_client",
+        },
         description=(
             f"{spec.resource_key} provider record guard "
             f"({spec.provider_package}, {spec.dataset_key})."
         )
     )
-    def _resource(_context: InitResourceContext) -> object:
+    def _resource(context: InitResourceContext) -> object:
+        ensure_feature_operation_guard_for_provider(
+            context,
+            boundary=spec.resource_key,
+        )
         settings = KorTravelMapSettings()
         has_required_settings = all(
             getattr(settings, setting_name) is not None for setting_name in spec.setting_names
@@ -391,12 +404,20 @@ def build_provider_record_live_resource(
     """
 
     @resource(
+        required_resource_keys={
+            "feature_operation_guard",
+            "kor_travel_map_client",
+        },
         description=(
             f"{spec.resource_key} provider record live fetcher "
             f"({spec.provider_package}, {spec.dataset_key})."
         )
     )
-    def _resource(_context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
+    def _resource(context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
+        ensure_feature_operation_guard_for_provider(
+            context,
+            boundary=spec.resource_key,
+        )
         settings = KorTravelMapSettings()
         has_required_settings = all(
             getattr(settings, setting_name) is not None for setting_name in spec.setting_names
@@ -448,6 +469,10 @@ def _build_knps_record_resource(
     """registry가 고정한 KNPS dataset snapshot으로 fetcher를 실행한다."""
 
     @resource(
+        required_resource_keys={
+            "feature_operation_guard",
+            "kor_travel_map_client",
+        },
         config_schema=_KNPS_DATASET_CONFIG_SCHEMA,
         description=(
             f"{spec.resource_key} provider record live fetcher "
@@ -455,6 +480,10 @@ def _build_knps_record_resource(
         ),
     )
     def _resource(context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
+        ensure_feature_operation_guard_for_provider(
+            context,
+            boundary=spec.resource_key,
+        )
         settings = KorTravelMapSettings()
         configured = context.resource_config.get("dataset_key")
         dataset_key = str(configured or getattr(settings, setting_name))
@@ -479,6 +508,7 @@ def _datagokr_file_data_dataset_key(
 
 
 @resource(
+    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
     config_schema=_DATAGOKR_FILE_DATA_CONFIG_SCHEMA,
     description=(
         "data.go.kr curated fileData dataset_key 값. Schedule run_config가 있으면 "
@@ -488,6 +518,10 @@ def _datagokr_file_data_dataset_key(
 def datagokr_file_data_dataset_key_resource(
     context: InitResourceContext,
 ) -> str:
+    ensure_feature_operation_guard_for_provider(
+        context,
+        boundary="datagokr_file_data_dataset_key",
+    )
     return _datagokr_file_data_dataset_key(context, KorTravelMapSettings())
 
 
@@ -761,6 +795,7 @@ _DATAGOKR_FILE_DATA_SPEC: ProviderRecordResourceSpec = next(
 
 
 @resource(
+    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
     config_schema=_DATAGOKR_FILE_DATA_CONFIG_SCHEMA,
     description=(
         "datagokr_file_data_records provider record live fetcher "
@@ -770,6 +805,10 @@ _DATAGOKR_FILE_DATA_SPEC: ProviderRecordResourceSpec = next(
 def _datagokr_file_data_records_resource(
     context: InitResourceContext,
 ) -> Iterable[Any] | AsyncIterator[Any]:
+    ensure_feature_operation_guard_for_provider(
+        context,
+        boundary="datagokr_file_data_records",
+    )
     settings = KorTravelMapSettings()
     has_required_settings = all(
         getattr(settings, setting_name) is not None
@@ -984,12 +1023,13 @@ def _dispose_async_engine(engine: Any) -> None:
 
 
 @resource(
+    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
     description=(
         "kma_weather_client provider live client (python-kma-api, "
         "kma_ultra_short_nowcast/kma_ultra_short_forecast/kma_short_forecast)."
     )
 )
-def kma_weather_client_resource(_context: InitResourceContext) -> Iterator[Any]:
+def kma_weather_client_resource(context: InitResourceContext) -> Iterator[Any]:
     """``python-kma-api`` ``KmaClient`` live 인스턴스 (T-219b).
 
     KMA weather asset은 대상 격자가 DB(``ops.poi_cache_targets``)에서 나와
@@ -997,6 +1037,10 @@ def kma_weather_client_resource(_context: InitResourceContext) -> Iterator[Any]:
     노출하고 asset이 격자별로 직접 호출한다(ADR-006 wrapper 없음, 계획 정본
     §2.3). credential이 없으면 guard와 동일한 helpful message로 실패한다.
     """
+    ensure_feature_operation_guard_for_provider(
+        context,
+        boundary="kma_weather_client",
+    )
     settings = KorTravelMapSettings()
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1018,12 +1062,13 @@ def kma_weather_client_resource(_context: InitResourceContext) -> Iterator[Any]:
 
 
 @resource(
+    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
     description=(
         "kma_datagokr_client provider live client (python-kma-api DataGoKrClient, "
         "kma_mid_forecast)."
     )
 )
-def kma_datagokr_client_resource(_context: InitResourceContext) -> Iterator[Any]:
+def kma_datagokr_client_resource(context: InitResourceContext) -> Iterator[Any]:
     """``python-kma-api`` ``DataGoKrClient`` live 인스턴스 (T-219c).
 
     중기예보(``getMidLandFcst``/``getMidTa``)는 대상 region이 설정
@@ -1032,6 +1077,10 @@ def kma_datagokr_client_resource(_context: InitResourceContext) -> Iterator[Any]
     호출한다(ADR-006 wrapper 없음). credential이 없으면 guard와 동일한
     helpful message로 실패한다.
     """
+    ensure_feature_operation_guard_for_provider(
+        context,
+        boundary="kma_datagokr_client",
+    )
     settings = KorTravelMapSettings()
     secret = settings.data_go_kr_service_key
     if secret is None:

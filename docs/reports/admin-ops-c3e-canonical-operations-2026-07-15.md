@@ -1,6 +1,6 @@
 # C3e canonical operation 영속화 설계
 
-> 상태: 문서 gate·C3e-A1·C3e-A2 완료, C3e-B1/B2/B3·C 구현 전
+> 상태: 문서 gate·C3e-A1/A2/B1/B2/B3/C 구현·로컬 gate 완료, C3e-I·#679·n150 미완료
 > 범위: T-ADM-C3e, 이슈 #679, ADR-064
 > 선행: PR #689(C3b root projection), PR #695(C3d 계층 취소)
 
@@ -699,6 +699,28 @@ typed identity가 없는 event-only sibling은 root timeline에는 남지만 pai
 live n150/prod는 C3e-I/C7 최종 gate로 남긴다.
 
 A2는 PR #705의 8개 CI gate green 뒤 main에 병합했고 `docs/tasks-done.md`로 이동했다.
+
+### C3e-B2 구현·로컬 gate 기록
+
+B2는 B1 immutable registry를 실제 provider 실행 경계에 연결했다. 모든 live provider resource는
+provider I/O 전에 authoritative Dagster run record의 run id·job·resolved asset selection·run
+config·canonical identity/version tag·trigger를 exact match로 검증한다. resource 초기화와 public
+wrapper 양쪽에서 멱등 ensure를 수행해 초기화 뒤 취소 marker나 identity drift가 생겨도 fetch 전에
+fail-closed한다. 각 public asset과 KMA wrapper는 raw 성공 뒤 자기 exact pair만 완료하고, 재시도
+실패 event에는 redacted 오류만 남긴다.
+
+MCST raw runner는 nullable async pair-completion callback으로 앞선 pair 성공을 보존하며,
+`FeatureUpdateAssetRunner` direct 경로는 operation tracking을 만들지 않는다. 취소 marker 선점,
+terminal·selection drift, naive Dagster timestamp는 child나 provider I/O 없이 typed conflict로
+닫는다. KNPS 비기본 point/geometry dataset은 `settings.model_copy(update=...)`로 provider fetcher와
+asset resource에 같은 snapshot을 전달하고 실제 `Definitions` 구성까지 회귀로 고정했다.
+
+테스트 전에 두 적대 리뷰어의 지적을 모두 반영했고 최종 판정은 각각 S1/S2/S3 0건이다. focused
+7개 파일 260건(1 skip), migration 0001→0052를 포함한 실제 PostGIS canonical operation 30건,
+Dagster package 전체 428건(1 skip), main unit 1,366건을 통과했다. Ruff, strict mypy 136개 소스,
+import 계약 4/4와 staged diff check도 통과했다. B2 wrapper 결과를 B3 sensor가 실제 terminal DB
+상태로 닫는 교차 검증, 일정·수동·갱신·import 통합, 이슈 #679 종결과 n150/prod 검증은
+`T-ADM-C3e-I`의 미완료 범위다.
 
 ## 7. 구현 전 수용 테스트
 

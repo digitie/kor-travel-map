@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-16 (agent A) — C3e-B2 provider guard·public wrapper tracking 완결
+
+- B1 canonical registry를 모든 live provider resource와 public asset/KMA wrapper에 연결했다.
+  authoritative Dagster run record의 job·selection·config·identity/version·trigger를 provider I/O
+  전에 exact match로 검증하고 resource 초기화 뒤에도 마지막 ensure를 반복해 취소 marker와
+  runtime drift를 fail-closed한다.
+- wrapper가 raw 성공 뒤 자기 exact pair만 완료하도록 했고, MCST는 nullable async callback으로
+  앞선 pair 성공을 보존한다. direct `FeatureUpdateAssetRunner`는 tracking 0을 유지한다. KNPS의
+  비기본 point/geometry 설정은 provider fetcher와 asset resource가 같은 `model_copy` snapshot을
+  사용하도록 고쳤다.
+- 두 적대 리뷰어가 timestamp timezone, 빈 resolved selection, retry outcome 어휘, KNPS 실제
+  `Definitions` 구성 등을 점검했고 최종 판정은 각각 S1/S2/S3 0건이다. focused 260건(1 skip),
+  실제 PostGIS canonical operation 30건, Dagster 전체 428건(1 skip), main unit 1,366건과 Ruff,
+  strict mypy 136개 소스, import 계약 4/4를 통과했다.
+- 완료 task는 `docs/tasks-done.md`로 이동했다. 다음 단계는 PR CI·승인·병합 뒤 C3e-I에서
+  B2→B3 실제 terminal DB 연쇄와 일정·수동·갱신·import 교차 회귀를 검증하고 #679를 닫는 것이다.
+  n150/prod 검증도 C3e-I/C7 전까지 완료로 간주하지 않는다.
+
 ## 2026-07-16 (agent B) — C3e-B3 run sensor·양방향 reconcile 완결
 
 - 수정 전 `reconcile_dagster_feature_run`의 codegraph 영향과 실제 caller를 확인하고, C3e-B1

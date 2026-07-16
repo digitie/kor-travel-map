@@ -10,12 +10,14 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import build_init_resource_context
 from kortravelmap.providers import krex as krex_provider
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 import kortravelmap.dagster.provider_fetchers as provider_fetchers
+from kortravelmap.dagster.feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
+)
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_airkorea_air_quality,
@@ -52,6 +54,29 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
     ".*:dagster_shared.utils.warnings.BetaWarning"
 )
+
+_PANEL_CLIENT = object()
+_PANEL_INSTANCE = object()
+_PANEL_RUN_ID = "panel-test"
+_PANEL_GUARD = FeatureOperationExecutionGuard(
+    client=cast(Any, _PANEL_CLIENT),
+    instance=_PANEL_INSTANCE,
+    identity=None,
+    dagster_run_id=_PANEL_RUN_ID,
+    trigger_kind=None,
+)
+
+
+def _guarded_init_resource_context() -> Any:
+    return SimpleNamespace(
+        resource_config={},
+        resources=SimpleNamespace(
+            feature_operation_guard=_PANEL_GUARD,
+            kor_travel_map_client=_PANEL_CLIENT,
+        ),
+        instance=_PANEL_INSTANCE,
+        run=SimpleNamespace(job_name="panel_only_job", run_id=_PANEL_RUN_ID),
+    )
 
 
 _DATAGOKR_SPEC = {
@@ -2693,7 +2718,7 @@ def test_live_resource_returns_iterable_when_credentials_present(
     resource_def = build_provider_record_live_resource(_DATAGOKR_SPEC, _fake_fetch)
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
-    result = resource_fn(build_init_resource_context())
+    result = resource_fn(_guarded_init_resource_context())
 
     assert result is sentinel
 
@@ -2710,7 +2735,7 @@ def test_live_resource_wraps_sync_generator_for_dagster_resource(
     resource_def = build_provider_record_live_resource(_DATAGOKR_SPEC, _fake_fetch)
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
-    result = resource_fn(build_init_resource_context())
+    result = resource_fn(_guarded_init_resource_context())
 
     assert isinstance(result, Iterable)
     assert not isinstance(result, Iterator)
@@ -2729,7 +2754,7 @@ def test_live_resource_raises_guard_message_when_credentials_missing(
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 
     with pytest.raises(RuntimeError) as exc_info:
-        resource_fn(build_init_resource_context())
+        resource_fn(_guarded_init_resource_context())
 
     message = str(exc_info.value)
     assert "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in message

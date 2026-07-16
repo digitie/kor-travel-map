@@ -13,10 +13,11 @@ slug별 ``DagsterFeatureLoadResult``는 dataset이 달라 ``merge``할 수 없�
 
 # NOTE: `from __future__ import annotations` 금지 — dagster가 asset 함수의
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
     MCST_PROVIDER_NAME,
@@ -34,6 +35,11 @@ from .assets import (
     _reverse_geocoder,
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
+from .feature_operation_tracking import (
+    append_failed_multi_pair_attempt,
+    ensure_tracked_multi_pair_asset,
+    finish_tracked_feature_pair,
+)
 
 __all__ = [
     "MCST_FEATURE_ASSETS",
@@ -86,6 +92,7 @@ def group_records_by_slug(
 
 async def run_feature_place_mcst_culture(
     context: AssetExecutionContext,
+    on_pair_done: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> McstLoadResult:
     """MCST 파일데이터 등록 dataset CSV row를 slug별 place Feature로 적재한다."""
     records = await _record_list(context, "mcst_culture_records")
@@ -103,6 +110,8 @@ async def run_feature_place_mcst_culture(
         slug_rows = grouped.get(slug)
         if not slug_rows:
             context.log.info("MCST %s row 없음 — skip.", spec.dataset_key)
+            if on_pair_done is not None:
+                await on_pair_done(MCST_PROVIDER_NAME, spec.dataset_key)
             continue
         bundles = await file_rows_to_bundles(
             slug_rows,
@@ -118,14 +127,15 @@ async def run_feature_place_mcst_culture(
                 skipped,
                 len(slug_rows),
             )
-        results.append(
-            await _load(
-                context,
-                provider=MCST_PROVIDER_NAME,
-                dataset_key=spec.dataset_key,
-                bundles=bundles,
-            )
+        loaded = await _load(
+            context,
+            provider=MCST_PROVIDER_NAME,
+            dataset_key=spec.dataset_key,
+            bundles=bundles,
         )
+        if on_pair_done is not None:
+            await on_pair_done(MCST_PROVIDER_NAME, spec.dataset_key)
+        results.append(loaded)
     result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
     _add_output_metadata(context, result.as_metadata())
     return result
@@ -139,7 +149,29 @@ async def run_feature_place_mcst_culture(
 async def feature_place_mcst_culture(
     context: AssetExecutionContext,
 ) -> McstLoadResult:
-    return await run_feature_place_mcst_culture(context)
+    completed: set[ProviderDatasetOperationKey] = set()
+
+    async def _on_pair_done(provider: str, dataset_key: str) -> None:
+        pair = ProviderDatasetOperationKey(provider, dataset_key)
+        if guard is not None:
+            await finish_tracked_feature_pair(guard, pair)
+        completed.add(pair)
+
+    pair_order = tuple(
+        ProviderDatasetOperationKey(MCST_PROVIDER_NAME, spec.dataset_key)
+        for spec in MCST_FILE_DATASETS.values()
+    )
+    guard = await ensure_tracked_multi_pair_asset(context)
+    try:
+        return await run_feature_place_mcst_culture(
+            context,
+            on_pair_done=_on_pair_done if guard is not None else None,
+        )
+    except Exception as exc:
+        failed_pair = next((pair for pair in pair_order if pair not in completed), None)
+        if guard is not None and failed_pair is not None:
+            await append_failed_multi_pair_attempt(context, guard, failed_pair, exc)
+        raise
 
 
 MCST_FEATURE_ASSETS: Final = [
