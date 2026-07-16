@@ -75,6 +75,18 @@ async def test_generic_writer_rejects_reserved_feature_kind(
         await writer(object(), kind=kind)
 
 
+async def test_feature_update_job_writer_rejects_noncanonical_scope_before_sql() -> None:
+    key = ProviderDatasetOperationKey("provider", "dataset")
+    for invalid_scope in ("legacy-alias", "external_system:", f"external_system:{'x' * 113}"):
+        with pytest.raises(ValueError, match="canonical sync scope"):
+            await jobs_repo.enqueue_feature_update_request_job(
+                object(),  # type: ignore[arg-type]
+                provider_dataset=key,
+                effective_sync_scope=invalid_scope,
+                dispatch_requested=False,
+            )
+
+
 def test_generic_writer_sql_excludes_reserved_feature_kinds() -> None:
     lifecycle_sql = (
         jobs_repo._UPDATE_PAYLOAD_SQL,

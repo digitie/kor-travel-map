@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-16 (codex, agent A) — T-ADM-C45X-B 구현·로컬 gate 완료
+
+- Alembic 0053으로 direct feature update job의 canonical `sync_scope`와
+  `dispatch_requested_at`을 typed 열로 승격했다. active identity는
+  `(provider, dataset_key, sync_scope)` partial unique index로 고정하며, 같은 계획은 동일
+  request/job을 200 재사용하고 run-now는 새 행 없이 기존 job의 dispatch marker만 멱등 기록한다.
+- KMA grid 3종은 typed `target_grids` 또는 exact `external_system:*` 없이는 실행하지 않는다.
+  active target subset·membership fingerprint·grid cap을 provider I/O 전에 검증하고, 실패 상태는
+  rollback 뒤 scope namespace에 별도 영속한다. datasets grid/detail도 3원 scope별 latest/recent,
+  first-run `never_run`, stale/orphan을 구분한다.
+- 두 적대 리뷰어가 run-now cancellation 경합, typed scope legacy fallback, Unicode whitespace DB
+  drift를 발견해 모두 보강했다. 동시 생성은 전용 0053 DB의 두 AsyncSession barrier로 unique
+  collision/retry를 결정적으로 검증한다. 최종 C45X-B 판정은 S1/S2/S3 0건이다. C4R UI의
+  `scope_refresh`/재사용 링크와 C7 destructive external scope/fingerprint/cap 증거는
+  `docs/tasks.md`의 후속 수용조건으로 고정했다.
+- API 530건, Dagster 444건(1 skip), root unit 1,396건, C45X 관련 PostGIS/migration 재검증,
+  Ruff, strict mypy(main 115/API 55/Dagster 23), import 계약 4/4, OpenAPI drift, frontend type/lint,
+  Vitest 82건, production build, C45X mocked Playwright 27건을 통과했다. raw integration의 live
+  5건은 외부 kor-travel-geo `/v2/reverse` HTTP 400이고, 전체 legacy mocked suite는 C4R/C6에서
+  교체될 기존 selector 기대가 red라 C45X green과 분리했다.
+- **다음 한 작업**: PR #701을 최신 main에 rebase하고 보안 감사·CI·승인 뒤 병합한다. 이후
+  Claude Code의 PR #698(C4R/C45X-U)을 적대 리뷰·보강해 #684/#686을 닫고 C4/C5로 진행한다.
+
 ## 2026-07-16 (codex) — T-ADM-C3e-I2 n150 운영 종결
 
 - n150 prod를 maintenance drain한 뒤 백업하고 0051/0052를 일방향 적용했다. Alembic은

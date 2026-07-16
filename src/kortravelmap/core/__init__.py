@@ -89,6 +89,15 @@ from kortravelmap.core.scoring import (
     score_pair,
     spatial_similarity,
 )
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
+    MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
+    TARGET_GRIDS_SYNC_SCOPE,
+    CanonicalSyncScope,
+    SyncScopeKind,
+    parse_canonical_sync_scope,
+)
 from kortravelmap.core.types import KST, kst_now
 from kortravelmap.core.weather import (
     filter_by_provider,
@@ -143,6 +152,14 @@ __all__ = [
     "haversine_meters",
     "DedupDecision",
     "classify_decision",
+    # provider refresh sync scope
+    "DATASET_WIDE_SYNC_SCOPE",
+    "TARGET_GRIDS_SYNC_SCOPE",
+    "EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX",
+    "MAX_EXTERNAL_SYSTEM_NAME_LENGTH",
+    "CanonicalSyncScope",
+    "SyncScopeKind",
+    "parse_canonical_sync_scope",
     # address (PR#37, ADR-041 — python-kraddr-base 흡수)
     "BjdParts",
     "normalize_bjd_code",

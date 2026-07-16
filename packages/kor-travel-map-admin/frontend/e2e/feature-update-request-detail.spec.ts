@@ -24,20 +24,25 @@ type FeatureUpdateRequestDetailResponse =
 type FeatureUpdateRequestMutationResponse =
   components["schemas"]["FeatureUpdateRequestMutationResponse"];
 type FeatureUpdateStatus = FeatureUpdateRequestRecord["status"];
+type ScopeDispatchFeatureUpdateRequestRecord = FeatureUpdateRequestRecord & {
+  requested_sync_scope: string | null;
+  effective_sync_scope: string | null;
+  dispatch_requested_at: string | null;
+};
 
 const REQUEST_ID = "66666666-6666-4666-8666-666666666666";
-const NEW_REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const JOB_ID = "77777777-7777-4777-8777-777777777777";
-const NEW_JOB_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const DETAIL_PATH = `/v1/admin/features/update-requests/${REQUEST_ID}`;
 
 function makeUpdateRequest(
-  overrides: Partial<FeatureUpdateRequestRecord> = {},
-): FeatureUpdateRequestRecord {
+  overrides: Partial<ScopeDispatchFeatureUpdateRequestRecord> = {},
+): ScopeDispatchFeatureUpdateRequestRecord {
   return {
     created_at: "2026-06-08T00:00:00.000Z",
     dagster_run_id: "dagster-run-fur-001",
     dataset_keys: ["festival_open_api"],
+    dispatch_requested_at: null,
+    effective_sync_scope: null,
     error_message: null,
     finished_at: null,
     job_id: JOB_ID,
@@ -46,6 +51,7 @@ function makeUpdateRequest(
     priority: 100,
     providers: ["python-visitkorea-api"],
     reason: "e2e",
+    requested_sync_scope: null,
     request_id: REQUEST_ID,
     run_mode: "queued",
     scope: {
@@ -75,7 +81,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 /**
  * 상세 GET / cancel / run-now를 가로챈다. cancel은 원 요청 상태를 바꾸고,
- * run-now는 원 요청을 유지한 채 신규 요청을 201로 반환한다.
+ * run-now는 같은 canonical 요청의 즉시 dispatch 완료를 200으로 반환한다.
  */
 async function mockUpdateRequest(
   page: Page,
@@ -86,7 +92,14 @@ async function mockUpdateRequest(
     cancel: number;
     runNow: number;
     runNowJobId: string | null;
-  } = { detail: 0, cancel: 0, runNow: 0, runNowJobId: null };
+    runNowRequestId: string | null;
+  } = {
+    detail: 0,
+    cancel: 0,
+    runNow: 0,
+    runNowJobId: null,
+    runNowRequestId: null,
+  };
   let status = options.initialStatus ?? "queued";
 
   await page.route(
@@ -111,18 +124,20 @@ async function mockUpdateRequest(
       }
       if (method === "POST" && pathname === `${DETAIL_PATH}/run-now`) {
         calls.runNow += 1;
-        calls.runNowJobId = NEW_JOB_ID;
+        calls.runNowJobId = JOB_ID;
+        calls.runNowRequestId = REQUEST_ID;
         const body: FeatureUpdateRequestMutationResponse = {
           data: makeUpdateRequest({
-            request_id: NEW_REQUEST_ID,
-            job_id: NEW_JOB_ID,
-            run_mode: "now",
+            request_id: REQUEST_ID,
+            job_id: JOB_ID,
+            dispatch_requested_at: "2026-06-08T00:00:01.000Z",
+            run_mode: "queued",
             status: "queued",
-            status_url: `/v1/admin/features/update-requests/${NEW_REQUEST_ID}`,
+            status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
           }),
           meta,
         };
-        await fulfillJson(route, body, 201);
+        await fulfillJson(route, body);
         return;
       }
       if (method === "GET" && pathname === DETAIL_PATH) {
@@ -171,7 +186,7 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
-  test("terminal(done) — cancel 숨김, run-now는 유지(재큐잉)", async ({
+  test("terminal(done) — cancel과 run-now 모두 숨김", async ({
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "done" });
@@ -181,15 +196,15 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
       page.getByRole("heading", { level: 1, name: "갱신 요청 상세" }),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
   });
 
-  test("running — cancel 노출, run-now 숨김", async ({ page }) => {
+  test("running — cancel과 run-now 노출", async ({ page }) => {
     await mockUpdateRequest(page, { initialStatus: "running" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     await expect(page.getByRole("button", { name: "취소" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
   });
 
   test("cancel 액션 → 성공 re-fetch 후 cancel 버튼 사라짐", async ({ page }) => {
@@ -204,8 +219,8 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     expect(calls.cancel).toBe(1);
   });
 
-  test("run-now 액션 → 원 요청 불변 + 신규 요청 링크", async ({ page }) => {
-    const calls = await mockUpdateRequest(page, { initialStatus: "done" });
+  test("run-now 액션 → 같은 canonical 요청 dispatch 완료", async ({ page }) => {
+    const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "즉시 실행" });
@@ -213,18 +228,21 @@ test.describe("/admin/features/update-requests/[requestId]", () => {
     await runNow.click();
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "즉시 실행 요청 생성 완료" });
+      .filter({ hasText: "즉시 실행 요청 완료" });
     await expect(
-      successAlert.getByRole("link", { name: NEW_REQUEST_ID }),
+      successAlert.getByRole("link", { name: REQUEST_ID }),
     ).toHaveAttribute(
       "href",
-      `/admin/features/update-requests/${NEW_REQUEST_ID}`,
+      `/admin/features/update-requests/${REQUEST_ID}`,
+    );
+    await expect(successAlert).toContainText(
+      "기존 요청의 즉시 dispatch를 요청했습니다.",
     );
     await expect(runNow).toBeVisible();
-    await expect(page.getByText("완료", { exact: true })).toBeVisible();
+    await expect(page.getByText("대기", { exact: true })).toBeVisible();
     expect(calls.runNow).toBe(1);
-    expect(calls.runNowJobId).toBe(NEW_JOB_ID);
-    expect(calls.runNowJobId).not.toBe(JOB_ID);
+    expect(calls.runNowRequestId).toBe(REQUEST_ID);
+    expect(calls.runNowJobId).toBe(JOB_ID);
   });
 
   test("404 — request 조회 실패 alert", async ({ page }) => {

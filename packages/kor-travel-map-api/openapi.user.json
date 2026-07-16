@@ -6016,6 +6016,8 @@
             "required": true,
             "schema": {
               "description": "외부 시스템 이름. 예: external-app",
+              "maxLength": 112,
+              "minLength": 1,
               "title": "External System",
               "type": "string"
             }

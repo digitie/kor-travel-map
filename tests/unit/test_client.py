@@ -244,3 +244,58 @@ async def test_features_nearby_coord_delegates_to_repo(
     assert recorded["radius_m"] == 1500.0
     assert recorded["sort"] == "distance"
     assert recorded["statuses"] == ("active",)
+
+
+async def test_list_poi_cache_target_coords_delegates_exact_system_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kortravelmap.client as client_mod
+
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> list[tuple[float, float]]:
+        recorded["session"] = session
+        recorded.update(kwargs)
+        return [(126.9, 37.5)]
+
+    monkeypatch.setattr(client_mod, "repo_list_active_target_coords", _fake)
+    client = _read_client(monkeypatch)
+
+    coords = await client.list_poi_cache_target_coords(external_system="tripmate")
+
+    assert coords == [(126.9, 37.5)]
+    assert recorded["external_system"] == "tripmate"
+
+
+async def test_active_poi_cache_target_external_system_reads_delegate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kortravelmap.client as client_mod
+
+    recorded: dict[str, object] = {}
+
+    async def _list(_session: object) -> list[str]:
+        return ["concierge", "tripmate"]
+
+    async def _has(_session: object, external_system: str) -> bool:
+        recorded["external_system"] = external_system
+        return True
+
+    monkeypatch.setattr(
+        client_mod,
+        "_repo_list_active_target_systems",
+        _list,
+    )
+    monkeypatch.setattr(
+        client_mod,
+        "_repo_has_active_target_system",
+        _has,
+    )
+    client = _read_client(monkeypatch)
+
+    systems = await client.list_active_poi_cache_target_external_systems()
+    exists = await client.has_active_poi_cache_targets_for_external_system("tripmate")
+
+    assert systems == ["concierge", "tripmate"]
+    assert exists is True
+    assert recorded == {"external_system": "tripmate"}

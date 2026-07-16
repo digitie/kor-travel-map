@@ -25,15 +25,19 @@ type PipelineCancellationRequest =
 type FeatureUpdateRequestRunNowRequest =
   components["schemas"]["FeatureUpdateRequestRunNowRequest"];
 type ProvidersResponse = components["schemas"]["ProvidersResponse"];
+type ScopeDispatchFeatureUpdateRequestRecord = FeatureUpdateRequestRecord & {
+  requested_sync_scope: string | null;
+  effective_sync_scope: string | null;
+  dispatch_requested_at: string | null;
+};
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 // detail deeplink truncation을 검증할 수 있게 12자 초과 uuid를 쓴다(shortId는 12자+"...").
 const DONE_REQUEST_ID = "aaaaaaaa-1111-4111-8111-111111111111";
 const QUEUED_REQUEST_ID = "bbbbbbbb-2222-4222-8222-222222222222";
+const RUNNING_REQUEST_ID = "cccccccc-4444-4444-8444-444444444444";
 const CREATED_REQUEST_ID = "dddddddd-0000-4000-8000-000000000001";
-const RUN_NOW_REQUEST_ID = "eeeeeeee-0000-4000-8000-000000000001";
 const JOB_ID = "cccccccc-3333-4333-8333-333333333333";
-const RUN_NOW_JOB_ID = "ffffffff-0000-4000-8000-000000000001";
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -44,12 +48,14 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 }
 
 function makeRequest(
-  overrides: Partial<FeatureUpdateRequestRecord> = {},
-): FeatureUpdateRequestRecord {
+  overrides: Partial<ScopeDispatchFeatureUpdateRequestRecord> = {},
+): ScopeDispatchFeatureUpdateRequestRecord {
   return {
     created_at: MOCK_NOW,
     dagster_run_id: null,
     dataset_keys: [],
+    dispatch_requested_at: null,
+    effective_sync_scope: null,
     error_message: null,
     finished_at: null,
     job_id: JOB_ID,
@@ -58,6 +64,7 @@ function makeRequest(
     priority: 50,
     providers: [],
     reason: "admin ui request",
+    requested_sync_scope: null,
     request_id: QUEUED_REQUEST_ID,
     run_mode: "queued",
     scope: {
@@ -95,8 +102,9 @@ function createResponse(
 ): FeatureUpdateRequestCreateResponse {
   return {
     data: { ...record, result_kind: "request" },
+    reused_active_request: false,
     meta: { duration_ms: 1, request_id: "e2e-feature-update-create" },
-  };
+  } as FeatureUpdateRequestCreateResponse & { reused_active_request: boolean };
 }
 
 function previewResponse(
@@ -145,7 +153,7 @@ interface FeatureUpdateMocks {
   createBodies: FeatureUpdateRequestCreateRequest[];
   previewBodies: FeatureUpdateRequestPreviewRequest[];
   runNowBodies: FeatureUpdateRequestRunNowRequest[];
-  runNowRecords: FeatureUpdateRequestRecord[];
+  runNowRecords: ScopeDispatchFeatureUpdateRequestRecord[];
   cancelBodies: PipelineCancellationRequest[];
 }
 
@@ -280,23 +288,17 @@ async function mockFeatureUpdateRequests(
       const requestId = url.pathname.split("/").at(-2) ?? "";
       const target =
         items.find((item) => item.request_id === requestId) ?? makeRequest();
-      const requeuedRequestId = `eeeeeeee-0000-4000-8000-${String(mocks.runNow).padStart(12, "0")}`;
-      const requeued = makeRequest({
+      const dispatched = makeRequest({
         ...target,
-        request_id: requeuedRequestId,
-        job_id:
-          mocks.runNow === 1
-            ? RUN_NOW_JOB_ID
-            : `ffffffff-0000-4000-8000-${String(mocks.runNow).padStart(12, "0")}`,
-        priority: body.priority ?? target.priority,
-        reason: body.reason ?? `run-now from ${target.request_id}`,
-        run_mode: "now",
-        status_url: `/v1/admin/features/update-requests/${requeuedRequestId}`,
-        status: "queued",
+        request_id: target.request_id,
+        job_id: target.job_id,
+        dispatch_requested_at: "2026-06-08T00:00:01.000Z",
+        run_mode: target.run_mode,
+        status_url: `/v1/admin/features/update-requests/${target.request_id}`,
+        status: target.status,
       });
-      mocks.runNowRecords.push(requeued);
-      items = [requeued, ...items];
-      await fulfillJson(route, mutationResponse(requeued));
+      mocks.runNowRecords.push(dispatched);
+      await fulfillJson(route, mutationResponse(dispatched));
       return;
     }
 
@@ -360,6 +362,7 @@ test.describe("admin/features/update-requests list + create depth", () => {
 
     await page.getByLabel(/미리보기/).uncheck();
     await expect(page.getByLabel(/미리보기/)).not.toBeChecked();
+    await page.getByLabel("데이터셋 키").fill("mois_license_features_bulk");
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -392,7 +395,7 @@ test.describe("admin/features/update-requests list + create depth", () => {
     ).toBeVisible();
   });
 
-  test("preview endpoint vs run-now: preview는 비영속, now는 생성", async ({
+  test("preview endpoint와 create now: preview는 비영속, now 요청은 생성", async ({
     page,
   }) => {
     const mocks = await mockFeatureUpdateRequests(page, {
@@ -484,18 +487,23 @@ test.describe("admin/features/update-requests list + create depth", () => {
     expect(mocks.createBodies[0]).not.toHaveProperty("operator");
   });
 
-  test("row run-now는 원 요청을 유지하고 신규 request_id를 안내한다", async ({
+  test("row run-now는 queued/running canonical identity를 그대로 dispatch한다", async ({
     page,
   }) => {
     const mocks = await mockFeatureUpdateRequests(page, {
       initial: [
-        // done 행: actions에 run-now만(cancel은 queued/running 전용).
+        // terminal 행에는 lifecycle mutation을 노출하지 않는다.
         makeRequest({
           request_id: DONE_REQUEST_ID,
           status: "done",
           finished_at: MOCK_NOW,
         }),
-        // queued 행: actions에 cancel + run-now 둘 다.
+        makeRequest({
+          request_id: RUNNING_REQUEST_ID,
+          status: "running",
+          started_at: MOCK_NOW,
+        }),
+        // active queued/running 행에는 cancel + run-now를 모두 노출한다.
         makeRequest({ request_id: QUEUED_REQUEST_ID, status: "queued" }),
       ],
     });
@@ -507,46 +515,58 @@ test.describe("admin/features/update-requests list + create depth", () => {
       name: new RegExp(DONE_REQUEST_ID.slice(0, 12)),
     });
     await expect(doneRow).toBeVisible();
-    // done 행: run-now 존재, cancel 없음.
+    // done 행: cancel/run-now 모두 없음.
     await expect(doneRow.getByRole("button", { name: "취소" })).toHaveCount(0);
-    await doneRow.getByRole("button", { name: "즉시 실행" }).click();
-
-    await expect.poll(() => mocks.runNow).toBe(1);
-    expect(mocks.runNowBodies[0]).toMatchObject({
-      reason: "run-now from admin ui",
-    });
-    expect(mocks.runNowBodies[0]).not.toHaveProperty("operator");
-    expect(mocks.runNowRecords[0]).toMatchObject({
-      request_id: RUN_NOW_REQUEST_ID,
-      job_id: RUN_NOW_JOB_ID,
-      priority: 50,
-      reason: "run-now from admin ui",
-      run_mode: "now",
-    });
-    expect(mocks.runNowRecords[0]?.job_id).not.toBe(JOB_ID);
-    const successAlert = page
-      .getByRole("status")
-      .filter({ hasText: "즉시 실행 요청 생성 완료" });
-    await expect(successAlert).toContainText(
-      "원본 요청은 변경되지 않았습니다.",
-    );
-    await expect(
-      successAlert.getByRole("link", { name: RUN_NOW_REQUEST_ID }),
-    ).toHaveAttribute(
-      "href",
-      `/admin/features/update-requests/${RUN_NOW_REQUEST_ID}`,
-    );
-    // done 필터에서 원 요청은 완료 상태로 그대로 남는다.
-    await expect(doneRow).toContainText("완료");
     await expect(
       doneRow.getByRole("button", { name: "즉시 실행" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
 
-    // queued 행은 cancel + run-now 둘 다 노출 + cancel은 /cancel POST.
+    await page.getByLabel("요청 상태 필터").selectOption("running");
+    const runningRow = page.getByRole("row", {
+      name: new RegExp(RUNNING_REQUEST_ID.slice(0, 12)),
+    });
+    await expect(runningRow).toBeVisible();
+    await expect(
+      runningRow.getByRole("button", { name: "즉시 실행" }),
+    ).toBeVisible();
+    await runningRow.getByRole("button", { name: "즉시 실행" }).click();
+    await expect.poll(() => mocks.runNow).toBe(1);
+    expect(mocks.runNowBodies[0]).toEqual({});
+    const runningSuccessAlert = page
+      .getByRole("status")
+      .filter({ hasText: "즉시 실행 요청 완료" });
+    await expect(runningSuccessAlert).toContainText("요청이 이미 실행 중입니다.");
+
     await page.getByLabel("요청 상태 필터").selectOption("queued");
     const queuedRow = page.getByRole("row", {
       name: new RegExp(QUEUED_REQUEST_ID.slice(0, 12)),
     });
+    await expect(queuedRow).toBeVisible();
+    await queuedRow.getByRole("button", { name: "즉시 실행" }).click();
+    await expect.poll(() => mocks.runNow).toBe(2);
+    expect(mocks.runNowBodies[1]).toEqual({});
+    expect(mocks.runNowRecords[1]).toMatchObject({
+      request_id: QUEUED_REQUEST_ID,
+      job_id: JOB_ID,
+      dispatch_requested_at: "2026-06-08T00:00:01.000Z",
+      priority: 50,
+      reason: "admin ui request",
+      run_mode: "queued",
+      status: "queued",
+    });
+    const successAlert = page
+      .getByRole("status")
+      .filter({ hasText: "즉시 실행 요청 완료" });
+    await expect(successAlert).toContainText(
+      "기존 요청의 즉시 dispatch를 요청했습니다.",
+    );
+    await expect(
+      successAlert.getByRole("link", { name: QUEUED_REQUEST_ID }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/features/update-requests/${QUEUED_REQUEST_ID}`,
+    );
+    // dispatch 뒤에도 같은 queued 행과 identity가 유지된다.
     await expect(queuedRow).toBeVisible();
     await expect(
       queuedRow.getByRole("button", { name: "즉시 실행" }),
@@ -643,6 +663,22 @@ test.describe("admin/features/update-requests list + create depth", () => {
     expect(mocks.create).toBe(0);
   });
 
+  test("provider와 dataset filter가 모두 비면 제출을 차단한다", async ({ page }) => {
+    const mocks = await mockFeatureUpdateRequests(page);
+
+    await page.goto("/admin/features/update-requests");
+    await page.getByLabel(/미리보기/).uncheck();
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: "제공자 또는 데이터셋 키를 하나 이상 선택하세요.",
+      }),
+    ).toBeVisible();
+    expect(mocks.create).toBe(0);
+    expect(mocks.preview).toBe(0);
+  });
+
   test("create API 422 -> 요청 생성 실패 alert + HTTP detail", async ({
     page,
   }) => {
@@ -654,6 +690,7 @@ test.describe("admin/features/update-requests list + create depth", () => {
     });
 
     await page.goto("/admin/features/update-requests");
+    await page.getByLabel("데이터셋 키").fill("mois_license_features_bulk");
     await page.getByLabel(/미리보기/).uncheck();
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -673,6 +710,7 @@ test.describe("admin/features/update-requests list + create depth", () => {
     });
 
     await page.goto("/admin/features/update-requests");
+    await page.getByLabel("데이터셋 키").fill("mois_license_features_bulk");
     await page.getByRole("button", { name: "미리보기" }).click();
 
     await expect.poll(() => mocks.preview).toBe(1);

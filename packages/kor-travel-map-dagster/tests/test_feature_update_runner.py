@@ -9,11 +9,18 @@ from typing import Any, cast
 import pytest
 from kortravelmap.api.provider_catalog import catalog_refreshable_entries
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshScope
+from kortravelmap.infra.feature_update_executor import (
+    ProviderDatasetRefreshFailure,
+    ProviderDatasetRefreshScope,
+)
 from kortravelmap.providers.airkorea import AIRKOREA_PROVIDER_NAME, DATASET_KEY_STATIONS
 from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_DATASETS,
     DATAGOKR_FILEDATA_PROVIDER_NAME,
+)
+from kortravelmap.providers.kma import (
+    KMA_PROVIDER_NAME,
+    KMA_SHORT_FORECAST_DATASET_KEY,
 )
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.providers.mois import (
@@ -71,6 +78,7 @@ def _scope(
     provider: str = "demo",
     dataset_key: str = "places",
     scope_type: str = "provider_dataset",
+    sync_scope: str | None = None,
 ) -> ProviderDatasetRefreshScope:
     request_scope: dict[str, object]
     if scope_type == "provider_dataset":
@@ -79,6 +87,8 @@ def _scope(
             "provider": provider,
             "dataset_key": dataset_key,
         }
+        if sync_scope is not None:
+            request_scope["sync_scope"] = sync_scope
     elif scope_type == "center_radius":
         request_scope = {
             "type": "center_radius",
@@ -97,6 +107,7 @@ def _scope(
         feature_ids=("feature-1",),
         feature_count=1,
         prevent_provider_reactivation=True,
+        sync_scope=sync_scope,
     )
 
 
@@ -259,10 +270,160 @@ async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
         ),
     )
 
-    with pytest.raises(RuntimeError, match="simulated transaction bind failure"):
-        await runner(object(), _scope())
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await runner(object(), _scope(sync_scope="dataset_wide"))
 
     assert teardown_calls == 1
+    failure = exc_info.value
+    assert failure.provider == "demo"
+    assert failure.dataset_key == "places"
+    assert failure.sync_scope == "default"
+    assert str(failure) == "provider refresh transaction binding failed"
+    assert isinstance(failure.__cause__, RuntimeError)
+
+
+async def test_feature_update_asset_runner_types_resource_initialization_failure() -> None:
+    async def _run(_context: object) -> _FakeAssetResult:
+        raise AssertionError("resource 초기화 실패 뒤 asset을 실행하면 안 된다.")
+
+    def _resources(
+        _settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> RunnerResources:
+        raise RuntimeError("credential missing")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider="demo",
+                dataset_keys=frozenset({"places"}),
+                run=_run,
+                resources=_resources,
+                asset_key="feature_demo_places",
+            ),
+        ),
+    )
+
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await runner(cast(Any, object()), _scope(sync_scope="dataset_wide"))
+
+    failure = exc_info.value
+    assert failure.provider == "demo"
+    assert failure.dataset_key == "places"
+    assert failure.sync_scope == "default"
+    assert str(failure) == "provider refresh resource initialization failed"
+
+
+async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope() -> None:
+    async def _run(_context: object) -> _FakeAssetResult:
+        raise RuntimeError("KMA provider failed")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider=KMA_PROVIDER_NAME,
+                dataset_keys=frozenset({KMA_SHORT_FORECAST_DATASET_KEY}),
+                run=_run,
+                resources=lambda _settings, _scope: RunnerResources({}),
+                asset_key="feature_weather_kma_grid_dispatch",
+                sync_state_failure_scope=runner_mod._kma_grid_effective_sync_scope,
+            ),
+        ),
+    )
+
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await runner(
+            cast(Any, object()),
+            _scope(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
+                sync_scope="external_system:tripmate",
+            ),
+        )
+
+    failure = exc_info.value
+    assert failure.provider == KMA_PROVIDER_NAME
+    assert failure.dataset_key == KMA_SHORT_FORECAST_DATASET_KEY
+    assert failure.sync_scope == "external_system:tripmate"
+    assert str(failure) == "provider refresh asset execution failed"
+    assert isinstance(failure.__cause__, RuntimeError)
+
+
+async def test_feature_update_asset_runner_preserves_typed_failure_when_teardown_fails() -> None:
+    failure = ProviderDatasetRefreshFailure(
+        provider="demo",
+        dataset_key="places",
+        sync_scope="dataset_wide",
+        message="provider failed",
+    )
+
+    async def _run(_context: object) -> _FakeAssetResult:
+        raise failure
+
+    def _teardown() -> None:
+        raise RuntimeError("teardown failed")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider="demo",
+                dataset_keys=frozenset({"places"}),
+                run=_run,
+                resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
+                asset_key="feature_demo_places",
+            ),
+        ),
+    )
+
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await runner(cast(Any, object()), _scope())
+
+    assert exc_info.value is failure
+
+
+async def test_feature_update_asset_runner_types_teardown_failure_after_success() -> None:
+    async def _run(_context: object) -> _FakeAssetResult:
+        return _FakeAssetResult(
+            provider="demo",
+            dataset_key="places",
+            feature_ids=("feature-1",),
+        )
+
+    def _teardown() -> None:
+        raise RuntimeError("teardown failed")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                provider="demo",
+                dataset_keys=frozenset({"places"}),
+                run=_run,
+                resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
+                asset_key="feature_demo_places",
+            ),
+        ),
+    )
+
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await runner(cast(Any, object()), _scope())
+
+    failure = exc_info.value
+    assert failure.provider == "demo"
+    assert failure.dataset_key == "places"
+    assert failure.sync_scope == "default"
+    assert "resource teardown failed" in str(failure)
 
 
 async def test_feature_update_asset_runner_rejects_unsupported_dataset() -> None:
@@ -429,6 +590,78 @@ def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("requested_scope", "effective_scope"),
+    [
+        ("target_grids", "target_grids"),
+        ("external_system:tripmate", "external_system:tripmate"),
+    ],
+)
+def test_kma_grid_resources_propagate_canonical_effective_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_scope: str | None,
+    effective_scope: str,
+) -> None:
+    monkeypatch.setattr(
+        runner_mod,
+        "_kma_weather_resources",
+        lambda _settings, _scope: RunnerResources({"kma_weather_client": object()}),
+    )
+
+    resources = runner_mod._kma_grid_resources(  # noqa: SLF001 - scope 경계 회귀
+        cast(KorTravelMapSettings, object()),
+        _scope(
+            provider="python-kma-api",
+            dataset_key="kma_short_forecast",
+            sync_scope=requested_scope,
+        ),
+    )
+
+    assert resources.values["feature_update_dataset_key"] == "kma_short_forecast"
+    assert resources.values["kma_weather_sync_scope"] == effective_scope
+    assert resources.values["kma_weather_sync_failure_managed_by_executor"] is True
+
+
+def test_kma_grid_resources_reject_missing_typed_effective_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected(*_args: object) -> RunnerResources:
+        raise AssertionError("missing typed scope must fail before KMA client creation")
+
+    monkeypatch.setattr(runner_mod, "_kma_weather_resources", _unexpected)
+
+    with pytest.raises(ValueError, match="effective sync_scope is required"):
+        runner_mod._kma_grid_resources(  # noqa: SLF001 - fail-closed 회귀
+            cast(KorTravelMapSettings, object()),
+            _scope(
+                provider="python-kma-api",
+                dataset_key="kma_short_forecast",
+                sync_scope=None,
+            ),
+        )
+
+
+@pytest.mark.parametrize("sync_scope", ["default", "all", "dataset_wide", " "])
+def test_kma_grid_resources_reject_non_target_scope_before_client_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_scope: str,
+) -> None:
+    def _unexpected(*_args: object) -> RunnerResources:
+        raise AssertionError("invalid scope must fail before KMA client creation")
+
+    monkeypatch.setattr(runner_mod, "_kma_weather_resources", _unexpected)
+
+    with pytest.raises(ValueError, match="sync_scope|KMA grid"):
+        runner_mod._kma_grid_resources(  # noqa: SLF001 - fail-closed 회귀
+            cast(KorTravelMapSettings, object()),
+            _scope(
+                provider="python-kma-api",
+                dataset_key="kma_short_forecast",
+                sync_scope=sync_scope,
+            ),
+        )
+
+
 def test_mois_runner_resources_sync_source_db_before_fetch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
@@ -556,7 +789,7 @@ def test_default_runner_supports_all_catalog_refreshable_entries() -> None:
     assert sorted(refreshable - supported) == []
 
 
-async def test_opinet_missing_key_fails_before_provider_client_auth_error() -> None:
+async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -570,8 +803,14 @@ async def test_opinet_missing_key_fails_before_provider_client_auth_error() -> N
         ),
     )
 
-    with pytest.raises(ProviderCredentialMissing, match="KOR_TRAVEL_MAP_OPINET_API_KEY"):
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
         await runner(
             object(),
             _scope(provider=OPINET_PROVIDER_NAME, dataset_key=OPINET_STATION_DATASET_KEY),
         )
+
+    failure = exc_info.value
+    assert failure.sync_scope == "default"
+    assert str(failure) == "provider refresh resource initialization failed"
+    assert isinstance(failure.__cause__, ProviderCredentialMissing)
+    assert "KOR_TRAVEL_MAP_OPINET_API_KEY" in str(failure.__cause__)

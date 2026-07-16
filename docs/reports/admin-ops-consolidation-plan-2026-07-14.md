@@ -41,10 +41,10 @@ dagster run↔import job 관계는 외부 Dagster UI 링크로만 연결. 상세
 - **스케줄 패널**: 목록(cron·다음 실행·상태·override 병합) + 조작(즉시 실행/시작/중지/cron 수정).
   cron 수정의 지연 반영(코드위치 reload) 안내 문구 유지. `default` 명령은 제거 —
   `PATCH {cron_schedule: null}` = override 삭제로 통합.
-- **조작**: import job cancel, update request cancel/**run-now(새 request 201 생성 — 원 행이
-  바뀌지 않고 새 행이 생기는 의미를 UI에 명시)**, 새 갱신 요청 생성 dialog(**6-type scope
-  union 전량**: feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/
-  cache_target_keys + `operator`/`reason` 감사 필드 + dry-run/priority — API 계약 축소 금지,
+- **조작**: import job cancel, update request cancel/**run-now(동일 canonical job 우선
+  dispatch, 200 멱등)**, 새 갱신 요청 생성 dialog(**6-type scope union 전량**:
+  feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/
+  cache_target_keys + 인증 actor/`reason` 감사 필드 + 별도 preview/priority — API 계약 축소 금지,
   UI 기본 노출은 provider_dataset·center_radius로 하되 전체 scope 선택 가능).
 - **실시간**: 기존 `/ops/live` WS 재사용(이미 3개 화면이 `dagster_runs` topic 구독 중 — "미활용"
   아님). 자동 갱신은 1페이지에 한정하고 그 외는 "새 실행 N건" 배지 + 수동 반영(조사 중 목록
@@ -104,8 +104,8 @@ WS는 브라우저 직결(BFF는 WS 프록시 불가)이라 무게이트 유지 
 | `/ops/pipeline/schedules` | GET | 스케줄 목록(override 병합) + sensor 상태 |
 | `/ops/pipeline/schedules/{name}` | PATCH | cron 수정(`cron_schedule: null` = override 삭제) |
 | `/ops/pipeline/schedules/{name}/commands` | POST | `{command: run\|start\|stop\|reset}` 4종 |
-| `/ops/pipeline/requests` | POST | 갱신 요청 생성 — **기존 6-type scope union·카탈로그 검증·geo resolver·advisory lock 409/Retry-After 계약 전량 승계** |
-| `/ops/pipeline/requests/{id}/run-now` | POST | 재큐잉(201 + 새 request) |
+| `/ops/pipeline/requests` | POST | 신규 갱신 요청 201 또는 같은 활성 계획 재사용 200 — 6-type scope·카탈로그·geo resolver 계약 |
+| `/ops/pipeline/requests/{id}/run-now` | POST | 같은 canonical job 우선 dispatch(200 멱등, terminal 409) |
 
 Dagster 목록·overview는 DB 운영 화면이 Dagster 장애 때문에 사라지지 않도록 기존의
 `200` graceful degrade를 유지한다. 반면 선택한 개별 run 상세는 성공한 조회만 `200`이고,

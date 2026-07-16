@@ -48,7 +48,7 @@ export function FeatureUpdateRequestDetailClient({
     (member) => member.job_id === data?.job_id,
   );
   const canCancel = Boolean(data?.status && !terminalStatuses.has(data.status));
-  const canRunNow = Boolean(data?.status && data.status !== "running");
+  const canRunNow = Boolean(data?.status && !terminalStatuses.has(data.status));
 
   return (
     <AdminShell
@@ -115,23 +115,25 @@ export function FeatureUpdateRequestDetailClient({
 
         {runNow.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>즉시 실행 요청 생성 실패</AlertTitle>
+            <AlertTitle>즉시 실행 요청 실패</AlertTitle>
             <AlertDescription>{runNow.error.message}</AlertDescription>
           </Alert>
         ) : null}
 
         {runNow.data ? (
           <Alert>
-            <AlertTitle>즉시 실행 요청 생성 완료</AlertTitle>
+            <AlertTitle>즉시 실행 요청 완료</AlertTitle>
             <AlertDescription>
-              원본 요청은 변경되지 않았습니다. 새 요청{" "}
+              {runNow.data.data.status === "running"
+                ? "요청이 이미 실행 중입니다."
+                : "기존 요청의 즉시 dispatch를 요청했습니다."}{" "}
               <Link
                 className="break-all font-mono underline underline-offset-2"
                 href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
               >
                 {runNow.data.data.request_id}
               </Link>
-              을 확인하세요.
+              상태를 확인하세요.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -177,7 +179,7 @@ export function FeatureUpdateRequestDetailClient({
                       onClick={() =>
                         runNow.mutate({
                           requestId,
-                          body: { reason: "run-now from detail view" },
+                          body: {},
                         })
                       }
                     >

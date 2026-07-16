@@ -10,6 +10,7 @@ from math import isfinite
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
+from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -65,6 +66,14 @@ SigunguRadiusMatch = Literal["intersects"]
 FeatureUpdatePolicyMode = Literal["refresh_existing"]
 NonEmptyString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+]
+ExternalSystemName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
+    ),
 ]
 FeatureIdString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
@@ -196,7 +205,7 @@ class CacheTargetKeysScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["cache_target_keys"]
-    external_system: NonEmptyString
+    external_system: ExternalSystemName
     target_keys: list[TargetKeyString] = Field(
         max_length=MAX_SCOPE_TARGET_KEYS,
         json_schema_extra={"uniqueItems": True},
@@ -287,6 +296,12 @@ class FeatureUpdateRequestRecord(BaseModel):
     request_id: UUID
     scope_type: ScopeType
     scope: FeatureUpdateScope
+    requested_sync_scope: str | None = Field(
+        description="운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
+    )
+    effective_sync_scope: str | None = Field(
+        description="실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
+    )
     providers: list[str]
     dataset_keys: list[str]
     update_policy: FeatureUpdatePolicy
@@ -296,6 +311,9 @@ class FeatureUpdateRequestRecord(BaseModel):
     matched_scope: dict[str, Any]
     job_id: UUID
     dagster_run_id: str | None
+    dispatch_requested_at: datetime | None = Field(
+        description="같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.",
+    )
     operator: str | None
     reason: AuditReason | None
     error_message: str | None
@@ -341,11 +359,12 @@ class FeatureUpdateRequestPreviewRecord(BaseModel):
 
 
 class FeatureUpdateRequestCreateResponse(BaseModel):
-    """새 영속 요청 생성 응답."""
+    """새 요청 또는 동일한 활성 canonical 요청 재사용 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureUpdateRequestCreatedRecord
+    reused_active_request: bool
     meta: Meta
 
 
@@ -359,7 +378,7 @@ class FeatureUpdateRequestPreviewResponse(BaseModel):
 
 
 class FeatureUpdateRequestMutationResponse(BaseModel):
-    """run-now처럼 반드시 새 영속 요청을 만드는 mutation 응답."""
+    """기존 canonical 요청의 상태나 dispatch 의도를 바꾸는 mutation 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -394,9 +413,6 @@ class FeatureUpdateRequestListResponse(BaseModel):
 
 
 class FeatureUpdateRequestRunNowRequest(BaseModel):
-    """기존 request payload를 run_mode=now로 재큐잉할 때의 override."""
+    """기존 canonical request에 우선 dispatch를 요청하는 빈 명령 body."""
 
     model_config = ConfigDict(extra="forbid")
-
-    priority: RequestPriority | None = None
-    reason: AuditReason | None = None

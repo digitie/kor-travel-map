@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.infra.feature_update_active_repo import FeatureUpdateDispatchConflict
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
@@ -93,6 +94,9 @@ class _FakeSession:
         self.begin_count += 1
         return _FakeBegin()
 
+    def begin_nested(self) -> _FakeBegin:
+        return _FakeBegin()
+
 
 @pytest.fixture
 def session() -> _FakeSession:
@@ -124,11 +128,19 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     ) -> PipelineExecution:
         return _execution(kind=kind, execution_id=execution_id)
 
+    async def _no_active_request(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
     app.dependency_overrides[get_session] = _fake_session
     monkeypatch.setattr(
         pipeline_mod,
         "get_current_pipeline_cancellation_detail",
         _no_cancellation,
+    )
+    monkeypatch.setattr(
+        fur_mod,
+        "find_active_provider_dataset_request",
+        _no_active_request,
     )
     monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _canonical_root)
     return TestClient(app)
@@ -225,6 +237,10 @@ def _update_request(
     *,
     job_id: str = "11111111-1111-1111-1111-111111111111",
     status: str = "queued",
+    dispatch_requested_at: datetime | None = None,
+    operator: str = "tester",
+    reason: str | None = "unit",
+    priority: int = 50,
 ) -> FeatureUpdateRequest:
     return FeatureUpdateRequest(
         request_id=request_id,
@@ -238,18 +254,20 @@ def _update_request(
         dataset_keys=(),
         update_policy={},
         run_mode="queued",
-        priority=50,
+        priority=priority,
         status=status,
         matched_scope={"feature_count": 1},
         job_id=job_id,
         dagster_run_id="run-1",
-        operator="tester",
-        reason="unit",
+        operator=operator,
+        reason=reason,
         error_message=None,
         created_at=_NOW,
         started_at=None,
         finished_at=None,
         generation=1,
+        effective_sync_scope="dataset_wide",
+        dispatch_requested_at=dispatch_requested_at,
     )
 
 
@@ -561,13 +579,17 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "content"
     ]["application/json"]["schema"]
     assert create_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
+    reused_response = spec["paths"]["/v1/ops/pipeline/requests"]["post"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]
+    assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
     preview_response = spec["paths"]["/v1/ops/pipeline/requests/preview"]["post"]["responses"][
         "200"
     ]["content"]["application/json"]["schema"]
     assert preview_response["$ref"].endswith("/FeatureUpdateRequestPreviewResponse")
     run_now_response = spec["paths"]["/v1/ops/pipeline/requests/{request_id}/run-now"]["post"][
         "responses"
-    ]["201"]["content"]["application/json"]["schema"]
+    ]["200"]["content"]["application/json"]["schema"]
     assert run_now_response["$ref"].endswith("/FeatureUpdateRequestMutationResponse")
     schemas = spec["components"]["schemas"]
     for schema_name in (
@@ -666,7 +688,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "/v1/ops/pipeline/requests/{request_id}/run-now",
     ):
         conflict = spec["paths"][path]["post"]["responses"]["409"]
-        assert conflict["headers"]["Retry-After"]["schema"] == {"type": "integer"}
+        assert "headers" not in conflict
 
 
 @pytest.mark.unit
@@ -2166,6 +2188,86 @@ def test_create_request_rejects_non_refreshable_pair(client: TestClient) -> None
 
 
 @pytest.mark.unit
+def test_create_request_rejects_sync_scope_for_dataset_wide_catalog_entry(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+                "sync_scope": "target_grids",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "sync_scope 선택을 지원하지 않습니다" in response.json()["detail"]
+
+
+@pytest.mark.unit
+def test_create_request_reuses_same_active_effective_scope(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = _update_request(operator="local-dev", reason="same")
+
+    async def _active(*_args: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        assert kwargs["sync_scope"] == "dataset_wide"
+        return existing
+
+    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise AssertionError("same active request must be reused")
+
+    monkeypatch.setattr(fur_mod, "find_active_provider_dataset_request", _active)
+    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _unexpected_enqueue)
+
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+            },
+            "reason": "same",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reused_active_request"] is True
+    assert response.json()["data"]["request_id"] == existing.request_id
+
+
+@pytest.mark.unit
+def test_create_request_rejects_different_plan_on_active_effective_scope(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = _update_request(operator="local-dev", reason="same", priority=50)
+
+    async def _active(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return existing
+
+    monkeypatch.setattr(fur_mod, "find_active_provider_dataset_request", _active)
+
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": existing.scope,
+            "priority": 51,
+            "reason": "same",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "ACTIVE_SCOPE_CONFLICT"
+    assert response.json()["details"]["request_id"] == existing.request_id
+
+
+@pytest.mark.unit
 def test_create_request_scope_lock_busy_maps_to_409(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2192,7 +2294,7 @@ def test_create_request_scope_lock_busy_maps_to_409(
 
 
 @pytest.mark.unit
-def test_run_now_requeues_as_new_request(
+def test_run_now_dispatches_same_canonical_request(
     client: TestClient,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -2201,31 +2303,28 @@ def test_run_now_requeues_as_new_request(
         assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request()
 
-    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
-        assert kwargs["run_mode"] == "now"
-        assert kwargs["operator"] == "local-dev"
-        assert kwargs["reason"] == ("run-now from 22222222-2222-2222-2222-222222222222")
+    async def _dispatch(_session: Any, request_id: str) -> FeatureUpdateRequest:
+        assert request_id == "22222222-2222-2222-2222-222222222222"
         return _update_request(
-            request_id="33333333-3333-3333-3333-333333333333",
-            job_id="44444444-4444-4444-8444-444444444444",
+            dispatch_requested_at=datetime(2026, 7, 14, 9, 1, tzinfo=UTC),
         )
 
-    monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
-    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(fur_mod, "get_update_request", _get_request)
+    monkeypatch.setattr(fur_mod, "request_feature_update_dispatch", _dispatch)
 
     response = client.post(
         "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
         json={},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     body = response.json()
-    assert body["data"]["request_id"] == "33333333-3333-3333-3333-333333333333"
-    assert body["data"]["job_id"] == "44444444-4444-4444-8444-444444444444"
-    assert body["data"]["job_id"] != _update_request().job_id
+    assert body["data"]["request_id"] == "22222222-2222-2222-2222-222222222222"
+    assert body["data"]["job_id"] == _update_request().job_id
+    assert body["data"]["dispatch_requested_at"] is not None
     assert body["data"]["generation"] == 1
     assert body["data"]["status_url"] == (
-        "/v1/ops/pipeline/executions/update_request/33333333-3333-3333-3333-333333333333"
+        "/v1/ops/pipeline/executions/update_request/22222222-2222-2222-2222-222222222222"
     )
     assert session.begin_count == 1
 
@@ -2258,13 +2357,50 @@ def test_pipeline_request_mutations_reject_operator_override(
 
 
 @pytest.mark.unit
-def test_run_now_conflicts_for_running_request(
+def test_run_now_returns_running_request_idempotently(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return _update_request(status="running")
 
-    monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
+    monkeypatch.setattr(fur_mod, "get_update_request", _get_request)
+
+    response = client.post(
+        "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "running"
+
+
+@pytest.mark.unit
+def test_run_now_dispatch_race_rejects_cancellation_requested(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests = iter(
+        (
+            _update_request(status="queued"),
+            replace(
+                _update_request(status="running"),
+                cancellation_id="77777777-7777-4777-8777-777777777777",
+            ),
+        )
+    )
+
+    async def _get_request(
+        _session: Any, _request_id: str
+    ) -> FeatureUpdateRequest | None:
+        return next(requests)
+
+    async def _dispatch(_session: Any, request_id: str) -> FeatureUpdateRequest:
+        raise FeatureUpdateDispatchConflict(
+            request_id=request_id,
+            current_status="running",
+        )
+
+    monkeypatch.setattr(fur_mod, "get_update_request", _get_request)
+    monkeypatch.setattr(fur_mod, "request_feature_update_dispatch", _dispatch)
 
     response = client.post(
         "/v1/ops/pipeline/requests/22222222-2222-2222-2222-222222222222/run-now",
@@ -2272,6 +2408,8 @@ def test_run_now_conflicts_for_running_request(
     )
 
     assert response.status_code == 409
+    assert response.json()["code"] == "REQUEST_NOT_DISPATCHABLE"
+    assert response.json()["details"]["status"] == "cancellation_requested"
 
 
 @pytest.mark.unit
@@ -2279,7 +2417,7 @@ def test_run_now_missing_request_404(client: TestClient, monkeypatch: pytest.Mon
     async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return None
 
-    monkeypatch.setattr(pipeline_mod, "get_update_request", _get_request)
+    monkeypatch.setattr(fur_mod, "get_update_request", _get_request)
 
     response = client.post(
         "/v1/ops/pipeline/requests/aaaaaaaa-0000-4000-8000-000000000000/run-now",

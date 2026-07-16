@@ -172,6 +172,7 @@ async def test_list_latest_dataset_executions_maps_common_projection(
     projected = PipelineDatasetLatestExecution(
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        sync_scope="dataset_wide",
         execution=_pipeline_execution(at=at),
         operation_member_id="22222222-2222-2222-2222-222222222222",
         pair_status="running",
@@ -193,6 +194,7 @@ async def test_list_latest_dataset_executions_maps_common_projection(
         DatasetLatestExecution(
             provider="python-mois-api",
             dataset_key="mois_license_features_bulk",
+            sync_scope="dataset_wide",
             execution=projected.execution,
             operation_member_id="22222222-2222-2222-2222-222222222222",
             pair_status="running",

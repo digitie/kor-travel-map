@@ -12,7 +12,7 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
  * `feature-update-request-detail.spec.ts`(smoke + 버튼 가시성)와 **중복되지 않는**
  * 깊이 시나리오만 더한다:
  *  - cancel/run-now POST가 정확한 pathname·method·body로 단 1회 발사되는지(payload 단언)
- *  - run-now가 원 요청을 바꾸지 않고 새 request_id를 반환·안내하는지
+ *  - run-now가 기존 canonical request_id/job_id를 유지해 dispatch하는지
  *  - failed/cancelled 같은 done 외 terminal 분기의 버튼 가시성
  *  - cancel/run-now mutation 실패(409)가 액션별 Alert를 띄우고 버튼이 잔존하는지
  *  - 새로고침(refetch) 버튼 / "목록" back-link
@@ -48,24 +48,28 @@ type PipelineCancellationRequest =
 type FeatureUpdateRequestRunNowRequest =
   components["schemas"]["FeatureUpdateRequestRunNowRequest"];
 type Meta = components["schemas"]["Meta"];
+type ScopeDispatchFeatureUpdateRequestRecord = FeatureUpdateRequestRecord & {
+  requested_sync_scope: string | null;
+  effective_sync_scope: string | null;
+  dispatch_requested_at: string | null;
+};
 
 const REQUEST_ID = "88888888-8888-4888-8888-888888888888";
-const NEW_REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const JOB_ID = "99999999-9999-4999-8999-999999999999";
-const NEW_JOB_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const DETAIL_PATH = `/v1/admin/features/update-requests/${REQUEST_ID}`;
-const NEW_DETAIL_PATH = `/v1/admin/features/update-requests/${NEW_REQUEST_ID}`;
 const LIST_PATH = "/admin/features/update-requests";
 
 const meta: Meta = { duration_ms: 1, request_id: "e2e-fur-detail-actions" };
 
 function makeUpdateRequest(
-  overrides: Partial<FeatureUpdateRequestRecord> = {},
-): FeatureUpdateRequestRecord {
+  overrides: Partial<ScopeDispatchFeatureUpdateRequestRecord> = {},
+): ScopeDispatchFeatureUpdateRequestRecord {
   return {
     created_at: "2026-06-08T00:00:00.000Z",
     dagster_run_id: "dagster-run-fur-002",
     dataset_keys: ["festival_open_api"],
+    dispatch_requested_at: null,
+    effective_sync_scope: null,
     error_message: null,
     finished_at: null,
     job_id: JOB_ID,
@@ -76,6 +80,7 @@ function makeUpdateRequest(
     priority: 100,
     providers: ["python-visitkorea-api"],
     reason: "e2e",
+    requested_sync_scope: null,
     request_id: REQUEST_ID,
     run_mode: "queued",
     scope: {
@@ -124,18 +129,17 @@ type MockOptions = {
 
 type Calls = {
   detail: number;
-  newDetail: number;
   cancel: number;
   runNow: number;
   cancelBody: PipelineCancellationRequest | null;
   runNowBody: FeatureUpdateRequestRunNowRequest | null;
-  runNowRecord: FeatureUpdateRequestRecord | null;
+  runNowRecord: ScopeDispatchFeatureUpdateRequestRecord | null;
 };
 
 /**
  * 상세 GET / cancel / run-now를 한 핸들러로 가로챈다.
  *  - cancel/run-now POST의 method·pathname·body·횟수를 캡처
- *  - cancel은 원 요청 상태를 바꾸고, run-now는 원 요청 불변 + 신규 요청 201을 반환
+ *  - cancel은 원 요청 상태를 바꾸고, run-now는 같은 canonical 요청을 200으로 반환
  *  - mutationStatus>=400이면 POST를 실패시켜 mutation error 분기를 트리거(status 미변경)
  *  - transitionStatus가 있으면 GET 횟수 기반으로 status를 단계 전환(폴링 검증)
  */
@@ -145,7 +149,6 @@ async function mockUpdateRequest(
 ): Promise<Calls> {
   const calls: Calls = {
     detail: 0,
-    newDetail: 0,
     cancel: 0,
     runNow: 0,
     cancelBody: null,
@@ -210,20 +213,19 @@ async function mockUpdateRequest(
           return;
         }
         const runNowRecord = makeUpdateRequest({
-          request_id: NEW_REQUEST_ID,
-          job_id: NEW_JOB_ID,
-          priority: calls.runNowBody?.priority ?? 100,
-          reason: calls.runNowBody?.reason ?? `run-now from ${REQUEST_ID}`,
-          run_mode: "now",
-          status: "queued",
-          status_url: `/v1/admin/features/update-requests/${NEW_REQUEST_ID}`,
+          request_id: REQUEST_ID,
+          job_id: JOB_ID,
+          dispatch_requested_at: "2026-06-08T00:00:01.000Z",
+          run_mode: "queued",
+          status,
+          status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
         });
         calls.runNowRecord = runNowRecord;
         const body: FeatureUpdateRequestMutationResponse = {
           data: runNowRecord,
           meta,
         };
-        await fulfillJson(route, body, 201);
+        await fulfillJson(route, body);
         return;
       }
 
@@ -244,16 +246,6 @@ async function mockUpdateRequest(
           meta,
         };
         await fulfillJson(route, body);
-        return;
-      }
-
-      if (method === "GET" && pathname === NEW_DETAIL_PATH) {
-        calls.newDetail += 1;
-        await fulfillJson(
-          route,
-          { detail: "run-now mutation cache miss" },
-          500,
-        );
         return;
       }
 
@@ -302,10 +294,10 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await expect.poll(() => calls.detail).toBeGreaterThan(detailBefore);
   });
 
-  test("run-now 액션 → 원 요청 불변 + 새 request_id 안내", async ({
+  test("run-now 액션 → 빈 body + canonical identity 유지", async ({
     page,
   }) => {
-    const calls = await mockUpdateRequest(page, { initialStatus: "done" });
+    const calls = await mockUpdateRequest(page, { initialStatus: "queued" });
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const runNow = page.getByRole("button", { name: "즉시 실행" });
@@ -314,53 +306,56 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await runNow.click();
 
     await expect.poll(() => calls.runNow).toBe(1);
-    // component(line 131)가 보내는 고정 reason.
     const runNowBody: FeatureUpdateRequestRunNowRequest | null =
       calls.runNowBody;
-    expect(runNowBody).toMatchObject({
-      reason: "run-now from detail view",
-    });
-    expect(runNowBody).not.toHaveProperty("operator");
+    expect(runNowBody).toEqual({});
     expect(calls.runNowRecord).toMatchObject({
-      request_id: NEW_REQUEST_ID,
-      job_id: NEW_JOB_ID,
-      reason: "run-now from detail view",
-      run_mode: "now",
+      request_id: REQUEST_ID,
+      job_id: JOB_ID,
+      dispatch_requested_at: "2026-06-08T00:00:01.000Z",
+      run_mode: "queued",
+      status: "queued",
     });
-    expect(calls.runNowRecord?.job_id).not.toBe(JOB_ID);
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "즉시 실행 요청 생성 완료" });
-    await expect(successAlert).toContainText("원본 요청은 변경되지 않았습니다.");
-    const newRequestLink = successAlert.getByRole("link", {
-      name: NEW_REQUEST_ID,
+      .filter({ hasText: "즉시 실행 요청 완료" });
+    await expect(successAlert).toContainText(
+      "기존 요청의 즉시 dispatch를 요청했습니다.",
+    );
+    const canonicalRequestLink = successAlert.getByRole("link", {
+      name: REQUEST_ID,
     });
-    await expect(newRequestLink).toHaveAttribute(
+    await expect(canonicalRequestLink).toHaveAttribute(
       "href",
-      `/admin/features/update-requests/${NEW_REQUEST_ID}`,
+      `/admin/features/update-requests/${REQUEST_ID}`,
     );
-    // 원 요청은 done 그대로라 즉시 실행 버튼과 완료 상태가 유지된다.
+    // 같은 queued 요청의 dispatch intent만 갱신하므로 identity와 상태가 유지된다.
     await expect(runNow).toBeVisible();
-    await expect(page.getByText("완료", { exact: true })).toBeVisible();
-
-    await newRequestLink.click();
-    await expect(page).toHaveURL(
-      new RegExp(`/admin/features/update-requests/${NEW_REQUEST_ID}$`),
-    );
-    const newRequestSummary = page.locator("section").first();
-    await expect(
-      newRequestSummary.getByText(NEW_REQUEST_ID, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      newRequestSummary.getByText("now", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      newRequestSummary.getByText("대기", { exact: true }),
-    ).toBeVisible();
-    expect(calls.newDetail).toBe(0);
+    await expect(page.getByText("대기", { exact: true })).toBeVisible();
   });
 
-  test("failed terminal — cancel 숨김, run-now 유지(재큐잉)", async ({
+  test("running run-now는 이미 실행 중인 canonical 요청으로 안내한다", async ({
+    page,
+  }) => {
+    const calls = await mockUpdateRequest(page, { initialStatus: "running" });
+    await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
+
+    await page.getByRole("button", { name: "즉시 실행" }).click();
+
+    await expect.poll(() => calls.runNow).toBe(1);
+    expect(calls.runNowRecord).toMatchObject({
+      request_id: REQUEST_ID,
+      job_id: JOB_ID,
+      status: "running",
+    });
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "즉시 실행 요청 완료" }),
+    ).toContainText("요청이 이미 실행 중입니다.");
+  });
+
+  test("failed terminal — cancel과 run-now 모두 숨김", async ({
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "failed" });
@@ -371,13 +366,12 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     ).toBeVisible();
     // failed ∈ terminalStatuses(component line 26) → canCancel=false.
     await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
-    // failed != running → canRunNow=true.
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
     // StatusBadge가 status 문자열 그대로 렌더(status-badge.tsx line 37).
     await expect(page.getByText("실패", { exact: true })).toBeVisible();
   });
 
-  test("cancelled terminal — cancel 숨김, run-now는 재큐잉 가능", async ({
+  test("cancelled terminal — cancel과 run-now 모두 숨김", async ({
     page,
   }) => {
     await mockUpdateRequest(page, { initialStatus: "cancelled" });
@@ -388,8 +382,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     ).toBeVisible();
     // cancelled ∈ terminalStatuses → cancel 숨김.
     await expect(page.getByRole("button", { name: "취소" })).toBeHidden();
-    // cancelled != running → terminal이어도 run-now는 노출(재큐잉 허용).
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
   });
 
   test("cancel 실패(409) → 요청 취소 실패 alert + cancel 버튼 잔존", async ({
@@ -412,7 +405,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await expect(cancel).toBeVisible();
   });
 
-  test("run-now 실패(409) → 즉시 실행 생성 실패 alert + 버튼 잔존", async ({
+  test("run-now 실패(409) → 즉시 실행 실패 alert + 버튼 잔존", async ({
     page,
   }) => {
     const calls = await mockUpdateRequest(page, {
@@ -426,7 +419,7 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
 
     await runNow.click();
 
-    await expect(page.getByText("즉시 실행 요청 생성 실패")).toBeVisible();
+    await expect(page.getByText("즉시 실행 요청 실패")).toBeVisible();
     await expect.poll(() => calls.runNow).toBe(1);
     // mutation 실패라 status 미변경(queued) → run-now 버튼 잔존.
     await expect(runNow).toBeVisible();
@@ -482,17 +475,17 @@ test.describe("/admin/features/update-requests/[requestId] actions", () => {
     await page.goto(`/admin/features/update-requests/${REQUEST_ID}`);
 
     const cancel = page.getByRole("button", { name: "취소" });
-    // running → canCancel=true, canRunNow=false.
+    // running은 active canonical 요청이므로 cancel/run-now 모두 가능하다.
     await expect(cancel).toBeVisible();
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
 
     allowTransition = true;
 
-    // 2s 폴링이 done을 반환 → terminal → cancel 사라지고 run-now 노출.
+    // 2s 폴링이 done을 반환 → terminal → cancel/run-now 모두 사라진다.
     // 전체 스위트 병렬 부하에서도 안정적이도록 타임아웃 여유를 둔다(2s 폴링 간격 +
     // 5s staleTime + 렌더; 단일 실행 ~3s, 부하 시 8s 근접해 flaky했음).
     await expect(cancel).toBeHidden({ timeout: 15_000 });
-    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "즉시 실행" })).toBeHidden();
     // 폴링이 최소 1회 추가 fetch.
     await expect.poll(() => calls.detail).toBeGreaterThanOrEqual(2);
   });

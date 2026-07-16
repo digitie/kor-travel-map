@@ -974,6 +974,7 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
             "provider": "python-c-api",
             "dataset_key": "dataset-c",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(provider_dataset, FeatureUpdateRequest)
 
@@ -997,7 +998,8 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
         text(
             """
             INSERT INTO ops.import_jobs (
-              job_id, kind, payload, status, provider, dataset_key, trigger_kind
+              job_id, kind, payload, status, provider, dataset_key, sync_scope,
+              trigger_kind
             )
             SELECT
               ('51000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
@@ -1006,6 +1008,7 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
                    ELSE 'direct-provider-' || seed.n::text END,
               CASE WHEN seed.n % 20 = 0 THEN 'target-dataset'
                    ELSE 'direct-dataset-' || seed.n::text END,
+              'dataset_wide',
               'update_request'
             FROM generate_series(1, 4000) AS seed(n)
 
@@ -1014,7 +1017,7 @@ async def test_provider_dataset_list_filter_uses_typed_and_gin_seed_indexes(
             SELECT
               ('52000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
               'feature_update_request', '{}'::jsonb, 'done',
-              NULL, NULL, 'update_request'
+              NULL, NULL, NULL, 'update_request'
             FROM generate_series(1, 4000) AS seed(n)
             """
         )

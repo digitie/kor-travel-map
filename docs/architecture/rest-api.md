@@ -297,11 +297,11 @@ POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
-GET/POST /v1/admin/features/update-requests             # 재적재 조회/영속 생성(201)
+GET/POST /v1/admin/features/update-requests             # 재적재 조회/영속 생성(201) 또는 활성 작업 재사용(200)
 POST   /v1/admin/features/update-requests/preview       # 비영속 실행 계획 미리보기(200)
 GET    /v1/admin/features/update-requests/{request_id}
 POST   /v1/admin/features/update-requests/{request_id}/cancel
-POST   /v1/admin/features/update-requests/{request_id}/run-now    # 201 새 now 요청 생성, 원본 불변
+POST   /v1/admin/features/update-requests/{request_id}/run-now    # 200 동일 canonical job 우선 dispatch
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
@@ -331,8 +331,15 @@ POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 
 ```
 - **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
   받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의
-  `AdminProxyContext.actor`에서만 파생한다. 실행 계획 필드 외에 create body는 `reason`,
-  run-now body는 nullable `priority`/`reason`만 요청별 override로 허용한다.
+  `AdminProxyContext.actor`에서만 파생한다. 실행 계획 필드 외에 create body만 `reason`을
+  받는다. run-now body는 빈 strict object이며 priority/reason을 바꾸거나 새 요청을 만들지 않고
+  기존 canonical job의 최초 `dispatch_requested_at`만 기록한다. queued 재호출과 running 조회는
+  같은 request를 `200`으로 반환하고 terminal 상태는 `409`다.
+- **target-selector scope**: KMA grid 3종은 `provider_dataset` scope에서만
+  `target_grids` 또는 `external_system:<name>`으로 선택한다. 이 pair를
+  provider/dataset filter로 지정한 non-direct 요청은 `422`로 거절한다.
+  non-direct 요청은 provider 또는 dataset_key filter를 하나 이상 요구해
+  source record의 비지원 pair가 worker에서 늦게 실패하는 경로를 차단한다.
 - **version 0/1 모델(#317)**: provider 적재=`data_origin='provider', data_version=0`,
   사용자 요청=`'user_request', data_version=1`, `feature.feature_versions` snapshot +
   `ops.feature_change_requests`. `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE=require_review|
@@ -387,8 +394,9 @@ GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
                                                       # root 상세 + current member/run 결과
 POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
-POST /v1/ops/pipeline/requests                        # 영속 갱신 요청 생성(201)
+POST /v1/ops/pipeline/requests                        # 영속 생성(201) 또는 같은 활성 계획 재사용(200)
 POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)
+POST /v1/ops/pipeline/requests/{request_id}/run-now   # 동일 canonical job 우선 dispatch(200)
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
 ```
 
@@ -411,6 +419,21 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   raw status 필드명은 nullable `dagster_run_status`이며 engine create/start/finish 시각을 응답
   시각으로 사용한다. root progress는 완료 pair 비율, exact SUCCESS는 100이고 partial
   failure/cancel은 완료 비율을 보존한다.
+- **Provider dataset scope 갱신(T-ADM-C45X-B, #686)**: request JSON의 nullable
+  `sync_scope`는 운영자가 보낸 requested 값만 보존하고, 실제 실행 identity는 연결 canonical
+  job의 non-null `effective_sync_scope`다. 일반 dataset은 명시 scope를 거부하고
+  `dataset_wide`, KMA grid 3종은 기본 `target_grids` 또는 활성 target이 있는
+  `external_system:<exact-name>`만 허용한다. 생성 응답은 `requested_sync_scope`,
+  `effective_sync_scope`, `reused_active_request`를 함께 반환한다. 같은
+  provider/dataset/effective scope의 queued/running 요청은 계획이 완전히 같을 때만 `200`으로
+  재사용하고 priority/operator/reason/policy 등이 다르면 기존 request 링크를 포함한 `409`다.
+  `/v1/ops/datasets`의 `catalog.scope_refresh`가 selector/effect/default/allowed scopes/reason을
+  서버 정본으로 제공한다. KMA runner는 선택 scope의 active target만
+  조회하고 target/grid membership fingerprint와 base cursor가 둘 다 같을 때만
+  skip한다. 격자 상한을 넘으면 provider I/O 전 전체 실패하여 partial cursor
+  전진을 금지하고, 실패 카운터는 provider transaction rollback 후 별도
+  transaction으로 영속한다. 일반 provider 실패는 성공 writer와 같은 `default` state
+  namespace에 기록하고, KMA grid 3종만 선택된 effective scope를 state namespace로 사용한다.
 - **Pipeline 계층 취소(T-ADM-C3d, #680)**: body는 최대 500자의 nullable `reason`만 허용한다.
   `operator`/`actor`를 포함한 알 수 없는 필드는 422이며, actor는 admin 인증의
   `AdminProxyContext.actor`에서만 파생한다. `import_job`이 request branch 안에 있으면

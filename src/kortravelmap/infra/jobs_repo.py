@@ -44,6 +44,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationKey,
     TriggerKind,
 )
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import try_advisory_lock
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationConflict,
@@ -96,7 +97,8 @@ _GENERIC_IMPORT_RESERVED_KINDS: Final[frozenset[str]] = (
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
     "current_stage, source_checksum, error_message, dagster_run_id, provider, "
-    "dataset_key, trigger_kind, operation_registry_version, dagster_run_status, "
+    "dataset_key, sync_scope, trigger_kind, operation_registry_version, "
+    "dagster_run_status, dispatch_requested_at, "
     "cancellation_id, quarantined_at, quarantine_reason, "
     "cancellation_requested_at, cancellation_requested_by, cancellation_reason, "
     "started_at, finished_at, heartbeat_at, created_at"
@@ -125,6 +127,7 @@ class ImportJob:
     dagster_run_id: str | None = None
     provider: str | None = None
     dataset_key: str | None = None
+    sync_scope: str | None = None
     trigger_kind: TriggerKind | None = None
     operation_registry_version: str | None = None
     dagster_run_status: str | None = None
@@ -138,6 +141,7 @@ class ImportJob:
     cancellation_reason: str | None = None
     quarantined_at: datetime | None = None
     quarantine_reason: str | None = None
+    dispatch_requested_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +179,7 @@ def _row_to_job(row: Any) -> ImportJob:
         dagster_run_id=row.dagster_run_id,
         provider=row.provider,
         dataset_key=row.dataset_key,
+        sync_scope=row.sync_scope,
         trigger_kind=(
             cast(TriggerKind, row.trigger_kind)
             if row.trigger_kind is not None
@@ -194,6 +199,7 @@ def _row_to_job(row: Any) -> ImportJob:
         cancellation_reason=row.cancellation_reason,
         quarantined_at=row.quarantined_at,
         quarantine_reason=row.quarantine_reason,
+        dispatch_requested_at=row.dispatch_requested_at,
     )
 
 
@@ -219,12 +225,13 @@ def _row_to_event(row: Any) -> ImportJobEvent:
 _INSERT_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
-    provider, dataset_key, trigger_kind
+    provider, dataset_key, sync_scope, trigger_kind, dispatch_requested_at
 )
 SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    :dagster_run_id, :provider, :dataset_key, :trigger_kind
+    :dagster_run_id, :provider, :dataset_key, :sync_scope, :trigger_kind,
+    CASE WHEN CAST(:dispatch_requested AS boolean) THEN clock_timestamp() END
 WHERE CAST(:parent_job_id AS uuid) IS NULL
    OR EXISTS (
       SELECT 1
@@ -241,12 +248,12 @@ RETURNING {_RETURN_COLUMNS}
 _START_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id, dagster_run_id,
-    provider, dataset_key, trigger_kind, status, started_at, heartbeat_at
+    provider, dataset_key, sync_scope, trigger_kind, status, started_at, heartbeat_at
 )
 SELECT
     :kind, CAST(:payload AS jsonb), :source_checksum,
     CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
-    :dagster_run_id, :provider, :dataset_key, :trigger_kind,
+    :dagster_run_id, :provider, :dataset_key, :sync_scope, :trigger_kind,
     'running', now(), now()
 WHERE CAST(:parent_job_id AS uuid) IS NULL
    OR EXISTS (
@@ -498,12 +505,14 @@ def _identity_params(
     *,
     provider_dataset: ProviderDatasetOperationKey | None,
     trigger_kind: TriggerKind | None,
+    sync_scope: str | None = None,
 ) -> dict[str, str | None]:
     if trigger_kind is not None and trigger_kind not in TRIGGER_KIND_VALUES:
         raise ValueError(f"invalid trigger_kind: {trigger_kind}")
     return {
         "provider": provider_dataset.provider if provider_dataset else None,
         "dataset_key": provider_dataset.dataset_key if provider_dataset else None,
+        "sync_scope": sync_scope,
         "trigger_kind": trigger_kind,
     }
 
@@ -558,6 +567,8 @@ async def enqueue_unpaired_import_job(
         dagster_run_id=dagster_run_id,
         provider_dataset=None,
         trigger_kind=trigger_kind,
+        sync_scope=None,
+        dispatch_requested=False,
     )
 
 
@@ -585,6 +596,8 @@ async def enqueue_provider_dataset_import_job(
         dagster_run_id=dagster_run_id,
         provider_dataset=provider_dataset,
         trigger_kind=trigger_kind,
+        sync_scope=None,
+        dispatch_requested=False,
     )
 
 
@@ -592,12 +605,26 @@ async def enqueue_feature_update_request_job(
     session: AsyncSession,
     *,
     provider_dataset: ProviderDatasetOperationKey | None,
+    effective_sync_scope: str | None,
+    dispatch_requested: bool,
 ) -> ImportJob:
     """전용 request writer가 같은 transaction에서 연결할 canonical job을 만든다.
 
     이 함수만 reserved ``feature_update_request`` kind를 생성할 수 있다. transaction을
     request INSERT 없이 commit하면 DB의 deferred 양방향 constraint trigger가 거부한다.
     """
+    if provider_dataset is None:
+        if effective_sync_scope is not None:
+            raise ValueError("non-provider_dataset feature update job must not have a sync scope")
+    elif effective_sync_scope is None:
+        raise ValueError("provider_dataset feature update job requires a canonical sync scope")
+    else:
+        try:
+            parse_canonical_sync_scope(effective_sync_scope)
+        except ValueError as exc:
+            raise ValueError(
+                "provider_dataset feature update job requires a canonical sync scope"
+            ) from exc
     return await _enqueue_import_job(
         session,
         kind=FEATURE_UPDATE_REQUEST_JOB_KIND,
@@ -608,6 +635,8 @@ async def enqueue_feature_update_request_job(
         dagster_run_id=None,
         provider_dataset=provider_dataset,
         trigger_kind="update_request",
+        sync_scope=effective_sync_scope,
+        dispatch_requested=dispatch_requested,
     )
 
 
@@ -622,10 +651,14 @@ async def _enqueue_import_job(
     dagster_run_id: str | None,
     provider_dataset: ProviderDatasetOperationKey | None,
     trigger_kind: TriggerKind | None,
+    sync_scope: str | None,
+    dispatch_requested: bool,
 ) -> ImportJob:
     normalized_run_id = _optional_dagster_run_id(dagster_run_id)
     identity = _identity_params(
-        provider_dataset=provider_dataset, trigger_kind=trigger_kind
+        provider_dataset=provider_dataset,
+        trigger_kind=trigger_kind,
+        sync_scope=sync_scope,
     )
     if parent_job_id is not None:
         await assert_generic_import_job_targets(session, (parent_job_id,))
@@ -639,6 +672,7 @@ async def _enqueue_import_job(
             "load_batch_id": load_batch_id,
             "parent_job_id": parent_job_id,
             "dagster_run_id": normalized_run_id,
+            "dispatch_requested": dispatch_requested,
             **identity,
         },
     )
@@ -730,7 +764,7 @@ async def _start_import_job(
     _validate_generic_kind(kind)
     normalized_run_id = _optional_dagster_run_id(dagster_run_id)
     identity = _identity_params(
-        provider_dataset=provider_dataset, trigger_kind=trigger_kind
+        provider_dataset=provider_dataset, trigger_kind=trigger_kind, sync_scope=None
     )
     if parent_job_id is not None:
         await assert_generic_import_job_targets(session, (parent_job_id,))

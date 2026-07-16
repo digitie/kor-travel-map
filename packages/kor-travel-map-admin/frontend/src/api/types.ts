@@ -652,7 +652,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 기존 request payload를 run_mode=now로 재큐잉 */
+        /** 기존 canonical request 우선 dispatch 요청 */
         post: operations["run_feature_update_request_now_v1_admin_features_update_requests__request_id__run_now_post"];
         delete?: never;
         options?: never;
@@ -2244,8 +2244,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 기존 request payload를 run_mode=now로 재큐잉 (201 + 새 request)
-         * @description 원 행은 바뀌지 않고 동일 payload의 **새 request 행**이 생성된다 — 응답의 request_id는 새 행의 id다.
+         * 기존 canonical request 우선 dispatch 요청
+         * @description 새 request를 만들지 않고 같은 canonical job의 dispatch_requested_at을 최초 한 번 기록한다. queued 재호출과 running 조회는 멱등이다.
          */
         post: operations["run_pipeline_update_request_now_v1_ops_pipeline_requests__request_id__run_now_post"];
         delete?: never;
@@ -6411,11 +6411,13 @@ export interface components {
         };
         /**
          * FeatureUpdateRequestCreateResponse
-         * @description 새 영속 요청 생성 응답.
+         * @description 새 요청 또는 동일한 활성 canonical 요청 재사용 응답.
          */
         FeatureUpdateRequestCreateResponse: {
             data: components["schemas"]["FeatureUpdateRequestCreatedRecord"];
             meta: components["schemas"]["Meta"];
+            /** Reused Active Request */
+            reused_active_request: boolean;
         };
         /**
          * FeatureUpdateRequestCreatedRecord
@@ -6431,6 +6433,16 @@ export interface components {
             dagster_run_id: string | null;
             /** Dataset Keys */
             dataset_keys: string[];
+            /**
+             * Dispatch Requested At
+             * @description 같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.
+             */
+            dispatch_requested_at: string | null;
+            /**
+             * Effective Sync Scope
+             * @description 실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.
+             */
+            effective_sync_scope: string | null;
             /** Error Message */
             error_message: string | null;
             /** Finished At */
@@ -6459,6 +6471,11 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
+            /**
+             * Requested Sync Scope
+             * @description 운영자가 provider_dataset 요청에 명시한 원본 sync scope.
+             */
+            requested_sync_scope: string | null;
             /**
              * Result Kind
              * @constant
@@ -6513,7 +6530,7 @@ export interface components {
         };
         /**
          * FeatureUpdateRequestMutationResponse
-         * @description run-now처럼 반드시 새 영속 요청을 만드는 mutation 응답.
+         * @description 기존 canonical 요청의 상태나 dispatch 의도를 바꾸는 mutation 응답.
          */
         FeatureUpdateRequestMutationResponse: {
             data: components["schemas"]["FeatureUpdateRequestRecord"];
@@ -6602,6 +6619,16 @@ export interface components {
             dagster_run_id: string | null;
             /** Dataset Keys */
             dataset_keys: string[];
+            /**
+             * Dispatch Requested At
+             * @description 같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.
+             */
+            dispatch_requested_at: string | null;
+            /**
+             * Effective Sync Scope
+             * @description 실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.
+             */
+            effective_sync_scope: string | null;
             /** Error Message */
             error_message: string | null;
             /** Finished At */
@@ -6631,6 +6658,11 @@ export interface components {
              */
             request_id: string;
             /**
+             * Requested Sync Scope
+             * @description 운영자가 provider_dataset 요청에 명시한 원본 sync scope.
+             */
+            requested_sync_scope: string | null;
+            /**
              * Run Mode
              * @enum {string}
              */
@@ -6655,14 +6687,9 @@ export interface components {
         };
         /**
          * FeatureUpdateRequestRunNowRequest
-         * @description 기존 request payload를 run_mode=now로 재큐잉할 때의 override.
+         * @description 기존 canonical request에 우선 dispatch를 요청하는 빈 명령 body.
          */
-        FeatureUpdateRequestRunNowRequest: {
-            /** Priority */
-            priority?: number | null;
-            /** Reason */
-            reason?: string | null;
-        };
+        FeatureUpdateRequestRunNowRequest: Record<string, never>;
         /**
          * FeatureWeatherResponse
          * @description ``GET /features/{feature_id}/weather`` 응답.
@@ -7431,8 +7458,6 @@ export interface components {
          * @description ETL 카탈로그가 아는 dataset 메타.
          */
         OpsDatasetCatalogInfo: {
-            /** Default Sync Scope */
-            default_sync_scope: string;
             /** Feature Kind */
             feature_kind: string;
             /** Is Feature Load */
@@ -7442,6 +7467,9 @@ export interface components {
             /** Label */
             label: string;
             preview: components["schemas"]["OpsDatasetPreviewCapability"];
+            /** Provider State Default Scope */
+            provider_state_default_scope: string;
+            scope_refresh: components["schemas"]["OpsDatasetScopeRefreshCapability"];
         };
         /** OpsDatasetDetailData */
         OpsDatasetDetailData: {
@@ -7643,6 +7671,8 @@ export interface components {
              * @enum {string}
              */
             status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /** Sync Scope */
+            sync_scope: string | null;
             /** Trigger Kind */
             trigger_kind: string | null;
         };
@@ -7844,6 +7874,30 @@ export interface components {
             source: "dagster_graphql";
             /** Status */
             status: string | null;
+        };
+        /**
+         * OpsDatasetScopeRefreshCapability
+         * @description 직접 갱신 요청에서 선택 가능한 effective sync scope 계약.
+         */
+        OpsDatasetScopeRefreshCapability: {
+            /** Allowed Sync Scopes */
+            allowed_sync_scopes: string[];
+            /** Default Sync Scope */
+            default_sync_scope: string;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "dataset_wide" | "sync_scope";
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Selector
+             * @enum {string}
+             */
+            selector: "none" | "poi_cache_targets";
+            /** Supported */
+            supported: boolean;
         };
         /**
          * OpsDatasetScopeState
@@ -12655,6 +12709,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 같은 계획의 활성 canonical request 재사용 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -12664,11 +12727,9 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description 동일 scope 즉시 실행 lock 경합 */
+            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
-                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12888,7 +12949,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12905,11 +12966,9 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 동일 scope 즉시 실행 lock 경합 */
+            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
-                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17479,6 +17538,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 같은 계획의 활성 canonical request 재사용 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
+                };
+            };
             /** @description Successful Response */
             201: {
                 headers: {
@@ -17488,11 +17556,9 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
-            /** @description 동일 scope 즉시 실행 lock 경합 */
+            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
-                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17577,7 +17643,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17594,11 +17660,9 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 동일 scope 즉시 실행 lock 경합 */
+            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
-                    /** @description 동일 scope lock 경합 시 재시도 대기 초. */
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

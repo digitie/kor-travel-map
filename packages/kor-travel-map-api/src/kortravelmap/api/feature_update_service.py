@@ -9,21 +9,33 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from time import perf_counter
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.geocoding import KorTravelGeoRestClient, resolve_sigungu_by_radius
+from kortravelmap.infra.feature_update_active_repo import (
+    FeatureUpdateDispatchConflict,
+    find_active_provider_dataset_request,
+    is_active_provider_dataset_unique_violation,
+    request_feature_update_dispatch,
+)
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
     FeatureUpdateRequestPreview,
     enqueue_feature_update_request,
+    get_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
     preview_feature_update_request as preview_feature_update_request_repo,
 )
+from kortravelmap.infra.poi_cache_target_repo import (
+    has_active_poi_cache_targets_for_external_system,
+)
 from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
 from kortravelmap.settings import KorTravelMapSettings
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.feature_update_schema import (
@@ -38,12 +50,18 @@ from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestRecord,
     FeatureUpdateScope,
 )
-from kortravelmap.api.provider_catalog import catalog_refreshable_entries
+from kortravelmap.api.provider_catalog import (
+    catalog_refreshable_entries,
+    find_catalog_entry,
+)
 from kortravelmap.api.response import make_meta
 
 __all__ = [
     "FeatureUpdateEnqueueError",
+    "FeatureUpdateActiveScopeConflict",
+    "FeatureUpdateDispatchStateConflict",
     "FeatureUpdateLockConflict",
+    "FeatureUpdateRequestNotFound",
     "FeatureUpdateResolverError",
     "FeatureUpdateServiceError",
     "FeatureUpdateValidationError",
@@ -56,6 +74,7 @@ __all__ = [
     "preview_response",
     "preview_update_request",
     "record_from_request",
+    "run_feature_update_request_now",
 ]
 
 DEFAULT_STATUS_URL_PREFIX = "/v1/admin/features/update-requests"
@@ -85,6 +104,38 @@ class FeatureUpdateLockConflict(RuntimeError, FeatureUpdateServiceError):
         self.retry_after_seconds = exc.retry_after_seconds
 
 
+class FeatureUpdateActiveScopeConflict(RuntimeError, FeatureUpdateServiceError):
+    """같은 effective scope의 활성 작업이 서로 다른 요청 계획을 가진다."""
+
+    code = "ACTIVE_SCOPE_CONFLICT"
+
+    def __init__(self, request: FeatureUpdateRequest) -> None:
+        super().__init__(
+            "같은 provider/dataset/sync_scope에 다른 활성 요청이 이미 있습니다."
+        )
+        self.request_id = request.request_id
+        self.status = (
+            "cancellation_requested"
+            if request.cancellation_id is not None
+            else request.status
+        )
+
+
+class FeatureUpdateDispatchStateConflict(RuntimeError, FeatureUpdateServiceError):
+    """terminal request에 즉시 dispatch를 요청했다."""
+
+    code = "REQUEST_NOT_DISPATCHABLE"
+
+    def __init__(self, *, request_id: str, current_status: str) -> None:
+        super().__init__(f"{current_status} 상태인 request는 dispatch할 수 없습니다.")
+        self.request_id = request_id
+        self.current_status = current_status
+
+
+class FeatureUpdateRequestNotFound(LookupError, FeatureUpdateServiceError):
+    """request_id에 해당하는 canonical feature update request가 없다."""
+
+
 class FeatureUpdateResolverError(RuntimeError, FeatureUpdateServiceError):
     """kor-travel-geo 호출이 실패했다."""
 
@@ -108,10 +159,19 @@ def record_from_request(
 ) -> FeatureUpdateRequestRecord:
     """저장 행을 persisted HTTP 표현으로 변환한다."""
 
+    requested_sync_scope = (
+        row.scope.get("sync_scope")
+        if row.scope_type == "provider_dataset"
+        and isinstance(row.scope.get("sync_scope"), str)
+        else None
+    )
+
     return FeatureUpdateRequestRecord(
         request_id=row.request_id,
         scope_type=row.scope_type,
         scope=row.scope,
+        requested_sync_scope=requested_sync_scope,
+        effective_sync_scope=row.effective_sync_scope,
         providers=list(row.providers),
         dataset_keys=list(row.dataset_keys),
         update_policy=row.update_policy,
@@ -121,6 +181,7 @@ def record_from_request(
         matched_scope=row.matched_scope,
         job_id=row.job_id,
         dagster_run_id=row.dagster_run_id,
+        dispatch_requested_at=row.dispatch_requested_at,
         operator=row.operator,
         reason=row.reason,
         error_message=row.error_message,
@@ -152,6 +213,7 @@ def created_response(
     data: FeatureUpdateRequest,
     *,
     started_at: float,
+    reused_active_request: bool = False,
     status_url_prefix: str = DEFAULT_STATUS_URL_PREFIX,
 ) -> FeatureUpdateRequestCreateResponse:
     """새 영속 요청을 생성 응답으로 변환한다."""
@@ -162,6 +224,7 @@ def created_response(
             result_kind="request",
             **persisted.model_dump(),
         ),
+        reused_active_request=reused_active_request,
         meta=make_meta(started_at=started_at),
     )
 
@@ -205,17 +268,23 @@ def _refreshable_pairs() -> frozenset[tuple[str, str]]:
     return frozenset((entry.provider, entry.dataset_key) for entry in catalog_refreshable_entries())
 
 
-def _validate_refreshable_request(
+async def _validate_refreshable_request(
+    session: AsyncSession,
     *,
     scope: Mapping[str, Any],
     providers: Sequence[str],
     dataset_keys: Sequence[str],
-) -> None:
+) -> str | None:
     refreshable_pairs = _refreshable_pairs()
+    target_scope_pairs = frozenset(
+        (entry.provider, entry.dataset_key)
+        for entry in catalog_refreshable_entries()
+        if entry.scope_refresh_selector != "none"
+    )
     refreshable_providers = {provider for provider, _dataset in refreshable_pairs}
     refreshable_datasets = {dataset for _provider, dataset in refreshable_pairs}
 
-    def reject(provider: str | None, dataset_key: str | None) -> None:
+    def reject(provider: str | None, dataset_key: str | None) -> NoReturn:
         subject = (
             f"{provider}/{dataset_key}"
             if provider is not None and dataset_key is not None
@@ -233,13 +302,75 @@ def _validate_refreshable_request(
         dataset_key = str(scope.get("dataset_key", ""))
         if (provider, dataset_key) not in refreshable_pairs:
             reject(provider, dataset_key)
+        entry = find_catalog_entry(provider, dataset_key)
+        if entry is None:
+            reject(provider, dataset_key)
+        requested = scope.get("sync_scope")
+        if entry.scope_refresh_selector == "none":
+            if requested is not None:
+                raise FeatureUpdateValidationError(
+                    f"{provider}/{dataset_key}는 sync_scope 선택을 지원하지 않습니다."
+                )
+            return "dataset_wide"
+        raw_scope = entry.sync_scope if requested is None else requested
+        if not isinstance(raw_scope, str):
+            raise FeatureUpdateValidationError("sync_scope는 문자열이어야 합니다.")
+        try:
+            canonical = parse_canonical_sync_scope(raw_scope)
+        except ValueError as exc:
+            raise FeatureUpdateValidationError(str(exc)) from exc
+        if canonical.kind not in {"target_grids", "external_system"}:
+            raise FeatureUpdateValidationError(
+                f"{provider}/{dataset_key}는 target 기반 sync_scope만 지원합니다."
+            )
+        if canonical.external_system is not None and not await (
+            has_active_poi_cache_targets_for_external_system(
+                session,
+                external_system=canonical.external_system,
+            )
+        ):
+            raise FeatureUpdateValidationError(
+                "활성 POI cache target이 없는 external_system입니다: "
+                f"{canonical.external_system}"
+            )
+        return canonical.value
+
+    if providers and dataset_keys:
+        selected_pairs = {
+            (provider, dataset_key)
+            for provider in providers
+            for dataset_key in dataset_keys
+        }
+    elif providers:
+        selected_pairs = {
+            pair for pair in refreshable_pairs if pair[0] in providers
+        }
+    elif dataset_keys:
+        selected_pairs = {
+            pair for pair in refreshable_pairs if pair[1] in dataset_keys
+        }
+    else:
+        raise FeatureUpdateValidationError(
+            "non-direct feature update request는 provider 또는 dataset_key "
+            "filter를 하나 이상 지정해야 합니다."
+        )
+    unsupported_target_pairs = sorted(selected_pairs & target_scope_pairs)
+    if unsupported_target_pairs:
+        subjects = ", ".join(
+            f"{provider}/{dataset_key}"
+            for provider, dataset_key in unsupported_target_pairs
+        )
+        raise FeatureUpdateValidationError(
+            "target 선택형 dataset은 provider_dataset scope로만 요청할 수 있습니다: "
+            f"{subjects}"
+        )
 
     if providers and dataset_keys:
         for provider in providers:
             for dataset_key in dataset_keys:
                 if (provider, dataset_key) not in refreshable_pairs:
                     reject(provider, dataset_key)
-        return
+        return None
 
     for provider in providers:
         if provider not in refreshable_providers:
@@ -247,6 +378,7 @@ def _validate_refreshable_request(
     for dataset_key in dataset_keys:
         if dataset_key not in refreshable_datasets:
             reject(None, dataset_key)
+    return None
 
 
 @asynccontextmanager
@@ -309,11 +441,43 @@ async def enqueue_update_request(
 ) -> FeatureUpdateRequest:
     """검증과 geo resolver를 적용해 영속 갱신 요청을 큐에 넣는다."""
 
-    _validate_refreshable_request(
+    effective_sync_scope = await _validate_refreshable_request(
+        session,
         scope=scope,
         providers=providers,
         dataset_keys=dataset_keys,
     )
+    return await _enqueue_validated_update_request(
+        session,
+        scope=scope,
+        effective_sync_scope=effective_sync_scope,
+        providers=providers,
+        dataset_keys=dataset_keys,
+        update_policy=update_policy,
+        run_mode=run_mode,
+        priority=priority,
+        operator=operator,
+        reason=reason,
+        settings=settings,
+    )
+
+
+async def _enqueue_validated_update_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    effective_sync_scope: str | None,
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+    update_policy: Mapping[str, Any],
+    run_mode: str,
+    priority: int,
+    operator: str | None,
+    reason: str | None,
+    settings: KorTravelMapSettings,
+) -> FeatureUpdateRequest:
+    """검증이 끝난 계획을 scope resolver와 canonical queue writer에 전달한다."""
+
     try:
         async with _sigungu_resolver_for_scope(scope, settings=settings) as sigungu_resolver:
             return await enqueue_feature_update_request(
@@ -326,6 +490,7 @@ async def enqueue_update_request(
                 priority=priority,
                 operator=operator,
                 reason=reason,
+                effective_sync_scope=effective_sync_scope,
                 sigungu_resolver=sigungu_resolver,
             )
     except (
@@ -335,6 +500,8 @@ async def enqueue_update_request(
         FeatureUpdateValidationError,
         SigunguResolverUnavailable,
     ):
+        raise
+    except IntegrityError:
         raise
     except Exception as exc:
         raise _enqueue_error(exc) from exc
@@ -353,7 +520,8 @@ async def preview_update_request(
 ) -> FeatureUpdateRequestPreview:
     """검증과 geo resolver를 적용하되 어떤 영속 행도 만들지 않는다."""
 
-    _validate_refreshable_request(
+    await _validate_refreshable_request(
+        session,
         scope=scope,
         providers=providers,
         dataset_keys=dataset_keys,
@@ -382,6 +550,112 @@ async def preview_update_request(
         raise _enqueue_error(exc) from exc
 
 
+def _assert_reusable_active_request(
+    existing: FeatureUpdateRequest,
+    *,
+    scope: Mapping[str, Any],
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+    update_policy: Mapping[str, Any],
+    priority: int,
+    operator: str,
+    reason: str | None,
+) -> None:
+    """활성 identity가 같아도 감사·실행 계획이 다르면 조용히 재사용하지 않는다."""
+
+    if existing.cancellation_id is not None:
+        raise FeatureUpdateActiveScopeConflict(existing)
+
+    existing_scope = dict(existing.scope)
+    requested_scope = dict(scope)
+    if existing.scope_type == "provider_dataset":
+        existing_scope.pop("sync_scope", None)
+        requested_scope.pop("sync_scope", None)
+    same_plan = (
+        existing_scope == requested_scope
+        and existing.providers == tuple(providers)
+        and existing.dataset_keys == tuple(dataset_keys)
+        and existing.update_policy == dict(update_policy)
+        and existing.priority == priority
+        and existing.operator == operator
+        and existing.reason == reason
+    )
+    if not same_plan:
+        raise FeatureUpdateActiveScopeConflict(existing)
+
+
+async def _reuse_active_request(
+    session: AsyncSession,
+    existing: FeatureUpdateRequest,
+    *,
+    requested_run_mode: str,
+) -> FeatureUpdateRequest | None:
+    if requested_run_mode != "now" or existing.status == "running":
+        return existing
+    try:
+        return await request_feature_update_dispatch(session, existing.request_id)
+    except FeatureUpdateDispatchConflict as exc:
+        current = await get_update_request(session, existing.request_id)
+        if current is not None and current.cancellation_id is not None:
+            raise FeatureUpdateActiveScopeConflict(current) from exc
+        if current is not None and current.status == "running":
+            return current
+        if current is not None and current.status in {"done", "failed", "cancelled"}:
+            return None
+        if current is None:
+            return None
+        raise FeatureUpdateDispatchStateConflict(
+            request_id=current.request_id,
+            current_status=current.status,
+        ) from exc
+
+
+async def _find_reusable_provider_dataset_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    effective_sync_scope: str | None,
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+    update_policy: Mapping[str, Any],
+    run_mode: str,
+    priority: int,
+    operator: str,
+    reason: str | None,
+) -> FeatureUpdateRequest | None:
+    if scope.get("type") != "provider_dataset" or effective_sync_scope is None:
+        return None
+    provider = scope.get("provider")
+    dataset_key = scope.get("dataset_key")
+    if not isinstance(provider, str) or not isinstance(dataset_key, str):
+        raise FeatureUpdateValidationError(
+            "provider_dataset scope에는 provider와 dataset_key가 필요합니다."
+        )
+    existing = await find_active_provider_dataset_request(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=effective_sync_scope,
+    )
+    if existing is None:
+        return None
+    _assert_reusable_active_request(
+        existing,
+        scope=scope,
+        providers=providers,
+        dataset_keys=dataset_keys,
+        update_policy=update_policy,
+        priority=priority,
+        operator=operator,
+        reason=reason,
+    )
+    return await _reuse_active_request(
+        session,
+        existing,
+        requested_run_mode=run_mode,
+    )
+
+
 async def create_feature_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
@@ -390,15 +664,22 @@ async def create_feature_update_request(
     status_url_prefix: str,
     settings: KorTravelMapSettings,
 ) -> FeatureUpdateRequestCreateResponse:
-    """영속 갱신 요청을 생성하고 201 응답을 만든다."""
+    """새 canonical 요청을 만들거나 같은 계획의 활성 요청을 멱등 재사용한다."""
 
     started_at = perf_counter()
     scope = _scope_payload(body.scope)
     update_policy = _update_policy_payload(body.update_policy)
     async with session.begin():
-        result = await enqueue_update_request(
+        effective_sync_scope = await _validate_refreshable_request(
             session,
             scope=scope,
+            providers=body.providers,
+            dataset_keys=body.dataset_keys,
+        )
+        result = await _find_reusable_provider_dataset_request(
+            session,
+            scope=scope,
+            effective_sync_scope=effective_sync_scope,
             providers=body.providers,
             dataset_keys=body.dataset_keys,
             update_policy=update_policy,
@@ -406,13 +687,95 @@ async def create_feature_update_request(
             priority=body.priority,
             operator=operator,
             reason=body.reason,
-            settings=settings,
+        )
+        reused = result is not None
+        for attempt in range(3):
+            if result is not None:
+                break
+            try:
+                async with session.begin_nested():
+                    result = await _enqueue_validated_update_request(
+                        session,
+                        scope=scope,
+                        effective_sync_scope=effective_sync_scope,
+                        providers=body.providers,
+                        dataset_keys=body.dataset_keys,
+                        update_policy=update_policy,
+                        run_mode=body.run_mode,
+                        priority=body.priority,
+                        operator=operator,
+                        reason=body.reason,
+                        settings=settings,
+                    )
+            except IntegrityError as exc:
+                if not is_active_provider_dataset_unique_violation(exc):
+                    raise FeatureUpdateEnqueueError(
+                        "feature update request enqueue failed"
+                    ) from exc
+                result = await _find_reusable_provider_dataset_request(
+                    session,
+                    scope=scope,
+                    effective_sync_scope=effective_sync_scope,
+                    providers=body.providers,
+                    dataset_keys=body.dataset_keys,
+                    update_policy=update_policy,
+                    run_mode=body.run_mode,
+                    priority=body.priority,
+                    operator=operator,
+                    reason=body.reason,
+                )
+                if result is not None:
+                    reused = True
+            if result is None and attempt == 2:
+                raise FeatureUpdateEnqueueError(
+                    "활성 scope lifecycle 경합이 반복되어 요청을 생성하지 못했습니다."
+                )
+    if result is None:  # pragma: no cover - loop의 마지막 attempt가 위에서 거절한다.
+        raise FeatureUpdateEnqueueError(
+            "활성 scope lifecycle 경합이 반복되어 요청을 생성하지 못했습니다."
         )
     return created_response(
         result,
         started_at=started_at,
+        reused_active_request=reused,
         status_url_prefix=status_url_prefix,
     )
+
+
+async def run_feature_update_request_now(
+    session: AsyncSession,
+    *,
+    request_id: str,
+) -> FeatureUpdateRequest:
+    """새 행 없이 기존 canonical request에 우선 dispatch 의도를 멱등 기록한다."""
+
+    existing = await get_update_request(session, request_id)
+    if existing is None:
+        raise FeatureUpdateRequestNotFound(
+            f"feature update request 없음: {request_id!r}"
+        )
+    if existing.cancellation_id is not None:
+        raise FeatureUpdateDispatchStateConflict(
+            request_id=existing.request_id,
+            current_status="cancellation_requested",
+        )
+    if existing.status == "running":
+        return existing
+    try:
+        return await request_feature_update_dispatch(session, request_id)
+    except FeatureUpdateDispatchConflict as exc:
+        current = await get_update_request(session, request_id)
+        if current is not None and current.cancellation_id is not None:
+            raise FeatureUpdateDispatchStateConflict(
+                request_id=current.request_id,
+                current_status="cancellation_requested",
+            ) from exc
+        if current is not None and current.status == "running":
+            return current
+        raise FeatureUpdateDispatchStateConflict(
+            request_id=exc.request_id,
+            current_status=exc.current_status,
+        ) from exc
 
 
 async def preview_feature_update_request(

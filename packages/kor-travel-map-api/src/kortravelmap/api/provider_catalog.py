@@ -127,6 +127,7 @@ from kortravelmap.api.etl_live import LIVE_LOADER_REGISTRY
 
 __all__ = [
     "PreviewKind",
+    "ScopeRefreshSelector",
     "ProviderDatasetCatalogEntry",
     "PROVIDER_DATASET_CATALOG",
     "list_catalog_providers",
@@ -139,6 +140,9 @@ __all__ = [
 
 PreviewKind = Literal["fixture", "live", "none"]
 """dataset preview 가용성 — fixture(오프라인 replay) / live(provider 실호출) / none."""
+
+ScopeRefreshSelector = Literal["none", "poi_cache_targets"]
+"""dataset refresh가 운영자 선택형 sync scope를 지원하는 방식."""
 
 
 @dataclass(frozen=True)
@@ -155,7 +159,8 @@ class ProviderDatasetCatalogEntry:
         산출 Feature 종류 (place/event/notice/price/weather/route/area).
         WeatherValue/PriceValue load는 매칭 대상 Feature kind를 표기.
     sync_scope:
-        provider_sync ``sync_scope`` — 대부분 ``default``, KMA 격자/region 예외.
+        provider_sync ``sync_scope`` — 대부분 ``default``, KMA grid 3종만
+        ``target_grids`` 예외.
     label:
         운영자용 한글 라벨.
     is_feature_load:
@@ -165,6 +170,9 @@ class ProviderDatasetCatalogEntry:
         Dagster feature update request로 실행 가능한 적재/갱신 단위이면 True.
         ``is_feature_load=False``인 PriceValue/WeatherValue/enrichment도 여기에
         포함될 수 있다. 아직 runner가 없는 수동 보강/alias 항목은 False.
+    scope_refresh_selector:
+        운영자가 선택할 수 있는 refresh scope의 종류. ``poi_cache_targets``는
+        활성 POI cache target 전체 또는 특정 ``external_system``만 선택한다.
     preview:
         ETL preview 가용성 — import 시점에 fixture/live registry 조회로 결정.
     """
@@ -176,6 +184,7 @@ class ProviderDatasetCatalogEntry:
     label: str
     is_feature_load: bool
     is_refreshable: bool
+    scope_refresh_selector: ScopeRefreshSelector
     preview: PreviewKind
 
 
@@ -206,6 +215,7 @@ def _entry(
     is_feature_load: bool,
     is_refreshable: bool | None = None,
     sync_scope: str = "default",
+    scope_refresh_selector: ScopeRefreshSelector = "none",
 ) -> ProviderDatasetCatalogEntry:
     return ProviderDatasetCatalogEntry(
         provider=provider,
@@ -215,6 +225,7 @@ def _entry(
         label=label,
         is_feature_load=is_feature_load,
         is_refreshable=is_feature_load if is_refreshable is None else is_refreshable,
+        scope_refresh_selector=scope_refresh_selector,
         preview=_preview_for(provider, dataset_key),
     )
 
@@ -327,6 +338,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         label="KMA 단기예보 (getVilageFcst, 3시간×5일)",
         is_feature_load=False,
         is_refreshable=True,
+        scope_refresh_selector="poi_cache_targets",
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -336,6 +348,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         label="KMA 초단기실황 (getUltraSrtNcst, 관측)",
         is_feature_load=False,
         is_refreshable=True,
+        scope_refresh_selector="poi_cache_targets",
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
@@ -345,12 +358,12 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         label="KMA 초단기예보 (getUltraSrtFcst, 30분×6시간)",
         is_feature_load=False,
         is_refreshable=True,
+        scope_refresh_selector="poi_cache_targets",
     ),
     _entry(
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_MID_FORECAST_DATASET_KEY,
         feature_kind="weather",
-        sync_scope="mid_region",
         label="KMA 중기예보 (getMidLandFcst + getMidTa, 3~10일)",
         is_feature_load=False,
         is_refreshable=True,
@@ -359,7 +372,6 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
         feature_kind="notice",
-        sync_scope="region",
         label="KMA 기상특보 (특보×구역 fan-out)",
         is_feature_load=True,
     ),

@@ -148,6 +148,7 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
             "provider": "python-mois-api",
             "dataset_key": "mois_license_features_bulk",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None

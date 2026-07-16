@@ -72,6 +72,15 @@ from kortravelmap.core.pipeline_cancellation_states import (
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
 
+_CANONICAL_WHITESPACE_SQL = (
+    "(' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) "
+    "|| chr(28) || chr(29) || chr(30) || chr(31) || chr(133) "
+    "|| chr(160) || chr(5760) || chr(8192) || chr(8193) || chr(8194) "
+    "|| chr(8195) || chr(8196) || chr(8197) || chr(8198) || chr(8199) "
+    "|| chr(8200) || chr(8201) || chr(8202) || chr(8232) || chr(8233) "
+    "|| chr(8239) || chr(8287) || chr(12288))"
+)
+
 __all__ = [
     "metadata",
     "Base",
@@ -1722,8 +1731,20 @@ class ImportJobRow(Base):
             "AND (dagster_run_id IS NULL OR (dagster_run_id = btrim(dagster_run_id) "
             "AND dagster_run_id <> '')) "
             "AND (status <> 'queued' OR dagster_run_id IS NULL) "
-            "AND (status <> 'running' OR dagster_run_id IS NOT NULL))",
+            "AND (status <> 'running' OR dagster_run_id IS NOT NULL) "
+            "AND ((provider IS NULL AND dataset_key IS NULL AND sync_scope IS NULL) OR "
+            "(provider IS NOT NULL AND dataset_key IS NOT NULL "
+            "AND sync_scope IS NOT NULL "
+            "AND (sync_scope IN ('dataset_wide','target_grids') OR "
+            "(left(sync_scope, 16) = 'external_system:' "
+            "AND char_length(sync_scope) <= 128 AND char_length(sync_scope) > 16 "
+            "AND substring(sync_scope FROM 17) = "
+            f"btrim(substring(sync_scope FROM 17), {_CANONICAL_WHITESPACE_SQL})))))",
             name=conv("ck_import_jobs_update_request_shape"),
+        ),
+        CheckConstraint(
+            "dispatch_requested_at IS NULL OR kind = 'feature_update_request'",
+            name=conv("ck_import_jobs_dispatch_requested_at"),
         ),
         CheckConstraint(
             "(quarantined_at IS NULL AND quarantine_reason IS NULL) OR "
@@ -1781,6 +1802,19 @@ class ImportJobRow(Base):
             postgresql_where=text(
                 "kind = 'feature_update_request' AND status = 'queued' "
                 "AND cancellation_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_import_jobs_active_feature_update_scope",
+            "provider",
+            "dataset_key",
+            "sync_scope",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'feature_update_request' "
+                "AND status IN ('queued','running') "
+                "AND quarantined_at IS NULL "
+                "AND provider IS NOT NULL"
             ),
         ),
         Index(
@@ -1891,6 +1925,7 @@ class ImportJobRow(Base):
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
     provider: Mapped[str | None] = mapped_column(Text)
     dataset_key: Mapped[str | None] = mapped_column(Text)
+    sync_scope: Mapped[str | None] = mapped_column(Text)
     trigger_kind: Mapped[str | None] = mapped_column(Text)
     operation_registry_version: Mapped[str | None] = mapped_column(Text)
     dagster_run_status: Mapped[str | None] = mapped_column(Text)
@@ -1911,6 +1946,9 @@ class ImportJobRow(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatch_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -2642,6 +2680,12 @@ class PoiCacheTargetRow(Base):
         CheckConstraint(
             "coord_precision_digits BETWEEN 3 AND 8",
             name="ck_poi_cache_targets_precision",
+        ),
+        CheckConstraint(
+            "external_system <> '' AND char_length(external_system) <= 112 "
+            "AND external_system = "
+            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL})",
+            name=conv("ck_poi_cache_targets_external_system_identity"),
         ),
         Index(
             "uq_poi_cache_targets_active_key",

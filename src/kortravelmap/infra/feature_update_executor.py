@@ -51,6 +51,9 @@ from kortravelmap.infra.scope_repo import (
     SigunguByRadiusResolver,
     count_features_matching_scope,
 )
+from kortravelmap.infra.sync_state_repo import (
+    record_sync_failure as record_provider_sync_failure,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -65,6 +68,7 @@ __all__ = [
     "FeatureUpdateConnectionUnsafe",
     "FeatureUpdateLockReleaseError",
     "ProviderDatasetRefreshResult",
+    "ProviderDatasetRefreshFailure",
     "ProviderDatasetRefreshRunner",
     "ProviderDatasetRefreshScope",
     "SkippedProviderDatasetRefresh",
@@ -92,6 +96,7 @@ class ProviderDatasetRefreshScope:
     feature_ids: tuple[str, ...]
     feature_count: int
     prevent_provider_reactivation: bool
+    sync_scope: str | None = None
     provider_policy: ProviderRefreshPolicy | None = None
     rate_limit: dict[str, Any] | None = None
     target_ids: tuple[str, ...] = ()
@@ -106,6 +111,8 @@ class ProviderDatasetRefreshScope:
         }
         if self.target_ids:
             payload["target_ids"] = list(self.target_ids)
+        if self.sync_scope is not None:
+            payload["sync_scope"] = self.sync_scope
         if self.rate_limit:
             payload["rate_limit"] = dict(self.rate_limit)
         return payload
@@ -131,6 +138,30 @@ class ProviderDatasetRefreshResult:
             "loaded_count": self.loaded_count,
             "metadata": dict(self.metadata or {}),
         }
+
+
+class ProviderDatasetRefreshFailure(RuntimeError):
+    """provider refresh 실패와 durable sync-state identity를 함께 전달한다."""
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        sync_scope: str,
+        message: str,
+    ) -> None:
+        for field_name, value in (
+            ("provider", provider),
+            ("dataset_key", dataset_key),
+            ("sync_scope", sync_scope),
+        ):
+            if not value or value != value.strip():
+                raise ValueError(f"{field_name} must be a trimmed non-empty string")
+        self.provider = provider
+        self.dataset_key = dataset_key
+        self.sync_scope = sync_scope
+        super().__init__(message)
 
 
 class ProviderDatasetRefreshRunner(Protocol):
@@ -412,6 +443,7 @@ async def build_feature_update_execution_plan(
                 feature_ids=resolution.feature_ids,
                 feature_count=item.feature_count,
                 prevent_provider_reactivation=prevent_provider_reactivation,
+                sync_scope=request.effective_sync_scope,
                 provider_policy=policy,
                 rate_limit=_rate_limit(policy),
                 target_ids=_target_ids_for_provider(target_matches),
@@ -670,6 +702,20 @@ async def _finish_failed_execution(
         status="failed",
         error_message=error_message,
     )
+
+
+async def _record_provider_refresh_failure(
+    session: AsyncSession,
+    failure: ProviderDatasetRefreshFailure,
+) -> None:
+    """실패한 bound refresh transaction과 분리해 sync failure를 먼저 commit한다."""
+    async with session.begin():
+        await record_provider_sync_failure(
+            session,
+            provider=failure.provider,
+            dataset_key=failure.dataset_key,
+            sync_scope=failure.sync_scope,
+        )
 
 
 async def execute_feature_update_request(
@@ -992,6 +1038,11 @@ async def _execute_feature_update_request_locked(
         error_message = f"{exc.__class__.__name__}: {exc}"
         if plan is None:
             plan = _unresolved_execution_plan(started)
+        if isinstance(exc, ProviderDatasetRefreshFailure):
+            # runner의 bound transaction은 ``session.begin`` context가 이미
+            # rollback했다. sync failure를 별도 transaction으로 먼저 commit해
+            # 이후 request terminalize 실패에도 provider 실패 신호를 보존한다.
+            await _record_provider_refresh_failure(session, exc)
         return await _finish_failed_execution(
             session,
             started,

@@ -7,9 +7,12 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from kortravelmap.dagster import feature_update_runner as dagster_runner_mod
+from kortravelmap.dagster import kma_weather as kma_weather_mod
 from kortravelmap.dagster.assets import run_feature_event_datagokr_cultural_festivals
 from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateAssetRunner,
@@ -53,6 +56,10 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
 from kortravelmap.infra.scope_repo import ScopeResolution
+from kortravelmap.providers.kma import (
+    KMA_PROVIDER_NAME,
+    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+)
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     STANDARD_DATA_PROVIDER_NAME,
@@ -629,6 +636,7 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
             "provider": STANDARD_DATA_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_CULTURAL_FESTIVALS,
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -725,6 +733,107 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
     assert stored.matched_scope.get("executed_provider_scopes", []) == []
 
 
+async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_scope = "external_system:external-app"
+    await upsert_poi_cache_target(
+        execution_session,
+        external_system="external-app",
+        target_key="bound-kma-failure",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=1.0,
+    )
+    request = await enqueue_feature_update_request(
+        execution_session,
+        scope={
+            "type": "provider_dataset",
+            "provider": KMA_PROVIDER_NAME,
+            "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+            "sync_scope": sync_scope,
+        },
+        effective_sync_scope=sync_scope,
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+    await execution_session.commit()
+
+    class _FailingForecast:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def now(self, *, nx: int, ny: int) -> object:
+            self.calls.append((nx, ny))
+            raise RuntimeError("bound KMA provider failure")
+
+    forecast = _FailingForecast()
+    monkeypatch.setattr(
+        dagster_runner_mod,
+        "_kma_weather_resources",
+        lambda _settings, _scope: RunnerResources(
+            {"kma_weather_client": SimpleNamespace(forecast=forecast)}
+        ),
+    )
+    monkeypatch.setattr(
+        kma_weather_mod,
+        "_kma_grid",
+        lambda lat, lon: (int(lon), int(lat)),
+    )
+    monkeypatch.setattr(
+        kma_weather_mod,
+        "_latest_nowcast_base",
+        lambda: ("20260611", "0500"),
+    )
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": AsyncKorTravelMapClient(migrated_engine),
+            "reverse_geocoder": None,
+            "fetched_at": _FETCHED,
+            "strict_address": "off",
+        },
+        log=logging.getLogger(__name__),
+        settings_factory=KorTravelMapSettings.model_construct,
+    )
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_feature_update_request(
+        request.request_id,
+        runner=runner,
+        dagster_run_id="dagster-bound-kma-failure",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "ProviderDatasetRefreshFailure" in result.error_message
+    assert forecast.calls == [(126, 37)]
+    sync_state = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT cursor, consecutive_failures, last_failure_at, last_success_at
+                FROM provider_sync.provider_sync_state
+                WHERE provider = :provider
+                  AND dataset_key = :dataset_key
+                  AND sync_scope = :sync_scope
+                """
+            ),
+            {
+                "provider": KMA_PROVIDER_NAME,
+                "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).mappings().one()
+    assert sync_state["cursor"] == {}
+    assert sync_state["consecutive_failures"] == 1
+    assert sync_state["last_failure_at"] is not None
+    assert sync_state["last_success_at"] is None
+
+
 async def test_transaction_bound_asset_client_rejects_engine_connection_escape(
     migrated_engine: AsyncEngine,
 ) -> None:
@@ -763,6 +872,7 @@ async def test_probe_failure_finishes_committed_prepare_as_failed(
             "provider": "python-probe-api",
             "dataset_key": "probe-failure",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -806,6 +916,7 @@ async def test_cancellation_marker_wins_before_runner_starts(
             "provider": "python-cancelled-api",
             "dataset_key": "cancelled-before-runner",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -885,6 +996,7 @@ async def test_execute_next_lock_busy_keeps_request_queued_and_rerunnable(
             "provider": "python-lock-busy-api",
             "dataset_key": "rerunnable",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -954,6 +1066,7 @@ async def test_preclaimed_running_request_requeues_when_scope_lock_is_busy(
             "provider": "python-preclaimed-api",
             "dataset_key": "lock-busy",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1061,6 +1174,7 @@ async def test_request_lease_loser_touches_only_queued_run_key_and_can_retry(
             "provider": "python-request-lease-api",
             "dataset_key": "queued-retry",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1133,6 +1247,7 @@ async def test_request_lease_loser_does_not_touch_active_running_owner(
             "provider": "python-request-lease-api",
             "dataset_key": "active-owner",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1189,6 +1304,7 @@ async def test_cancelled_error_releases_scope_lock_on_same_connection(
             "provider": "python-interrupted-api",
             "dataset_key": "cancelled-error",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     scope_lock_key = feature_update_scope_advisory_key(
@@ -1246,6 +1362,7 @@ async def test_false_exact_unlock_invalidates_connection(
             "provider": "python-unlock-api",
             "dataset_key": "false-unlock",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     scope_lock_id = advisory_lock_key(
@@ -1392,6 +1509,7 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
             "provider": "python-phase-api",
             "dataset_key": "phase-a",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()
@@ -1556,6 +1674,7 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
             "provider": "python-checkpoint-api",
             "dataset_key": "phase-a",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
@@ -1664,6 +1783,7 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
             "provider": "python-marker-race-api",
             "dataset_key": "phase-a",
         },
+        effective_sync_scope="dataset_wide",
     )
     assert isinstance(request, FeatureUpdateRequest)
     await execution_session.commit()

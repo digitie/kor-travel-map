@@ -17,7 +17,9 @@ from types import SimpleNamespace
 from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.feature_update_executor import (
+    ProviderDatasetRefreshFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
 )
@@ -165,6 +167,7 @@ ResourceFactory = Callable[
     "RunnerResources",
 ]
 Teardown = Callable[[], object]
+SyncStateFailureScope = str | Callable[[ProviderDatasetRefreshScope], str]
 
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "kor_travel_map_client",
@@ -193,12 +196,23 @@ class FeatureUpdateRunnerSpec:
     run: AssetRun
     resources: ResourceFactory
     asset_key: str
+    sync_state_failure_scope: SyncStateFailureScope = "default"
 
     def matches(self, scope: ProviderDatasetRefreshScope) -> bool:
         return (
             scope.provider == self.provider
             and scope.dataset_key in self.dataset_keys
         )
+
+    def resolve_sync_state_failure_scope(
+        self,
+        scope: ProviderDatasetRefreshScope,
+    ) -> str:
+        resolver = self.sync_state_failure_scope
+        value = resolver(scope) if callable(resolver) else resolver
+        if not value or value != value.strip():
+            raise ValueError("sync-state failure scope must be a trimmed non-empty string")
+        return value
 
 
 class _DirectAssetContext:
@@ -248,6 +262,7 @@ class FeatureUpdateAssetRunner:
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
+        failure_sync_scope = spec.resolve_sync_state_failure_scope(scope)
         if scope.provider == OPINET_PROVIDER_NAME and scope.scope_type != "provider_dataset":
             # OpiNet lowTop fetcher는 개별 feature/bbox/cache-target request scope를
             # 소비하지 않고 현재 설정의 전국 회전 window를 다시 조회한다. targeted
@@ -273,31 +288,87 @@ class FeatureUpdateAssetRunner:
                 status="skipped",
                 metadata=metadata,
             )
-        settings = self._settings_factory()
-        # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를 포함할 수
-        # 있으므로 이벤트 루프를 막지 않게 스레드로 보낸다(#617 리뷰).
-        extra = await asyncio.to_thread(spec.resources, settings, scope)
+        extra: RunnerResources | None = None
+        refresh_failure: ProviderDatasetRefreshFailure | None = None
         try:
-            resources = {**self._common_resources, **dict(extra.values)}
+            try:
+                settings = self._settings_factory()
+                # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를
+                # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
+                # 보낸다(#617 리뷰).
+                extra = await asyncio.to_thread(spec.resources, settings, scope)
+                resources = {**self._common_resources, **dict(extra.values)}
+            except ProviderDatasetRefreshFailure:
+                raise
+            except Exception as exc:
+                raise ProviderDatasetRefreshFailure(
+                    provider=scope.provider,
+                    dataset_key=scope.dataset_key,
+                    sync_scope=failure_sync_scope,
+                    message="provider refresh resource initialization failed",
+                ) from exc
             client = resources.get("kor_travel_map_client")
             if isinstance(client, AsyncKorTravelMapClient):
-                resources["kor_travel_map_client"] = await _bind_client_to_session(
-                    client,
-                    session,
+                try:
+                    resources["kor_travel_map_client"] = await _bind_client_to_session(
+                        client,
+                        session,
+                    )
+                except ProviderDatasetRefreshFailure:
+                    raise
+                except Exception as exc:
+                    raise ProviderDatasetRefreshFailure(
+                        provider=scope.provider,
+                        dataset_key=scope.dataset_key,
+                        sync_scope=failure_sync_scope,
+                        message="provider refresh transaction binding failed",
+                    ) from exc
+            try:
+                context = _DirectAssetContext(
+                    resources=resources,
+                    log=self._log,
+                    asset_key=spec.asset_key,
                 )
-            context = _DirectAssetContext(
-                resources=resources,
-                log=self._log,
-                asset_key=spec.asset_key,
-            )
-            result = await spec.run(context)
-            return _as_refresh_result(
-                result,
-                scope=scope,
-                output_metadata=context.output_metadata,
-            )
+                result = await spec.run(context)
+                return _as_refresh_result(
+                    result,
+                    scope=scope,
+                    output_metadata=context.output_metadata,
+                )
+            except ProviderDatasetRefreshFailure:
+                raise
+            except Exception as exc:
+                raise ProviderDatasetRefreshFailure(
+                    provider=scope.provider,
+                    dataset_key=scope.dataset_key,
+                    sync_scope=failure_sync_scope,
+                    message="provider refresh asset execution failed",
+                ) from exc
+        except ProviderDatasetRefreshFailure as exc:
+            refresh_failure = exc
+            raise
         finally:
-            await _close_teardowns(extra.teardowns)
+            if extra is not None:
+                try:
+                    await _close_teardowns(extra.teardowns)
+                except Exception as exc:
+                    if refresh_failure is None:
+                        raise ProviderDatasetRefreshFailure(
+                            provider=scope.provider,
+                            dataset_key=scope.dataset_key,
+                            sync_scope=failure_sync_scope,
+                            message=(
+                                "provider refresh resource teardown failed after the "
+                                "bound transaction"
+                            ),
+                        ) from exc
+                    log_error = getattr(self._log, "error", None)
+                    if callable(log_error):
+                        log_error(
+                            "provider refresh typed failure 뒤 resource teardown도 "
+                            "실패했지만 원래 failure identity를 보존한다.",
+                            exc_info=True,
+                        )
 
     def _spec_for_scope(
         self, scope: ProviderDatasetRefreshScope
@@ -644,11 +715,31 @@ def _kma_grid_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    effective_scope = _kma_grid_effective_sync_scope(scope)
     base = _kma_weather_resources(settings, scope)
     return RunnerResources(
-        {**dict(base.values), "feature_update_dataset_key": scope.dataset_key},
+        {
+            **dict(base.values),
+            "feature_update_dataset_key": scope.dataset_key,
+            "kma_weather_sync_scope": effective_scope,
+            "kma_weather_sync_failure_managed_by_executor": True,
+        },
         teardowns=base.teardowns,
     )
+
+
+def _kma_grid_effective_sync_scope(scope: ProviderDatasetRefreshScope) -> str:
+    raw_scope = scope.sync_scope
+    if raw_scope is None:
+        raise ValueError("KMA grid effective sync_scope is required")
+    if not isinstance(raw_scope, str):
+        raise ValueError("KMA grid sync_scope must be a string")
+    parsed_scope = parse_canonical_sync_scope(raw_scope)
+    if parsed_scope.kind == "dataset_wide":
+        raise ValueError(
+            "KMA grid datasets require target_grids or external_system:<name> sync_scope"
+        )
+    return parsed_scope.value
 
 
 _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
@@ -853,6 +944,7 @@ _DEFAULT_SPECS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=_run_kma_grid_weather,
         resources=_kma_grid_resources,
         asset_key="feature_weather_kma_grid_dispatch",
+        sync_state_failure_scope=_kma_grid_effective_sync_scope,
     ),
     FeatureUpdateRunnerSpec(
         provider=KMA_PROVIDER_NAME,

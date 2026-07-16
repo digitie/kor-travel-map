@@ -33,6 +33,7 @@ from kortravelmap.api.ops_dataset_schema import (
 )
 from kortravelmap.api.ops_dataset_service import (
     OrphanMutationDisabledError,
+    load_dataset_detail,
     load_datasets_grid,
 )
 from kortravelmap.api.settings import ApiSettings
@@ -110,6 +111,58 @@ def _policy(
         created_at=_NOW,
         updated_at=_NOW,
         stale_after_minutes=stale_after_minutes,
+    )
+
+
+def _pipeline_execution(
+    *,
+    provider: str,
+    dataset_key: str,
+    execution_id: str,
+    created_at: datetime = _NOW,
+) -> PipelineExecution:
+    job_id = execution_id.replace("11111111", "22222222")
+    return PipelineExecution(
+        kind="update_request",
+        id=execution_id,
+        status="running",
+        created_at=created_at,
+        providers=(provider,),
+        dataset_keys=(dataset_key,),
+        provider_datasets=(),
+        progress=None,
+        current_stage=None,
+        scope_type="provider_dataset",
+        priority=50,
+        run_mode="queued",
+        operator=None,
+        error_message=None,
+        started_at=_NOW,
+        finished_at=None,
+        dagster_run_id=f"run-{execution_id[:8]}",
+        dagster_run_status=None,
+        trigger_kind="update_request",
+        operation_registry_version=None,
+        requested_job_id=job_id,
+        linked_job_count=1,
+        projected_job=PipelineProjectedJob(
+            id=job_id,
+            job_kind="feature_update_request",
+            status="running",
+            progress=0,
+            current_stage=None,
+            error_message=None,
+            created_at=created_at,
+            started_at=_NOW,
+            finished_at=None,
+            dagster_run_id=f"run-{execution_id[:8]}",
+            dagster_run_status=None,
+            trigger_kind="update_request",
+            operation_registry_version=None,
+            load_batch_id=None,
+            parent_job_id=None,
+            depth=0,
+        ),
     )
 
 
@@ -213,6 +266,7 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
         "detail_url",
         "pair_status",
         "operation_member_id",
+        "sync_scope",
         "provider_datasets",
         "projected_job",
         "cancellation",
@@ -239,6 +293,27 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert pair["properties"]["operation_member_id"]["format"] == "uuid"
     assert set(pair["properties"]["status"]["enum"]) == operation_states
     assert "status_source" not in pair["properties"]
+    scope_refresh = spec["components"]["schemas"][
+        "OpsDatasetScopeRefreshCapability"
+    ]
+    assert {
+        "supported",
+        "selector",
+        "effect",
+        "default_sync_scope",
+        "allowed_sync_scopes",
+        "reason",
+    } <= set(scope_refresh["properties"])
+    assert {
+        "supported",
+        "selector",
+        "effect",
+        "default_sync_scope",
+        "allowed_sync_scopes",
+    } <= set(scope_refresh["required"])
+    catalog = spec["components"]["schemas"]["OpsDatasetCatalogInfo"]
+    assert "provider_state_default_scope" in catalog["required"]
+    assert "default_sync_scope" not in catalog["properties"]
     projected = spec["components"]["schemas"]["OpsDatasetProjectedJob"]
     assert projected["properties"]["id"]["format"] == "uuid"
     assert set(projected["properties"]["status"]["enum"]) == operation_states
@@ -508,49 +583,26 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     latest = DatasetLatestExecution(
         provider=state.provider,
         dataset_key=state.dataset_key,
-        execution=PipelineExecution(
-            kind="update_request",
-            id="11111111-1111-1111-1111-111111111111",
-            status="running",
-            created_at=_NOW,
-            providers=(state.provider,),
-            dataset_keys=(state.dataset_key,),
-            provider_datasets=(),
-            progress=None,
-            current_stage=None,
-            scope_type="provider_dataset",
-            priority=50,
-            run_mode="queued",
-            operator=None,
-            error_message=None,
-            started_at=_NOW,
-            finished_at=None,
-            dagster_run_id="run-1",
-            dagster_run_status=None,
-            trigger_kind="update_request",
-            operation_registry_version=None,
-            requested_job_id="22222222-2222-2222-2222-222222222222",
-            linked_job_count=1,
-            projected_job=PipelineProjectedJob(
-                id="22222222-2222-2222-2222-222222222222",
-                job_kind="feature_update_request",
-                status="running",
-                progress=0,
-                current_stage=None,
-                error_message=None,
-                created_at=_NOW,
-                started_at=_NOW,
-                finished_at=None,
-                dagster_run_id="run-1",
-                dagster_run_status=None,
-                trigger_kind="update_request",
-                operation_registry_version=None,
-                load_batch_id=None,
-                parent_job_id=None,
-                depth=0,
-            ),
+        sync_scope="dataset_wide",
+        execution=_pipeline_execution(
+            provider=state.provider,
+            dataset_key=state.dataset_key,
+            execution_id="11111111-1111-1111-1111-111111111111",
         ),
         operation_member_id="22222222-2222-2222-2222-222222222222",
+        pair_status="running",
+    )
+    newer_unscoped = DatasetLatestExecution(
+        provider=state.provider,
+        dataset_key=state.dataset_key,
+        sync_scope=None,
+        execution=_pipeline_execution(
+            provider=state.provider,
+            dataset_key=state.dataset_key,
+            execution_id="33333333-3333-4333-8333-333333333333",
+            created_at=_NOW + timedelta(minutes=1),
+        ),
+        operation_member_id="44444444-4444-4444-8444-444444444444",
         pair_status="running",
     )
     schedule_index = DatasetScheduleIndex(
@@ -585,16 +637,24 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
         _session: object,
     ) -> tuple[DatasetLatestExecution, ...]:
         calls["latest"] += 1
-        return (latest,)
+        return (latest, newer_unscoped)
 
     async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
         return schedule_index
+
+    async def _external_systems(_session: object) -> tuple[str, ...]:
+        return ("concierge", "geo")
 
     monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
     monkeypatch.setattr(service, "list_all_provider_refresh_policies", _policies)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _issues)
     monkeypatch.setattr(service, "list_latest_dataset_executions", _latest)
     monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
+    monkeypatch.setattr(
+        service,
+        "list_active_poi_cache_target_external_systems",
+        _external_systems,
+    )
 
     data = await load_datasets_grid(
         cast(Any, object()),
@@ -620,7 +680,307 @@ async def test_grid_calculates_freshness_and_keeps_time_meanings_separate(
     assert row.latest_execution is not None
     assert row.latest_execution.status == "running"
     assert row.latest_execution.pair_status == "running"
+    assert row.latest_execution.sync_scope is None
+    assert str(row.latest_execution.id) == newer_unscoped.execution.id
+    assert row.catalog is not None
+    assert row.catalog.scope_refresh.supported is False
+    assert row.catalog.scope_refresh.effect == "dataset_wide"
+    kma_row = next(
+        item
+        for item in data.items
+        if item.catalog is not None
+        and item.catalog.scope_refresh.selector == "poi_cache_targets"
+    )
+    assert kma_row.catalog is not None
+    assert kma_row.catalog.scope_refresh.allowed_sync_scopes == [
+        "target_grids",
+        "external_system:concierge",
+        "external_system:geo",
+    ]
     assert calls["latest"] == 1
+
+
+@pytest.mark.unit
+async def test_grid_projects_latest_execution_by_exact_sync_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import ops_dataset_service as service
+
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    exact_scopes = ("external_system:concierge", "external_system:geo")
+    scopes = (*exact_scopes, "external_system:without-exact-run")
+    states = [
+        SyncState(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=scope,
+            status="active",
+            cursor={},
+            last_success_at=_NOW,
+            last_failure_at=None,
+            consecutive_failures=0,
+            next_run_after=None,
+        )
+        for scope in scopes
+    ]
+    executions = tuple(
+        DatasetLatestExecution(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=scope,
+            execution=_pipeline_execution(
+                provider=provider,
+                dataset_key=dataset_key,
+                execution_id=(
+                    f"{index}" * 8 + "-0000-4000-8000-" + f"{index}" * 12
+                ),
+            ),
+            operation_member_id=(
+                f"{index}" * 8 + "-0000-4000-8000-" + f"{index}" * 12
+            ),
+            pair_status="running",
+        )
+        for index, scope in enumerate(exact_scopes, start=3)
+    )
+    unscoped = DatasetLatestExecution(
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=None,
+        execution=_pipeline_execution(
+            provider=provider,
+            dataset_key=dataset_key,
+            execution_id="99999999-9999-4999-8999-999999999999",
+            created_at=_NOW + timedelta(minutes=1),
+        ),
+        operation_member_id="88888888-8888-4888-8888-888888888888",
+        pair_status="running",
+    )
+
+    async def _states(_session: object) -> list[SyncState]:
+        return states
+
+    async def _empty(_session: object, **_kwargs: object) -> tuple[object, ...]:
+        return ()
+
+    async def _latest(_session: object) -> tuple[DatasetLatestExecution, ...]:
+        return (*executions, unscoped)
+
+    async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+
+    async def _external_systems(_session: object) -> tuple[str, ...]:
+        return ("concierge", "geo", "new")
+
+    monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
+    monkeypatch.setattr(service, "list_all_provider_refresh_policies", _empty)
+    monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
+    monkeypatch.setattr(service, "list_latest_dataset_executions", _latest)
+    monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
+    monkeypatch.setattr(
+        service,
+        "list_active_poi_cache_target_external_systems",
+        _external_systems,
+    )
+
+    data = await load_datasets_grid(
+        cast(Any, object()),
+        settings=ApiSettings(),
+        dagster_client=cast(Any, object()),
+        now=_NOW,
+    )
+    rows = {
+        row.sync_scope: row
+        for row in data.items
+        if row.provider == provider and row.dataset_key == dataset_key
+    }
+    expected_scopes = {
+        *scopes,
+        "target_grids",
+        "external_system:new",
+    }
+    assert expected_scopes <= rows.keys()
+    assert rows["target_grids"].latest_execution is None
+    assert rows["external_system:new"].latest_execution is None
+    for scope, execution in zip(exact_scopes, executions, strict=True):
+        latest = rows[scope].latest_execution
+        assert latest is not None
+        assert str(latest.id) == execution.execution.id
+        assert latest.sync_scope == scope
+    assert rows["external_system:without-exact-run"].latest_execution is None
+
+
+@pytest.mark.unit
+async def test_detail_materializes_all_catalog_target_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import ops_dataset_service as service
+
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    state = SyncState(
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope="external_system:concierge",
+        status="active",
+        cursor={},
+        last_success_at=_NOW,
+        last_failure_at=None,
+        consecutive_failures=0,
+        next_run_after=None,
+    )
+
+    async def _states(_session: object, **_kwargs: object) -> list[SyncState]:
+        return [state]
+
+    async def _none(_session: object, **_kwargs: object) -> None:
+        return None
+
+    async def _empty_page(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(items=(), next_cursor=None)
+
+    async def _empty(_session: object, **_kwargs: object) -> tuple[object, ...]:
+        return ()
+
+    async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+
+    async def _external_systems(_session: object) -> tuple[str, ...]:
+        return ("concierge", "geo")
+
+    monkeypatch.setattr(service.sync_state_repo, "list_sync_states", _states)
+    monkeypatch.setattr(service, "get_provider_refresh_policy", _none)
+    monkeypatch.setattr(service, "list_pipeline_executions", _empty_page)
+    monkeypatch.setattr(service, "list_ops_import_job_events", _empty_page)
+    monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
+    monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
+    monkeypatch.setattr(
+        service,
+        "list_active_poi_cache_target_external_systems",
+        _external_systems,
+    )
+
+    detail = await load_dataset_detail(
+        cast(Any, object()),
+        settings=ApiSettings(),
+        dagster_client=cast(Any, object()),
+        provider=provider,
+        dataset_key=dataset_key,
+        now=_NOW,
+    )
+    scopes = {scope.sync_scope: scope for scope in detail.scopes}
+    assert set(scopes) == {
+        "target_grids",
+        "external_system:concierge",
+        "external_system:geo",
+    }
+    assert scopes["target_grids"].status == "never_run"
+    assert scopes["external_system:concierge"].status == "active"
+    assert scopes["external_system:geo"].status == "never_run"
+
+
+@pytest.mark.unit
+async def test_grid_does_not_guess_unscoped_execution_for_orphan_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import ops_dataset_service as service
+
+    provider = "orphan-provider"
+    dataset_key = "orphan-dataset"
+    policy_provider = "policy-only-orphan-provider"
+    policy_dataset_key = "policy-only-orphan-dataset"
+    scopes = ("region:a", "region:b")
+    states = [
+        SyncState(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=scope,
+            status="active",
+            cursor={},
+            last_success_at=_NOW,
+            last_failure_at=None,
+            consecutive_failures=0,
+            next_run_after=None,
+        )
+        for scope in scopes
+    ]
+    unscoped = DatasetLatestExecution(
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=None,
+        execution=_pipeline_execution(
+            provider=provider,
+            dataset_key=dataset_key,
+            execution_id="77777777-7777-4777-8777-777777777777",
+        ),
+        operation_member_id="66666666-6666-4666-8666-666666666666",
+        pair_status="running",
+    )
+    policy = _policy(
+        provider=policy_provider,
+        dataset_key=policy_dataset_key,
+    )
+    policy_unscoped = DatasetLatestExecution(
+        provider=policy_provider,
+        dataset_key=policy_dataset_key,
+        sync_scope=None,
+        execution=_pipeline_execution(
+            provider=policy_provider,
+            dataset_key=policy_dataset_key,
+            execution_id="55555555-5555-4555-8555-555555555555",
+        ),
+        operation_member_id="44444444-4444-4444-8444-444444444444",
+        pair_status="running",
+    )
+
+    async def _states(_session: object) -> list[SyncState]:
+        return states
+
+    async def _empty(_session: object, **_kwargs: object) -> tuple[object, ...]:
+        return ()
+
+    async def _policies(
+        _session: object,
+    ) -> tuple[ProviderRefreshPolicy, ...]:
+        return (policy,)
+
+    async def _latest(_session: object) -> tuple[DatasetLatestExecution, ...]:
+        return (unscoped, policy_unscoped)
+
+    async def _schedules(**_kwargs: object) -> DatasetScheduleIndex:
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+
+    monkeypatch.setattr(service.sync_state_repo, "list_all_sync_states", _states)
+    monkeypatch.setattr(service, "list_all_provider_refresh_policies", _policies)
+    monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)
+    monkeypatch.setattr(service, "list_latest_dataset_executions", _latest)
+    monkeypatch.setattr(service, "load_dataset_schedule_index", _schedules)
+    monkeypatch.setattr(
+        service,
+        "list_active_poi_cache_target_external_systems",
+        _empty,
+    )
+
+    data = await load_datasets_grid(
+        cast(Any, object()),
+        settings=ApiSettings(),
+        dagster_client=cast(Any, object()),
+        now=_NOW,
+    )
+    orphan_rows = [
+        row
+        for row in data.items
+        if row.provider == provider and row.dataset_key == dataset_key
+    ]
+    assert {row.sync_scope for row in orphan_rows} == set(scopes)
+    assert all(row.latest_execution is None for row in orphan_rows)
+    policy_row = next(
+        row
+        for row in data.items
+        if row.provider == policy_provider and row.dataset_key == policy_dataset_key
+    )
+    assert policy_row.sync_scope == "default"
+    assert policy_row.latest_execution is None
 
 
 @pytest.mark.unit

@@ -4362,7 +4362,7 @@
         "description": "외부 POI/cache target key 목록 기반 갱신 scope.",
         "properties": {
           "external_system": {
-            "maxLength": 128,
+            "maxLength": 112,
             "minLength": 1,
             "title": "External System",
             "type": "string"
@@ -11388,17 +11388,22 @@
       },
       "FeatureUpdateRequestCreateResponse": {
         "additionalProperties": false,
-        "description": "새 영속 요청 생성 응답.",
+        "description": "새 요청 또는 동일한 활성 canonical 요청 재사용 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/FeatureUpdateRequestCreatedRecord"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
+          },
+          "reused_active_request": {
+            "title": "Reused Active Request",
+            "type": "boolean"
           }
         },
         "required": [
           "data",
+          "reused_active_request",
           "meta"
         ],
         "title": "FeatureUpdateRequestCreateResponse",
@@ -11430,6 +11435,31 @@
             },
             "title": "Dataset Keys",
             "type": "array"
+          },
+          "dispatch_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.",
+            "title": "Dispatch Requested At"
+          },
+          "effective_sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
+            "title": "Effective Sync Scope"
           },
           "error_message": {
             "anyOf": [
@@ -11508,6 +11538,18 @@
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
+          },
+          "requested_sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
+            "title": "Requested Sync Scope"
           },
           "result_kind": {
             "const": "request",
@@ -11603,6 +11645,8 @@
           "request_id",
           "scope_type",
           "scope",
+          "requested_sync_scope",
+          "effective_sync_scope",
           "providers",
           "dataset_keys",
           "update_policy",
@@ -11612,6 +11656,7 @@
           "matched_scope",
           "job_id",
           "dagster_run_id",
+          "dispatch_requested_at",
           "operator",
           "reason",
           "error_message",
@@ -11681,7 +11726,7 @@
       },
       "FeatureUpdateRequestMutationResponse": {
         "additionalProperties": false,
-        "description": "run-now처럼 반드시 새 영속 요청을 만드는 mutation 응답.",
+        "description": "기존 canonical 요청의 상태나 dispatch 의도를 바꾸는 mutation 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
@@ -11933,6 +11978,31 @@
             "title": "Dataset Keys",
             "type": "array"
           },
+          "dispatch_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "같은 canonical 작업의 즉시 dispatch가 요청된 최초 시각.",
+            "title": "Dispatch Requested At"
+          },
+          "effective_sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "실행과 활성 작업 유일성에 실제 적용되는 정규화된 sync scope.",
+            "title": "Effective Sync Scope"
+          },
           "error_message": {
             "anyOf": [
               {
@@ -12010,6 +12080,18 @@
             "format": "uuid",
             "title": "Request Id",
             "type": "string"
+          },
+          "requested_sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "운영자가 provider_dataset 요청에 명시한 원본 sync scope.",
+            "title": "Requested Sync Scope"
           },
           "run_mode": {
             "enum": [
@@ -12100,6 +12182,8 @@
           "request_id",
           "scope_type",
           "scope",
+          "requested_sync_scope",
+          "effective_sync_scope",
           "providers",
           "dataset_keys",
           "update_policy",
@@ -12109,6 +12193,7 @@
           "matched_scope",
           "job_id",
           "dagster_run_id",
+          "dispatch_requested_at",
           "operator",
           "reason",
           "error_message",
@@ -12123,35 +12208,8 @@
       },
       "FeatureUpdateRequestRunNowRequest": {
         "additionalProperties": false,
-        "description": "기존 request payload를 run_mode=now로 재큐잉할 때의 override.",
-        "properties": {
-          "priority": {
-            "anyOf": [
-              {
-                "maximum": 1000.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "maxLength": 500,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
+        "description": "기존 canonical request에 우선 dispatch를 요청하는 빈 명령 body.",
+        "properties": {},
         "title": "FeatureUpdateRequestRunNowRequest",
         "type": "object"
       },
@@ -14214,10 +14272,6 @@
         "additionalProperties": false,
         "description": "ETL 카탈로그가 아는 dataset 메타.",
         "properties": {
-          "default_sync_scope": {
-            "title": "Default Sync Scope",
-            "type": "string"
-          },
           "feature_kind": {
             "title": "Feature Kind",
             "type": "string"
@@ -14236,14 +14290,22 @@
           },
           "preview": {
             "$ref": "#/components/schemas/OpsDatasetPreviewCapability"
+          },
+          "provider_state_default_scope": {
+            "title": "Provider State Default Scope",
+            "type": "string"
+          },
+          "scope_refresh": {
+            "$ref": "#/components/schemas/OpsDatasetScopeRefreshCapability"
           }
         },
         "required": [
           "feature_kind",
-          "default_sync_scope",
+          "provider_state_default_scope",
           "label",
           "is_feature_load",
           "is_refreshable",
+          "scope_refresh",
           "preview"
         ],
         "title": "OpsDatasetCatalogInfo",
@@ -14849,6 +14911,17 @@
             "title": "Status",
             "type": "string"
           },
+          "sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
+          },
           "trigger_kind": {
             "anyOf": [
               {
@@ -14868,6 +14941,7 @@
           "status",
           "pair_status",
           "operation_member_id",
+          "sync_scope",
           "providers",
           "dataset_keys",
           "provider_datasets",
@@ -15346,6 +15420,63 @@
           "next_scheduled_at"
         ],
         "title": "OpsDatasetScheduleSummary",
+        "type": "object"
+      },
+      "OpsDatasetScopeRefreshCapability": {
+        "additionalProperties": false,
+        "description": "직접 갱신 요청에서 선택 가능한 effective sync scope 계약.",
+        "properties": {
+          "allowed_sync_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Sync Scopes",
+            "type": "array"
+          },
+          "default_sync_scope": {
+            "title": "Default Sync Scope",
+            "type": "string"
+          },
+          "effect": {
+            "enum": [
+              "dataset_wide",
+              "sync_scope"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "selector": {
+            "enum": [
+              "none",
+              "poi_cache_targets"
+            ],
+            "title": "Selector",
+            "type": "string"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported",
+          "selector",
+          "effect",
+          "default_sync_scope",
+          "allowed_sync_scopes"
+        ],
+        "title": "OpsDatasetScopeRefreshCapability",
         "type": "object"
       },
       "OpsDatasetScopeState": {
@@ -26945,6 +27076,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "같은 계획의 활성 canonical request 재사용"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -26963,15 +27104,7 @@
                 }
               }
             },
-            "description": "동일 scope 즉시 실행 lock 경합",
-            "headers": {
-              "Retry-After": {
-                "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
+            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -27275,13 +27408,13 @@
                     "type": "null"
                   }
                 ],
-                "title": "Body"
+                "title": " Body"
               }
             }
           }
         },
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -27309,15 +27442,7 @@
                 }
               }
             },
-            "description": "동일 scope 즉시 실행 lock 경합",
-            "headers": {
-              "Retry-After": {
-                "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
+            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -27340,7 +27465,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "기존 request payload를 run_mode=now로 재큐잉",
+        "summary": "기존 canonical request 우선 dispatch 요청",
         "tags": [
           "admin-update-requests"
         ]
@@ -29263,6 +29388,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 112,
+                  "minLength": 1,
                   "type": "string"
                 },
                 {
@@ -29374,6 +29501,8 @@
             "name": "external_system",
             "required": true,
             "schema": {
+              "maxLength": 112,
+              "minLength": 1,
               "title": "External System",
               "type": "string"
             }
@@ -29453,6 +29582,8 @@
             "name": "external_system",
             "required": true,
             "schema": {
+              "maxLength": 112,
+              "minLength": 1,
               "title": "External System",
               "type": "string"
             }
@@ -29532,6 +29663,8 @@
             "name": "external_system",
             "required": true,
             "schema": {
+              "maxLength": 112,
+              "minLength": 1,
               "title": "External System",
               "type": "string"
             }
@@ -32357,6 +32490,8 @@
             "required": true,
             "schema": {
               "description": "외부 시스템 이름. 예: external-app",
+              "maxLength": 112,
+              "minLength": 1,
               "title": "External System",
               "type": "string"
             }
@@ -36815,6 +36950,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "같은 계획의 활성 canonical request 재사용"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -36833,15 +36978,7 @@
                 }
               }
             },
-            "description": "동일 scope 즉시 실행 lock 경합",
-            "headers": {
-              "Retry-After": {
-                "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
+            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -36924,7 +37061,7 @@
     },
     "/v1/ops/pipeline/requests/{request_id}/run-now": {
       "post": {
-        "description": "원 행은 바뀌지 않고 동일 payload의 **새 request 행**이 생성된다 — 응답의 request_id는 새 행의 id다.",
+        "description": "새 request를 만들지 않고 같은 canonical job의 dispatch_requested_at을 최초 한 번 기록한다. queued 재호출과 running 조회는 멱등이다.",
         "operationId": "run_pipeline_update_request_now_v1_ops_pipeline_requests__request_id__run_now_post",
         "parameters": [
           {
@@ -36950,13 +37087,13 @@
                     "type": "null"
                   }
                 ],
-                "title": "Body"
+                "title": " Body"
               }
             }
           }
         },
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
@@ -36984,15 +37121,7 @@
                 }
               }
             },
-            "description": "동일 scope 즉시 실행 lock 경합",
-            "headers": {
-              "Retry-After": {
-                "description": "동일 scope lock 경합 시 재시도 대기 초.",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
+            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -37015,7 +37144,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "기존 request payload를 run_mode=now로 재큐잉 (201 + 새 request)",
+        "summary": "기존 canonical request 우선 dispatch 요청",
         "tags": [
           "ops-pipeline"
         ]

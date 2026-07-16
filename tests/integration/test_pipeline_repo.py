@@ -36,12 +36,13 @@ _INSERT_JOB_SQL = text(
     """
     INSERT INTO ops.import_jobs (
         job_id, kind, parent_job_id, payload, status, progress, current_stage,
-        created_at, started_at, dagster_run_id, provider, dataset_key, trigger_kind
+        created_at, started_at, dagster_run_id, provider, dataset_key, sync_scope,
+        trigger_kind
     ) VALUES (
         CAST(:job_id AS uuid), :kind, CAST(:parent_job_id AS uuid),
         CAST(:payload AS jsonb), :status, :progress, :current_stage,
         :created_at, :started_at, :dagster_run_id, :provider, :dataset_key,
-        :trigger_kind
+        :sync_scope, :trigger_kind
     )
     """
 )
@@ -84,6 +85,7 @@ async def _job(
     payload: dict[str, Any] | None = None,
     provider: str | None = None,
     dataset_key: str | None = None,
+    sync_scope: str | None = None,
 ) -> None:
     await session.execute(
         _INSERT_JOB_SQL,
@@ -104,6 +106,7 @@ async def _job(
             ),
             "provider": provider,
             "dataset_key": dataset_key,
+            "sync_scope": sync_scope,
             "trigger_kind": "update_request" if kind == "feature_update_request" else None,
         },
     )
@@ -131,6 +134,11 @@ async def _request(
             provider=(str(request_scope.get("provider")) if is_direct else None),
             dataset_key=(
                 str(request_scope.get("dataset_key")) if is_direct else None
+            ),
+            sync_scope=(
+                str(request_scope.get("sync_scope", "dataset_wide"))
+                if is_direct
+                else None
             ),
         )
     await session.execute(
@@ -677,6 +685,7 @@ async def test_direct_request_pair_ignores_audit_event_pair(
         kind="feature_update_request",
         provider="provider-direct",
         dataset_key="dataset-direct",
+        sync_scope="target_grids",
     )
     await _request(
         migrated_session,
@@ -687,7 +696,7 @@ async def test_direct_request_pair_ignores_audit_event_pair(
             "type": "provider_dataset",
             "provider": "provider-direct",
             "dataset_key": "dataset-direct",
-            "sync_scope": "region:11",
+            "sync_scope": "target_grids",
         },
     )
     await _event(
@@ -706,7 +715,7 @@ async def test_direct_request_pair_ignores_audit_event_pair(
     assert root.kind == "update_request"
     assert root.id == _REQUEST_OWNER
     assert set(pairs) == {("provider-direct", "dataset-direct")}
-    assert pairs[("provider-direct", "dataset-direct")].sync_scope == "region:11"
+    assert pairs[("provider-direct", "dataset-direct")].sync_scope == "target_grids"
     assert pairs[("provider-direct", "dataset-direct")].operation_member_id == _JOB_ROOT
     assert (
         await list_pipeline_executions(
@@ -859,7 +868,7 @@ async def test_request_arrays_are_single_filters_and_direct_scope_is_exact_pair(
             "type": "provider_dataset",
             "provider": "direct-provider",
             "dataset_key": "direct-dataset",
-            "sync_scope": "region:11",
+            "sync_scope": "target_grids",
         },
     )
 
@@ -900,7 +909,7 @@ async def test_request_arrays_are_single_filters_and_direct_scope_is_exact_pair(
     pair = direct.items[0].provider_datasets[0]
     assert pair.provider == "direct-provider"
     assert pair.dataset_key == "direct-dataset"
-    assert pair.sync_scope == "region:11"
+    assert pair.sync_scope == "target_grids"
     assert pair.operation_member_id == str(uuid5(_REQUEST_JOB_NAMESPACE, direct_request))
 
 
@@ -913,6 +922,7 @@ async def test_direct_scope_cannot_disagree_with_typed_job_identity(
         kind="feature_update_request",
         provider="typed-provider",
         dataset_key="typed-dataset",
+        sync_scope="dataset_wide",
     )
     with pytest.raises(IntegrityError):
         async with migrated_session.begin_nested():
@@ -927,6 +937,49 @@ async def test_direct_scope_cannot_disagree_with_typed_job_identity(
                     "dataset_key": "scope-dataset",
                 },
             )
+
+
+async def test_latest_dataset_execution_keeps_direct_scopes_separate(
+    migrated_session: AsyncSession,
+) -> None:
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    requests = (
+        (
+            "a3333333-3333-4333-8333-333333333333",
+            "target_grids",
+            _T0,
+        ),
+        (
+            "a4444444-4444-4444-8444-444444444444",
+            "external_system:concierge",
+            _T0 + timedelta(minutes=1),
+        ),
+    )
+    for request_id, sync_scope, created_at in requests:
+        await _request(
+            migrated_session,
+            request_id,
+            job_id=None,
+            created_at=created_at,
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+
+    latest = await list_latest_dataset_pipeline_executions(migrated_session)
+    by_scope = {
+        item.sync_scope: item
+        for item in latest
+        if item.provider == provider and item.dataset_key == dataset_key
+    }
+
+    assert set(by_scope) == {"target_grids", "external_system:concierge"}
+    assert by_scope["target_grids"].execution.id == requests[0][0]
+    assert by_scope["external_system:concierge"].execution.id == requests[1][0]
 
 
 async def test_status_counts_for_overview(migrated_session: AsyncSession) -> None:
@@ -1177,8 +1230,8 @@ async def _seed_selective_projection_cardinality(
         text(
             """
             INSERT INTO ops.import_jobs (
-                job_id, kind, payload, status, provider, dataset_key, trigger_kind,
-                created_at
+                job_id, kind, payload, status, provider, dataset_key, sync_scope,
+                trigger_kind, created_at
             )
             SELECT
                 (
@@ -1195,7 +1248,7 @@ async def _seed_selective_projection_cardinality(
                     THEN 'noise-direct-dataset-' || seed.n::text
                   ELSE 'direct-dataset'
                 END,
-                'update_request', CAST(:created_at AS timestamptz)
+                'dataset_wide', 'update_request', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 4000) AS seed(n)
 
             UNION ALL
@@ -1206,7 +1259,7 @@ async def _seed_selective_projection_cardinality(
                   || lpad(seed.n::text, 12, '0')
                 )::uuid,
                 'feature_update_request', '{}'::jsonb, 'queued',
-                NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
+                NULL, NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 4000) AS seed(n)
 
             UNION ALL
@@ -1217,7 +1270,7 @@ async def _seed_selective_projection_cardinality(
                   || lpad(seed.n::text, 12, '0')
                 )::uuid,
                 'feature_update_request', '{}'::jsonb, 'queued',
-                NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
+                NULL, NULL, NULL, 'update_request', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 4000) AS seed(n)
             """
         ),

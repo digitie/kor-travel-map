@@ -6,7 +6,8 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
@@ -293,7 +294,10 @@ def _unprocessable(exc: ValueError) -> HTTPException:
     responses={409: {"description": "같은 key의 좌표 conflict"}},
 )
 async def put_poi_cache_target(
-    external_system: str,
+    external_system: Annotated[
+        str,
+        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
+    ],
     target_key: str,
     body: PoiCacheTargetUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -334,7 +338,10 @@ async def put_poi_cache_target(
 )
 async def list_poi_cache_target_records(
     session: Annotated[AsyncSession, Depends(get_session)],
-    external_system: Annotated[str | None, Query()] = None,
+    external_system: Annotated[
+        str | None,
+        Query(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
+    ] = None,
     update_enabled: Annotated[bool | None, Query()] = None,
     include_deleted: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -371,7 +378,10 @@ async def list_poi_cache_target_records(
     responses={404: {"description": "target 없음"}},
 )
 async def get_poi_cache_target_record(
-    external_system: str,
+    external_system: Annotated[
+        str,
+        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
+    ],
     target_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     include_deleted: Annotated[bool, Query()] = False,
@@ -402,7 +412,10 @@ async def get_poi_cache_target_record(
     },
 )
 async def delete_poi_cache_target_record(
-    external_system: str,
+    external_system: Annotated[
+        str,
+        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
+    ],
     target_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PoiCacheTargetResponse:
