@@ -1961,31 +1961,42 @@ test.describe("/ops/pipeline", () => {
       .click();
     await expect(page.getByText(/page 2/)).toBeVisible();
     await expect
-      .poll(() => counters.executionQueries.at(-1)?.get("cursor"))
-      .not.toBeNull();
+      .poll(() =>
+        counters.executionQueries.some(
+          (query) => query.get("cursor") === "cursor-page-2",
+        ),
+      )
+      .toBe(true);
 
+    const beforeFilterChange = counters.executionQueries.length;
     await page.evaluate(() => {
       window.history.pushState(null, "", "/ops/pipeline?status=failed");
     });
     await expect(page.getByText(/page 1/)).toBeVisible();
     await expect
       .poll(() => {
-        const query = counters.executionQueries.at(-1);
-        return `${query?.get("status")}|${query?.has("cursor")}`;
+        return counters.executionQueries
+          .slice(beforeFilterChange)
+          .some(
+            (query) =>
+              query.get("status") === "failed" && !query.has("cursor"),
+          );
       })
-      .toBe("failed|false");
+      .toBe(true);
     await expect(
       page.getByRole("button", { name: /새 실행 .*건 반영/ }),
     ).toHaveCount(0);
 
+    const beforeHistoryBack = counters.executionQueries.length;
     await page.goBack();
     await expect(page.getByText(/page 1/)).toBeVisible();
     await expect
       .poll(() => {
-        const query = counters.executionQueries.at(-1);
-        return `${query?.has("status")}|${query?.has("cursor")}`;
+        return counters.executionQueries
+          .slice(beforeHistoryBack)
+          .some((query) => !query.has("status") && !query.has("cursor"));
       })
-      .toBe("false|false");
+      .toBe(true);
   });
 
   test("상세 원 행이 필터로 사라지면 닫기 focus를 첫 표시 행으로 복귀", async ({
