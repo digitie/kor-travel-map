@@ -74,14 +74,35 @@ function invalidateFeatureSurfaces(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
 }
 
+function invalidatePipelineLivePage(
+  queryClient: QueryClient,
+  surface: "executions" | "events",
+) {
+  void queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "pipeline" && key[1] === surface && key[2] === "live"
+      );
+    },
+  });
+}
+
+function invalidatePipelineExecutionDetails(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({
+    queryKey: ["pipeline", "execution"],
+  });
+}
+
 function invalidatePipelineSurfaces(queryClient: QueryClient) {
-  void queryClient.invalidateQueries({ queryKey: ["pipeline", "executions"] });
+  invalidatePipelineLivePage(queryClient, "executions");
   void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
-  void queryClient.invalidateQueries({ queryKey: ["pipeline", "events"] });
+  invalidatePipelineLivePage(queryClient, "events");
 }
 
 function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   if (topic === "import_jobs") {
+    invalidatePipelineExecutionDetails(queryClient);
     invalidatePipelineSurfaces(queryClient);
     invalidateOpsDatasetQueries(queryClient);
     return;
@@ -91,7 +112,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["pipeline", "execution", "import_job", jobId],
     });
-    void queryClient.invalidateQueries({ queryKey: ["pipeline", "events"] });
+    invalidatePipelineLivePage(queryClient, "events");
     invalidateOpsDatasetQueries(queryClient);
     return;
   }
@@ -106,6 +127,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   }
   if (topic === "feature_update_requests") {
     invalidateFeatureSurfaces(queryClient);
+    invalidatePipelineExecutionDetails(queryClient);
     invalidatePipelineSurfaces(queryClient);
     invalidateOpsDatasetQueries(queryClient);
     return;
@@ -138,6 +160,9 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   if (topic === "dagster_runs") {
     void queryClient.invalidateQueries({
       queryKey: ["pipeline", "dagster-runs"],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["pipeline", "dagster-run"],
     });
     void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
     void queryClient.invalidateQueries({ queryKey: ["pipeline", "schedules"] });

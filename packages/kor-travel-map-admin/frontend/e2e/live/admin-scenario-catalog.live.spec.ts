@@ -46,6 +46,11 @@ function firstLiveSmokeScenarioPerSurface(
   });
 }
 
+function apiContract(url: string, method: string): string {
+  const pathname = new URL(url).pathname.replace(/^\/api\/proxy/, "");
+  return `${method} ${pathname}`;
+}
+
 test.describe("admin live scenario catalog", () => {
   test("catalog taxonomy has route, API, reflection, and risk metadata", () => {
     const scenarios = buildAdminLiveScenarioCatalog();
@@ -71,6 +76,38 @@ test.describe("admin live scenario catalog", () => {
       expect(surface.readApis.length, surface.id).toBeGreaterThan(0);
       expect(surface.reflectedSurfaces.length, surface.id).toBeGreaterThan(0);
     }
+  });
+
+  test("pipeline live UI calls datasets catalog and conditional MOIS precheck", async ({
+    page,
+  }) => {
+    const observed = new Set<string>();
+    page.on("request", (request) => {
+      observed.add(apiContract(request.url(), request.method()));
+    });
+
+    await page.goto("/ops/pipeline");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "파이프라인" }),
+    ).toBeVisible(READY);
+    await expect
+      .poll(() => observed.has("GET /v1/ops/datasets"), READY)
+      .toBe(true);
+
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog.getByLabel("provider").first().fill("python-mois-api");
+    await dialog.getByLabel("dataset_key").fill("mois_licenses");
+
+    await expect
+      .poll(
+        () =>
+          observed.has(
+            "GET /v1/ops/pipeline/prechecks/mois-source-sync",
+          ),
+        READY,
+      )
+      .toBe(true);
   });
 
   test("representative live route smoke follows the scenario catalog", async ({

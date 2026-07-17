@@ -113,8 +113,8 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/features/new` | 수동 feature 추가 change request | `POST /v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 |
 | `/features/[feature_id]` | 상세, 위치, 원천, 이슈, 조치 | `/v1/features/{feature_id}`, `/v1/admin/features/{feature_id}`, `/v1/features/{feature_id}/weather` |
 | `/ops/providers` | provider별 상태 목록 + provider 상세, dataset 상태, sync cursor, refresh policy 편집 (구 `/admin/providers`, `/admin/providers/[provider]`는 별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/providers/*` REST는 backend-only) | `/ops/providers` |
-| `/ops/import-jobs` | 적재/검증 job 목록 | `/ops/import-jobs` |
-| `/ops/import-jobs/[job_id]` | 진행률과 상태 상세, event timeline, cancel, 관련 링크 | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel` |
+| `/ops/pipeline` | request/import job root 타임라인, 실행 상세, event, Dagster run, schedule 조작 | `/v1/ops/pipeline/*` |
+| `/ops/datasets` | provider/dataset 카탈로그와 최신 실행 상태, 즉시 갱신 | `/v1/ops/datasets`, `/v1/ops/pipeline/requests*` |
 | `/admin/features/dedup-reviews` | 중복 후보 검토 | `/admin/features/dedup-reviews`, `/admin/features/dedup-reviews/{review_id}` |
 | `/admin/features/enrichment-reviews` | enrichment 후보 검토 | `/admin/features/enrichment-reviews`, `/admin/features/enrichment-reviews/{review_id}` |
 | `/admin/issues` | 이슈 있는 feature 지도/테이블 | `/admin/issues/features` |
@@ -122,7 +122,6 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/features/update-requests` | 좌표/반경/시군구/provider 기준 업데이트 요청 | `/admin/features/update-requests` |
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
 | `/ops/providers` (refresh policy 편집) | provider별 update 주기/rate limit 정책 (별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/provider-refresh-policies` REST는 backend-only) | `/admin/provider-refresh-policies` |
-| `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
 | `/admin/settings` | public API key 생성/폐기와 admin 로그인 감사 이벤트 조회 | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` |
 | `/` (운영 홈 summary) | feature/source/job/dedup/issue/consistency summary (별도 frontend 경로로 만들지 않고 운영 홈 `/`에서 소비한다. `/ops/metrics` REST는 backend-only) | `/ops/metrics` |
 | `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
@@ -133,7 +132,8 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 
 - **Features**: `/features`, `/features/[feature_id]`, `/admin/features/new`, `/admin/issues`.
 - **Providers**: `/ops/providers` (provider 목록 + 상세 + 강제 실행/refresh policy 편집).
-- **Jobs**: `/ops/import-jobs`, job 상세, offline upload job.
+- **Pipeline**: `/ops/pipeline`에서 실행·event·Dagster·schedule을 통합하고,
+  `/ops/datasets`에서 provider/dataset 상태와 즉시 갱신을 다룬다.
 - **Review**: `/admin/features/dedup-reviews`, `/admin/features/enrichment-reviews`, missing data queue, consistency samples.
 - **Ops**: `/admin/dagster`, `/admin/settings`, `/ops/logs`, `/ops/consistency`, `/ops/metrics`.
 - **Debug**: `/debug/etl`.
@@ -144,7 +144,7 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 `/admin/features/change-requests`, `/admin/issues`, `/admin/features/dedup-reviews`,
 `/admin/features/enrichment-reviews`, `/admin/features/update-requests`,
 `/admin/poi-cache-targets`, `/admin/offline-uploads`, `/admin/backups`,
-`/admin/dagster`, `/admin/settings`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`,
+`/admin/settings`, `/ops/pipeline`, `/ops/datasets`,
 `/ops/providers`, `/ops/consistency`, `/ops/logs`다.
 
 T-221 종료 기준으로 admin UI/UX 시나리오 연결성의 핵심 gap은 닫았다. 후속은 T-222
@@ -680,7 +680,8 @@ full upsert. `system_interval_seconds`/`optimal_interval_seconds`는
 처리 규칙:
 
 - 응답은 `FeatureUpdateRequestRecord` envelope다.
-- 생성된 request의 `job_id`는 `/ops/import-jobs/{job_id}`에서 진행 상태를 본다.
+- 생성된 request의 `job_id`는
+  `/ops/pipeline?execution=import_job:{job_id}`에서 진행 상태를 본다.
 - request 상세는 `/admin/features/update-requests/{request_id}`에서 확인한다.
 - 같은 scope 동시 실행은 feature update request의 advisory lock과 queue 처리 규칙을 따른다.
 - provider client 호출은 provider 라이브러리 public API를 직접 사용한다.
@@ -729,25 +730,31 @@ full upsert. `system_interval_seconds`/`optimal_interval_seconds`는
 
 ### 12.2 Job 목록
 
-#### `GET /ops/import-jobs`
+#### `GET /v1/ops/pipeline/executions`
 
 Query:
 
-- `state`
 - `kind`
+- `status`
+- `provider`
+- `dataset_key`
+- `sync_scope`
 - `load_batch_id`
 - `parent_job_id`
+- `created_from`
+- `created_to`
 - `page_size`
 - `cursor`
 
-현재 구현은 `ops.import_jobs` 목록이다. 기본 정렬은
-`created_at desc, job_id desc`이고, `load_batch_id`와 `parent_job_id`로
-T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/sort/order
-필터는 후속 확장이다.
+request와 import job hierarchy를 canonical root로 접은 목록이다. 기본 정렬은
+`created_at DESC, id DESC, kind DESC`이고 keyset cursor를 쓴다.
+`load_batch_id`와 `parent_job_id`는 대표 작업 하나가 아니라 root의 전체 component
+membership에서 판정하며 cursor와 `LIMIT`보다 먼저 적용한다. UI의
+`/ops/pipeline?load_batch_id=...` 링크는 이 서버 query로 전달한다.
 
 ### 12.3 Job 상세
 
-#### `GET /ops/import-jobs/{job_id}`
+#### `GET /v1/ops/import-jobs/{job_id}`의 canonical 링크 계약
 
 응답:
 
@@ -763,10 +770,11 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
     "current_stage": "fetching",
     "payload": {"provider": "python-mois-api", "dataset_key": "mois_license_features_bulk"},
     "source_checksum": null,
-    "status_url": "/v1/ops/import-jobs/c2ef3a84-...",
+    "status_url": "/v1/ops/pipeline/executions/import_job/c2ef3a84-...",
     "links": [
-      {"rel": "events", "href": "/v1/ops/import-jobs/c2ef3a84-.../events"},
-      {"rel": "dagster_run", "href": "/v1/ops/dagster/runs/run-1"}
+      {"rel": "events", "href": "/v1/ops/pipeline/events?job_id=c2ef3a84-..."},
+      {"rel": "load_batch", "href": "/v1/ops/pipeline/executions?load_batch_id=35e8999f-..."},
+      {"rel": "dagster_run", "href": "/v1/ops/pipeline/dagster-runs/run-1"}
     ],
     "started_at": "2026-06-01T10:00:00+09:00",
     "heartbeat_at": "2026-06-01T10:04:11+09:00",
@@ -775,6 +783,13 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
   }
 }
 ```
+
+`status_url`과 HATEOAS `href`는 모두 REST API canonical URL이다. UI 이동용
+`EntityLink`만 `/ops/pipeline?...`을 만든다. Dagster 링크는 typed
+`ops.import_jobs.dagster_run_id`를 우선하며 payload의 충돌 값은 무시하고, run ID는
+path segment로 percent-encode한다. 실행 상세는
+`GET /v1/ops/pipeline/executions/{kind}/{execution_id}`, event는
+`GET /v1/ops/pipeline/events?job_id=...`에서 확인한다.
 
 ### 12.4 진행 상태 업데이트 방식
 
@@ -786,15 +801,17 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
 - server는 DB trigger 없이 topic snapshot revision을 polling하고, 변경된 topic만
   `snapshot`/`update` frame으로 전송한다.
 - frontend는 WebSocket payload를 화면 source of truth로 저장하지 않고,
-  TanStack Query invalidate signal로만 사용한다.
+  TanStack Query invalidate signal로만 사용한다. aggregate topic은 실행/event의
+  `live` 첫 페이지와 현재 선택한 실행 또는 Dagster run 상세만 무효화하며, cursor로
+  조사 중인 `paged` query는 유지한다.
 - 기존 `GET /ops/import-jobs*` polling은 WebSocket이 막힌 환경의 fallback으로 유지한다.
 - `status`가 terminal(`done`, `failed`, `cancelled`)이면 polling을 멈춘다.
-- `/ops/import-jobs/[job_id]` frontend 상세 화면은 job payload, parent/batch/request/
-  upload/Dagster 관련 링크, event timeline, cancel form을 제공한다.
+- `/ops/pipeline` 상세 패널은 root와 대표 작업, parent/batch/request/upload/Dagster
+  연결, event timeline, cancel form을 한 화면에서 제공한다.
 
 ### 12.5 취소
 
-#### `POST /ops/import-jobs/{job_id}/cancel`
+#### `POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel`
 
 요청:
 

@@ -417,6 +417,8 @@ root_job_members AS (
         owner.owner_request_id AS root_id,
         owner.job_id,
         owner.anchor_depth AS depth,
+        job.load_batch_id,
+        job.parent_job_id,
         job.provider,
         job.dataset_key,
         job.status,
@@ -431,6 +433,8 @@ root_job_members AS (
         standalone.component_root_id AS root_id,
         standalone.job_id,
         standalone.depth,
+        standalone.load_batch_id,
+        standalone.parent_job_id,
         standalone.provider,
         standalone.dataset_key,
         standalone.status,
@@ -515,9 +519,7 @@ roots_with_identity AS (
 )
 """
 
-_PIPELINE_ROOT_CTES_SQL: Final[str] = (
-    PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SQL
-)
+_PIPELINE_ROOT_CTES_SQL: Final[str] = PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SQL
 
 _SCOPED_COMPONENT_SOURCE_BODY_SQL: Final[str] = """
 scoped_jobs AS (
@@ -688,7 +690,8 @@ pipeline_requests AS MATERIALIZED (
 )
 """
 
-_IDENTITY_SCOPED_SOURCE_SQL: Final[str] = """
+_IDENTITY_SCOPED_SOURCE_SQL: Final[str] = (
+    """
 scoped_request_seeds AS MATERIALIZED (
     SELECT request.request_id, request.job_id
     FROM ops.feature_update_requests AS request
@@ -737,9 +740,12 @@ scoped_job_seeds AS MATERIALIZED (
     FROM scoped_request_seeds AS request
     WHERE request.job_id IS NOT NULL
 ),
-""" + _SCOPED_COMPONENT_SOURCE_BODY_SQL
+"""
+    + _SCOPED_COMPONENT_SOURCE_BODY_SQL
+)
 
-_DETAIL_SCOPED_SOURCE_SQL: Final[str] = """
+_DETAIL_SCOPED_SOURCE_SQL: Final[str] = (
+    """
 scoped_request_seeds AS MATERIALIZED (
     SELECT request.request_id, request.job_id
     FROM ops.feature_update_requests AS request
@@ -759,7 +765,9 @@ scoped_job_seeds AS MATERIALIZED (
     FROM scoped_request_seeds AS request
     WHERE request.job_id IS NOT NULL
 ),
-""" + _SCOPED_COMPONENT_SOURCE_BODY_SQL
+"""
+    + _SCOPED_COMPONENT_SOURCE_BODY_SQL
+)
 
 _LIST_EXECUTIONS_BODY_SQL: Final[str] = """
 filtered_roots AS (
@@ -825,6 +833,26 @@ filtered_roots AS (
       AND (
         CAST(:created_to AS timestamptz) IS NULL
         OR root.created_at <= CAST(:created_to AS timestamptz)
+      )
+      AND (
+        CAST(:load_batch_id AS uuid) IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM root_job_members AS member
+          WHERE member.root_kind = root.kind
+            AND member.root_id = root.id
+            AND member.load_batch_id = CAST(:load_batch_id AS uuid)
+        )
+      )
+      AND (
+        CAST(:parent_job_id AS uuid) IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM root_job_members AS member
+          WHERE member.root_kind = root.kind
+            AND member.root_id = root.id
+            AND member.parent_job_id = CAST(:parent_job_id AS uuid)
+        )
       )
       AND (
         CAST(:cursor_created_at AS timestamptz) IS NULL
@@ -1117,11 +1145,7 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         PipelineProviderDatasetIdentity(
             provider=str(item["provider"]),
             dataset_key=str(item["dataset_key"]),
-            sync_scope=(
-                str(item["sync_scope"])
-                if item.get("sync_scope") is not None
-                else None
-            ),
+            sync_scope=(str(item["sync_scope"]) if item.get("sync_scope") is not None else None),
             operation_member_id=str(item["operation_member_id"]),
             status=str(item["status"]),
         )
@@ -1144,14 +1168,10 @@ def _row_to_execution(row: Any) -> PipelineExecution:
         trigger_kind=row.projected_trigger_kind,
         operation_registry_version=row.projected_operation_registry_version,
         load_batch_id=(
-            str(row.projected_load_batch_id)
-            if row.projected_load_batch_id is not None
-            else None
+            str(row.projected_load_batch_id) if row.projected_load_batch_id is not None else None
         ),
         parent_job_id=(
-            str(row.projected_parent_job_id)
-            if row.projected_parent_job_id is not None
-            else None
+            str(row.projected_parent_job_id) if row.projected_parent_job_id is not None else None
         ),
         depth=int(row.projected_depth),
     )
@@ -1167,9 +1187,7 @@ def _row_to_execution(row: Any) -> PipelineExecution:
             requested_by=str(row.cancellation_requested_by),
             reason=row.cancellation_reason,
             retryable=bool(row.cancellation_retryable),
-            unresolved_member_count=int(
-                row.cancellation_unresolved_member_count
-            ),
+            unresolved_member_count=int(row.cancellation_unresolved_member_count),
         )
     return PipelineExecution(
         kind=str(row.kind),
@@ -1207,9 +1225,7 @@ async def get_pipeline_execution(
 ) -> PipelineExecution | None:
     """root id 또는 import member id에서 canonical root projection을 찾는다."""
     if kind not in PIPELINE_EXECUTION_KINDS:
-        raise ValueError(
-            f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}"
-        )
+        raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
     try:
         root_id = str(UUID(execution_id))
     except (TypeError, ValueError) as exc:
@@ -1231,6 +1247,8 @@ async def list_pipeline_executions(
     provider: str | None = None,
     dataset_key: str | None = None,
     dataset_sync_scopes: Collection[str | None] | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
     limit: int = 50,
@@ -1240,17 +1258,19 @@ async def list_pipeline_executions(
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
     if dataset_sync_scopes is not None and (provider is None or dataset_key is None):
-        raise ValueError(
-            "dataset_sync_scopes requires both provider and dataset_key"
-        )
+        raise ValueError("dataset_sync_scopes requires both provider and dataset_key")
+    try:
+        normalized_load_batch_id = str(UUID(load_batch_id)) if load_batch_id is not None else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError("load_batch_id must be a UUID") from exc
+    try:
+        normalized_parent_job_id = str(UUID(parent_job_id)) if parent_job_id is not None else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError("parent_job_id must be a UUID") from exc
     sync_scopes = tuple(
-        dict.fromkeys(
-            scope for scope in (dataset_sync_scopes or ()) if scope is not None
-        )
+        dict.fromkeys(scope for scope in (dataset_sync_scopes or ()) if scope is not None)
     )
-    include_unscoped_scope = bool(
-        dataset_sync_scopes is not None and None in dataset_sync_scopes
-    )
+    include_unscoped_scope = bool(dataset_sync_scopes is not None and None in dataset_sync_scopes)
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(cursor)
@@ -1270,6 +1290,8 @@ async def list_pipeline_executions(
                 "filter_sync_scopes": filter_sync_scopes,
                 "sync_scopes": list(sync_scopes),
                 "include_unscoped_scope": include_unscoped_scope,
+                "load_batch_id": normalized_load_batch_id,
+                "parent_job_id": normalized_parent_job_id,
                 "created_from": created_from,
                 "created_to": created_to,
                 "cursor_created_at": cursor_created_at,
@@ -1314,9 +1336,7 @@ async def list_latest_dataset_pipeline_executions(
             provider=str(row.selected_provider),
             dataset_key=str(row.selected_dataset_key),
             sync_scope=(
-                str(row.selected_sync_scope)
-                if row.selected_sync_scope is not None
-                else None
+                str(row.selected_sync_scope) if row.selected_sync_scope is not None else None
             ),
             execution=_row_to_execution(row),
             operation_member_id=str(row.selected_operation_member_id),

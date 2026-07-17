@@ -37,6 +37,55 @@ describe("ops live invalidation", () => {
     );
   });
 
+  it("aggregate topic은 live 첫 페이지와 선택 상세만 갱신하고 paged 이력은 보존한다", () => {
+    const queryClient = new QueryClient();
+    const executionsLiveKey = ["pipeline", "executions", "live", {}];
+    const executionsPagedKey = [
+      "pipeline",
+      "executions",
+      "paged",
+      {},
+      "cursor-1",
+    ];
+    const eventsLiveKey = ["pipeline", "events", "live", {}];
+    const eventsPagedKey = [
+      "pipeline",
+      "events",
+      "paged",
+      {},
+      "cursor-1",
+    ];
+    const activeDetailKey = [
+      "pipeline",
+      "execution",
+      "import_job",
+      "job-active",
+      {},
+    ];
+
+    for (const key of [
+      executionsLiveKey,
+      executionsPagedKey,
+      eventsLiveKey,
+      eventsPagedKey,
+      activeDetailKey,
+    ]) {
+      seedQuery(queryClient, key);
+    }
+
+    __testing.invalidateLiveTopic(queryClient, "import_jobs");
+
+    expect(queryClient.getQueryState(executionsLiveKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(eventsLiveKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(activeDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(executionsPagedKey)?.isInvalidated).toBe(
+      false,
+    );
+    expect(queryClient.getQueryState(eventsPagedKey)?.isInvalidated).toBe(false);
+  });
+
   it("feature_update_requests topic이 feature 지도/상세/admin 목록을 갱신 대상으로 만든다", () => {
     const queryClient = new QueryClient();
     const featureMapKey = ["features", "viewport", "6/54/24", "", "summary", 500];
@@ -129,5 +178,15 @@ describe("ops live invalidation", () => {
     expect(queryClient.getQueryState(runListKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(schedulesKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(datasetsKey)?.isInvalidated).toBe(true);
+  });
+
+  it("Dagster aggregate topic도 선택 run 상세를 무효화한다", () => {
+    const queryClient = new QueryClient();
+    const runDetailKey = ["pipeline", "dagster-run", "run-active", {}];
+
+    seedQuery(queryClient, runDetailKey);
+    __testing.invalidateLiveTopic(queryClient, "dagster_runs");
+
+    expect(queryClient.getQueryState(runDetailKey)?.isInvalidated).toBe(true);
   });
 });

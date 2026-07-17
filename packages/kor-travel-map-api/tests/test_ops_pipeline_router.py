@@ -1110,6 +1110,8 @@ def test_executions_list_passes_filters_and_maps_rows(
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "default",
+            "load_batch_id": "33333333-3333-3333-3333-333333333333",
+            "parent_job_id": "44444444-4444-4444-4444-444444444444",
             "created_from": "2026-07-01T00:00:00Z",
             "page_size": 2,
         },
@@ -1125,6 +1127,8 @@ def test_executions_list_passes_filters_and_maps_rows(
         "dataset_wide",
         None,
     )
+    assert captured["load_batch_id"] == "33333333-3333-3333-3333-333333333333"
+    assert captured["parent_job_id"] == "44444444-4444-4444-4444-444444444444"
     assert captured["limit"] == 2
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "cursor-next"
@@ -1774,6 +1778,46 @@ def test_dagster_run_detail_not_found_is_problem_404(
         "run_id": "missing-run",
         "errors": ["Run not found"],
     }
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_round_trips_encoded_opaque_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs["variables"])
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "Run",
+                    "runId": "typed/run id",
+                    "jobName": "provider_job",
+                    "status": "SUCCESS",
+                    "tags": [],
+                    "eventConnection": {
+                        "cursor": None,
+                        "hasMore": False,
+                        "events": [],
+                    },
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    from kortravelmap.api.routers import ops as ops_router_mod
+
+    links = ops_router_mod._job_links(_job(dagster_run_id="typed/run id"))
+    href = next(link.href for link in links if link.rel == "dagster_run")
+    assert href == "/v1/ops/pipeline/dagster-runs/typed%2Frun%20id"
+
+    response = client.get(href)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["run"]["run_id"] == "typed/run id"
+    assert captured["runId"] == "typed/run id"
 
 
 @pytest.mark.unit

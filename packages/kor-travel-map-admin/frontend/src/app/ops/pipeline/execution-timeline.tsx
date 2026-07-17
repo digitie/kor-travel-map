@@ -161,11 +161,23 @@ export function ExecutionTimeline({
       provider: provider.trim() || undefined,
       dataset_key: datasetKey.trim() || undefined,
       sync_scope: syncScope.trim() || undefined,
+      load_batch_id: loadBatchId.trim() || undefined,
+      parent_job_id: parentJobId.trim() || undefined,
       created_from: datetimeLocalIsoValue(createdFrom),
       created_to: datetimeLocalIsoValue(createdTo),
       page_size: PAGE_SIZE,
     }),
-    [kind, status, provider, datasetKey, syncScope, createdFrom, createdTo],
+    [
+      kind,
+      status,
+      provider,
+      datasetKey,
+      syncScope,
+      loadBatchId,
+      parentJobId,
+      createdFrom,
+      createdTo,
+    ],
   );
 
   const executions = usePipelineExecutions({ ...filters, cursor });
@@ -179,21 +191,7 @@ export function ExecutionTimeline({
     () => executions.data?.data.items ?? [],
     [executions.data],
   );
-  const rows = useMemo(() => {
-    const batch = loadBatchId.trim();
-    const parent = parentJobId.trim();
-    if (!batch && !parent) {
-      return items;
-    }
-    // load_batch_id/parent_job_id 딥링크 승계 — root 목록에 서버 필터가 없어
-    // 로드된 행의 대표 작업(projected_job)에서만 좁힌다(클라이언트 필터).
-    return items.filter((root) => {
-      const projected = root.projected_job;
-      const batchOk = !batch || projected?.load_batch_id === batch;
-      const parentOk = !parent || projected?.parent_job_id === parent;
-      return batchOk && parentOk;
-    });
-  }, [items, loadBatchId, parentJobId]);
+  const rows = items;
 
   const newCount = useMemo(() => {
     if (cursorStack.length === 0 || !baselineTop) {

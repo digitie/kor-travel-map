@@ -144,6 +144,8 @@ export interface PipelineExecutionsParams {
   provider?: string;
   dataset_key?: string;
   sync_scope?: string;
+  load_batch_id?: string;
+  parent_job_id?: string;
   created_from?: string;
   created_to?: string;
   page_size?: number;
@@ -186,6 +188,8 @@ function fetchExecutions(
       provider: params.provider,
       dataset_key: params.dataset_key,
       sync_scope: params.sync_scope,
+      load_batch_id: params.load_batch_id,
+      parent_job_id: params.parent_job_id,
       created_from: params.created_from,
       created_to: params.created_to,
       page_size: params.page_size,

@@ -61,6 +61,7 @@ def _job(
     *,
     status: str = "running",
     payload: dict[str, Any] | None = None,
+    dagster_run_id: str | None = None,
 ) -> OpsImportJob:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OpsImportJob(
@@ -69,6 +70,7 @@ def _job(
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
         update_request_id="22222222-2222-2222-2222-222222222222",
+        dagster_run_id=dagster_run_id,
         payload=payload or {"request_id": "req-1"},
         status=status,
         progress=40,
@@ -208,9 +210,9 @@ def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
         cancel_operation["responses"]
     )
     for status_code in ("409", "502", "503"):
-        assert cancel_operation["responses"][status_code]["headers"][
-            "Retry-After"
-        ]["schema"] == {"type": "integer"}
+        assert cancel_operation["responses"][status_code]["headers"]["Retry-After"]["schema"] == {
+            "type": "integer"
+        }
 
 
 @pytest.mark.unit
@@ -394,37 +396,28 @@ def test_import_jobs_list_passes_filters(
     assert body["data"]["items"][0]["parent_job_id"] == _job().parent_job_id
     assert body["data"]["items"][0]["status"] == "running"
     assert body["data"]["items"][0]["status_url"] == (
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111"
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111"
     )
     assert body["data"]["items"][0]["links"][0]["rel"] == "self"
-    links_by_rel = {
-        link["rel"]: link["href"] for link in body["data"]["items"][0]["links"]
-    }
+    links_by_rel = {link["rel"]: link["href"] for link in body["data"]["items"][0]["links"]}
     assert links_by_rel["self"] == body["data"]["items"][0]["status_url"]
     assert links_by_rel["events"] == (
-        "/v1/ops/pipeline/events?job_id="
-        "11111111-1111-1111-1111-111111111111"
+        "/v1/ops/pipeline/events?job_id=11111111-1111-1111-1111-111111111111"
     )
     assert links_by_rel["cancel"] == (
-        "/v1/ops/pipeline/executions/import_job/"
-        "11111111-1111-1111-1111-111111111111/cancel"
+        "/v1/ops/pipeline/executions/import_job/11111111-1111-1111-1111-111111111111/cancel"
     )
     assert links_by_rel["parent_job"].endswith(
         "/executions/import_job/44444444-4444-4444-4444-444444444444"
     )
     assert links_by_rel["load_batch"] == (
-        "/ops/pipeline?kind=import_job&load_batch_id="
-        "33333333-3333-3333-3333-333333333333"
+        "/v1/ops/pipeline/executions?load_batch_id=33333333-3333-3333-3333-333333333333"
     )
     assert any(
-        link["rel"] == "feature_update_request"
-        for link in body["data"]["items"][0]["links"]
+        link["rel"] == "feature_update_request" for link in body["data"]["items"][0]["links"]
     )
     assert any(
-        link["href"].endswith(
-            "/executions/update_request/22222222-2222-2222-2222-222222222222"
-        )
+        link["href"].endswith("/executions/update_request/22222222-2222-2222-2222-222222222222")
         for link in body["data"]["items"][0]["links"]
     )
     assert body["meta"]["page"] == {
@@ -435,13 +428,29 @@ def test_import_jobs_list_passes_filters(
 
 
 @pytest.mark.unit
-def test_import_job_links_use_canonical_dagster_run_api() -> None:
+def test_import_job_links_use_typed_canonical_dagster_run_api() -> None:
     from kortravelmap.api.routers import ops as router_mod
 
-    links = router_mod._job_links(_job(payload={"dagster_run_id": "run-1"}))
+    links = router_mod._job_links(_job(dagster_run_id="typed/run id"))
 
     assert next(link.href for link in links if link.rel == "dagster_run") == (
-        "/v1/ops/pipeline/dagster-runs/run-1"
+        "/v1/ops/pipeline/dagster-runs/typed%2Frun%20id"
+    )
+
+
+@pytest.mark.unit
+def test_import_job_links_ignore_conflicting_payload_dagster_run_id() -> None:
+    from kortravelmap.api.routers import ops as router_mod
+
+    links = router_mod._job_links(
+        _job(
+            dagster_run_id="typed-run",
+            payload={"dagster_run_id": "payload-run", "run_id": "legacy-run"},
+        )
+    )
+
+    assert next(link.href for link in links if link.rel == "dagster_run") == (
+        "/v1/ops/pipeline/dagster-runs/typed-run"
     )
 
 
@@ -482,8 +491,7 @@ def test_import_job_events_list_passes_filters(
     monkeypatch.setattr(router_mod, "list_ops_import_job_events", _events)
 
     response = client.get(
-        f"/v1/ops/import-jobs/{_job().job_id}/events?"
-        "level=error&page_size=10&cursor=cursor-1"
+        f"/v1/ops/import-jobs/{_job().job_id}/events?level=error&page_size=10&cursor=cursor-1"
     )
 
     assert response.status_code == 200
@@ -661,9 +669,7 @@ def test_health_deep_degraded_returns_503(
     from kortravelmap.api.routers.ops import OpsHealthCheck
 
     async def _db(_session: Any) -> OpsHealthCheck:
-        return OpsHealthCheck(
-            component="database", status="error", detail="connection refused"
-        )
+        return OpsHealthCheck(component="database", status="error", detail="connection refused")
 
     async def _postgis(_session: Any) -> OpsHealthCheck:
         return OpsHealthCheck(component="postgis", status="ok", detail="3.5")

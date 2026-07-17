@@ -39,14 +39,14 @@ _REQUEST_JOB_NAMESPACE = UUID("8ff8c150-70cf-4dda-91bb-e6965fb5d0e3")
 _INSERT_JOB_SQL = text(
     """
     INSERT INTO ops.import_jobs (
-        job_id, kind, parent_job_id, payload, status, progress, current_stage,
+        job_id, kind, load_batch_id, parent_job_id, payload, status, progress, current_stage,
         created_at, started_at, dagster_run_id, provider, dataset_key, sync_scope,
-        trigger_kind
+        trigger_kind, operation_registry_version, dagster_run_status
     ) VALUES (
-        CAST(:job_id AS uuid), :kind, CAST(:parent_job_id AS uuid),
+        CAST(:job_id AS uuid), :kind, CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
         CAST(:payload AS jsonb), :status, :progress, :current_stage,
         :created_at, :started_at, :dagster_run_id, :provider, :dataset_key,
-        :sync_scope, :trigger_kind
+        :sync_scope, :trigger_kind, :operation_registry_version, :dagster_run_status
     )
     """
 )
@@ -82,6 +82,7 @@ async def _job(
     job_id: str,
     *,
     kind: str = "provider_load",
+    load_batch_id: str | None = None,
     parent_job_id: str | None = None,
     created_at: datetime = _T0,
     status: str = "queued",
@@ -96,6 +97,7 @@ async def _job(
         {
             "job_id": job_id,
             "kind": kind,
+            "load_batch_id": load_batch_id,
             "parent_job_id": parent_job_id,
             "payload": json.dumps(payload or {}),
             "status": status,
@@ -111,7 +113,15 @@ async def _job(
             "provider": provider,
             "dataset_key": dataset_key,
             "sync_scope": sync_scope,
-            "trigger_kind": "update_request" if kind == "feature_update_request" else None,
+            "trigger_kind": (
+                "manual"
+                if kind == "provider_feature_load_run"
+                else ("update_request" if kind == "feature_update_request" else None)
+            ),
+            "operation_registry_version": (
+                "test-v1" if kind == "provider_feature_load_run" else None
+            ),
+            "dagster_run_status": ("STARTED" if kind == "provider_feature_load_run" else None),
         },
     )
 
@@ -136,13 +146,9 @@ async def _request(
             kind="feature_update_request",
             created_at=created_at,
             provider=(str(request_scope.get("provider")) if is_direct else None),
-            dataset_key=(
-                str(request_scope.get("dataset_key")) if is_direct else None
-            ),
+            dataset_key=(str(request_scope.get("dataset_key")) if is_direct else None),
             sync_scope=(
-                str(request_scope.get("sync_scope", "dataset_wide"))
-                if is_direct
-                else None
+                str(request_scope.get("sync_scope", "dataset_wide")) if is_direct else None
             ),
         )
     await session.execute(
@@ -213,9 +219,7 @@ def _assert_bounded_selective_access(
     ]
     assert executed_sequential == []
 
-    base_access = [
-        node for node in nodes if node.get("Relation Name") in base_relations
-    ]
+    base_access = [node for node in nodes if node.get("Relation Name") in base_relations]
     assert base_access
     touches = sum(
         float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
@@ -572,9 +576,7 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
-    pairs = {
-        (pair.provider, pair.dataset_key): pair for pair in root.provider_datasets
-    }
+    pairs = {(pair.provider, pair.dataset_key): pair for pair in root.provider_datasets}
 
     assert set(pairs) == {("provider-typed", "dataset-typed")}
     assert pairs[("provider-typed", "dataset-typed")].operation_member_id == _JOB_CHILD
@@ -618,9 +620,7 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
     assert detail.provider_datasets == root.provider_datasets
 
     latest = await list_latest_dataset_pipeline_executions(migrated_session)
-    latest_by_pair = {
-        (item.provider, item.dataset_key): item for item in latest
-    }
+    latest_by_pair = {(item.provider, item.dataset_key): item for item in latest}
     assert set(latest_by_pair) == set(pairs)
     assert all(item.execution.id == _JOB_ROOT for item in latest_by_pair.values())
     assert latest_by_pair[("provider-typed", "dataset-typed")].pair_status == "running"
@@ -712,9 +712,7 @@ async def test_direct_request_pair_ignores_audit_event_pair(
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
-    pairs = {
-        (pair.provider, pair.dataset_key): pair for pair in root.provider_datasets
-    }
+    pairs = {(pair.provider, pair.dataset_key): pair for pair in root.provider_datasets}
 
     assert root.kind == "update_request"
     assert root.id == _REQUEST_OWNER
@@ -848,6 +846,103 @@ async def test_cursor_kind_breaks_same_timestamp_and_uuid_tie(
     assert first.next_cursor is not None
     assert [(item.kind, item.id) for item in second.items] == [("import_job", shared)]
     assert second.next_cursor is None
+
+
+async def test_component_membership_filters_are_applied_before_page_limit(
+    migrated_session: AsyncSession,
+) -> None:
+    target_root = "a9111111-1111-4111-8111-111111111111"
+    target_child = "a9222222-2222-4222-8222-222222222222"
+    load_batch_id = "a9333333-3333-4333-8333-333333333333"
+    await _job(
+        migrated_session,
+        target_root,
+        kind="provider_feature_load_run",
+        created_at=_T0,
+        status="running",
+    )
+    await _job(
+        migrated_session,
+        target_child,
+        load_batch_id=load_batch_id,
+        parent_job_id=target_root,
+        created_at=_T0 + timedelta(minutes=1),
+    )
+    for index in range(3):
+        await _job(
+            migrated_session,
+            str(uuid5(_REQUEST_JOB_NAMESPACE, f"newer-unrelated-root-{index}")),
+            created_at=_T0 + timedelta(hours=index + 1),
+        )
+
+    by_batch = await list_pipeline_executions(
+        migrated_session,
+        load_batch_id=load_batch_id,
+        limit=1,
+    )
+    by_parent = await list_pipeline_executions(
+        migrated_session,
+        parent_job_id=target_root,
+        limit=1,
+    )
+
+    assert [(item.kind, item.id) for item in by_batch.items] == [("import_job", target_root)]
+    assert by_batch.items[0].projected_job.id == target_root
+    assert by_batch.next_cursor is None
+    assert [(item.kind, item.id) for item in by_parent.items] == [("import_job", target_root)]
+    assert by_parent.next_cursor is None
+
+    request_root = "a9444444-4444-4444-8444-444444444444"
+    request_child = "a9555555-5555-4555-8555-555555555555"
+    request_id = "a9666666-6666-4666-8666-666666666666"
+    request_load_batch_id = "a9777777-7777-4777-8777-777777777777"
+    request_projection = "a9888888-8888-4888-8888-888888888888"
+    await _job(
+        migrated_session,
+        request_root,
+        kind="feature_update_request",
+        created_at=_T0 - timedelta(hours=2),
+    )
+    await _job(
+        migrated_session,
+        request_child,
+        load_batch_id=request_load_batch_id,
+        parent_job_id=request_root,
+        created_at=_T0 - timedelta(hours=1),
+    )
+    await _job(
+        migrated_session,
+        request_projection,
+        parent_job_id=request_root,
+        created_at=_T0 - timedelta(minutes=30),
+    )
+    await _request(
+        migrated_session,
+        request_id,
+        job_id=request_root,
+        created_at=_T0 - timedelta(hours=2),
+    )
+
+    request_by_batch = await list_pipeline_executions(
+        migrated_session,
+        load_batch_id=request_load_batch_id,
+        limit=1,
+    )
+    request_by_parent = await list_pipeline_executions(
+        migrated_session,
+        parent_job_id=request_root,
+        limit=1,
+    )
+
+    assert [(item.kind, item.id) for item in request_by_batch.items] == [
+        ("update_request", request_id)
+    ]
+    assert request_by_batch.items[0].projected_job.id == request_projection
+    assert request_by_batch.next_cursor is None
+    assert [(item.kind, item.id) for item in request_by_parent.items] == [
+        ("update_request", request_id)
+    ]
+    assert request_by_parent.next_cursor is None
 
 
 async def test_request_arrays_are_single_filters_and_direct_scope_is_exact_pair(
@@ -994,9 +1089,7 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
     selected_scope = "external_system:retired"
     selected_request_ids: list[str] = []
     for index in range(11):
-        selected_request_id = str(
-            uuid5(_REQUEST_JOB_NAMESPACE, f"selected-retired-scope-{index}")
-        )
+        selected_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"selected-retired-scope-{index}"))
         selected_request_ids.append(selected_request_id)
         selected_created_at = _T0 + timedelta(minutes=index * 2)
         await _request(
@@ -1011,9 +1104,7 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
                 "sync_scope": selected_scope,
             },
         )
-        selected_job_id = str(
-            uuid5(_REQUEST_JOB_NAMESPACE, selected_request_id)
-        )
+        selected_job_id = str(uuid5(_REQUEST_JOB_NAMESPACE, selected_request_id))
         if index == 0:
             await _job(
                 migrated_session,
@@ -1077,9 +1168,7 @@ async def test_dataset_scope_filter_is_applied_before_page_limit(
         cursor=exact_first_page.next_cursor,
     )
 
-    exact_ids = [
-        item.id for item in (*exact_first_page.items, *exact_second_page.items)
-    ]
+    exact_ids = [item.id for item in (*exact_first_page.items, *exact_second_page.items)]
     assert len(unscoped_page.items) == 10
     assert exact_ids == list(reversed(selected_request_ids))
     assert len(exact_ids) == len(set(exact_ids)) == 11
@@ -1162,11 +1251,8 @@ async def test_more_than_one_thousand_roots_have_complete_pagination_and_latest(
     assert len(seen) == root_count
     assert len(set(seen)) == root_count
     assert len(latest) == root_count
-    assert {
-        (item.provider, item.dataset_key) for item in latest
-    } == {
-        ("bulk-provider", f"bulk-dataset-{number:04d}")
-        for number in range(1, root_count + 1)
+    assert {(item.provider, item.dataset_key) for item in latest} == {
+        ("bulk-provider", f"bulk-dataset-{number:04d}") for number in range(1, root_count + 1)
     }
     assert counts.operations_by_status == {"queued": root_count}
     assert counts.active_operations == root_count
@@ -1479,9 +1565,7 @@ async def test_selective_projection_plans_use_natural_bounded_access_paths(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_selective_projection_cardinality(migrated_session)
-    await migrated_session.execute(
-        text("SET LOCAL plan_cache_mode = force_generic_plan")
-    )
+    await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
     cases = (
         (
             "typed-exact",
@@ -1529,6 +1613,8 @@ async def test_selective_projection_plans_use_natural_bounded_access_paths(
             "filter_sync_scopes": False,
             "sync_scopes": [],
             "include_unscoped_scope": False,
+            "load_batch_id": None,
+            "parent_job_id": None,
             "created_from": None,
             "created_to": None,
             "cursor_created_at": None,
@@ -1546,19 +1632,14 @@ async def test_selective_projection_plans_use_natural_bounded_access_paths(
             )
         ).scalar_one()
         _assert_bounded_selective_access(plan, expected_index=expected_index)
-        assert all(
-            node.get("Relation Name") != "import_job_events"
-            for node in _plan_nodes(plan)
-        )
+        assert all(node.get("Relation Name") != "import_job_events" for node in _plan_nodes(plan))
 
 
 async def test_uuid_detail_plans_expand_only_selected_component(
     migrated_session: AsyncSession,
 ) -> None:
     targets = await _seed_selective_projection_cardinality(migrated_session)
-    await migrated_session.execute(
-        text("SET LOCAL plan_cache_mode = force_generic_plan")
-    )
+    await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
     cases = (
         ("import-member", "import_job", _JOB_CHILD, "pk_import_jobs"),
         (

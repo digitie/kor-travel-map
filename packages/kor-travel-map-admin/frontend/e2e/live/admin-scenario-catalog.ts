@@ -102,10 +102,13 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/pipeline/dagster-runs",
       "/v1/ops/pipeline/dagster-runs/{run_id}",
       "/v1/ops/pipeline/schedules",
+      "/v1/ops/datasets",
+      "/v1/ops/pipeline/prechecks/mois-source-sync",
     ],
     writeApis: [
       writeApi("POST", "/v1/ops/pipeline/requests"),
       writeApi("POST", "/v1/ops/pipeline/requests/preview"),
+      writeApi("POST", "/v1/ops/pipeline/requests/{request_id}/run-now"),
       writeApi(
         "POST",
         "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel",
@@ -114,6 +117,10 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi(
         "POST",
         "/v1/ops/pipeline/schedules/{schedule_name}/commands",
+      ),
+      writeApi(
+        "POST",
+        "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve",
       ),
     ],
     reflectedSurfaces: ["/ops/datasets", "/features", "/ops/logs"],

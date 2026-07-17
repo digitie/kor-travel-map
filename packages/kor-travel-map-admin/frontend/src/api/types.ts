@@ -2129,7 +2129,7 @@ export interface paths {
         };
         /**
          * root 실행 타임라인
-         * @description import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다.
+         * @description import job hierarchy를 job별 nearest request anchor branch와 standalone partition으로 접어 root만 반환한다. keyset total order는 `(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 `dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. `load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 대해 cursor/LIMIT 전에 적용한다.
          */
         get: operations["list_executions_v1_ops_pipeline_executions_get"];
         put?: never;
@@ -17728,6 +17728,8 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description provider+dataset exact pair의 논리 scope. 두 query를 함께 주어야 하며 기본 state는 dataset_wide/NULL 저장 표현을 같은 이력으로 조회한다. */
                 sync_scope?: string | null;
+                load_batch_id?: string | null;
+                parent_job_id?: string | null;
                 created_from?: string | null;
                 created_to?: string | null;
                 page_size?: number;
