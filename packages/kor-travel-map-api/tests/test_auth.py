@@ -43,6 +43,17 @@ def _request(settings: ApiSettings) -> Any:
 
 
 @pytest.mark.unit
+def test_settings_reads_shared_admin_proxy_secret_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", "shared-secret")
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET", raising=False)
+    settings = ApiSettings(_env_file=None)
+    assert settings.admin_proxy_secret is not None
+    assert settings.admin_proxy_secret.get_secret_value() == "shared-secret"
+
+
+@pytest.mark.unit
 async def test_service_token_unset_allows_any() -> None:
     settings = _api_settings(service_token=None)
     # 미설정이면 헤더 유무와 무관하게 통과(raise 없음).

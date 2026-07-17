@@ -21,6 +21,12 @@
   webserver/daemon 경계에만 둔다.
 - **CHANGED**: 로컬 `admin:stack`도 process별 `env -i` allowlist를 사용한다. API/frontend는
   provider loader credential을 상속하지 않고 Dagster process만 이를 받는다.
+- **CHANGED**: 구 API provider env 9종은 Docker/local 기동에서 fail-closed하고, MOIS
+  freshness·file-registry TTL·offline upload prefix는 API와 Dagster가 같은 root 설정을 쓴다.
+  Compose frontend도 login/session/BFF env만 명시적으로 전달한다.
+- **CHANGED**: BFF 공유 secret은 root `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` 하나만 정본으로
+  두고 API/frontend가 같은 이름을 직접 읽는다. API package env의 중복 secret과
+  사용되지 않는 fixture provider/dataset 목록 helper도 제거했다.
 
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 

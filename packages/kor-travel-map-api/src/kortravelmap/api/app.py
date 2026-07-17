@@ -2,7 +2,7 @@
 
 ADR 참조
 --------
-- ADR-005 — 인증 없음 (네트워크 계층 책임)
+- ADR-005 — 네트워크 인증 + 앱 레벨 defense-in-depth
 - ADR-020 — 디버그 UI는 별도 패키지 (메인 라이브러리에 FastAPI 의존 X)
 - ADR-031 — OpenAPI export drift gate (`scripts/export_openapi.py`)
 - ADR-035 — 운영 범위 확장 (디버그 + admin + 유지보수 + 프로덕션 운영)
@@ -10,12 +10,12 @@ ADR 참조
 
 운영
 ----
-uvicorn 직접 호출:
-    ``uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701``
+표준 기동:
+    package-scoped API env와 root 공유 env를 준비하고 ``npm run admin:stack`` 사용
 
-uvicorn 설정은 ``ApiSettings``(``KOR_TRAVEL_MAP_API_*`` env) 또는 호출자가
-명시. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO 게이트웨이 뒤에
-둔다.
+launcher는 ``ApiSettings``(``KOR_TRAVEL_MAP_API_*`` env)와 process별 credential
+allowlist를 검증한다. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO
+게이트웨이 뒤에 둔다.
 """
 
 from __future__ import annotations
@@ -648,6 +648,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 app: FastAPI = create_app()
 """모듈-레벨 FastAPI instance.
 
-``uvicorn kortravelmap.api.app:app``로 직접 실행, ``scripts/export_openapi.
-py``가 ``app.openapi()``를 호출.
+검증된 launcher가 이 instance를 실행하고, ``scripts/export_openapi.py``가
+``app.openapi()``를 호출한다.
 """

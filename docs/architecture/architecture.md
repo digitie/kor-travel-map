@@ -17,7 +17,8 @@
   의존 없음. kor-travel-map API/Dagster 내부에서 사용한다.
 - `kor-travel-map-api` (ADR-055) — `packages/kor-travel-map-api/`.
   FastAPI OpenAPI backend. Docker 독립 프로그램의 public/admin/ops/debug API 표면이다.
-  인증 없음, 내부망/네트워크 계층 보호 전제.
+  공개 API key/service token과 admin frontend proxy actor/shared secret을 검증하고,
+  reverse proxy SSO/IP allowlist를 함께 적용한다.
 - `kor-travel-map-admin` — `packages/kor-travel-map-admin/frontend/`.
   Next.js admin UI.
 
@@ -132,7 +133,7 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 │ kor-travel-map API (별도 Python 패키지)                                │
 │ packages/kor-travel-map-api/src/kortravelmap/api/                      │
 │                                                                  │
-│  uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701│
+│  npm run admin:stack (scoped API env + process allowlist)       │
 │                                                                  │
 │   ├── /health, /version                  (public status)      │
 │   ├── /features*, /public*, /providers*  (public read)        │
@@ -272,7 +273,7 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 | ADR-002 | 의존 계층 + import-linter 강제 / async-only API |
 | ADR-003 | PinVi ↔ 라이브러리 함수 호출 운영 모델은 ADR-045로 superseded |
 | ADR-004 | ORM은 매핑만, 쿼리는 raw SQL `text()` |
-| ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 |
+| ADR-005 | 네트워크 인증을 1차 경계로 두고 API key/service token/admin proxy 방어를 병행 |
 | ADR-006 | provider adapter/wrapper 신규 생성 금지 |
 | ADR-007 | Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 채택 |
 | ADR-008 | PostGIS extension은 `x_extension` schema 격리 |
@@ -297,7 +298,7 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 |------|----|-----|
 | 의존 계층 | 명시되지 않음 | dto/core/infra/providers/client/api 5층 + import-linter |
 | PinVi 연계 | 일부 함수 + 일부 라우터 | OpenAPI HTTP 연동 (ADR-045) |
-| 디버그/UI | stdlib HTTP server (별도 package) | FastAPI `kor-travel-map-api` + Next.js `kor-travel-map-admin` (ADR-055, 인증 없음) |
+| 디버그/UI | stdlib HTTP server (별도 package) | FastAPI `kor-travel-map-api` + Next.js `kor-travel-map-admin` (ADR-055, 앱+네트워크 인증) |
 | ORM | 일부 SQLAlchemy ORM 사용 | ORM은 매핑만, 쿼리는 raw SQL `text()` |
 | 시간 | 일부 naive datetime 혼재 | KST aware 일원화 |
 | 공간 쿼리 | 좌표 자유 변환 | `coord_5179`(meter) 기준, CTE 1회 변환 강제 |
@@ -305,7 +306,7 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 | 작업 큐 | 없음 / 메모리 | `import_jobs` 영속화 |
 | 객체 저장소 | RustFS hard-coded | S3 호환만 가정, swap 가능 |
 | 테스트 | replay fixture 중심 | unit/integration/e2e/fixture 4단계 |
-| 디버그 API 인증 | 없음 (v1과 동일) | 없음 (명시적 결정 ADR-005) |
+| 디버그 API 인증 | 없음 (v1과 동일) | reverse proxy 경계 + public/admin 앱 인증 (ADR-005 amendment) |
 | v1 동기 인터페이스 | 일부 동기 path | 동기 신규 추가 금지 (async-only) |
 
 ## 11. 이관된 결정 (구 ADR)

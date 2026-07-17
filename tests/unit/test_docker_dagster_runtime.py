@@ -123,6 +123,12 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     ]
     assert all_provider_keys.isdisjoint(api["environment"])
     assert {
+        "KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX",
+        "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS",
+        "KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS",
+        "KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS",
+    } <= set(api["environment"])
+    assert {
         key for key in api["environment"] if key.startswith("KOR_TRAVEL_MAP_API_")
     } == {
         "KOR_TRAVEL_MAP_API_HOST",
@@ -130,6 +136,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_DAGSTER_URL",
         "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
     }
+    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
 
     root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
     assert root_api_keys == {
@@ -142,7 +149,6 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         prefix="KOR_TRAVEL_MAP_API_",
     )
     assert {
-        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
         "KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED",
@@ -172,6 +178,33 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         ]
 
     assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in services["dagster-daemon"]["environment"]
+
+    frontend_environment = services["frontend"]["environment"]
+    assert {
+        "KOR_TRAVEL_MAP_API_INTERNAL_URL",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        "KOR_TRAVEL_MAP_UI_ADMIN_USERNAME",
+        "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH",
+        "KOR_TRAVEL_MAP_UI_SESSION_SECRET",
+        "KOR_TRAVEL_MAP_UI_TRUST_PROXY_HEADERS",
+        "KOR_TRAVEL_MAP_UI_PUBLIC_ORIGINS",
+    } <= set(frontend_environment)
+
+    entrypoint = _script("docker/api-entrypoint.sh")
+    for removed_key in (
+        "KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KMA_APIHUB_KEY",
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_DATAGOKR_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_VISITKOREA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KREX_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KNPS_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED",
+    ):
+        assert removed_key in entrypoint
+    assert "removed provider runtime key must not enter API container" in entrypoint
 
 
 @pytest.mark.unit
@@ -230,8 +263,8 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert "KOR_TRAVEL_MAP_API_ENV_FILE" in script
     assert "required API env file is missing" in script
     assert "inline comments are not allowed in API env values" in script
-    assert "API admin proxy secret must not have surrounding whitespace" in script
-    assert "API/frontend admin proxy secrets do not match" in script
+    assert "shared admin proxy secret must be configured only in root env" in script
+    assert "frontend admin proxy secret must not have surrounding whitespace" in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
     assert "start_bg api env -i" in script
     assert "start_bg web env -i" in script
@@ -241,7 +274,10 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert '"${API_SCOPED_ENV[@]}"' in script
     assert '"${FRONTEND_PROCESS_ENV[@]}"' in script
     assert '"${DAGSTER_PROCESS_ENV[@]}"' in script
+    assert "KOR_TRAVEL_MAP_FILE_REGISTRY_*" in script
+    assert "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS" in script
     assert 'KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root"' in script
+    assert 'KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET="$frontend_proxy_secret"' in script
     assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
     assert "CREATE DATABASE" in script
     assert "dagster-webserver" in script
@@ -250,6 +286,9 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert 'KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in script
     assert "start_bg dagster-daemon env" in script
     assert "ensure_bg_alive dagster-daemon" in script
+
+    host_compose = _script("docker-compose.host.yml")
+    assert "KOR_TRAVEL_MAP_HOST_API_INTERNAL_URL" in host_compose
 
 
 @pytest.mark.unit
@@ -267,7 +306,6 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     }
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n"
         "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
         encoding="utf-8",
     )
@@ -283,7 +321,7 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     assert valid.stdout.strip() == "admin stack environment is valid"
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret # ambiguous\n",
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups # ambiguous\n",
         encoding="utf-8",
     )
     inline_comment = subprocess.run(
@@ -298,10 +336,10 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     assert "inline comments are not allowed" in inline_comment.stderr
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=' shared-secret '\n",
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n",
         encoding="utf-8",
     )
-    surrounding_whitespace = subprocess.run(
+    duplicate_secret_source = subprocess.run(
         ["bash", "scripts/run-admin-stack.sh"],
         cwd=ROOT,
         env=process_env,
@@ -309,11 +347,13 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
         capture_output=True,
         text=True,
     )
-    assert surrounding_whitespace.returncode != 0
-    assert "must not have surrounding whitespace" in surrounding_whitespace.stderr
+    assert duplicate_secret_source.returncode != 0
+    assert "shared admin proxy secret must be configured only in root env" in (
+        duplicate_secret_source.stderr
+    )
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n",
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
         encoding="utf-8",
     )
     root_env.write_text(
@@ -334,10 +374,14 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     )
 
     root_env.write_text(
-        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=different-secret\n",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret\n",
         encoding="utf-8",
     )
-    mismatch = subprocess.run(
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY=stale-secret\n",
+        encoding="utf-8",
+    )
+    removed_provider_key = subprocess.run(
         ["bash", "scripts/run-admin-stack.sh"],
         cwd=ROOT,
         env=process_env,
@@ -345,8 +389,67 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
         capture_output=True,
         text=True,
     )
-    assert mismatch.returncode != 0
-    assert "API/frontend admin proxy secrets do not match" in mismatch.stderr
+    assert removed_provider_key.returncode != 0
+    assert "removed provider runtime key is not allowed" in removed_provider_key.stderr
+
+
+@pytest.mark.unit
+def test_api_container_rejects_stale_provider_env_even_when_empty() -> None:
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY": "",
+    }
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "removed provider runtime key must not enter API container" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "proxy_secret",
+    [None, "", " shared-secret", "shared-secret "],
+)
+def test_api_container_requires_unambiguous_proxy_secret(
+    proxy_secret: str | None,
+) -> None:
+    process_env = {"PATH": os.environ["PATH"]}
+    if proxy_secret is not None:
+        process_env["KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"] = proxy_secret
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required" in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "shared-secret",
+            "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET": "shared-secret",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "legacy API-specific admin proxy secret" in result.stderr
 
 
 @pytest.mark.unit

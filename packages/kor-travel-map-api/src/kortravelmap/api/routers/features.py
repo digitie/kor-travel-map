@@ -14,7 +14,8 @@ DTO 매핑만, SQL 미보유.
 ADR 참조
 --------
 - ADR-004 — 쿼리는 raw SQL (``feature_repo``)
-- ADR-005 + ADR-035 — 인증 없음, 운영 범위. 본 라우터는 ``/features`` prefix.
+- ADR-005 + ADR-035 — public API key/service token + 네트워크 경계 보호.
+  본 라우터는 ``/features`` prefix.
 - ADR-012 — bbox/좌표는 4326, GIST 인덱스 사용 (술어에 ST_Transform 없음)
 """
 

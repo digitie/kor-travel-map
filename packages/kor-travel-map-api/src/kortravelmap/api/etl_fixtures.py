@@ -65,8 +65,6 @@ from kortravelmap.providers.standard_data import (
 __all__ = [
     "EtlFixtureEntry",
     "FIXTURE_REGISTRY",
-    "list_providers",
-    "list_datasets",
     "run_fixture_preview",
 ]
 
@@ -1303,16 +1301,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_mcst_split_coord,
     ),
 )
-
-
-def list_providers() -> list[str]:
-    """등록된 provider canonical name 목록 (중복 제거, 정렬)."""
-    return sorted({e.provider for e in FIXTURE_REGISTRY})
-
-
-def list_datasets(provider: str) -> list[str]:
-    """주어진 provider의 dataset 목록 (정렬)."""
-    return sorted(e.dataset for e in FIXTURE_REGISTRY if e.provider == provider)
 
 
 def _find_entry(provider: str, dataset: str) -> EtlFixtureEntry | None:

@@ -74,9 +74,11 @@ uv pip install -e ".[dev,geo,providers]"
 docker compose up -d postgres
 alembic upgrade head
 
-# REST API 별도 패키지
+# API/admin/Dagster stack — scoped API env 필수, root cwd 직접 uvicorn 금지
 uv pip install -e packages/kor-travel-map-api
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 ```
 
 Admin frontend는 WSL Node/npm으로 실행한다. Windows Node/npm은 사용하지 않는다.

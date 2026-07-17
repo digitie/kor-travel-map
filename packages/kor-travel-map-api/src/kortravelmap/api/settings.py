@@ -133,12 +133,14 @@ class ApiSettings(BaseSettings):
     )
     admin_proxy_secret: SecretStr | None = Field(
         default=None,
+        validation_alias="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
         description=(
             "Next.js admin frontend proxy가 FastAPI admin API 호출 시 넣는 server-only "
             "secret. 설정되면 ``/v1/admin/*`` 요청은 허용된 peer CIDR + "
             "``X-Kor-Travel-Map-Admin-Proxy-Secret`` + "
             "``X-Kor-Travel-Map-Actor``가 모두 맞아야 통과한다. 미설정이면 기존 "
-            "로컬/테스트 하위호환으로 admin gate를 강제하지 않는다."
+            "로컬/테스트 하위호환으로 admin gate를 강제하지 않는다. API와 frontend가 "
+            "공유하는 env 정본은 ``KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET``이다."
         ),
     )
     admin_trusted_proxy_cidrs: list[str] = Field(

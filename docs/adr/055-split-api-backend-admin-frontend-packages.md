@@ -45,7 +45,8 @@ admin 라우터가 아니라 REST API 전체를 대상으로 한다.
 ### 결과
 
 - `uv pip install -e packages/kor-travel-map-api`가 backend 설치 명령이다.
-- `uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701`가 backend 실행 명령이다.
+- C6B 이후 개발 backend는 scoped API env와 process allowlist를 적용하는
+  `npm run admin:stack`으로 실행한다. root cwd 직접 `uvicorn`은 지원하지 않는다.
 - `npm -w packages/kor-travel-map-admin/frontend ...`가 admin UI 실행/빌드 명령이다.
 - Docker `api` service는 `packages/kor-travel-map-api`를 설치하고, `frontend` service는
   `packages/kor-travel-map-admin/frontend`만 빌드한다.

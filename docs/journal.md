@@ -34,7 +34,12 @@
   allowlist로 고정했다. 추가 재검토에서 발견한 local `admin:stack` 우회도 process별
   `env -i` allowlist와 필수 scoped API env로 닫았다. API cwd 변경에 따른 backup root 분기와
   env inline comment/proxy-secret 공백도 root 절대경로·strict parser로 보강했다. 재리뷰와
-  테스트는 아직 진행 전이다.
+  테스트는 아직 진행 전이다. 독립 runtime 재검토의 구 API provider key, MOIS/file-registry/
+  offline prefix, Compose frontend auth/BFF, direct uvicorn 문서 지적도 fail-closed runtime과
+  현행 기동 문서에 반영했다. BFF shared secret은 root 단일 이름을 API/frontend가 직접
+  읽도록 바꾸고 package env의 구 API 전용 중복 secret을 금지했으며, dead fixture 목록 helper와
+  no-auth/legacy endpoint 설명도 제거했다. 생성 OpenAPI와 admin type은 C6A/UI 최종 rebase 뒤
+  반드시 갱신하고 drift green을 확인하기 전에는 C6b를 병합하지 않는다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

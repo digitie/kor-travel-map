@@ -12,7 +12,8 @@ SPRINT-4 §2.1 **Step D** — 디버그 UI에서 사용자가 명시 트리거�
 ADR 참조
 --------
 - ADR-004 — 쿼리는 raw SQL (``feature_repo.get_primary_source_detail``)
-- ADR-005 + ADR-035 — 인증 없음, 운영 범위. 본 라우터는 ``/debug`` prefix.
+- ADR-005 + ADR-035 — 네트워크 경계로 제한하는 debug 운영 범위.
+  본 라우터는 ``/debug`` prefix.
 - ADR-006 — provider 라이브러리 미import (적재된 raw_data 재사용, on-demand fetch 아님)
 """
 

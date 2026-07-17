@@ -5,7 +5,7 @@
 admin UI의 데이터셋 상태와 fixture preview는 서로 다른 source에서 provider
 목록을 그리던 과거 표면을 대체한다:
 
-- fixture preview → `etl_fixtures.list_providers()`
+- fixture preview → `etl_fixtures.FIXTURE_REGISTRY`
 - dataset 상태 → `provider_sync_state` row
 
 둘 중 어느 쪽도 mois/knps/krheritage/mcst 같은 "구현은 됐으나 fixture/sync

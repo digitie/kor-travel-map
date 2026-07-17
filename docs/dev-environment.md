@@ -294,7 +294,7 @@ debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 **WSL에서 실�
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
-| backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12701` |
+| backend (FastAPI) | **WSL `/mnt/f` worktree** | `npm run admin:stack` (scoped API env 필수, root 직접 uvicorn 금지) |
 | frontend (Next.js) | **WSL `/mnt/f` worktree** | `npm run start` (`next start :12705`) |
 | **Playwright (chromium)** | **n150 Linux 우선** | `cd packages/kor-travel-map-admin/frontend && npm run e2e` |
 | **Playwright fallback** | **Windows만** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |

@@ -32,7 +32,7 @@ FRONTEND_PROCESS_ENV=()
 DAGSTER_PROCESS_ENV=()
 while IFS= read -r name; do
   case "$name" in
-    KOR_TRAVEL_MAP_PG_* | KOR_TRAVEL_MAP_OBJECT_STORE_* | KOR_TRAVEL_MAP_OFFLINE_UPLOAD_*)
+    KOR_TRAVEL_MAP_PG_* | KOR_TRAVEL_MAP_OBJECT_STORE_* | KOR_TRAVEL_MAP_OFFLINE_UPLOAD_* | KOR_TRAVEL_MAP_FILE_REGISTRY_* | KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS)
       API_SHARED_ENV+=("$name=${!name}")
       ;;
   esac
@@ -66,8 +66,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     exit 1
   fi
   case "$key" in
+    KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY | KOR_TRAVEL_MAP_API_KMA_APIHUB_KEY | KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY | KOR_TRAVEL_MAP_API_DATAGOKR_SERVICE_KEY | KOR_TRAVEL_MAP_API_VISITKOREA_SERVICE_KEY | KOR_TRAVEL_MAP_API_KREX_SERVICE_KEY | KOR_TRAVEL_MAP_API_KNPS_SERVICE_KEY | KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY | KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY | KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED)
+      echo "removed provider runtime key is not allowed in API env: $key" >&2
+      exit 1
+      ;;
     KOR_TRAVEL_MAP_API_INTERNAL_URL)
       echo "frontend-only key is not allowed in API env: $key" >&2
+      exit 1
+      ;;
+    KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET)
+      echo "shared admin proxy secret must be configured only in root env: KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" >&2
       exit 1
       ;;
     KOR_TRAVEL_MAP_API_* | KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_* | KOR_TRAVEL_MAP_KAKAO_* | KOR_TRAVEL_MAP_NAVER_* | KOR_TRAVEL_MAP_GOOGLE_PLACES_*)
@@ -91,19 +99,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       exit 1
     fi
   fi
-  if [[ "$key" == "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET" ]]; then
-    trimmed_value="${value#"${value%%[![:space:]]*}"}"
-    trimmed_value="${trimmed_value%"${trimmed_value##*[![:space:]]}"}"
-    if [[ "$value" != "$trimmed_value" ]]; then
-      echo "API admin proxy secret must not have surrounding whitespace" >&2
-      exit 1
-    fi
-  fi
   API_SCOPED_VALUES["$key"]="$value"
   API_SCOPED_ENV+=("$key=$value")
 done <"$API_ENV_FILE"
 
-api_proxy_secret="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET]:-}"
 frontend_proxy_secret="${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:-}"
 trimmed_frontend_proxy_secret="${frontend_proxy_secret#"${frontend_proxy_secret%%[![:space:]]*}"}"
 trimmed_frontend_proxy_secret="${trimmed_frontend_proxy_secret%"${trimmed_frontend_proxy_secret##*[![:space:]]}"}"
@@ -111,12 +110,8 @@ if [[ "$frontend_proxy_secret" != "$trimmed_frontend_proxy_secret" ]]; then
   echo "frontend admin proxy secret must not have surrounding whitespace" >&2
   exit 1
 fi
-if [[ -z "$api_proxy_secret" || -z "$frontend_proxy_secret" ]]; then
-  echo "API/frontend admin proxy secrets must both be configured" >&2
-  exit 1
-fi
-if [[ "$api_proxy_secret" != "$frontend_proxy_secret" ]]; then
-  echo "API/frontend admin proxy secrets do not match" >&2
+if [[ -z "$frontend_proxy_secret" ]]; then
+  echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be configured in root env" >&2
   exit 1
 fi
 
@@ -289,6 +284,7 @@ start_bg() {
     "${COMMON_PROCESS_ENV[@]}" \
     "${API_SHARED_ENV[@]}" \
     "${API_SCOPED_ENV[@]}" \
+    KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET="$frontend_proxy_secret" \
     KOR_TRAVEL_MAP_API_HOST="$API_BIND_HOST" \
     KOR_TRAVEL_MAP_API_PORT="$KOR_TRAVEL_MAP_API_PORT" \
     KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root" \

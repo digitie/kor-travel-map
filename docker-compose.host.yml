@@ -79,6 +79,7 @@ services:
     environment:
       PORT: ${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}
       HOSTNAME: 0.0.0.0
+      KOR_TRAVEL_MAP_API_INTERNAL_URL: ${KOR_TRAVEL_MAP_HOST_API_INTERNAL_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12701}}
     # base healthcheck는 12705로 고정 probe하므로 host 모드에서 실제 listen 포트와
     # 어긋날 수 있다. 런타임 포트로 다시 probe한다.
     healthcheck:

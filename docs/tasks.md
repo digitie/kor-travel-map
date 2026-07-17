@@ -48,7 +48,8 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   backend/API clean-cut branch에서는 legacy OpenAPI operation 28개와 전용 라우터,
   raw live ETL loader·API credential 주입을 제거하고 public provider read 2종을
   소형 라우터로 분리했다. 최종 통합 rebase·OpenAPI 재생성·적대 리뷰 2인과 테스트
-  gate 전이므로 완료 처리하지 않는다.
+  gate 전이므로 완료 처리하지 않는다. 최종 UI 결합 직후 삭제 route가 남은 tracked
+  `openapi.json`과 admin generated type을 재생성해 drift gate를 green으로 만들어야 한다.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔

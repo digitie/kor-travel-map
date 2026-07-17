@@ -9,8 +9,9 @@
 - public provider read를 운영 결합 로직이 없는 `public_providers.py`로 옮기고 기존 응답 schema
   이름과 cursor 비노출 계약을 보존했다. `etl_live.py`, live adapter tests, API 전용 provider
   credential settings·compose/load-env 주입을 제거했으며 preview catalog는 fixture/none만 가진다.
-- migration은 추가하지 않았다. OpenAPI/admin types는 C5/C6A rebase와 외부 적대 리뷰 반영 직전에
-  실제 branch에서 재생성한다.
+- migration은 추가하지 않았다. 현재 tracked `openapi.json`에는 삭제된 legacy path가 남아
+  있으므로 병합 가능한 상태가 아니다. OpenAPI/admin types는 C5/C6A UI 최종 rebase 직후 실제
+  통합 branch에서 재생성하고 drift gate를 통과해야 한다.
 - 적대 리뷰 1차는 production S1/S2 결함 0건, 테스트 회귀 S3 3건으로 판정했다. CORS,
   feature-update idempotency/strict DTO, public provider empty-list 회귀를 복원했다.
 - 적대 리뷰 2차의 S2 provider secret 경계를 반영해 API container를 package-scoped `.env`로
@@ -18,8 +19,12 @@
   계약을 현행 문서에 완결했다.
 - 재검증 S2에 따라 idempotency 문서를 actor-scoped ledger와 일치시키고 API 전용 env를
   Compose 필수 입력으로 전환했다. root 예시의 중복 API runtime 설정도 제거했다.
-- **다음 한 작업**: 새 반영 snapshot을 적대 리뷰어에게 재검증받는다. 그 전에는 사용자
-  지시대로 테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
+- runtime 재검토의 removed provider env, MOIS/file-registry/offline 설정, Compose frontend
+  auth/BFF 누락을 보강했다. BFF secret은 root 단일 정본으로 만들고 package env 중복을
+  fail-closed했으며 dead fixture helper와 no-auth/legacy endpoint 문서를 정리했다.
+- **다음 한 작업**: C5/C6A UI 최종 rebase 뒤 OpenAPI/admin type을 재생성한 단일 통합 SHA를
+  적대 리뷰어 2명에게 재검증받는다. 그 전에는 사용자 지시대로 테스트·lint·push·PR을 실행하지
+  않으며, 생성 계약 drift가 green이 아니면 C6b를 병합하지 않는다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 

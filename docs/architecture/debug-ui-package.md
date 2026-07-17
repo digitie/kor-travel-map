@@ -6,7 +6,7 @@
 
 본 문서는 `kor-travel-map` 저장소 내 별도 Python API 패키지
 `kor-travel-map-api`와 admin frontend 패키지 `kor-travel-map-admin`의 사양
-reference다. 결정 근거는 `docs/adr/README.md`의 ADR-005(인증 없음, 내부망 전용) +
+reference다. 결정 근거는 `docs/adr/README.md`의 ADR-005(네트워크 경계 + 앱 방어) +
 ADR-020(메인 패키지에서 FastAPI 분리) + ADR-045(Docker 독립 프로그램, 독립
 DB/Dagster, PinVi OpenAPI 연동) + ADR-055(API/admin 패키지 분리).
 
@@ -32,7 +32,7 @@ Admin 우선 OpenAPI와 Dagster feature update queue 계약은
 | Admin UI 위치 | `packages/kor-travel-map-admin/frontend/` |
 | 별도 `pyproject.toml` | 예 |
 | 의존성 | `kor-travel-map`, FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
-| 인증 | **없음** (ADR-005, 내부망 전제) |
+| 인증 | 공개 API key/service token + admin frontend proxy actor/shared secret. reverse proxy SSO/IP allowlist 병행 |
 | PinVi 의존 | **없음** — ADR-045 이후 PinVi는 OpenAPI client로만 연동 |
 | 운영 형태 | Docker 독립 프로그램의 API backend + admin frontend |
 | DB | 독립 PostgreSQL/PostGIS (`kor_travel_map`) |
@@ -168,7 +168,8 @@ class ApiSettings(BaseSettings):
     # provider credential은 Dagster/provider runtime만 소유한다.
 ```
 
-각 provider key의 출처(.env 이름)는 `settings.py` 필드 docstring 참조.
+provider loader credential은 API settings에 존재하지 않으며 Dagster/provider runtime만
+소유한다. API는 fixture preview와 canonical pipeline/datasets application service만 제공한다.
 
 메인 라이브러리 settings는 별도 `KorTravelMapSettings`를 그대로 import해서 사용한다.
 `pg_dsn`, `object_store_*` 같은 항목은 본 패키지에서 재정의하지 않는다.
@@ -180,19 +181,15 @@ class ApiSettings(BaseSettings):
 uv pip install -e .
 uv pip install -e packages/kor-travel-map-api
 
-# 기동 (인증 없음, localhost 전용)
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
-
-# 환경변수로 override
-KOR_TRAVEL_MAP_API_HOST=127.0.0.1 \
-KOR_TRAVEL_MAP_API_PORT=12701 \
-KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://... \
-uvicorn kortravelmap.api.app:app
+# scoped API env 생성 후 검증된 local stack 기동
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 
 ```
 
-`0.0.0.0` 바인드 시 경고 로그 (ADR-005 후속). 코드 작성 단계에서
-`warn_if_external_bind(host)` helper를 박는다.
+root cwd 직접 `uvicorn`은 package `.env`와 process별 credential allowlist를 우회하므로
+지원하지 않는다.
 
 ## 6. 엔드포인트
 
@@ -295,18 +292,17 @@ type drift 부채 0).
   `httpx.AsyncClient(ASGITransport)`. DB 없이 라우터 응답 셰입 검증.
 - **e2e** (`tests/e2e/`): testcontainers PostGIS + 실제 메인 라이브러리 wiring.
   EXPLAIN 통합 테스트는 메인 라이브러리 책임이지만, 라우터 통합 path도 검증.
-- 인증 없음 동작 회귀 테스트 (Authorization 헤더 무시 확인).
+- 공개 API key/service token과 admin proxy actor/shared secret 인증 회귀 테스트.
 - `0.0.0.0` 바인드 경고 로그 회귀 테스트.
 
 자세한 매트릭스는 `docs/test-strategy.md`.
 
 ## 10. 운영 시 주의 사항
 
-- **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
+- **직접 외부 노출 금지**. host default `127.0.0.1`; 외부 접근은 인증된 reverse proxy만 허용.
 - **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from <lan-cidr>
   to any port 12701`(예: 사내망 RFC1918 대역) 같은 사내망 한정 허용만.
-- **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
-  계층에서.
+- **Cloudflare Tunnel** 또는 **Tailscale** 원격 접근은 네트워크 인증과 앱 인증을 함께 적용.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준
   (`provider`, `dataset_key`, `request_id`, `feature_id`).
 - **PII 노출**: provider raw payload, location 데이터가 응답에 그대로 노출되므로
@@ -317,7 +313,7 @@ type drift 부채 0).
 본 패키지는 다음을 하지 않는다:
 
 - 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — PinVi)
-- 인증/세션/권한 (네트워크 계층 책임)
+- 사용자 계정·조직 권한 모델. 앱은 API key/service token과 admin proxy actor 경계만 소유한다.
 - SQL write/DDL
 - 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
 - PinVi 사용자/여행계획/POI 도메인 화면
@@ -409,8 +405,10 @@ cd ~/dev/kor-travel-map
 uv pip install -e ".[dev]"
 uv pip install -e packages/kor-travel-map-api
 
-# 2. backend (FastAPI) 기동
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
+# 2. scoped env를 준비하고 backend/frontend/Dagster stack 기동
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 
 # 3. frontend (Next.js dev) 기동
 cd packages/kor-travel-map-admin/frontend
