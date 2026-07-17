@@ -133,14 +133,14 @@ PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 | `<geo-api-host>` | `kor-travel-geo` REST API | `12501` |
 | `<geo-console-host>` | `kor-travel-geo` Web UI | `12505` |
 
-운영 노드 `.env`에 채우는 값:
+운영 노드의 root `.env`와 API 전용 `packages/kor-travel-map-api/.env`에 나누어 채우는 값:
 
 - `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` / `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` —
   프론트(브라우저)가 호출할 API/Dagster 주소. **Next.js build-time inline**이라 도메인을
   바꾸면 frontend 이미지를 **재빌드**한다(`npm run docker:build`).
-- `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` — 프론트 origin(예: `["https://<map-host>"]`)을
-  허용해야 브라우저 cross-origin fetch가 통과한다. `docker-compose.yml`은 이 env가 있으면
-  그대로 쓰고, 없으면 localhost(`:12705`)로 fallback한다.
+- API 전용 `.env`의 `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` — 프론트 origin(예:
+  `["https://<map-host>"]`)을 허용해야 브라우저 cross-origin fetch가 통과한다. root
+  `.env` 값은 API container로 전달하지 않으며, API 전용 파일의 기본값은 localhost(`:12705`)다.
 - `KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL` — feature 파일/업로드 이미지의 **브라우저
   노출 주소**(`https://<s3-api-host>/<bucket>`). API 컨테이너→RustFS 내부 통신은 docker
   네트워크(`http://rustfs:9000`)를 그대로 쓰므로 외부에 노출되는 것은 이 public URL뿐이다.

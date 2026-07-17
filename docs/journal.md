@@ -29,7 +29,9 @@
 - 반영 snapshot 재리뷰는 actor-scoped ledger를 전역 key처럼 설명한 문서 오류와 API 전용
   env 부재 시 인증 기본값 기동 가능성을 S2로 확인했다. 문서는 actor별 독립 namespace로
   정정하고 API env를 Compose 필수 입력으로 바꿨다. root 예시의 중복 API runtime 설정도
-  제거하고 provider secret 격리 회귀 테스트를 추가했다. 재리뷰와 테스트는 아직 진행 전이다.
+  제거하고 provider secret 격리 회귀 테스트를 추가했다. 후속 재검토의 운영 CORS 문서와
+  오래된 전역 key/provider 주입 주석도 정정하고, root/Compose/load-env의 허용 API 설정을
+  allowlist로 고정했다. 재리뷰와 테스트는 아직 진행 전이다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

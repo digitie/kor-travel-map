@@ -32,6 +32,22 @@ def _script(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _assigned_env_keys(text: str, *, prefix: str) -> set[str]:
+    keys: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line.removeprefix("export ")
+        if "=" not in line:
+            continue
+        key = line.split("=", maxsplit=1)[0]
+        if key.startswith(prefix):
+            keys.add(key)
+    return keys
+
+
 @pytest.mark.unit
 def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     services = _compose()["services"]
@@ -104,22 +120,47 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         }
     ]
     assert all_provider_keys.isdisjoint(api["environment"])
-    assert "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS" not in api["environment"]
-
-    root_env = _script(".env.example")
-    root_env_keys = {
-        line.split("=", maxsplit=1)[0]
-        for line in root_env.splitlines()
-        if line and not line.startswith("#") and "=" in line
+    assert {
+        key for key in api["environment"] if key.startswith("KOR_TRAVEL_MAP_API_")
+    } == {
+        "KOR_TRAVEL_MAP_API_HOST",
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_DAGSTER_URL",
+        "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
     }
-    api_env = _script("packages/kor-travel-map-api/.env.example")
-    for api_runtime_key in (
+
+    root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
+    assert root_api_keys == {
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_INTERNAL_URL",
+    }
+
+    package_api_keys = _assigned_env_keys(
+        _script("packages/kor-travel-map-api/.env.example"),
+        prefix="KOR_TRAVEL_MAP_API_",
+    )
+    assert {
         "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
-    ):
-        assert api_runtime_key not in root_env_keys
-        assert api_runtime_key in api_env
+        "KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED",
+        "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
+        "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
+        "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
+    } <= package_api_keys
+
+    load_env_api_keys = _assigned_env_keys(
+        _script("scripts/load-env.sh"), prefix="KOR_TRAVEL_MAP_API_"
+    )
+    assert load_env_api_keys == {
+        "KOR_TRAVEL_MAP_API_HOST",
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_DAGSTER_URL",
+        "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
+    }
 
     for service_name in ("dagster", "dagster-daemon"):
         environment = services[service_name]["environment"]
