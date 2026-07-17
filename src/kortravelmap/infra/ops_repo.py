@@ -266,10 +266,7 @@ def _list_import_job_events_sql(
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
-    clauses: list[str] = [
-        "event.quarantined_at IS NULL",
-        "job.quarantined_at IS NULL",
-    ]
+    clauses: list[str] = ["event.quarantined_at IS NULL"]
     if job_id is not None:
         clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:
@@ -288,6 +285,19 @@ def _list_import_job_events_sql(
                 "event.dataset_key = CAST(:dataset_key AS text)",
             )
         )
+    if sync_scope is None:
+        job_join = """
+JOIN LATERAL (
+    SELECT candidate.sync_scope
+    FROM ops.import_jobs AS candidate
+    WHERE candidate.job_id = event.job_id
+      AND candidate.quarantined_at IS NULL
+    LIMIT 1
+) AS job ON true
+"""
+    else:
+        job_join = "JOIN ops.import_jobs AS job ON job.job_id = event.job_id"
+        clauses.append("job.quarantined_at IS NULL")
     request_join = ""
     if sync_scope is not None:
         request_join = (
@@ -313,7 +323,7 @@ def _list_import_job_events_sql(
     return f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
 FROM ops.import_job_events AS event
-JOIN ops.import_jobs AS job ON job.job_id = event.job_id
+{job_join}
 {request_join}
 {where_sql}
 ORDER BY event.occurred_at DESC, event.event_id DESC

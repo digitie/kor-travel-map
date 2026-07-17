@@ -138,8 +138,8 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
         cursor_occurred_at=None,
     )
     assert "event.quarantined_at IS NULL" in events_sql
-    assert "job.quarantined_at IS NULL" in events_sql
-    assert "JOIN ops.import_jobs AS job" in events_sql
+    assert "candidate.quarantined_at IS NULL" in events_sql
+    assert "JOIN LATERAL" in events_sql
     assert "ops.feature_update_requests" not in events_sql
 
 
