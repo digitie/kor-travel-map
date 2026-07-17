@@ -424,6 +424,7 @@ function PolicyEditor({
     latestObservedRevision,
     reconcileMessage,
     revisionConflict,
+    serverSnapshotEpoch,
   } = editorState;
   const saveGuard: PolicySaveGuard = {
     acknowledgedPropRevision,
@@ -540,6 +541,7 @@ function PolicyEditor({
       }));
       return;
     }
+    const mutationStartEpoch = serverSnapshotEpoch;
     upsertPolicy.mutate(
       { provider, datasetKey, body },
       {
@@ -548,7 +550,11 @@ function PolicyEditor({
           // revision을 기준으로 적용된 결과만 아래 순수 전이가 UI 상태로 남긴다.
           resetPolicyMutation();
           setEditorState((current) =>
-            applyPolicyMutationSuccess(current, response.data),
+            applyPolicyMutationSuccess(
+              current,
+              response.data,
+              mutationStartEpoch,
+            ),
           );
         },
         onError: (submitError) => {
@@ -562,7 +568,11 @@ function PolicyEditor({
             return;
           }
           setEditorState((current) =>
-            applyPolicyMutationConflict(current, conflict),
+            applyPolicyMutationConflict(
+              current,
+              conflict,
+              mutationStartEpoch,
+            ),
           );
         },
       },

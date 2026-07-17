@@ -50,6 +50,7 @@ export type PolicyEditorState = {
   latestObservedRevision: string | null;
   reconcileMessage: string | null;
   revisionConflict: PolicyRevisionConflict | null;
+  serverSnapshotEpoch: number;
 };
 
 export type PolicySaveGuard = {
@@ -123,6 +124,7 @@ export function initialPolicyEditorState(
     latestObservedRevision: revision,
     reconcileMessage: null,
     revisionConflict: null,
+    serverSnapshotEpoch: 0,
   };
 }
 
@@ -165,14 +167,20 @@ export function observePolicyProp(
     ...state,
     acknowledgedPropRevision: incomingRevision,
   };
+  // mutation/409 transition이 이미 같은 snapshot을 적용하며 epoch를 올렸다.
+  // 뒤따르는 own-refetch는 ack만 따라잡고 같은 snapshot의 epoch를 또 올리지 않는다.
   if (incomingRevision === state.latestObservedRevision) {
     return acknowledgedState;
   }
+  const observedState = {
+    ...acknowledgedState,
+    serverSnapshotEpoch: state.serverSnapshotEpoch + 1,
+  };
   if (!state.dirty) {
-    return applyServerPolicyState(acknowledgedState, policy);
+    return applyServerPolicyState(observedState, policy);
   }
   return {
-    ...acknowledgedState,
+    ...observedState,
     hasDeferredServerPolicy: true,
     latestObservedPolicy: policy ?? null,
     latestObservedRevision: incomingRevision,
@@ -205,13 +213,18 @@ function isOlderPolicyRevision(
 export function applyPolicyMutationSuccess(
   state: PolicyEditorState,
   policy: ProviderRefreshPolicyRecord,
+  startEpoch: number,
 ): PolicyEditorState {
-  if (isOlderPolicyRevision(policy.revision, state.latestObservedRevision)) {
+  if (
+    startEpoch !== state.serverSnapshotEpoch ||
+    isOlderPolicyRevision(policy.revision, state.latestObservedRevision)
+  ) {
     return state;
   }
   return {
     ...applyServerPolicyState(state, policy),
     lastSavedAt: policy.updated_at,
+    serverSnapshotEpoch: state.serverSnapshotEpoch + 1,
   };
 }
 
@@ -219,8 +232,10 @@ export function applyPolicyMutationSuccess(
 export function applyPolicyMutationConflict(
   state: PolicyEditorState,
   conflict: PolicyRevisionConflict,
+  startEpoch: number,
 ): PolicyEditorState {
   if (
+    startEpoch !== state.serverSnapshotEpoch ||
     isOlderPolicyRevision(
       conflict.currentRevision,
       state.latestObservedRevision,
@@ -242,6 +257,7 @@ export function applyPolicyMutationConflict(
     latestObservedPolicy: conflict.currentPolicy,
     latestObservedRevision: conflict.currentRevision,
     revisionConflict: conflict,
+    serverSnapshotEpoch: state.serverSnapshotEpoch + 1,
   };
 }
 
