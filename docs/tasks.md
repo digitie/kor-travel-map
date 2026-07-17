@@ -34,15 +34,18 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   `T-ADM-AUD-718`/0056): canonical root/member와 effective `sync_scope`를 기준으로
   active operation projection과 event/history 조회 경계를 typed DB 열·제약·실제
   access path로 고정한다. exact-scope 조건을 cursor/LIMIT 전에 적용하고 run/event
-  continuation과 canonical history URL을 모두 반환한다. 두 scope 혼합과 page limit 초과,
-  stale/terminal/active 조합을 실제 DB/API 통합 테스트로 증명한다.
+  continuation과 canonical history URL을 모두 반환한다. cursor에는 job/level/provider/
+  dataset/scope filter fingerprint를 묶어 다른 filter에서 재사용하면 typed 422로 닫고,
+  canonical `sync_scope` parser가 거부하는 값도 typed 422로 닫는다. 두 scope 혼합과 page
+  limit 초과, stale/terminal/active 조합을 실제 DB/API 통합 테스트로 증명한다.
 - [ ] `T-ADM-C7B-UI` — **exact-scope 조작·이력 UI 소비** (issues **#712/#719**,
   **PR 1개**, 의존 C7B-API·C7A): 잘못된 dataset/scope deep link는 다른 행으로
   폴백하지 않고 fail-closed하며, provider-only URL은 실제 선택 tuple로 canonicalize한
   뒤에만 조작을 허용한다. scope capability·active operation 링크를 선제 소비하고
   run/event continuation을 `더 보기` 또는 canonical pipeline history로 끝까지 탐색한다.
-  local draft와 back/forward/focus 의미를 보존하고 mock/live UI E2E로 POST tuple과 URL,
-  requested/effective scope를 대조한다.
+  provider/dataset tuple이 불완전해지는 즉시 stale scope와 cursor를 함께 비우고, URL
+  변경·back/forward를 controlled filter state에 반영한다. local draft와 focus 의미를
+  보존하고 mock/live UI E2E로 POST tuple과 URL, requested/effective scope를 대조한다.
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존
   C6b·C7A·C7B-720·AUD-686·C7B-UI): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
