@@ -494,6 +494,22 @@ async def _claim_schedule_command(
     """idempotency key를 durable하게 선점하고 완료 응답이면 재생한다."""
 
     try:
+        # active claim INSERT의 unique-index 대기가 길어져도 lease clock은 lock 해제 뒤
+        # 시작돼야 한다. schedule 단위 xact lock을 먼저 잡으면 column default가 대기
+        # 전에 평가되어 이미 만료된 claim이 생성되는 경로를 닫을 수 있다.
+        await session.execute(
+            text(
+                """
+                SELECT pg_advisory_xact_lock(
+                  hashtextextended(
+                    'ops.dagster_schedule_active_claims:' || :schedule_name,
+                    0
+                  )
+                )
+                """
+            ),
+            {"schedule_name": schedule_name},
+        )
         inserted = await session.execute(
             text(
                 """

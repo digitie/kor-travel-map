@@ -650,6 +650,81 @@ async def test_operation_deadline_cancels_old_owner_before_new_mutation(
     assert remote_calls == 1
 
 
+async def test_schedule_claim_lease_clock_starts_after_advisory_lock_wait(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_claim_lock_clock"
+    worker_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def _uncertain_operation(
+        mutation_guard: Callable[[], Awaitable[None]],
+    ) -> DagsterScheduleCommandResponse:
+        await mutation_guard()
+        response = _command_response()
+        response.data.status = "unavailable"
+        response.data.outcome_certainty = "uncertain"
+        response.data.effective_status = "unknown"
+        response.data.errors = ["response lost after mutation"]
+        return response
+
+    async def _run_waiting_claim() -> DagsterScheduleCommandResponse:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            worker_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            return await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="start",
+                actor="admin@example.test",
+                reason="lock wait clock",
+                request_details={"command": "start"},
+                command_id=command_id,
+                operation=_uncertain_operation,
+            )
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as blocker:
+        await blocker.execute(
+            text(
+                """
+                SELECT pg_advisory_xact_lock(
+                  hashtextextended(
+                    'ops.dagster_schedule_active_claims:' || :schedule_name,
+                    0
+                  )
+                )
+                """
+            ),
+            {"schedule_name": schedule_name},
+        )
+        waiting_task = asyncio.create_task(_run_waiting_claim())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await worker_pid,
+        )
+        await asyncio.sleep(0.1)
+        released_at = await blocker.scalar(text("SELECT clock_timestamp()"))
+        await blocker.commit()
+
+    await waiting_task
+    async with AsyncSession(migrated_engine) as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT created_at, resolvable_after
+                    FROM ops.dagster_schedule_active_claims
+                    WHERE command_id = CAST(:command_id AS uuid)
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        ).one()
+
+    assert released_at is not None
+    assert row.created_at >= released_at
+    assert (row.resolvable_after - row.created_at).total_seconds() >= 300
+
+
 async def test_schedule_active_claim_blocks_new_key_until_terminal(
     migrated_engine: AsyncEngine,
 ) -> None:
