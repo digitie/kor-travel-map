@@ -123,14 +123,32 @@ export function ExecutionTimeline({
   const syncScope = initialFilters.syncScope ?? "";
   const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
   const createdTo = datetimeLocalValue(initialFilters.createdTo);
+  const loadBatchId = initialLoadBatchId ?? "";
+  const parentJobId = initialParentJobId ?? "";
+  const filterSignature = JSON.stringify([
+    kind,
+    status,
+    provider,
+    datasetKey,
+    syncScope,
+    createdFrom,
+    createdTo,
+    loadBatchId,
+    parentJobId,
+  ]);
+  const [paginationSignature, setPaginationSignature] =
+    useState(filterSignature);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [baselineTop, setBaselineTop] = useState<{
     createdAt: string;
     kind: ExecutionKind;
     id: string;
   } | null>(null);
-  const loadBatchId = initialLoadBatchId ?? "";
-  const parentJobId = initialParentJobId ?? "";
+  if (paginationSignature !== filterSignature) {
+    setPaginationSignature(filterSignature);
+    setCursorStack([]);
+    setBaselineTop(null);
+  }
 
   const cursor = cursorStack.at(-1) ?? null;
   const filters = useMemo(

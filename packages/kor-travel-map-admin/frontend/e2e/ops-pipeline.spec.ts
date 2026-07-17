@@ -1949,6 +1949,43 @@ test.describe("/ops/pipeline", () => {
     ).toHaveClass(/ring-2/);
   });
 
+  test("history filter 변경은 이전 cursor와 신규 배지 baseline을 폐기한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+    await page
+      .getByRole("button", { name: "실행 타임라인 다음 페이지" })
+      .click();
+    await expect(page.getByText(/page 2/)).toBeVisible();
+    await expect
+      .poll(() => counters.executionQueries.at(-1)?.get("cursor"))
+      .not.toBeNull();
+
+    await page.evaluate(() => {
+      window.history.pushState(null, "", "/ops/pipeline?status=failed");
+    });
+    await expect(page.getByText(/page 1/)).toBeVisible();
+    await expect
+      .poll(() => {
+        const query = counters.executionQueries.at(-1);
+        return `${query?.get("status")}|${query?.has("cursor")}`;
+      })
+      .toBe("failed|false");
+    await expect(
+      page.getByRole("button", { name: /새 실행 .*건 반영/ }),
+    ).toHaveCount(0);
+
+    await page.goBack();
+    await expect(page.getByText(/page 1/)).toBeVisible();
+    await expect
+      .poll(() => {
+        const query = counters.executionQueries.at(-1);
+        return `${query?.has("status")}|${query?.has("cursor")}`;
+      })
+      .toBe("false|false");
+  });
+
   test("상세 원 행이 필터로 사라지면 닫기 focus를 첫 표시 행으로 복귀", async ({
     page,
   }) => {
