@@ -26,6 +26,10 @@ import {
   postJson,
   withIdempotencyKey,
 } from "./client";
+import {
+  canonicalFeatureUpdateIdempotencyBody,
+  featureUpdateIdempotencyOperationKey,
+} from "./feature-update-idempotency";
 import type { components, paths } from "./types";
 
 type Schemas = components["schemas"];
@@ -401,16 +405,21 @@ export function useCreateUpdateRequestMutation() {
     Error,
     FeatureUpdateRequestCreateRequest
   >({
-    mutationFn: async (body) =>
-      withIdempotencyKey(
-        await idempotencyOperationKey("pipeline:update-request:create", body),
+    mutationFn: async (body) => {
+      const canonicalBody = canonicalFeatureUpdateIdempotencyBody(body);
+      return withIdempotencyKey(
+        await featureUpdateIdempotencyOperationKey(
+          "pipeline:update-request:create",
+          canonicalBody,
+        ),
         (idempotencyKey) =>
           postJson<FeatureUpdateRequestCreateResponse>(
             "/v1/ops/pipeline/requests",
-            body,
+            canonicalBody,
             { headers: { "Idempotency-Key": idempotencyKey } },
           ),
-      ),
+      );
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "executions"],

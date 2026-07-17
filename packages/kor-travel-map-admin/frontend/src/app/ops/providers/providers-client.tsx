@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { featureUpdateCreationStatus } from "@/api/feature-update-idempotency";
 import {
   type OpsProviderDatasetDetail,
   type OpsProviderDatasetSummary,
@@ -638,7 +639,11 @@ function DatasetDetailPanel({
         </div>
         {createdRequest ? (
           <Alert>
-            <AlertTitle>요청 생성 완료</AlertTitle>
+            <AlertTitle>
+              {createRequest.data
+                ? featureUpdateCreationStatus(createRequest.data)
+                : "요청 생성 완료"}
+            </AlertTitle>
             <AlertDescription>
               <Link
                 className="underline underline-offset-2"

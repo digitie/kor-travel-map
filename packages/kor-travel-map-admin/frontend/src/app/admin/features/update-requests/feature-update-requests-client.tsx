@@ -5,6 +5,7 @@ import { PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
+import { featureUpdateCreationStatus } from "@/api/feature-update-idempotency";
 import {
   type FeatureUpdateRequestPreviewRequest,
   type FeatureUpdateStatus,
@@ -448,7 +449,11 @@ export function FeatureUpdateRequestsClient() {
             </Button>
             {createRequest.data || previewRequest.data ? (
               <Alert>
-                <AlertTitle>요청 처리 완료</AlertTitle>
+                <AlertTitle>
+                  {createRequest.data
+                    ? featureUpdateCreationStatus(createRequest.data)
+                    : "요청 처리 완료"}
+                </AlertTitle>
                 <AlertDescription>
                   {createRequest.data?.data.result_kind === "request" ? (
                     `${createRequest.data.data.request_id} · ${statusLabel(createRequest.data.data.status)}`

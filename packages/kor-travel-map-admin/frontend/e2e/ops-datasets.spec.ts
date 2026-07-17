@@ -49,6 +49,8 @@ const KREX_DATASET = "krex_rest_areas";
 const REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NEW_REQUEST_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const JOB_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // 신선도는 서버 계산 `freshness.state` 정본을 쓴다(브라우저 48h 계산 제거,
 // T-ADM-C4R). FRESH_AT은 last_success_at 표시용 최근 시각일 뿐 판정에 안 쓰인다.
@@ -520,19 +522,35 @@ async function mockPipelineRequests(
     createStatus?: number;
     conflictCode?: "ACTIVE_SCOPE_CONFLICT" | "LOCK_BUSY";
     reusedActiveRequest?: boolean;
+    createResponseLossOnce?: boolean;
     executionStatus?: string | ((executionGetCount: number) => string);
     executionGetStatus?: number;
   } = {},
 ) {
-  const posts: { body: FeatureUpdateRequestCreateRequest }[] = [];
+  const posts: {
+    body: FeatureUpdateRequestCreateRequest;
+    bodyJson: string;
+    idempotencyKey: string;
+  }[] = [];
+  const requestLedger = new Map<
+    string,
+    { bodyJson: string; response: FeatureUpdateRequestCreateResponse }
+  >();
   const executionGets: string[] = [];
 
   await page.route("**/api/proxy/v1/ops/pipeline/**", async (route) => {
     const request = route.request();
     const pathname = apiPathname(new URL(request.url()));
     if (pathname === "/v1/ops/pipeline/requests" && request.method() === "POST") {
+      const idempotencyKey = request.headers()["idempotency-key"] ?? "";
+      if (!UUID_PATTERN.test(idempotencyKey)) {
+        throw new Error(
+          `pipeline request Idempotency-Key must be UUID: ${idempotencyKey}`,
+        );
+      }
+      const bodyJson = request.postData() ?? "";
       const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
-      posts.push({ body });
+      posts.push({ body, bodyJson, idempotencyKey });
       if (options.createStatus === 409) {
         const conflictCode = options.conflictCode ?? "ACTIVE_SCOPE_CONFLICT";
         await route.fulfill({
@@ -566,6 +584,29 @@ async function mockPipelineRequests(
         });
         return;
       }
+      const existing = requestLedger.get(idempotencyKey);
+      if (existing) {
+        if (existing.bodyJson !== bodyJson) {
+          await fulfillJson(
+            route,
+            {
+              type: "https://kor-travel-map/errors/idempotency-conflict",
+              title: "Idempotency conflict",
+              status: 409,
+              detail: "같은 Idempotency-Key의 body가 다릅니다.",
+              code: "IDEMPOTENCY_CONFLICT",
+              request_id: "e2e-refresh-conflict",
+            },
+            409,
+          );
+          return;
+        }
+        await fulfillJson(
+          route,
+          { ...existing.response, idempotent_replay: true },
+        );
+        return;
+      }
       const response: FeatureUpdateRequestCreateResponse = {
         data: makeCreatedRequest(
           options.reusedActiveRequest
@@ -580,6 +621,11 @@ async function mockPipelineRequests(
         idempotent_replay: false,
         reused_active_request: options.reusedActiveRequest ?? false,
       };
+      requestLedger.set(idempotencyKey, { bodyJson, response });
+      if (options.createResponseLossOnce && posts.length === 1) {
+        await route.abort("connectionreset");
+        return;
+      }
       await fulfillJson(route, response, options.reusedActiveRequest ? 200 : 201);
       return;
     }
@@ -710,7 +756,11 @@ async function mockPipelineRequests(
     throw new Error(`Unexpected pipeline call: ${request.method()} ${pathname}`);
   });
 
-  return { posts, executionGets };
+  return {
+    posts,
+    executionGets,
+    persistedRequestCount: () => requestLedger.size,
+  };
 }
 
 function defaultGrid(): {
@@ -1257,6 +1307,34 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect
       .poll(() => datasetMocks.counts.list)
       .toBeGreaterThan(listCountBefore);
+  });
+
+  test("지금 갱신 — 응답 유실은 같은 UUID key와 exact body로 한 요청을 replay한다", async ({
+    page,
+  }) => {
+    const { items, details } = defaultGrid();
+    await mockOpsDatasets(page, { items, details });
+    const pipeline = await mockPipelineRequests(page, {
+      createResponseLossOnce: true,
+      executionStatus: "done",
+    });
+    await page.goto(KMA_DEEP_LINK);
+
+    await page.getByRole("button", { name: "지금 갱신" }).click();
+    await expect.poll(() => pipeline.posts.length).toBe(1);
+    await expect(page.getByText("갱신 요청 실패")).toBeVisible();
+    await page.getByRole("button", { name: "지금 갱신" }).click();
+
+    await expect.poll(() => pipeline.posts.length).toBe(2);
+    await expect(page.getByTestId("refresh-create-result")).toHaveText(
+      "동일 요청 결과 재생(200)",
+    );
+    expect(pipeline.posts[0].idempotencyKey).toMatch(UUID_PATTERN);
+    expect(pipeline.posts[1].idempotencyKey).toBe(
+      pipeline.posts[0].idempotencyKey,
+    );
+    expect(pipeline.posts[1].bodyJson).toBe(pipeline.posts[0].bodyJson);
+    expect(pipeline.persistedRequestCount()).toBe(1);
   });
 
   test("지금 갱신 — 다른 계획의 활성 scope 409는 기존 요청 링크를 제공한다", async ({

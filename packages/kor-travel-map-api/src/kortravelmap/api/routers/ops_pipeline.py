@@ -1855,7 +1855,10 @@ async def resolve_pipeline_schedule_claim(
     responses={
         200: {
             "model": FeatureUpdateRequestCreateResponse,
-            "description": "같은 계획의 활성 canonical request 재사용",
+            "description": (
+                "같은 계획의 활성 canonical request 재사용 또는 같은 "
+                "Idempotency-Key의 terminal 결과 재생"
+            ),
         },
         **FEATURE_UPDATE_CONFLICT_RESPONSES,
         **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES,

@@ -355,7 +355,7 @@ class FeatureUpdateRequestPreviewRecord(BaseModel):
 
 
 class FeatureUpdateRequestCreateResponse(BaseModel):
-    """새 요청 또는 동일한 활성 canonical 요청 재사용 응답."""
+    """새 요청, 활성 canonical 요청 재사용 또는 terminal 결과 재생 응답."""
 
     model_config = ConfigDict(extra="forbid")
 

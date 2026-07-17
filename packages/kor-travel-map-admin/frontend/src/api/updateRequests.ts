@@ -7,11 +7,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiClientError,
   getJson,
-  idempotencyOperationKey,
   pathWithQuery,
   postJson,
   withIdempotencyKey,
 } from "./client";
+import {
+  canonicalFeatureUpdateIdempotencyBody,
+  featureUpdateIdempotencyOperationKey,
+} from "./feature-update-idempotency";
 import { pipelineCancellationQueryKeys } from "./pipelineCancellationInvalidation";
 import { invalidateOpsProviderQueries } from "./providers";
 import type { components, paths } from "./types";
@@ -117,12 +120,16 @@ function fetchFeatureUpdateRequest(
 function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
-  return idempotencyOperationKey("admin:update-request:create", body).then(
+  const canonicalBody = canonicalFeatureUpdateIdempotencyBody(body);
+  return featureUpdateIdempotencyOperationKey(
+    "admin:update-request:create",
+    canonicalBody,
+  ).then(
     (operationKey) =>
       withIdempotencyKey(operationKey, (idempotencyKey) =>
         postJson<FeatureUpdateRequestCreateResponse>(
           "/v1/admin/features/update-requests",
-          body,
+          canonicalBody,
           { headers: { "Idempotency-Key": idempotencyKey } },
         ),
       ),

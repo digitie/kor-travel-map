@@ -52,6 +52,24 @@ const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule";
 
+async function expectScheduleControlsDisabled(page: Page): Promise<void> {
+  await expect(page.getByLabel("명령 사유 (선택)")).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", {
+      name: new RegExp(`${SCHEDULE_NAME} 스케줄 (시작|중지)`),
+    }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: `${SCHEDULE_NAME} 상태 기본값 복귀` }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` }),
+  ).toBeDisabled();
+}
+
 const META = { duration_ms: 1, request_id: "e2e-pipeline" };
 
 function makeCatalogRow(
@@ -2112,7 +2130,7 @@ test.describe("/ops/pipeline", () => {
     await expect(reason).toHaveValue("");
   });
 
-  test("cron terminal audit 실패 후 body 변경은 새 action key를 사용한다", async ({
+  test("cron terminal audit 실패 후 patch UI와 다른 명령을 잠근다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -2135,17 +2153,21 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toContainText(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
-    await dialog
-      .getByRole("textbox", { name: "cron", exact: true })
-      .fill("25 5 * * *");
-    await dialog.getByRole("button", { name: "저장", exact: true }).click();
-
-    expect(counters.scheduleKeys).toHaveLength(2);
-    expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
-    expect(counters.patchBodies[1]).not.toEqual(counters.patchBodies[0]);
+    await expect(
+      dialog.getByRole("textbox", { name: "cron", exact: true }),
+    ).toBeDisabled();
+    await expect(reason).toBeDisabled();
+    await expect(
+      dialog.getByRole("button", { name: "기본값으로 되돌리기" }),
+    ).toBeDisabled();
+    await expect(
+      dialog.getByRole("button", { name: "저장", exact: true }),
+    ).toBeDisabled();
+    expect(counters.scheduleKeys).toHaveLength(1);
+    expect(counters.patchBodies).toHaveLength(1);
   });
 
-  test("terminal audit 실패는 reason과 동일 idempotency key를 유지한다", async ({
+  test("terminal audit 실패 claim이 남으면 모든 schedule 조작을 잠근다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -2155,25 +2177,17 @@ test.describe("/ops/pipeline", () => {
     const reason = page.getByLabel("명령 사유 (선택)");
     await reason.fill("감사 결과 확인 필요");
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      await page
-        .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
-        .click();
-      await page
-        .getByRole("button", { name: "즉시 실행", exact: true })
-        .click();
-      await expect(page.getByTestId("schedule-command-result")).toContainText(
-        "terminal 감사 기록에 실패",
-      );
-      await expect(page.getByTestId("schedule-command-result")).toContainText(
-        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      );
-    }
-
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+    await expect(page.getByTestId("schedule-command-result")).toContainText(
+      "terminal 감사 기록에 실패",
+    );
     await expect(reason).toHaveValue("감사 결과 확인 필요");
-    expect(counters.scheduleKeys).toHaveLength(2);
-    expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
-    expect(counters.commandBodies[1]).toEqual(counters.commandBodies[0]);
+    await expectScheduleControlsDisabled(page);
+    expect(counters.scheduleKeys).toHaveLength(1);
+    expect(counters.commandBodies).toHaveLength(1);
   });
 
   test("결과 불명 schedule claim을 실제 상태 확인 근거와 함께 해제", async ({
@@ -2269,6 +2283,62 @@ test.describe("/ops/pipeline", () => {
         await expect(
           recovery.getByLabel("확인 근거·해제 사유 (필수)"),
         ).toBeDisabled();
+        await expectScheduleControlsDisabled(page);
+      }
+    }
+
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toContainText("Dagster 미반영 확인");
+    expect(counters.claimResolutionBodies).toHaveLength(2);
+    expect(counters.claimResolutionBodies[1]).toEqual(
+      counters.claimResolutionBodies[0],
+    );
+  });
+
+  test("claim 해제 503은 frozen body와 schedule 잠금을 유지해 replay한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleAuditStatus: "terminal_record_failed",
+      claimResolutionErrorOnce: {
+        status: 503,
+        body: {
+          type: "https://kor-travel-map/errors/service-unavailable",
+          title: "Service Unavailable",
+          status: 503,
+          detail: "해제 결과를 확정할 수 없습니다.",
+          code: "SERVICE_UNAVAILABLE",
+          request_id: "e2e",
+        },
+      },
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await recovery
+      .getByLabel("확인 근거·해제 사유 (필수)")
+      .fill("Dagster 실행 미반영을 확인함");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await recovery.getByRole("button", { name: "claim 해제" }).click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "확인 결과 기록 후 해제" })
+        .click();
+      if (attempt === 0) {
+        await expect(page.getByText("claim 해제 실패")).toBeVisible();
+        await expect(
+          recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
+        ).toBeDisabled();
+        await expect(
+          recovery.getByLabel("확인 근거·해제 사유 (필수)"),
+        ).toBeDisabled();
+        await expectScheduleControlsDisabled(page);
       }
     }
 
@@ -2320,6 +2390,7 @@ test.describe("/ops/pipeline", () => {
     await expect(
       recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
     ).toBeEnabled();
+    await expectScheduleControlsDisabled(page);
     await reason.fill("수정한 확인 사유");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page

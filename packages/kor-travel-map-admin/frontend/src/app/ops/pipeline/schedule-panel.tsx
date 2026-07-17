@@ -263,6 +263,13 @@ export function SchedulePanel({
     claimResolutionSubmission.commandId === recoveryClaim.commandId
       ? claimResolutionSubmission
       : null;
+  const scheduleRecoveryLocked = Boolean(
+    recoveryClaim || claimResolutionSubmission,
+  );
+  const scheduleControlsDisabled =
+    scheduleMutationPending || scheduleRecoveryLocked;
+  const scheduleControlsGuardRef = useRef(false);
+  scheduleControlsGuardRef.current = scheduleControlsDisabled;
 
   useEffect(() => {
     if (highlightSchedule && highlightRef.current) {
@@ -274,6 +281,9 @@ export function SchedulePanel({
     schedule: PipelineSchedule,
     command: PipelineScheduleCommand,
   ) => {
+    if (scheduleControlsGuardRef.current) {
+      return;
+    }
     onHighlightSchedule(schedule.name);
     if (command === "run" || command === "start") {
       const confirmed = await confirm({
@@ -287,11 +297,12 @@ export function SchedulePanel({
       if (!confirmed) {
         return;
       }
+      if (scheduleControlsGuardRef.current) {
+        return;
+      }
     }
     patchSchedule.reset();
     commandSchedule.reset();
-    resolveClaim.reset();
-    setClaimResolutionSubmission(null);
     setLastResult(null);
     commandSchedule.mutate(
       {
@@ -316,6 +327,9 @@ export function SchedulePanel({
   };
 
   const openEdit = (schedule: PipelineSchedule) => {
+    if (scheduleControlsGuardRef.current) {
+      return;
+    }
     onHighlightSchedule(schedule.name);
     setEditing(schedule);
     setCronDraft(
@@ -328,13 +342,11 @@ export function SchedulePanel({
   };
 
   const submitCronUpdate = () => {
-    if (!editing) {
+    if (!editing || scheduleControlsGuardRef.current) {
       return;
     }
     patchSchedule.reset();
     commandSchedule.reset();
-    resolveClaim.reset();
-    setClaimResolutionSubmission(null);
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -359,13 +371,11 @@ export function SchedulePanel({
   };
 
   const submitClearOverride = () => {
-    if (!editing) {
+    if (!editing || scheduleControlsGuardRef.current) {
       return;
     }
     patchSchedule.reset();
     commandSchedule.reset();
-    resolveClaim.reset();
-    setClaimResolutionSubmission(null);
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -669,6 +679,7 @@ export function SchedulePanel({
                 ) : null}
                 <div className="mt-2">
                   <FormField
+                    disabled={scheduleControlsDisabled}
                     label="명령 사유 (선택)"
                     placeholder="시작·중지·reset·즉시 실행 감사 로그에 기록"
                     value={commandReasons[schedule.name] ?? ""}
@@ -683,7 +694,9 @@ export function SchedulePanel({
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Button
                     aria-label={`${schedule.name} 즉시 실행`}
-                    disabled={scheduleMutationPending || !schedule.can_run_now}
+                    disabled={
+                      scheduleControlsDisabled || !schedule.can_run_now
+                    }
                     size="sm"
                     type="button"
                     variant="outline"
@@ -696,7 +709,7 @@ export function SchedulePanel({
                   {schedule.status === "RUNNING" ? (
                     <Button
                       aria-label={`${schedule.name} 스케줄 중지`}
-                      disabled={scheduleMutationPending}
+                      disabled={scheduleControlsDisabled}
                       size="sm"
                       type="button"
                       variant="destructive"
@@ -708,7 +721,7 @@ export function SchedulePanel({
                   ) : (
                     <Button
                       aria-label={`${schedule.name} 스케줄 시작`}
-                      disabled={scheduleMutationPending}
+                      disabled={scheduleControlsDisabled}
                       size="sm"
                       type="button"
                       variant="outline"
@@ -720,7 +733,9 @@ export function SchedulePanel({
                   )}
                   <Button
                     aria-label={`${schedule.name} 상태 기본값 복귀`}
-                    disabled={scheduleMutationPending || !schedule.can_reset}
+                    disabled={
+                      scheduleControlsDisabled || !schedule.can_reset
+                    }
                     size="sm"
                     type="button"
                     variant="outline"
@@ -731,7 +746,7 @@ export function SchedulePanel({
                   </Button>
                   <Button
                     aria-label={`${schedule.name} cron 수정`}
-                    disabled={scheduleMutationPending}
+                    disabled={scheduleControlsDisabled}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -766,6 +781,7 @@ export function SchedulePanel({
           </DialogHeader>
           <div className="flex flex-col gap-3">
             <FormField
+              disabled={scheduleControlsDisabled}
               hint="분 시 일 월 요일 5필드. 분은 0~59 단일 값 또는 */N(N≥10)만 허용됩니다."
               label="cron"
               value={cronDraft}
@@ -777,6 +793,7 @@ export function SchedulePanel({
               </p>
             ) : null}
             <FormField
+              disabled={scheduleControlsDisabled}
               label="수정 사유"
               placeholder="감사 로그에 남는 사유"
               value={editReason}
@@ -804,7 +821,7 @@ export function SchedulePanel({
           <DialogFooter>
             <Button
               aria-label="기본값으로 되돌리기"
-              disabled={scheduleMutationPending}
+              disabled={scheduleControlsDisabled}
               type="button"
               variant="outline"
               onClick={submitClearOverride}
@@ -813,7 +830,7 @@ export function SchedulePanel({
               기본값으로 되돌리기
             </Button>
             <Button
-              disabled={scheduleMutationPending || !cronDraft.trim()}
+              disabled={scheduleControlsDisabled || !cronDraft.trim()}
               type="button"
               onClick={submitCronUpdate}
             >
