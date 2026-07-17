@@ -83,6 +83,42 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
 
 @pytest.mark.unit
+def test_bridge_admin_bff_uses_exact_trusted_peer_address() -> None:
+    compose = _compose()
+    services = compose["services"]
+
+    assert compose["networks"]["admin-control"]["ipam"]["config"] == [
+        {"subnet": "172.31.254.0/29"}
+    ]
+    assert services["api"]["networks"]["admin-control"]["ipv4_address"] == (
+        "172.31.254.2"
+    )
+    assert services["frontend"]["networks"]["admin-control"]["ipv4_address"] == (
+        "172.31.254.3"
+    )
+    assert services["api"]["environment"][
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS"
+    ] == '["172.31.254.3/32"]'
+
+    host_compose = _script("docker-compose.host.yml")
+    assert host_compose.count("networks: !reset []") == 2
+    assert (
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: "
+        "'[\"127.0.0.1/32\",\"::1/128\"]'"
+    ) in host_compose
+
+
+@pytest.mark.unit
+def test_root_env_example_has_no_inline_comments_in_assignments() -> None:
+    assignments = (
+        line
+        for line in _script(".env.example").splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    assert all(" #" not in line for line in assignments)
+
+
+@pytest.mark.unit
 def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
     services = _compose()["services"]
 
@@ -135,6 +171,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_PORT",
         "KOR_TRAVEL_MAP_API_DAGSTER_URL",
         "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
 

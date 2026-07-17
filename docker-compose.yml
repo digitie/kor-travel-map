@@ -115,6 +115,9 @@ services:
       KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS: '${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS:-["dagster","127.0.0.1","localhost","::1"]}'
       KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET: ${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:?KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required}
+      # bridge 모드의 BFF peer를 단일 고정 주소로 제한한다. 임의의 compose
+      # container subnet 전체를 신뢰하지 않는다.
+      KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: '["172.31.254.3/32"]'
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -144,6 +147,10 @@ services:
         condition: service_completed_successfully
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12701}:${KOR_TRAVEL_MAP_API_PORT:-12701}"
+    networks:
+      default:
+      admin-control:
+        ipv4_address: 172.31.254.2
     healthcheck:
       test:
         [
@@ -183,6 +190,9 @@ services:
         condition: service_healthy
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}:12705"
+    networks:
+      admin-control:
+        ipv4_address: 172.31.254.3
     healthcheck:
       # bridge 모드 컨테이너는 내부적으로 PORT(미설정 시 Dockerfile 기본 12705)에 listen한다.
       # 런타임 process.env.PORT를 읽어 probe하면 PORT override(host overlay 포함)에도
@@ -315,6 +325,14 @@ volumes:
     name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
     name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}
+
+# bridge 모드에서 API가 신뢰할 frontend BFF peer를 정확한 /32로 고정한다.
+# 다른 서비스는 이 control-plane network에 참여하지 않는다.
+networks:
+  admin-control:
+    ipam:
+      config:
+        - subnet: 172.31.254.0/29
 
 # private provider repo fetch용 (#370). 미설정(빈 값) 시 public pin만 fetch.
 secrets:

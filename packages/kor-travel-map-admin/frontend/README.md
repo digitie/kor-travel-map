@@ -188,8 +188,8 @@ mutation spec은 `E2E_ADMIN_FEATURES_WRITE=1`, `E2E_SETTINGS_WRITE=1` 또는 공
 
 Windows localhost relay가 stale listener 정리 뒤 바로 복구되지 않으면 WSL IP와 같은
 고정 포트로 검증한다. 이때 frontend를 띄울 때도 브라우저가 접근할 수 있는 API/
-Dagster URL을 `NEXT_PUBLIC_*`로 넣는다. `scripts/load-env.sh`는 기본 CORS origin에
-WSL IP 기반 `http://<WSL-IP>:12705`를 포함한다.
+Dagster URL을 `NEXT_PUBLIC_*`로 넣고, API package `.env`의
+`KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS`에 `http://<WSL-IP>:12705`를 명시한다.
 
 ```bash
 WSL_IP="$(hostname -I | awk '{print $1}')"
@@ -261,5 +261,6 @@ GPL-3.0-or-later (메인 패키지와 동일). 외부 의존성: `next` (MIT),
   채택, SPEC V8 v8_3 supersede) — 본 frontend는 디버그 전용 (PinVi
   `apps/web`과 별도 코드베이스, 공통 마커는 `@kor-travel-map/map-marker-react` npm
   패키지로 공유)
-- 인증 / 세션 / 권한 (ADR-005 + ADR-020: 내부망 전용, no auth)
+- 외부 사용자 계정·역할 관리(관리자 UI 자체는 login/session과 same-origin BFF 인증을
+  제공하며, 운영망 접근 제어는 reverse proxy/SSO가 담당)
 - DB 직접 접근 (모두 backend API 경유)

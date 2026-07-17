@@ -221,7 +221,6 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                     session,
                     idempotency_key=idempotency_key,
                     operator="integration-c45x-race",
-                    status_url_prefix="/v1/admin/features/update-requests",
                     settings=settings,
                     resolved_plan_guard=_allow_plan,
                 )
@@ -374,7 +373,6 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                         session,
                         idempotency_key=idempotency_key,
                         operator=actor,
-                        status_url_prefix="/v1/ops/pipeline/requests",
                         settings=settings,
                         resolved_plan_guard=_allow_plan,
                     )
@@ -504,7 +502,6 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                     session,
                     idempotency_key=rollback_key,
                     operator="integration-other-actor",
-                    status_url_prefix="/v1/ops/pipeline/requests",
                     settings=settings,
                     resolved_plan_guard=_reject_plan,
                 )
@@ -531,7 +528,6 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                 session,
                 idempotency_key=rollback_key,
                 operator="integration-other-actor",
-                status_url_prefix="/v1/ops/pipeline/requests",
                 settings=settings,
                 resolved_plan_guard=_allow_plan,
             )
@@ -591,7 +587,6 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                     session,
                     idempotency_key=atomic_key,
                     operator="integration-atomic-rollback",
-                    status_url_prefix="/v1/ops/pipeline/requests",
                     settings=settings,
                     resolved_plan_guard=_allow_plan,
                 )
@@ -608,7 +603,6 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                 session,
                 idempotency_key=atomic_key,
                 operator="integration-atomic-rollback",
-                status_url_prefix="/v1/ops/pipeline/requests",
                 settings=settings,
                 resolved_plan_guard=_allow_plan,
             )

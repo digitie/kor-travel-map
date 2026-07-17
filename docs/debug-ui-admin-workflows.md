@@ -22,7 +22,8 @@
 
 관련 결정:
 
-- ADR-005: 인증 없음, 내부망/네트워크 계층 보호.
+- ADR-005 amendment: 운영 인증의 1차 책임은 네트워크 계층에 두고 앱에는 defense-in-depth
+  gate를 둔다. admin UI는 login/session과 same-origin BFF 인증을 사용한다.
 - ADR-020: 메인 라이브러리와 별도 Python 패키지.
 - ADR-031: OpenAPI export drift gate.
 - ADR-035: debug UI를 프로덕션 admin/유지보수 UI로도 운영.
@@ -59,8 +60,9 @@ kor-travel-map 독립 프로그램의 admin frontend/backend다. PinVi와는 Ope
 
 ## 2. 비목표와 금지 사항
 
-- 인증, 세션, 권한을 애플리케이션 코드에 넣지 않는다. 접근 제어는 Cloudflare
-  Tunnel, SSO gateway, IP allowlist, SSH tunnel 등 네트워크 계층 책임이다.
+- 외부 사용자 IAM·역할 체계를 이 패키지에 만들지 않는다. 운영 접근 제어의 1차 책임은
+  Cloudflare Tunnel, SSO gateway, IP allowlist, SSH tunnel 등 네트워크 계층에 두되,
+  admin UI의 login/session과 same-origin BFF gate는 반드시 유지한다.
 - PinVi 사용자용 지도 UI를 만들지 않는다. 본 UI는 개발자/운영자 전용이다.
 - 메인 패키지 `kortravelmap`에 FastAPI, Uvicorn, React, Next.js 의존을 추가하지
   않는다.

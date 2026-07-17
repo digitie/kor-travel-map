@@ -127,21 +127,24 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 `../../docs/debug-ui-admin-workflows.md`. 요약:
 
 - `/health`, `/version`
-- `/features/{id}`, `/features/in-bounds`, `/features/nearby`
-- `/admin/features`, `/admin/features/{id}`, `/admin/features/{id}/deactivate`,
-  `/admin/features/change-requests`
-- `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 target
+- `/v1/features/{id}`, `/v1/features/in-bounds`, `/v1/features/nearby`
+- `/v1/admin/features`, `/v1/admin/features/{id}`, `/v1/admin/features/{id}/deactivate`,
+  `/v1/admin/features/change-requests`
+- `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
-- `/features/{id}/weather`, `/features/{id}/sources`, `/features/{id}/files`
-- `/providers`, `/providers/{provider}/last-sync` (공개 provider 신선도)
-- `/ops/datasets`, `/ops/datasets/{provider}/{dataset_key}` (상태·정책·fixture preview)
-- `/ops/pipeline/overview`, `/ops/pipeline/executions`, `/ops/pipeline/requests`
+- `/v1/features/{id}/weather`, `/v1/features/{id}/sources`, `/v1/features/{id}/files`
+- `/v1/providers`, `/v1/providers/{provider}/last-sync` (공개 provider 신선도)
+- `/v1/ops/datasets`, `/v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`
+  (상태·정책·fixture preview)
+- `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions`, `/v1/ops/pipeline/requests`
   (실행·event·Dagster·schedule 통합)
-- `/dedup-review`, `/integrity-violations`
-- `/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load),
-  `/ops/error-logs`
+- `/v1/admin/features/dedup-reviews`, `/v1/ops/consistency/issues`,
+  `/v1/ops/system-logs`
+- `/v1/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load)
 
-admin/ops 엔드포인트는 admin frontend proxy 인증 context를 요구한다. 런타임
+`/v1/admin/*`와 조작을 포함하는 canonical `/v1/ops/pipeline/*`·`/v1/ops/datasets/*`는
+admin frontend proxy 인증 context를 요구한다. health·metrics·live·운영 로그·정합성 같은
+관측용 ops read는 별도 인프라 접근 제어 경계에서 제공한다. 런타임
 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
 PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.

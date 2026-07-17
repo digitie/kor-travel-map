@@ -55,7 +55,7 @@ def test_catalog_includes_specific_dataset_keys() -> None:
 def test_catalog_covers_all_fixture_datasets() -> None:
     """모든 fixture-backed (provider, dataset)은 카탈로그에 존재해야 한다.
 
-    누락되면 /etl preview가 카탈로그에서 그 dataset을 못 그린다 → drift 방지.
+    누락되면 /v1/ops/datasets/preview가 카탈로그에서 그 dataset을 못 그린다 → drift 방지.
     """
     for entry in FIXTURE_REGISTRY:
         assert find_catalog_entry(entry.provider, entry.dataset) is not None, (
