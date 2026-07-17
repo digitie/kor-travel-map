@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 
-import { DAGSTER_UI_URL } from "@/api/dagster";
+import { DAGSTER_UI_URL } from "@/api/pipeline";
 import { cn } from "@/lib/utils";
 
 /**

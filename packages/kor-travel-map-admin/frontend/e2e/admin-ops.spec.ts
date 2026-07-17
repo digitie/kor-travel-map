@@ -2,6 +2,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
 import { bffApiPath } from "./bff-api-path";
+import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -27,10 +28,6 @@ type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
 type CategoriesResponse = components["schemas"]["CategoriesResponse"];
 type CategorySummary = components["schemas"]["CategorySummary"];
 type BackupRecord = components["schemas"]["BackupRecord"];
-type OpsProviderDatasetSummary =
-  components["schemas"]["OpsProviderDatasetSummary"];
-type OpsProviderDetailResponse =
-  components["schemas"]["OpsProviderDetailResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
@@ -190,55 +187,6 @@ async function mockCategories(page: Page) {
     }
     throw new Error(`Unhandled categories route: ${request.method()} ${apiPath}`);
   });
-}
-
-function makeOpsProviderDataset(
-  overrides: Partial<OpsProviderDatasetSummary> = {},
-): OpsProviderDatasetSummary {
-  return {
-    provider: "python-kma-api",
-    dataset_key: "kma_weather_values",
-    sync_scope: "default",
-    status: "active",
-    last_success_at: MOCK_NOW,
-    last_failure_at: null,
-    next_run_after: null,
-    consecutive_failures: 0,
-    links: [],
-    refresh_policy: null,
-    ...overrides,
-  };
-}
-
-function makeOpsProviderDetailResponse(
-  item: OpsProviderDatasetSummary,
-): OpsProviderDetailResponse {
-  return {
-    data: {
-      provider: item.provider,
-      datasets: [
-        {
-          provider: item.provider,
-          dataset_key: item.dataset_key,
-          links: [],
-          recent_update_requests: [],
-          refresh_policy: item.refresh_policy ?? null,
-          sync_states: [
-            {
-              sync_scope: item.sync_scope,
-              status: item.status,
-              last_success_at: item.last_success_at,
-              last_failure_at: item.last_failure_at,
-              next_run_after: item.next_run_after,
-              consecutive_failures: item.consecutive_failures,
-              cursor: {},
-            },
-          ],
-        },
-      ],
-    },
-    meta: { duration_ms: 1, request_id: "e2e-ops-provider-detail" },
-  };
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
@@ -923,21 +871,7 @@ async function mockFeatureChangeMutations(
 test.describe("admin/ops pages", () => {
   test.beforeEach(async ({ page }) => {
     await mockCategories(page);
-  });
-
-  test("/v1/ops/import-jobs", async ({ page }) => {
-    await page.goto("/ops/import-jobs");
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "적재 작업" }),
-    ).toBeVisible();
-    await expect(page.getByLabel("상태")).toBeVisible();
-    await expect(page.getByPlaceholder("작업 종류")).toBeVisible();
-    for (const column of ["작업", "종류", "상태", "진행", "단계"]) {
-      await expect(
-        page.getByRole("columnheader", { name: column, exact: true }),
-      ).toBeVisible();
-    }
+    await mockOpsDatasetCatalog(page);
   });
 
   test("/v1/admin/features", async ({ page }) => {
@@ -1340,31 +1274,6 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
   });
 
-  test("/v1/admin/features/update-requests", async ({ page }) => {
-    await page.goto("/admin/features/update-requests");
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "갱신 요청" }),
-    ).toBeVisible();
-    await expect(page.getByText("새 요청")).toBeVisible();
-    for (const label of ["경도", "위도", "반경(km)", "제공자", "데이터셋 키"]) {
-      await expect(page.getByLabel(label)).toBeVisible();
-    }
-    await expect(page.getByLabel("실행 모드")).toBeVisible();
-    await expect(
-      page.getByLabel("미리보기(요청을 저장하거나 실행하지 않음)"),
-    ).toBeChecked();
-    await expect(page.getByLabel("요청 상태 필터")).toBeVisible();
-
-    // T-218b: lon을 비우고 생성 → 클라이언트 검증 에러 + 포커스(네트워크 호출 전 차단).
-    const lon = page.getByLabel("경도");
-    await lon.fill("");
-    await page.getByRole("button", { name: "미리보기" }).click();
-    await expect(lon).toHaveAttribute("aria-invalid", "true");
-    await expect(lon).toBeFocused();
-    await expect(page.getByText("경도를 입력하세요.")).toBeVisible();
-  });
-
   test("/v1/admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
 
@@ -1578,78 +1487,4 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("swap command planned")).toBeVisible();
   });
 
-  test("/v1/providers freshness dashboard (T-217g)", async ({ page }) => {
-    // T-221d(#404) 이후 /ops/providers는 `/v1/ops/providers`(+`/{provider}` 상세)를
-    // 쓴다 — 목록·상세 모두 mock해 라이브 데이터와 분리한다(#409).
-    const kmaDataset = makeOpsProviderDataset();
-    const moisDataset = makeOpsProviderDataset({
-      provider: "python-mois-api",
-      dataset_key: "mois_license_features_bulk",
-      last_failure_at: "2026-06-10T02:00:00.000Z",
-      consecutive_failures: 3,
-    });
-    await page.route("**/v1/ops/providers**", async (route) => {
-      const request = route.request();
-      const apiPath = bffApiPath(request.url());
-      if (request.method() === "GET" && apiPath === "/v1/ops/providers") {
-        await fulfillJson(route, {
-          data: { items: [kmaDataset, moisDataset] },
-          meta: { duration_ms: 1, request_id: "e2e-providers-freshness" },
-        });
-        return;
-      }
-      if (
-        request.method() === "GET" &&
-        apiPath === `/v1/ops/providers/${encodeURIComponent(kmaDataset.provider)}`
-      ) {
-        await fulfillJson(route, makeOpsProviderDetailResponse(kmaDataset));
-        return;
-      }
-      throw new Error(`Unhandled providers route: ${request.method()} ${apiPath}`);
-    });
-
-    await page.goto("/ops/providers");
-
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Provider 상태" }),
-    ).toBeVisible();
-    // T-221d 상세 패널의 sync state/update request 테이블이 같은 헤더를 쓰므로,
-    // freshness 테이블에만 있는 `정책` 헤더로 테이블을
-    // 한정해 strict mode 위반을 피한다(#409).
-    const freshnessTable = page.getByRole("table").filter({
-      has: page.getByRole("columnheader", { name: "정책" }),
-    });
-    for (const column of [
-      "상세",
-      "제공자",
-      "데이터셋",
-      "범위",
-      "상태",
-      "정책",
-      "마지막 성공",
-      "다음 실행",
-      "실패 횟수",
-    ]) {
-      await expect(
-        freshnessTable.getByRole("columnheader", { name: column }),
-      ).toBeVisible();
-    }
-    // 요약 배지 + 연속 실패 경고(assertive alert)
-    await expect(page.getByText("제공자 2", { exact: true })).toBeVisible();
-    await expect(page.getByText("실패 1", { exact: true })).toBeVisible();
-    await expect(
-      page
-        .getByRole("alert")
-        .filter({ hasText: "python-mois-api/mois_license_features_bulk (3회)" }),
-    ).toBeVisible();
-    // 행 데이터
-    await expect(freshnessTable.getByText("kma_weather_values")).toBeVisible();
-    await expect(
-      freshnessTable
-        .getByRole("row", { name: /python-mois-api/ })
-        .getByText("3", { exact: true }),
-    ).toBeVisible();
-    // 첫 행(kma) dataset이 기본 선택되어 T-221d 상세 패널이 뜬다.
-    await expect(page.getByText("데이터셋 상세")).toBeVisible();
-  });
 });

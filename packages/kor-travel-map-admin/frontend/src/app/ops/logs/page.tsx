@@ -19,10 +19,7 @@ export default async function LogsPage({
   const params = (await searchParams) ?? {};
   return (
     <LogsClient
-      initialDatasetKey={firstParam(params.dataset_key)}
-      initialJobId={firstParam(params.job_id)}
       initialLevel={firstParam(params.level)}
-      initialProvider={firstParam(params.provider)}
       initialTab={firstParam(params.tab)}
     />
   );

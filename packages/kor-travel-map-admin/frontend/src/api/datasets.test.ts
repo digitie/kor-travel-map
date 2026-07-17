@@ -12,10 +12,12 @@ import {
   filterDatasetRecentRuns,
   hasActiveDatasetDetailExecution,
   hasActiveDatasetExecution,
+  opsDatasetCatalogOptions,
   previewOpsDataset,
   resolveDatasetRefreshScope,
   upsertOpsDatasetRefreshPolicy,
   type OpsDatasetLatestExecution,
+  type OpsDatasetGridRow,
   type OpsDatasetDetailResponse,
   type OpsDatasetScopeRefreshCapability,
   type OpsDatasetsGridResponse,
@@ -63,6 +65,32 @@ describe("ops datasets current REST contract", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("canonical grid만 provider/dataset 입력 보조 목록으로 중복 없이 축약한다", () => {
+    const row = (
+      provider: string,
+      datasetKey: string,
+      catalogState: OpsDatasetGridRow["catalog_state"] = "canonical",
+    ) =>
+      ({
+        provider,
+        dataset_key: datasetKey,
+        catalog_state: catalogState,
+      }) as OpsDatasetGridRow;
+
+    expect(
+      opsDatasetCatalogOptions([
+        row("z-provider", "dataset-b"),
+        row("a-provider", "dataset-c"),
+        row("a-provider", "dataset-a"),
+        row("a-provider", "dataset-a"),
+        row("legacy-provider", "orphan", "orphan"),
+      ]),
+    ).toEqual([
+      { provider: "a-provider", datasets: ["dataset-a", "dataset-c"] },
+      { provider: "z-provider", datasets: ["dataset-b"] },
+    ]);
   });
 
   it("detail/preview/refresh-policy가 고정 경로와 query 식별자를 사용한다", async () => {

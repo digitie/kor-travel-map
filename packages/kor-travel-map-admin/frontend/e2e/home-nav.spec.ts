@@ -13,18 +13,20 @@ type OpsMetricsResponse = components["schemas"]["OpsMetricsResponse"];
 type OpsMetricsData = components["schemas"]["OpsMetricsData"];
 type PipelineOverviewResponse =
   components["schemas"]["PipelineOverviewResponse"];
-type OpsImportJobsListResponse =
-  components["schemas"]["OpsImportJobsListResponse"];
-type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
+type PipelineExecutionsListResponse =
+  components["schemas"]["PipelineExecutionsListResponse"];
+type PipelineExecutionRootRecord =
+  components["schemas"]["PipelineExecutionRootRecord"];
 type DedupReviewListResponse =
   components["schemas"]["DedupReviewListResponse"];
 type DedupReviewListMeta = DedupReviewListResponse["meta"];
 type DedupReviewRecord = components["schemas"]["DedupReviewRecord"];
 type DedupFeatureRecord = components["schemas"]["DedupFeatureRecord"];
-type DagsterSummaryResponse = components["schemas"]["DagsterSummaryResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const IMPORT_JOB_ID = "import-job-0123456789abcdef-home";
+const UPDATE_REQUEST_ID = "update-request-0123456789abcdef-home";
+const PROJECTED_JOB_ID = "projected-job-0123456789abcdef-home";
 const DEDUP_REVIEW_ID = "dedup-review-0123456789abcdef-home";
 
 // ── 공용 헬퍼 ────────────────────────────────────────────────────────────────
@@ -118,8 +120,9 @@ function makePipelineOverview(): PipelineOverviewResponse {
       active_operations: 3,
       checked_at: MOCK_NOW,
       dagster: {
-        dagster_url: "http://127.0.0.1:12702",
-        graphql_url: "http://127.0.0.1:12702/graphql",
+        dagster_url: "http://dagster:12702",
+        graphql_url: "http://dagster:12702/graphql",
+        recent_runs: [],
         schedule_count: 1,
         sensor_count: 0,
         status: "ok",
@@ -131,34 +134,90 @@ function makePipelineOverview(): PipelineOverviewResponse {
   };
 }
 
-function makeImportJob(
-  overrides: Partial<OpsImportJobRecord> = {},
-): OpsImportJobRecord {
+function makeUpdateRequestExecution(): PipelineExecutionRootRecord {
   return {
+    ...makeImportExecution(),
+    detail_url: `/v1/ops/pipeline/executions/update_request/${UPDATE_REQUEST_ID}`,
+    id: UPDATE_REQUEST_ID,
+    kind: "update_request",
+    progress: null,
+    projected_job: {
+      ...makeImportExecution().projected_job,
+      detail_url: `/v1/ops/pipeline/executions/import_job/${PROJECTED_JOB_ID}`,
+      id: PROJECTED_JOB_ID,
+      job_kind: "provider_refresh",
+      progress: 75,
+    },
+    requested_job_id: PROJECTED_JOB_ID,
+  };
+}
+
+function makeImportExecution(
+  overrides: Partial<PipelineExecutionRootRecord> = {},
+): PipelineExecutionRootRecord {
+  return {
+    cancellation: null,
     created_at: MOCK_NOW,
     current_stage: "load",
+    dagster_run_id: "dagster-run-home",
+    dagster_run_status: "STARTED",
+    dataset_keys: ["mock_dataset"],
+    detail_url: `/v1/ops/pipeline/executions/import_job/${IMPORT_JOB_ID}`,
     error_message: null,
     finished_at: null,
-    heartbeat_at: MOCK_NOW,
-    job_id: IMPORT_JOB_ID,
-    kind: "festival_sync",
-    links: [],
-    load_batch_id: null,
-    parent_job_id: null,
-    payload: {},
+    id: IMPORT_JOB_ID,
+    kind: "import_job",
+    linked_job_count: 1,
+    operation_registry_version: null,
+    operator: null,
+    priority: null,
     progress: 50,
-    source_checksum: null,
+    projected_job: {
+      created_at: MOCK_NOW,
+      current_stage: "load",
+      dagster_run_id: "dagster-run-home",
+      dagster_run_status: "STARTED",
+      depth: 0,
+      detail_url: `/v1/ops/pipeline/executions/import_job/${IMPORT_JOB_ID}`,
+      error_message: null,
+      finished_at: null,
+      id: IMPORT_JOB_ID,
+      job_kind: "festival_sync",
+      load_batch_id: null,
+      operation_registry_version: null,
+      parent_job_id: null,
+      progress: 50,
+      started_at: MOCK_NOW,
+      status: "running",
+      trigger_kind: "manual",
+    },
+    provider_datasets: [
+      {
+        dataset_key: "mock_dataset",
+        operation_member_id: IMPORT_JOB_ID,
+        provider: "mock-provider",
+        status: "running",
+        sync_scope: "dataset_wide",
+      },
+    ],
+    providers: ["mock-provider"],
+    requested_job_id: null,
+    run_mode: null,
+    scope_type: null,
     started_at: MOCK_NOW,
     status: "running",
-    status_url: `/v1/ops/import-jobs/${IMPORT_JOB_ID}`,
+    trigger_kind: "manual",
     ...overrides,
   };
 }
 
-function makeImportJobsList(
-  items: OpsImportJobRecord[],
-): OpsImportJobsListResponse {
-  return { data: { items }, meta: cursorListMeta(8, "e2e-home-import-jobs") };
+function makeImportExecutionsList(
+  items: PipelineExecutionRootRecord[],
+): PipelineExecutionsListResponse {
+  return {
+    data: { items },
+    meta: cursorListMeta(8, "e2e-home-pipeline-executions"),
+  };
 }
 
 function makeDedupFeature(
@@ -205,34 +264,9 @@ function makeDedupList(items: DedupReviewRecord[]): DedupReviewListResponse {
   return { data: { items }, meta: offsetListMeta(6, "e2e-home-dedup") };
 }
 
-function makeDagster(
-  overrides: Partial<components["schemas"]["DagsterSummaryData"]> = {},
-): DagsterSummaryResponse {
-  return {
-    data: {
-      asset_count: 2,
-      checked_at: MOCK_NOW,
-      dagster_url: "http://127.0.0.1:12702",
-      errors: [],
-      graphql_url: "http://127.0.0.1:12702/graphql",
-      job_count: 1,
-      recent_runs: [],
-      repositories: [],
-      repository_count: 1,
-      run_counts: { SUCCESS: 3 },
-      schedule_count: 1,
-      sensor_count: 0,
-      status: "ok",
-      version: "1.7.0",
-      ...overrides,
-    },
-    meta: simpleMeta("e2e-home-dagster"),
-  };
-}
-
 // ── 라우트 mock 설치 ─────────────────────────────────────────────────────────
 //
-// 홈은 health/version/metrics/import-jobs/dedup-reviews/dagster-summary 6개를
+// 홈은 health/version/metrics/pipeline overview+executions/dedup-reviews를
 // GET으로 호출한다. method + pathname을 가드해 다른 sub-request를 오배달하지 않는다.
 
 function isRoutePassthrough(route: Route): boolean {
@@ -295,23 +329,23 @@ async function routeMetrics(page: Page, handler: (route: Route) => Promise<void>
   });
 }
 
-async function routeImportJobs(
+async function routePipelineExecutions(
   page: Page,
   handler: (route: Route) => Promise<void>,
 ) {
-  await page.route("**/v1/ops/import-jobs**", async (route) => {
+  await page.route("**/v1/ops/pipeline/executions**", async (route) => {
     if (isRoutePassthrough(route)) {
       await route.continue();
       return;
     }
     const request = route.request();
     const apiPath = bffApiPath(request.url());
-    // 홈은 목록(list)만 호출한다 — `/{job_id}` 상세/events는 오지 않지만 방어한다.
-    if (request.method() !== "GET" || apiPath !== "/v1/ops/import-jobs") {
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/pipeline/executions") {
       throw new Error(
-        `Unhandled home import-jobs route: ${request.method()} ${apiPath}`,
+        `Unhandled home pipeline executions route: ${request.method()} ${apiPath}`,
       );
     }
+    expect(new URL(request.url()).searchParams.get("kind")).toBeNull();
     await handler(route);
   });
 }
@@ -354,23 +388,6 @@ async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) 
   });
 }
 
-async function routeDagster(page: Page, handler: (route: Route) => Promise<void>) {
-  await page.route("**/v1/ops/dagster/summary**", async (route) => {
-    if (isRoutePassthrough(route)) {
-      await route.continue();
-      return;
-    }
-    const request = route.request();
-    const apiPath = bffApiPath(request.url());
-    if (request.method() !== "GET" || apiPath !== "/v1/ops/dagster/summary") {
-      throw new Error(
-        `Unhandled home Dagster route: ${request.method()} ${apiPath}`,
-      );
-    }
-    await handler(route);
-  });
-}
-
 // admin-shell.tsx NAV_GROUPS와 정확히 1:1로 거울처럼 박는다 (그룹 순서 그대로 평탄화).
 // nav item이 추가/삭제되면 이 표와 toHaveCount(21)가 함께 깨져 테스트가 drift를 잡는다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
@@ -386,12 +403,8 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "큐레이션 지도", href: "/curated-features" },
   // [수집 파이프라인]
   { label: "파이프라인", href: "/ops/pipeline" },
-  { label: "Provider 상태", href: "/ops/providers" },
-  { label: "적재 작업", href: "/ops/import-jobs" },
-  { label: "갱신 요청", href: "/admin/features/update-requests" },
+  { label: "데이터셋", href: "/ops/datasets" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
-  { label: "작업 자동화", href: "/admin/dagster" },
-  { label: "ETL 미리보기", href: "/etl" },
   { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
   // [모니터링]
   { label: "운영 로그", href: "/ops/logs" },
@@ -411,7 +424,7 @@ const NAV_GROUP_HEADERS = [
 ] as const;
 
 test.describe("home page (/) — nav + metric/status depth", () => {
-  test("admin shell: 21개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 18개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
@@ -422,15 +435,14 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(navigation).toBeVisible();
 
     for (const { label, href } of NAV_ITEMS) {
-      // nav로 scope — 로고 Link(text "kor-travel-map", href="/")와 body의
-      // /ops/import-jobs("전체")·/admin/dagster·/admin/features/dedup-reviews Link 충돌 회피.
+      // nav로 scope — 로고와 body의 동일 label 링크 충돌을 피한다.
       const link = navigation.getByRole("link", { name: label, exact: true });
       await expect(link).toBeVisible();
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 22개 — source NAV_GROUPS 기준.
-    await expect(navigation.getByRole("link")).toHaveCount(22);
+    // nav 링크는 정확히 18개 — source NAV_GROUPS 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(18);
 
     // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
     for (const header of NAV_GROUP_HEADERS) {
@@ -441,20 +453,25 @@ test.describe("home page (/) — nav + metric/status depth", () => {
   });
 
   test("metric/status 카드가 happy-path payload에서 렌더", async ({ page }) => {
-    // 6개 라우트 모두 page.goto 전에 mock.
+    // 6개 canonical 라우트를 모두 page.goto 전에 mock.
     await routeHealth(page, (route) => fulfillJson(route, makeHealth()));
     await routeVersion(page, (route) => fulfillJson(route, makeVersion()));
     await routeMetrics(page, (route) => fulfillJson(route, makeMetrics()));
     await routePipeline(page, (route) =>
       fulfillJson(route, makePipelineOverview()),
     );
-    await routeImportJobs(page, (route) =>
-      fulfillJson(route, makeImportJobsList([makeImportJob()])),
+    await routePipelineExecutions(page, (route) =>
+      fulfillJson(
+        route,
+        makeImportExecutionsList([
+          makeUpdateRequestExecution(),
+          makeImportExecution(),
+        ]),
+      ),
     );
     await routeDedup(page, (route) =>
       fulfillJson(route, makeDedupList([makeDedupReview()])),
     );
-    await routeDagster(page, (route) => fulfillJson(route, makeDagster()));
 
     await page.goto("/");
 
@@ -518,20 +535,24 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       issuesCard.getByRole("link", { name: "이슈", exact: true }),
     ).toHaveAttribute("href", "/admin/issues");
 
-    // ── 최근 import jobs 테이블 ──
+    // ── 최근 pipeline root 테이블 ──
     await expect(
-      page.getByRole("heading", { name: "최근 적재 작업" }),
+      page.getByRole("heading", { name: "최근 파이프라인 실행" }),
     ).toBeVisible();
-    for (const column of ["job", "kind", "status", "progress", "updated"]) {
+    for (const column of ["실행", "kind", "status", "progress", "updated"]) {
       await expect(
         page.getByRole("columnheader", { name: column }),
       ).toBeVisible();
     }
-    const jobRow = page.getByRole("row", { name: /festival_sync/ });
+    const jobRow = page.getByRole("row", { name: /import_job/ });
     await expect(jobRow).toBeVisible();
     await expect(jobRow.getByText("실행중", { exact: true })).toBeVisible();
     // shortId(job_id) — font-mono 텍스트.
     await expect(jobRow.getByText("import-job-0", { exact: false })).toBeVisible();
+    const requestRow = page.getByRole("row", { name: /update_request/ });
+    await expect(requestRow.getByText("update-reque", { exact: false })).toBeVisible();
+    await expect(requestRow.getByText("-", { exact: true })).toBeVisible();
+    await expect(requestRow.getByText("projected-job", { exact: false })).toHaveCount(0);
 
     // ── Backend status 카드 (Backend Card로 scope — Dagster StatusBadge 충돌 회피) ──
     const backendCard = page.getByTestId("service-backend");
@@ -541,11 +562,15 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     // ── Dagster status 카드 ──
     const dagsterCard = page.getByTestId("service-dagster");
-    await expect(dagsterCard.getByText("2 assets")).toBeVisible();
+    await expect(dagsterCard.getByText("0 recent runs")).toBeVisible();
     await expect(dagsterCard.getByText("1 schedules")).toBeVisible();
     await expect(
       dagsterCard.getByRole("link", { name: "작업 자동화" }),
-    ).toHaveAttribute("href", "/admin/dagster");
+    ).toHaveAttribute("href", "/ops/pipeline?tab=schedules");
+    await expect(page.getByRole("link", { name: "Dagster", exact: true })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:12702",
+    );
 
     // ── Dedup pending 카드 ──
     const dedupPendingCard = cards.filter({
@@ -558,7 +583,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(dedupLink).toHaveAttribute("href", "/admin/features/dedup-reviews");
   });
 
-  test("health/metrics/dagster 5xx → destructive alert + 카드 degrade, shell 생존", async ({
+  test("health/metrics/pipeline 5xx → destructive alert + 카드 degrade, shell 생존", async ({
     page,
   }) => {
     await routeHealth(page, (route) =>
@@ -570,12 +595,9 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await routePipeline(page, (route) =>
       fulfillJson(route, { detail: "boom" }, 500),
     );
-    await routeDagster(page, (route) =>
-      fulfillJson(route, { detail: "unavailable" }, 503),
-    );
     // version은 200 — partial failure 회복력 증명.
     await routeVersion(page, (route) => fulfillJson(route, makeVersion()));
-    await routeImportJobs(page, (route) =>
+    await routePipelineExecutions(page, (route) =>
       fulfillJson(route, { detail: "boom" }, 500),
     );
     await routeDedup(page, (route) => fulfillJson(route, makeDedupList([])));
@@ -614,14 +636,17 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     const dagsterCard = page.getByTestId("service-dagster");
     await expect(dagsterCard.getByText("오류", { exact: true })).toBeVisible();
 
-    // 최근 import jobs: error.message <p>(text-destructive) + 빈 테이블 emptyMessage.
+    // 최근 pipeline 실행: error.message <p>(text-destructive) + 빈 테이블 emptyMessage.
     const importCard = cards.filter({
-      has: page.getByRole("heading", { name: "최근 적재 작업", exact: true }),
+      has: page.getByRole("heading", {
+        name: "최근 파이프라인 실행",
+        exact: true,
+      }),
     });
     await expect(
       importCard.getByText(/실패 \(HTTP 500\)/),
     ).toBeVisible();
-    await expect(importCard.getByText("import job이 없습니다.")).toBeVisible();
+    await expect(importCard.getByText("파이프라인 실행이 없습니다.")).toBeVisible();
 
     // Dedup pending 빈 상태.
     await expect(
@@ -638,11 +663,10 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     await routeHealth(page, (route) => fulfillJson(route, makeHealth()));
     await routeVersion(page, (route) => fulfillJson(route, makeVersion()));
-    await routeImportJobs(page, (route) =>
-      fulfillJson(route, makeImportJobsList([])),
+    await routePipelineExecutions(page, (route) =>
+      fulfillJson(route, makeImportExecutionsList([])),
     );
     await routeDedup(page, (route) => fulfillJson(route, makeDedupList([])));
-    await routeDagster(page, (route) => fulfillJson(route, makeDagster()));
     await routePipeline(page, (route) =>
       fulfillJson(route, makePipelineOverview()),
     );
@@ -654,7 +678,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await page.goto("/");
 
     // metrics section: isLoading 동안 정확히 4개 MetricCardSkeleton.
-    // import-jobs 테이블은 위에서 즉시 resolve(빈 목록)되므로 DataTable skeleton과
+    // pipeline executions 테이블은 즉시 resolve되므로 DataTable skeleton과
     // 충돌하지 않지만, data-testid="metric-skeleton"으로 metrics skeleton만 한정한다.
     const metricSkeletons = page.getByTestId("metric-skeleton");
     await expect(metricSkeletons).toHaveCount(4);
@@ -680,7 +704,6 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     // 렌더한다(home.spec docstring 회복력 계약). data 행이 아닌 URL+H1만 단언한다.
     // nav href 자체는 위 테스트가 전수 검증하므로 여기서는 direct deep-link로
     // 진입해 느린 live query와 click timing의 결합을 피한다.
-    // 기존 home.spec이 이미 다루는 Import jobs / Update requests는 중복하지 않는다.
     // H1이 admin-ops.spec에서 확인된 목적지만 H1 단언 — 나머지는 URL-only.
     const targetsWithH1: ReadonlyArray<{
       label: string;
@@ -699,7 +722,8 @@ test.describe("home page (/) — nav + metric/status depth", () => {
         h1: "변경 요청 작성",
       },
       { label: "이슈", href: "/admin/issues", h1: "이슈" },
-      { label: "Provider 상태", href: "/ops/providers", h1: "Provider 상태" },
+      { label: "파이프라인", href: "/ops/pipeline", h1: "파이프라인" },
+      { label: "데이터셋", href: "/ops/datasets", h1: "데이터셋" },
       { label: "정합성 점검", href: "/ops/consistency", h1: "정합성 점검" },
       { label: "운영 로그", href: "/ops/logs", h1: "운영 로그" },
       {
@@ -737,8 +761,6 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     const urlOnlyTargets: ReadonlyArray<{ href: string }> = [
       { href: "/features" },
       { href: "/admin/features/curated" },
-      { href: "/admin/dagster" },
-      { href: "/etl" },
     ];
 
     for (const { href } of urlOnlyTargets) {

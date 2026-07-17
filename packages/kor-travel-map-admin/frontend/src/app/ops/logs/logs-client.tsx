@@ -3,19 +3,14 @@
 import { type ColumnDef } from "@tanstack/react-table";
 import {
   AlertTriangleIcon,
-  ArrowUpRightIcon,
   RefreshCwIcon,
   SearchIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
-import { useOpsLiveInvalidation } from "@/api/live";
 import {
   useApiCallLogs,
-  useImportJobEvents,
   useSystemLogs,
-  type ImportJobEventLevel,
   type SystemLogLevel,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
@@ -39,39 +34,24 @@ const LEVELS: Array<SystemLogLevel | "all"> = [
   "debug",
   "all",
 ];
-const EVENT_LEVELS: Array<ImportJobEventLevel | "all"> = [
-  "critical",
-  "error",
-  "warning",
-  "info",
-  "debug",
-  "all",
-];
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
-type LogTab = "system" | "api" | "events";
+type LogTab = "system" | "api";
 
 export function LogsClient({
   initialTab,
-  initialJobId,
-  initialProvider,
-  initialDatasetKey,
   initialLevel,
 }: {
   initialTab?: string;
-  initialJobId?: string;
-  initialProvider?: string;
-  initialDatasetKey?: string;
   initialLevel?: string;
 } = {}) {
   const [activeLogTab, setActiveLogTab] = useState<LogTab>(() =>
-    initialTab === "system" || initialTab === "api" || initialTab === "events"
+    initialTab === "system" || initialTab === "api"
       ? initialTab
       : "system",
   );
   const [systemQ, setSystemQ] = useState("");
   const deferredSystemQ = useDeferredValue(systemQ.trim());
   const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">(() =>
-    initialTab !== "events" &&
     initialLevel &&
     (LEVELS as readonly string[]).includes(initialLevel)
       ? (initialLevel as SystemLogLevel)
@@ -86,21 +66,6 @@ export function LogsClient({
   const [apiMinStatus, setApiMinStatus] = useState("");
   const [apiCursor, setApiCursor] = useState<string | null>(null);
   const [apiPageIndex, setApiPageIndex] = useState(1);
-
-  const [eventJobId, setEventJobId] = useState(initialJobId ?? "");
-  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">(() =>
-    initialTab === "events" &&
-    initialLevel &&
-    (EVENT_LEVELS as readonly string[]).includes(initialLevel)
-      ? (initialLevel as ImportJobEventLevel)
-      : "all",
-  );
-  const [eventProvider, setEventProvider] = useState(initialProvider ?? "");
-  const [eventDatasetKey, setEventDatasetKey] = useState(
-    initialDatasetKey ?? "",
-  );
-  const [eventCursor, setEventCursor] = useState<string | null>(null);
-  const [eventPageIndex, setEventPageIndex] = useState(1);
 
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
@@ -127,36 +92,10 @@ export function LogsClient({
     }),
     [apiCursor, apiMethod, apiMinStatus, apiPath, pageSize],
   );
-  const eventParams = useMemo(
-    () => ({
-      job_id: eventJobId.trim().length > 0 ? eventJobId.trim() : undefined,
-      level: eventLevel === "all" ? undefined : eventLevel,
-      provider:
-        eventProvider.trim().length > 0 ? eventProvider.trim() : undefined,
-      dataset_key:
-        eventDatasetKey.trim().length > 0
-          ? eventDatasetKey.trim()
-          : undefined,
-      page_size: pageSize,
-      cursor: eventCursor ?? undefined,
-    }),
-    [
-      eventCursor,
-      eventDatasetKey,
-      eventJobId,
-      eventLevel,
-      eventProvider,
-      pageSize,
-    ],
-  );
-
   const systemLogs = useSystemLogs(systemParams);
   const apiLogs = useApiCallLogs(apiParams);
-  const jobEvents = useImportJobEvents(eventParams);
-  const live = useOpsLiveInvalidation({ topics: ["import_jobs"] });
   const systemItems = systemLogs.data?.data.items ?? [];
   const apiItems = apiLogs.data?.data.items ?? [];
-  const eventItems = jobEvents.data?.data.items ?? [];
   const resetSystemPage = () => {
     setSystemCursor(null);
     setSystemPageIndex(1);
@@ -164,10 +103,6 @@ export function LogsClient({
   const resetApiPage = () => {
     setApiCursor(null);
     setApiPageIndex(1);
-  };
-  const resetEventPage = () => {
-    setEventCursor(null);
-    setEventPageIndex(1);
   };
   const nextSystemPage = () => {
     const nextCursor = systemLogs.data?.meta.page?.next_cursor ?? null;
@@ -181,23 +116,14 @@ export function LogsClient({
     setApiCursor(nextCursor);
     setApiPageIndex((page) => page + 1);
   };
-  const nextEventPage = () => {
-    const nextCursor = jobEvents.data?.meta.page?.next_cursor ?? null;
-    if (!nextCursor) return;
-    setEventCursor(nextCursor);
-    setEventPageIndex((page) => page + 1);
-  };
   const refreshAll = () => {
     void systemLogs.refetch();
     void apiLogs.refetch();
-    void jobEvents.refetch();
   };
 
   type SystemLogRow = (typeof systemItems)[number];
   type ApiLogRow = (typeof apiItems)[number];
-  type JobEventRow = (typeof eventItems)[number];
-
-  // 세 로그 테이블은 모두 keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로
+  // 두 로그 테이블은 모두 keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로
   // 모든 accessor 컬럼의 client 정렬을 끈다(#502: manual 기본에서 client 정렬은 현재 페이지만
   // 재배열해 오해를 줌).
   const systemColumns = useMemo<ColumnDef<SystemLogRow, unknown>[]>(
@@ -308,89 +234,11 @@ export function LogsClient({
     [],
   );
 
-  const eventColumns = useMemo<ColumnDef<JobEventRow, unknown>[]>(
-    () => [
-      {
-        accessorKey: "occurred_at",
-        header: "발생",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.occurred_at)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "level",
-        header: "레벨",
-        enableSorting: false,
-        cell: ({ row }) => <StatusBadge status={row.original.level} />,
-      },
-      {
-        accessorKey: "provider",
-        header: "provider",
-        enableSorting: false,
-        cell: ({ row }) => row.original.provider ?? "-",
-      },
-      {
-        accessorKey: "dataset_key",
-        header: "데이터셋",
-        enableSorting: false,
-        cell: ({ row }) => row.original.dataset_key ?? "-",
-      },
-      {
-        accessorKey: "stage",
-        header: "단계",
-        enableSorting: false,
-        cell: ({ row }) => row.original.stage ?? "-",
-      },
-      {
-        id: "message",
-        header: "메시지",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <div className="max-w-96">
-            <div className="line-clamp-2">{row.original.message}</div>
-          </div>
-        ),
-      },
-      {
-        id: "job",
-        header: "작업",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            <Link
-              className={
-                "inline-flex items-center gap-1 text-primary hover:underline"
-              }
-              href={`/ops/pipeline?execution=import_job:${encodeURIComponent(
-                row.original.job_id,
-              )}`}
-            >
-              {shortId(row.original.job_id)}
-              <ArrowUpRightIcon className="size-3" />
-            </Link>
-          </span>
-        ),
-      },
-      {
-        accessorKey: "code",
-        header: "코드",
-        enableSorting: false,
-        cell: ({ row }) => row.original.code ?? "-",
-      },
-    ],
-    [],
-  );
-
   return (
     <AdminShell
       actions={
         <Button
-          disabled={
-            systemLogs.isFetching || apiLogs.isFetching || jobEvents.isFetching
-          }
+          disabled={systemLogs.isFetching || apiLogs.isFetching}
           type="button"
           variant="outline"
           onClick={refreshAll}
@@ -403,14 +251,12 @@ export function LogsClient({
       title="운영 로그"
     >
       <div className="flex flex-col gap-4">
-        {(systemLogs.isError || apiLogs.isError || jobEvents.isError) && (
+        {(systemLogs.isError || apiLogs.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>로그 조회 실패</AlertTitle>
             <AlertDescription>
-              {systemLogs.error?.message ??
-                apiLogs.error?.message ??
-                jobEvents.error?.message}
+              {systemLogs.error?.message ?? apiLogs.error?.message}
             </AlertDescription>
           </Alert>
         )}
@@ -424,7 +270,6 @@ export function LogsClient({
                 setPageSize(Number(event.target.value) as typeof pageSize);
                 resetSystemPage();
                 resetApiPage();
-                resetEventPage();
               }}
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
@@ -440,13 +285,7 @@ export function LogsClient({
               api {apiItems.length}
             </Badge>
             <Badge variant="outline">
-              job events {eventItems.length}
-            </Badge>
-            <Badge variant="outline">
               page size {pageSize}
-            </Badge>
-            <Badge variant={live.state === "live" ? "default" : "outline"}>
-              {live.state === "live" ? "실시간" : live.state}
             </Badge>
           </div>
         </div>
@@ -458,7 +297,6 @@ export function LogsClient({
           <TabsList>
             <TabsTrigger value="system">System logs</TabsTrigger>
             <TabsTrigger value="api">API call logs</TabsTrigger>
-            <TabsTrigger value="events">Job events</TabsTrigger>
           </TabsList>
 
           <TabsContent className="mt-4" value="system">
@@ -570,71 +408,6 @@ export function LogsClient({
             </section>
           </TabsContent>
 
-          <TabsContent className="mt-4" value="events">
-            <section className="rounded-lg border bg-background">
-              <div className="grid gap-3 border-b p-4 md:grid-cols-[minmax(16rem,1.2fr)_auto_auto_auto_auto_auto]">
-                <Input
-                  aria-label="job event job id"
-                  placeholder="job_id"
-                  value={eventJobId}
-                  onChange={(event) => {
-                    setEventJobId(event.target.value);
-                    resetEventPage();
-                  }}
-                />
-                <NativeSelect
-                  aria-label="job event level"
-                  value={eventLevel}
-                  onChange={(event) => {
-                    setEventLevel(
-                      event.target.value as ImportJobEventLevel | "all",
-                    );
-                    resetEventPage();
-                  }}
-                >
-                  {EVENT_LEVELS.map((item) => (
-                    <NativeSelectOption key={item} value={item}>
-                      {item}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-                <Input
-                  aria-label="job event provider"
-                  placeholder="provider"
-                  value={eventProvider}
-                  onChange={(event) => {
-                    setEventProvider(event.target.value);
-                    resetEventPage();
-                  }}
-                />
-                <Input
-                  aria-label="job event dataset key"
-                  placeholder="dataset_key"
-                  value={eventDatasetKey}
-                  onChange={(event) => {
-                    setEventDatasetKey(event.target.value);
-                    resetEventPage();
-                  }}
-                />
-                <CursorPager
-                  ariaPrefix="job event"
-                  hasNext={Boolean(jobEvents.data?.meta.page?.next_cursor)}
-                  isFetching={jobEvents.isFetching}
-                  summary={<>page {eventPageIndex}</>}
-                  onFirst={resetEventPage}
-                  onNext={nextEventPage}
-                />
-              </div>
-              <DataTable
-                columns={eventColumns}
-                data={eventItems}
-                getRowId={(row) => row.event_id}
-                isLoading={jobEvents.isLoading}
-                emptyMessage="job event가 없습니다."
-                containerClassName="overflow-auto"
-              />
-            </section>
-          </TabsContent>
         </Tabs>
       </div>
     </AdminShell>

@@ -15,11 +15,13 @@ import {
 import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 
-import { DAGSTER_UI_URL, useDagsterSummary } from "@/api/dagster";
 import { useDedupReviews } from "@/api/dedup";
-import { useImportJobs } from "@/api/importJobs";
 import { useOpsMetrics } from "@/api/ops";
-import { usePipelineOverview } from "@/api/pipeline";
+import {
+  DAGSTER_UI_URL,
+  usePipelineExecutions,
+  usePipelineOverview,
+} from "@/api/pipeline";
 import { useHealth, useVersion } from "@/api/queries";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
@@ -135,12 +137,11 @@ export function HomePageClient() {
   const metricsData = metrics.data?.data;
   const pipeline = usePipelineOverview(8);
   const pipelineData = pipeline.data?.data;
-  const importJobs = useImportJobs({ page_size: 8 });
+  const pipelineExecutions = usePipelineExecutions({ page_size: 8 });
   const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
-  const dagster = useDagsterSummary(8);
-  const dagsterData = dagster.data?.data;
+  const dagsterData = pipelineData?.dagster;
 
-  const importJobItems = importJobs.data?.data.items ?? [];
+  const pipelineExecutionItems = pipelineExecutions.data?.data.items ?? [];
   const totalFeatures = metricsData?.features_total ?? 0;
   const activeFeatures = metricsData?.features_active ?? 0;
   const activeFeatureRatio =
@@ -154,26 +155,36 @@ export function HomePageClient() {
   ).reduce((sum, count) => sum + count, 0);
   const pendingDedupCount = metricsData?.dedup_fp_stats.pending ?? 0;
   const openIssueCount = metricsData?.data_integrity_issues.open_total ?? 0;
-  type ImportJobRow = NonNullable<
-    typeof importJobs.data
+  type PipelineExecutionRow = NonNullable<
+    typeof pipelineExecutions.data
   >["data"]["items"][number];
-  const importJobColumns = useMemo<ColumnDef<ImportJobRow, unknown>[]>(
+  const pipelineExecutionColumns = useMemo<
+    ColumnDef<PipelineExecutionRow, unknown>[]
+  >(
     () => [
       {
-        accessorKey: "job_id",
-        header: "job",
+        accessorKey: "id",
+        header: "실행",
         enableSorting: false,
         cell: ({ row }) => (
           <EntityLink
             className="text-xs"
-            id={row.original.job_id}
-            kind="importJob"
+            id={row.original.id}
+            kind={
+              row.original.kind === "import_job"
+                ? "importJob"
+                : "updateRequest"
+            }
           >
-            {shortId(row.original.job_id)}
+            {shortId(row.original.id)}
           </EntityLink>
         ),
       },
-      { accessorKey: "kind", header: "kind", enableSorting: true },
+      {
+        accessorKey: "kind",
+        header: "kind",
+        enableSorting: true,
+      },
       {
         accessorKey: "status",
         header: "status",
@@ -185,7 +196,9 @@ export function HomePageClient() {
         header: "progress",
         enableSorting: true,
         cell: ({ row }) => (
-          <span className="font-mono">{row.original.progress}%</span>
+          <span className="font-mono">
+            {row.original.progress === null ? "-" : `${row.original.progress}%`}
+          </span>
         ),
       },
       {
@@ -193,13 +206,13 @@ export function HomePageClient() {
         header: "updated",
         enableSorting: true,
         accessorFn: (row) =>
-          row.finished_at ?? row.heartbeat_at ?? row.started_at,
+          row.finished_at ?? row.started_at ?? row.created_at,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(
               row.original.finished_at ??
-                row.original.heartbeat_at ??
-                row.original.started_at,
+                row.original.started_at ??
+                row.original.created_at,
             )}
           </span>
         ),
@@ -213,9 +226,8 @@ export function HomePageClient() {
     void version.refetch();
     void metrics.refetch();
     void pipeline.refetch();
-    void importJobs.refetch();
+    void pipelineExecutions.refetch();
     void dedup.refetch();
-    void dagster.refetch();
   };
 
   return (
@@ -241,7 +253,10 @@ export function HomePageClient() {
       title="운영 홈"
     >
       <div className="space-y-6">
-        {(health.isError || metrics.isError || pipeline.isError || dagster.isError) && (
+        {(health.isError ||
+          metrics.isError ||
+          pipeline.isError ||
+          pipelineExecutions.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>운영 summary 확인 필요</AlertTitle>
@@ -249,7 +264,7 @@ export function HomePageClient() {
               {health.error?.message ??
                 metrics.error?.message ??
                 pipeline.error?.message ??
-                dagster.error?.message}
+                pipelineExecutions.error?.message}
             </AlertDescription>
           </Alert>
         )}
@@ -326,28 +341,28 @@ export function HomePageClient() {
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <Card>
             <CardHeader>
-              <CardTitle>최근 적재 작업</CardTitle>
+              <CardTitle>최근 파이프라인 실행</CardTitle>
               <CardAction>
                 <Link
                   className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                  href="/ops/pipeline?kind=import_job"
+                  href="/ops/pipeline"
                 >
                   전체
                 </Link>
               </CardAction>
             </CardHeader>
             <CardContent>
-              {importJobs.isError ? (
+              {pipelineExecutions.isError ? (
                 <p className="text-sm text-destructive">
-                  {importJobs.error.message}
+                  {pipelineExecutions.error.message}
                 </p>
               ) : null}
               <DataTable
-                columns={importJobColumns}
-                data={importJobItems}
-                getRowId={(row) => row.job_id}
-                isLoading={importJobs.isLoading}
-                emptyMessage="import job이 없습니다."
+                columns={pipelineExecutionColumns}
+                data={pipelineExecutionItems}
+                getRowId={(row) => row.id}
+                isLoading={pipelineExecutions.isLoading}
+                emptyMessage="파이프라인 실행이 없습니다."
                 manualSorting={false}
               />
             </CardContent>
@@ -395,13 +410,13 @@ export function HomePageClient() {
                     </span>
                     <StatusBadge
                       status={
-                        dagsterData?.status ?? (dagster.isError ? "error" : "loading")
+                        dagsterData?.status ?? (pipeline.isError ? "error" : "loading")
                       }
                     />
                   </div>
                   <div className="mb-3 flex flex-wrap gap-2">
                     <Badge variant="outline">
-                      {formatCount(dagsterData?.asset_count)} assets
+                      {formatCount(dagsterData?.recent_runs?.length)} recent runs
                     </Badge>
                     <Badge variant="outline">
                       {formatCount(dagsterData?.schedule_count)} schedules

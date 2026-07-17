@@ -2,6 +2,7 @@ import { expect, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
 import { bffApiPath } from "./bff-api-path";
+import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -238,6 +239,10 @@ const csvFile = {
 };
 
 test.describe("admin/offline-uploads edge depth", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockOpsDatasetCatalog(page);
+  });
+
   // -------------------------------------------------------------------------
   // 1) Job-level validation_failed surface (NOT an isError transport failure).
   //    smoke는 HAPPY path(1 valid / 0 error → validated)만 검증한다. 여기서는

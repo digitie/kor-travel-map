@@ -19,7 +19,10 @@ import { useCallback, useMemo, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
-import { useProviders } from "@/api/etl";
+import {
+  opsDatasetCatalogOptions,
+  useOpsDatasetCatalog,
+} from "@/api/datasets";
 import {
   FEATURE_CLUSTER_MAX_ZOOM,
   FEATURE_KINDS,
@@ -256,7 +259,7 @@ export function FeaturesClient() {
 
   // 소스(provider) 필터 옵션: feature 선택 시 그 feature가 묶인 provider만, 아니면
   // 전체 provider 목록. 선택이 바뀌어 현재 값이 옵션에 없으면 "모두 보기"로 되돌린다.
-  const providersQuery = useProviders();
+  const datasetsQuery = useOpsDatasetCatalog();
   const selectedFeatureAdminDetail = useAdminFeatureDetail(selectedFeatureId);
   const providerOptions = useMemo<string[]>(() => {
     if (selectedFeatureId) {
@@ -265,9 +268,10 @@ export function FeaturesClient() {
         new Set(sources.map((source) => source.provider)),
       ).sort();
     }
-    const providers = providersQuery.data?.data.providers ?? [];
-    return Array.from(new Set(providers.map((entry) => entry.provider))).sort();
-  }, [selectedFeatureId, selectedFeatureAdminDetail.data, providersQuery.data]);
+    return opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []).map(
+      (entry) => entry.provider,
+    );
+  }, [selectedFeatureId, selectedFeatureAdminDetail.data, datasetsQuery.data]);
 
   // 선택이 바뀌어 저장된 값이 현재 옵션에 없으면, effect로 setState하지 않고
   // 렌더 시점에 "모두 보기"(빈 값)로 환원한다 (react-hooks/set-state-in-effect 회피).

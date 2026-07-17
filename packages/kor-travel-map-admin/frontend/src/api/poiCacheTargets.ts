@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { deleteJson, getJson, pathWithQuery, putJson } from "./client";
+import { invalidateOpsDatasetQueries } from "./datasets";
 import type { components, paths } from "./types";
 
 type PoiCacheTargetSchemas = components["schemas"];
@@ -190,9 +191,7 @@ export function useUpsertPoiCacheTargetMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["nearby-features-by-target"],
       });
-      void queryClient.invalidateQueries({
-        queryKey: ["feature-update-requests"],
-      });
+      invalidateOpsDatasetQueries(queryClient);
       if (data.data.nearby_url) {
         void queryClient.invalidateQueries({ queryKey: ["features"] });
       }
@@ -221,9 +220,7 @@ export function useDeletePoiCacheTargetMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["nearby-features-by-target"],
       });
-      void queryClient.invalidateQueries({
-        queryKey: ["feature-update-requests"],
-      });
+      invalidateOpsDatasetQueries(queryClient);
     },
   });
 }

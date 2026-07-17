@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import * as F from "./_fixtures";
 
-// LIVE (non-mock) read-only e2e for the 4 review/queue pages.
-//   route: /admin/issues, /admin/features/dedup-reviews, /admin/features/enrichment-reviews,
-//          /admin/features/update-requests
+// LIVE (non-mock) read-only e2e for the 3 review/queue pages.
+//   route: /admin/issues, /admin/features/dedup-reviews,
+//          /admin/features/enrichment-reviews
 // backend = prod 실데이터(1.09M features). PRESENCE for all four queues = 0
-// (issues/dedup/enrichment/update_requests). So every page is expected to be
+// (issues/dedup/enrichment). So every page is expected to be
 // EMPTY: we assert heading + (empty-state OR table container) + controls, never
 // exact row text/counts. Decision action buttons are not clicked; detail smoke
 // may open the read-only detail dialog. Other interactions are nav links, status
@@ -55,15 +55,6 @@ const PAGES: ReviewPage[] = [
     statusLabel: "enrichment status",
     statuses: ["pending", "accepted", "rejected", "ignored", "all"],
     sortHeaders: ["점수", "거리", "상태", "생성"],
-  },
-  {
-    route: "/admin/features/update-requests",
-    heading: "갱신 요청",
-    navLabel: "갱신 요청",
-    empty: "요청이 없습니다.",
-    statusLabel: "요청 상태 필터",
-    statuses: ["queued", "running", "done", "failed", "cancelled", "all"],
-    sortHeaders: ["상태", "생성"],
   },
 ];
 

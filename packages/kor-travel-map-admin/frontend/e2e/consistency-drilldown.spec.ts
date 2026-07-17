@@ -234,10 +234,10 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     });
     await expect(reportBRow.getByText("critical")).toBeVisible();
 
-    // 개편 B 크로스링크: 배치 셀은 해당 배치로 필터된 적재 작업 목록으로 딥링크.
+    // canonical pipeline에서 같은 load batch로 필터한다.
     await expect(reportBRow.getByRole("link")).toHaveAttribute(
       "href",
-      `/ops/import-jobs?load_batch_id=${BATCH_B_ID}`,
+      `/ops/pipeline?load_batch_id=${BATCH_B_ID}`,
     );
 
     // issues 카드 — unique message + severity 'critical' + provider cell.

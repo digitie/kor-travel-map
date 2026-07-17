@@ -6,7 +6,6 @@ import {
   DatabaseIcon,
   ArchiveIcon,
   FolderTreeIcon,
-  GaugeIcon,
   GitCompareArrowsIcon,
   HomeIcon,
   LayersIcon,
@@ -17,7 +16,6 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   UploadCloudIcon,
-  RefreshCwIcon,
   RadarIcon,
   RouteIcon,
   LogOutIcon,
@@ -44,7 +42,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * 작업 지향 nav 그룹 (§1) — nav·섹션 배지·브레드크럼 라벨의 단일 정본.
- * 그룹 헤더는 비링크, href 20개는 기존 경로 그대로(라우트 이동 없음).
+ * 그룹 헤더는 비링크이며 href 18개는 존치하는 canonical 화면만 가리킨다.
  */
 export const NAV_GROUPS = [
   {
@@ -86,23 +84,13 @@ export const NAV_GROUPS = [
     group: "수집 파이프라인",
     badge: "수집 파이프라인",
     items: [
-      // ADR-064 통합 페이지 ①·②. 구 항목 제거는 T-ADM-C6b에서 수행(병기 유지).
       { href: "/ops/pipeline", label: "파이프라인", icon: WorkflowIcon },
       { href: "/ops/datasets", label: "데이터셋", icon: LayersIcon },
-      { href: "/ops/providers", label: "Provider 상태", icon: GaugeIcon },
-      { href: "/ops/import-jobs", label: "적재 작업", icon: ListChecksIcon },
-      {
-        href: "/admin/features/update-requests",
-        label: "갱신 요청",
-        icon: RefreshCwIcon,
-      },
       {
         href: "/admin/offline-uploads",
         label: "오프라인 업로드",
         icon: UploadCloudIcon,
       },
-      { href: "/admin/dagster", label: "작업 자동화", icon: WorkflowIcon },
-      { href: "/etl", label: "ETL 미리보기", icon: DatabaseIcon },
       {
         href: "/admin/poi-cache-targets",
         label: "POI 캐시 대상",

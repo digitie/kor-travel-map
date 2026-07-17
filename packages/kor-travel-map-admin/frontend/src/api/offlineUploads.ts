@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { deleteJson, getJson, pathWithQuery, postFormData, postJson } from "./client";
+import { invalidateOpsDatasetQueries } from "./datasets";
 import type { components, paths } from "./types";
 
 type OfflineUploadSchemas = components["schemas"];
@@ -234,10 +235,14 @@ export function useValidateOfflineUploadMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["offline-upload-validation", request.uploadId],
       });
-      void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "executions"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      invalidateOpsDatasetQueries(queryClient);
       if (data.meta.job_id) {
         void queryClient.invalidateQueries({
-          queryKey: ["import-job", data.meta.job_id],
+          queryKey: ["pipeline", "execution", "import_job", data.meta.job_id],
         });
       }
     },
@@ -269,12 +274,23 @@ export function useLaunchOfflineUploadLoadMutation() {
     onSuccess: (data, uploadId) => {
       void queryClient.invalidateQueries({ queryKey: ["offline-uploads"] });
       void queryClient.invalidateQueries({ queryKey: ["offline-upload", uploadId] });
-      void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-      void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "executions"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "dagster-runs"],
+      });
+      invalidateOpsDatasetQueries(queryClient);
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       if (data.data.load_job_id) {
         void queryClient.invalidateQueries({
-          queryKey: ["import-job", data.data.load_job_id],
+          queryKey: [
+            "pipeline",
+            "execution",
+            "import_job",
+            data.data.load_job_id,
+          ],
         });
       }
     },
