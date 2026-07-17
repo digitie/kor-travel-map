@@ -13,13 +13,14 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from time import perf_counter
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from kortravelmap.api import dagster_schedule_service
 from kortravelmap.api.dagster_schedule_service import (
-    DagsterScheduleIdempotencyConflict,
     DagsterScheduleClaimNotFound,
+    DagsterScheduleClaimResolutionConflict,
+    DagsterScheduleIdempotencyConflict,
     DagsterScheduleUncertainOutcome,
     DagsterScheduleStorageUnavailable,
     append_schedule_audit_event,
@@ -30,6 +31,7 @@ from kortravelmap.api.dagster_schedule_service import (
     upsert_schedule_override,
 )
 from kortravelmap.api.dagster_schema import (
+    DagsterScheduleClaimResolution,
     DagsterScheduleCommandData,
     DagsterScheduleCommandResponse,
 )
@@ -74,6 +76,63 @@ async def _row(session: AsyncSession, name: str) -> object | None:
         {"name": name},
     )
     return result.one_or_none()
+
+
+async def _seed_active_schedule_claim(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+    schedule_name: str,
+    command: str = "reset",
+    reason: str = "운영 확인",
+) -> None:
+    await append_schedule_audit_event(
+        session,
+        command_id=command_id,
+        schedule_name=schedule_name,
+        command=command,
+        phase="requested",
+        actor="admin@example.test",
+        reason=reason,
+        details={"command": command},
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO ops.dagster_schedule_active_claims (
+              command_id, schedule_name
+            ) VALUES (CAST(:command_id AS uuid), :schedule_name)
+            """
+        ),
+        {
+            "command_id": str(command_id),
+            "schedule_name": schedule_name,
+        },
+    )
+    await session.commit()
+
+
+async def _wait_for_lock_waiter(
+    engine: AsyncEngine,
+    *,
+    backend_pid: int,
+) -> None:
+    for _ in range(500):
+        async with AsyncSession(engine) as observer:
+            waiting = await observer.scalar(
+                text(
+                    """
+                    SELECT wait_event_type = 'Lock'
+                    FROM pg_stat_activity
+                    WHERE pid = :backend_pid
+                    """
+                ),
+                {"backend_pid": backend_pid},
+            )
+        if waiting is True:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"backend {backend_pid}가 row lock 대기 상태가 되지 않았습니다.")
 
 
 async def test_schedule_override_upsert_read_conflict_delete(
@@ -133,15 +192,12 @@ async def test_schedule_audit_events_are_append_only_and_correlated(
 ) -> None:
     command_id = uuid4()
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-        await append_schedule_audit_event(
+        await _seed_active_schedule_claim(
             session,
             command_id=command_id,
             schedule_name=_NAME,
             command="reset",
-            phase="requested",
-            actor="admin@example.test",
             reason="운영 기본값 복귀",
-            details={},
         )
         await append_schedule_audit_event(
             session,
@@ -151,7 +207,10 @@ async def test_schedule_audit_events_are_append_only_and_correlated(
             phase="succeeded",
             actor="admin@example.test",
             reason="운영 기본값 복귀",
-            details={"effective_status": "confirmed"},
+            details={
+                "effective_status": "confirmed",
+                "outcome_certainty": "confirmed",
+            },
         )
         result = await session.execute(
             text(
@@ -171,7 +230,10 @@ async def test_schedule_audit_events_are_append_only_and_correlated(
         ]
         assert {row.actor for row in rows} == {"admin@example.test"}
         assert {row.reason for row in rows} == {"운영 기본값 복귀"}
-        assert rows[1].details == {"effective_status": "confirmed"}
+        assert rows[1].details == {
+            "effective_status": "confirmed",
+            "outcome_certainty": "confirmed",
+        }
 
         with pytest.raises(DBAPIError):
             await session.execute(
@@ -204,15 +266,12 @@ async def test_schedule_terminal_audit_rejects_mismatched_request_fields(
 ) -> None:
     command_id = uuid4()
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-        await append_schedule_audit_event(
+        await _seed_active_schedule_claim(
             session,
             command_id=command_id,
             schedule_name=_NAME,
             command="start",
-            phase="requested",
-            actor="admin@example.test",
             reason="원 요청",
-            details={"command": "start"},
         )
 
         with pytest.raises(DBAPIError):
@@ -553,6 +612,7 @@ async def test_uncertain_remote_result_replays_same_key_and_blocks_new_key(
 
     assert first.data.outcome_certainty == "uncertain"
     assert replay.data.outcome_certainty == "uncertain"
+    assert replay.data.audit_status == first.data.audit_status == "recorded"
     assert conflict.value.active_command_id == command_id
     assert remote_calls == 1
 
@@ -626,12 +686,46 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
         assert resolved.command_id == command_id
         assert resolved.resolution == "confirmed_not_applied"
         assert resolved.reason == "Dagster run 목록 직접 확인"
+        assert resolved.replayed is False
+
+        replayed = await resolve_schedule_active_claim(
+            session,
+            schedule_name=schedule_name,
+            command_id=command_id,
+            resolution="confirmed_not_applied",
+            actor="other-admin@example.test",
+            reason=" Dagster run 목록 직접 확인 ",
+        )
+        assert replayed.replayed is True
+        assert replayed.resolution_id == resolved.resolution_id
+        assert replayed.resolved_at == resolved.resolved_at
+        assert replayed.actor == "admin@example.test"
+
+        with pytest.raises(DagsterScheduleClaimResolutionConflict):
+            await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_applied",
+                actor="admin@example.test",
+                reason="Dagster run 목록 직접 확인",
+            )
+        with pytest.raises(DagsterScheduleClaimResolutionConflict):
+            await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="다른 확인 근거",
+            )
 
         stored = (
             await session.execute(
                 text(
                     """
-                    SELECT resolution, actor, reason
+                    SELECT resolution, actor, reason,
+                           count(*) OVER () AS resolution_count
                     FROM ops.dagster_schedule_claim_resolutions
                     WHERE command_id = CAST(:command_id AS uuid)
                     """
@@ -643,6 +737,7 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
             "confirmed_not_applied",
             "admin@example.test",
             "Dagster run 목록 직접 확인",
+            1,
         )
 
         with pytest.raises(DBAPIError):
@@ -670,3 +765,251 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
         )
 
     assert remote_calls == 2
+
+
+async def test_confirmed_terminal_wins_concurrent_claim_resolution(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_terminal_wins"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed:
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command="reset",
+        )
+
+    loop = asyncio.get_running_loop()
+    terminal_pid: asyncio.Future[int] = loop.create_future()
+    resolution_pid: asyncio.Future[int] = loop.create_future()
+
+    async def _append_terminal() -> None:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            terminal_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            await append_schedule_audit_event(
+                session,
+                command_id=command_id,
+                schedule_name=schedule_name,
+                command="reset",
+                phase="succeeded",
+                actor="admin@example.test",
+                reason="운영 확인",
+                details={"outcome_certainty": "confirmed"},
+            )
+
+    async def _resolve_claim() -> DagsterScheduleClaimResolution:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            resolution_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            return await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="Dagster에서 미반영 확인",
+            )
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as blocker:
+        await blocker.execute(
+            text(
+                """
+                SELECT command_id
+                FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                FOR UPDATE
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        terminal_task = asyncio.create_task(_append_terminal())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await terminal_pid,
+        )
+        resolution_task = asyncio.create_task(_resolve_claim())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await resolution_pid,
+        )
+        await blocker.commit()
+
+    terminal_result, resolution_result = await asyncio.gather(
+        terminal_task,
+        resolution_task,
+        return_exceptions=True,
+    )
+    assert terminal_result is None
+    assert isinstance(resolution_result, DagsterScheduleClaimResolutionConflict)
+
+    async with AsyncSession(migrated_engine) as session:
+        terminal_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_audit_events
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND phase IN ('succeeded','failed')
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        resolution_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_claim_resolutions
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+    assert (terminal_count, resolution_count) == (1, 0)
+
+
+async def test_concurrent_identical_claim_resolution_replays_single_row(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_concurrent_resolution_replay"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed:
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command="reset",
+        )
+
+    async def _resolve(actor: str) -> DagsterScheduleClaimResolution:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            return await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor=actor,
+                reason=" Dagster에서 미반영 확인 ",
+            )
+
+    first, second = await asyncio.gather(
+        _resolve("admin-a@example.test"),
+        _resolve("admin-b@example.test"),
+    )
+
+    assert {first.replayed, second.replayed} == {False, True}
+    assert first.resolution_id == second.resolution_id
+    assert first.resolved_at == second.resolved_at
+    assert first.actor == second.actor
+    async with AsyncSession(migrated_engine) as session:
+        resolution_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_claim_resolutions
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+    assert resolution_count == 1
+
+
+async def test_claim_resolution_wins_concurrent_late_terminal(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_resolution_wins"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed:
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command="reset",
+        )
+
+    loop = asyncio.get_running_loop()
+    terminal_pid: asyncio.Future[int] = loop.create_future()
+    resolution_pid: asyncio.Future[int] = loop.create_future()
+
+    async def _append_terminal() -> None:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            terminal_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            await append_schedule_audit_event(
+                session,
+                command_id=command_id,
+                schedule_name=schedule_name,
+                command="reset",
+                phase="succeeded",
+                actor="admin@example.test",
+                reason="운영 확인",
+                details={"outcome_certainty": "confirmed"},
+            )
+
+    async def _resolve_claim() -> DagsterScheduleClaimResolution:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            resolution_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            return await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="Dagster에서 미반영 확인",
+            )
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as blocker:
+        await blocker.execute(
+            text(
+                """
+                SELECT command_id
+                FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                FOR UPDATE
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        resolution_task = asyncio.create_task(_resolve_claim())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await resolution_pid,
+        )
+        terminal_task = asyncio.create_task(_append_terminal())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await terminal_pid,
+        )
+        await blocker.commit()
+
+    resolution_result, terminal_result = await asyncio.gather(
+        resolution_task,
+        terminal_task,
+        return_exceptions=True,
+    )
+    assert isinstance(resolution_result, DagsterScheduleClaimResolution)
+    assert resolution_result.replayed is False
+    assert isinstance(terminal_result, DagsterScheduleStorageUnavailable)
+
+    async with AsyncSession(migrated_engine) as session:
+        terminal_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_audit_events
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND phase IN ('succeeded','failed')
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        resolution_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_claim_resolutions
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+    assert (terminal_count, resolution_count) == (0, 1)

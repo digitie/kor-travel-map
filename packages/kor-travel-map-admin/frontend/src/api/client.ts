@@ -99,9 +99,27 @@ export async function withIdempotencyKey<T>(
     }
     return result;
   } catch (error) {
+    const problemDetails =
+      error instanceof ApiClientError &&
+      typeof error.problem?.details === "object" &&
+      error.problem.details !== null
+        ? (error.problem.details as Record<string, unknown>)
+        : null;
+    const confirmedRecordedFailure =
+      problemDetails?.outcome_certainty === "confirmed" &&
+      problemDetails.audit_status === "recorded";
+    const explicitPreMutationFailure =
+      error instanceof ApiClientError &&
+      [
+        "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
+        "INVALID_SCHEDULE_COMMAND",
+      ].includes(error.problem?.code ?? "");
     const uncertainConflict =
       error instanceof ApiClientError &&
-      error.problem?.code === "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT";
+      [
+        "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+        "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
+      ].includes(error.problem?.code ?? "");
     const uncertainTransport =
       error instanceof ApiClientError &&
       (error.status >= 500 ||
@@ -111,8 +129,9 @@ export async function withIdempotencyKey<T>(
         error.status === 499);
     if (
       error instanceof ApiClientError &&
-      !uncertainConflict &&
-      !uncertainTransport
+      (explicitPreMutationFailure ||
+        (!uncertainConflict &&
+          (confirmedRecordedFailure || !uncertainTransport)))
     ) {
       writeIdempotencyKey(operationKey, null);
     }

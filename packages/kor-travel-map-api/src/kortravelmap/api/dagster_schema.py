@@ -355,3 +355,4 @@ class DagsterScheduleClaimResolution(BaseModel):
     actor: str
     reason: str
     resolved_at: datetime
+    replayed: bool

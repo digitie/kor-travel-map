@@ -7,7 +7,10 @@ import {
   withIdempotencyKey,
 } from "./client";
 
-type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchMock = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 function jsonResponse(): Response {
   return new Response("{}", {
@@ -32,7 +35,9 @@ function stubFetchStatus(status: number) {
 
 function stubIdempotencyBrowser(keys: string[]) {
   const values = new Map<string, string>();
-  const randomUUID = vi.fn(() => keys.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff");
+  const randomUUID = vi.fn(
+    () => keys.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff",
+  );
   vi.stubGlobal("crypto", { randomUUID });
   vi.stubGlobal("window", {
     sessionStorage: {
@@ -92,7 +97,9 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
       status: 401,
     });
 
-    expect(assign).toHaveBeenCalledWith("/login?next=%2Fadmin%2Fsettings%3Ftab%3Dkeys");
+    expect(assign).toHaveBeenCalledWith(
+      "/login?next=%2Fadmin%2Fsettings%3Ftab%3Dkeys",
+    );
   });
 
   it("RFC7807 본문과 Retry-After를 typed 오류로 보존한다", async () => {
@@ -119,9 +126,12 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
       ),
     );
 
-    const error = await postJson("/v1/ops/pipeline/executions/import_job/1/cancel", {
-      reason: "test",
-    }).catch((caught: unknown) => caught);
+    const error = await postJson(
+      "/v1/ops/pipeline/executions/import_job/1/cancel",
+      {
+        reason: "test",
+      },
+    ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({
@@ -224,6 +234,89 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
       "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     ]);
     expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("확정·기록된 semantic 502 뒤에는 새 idempotency key를 발급한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    const seen: string[] = [];
+    const confirmedFailure = new ApiClientError(
+      "known Dagster failure",
+      502,
+      "/v1/ops/pipeline/schedules/x/commands",
+      {
+        code: "DAGSTER_SCHEDULE_COMMAND_FAILED",
+        detail: "known Dagster failure",
+        details: {
+          outcome_certainty: "confirmed",
+          audit_status: "recorded",
+        },
+        errors: [],
+        request_id: "request-confirmed",
+        status: 502,
+        title: "known Dagster failure",
+        type: "https://kor-travel-map/errors/dagster-schedule-command-failed",
+      },
+    );
+
+    await expect(
+      withIdempotencyKey("schedule:confirmed", async (key) => {
+        seen.push(key);
+        throw confirmedFailure;
+      }),
+    ).rejects.toBe(confirmedFailure);
+    await withIdempotencyKey("schedule:confirmed", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("명시적 mutation 전 storage failure 뒤에는 새 idempotency key를 발급한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "33333333-3333-4333-8333-333333333333",
+      "44444444-4444-4444-8444-444444444444",
+    ]);
+    const seen: string[] = [];
+    const storageFailure = new ApiClientError(
+      "audit storage unavailable",
+      503,
+      "/v1/ops/pipeline/schedules/x/commands",
+      {
+        code: "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
+        detail: "audit storage unavailable",
+        details: null,
+        errors: [],
+        request_id: "request-storage",
+        status: 503,
+        title: "audit storage unavailable",
+        type: "https://kor-travel-map/errors/dagster-schedule-storage-unavailable",
+      },
+    );
+
+    await expect(
+      withIdempotencyKey("schedule:storage", async (key) => {
+        seen.push(key);
+        throw storageFailure;
+      }),
+    ).rejects.toBe(storageFailure);
+    await withIdempotencyKey("schedule:storage", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "33333333-3333-4333-8333-333333333333",
+      "44444444-4444-4444-8444-444444444444",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
   });
 
   it.each([408, 425, 429, 499, 500, 502, 503])(

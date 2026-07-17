@@ -1773,11 +1773,16 @@ async def post_pipeline_schedule_command(
     description=(
         "transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 "
         "schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 "
-        "반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다."
+        "반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다. "
+        "응답 유실 뒤 같은 command_id·resolution·정규화된 사유로 재요청하면 기존 결과를 "
+        "replayed=true로 재생하고, resolution 또는 사유가 다르면 409로 거부한다."
     ),
     responses={
         404: {"model": ProblemDetail, "description": "schedule claim 없음"},
-        409: {"model": ProblemDetail, "description": "이미 해제되었거나 확정 결과인 claim"},
+        409: {
+            "model": ProblemDetail,
+            "description": "확정 결과인 claim 또는 기존 해제 결과와 요청 body 불일치",
+        },
         422: {"model": ProblemDetail, "description": "해제 사유 또는 resolution 검증 실패"},
         503: {"model": ProblemDetail, "description": "schedule 감사 저장소 장애"},
     },

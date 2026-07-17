@@ -618,9 +618,15 @@ interface MockOptions {
   scheduleCommandStatus?: "ok" | "error";
   schedulePatchStatus?: "ok" | "error";
   scheduleActionStatus?: "ok" | "error";
+  scheduleActionStatuses?: Array<"ok" | "error">;
   scheduleActionConflict?: boolean;
+  scheduleActionConflictActiveCommandId?: string | null;
+  scheduleUncertainOutcome?: boolean;
   scheduleAuditStatus?: "recorded" | "terminal_record_failed";
   scheduleResponseDelayMs?: number;
+  claimResolutionResponseLossOnce?: boolean;
+  previewResponseDelaysMs?: number[];
+  previewFeatureCounts?: number[];
   schedulesResponse?: PipelineSchedulesResponse;
   reusedActiveRequest?: boolean;
   requestCreate?: {
@@ -872,6 +878,13 @@ async function installPipelineMocks(
       )
     ) {
       counters.claimResolutionBodies.push(request.postDataJSON());
+      if (
+        options.claimResolutionResponseLossOnce &&
+        counters.claimResolutionBodies.length === 1
+      ) {
+        await route.abort("connectionreset");
+        return;
+      }
       const parts = pathname.split("/");
       await fulfillJson(route, {
         data: {
@@ -882,6 +895,7 @@ async function installPipelineMocks(
           actor: "admin:e2e",
           reason: request.postDataJSON().reason,
           resolved_at: "2026-07-14T10:06:00.000Z",
+          replayed: counters.claimResolutionBodies.length > 1,
         },
         meta: META,
       });
@@ -934,12 +948,28 @@ async function installPipelineMocks(
       counters.commandBodies.push(request.postDataJSON());
       counters.scheduleKeys.push(request.headers()["idempotency-key"] ?? "");
       const body = request.postDataJSON() as { command: string };
+      const actionStatuses = options.scheduleActionStatuses;
+      const actionStatus =
+        (actionStatuses && actionStatuses.length > 0
+          ? actionStatuses[
+              Math.min(
+                counters.commandBodies.length - 1,
+                actionStatuses.length - 1,
+              )
+            ]
+          : undefined) ??
+        options.scheduleActionStatus ??
+        options.scheduleCommandStatus;
       if (options.scheduleResponseDelayMs) {
         await new Promise((resolve) =>
           setTimeout(resolve, options.scheduleResponseDelayMs),
         );
       }
       if (options.scheduleActionConflict) {
+        const activeCommandId =
+          options.scheduleActionConflictActiveCommandId === undefined
+            ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            : options.scheduleActionConflictActiveCommandId;
         await fulfillJson(
           route,
           {
@@ -952,17 +982,35 @@ async function installPipelineMocks(
             errors: [],
             details: {
               command_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-              active_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              active_command_id: activeCommandId,
             },
           },
           409,
         );
         return;
       }
-      if (
-        (options.scheduleActionStatus ?? options.scheduleCommandStatus) ===
-        "error"
-      ) {
+      if (options.scheduleUncertainOutcome) {
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-outcome-uncertain",
+            title: "Dagster 결과 불명",
+            status: 500,
+            detail: "응답 유실로 실제 반영 여부를 확인해야 합니다.",
+            code: "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: {
+              command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              active_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              outcome_certainty: "uncertain",
+            },
+          },
+          500,
+        );
+        return;
+      }
+      if (actionStatus === "error") {
         const partial = makeCommandResult({
           command: body.command as "run" | "start" | "stop" | "reset",
           errors: ["Dagster mutation failed"],
@@ -1008,6 +1056,11 @@ async function installPipelineMocks(
     }
     if (pathname.endsWith("/v1/ops/pipeline/requests/preview")) {
       counters.previewBodies.push(request.postDataJSON());
+      const previewIndex = counters.previewBodies.length - 1;
+      const previewDelay = options.previewResponseDelaysMs?.[previewIndex] ?? 0;
+      if (previewDelay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, previewDelay));
+      }
       const preview: FeatureUpdateRequestPreviewResponse = {
         data: {
           result_kind: "preview",
@@ -1022,7 +1075,9 @@ async function installPipelineMocks(
           update_policy: {},
           run_mode: "queued",
           priority: 50,
-          matched_scope: { feature_count: 12 },
+          matched_scope: {
+            feature_count: options.previewFeatureCounts?.[previewIndex] ?? 12,
+          },
         },
         meta: META,
       };
@@ -1826,6 +1881,39 @@ test.describe("/ops/pipeline", () => {
     expect(counters.scheduleKeys.at(0)).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+    await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(0);
+  });
+
+  test("확정된 502 실패 뒤 동일 명령은 새 idempotency key로 재시도", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleActionStatuses: ["error", "ok"],
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+    await page.getByLabel("명령 사유 (선택)").fill("확정 실패 재시도");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await page
+        .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+        .click();
+      await page
+        .getByRole("button", { name: "즉시 실행", exact: true })
+        .click();
+      if (attempt === 0) {
+        await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
+        await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(
+          0,
+        );
+      }
+    }
+
+    await expect(page.getByTestId("schedule-command-result")).toContainText(
+      "즉시 실행 · 성공",
+    );
+    expect(counters.commandBodies).toHaveLength(2);
+    expect(counters.commandBodies[1]).toEqual(counters.commandBodies[0]);
+    expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
   });
 
   test("스케줄 409 active command ID를 claim recovery 조작으로 연결", async ({
@@ -1844,6 +1932,39 @@ test.describe("/ops/pipeline", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
     await expect(recovery).toContainText(SCHEDULE_NAME);
+  });
+
+  test("스케줄 409에 active command ID가 없으면 recovery를 노출하지 않는다", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, {
+      scheduleActionConflict: true,
+      scheduleActionConflictActiveCommandId: null,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+      .click();
+
+    await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(0);
+  });
+
+  test("결과 불명 500의 active command ID를 recovery로 연결", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, { scheduleUncertainOutcome: true });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+      .click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(recovery).toContainText(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
   });
 
   test("명령 502 후 다른 cron 수정 성공은 이전 오류 상태를 제거", async ({
@@ -2030,6 +2151,44 @@ test.describe("/ops/pipeline", () => {
     expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
   });
 
+  test("claim 해제 응답 유실은 같은 body로 안전하게 replay", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleAuditStatus: "terminal_record_failed",
+      claimResolutionResponseLossOnce: true,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await recovery
+      .getByLabel("확인 근거·해제 사유 (필수)")
+      .fill("Dagster run 목록에서 미반영 확인");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await recovery.getByRole("button", { name: "claim 해제" }).click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "확인 결과 기록 후 해제" })
+        .click();
+      if (attempt === 0) {
+        await expect(page.getByText("claim 해제 실패")).toBeVisible();
+      }
+    }
+
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toContainText("Dagster 미반영 확인");
+    expect(counters.claimResolutionBodies).toHaveLength(2);
+    expect(counters.claimResolutionBodies[1]).toEqual(
+      counters.claimResolutionBodies[0],
+    );
+  });
+
   test("요청 dialog — scope 전환·MOIS 경고·별도 preview", async ({ page }) => {
     const counters = await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
@@ -2081,6 +2240,65 @@ test.describe("/ops/pipeline", () => {
 
     await expect(dialog.getByTestId("request-preview-result")).toHaveCount(0);
     expect(counters.previewBodies).toHaveLength(1);
+  });
+
+  test("요청 dialog — 닫고 다시 열면 preview·생성 결과가 남지 않는다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog.getByLabel("provider").first().fill("python-kma-api");
+    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    await expect(dialog.getByTestId("request-preview-result")).toBeVisible();
+
+    await dialog.getByRole("button", { name: "닫기" }).click();
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    await expect(dialog.getByTestId("request-preview-result")).toHaveCount(0);
+    expect(counters.previewBodies).toHaveLength(1);
+
+    await dialog
+      .getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)")
+      .uncheck();
+    await dialog
+      .getByRole("button", { name: "요청 생성", exact: true })
+      .click();
+    await expect(dialog.getByTestId("request-create-result")).toBeVisible();
+    await dialog.getByRole("button", { name: "닫기" }).click();
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+
+    await expect(dialog.getByTestId("request-create-result")).toHaveCount(0);
+    await expect(dialog.getByTestId("request-preview-result")).toHaveCount(0);
+    expect(counters.requestBodies).toHaveLength(1);
+  });
+
+  test("요청 dialog — 이전 pending 응답이 재오픈 후 새 결과를 덮지 않는다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      previewResponseDelaysMs: [700, 0],
+      previewFeatureCounts: [11, 22],
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog.getByLabel("provider").first().fill("python-kma-api");
+    await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    await expect.poll(() => counters.previewBodies.length).toBe(1);
+
+    await dialog.getByRole("button", { name: "닫기" }).click();
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    const result = dialog.getByTestId("request-preview-result");
+    await expect(result).toContainText('"feature_count":22');
+
+    await page.waitForTimeout(800);
+    await expect(result).toContainText('"feature_count":22');
+    await expect(result).not.toContainText('"feature_count":11');
+    expect(counters.previewBodies).toHaveLength(2);
   });
 
   test("요청 dialog — priority 소수는 전송 없이 명시적으로 거부", async ({

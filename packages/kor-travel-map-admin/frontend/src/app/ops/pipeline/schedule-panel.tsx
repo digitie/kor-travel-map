@@ -177,7 +177,14 @@ function claimRecoveryFromConflict(
   error: Error | null,
   scheduleName: string | undefined,
 ): ScheduleClaimRecovery | null {
-  if (!(error instanceof ApiClientError) || !scheduleName) {
+  if (
+    !(error instanceof ApiClientError) ||
+    !scheduleName ||
+    ![
+      "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
+      "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+    ].includes(error.problem?.code ?? "")
+  ) {
     return null;
   }
   const details = error.problem?.details;
@@ -185,12 +192,11 @@ function claimRecoveryFromConflict(
     return null;
   }
   const record = details as Record<string, unknown>;
-  const commandId =
-    record.active_command_id ?? record.audit_command_id ?? record.command_id;
-  if (typeof commandId !== "string" || commandId.length === 0) {
+  const commandId = record.active_command_id;
+  if (typeof commandId !== "string" || commandId.trim().length === 0) {
     return null;
   }
-  return { scheduleName, commandId };
+  return { scheduleName, commandId: commandId.trim() };
 }
 
 export function SchedulePanel({

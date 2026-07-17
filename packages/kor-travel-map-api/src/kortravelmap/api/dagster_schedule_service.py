@@ -400,6 +400,27 @@ async def append_schedule_audit_event(
     """schedule 명령 감사 이벤트를 덮어쓰기 없이 1행 추가한다."""
 
     try:
+        if phase != "requested":
+            active_claim = await session.execute(
+                text(
+                    """
+                    SELECT command_id
+                    FROM ops.dagster_schedule_active_claims
+                    WHERE command_id = CAST(:command_id AS uuid)
+                      AND schedule_name = :schedule_name
+                    FOR UPDATE
+                    """
+                ),
+                {
+                    "command_id": str(command_id),
+                    "schedule_name": schedule_name,
+                },
+            )
+            if active_claim.scalar_one_or_none() is None:
+                await session.rollback()
+                raise DagsterScheduleStorageUnavailable(
+                    "schedule terminal 감사 이벤트에 대응하는 활성 claim이 없습니다."
+                )
         await session.execute(
             text(
                 """
@@ -605,6 +626,56 @@ async def _claim_schedule_command(
     return _schedule_command_response(data, started_at=perf_counter())
 
 
+def _claim_resolution_from_row(
+    row: object,
+    *,
+    schedule_name: str,
+    resolution: Literal["confirmed_applied", "confirmed_not_applied"],
+    normalized_reason: str,
+    replayed: bool,
+) -> DagsterScheduleClaimResolution:
+    row_schedule_name = str(getattr(row, "schedule_name"))
+    row_resolution = str(getattr(row, "resolution"))
+    row_reason = str(getattr(row, "reason"))
+    if (
+        row_schedule_name != schedule_name
+        or row_resolution != resolution
+        or row_reason != normalized_reason
+    ):
+        raise DagsterScheduleClaimResolutionConflict(
+            "이미 기록된 claim 해제 결과와 resolution 또는 사유가 다릅니다."
+        )
+    return DagsterScheduleClaimResolution(
+        resolution_id=int(getattr(row, "resolution_id")),
+        command_id=UUID(str(getattr(row, "command_id"))),
+        schedule_name=row_schedule_name,
+        resolution=resolution,
+        actor=str(getattr(row, "actor")),
+        reason=row_reason,
+        resolved_at=getattr(row, "created_at"),
+        replayed=replayed,
+    )
+
+
+async def _existing_claim_resolution(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+) -> object | None:
+    result = await session.execute(
+        text(
+            """
+            SELECT resolution_id, command_id, schedule_name, resolution,
+                   actor, reason, created_at
+            FROM ops.dagster_schedule_claim_resolutions
+            WHERE command_id = CAST(:command_id AS uuid)
+            """
+        ),
+        {"command_id": str(command_id)},
+    )
+    return result.one_or_none()
+
+
 async def resolve_schedule_active_claim(
     session: AsyncSession,
     *,
@@ -620,6 +691,21 @@ async def resolve_schedule_active_claim(
     if not normalized_reason:
         raise DagsterScheduleValidationError("claim 해제 사유를 입력하세요.")
     try:
+        existing_resolution = await _existing_claim_resolution(
+            session,
+            command_id=command_id,
+        )
+        if existing_resolution is not None:
+            replay = _claim_resolution_from_row(
+                existing_resolution,
+                schedule_name=schedule_name,
+                resolution=resolution,
+                normalized_reason=normalized_reason,
+                replayed=True,
+            )
+            await session.commit()
+            return replay
+
         claim_result = await session.execute(
             text(
                 """
@@ -647,6 +733,20 @@ async def resolve_schedule_active_claim(
             },
         )
         claim_row = claim_result.one_or_none()
+        existing_resolution = await _existing_claim_resolution(
+            session,
+            command_id=command_id,
+        )
+        if existing_resolution is not None:
+            replay = _claim_resolution_from_row(
+                existing_resolution,
+                schedule_name=schedule_name,
+                resolution=resolution,
+                normalized_reason=normalized_reason,
+                replayed=True,
+            )
+            await session.commit()
+            return replay
         if claim_row is None:
             known_result = await session.execute(
                 text(
@@ -749,6 +849,7 @@ async def resolve_schedule_active_claim(
         actor=actor,
         reason=normalized_reason,
         resolved_at=resolution_row.created_at,
+        replayed=False,
     )
 
 
@@ -870,9 +971,10 @@ def _schedule_command_response(
     data: DagsterScheduleCommandData,
     *,
     started_at: float,
-    outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed",
+    outcome_certainty: Literal["confirmed", "uncertain"] | None = None,
 ) -> DagsterScheduleCommandResponse:
-    data.outcome_certainty = outcome_certainty
+    if outcome_certainty is not None:
+        data.outcome_certainty = outcome_certainty
     return DagsterScheduleCommandResponse(
         data=data,
         meta=make_meta(started_at=started_at),
@@ -896,7 +998,7 @@ def _schedule_origin_id(state_id: str | None) -> str | None:
 
 
 def _graphql_result_error(result: JsonDict) -> str | None:
-    typename = dagster_graphql.optional_string(result.get("__typename"))
+    typename = _nonblank_string(result.get("__typename"))
     if typename in {
         "ScheduleStateResult",
         "LaunchRunSuccess",
@@ -911,11 +1013,19 @@ def _graphql_result_error(result: JsonDict) -> str | None:
             for error in (raw_errors if isinstance(raw_errors, list) else [])
         ]
         return " / ".join(errors) if errors else "run config validation failed"
-    message = dagster_graphql.optional_string(result.get("message"))
-    class_name = dagster_graphql.optional_string(result.get("className"))
+    message = _nonblank_string(result.get("message"))
+    class_name = _nonblank_string(result.get("className"))
     if class_name and message:
         return f"{class_name}: {message}"
     return message or f"Dagster mutation failed: {typename or 'unknown'}"
+
+
+def _nonblank_string(value: object) -> str | None:
+    text_value = dagster_graphql.optional_string(value)
+    if text_value is None:
+        return None
+    normalized = text_value.strip()
+    return normalized or None
 
 
 def _command_error_data(
@@ -1018,26 +1128,55 @@ async def _reload_location(
             " / ".join(dagster_graphql.graphql_error_message(error) for error in graphql_errors),
             "uncertain",
         )
-    result = dagster_graphql.as_dict(
-        dagster_graphql.as_dict(payload.get("data")).get("reloadRepositoryLocation")
-    )
-    if result.get("__typename") == "WorkspaceLocationEntry":
-        load_status = dagster_graphql.optional_string(result.get("loadStatus"))
-        location = dagster_graphql.as_dict(result.get("locationOrLoadError"))
-        if load_status == "LOADED" and location.get("__typename") == "RepositoryLocation":
+    data = payload.get("data")
+    raw_result = data.get("reloadRepositoryLocation") if isinstance(data, dict) else None
+    result = dagster_graphql.as_dict(raw_result)
+    typename = _nonblank_string(result.get("__typename"))
+    if typename == "WorkspaceLocationEntry":
+        load_status = _nonblank_string(result.get("loadStatus"))
+        raw_location = result.get("locationOrLoadError")
+        location = dagster_graphql.as_dict(raw_location)
+        location_typename = _nonblank_string(location.get("__typename"))
+        location_name = _nonblank_string(location.get("name"))
+        if load_status is None:
+            return (
+                "error",
+                "code location reload 응답에 loadStatus가 없습니다.",
+                "uncertain",
+            )
+        if load_status not in {"LOADED", "LOADING"}:
+            return (
+                "error",
+                f"code location reload 응답의 loadStatus를 해석할 수 없습니다: {load_status}",
+                "uncertain",
+            )
+        if location_typename == "RepositoryLocation" and location_name is not None:
+            if load_status != "LOADED":
+                return (
+                    "error",
+                    f"code location reload가 아직 완료되지 않았습니다: {load_status}",
+                    "confirmed",
+                )
             return "succeeded", None, "confirmed"
-        location_error = _graphql_result_error(location)
+        if location_typename == "PythonError":
+            location_error = _graphql_result_error(location)
+            return (
+                "error",
+                f"code location reload 후 load 실패(loadStatus={load_status}): {location_error}",
+                "confirmed",
+            )
         return (
             "error",
-            "code location reload 후 load 실패"
-            f"(loadStatus={load_status or 'unknown'}): {location_error}",
-            "confirmed",
+            "code location reload 응답의 locationOrLoadError shape를 확인할 수 없습니다.",
+            "uncertain",
         )
-    error = _graphql_result_error(result)
+    if typename in {"ReloadNotSupported", "RepositoryLocationNotFound", "PythonError"}:
+        return "error", _graphql_result_error(result), "confirmed"
     return (
         "error",
-        error or "code location reload 응답을 확인할 수 없습니다.",
-        "confirmed",
+        "code location reload 응답 union을 확인할 수 없습니다"
+        f"(__typename={typename or 'unknown'}).",
+        "uncertain",
     )
 
 
@@ -1399,13 +1538,33 @@ async def mutate_schedule_state(
             started_at=started_at,
             outcome_certainty="uncertain",
         )
-    result = dagster_graphql.as_dict(dagster_graphql.as_dict(payload.get("data")).get(result_key))
-    result_error = _graphql_result_error(result)
+    data = payload.get("data")
+    raw_result = data.get(result_key) if isinstance(data, dict) else None
+    result = dagster_graphql.as_dict(raw_result)
+    typename = _nonblank_string(result.get("__typename"))
+    known_failure = typename in {
+        "ScheduleNotFoundError",
+        "UnauthorizedError",
+        "PythonError",
+    }
     state = dagster_graphql.as_dict(result.get("scheduleState"))
-    state_status = dagster_graphql.optional_string(state.get("status"))
-    malformed_success = result_error is None and state_status is None
-    if malformed_success:
-        result_error = "Dagster schedule mutation 성공 응답에 scheduleState.status가 없습니다."
+    state_status = _nonblank_string(state.get("status"))
+    if typename == "ScheduleStateResult":
+        uncertain_result = state_status is None
+        result_error = (
+            None
+            if state_status is not None
+            else "Dagster schedule mutation 성공 응답에 scheduleState.status가 없습니다."
+        )
+    elif known_failure:
+        uncertain_result = False
+        result_error = _graphql_result_error(result)
+    else:
+        uncertain_result = True
+        result_error = (
+            "Dagster schedule mutation 응답 union을 확인할 수 없습니다"
+            f"(__typename={typename or 'unknown'})."
+        )
     return _schedule_command_response(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
@@ -1421,11 +1580,11 @@ async def mutate_schedule_state(
             schedule_status=state_status or schedule.status,
             save_status="not_applicable",
             reload_status="not_requested",
-            effective_status="unknown" if malformed_success else "confirmed",
+            effective_status="unknown" if uncertain_result else "confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
-        outcome_certainty="uncertain" if malformed_success else "confirmed",
+        outcome_certainty="uncertain" if uncertain_result else "confirmed",
     )
 
 
@@ -1565,13 +1724,31 @@ async def run_schedule_now(
             started_at=started_at,
             outcome_certainty="uncertain",
         )
-    result = dagster_graphql.as_dict(dagster_graphql.as_dict(payload.get("data")).get("launchRun"))
-    result_error = _graphql_result_error(result)
+    data = payload.get("data")
+    raw_result = data.get("launchRun") if isinstance(data, dict) else None
+    result = dagster_graphql.as_dict(raw_result)
+    typename = _nonblank_string(result.get("__typename"))
+    known_failure = typename in {
+        "RunConfigValidationInvalid",
+        "PipelineNotFoundError",
+        "UnauthorizedError",
+        "PythonError",
+    }
     run = dagster_graphql.as_dict(result.get("run"))
-    run_id = dagster_graphql.optional_string(run.get("runId"))
-    malformed_success = result_error is None and run_id is None
-    if malformed_success:
-        result_error = "Dagster launch 성공 응답에 run.runId가 없습니다."
+    run_id = _nonblank_string(run.get("runId"))
+    if typename == "LaunchRunSuccess":
+        uncertain_result = run_id is None
+        result_error = (
+            None if run_id is not None else "Dagster launch 성공 응답에 run.runId가 없습니다."
+        )
+    elif known_failure:
+        uncertain_result = False
+        result_error = _graphql_result_error(result)
+    else:
+        uncertain_result = True
+        result_error = (
+            f"Dagster launch 응답 union을 확인할 수 없습니다(__typename={typename or 'unknown'})."
+        )
     return _schedule_command_response(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
@@ -1589,9 +1766,9 @@ async def run_schedule_now(
             run_status=dagster_graphql.optional_string(run.get("status")),
             save_status="not_applicable",
             reload_status="not_requested",
-            effective_status="unknown" if malformed_success else "confirmed",
+            effective_status="unknown" if uncertain_result else "confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
-        outcome_certainty="uncertain" if malformed_success else "confirmed",
+        outcome_certainty="uncertain" if uncertain_result else "confirmed",
     )

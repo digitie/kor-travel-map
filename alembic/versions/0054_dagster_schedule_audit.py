@@ -204,6 +204,15 @@ def upgrade() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
+          PERFORM 1
+          FROM ops.dagster_schedule_active_claims AS claim
+          WHERE claim.command_id = NEW.command_id
+            AND claim.schedule_name = NEW.schedule_name
+          FOR UPDATE;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'terminal schedule audit event requires active claim'
+              USING ERRCODE = '23514';
+          END IF;
           IF NOT EXISTS (
             SELECT 1
             FROM ops.dagster_schedule_audit_events AS requested
@@ -215,6 +224,14 @@ def upgrade() -> None:
               AND requested.reason IS NOT DISTINCT FROM NEW.reason
           ) THEN
             RAISE EXCEPTION 'terminal schedule audit event does not match requested event'
+              USING ERRCODE = '23514';
+          END IF;
+          IF EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_claim_resolutions AS resolution
+            WHERE resolution.command_id = NEW.command_id
+          ) THEN
+            RAISE EXCEPTION 'resolved schedule claim cannot receive terminal audit event'
               USING ERRCODE = '23514';
           END IF;
           RETURN NEW;
@@ -251,27 +268,36 @@ def upgrade() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
+          PERFORM 1
+          FROM ops.dagster_schedule_active_claims AS claim
+          WHERE claim.command_id = NEW.command_id
+            AND claim.schedule_name = NEW.schedule_name
+          FOR UPDATE;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'only an active uncertain schedule claim can be resolved'
+              USING ERRCODE = '23514';
+          END IF;
           IF NOT EXISTS (
             SELECT 1
-            FROM ops.dagster_schedule_active_claims AS claim
-            JOIN ops.dagster_schedule_audit_events AS requested
-              ON requested.command_id = claim.command_id
-             AND requested.phase = 'requested'
-            LEFT JOIN ops.dagster_schedule_audit_events AS terminal
-              ON terminal.command_id = claim.command_id
-             AND terminal.phase IN ('succeeded','failed')
-            WHERE claim.command_id = NEW.command_id
-              AND claim.schedule_name = NEW.schedule_name
+            FROM ops.dagster_schedule_audit_events AS requested
+            WHERE requested.command_id = NEW.command_id
               AND requested.schedule_name = NEW.schedule_name
+              AND requested.phase = 'requested'
+          ) THEN
+            RAISE EXCEPTION 'schedule claim resolution requires requested event'
+              USING ERRCODE = '23514';
+          END IF;
+          IF EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_audit_events AS terminal
+            WHERE terminal.command_id = NEW.command_id
+              AND terminal.phase IN ('succeeded','failed')
               AND (
-                terminal.command_id IS NULL
-                OR (
-                  terminal.schedule_name = NEW.schedule_name
-                  AND terminal.details ->> 'outcome_certainty' = 'uncertain'
-                )
+                terminal.schedule_name <> NEW.schedule_name
+                OR terminal.details ->> 'outcome_certainty' IS DISTINCT FROM 'uncertain'
               )
           ) THEN
-            RAISE EXCEPTION 'only an active uncertain schedule claim can be resolved'
+            RAISE EXCEPTION 'confirmed schedule terminal event cannot be resolved'
               USING ERRCODE = '23514';
           END IF;
           RETURN NEW;
