@@ -66,6 +66,7 @@ from kortravelmap.providers.standard_data import (
     cultural_festivals_to_bundles,
 )
 from kortravelmap.settings import KorTravelMapSettings
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -100,7 +101,7 @@ async def _cleanup_committed_execution_rows(
     """phase commit 테스트가 남긴 행을 테스트마다 제거한다."""
     yield
     async with AsyncSession(migrated_engine) as session, session.begin():
-        await session.execute(text(_TRUNCATE_SQL))
+        await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 @pytest.fixture

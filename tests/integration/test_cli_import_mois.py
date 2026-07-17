@@ -21,6 +21,7 @@ from kortravelmap.cli.main import build_parser
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.models import FeatureRow
 from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -61,7 +62,7 @@ async def container_dsn(
     dsn = normalize_async_dsn(pg_container.get_connection_url())  # type: ignore[attr-defined]
     yield dsn
     async with AsyncSession(migrated_engine) as session, session.begin():
-        await session.execute(text(_TRUNCATE_SQL))
+        await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def _feature_count(engine: AsyncEngine) -> int:
