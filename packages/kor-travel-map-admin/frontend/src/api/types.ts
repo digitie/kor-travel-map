@@ -9247,7 +9247,6 @@ export interface components {
             audit_command_id?: string | null;
             /**
              * Audit Status
-             * @default recorded
              * @enum {string}
              */
             audit_status: "recorded" | "terminal_record_failed";

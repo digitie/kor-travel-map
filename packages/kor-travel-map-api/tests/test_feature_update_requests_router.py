@@ -20,6 +20,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.providers.kma import (
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
+    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
@@ -529,7 +530,7 @@ def test_create_idempotency_replays_canonical_body_and_conflicts_on_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mapping: FeatureUpdateRequestIdempotency | None = None
-    terminal = replace(_request(), state="done", operator="local-dev", reason="same")
+    terminal = replace(_request(), status="done", operator="local-dev", reason="same")
 
     async def _enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
         return replace(_request(), operator="local-dev", reason="same")
@@ -659,7 +660,7 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
     first_key = "10000000-0000-4000-8000-000000000001"
     second_key = "10000000-0000-4000-8000-000000000002"
     base = {
-        "providers": [MOIS_PROVIDER_NAME],
+        "providers": [KMA_PROVIDER_NAME],
         "reason": "canonical plan",
     }
     first = client.post(
@@ -667,7 +668,10 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
         headers={"Idempotency-Key": first_key},
         json={
             **base,
-            "dataset_keys": [DATASET_KEY_DETAIL, DATASET_KEY_BULK],
+            "dataset_keys": [
+                KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+                KMA_SHORT_FORECAST_DATASET_KEY,
+            ],
             "scope": {
                 "type": "feature_ids",
                 "feature_ids": ["feature-b", "feature-a"],
@@ -679,7 +683,10 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
         headers={"Idempotency-Key": second_key},
         json={
             **base,
-            "dataset_keys": [DATASET_KEY_BULK, DATASET_KEY_DETAIL],
+            "dataset_keys": [
+                KMA_SHORT_FORECAST_DATASET_KEY,
+                KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+            ],
             "scope": {
                 "type": "feature_ids",
                 "feature_ids": ["feature-a", "feature-b"],
@@ -701,7 +708,14 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
     assert (
         enqueued[0]["dataset_keys"]
         == enqueued[1]["dataset_keys"]
-        == tuple(sorted((DATASET_KEY_BULK, DATASET_KEY_DETAIL)))
+        == tuple(
+            sorted(
+                (
+                    KMA_SHORT_FORECAST_DATASET_KEY,
+                    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+                )
+            )
+        )
     )
 
 

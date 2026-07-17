@@ -120,17 +120,19 @@ async def test_feature_update_idempotency_ledger_is_actor_scoped_and_append_only
             )
         ).all()
     )
-    assert constraints["pk_feature_update_request_idempotency"] == (
-        "PRIMARY KEY (actor, idempotency_key)"
+    primary_key = next(
+        definition
+        for definition in constraints.values()
+        if definition.startswith("PRIMARY KEY")
     )
-    assert (
-        "FOREIGN KEY (request_id)"
-        in constraints["fk_feature_update_request_idempotency_request_id_feature_update_requests"]
+    request_foreign_key = next(
+        definition
+        for definition in constraints.values()
+        if definition.startswith("FOREIGN KEY (request_id)")
     )
-    assert (
-        "ON DELETE RESTRICT"
-        in constraints["fk_feature_update_request_idempotency_request_id_feature_update_requests"]
-    )
+    assert primary_key == "PRIMARY KEY (actor, idempotency_key)"
+    assert "FOREIGN KEY (request_id)" in request_foreign_key
+    assert "ON DELETE RESTRICT" in request_foreign_key
     request_index = await migrated_session.scalar(
         text(
             """

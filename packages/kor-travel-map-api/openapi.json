@@ -19127,7 +19127,6 @@
             "title": "Audit Command Id"
           },
           "audit_status": {
-            "default": "recorded",
             "enum": [
               "recorded",
               "terminal_record_failed"
@@ -19305,7 +19304,8 @@
           "effective_cron_schedule",
           "save_status",
           "reload_status",
-          "effective_status"
+          "effective_status",
+          "audit_status"
         ],
         "title": "PipelineScheduleCommandData",
         "type": "object"

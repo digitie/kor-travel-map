@@ -529,7 +529,7 @@ class PipelineScheduleCommandData(BaseModel):
     effective_status: Literal["confirmed", "pending_verification", "mismatch", "unknown"]
     outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed"
     audit_command_id: UUID | None = None
-    audit_status: Literal["recorded", "terminal_record_failed"] = "recorded"
+    audit_status: Literal["recorded", "terminal_record_failed"]
     errors: list[str] = Field(default_factory=list)
 
 

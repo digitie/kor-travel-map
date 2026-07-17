@@ -91,7 +91,7 @@ def schedule_validation_http_exception(
     """schedule 입력 오류를 RFC7807 중앙 handler 입력으로 바꾼다."""
 
     return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail={
             "code": "INVALID_SCHEDULE_COMMAND",
             "message": str(exc),
