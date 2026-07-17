@@ -68,7 +68,9 @@ def schedule_uncertain_outcome_http_exception(
             "message": str(exc),
             "details": {
                 "command_id": str(exc.command_id),
-                "active_command_id": str(exc.command_id),
+                "active_command_id": (
+                    str(exc.active_command_id) if exc.active_command_id is not None else None
+                ),
                 "outcome_certainty": "uncertain",
             },
         },

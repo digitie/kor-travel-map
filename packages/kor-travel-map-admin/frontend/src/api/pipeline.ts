@@ -23,6 +23,8 @@ import {
   patchJson,
   pathWithQuery,
   postJson,
+  readFrozenIdempotencySubmission,
+  withFrozenIdempotencySubmission,
   withIdempotencyKey,
 } from "./client";
 import {
@@ -70,6 +72,14 @@ export type PipelineScheduleClaimResolutionRequest =
   Schemas["PipelineScheduleClaimResolutionRequest"];
 export type PipelineScheduleClaimResolutionResponse =
   Schemas["PipelineScheduleClaimResolutionResponse"];
+export type PipelineScheduleMutationSubmission =
+  | { kind: "patch"; body: PipelineScheduleUpdateRequest }
+  | { kind: "command"; body: PipelineScheduleCommandRequest };
+export interface PipelineFrozenScheduleMutation {
+  scheduleName: string;
+  idempotencyKey: string;
+  submission: PipelineScheduleMutationSubmission;
+}
 export type FeatureUpdateRequestCreateRequest =
   Schemas["FeatureUpdateRequestCreateRequest"];
 export type FeatureUpdateRequestCreateResponse =
@@ -445,6 +455,87 @@ export function usePreviewUpdateRequestMutation() {
   });
 }
 
+function pipelineScheduleMutationKey(scheduleName: string): string {
+  return `pipeline:schedule:${scheduleName}:mutation`;
+}
+
+function isPipelineScheduleMutationSubmission(
+  value: unknown,
+): value is PipelineScheduleMutationSubmission {
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    return false;
+  }
+  const submission = value as {
+    kind?: unknown;
+    body?: unknown;
+  };
+  if (
+    (submission.kind !== "patch" && submission.kind !== "command") ||
+    typeof submission.body !== "object" ||
+    submission.body === null
+  ) {
+    return false;
+  }
+  if (submission.kind === "patch") {
+    const cronSchedule = (submission.body as { cron_schedule?: unknown })
+      .cron_schedule;
+    return cronSchedule === null || typeof cronSchedule === "string";
+  }
+  return ["run", "start", "stop", "reset"].includes(
+    String((submission.body as { command?: unknown }).command ?? ""),
+  );
+}
+
+export function readPipelineFrozenScheduleMutation(
+  scheduleName: string,
+): PipelineFrozenScheduleMutation | null {
+  const frozen =
+    readFrozenIdempotencySubmission<PipelineScheduleMutationSubmission>(
+      pipelineScheduleMutationKey(scheduleName),
+    );
+  if (frozen === null) {
+    return null;
+  }
+  if (!isPipelineScheduleMutationSubmission(frozen.submission)) {
+    throw new Error("저장된 schedule mutation 요청 형식이 올바르지 않습니다.");
+  }
+  return {
+    scheduleName,
+    idempotencyKey: frozen.idempotencyKey,
+    submission: frozen.submission,
+  };
+}
+
+function submitScheduleMutation(
+  scheduleName: string,
+  requestedSubmission: PipelineScheduleMutationSubmission,
+): Promise<PipelineScheduleCommandResponse> {
+  return withFrozenIdempotencySubmission(
+    pipelineScheduleMutationKey(scheduleName),
+    requestedSubmission,
+    (submission, idempotencyKey) => {
+      const options = { headers: { "Idempotency-Key": idempotencyKey } };
+      if (submission.kind === "patch") {
+        return patchJson<PipelineScheduleCommandResponse>(
+          `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}`,
+          submission.body,
+          options,
+        );
+      }
+      return postJson<PipelineScheduleCommandResponse>(
+        `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}/commands`,
+        submission.body,
+        options,
+      );
+    },
+    {
+      retainOnSuccess: (response) =>
+        response.data.outcome_certainty === "uncertain" ||
+        response.data.audit_status === "terminal_record_failed",
+    },
+  );
+}
+
 export function useRunNowUpdateRequestMutation() {
   const queryClient = useQueryClient();
   return useMutation<
@@ -484,19 +575,7 @@ export function usePatchScheduleMutation() {
     { scheduleName: string; body: PipelineScheduleUpdateRequest }
   >({
     mutationFn: ({ scheduleName, body }) =>
-      withIdempotencyKey(
-        `pipeline:schedule:${scheduleName}:patch:${JSON.stringify(body)}`,
-        (idempotencyKey) =>
-          patchJson<PipelineScheduleCommandResponse>(
-            `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}`,
-            body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
-          ),
-        {
-          retainOnSuccess: (response) =>
-            response.data.audit_status === "terminal_record_failed",
-        },
-      ),
+      submitScheduleMutation(scheduleName, { kind: "patch", body }),
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "schedules"],
@@ -517,19 +596,7 @@ export function useScheduleCommandMutation() {
     { scheduleName: string; body: PipelineScheduleCommandRequest }
   >({
     mutationFn: ({ scheduleName, body }) =>
-      withIdempotencyKey(
-        `pipeline:schedule:${scheduleName}:command:${JSON.stringify(body)}`,
-        (idempotencyKey) =>
-          postJson<PipelineScheduleCommandResponse>(
-            `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}/commands`,
-            body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
-          ),
-        {
-          retainOnSuccess: (response) =>
-            response.data.audit_status === "terminal_record_failed",
-        },
-      ),
+      submitScheduleMutation(scheduleName, { kind: "command", body }),
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "schedules"],

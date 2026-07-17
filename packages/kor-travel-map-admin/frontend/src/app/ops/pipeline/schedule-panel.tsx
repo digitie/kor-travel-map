@@ -9,6 +9,7 @@ import {
   type PipelineScheduleCommand,
   type PipelineScheduleCommandResponse,
   type PipelineScheduleClaimResolutionRequest,
+  readPipelineFrozenScheduleMutation,
   usePatchScheduleMutation,
   usePipelineSchedules,
   useResolveScheduleClaimMutation,
@@ -238,6 +239,21 @@ export function SchedulePanel({
 
   const data = schedules.data?.data;
   const scheduleItems = useMemo(() => data?.schedules ?? [], [data]);
+  const [frozenScheduleMutation, setFrozenScheduleMutation] = useState<
+    ReturnType<typeof readPipelineFrozenScheduleMutation>
+  >(null);
+  useEffect(() => {
+    setFrozenScheduleMutation(
+      scheduleItems
+        .map((schedule) => readPipelineFrozenScheduleMutation(schedule.name))
+        .find((submission) => submission !== null) ?? null,
+    );
+  }, [
+    commandSchedule.status,
+    patchSchedule.status,
+    resolveClaim.status,
+    scheduleItems,
+  ]);
   const sensors = data?.sensors ?? [];
   const scheduleMutationPending =
     patchSchedule.isPending ||
@@ -264,7 +280,7 @@ export function SchedulePanel({
       ? claimResolutionSubmission
       : null;
   const scheduleRecoveryLocked = Boolean(
-    recoveryClaim || claimResolutionSubmission,
+    recoveryClaim || claimResolutionSubmission || frozenScheduleMutation,
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
@@ -461,6 +477,42 @@ export function SchedulePanel({
     );
   };
 
+  const retryFrozenScheduleMutation = () => {
+    if (
+      !frozenScheduleMutation ||
+      recoveryClaim ||
+      patchSchedule.isPending ||
+      commandSchedule.isPending
+    ) {
+      return;
+    }
+    patchSchedule.reset();
+    commandSchedule.reset();
+    resolveClaim.reset();
+    setLastResult(null);
+    scheduleControlsGuardRef.current = true;
+    const onSuccess = (response: PipelineScheduleCommandResponse) => {
+      setLastResult(response.data);
+    };
+    if (frozenScheduleMutation.submission.kind === "patch") {
+      patchSchedule.mutate(
+        {
+          scheduleName: frozenScheduleMutation.scheduleName,
+          body: frozenScheduleMutation.submission.body,
+        },
+        { onSuccess },
+      );
+      return;
+    }
+    commandSchedule.mutate(
+      {
+        scheduleName: frozenScheduleMutation.scheduleName,
+        body: frozenScheduleMutation.submission.body,
+      },
+      { onSuccess },
+    );
+  };
+
   return (
     <div className="space-y-4">
       {schedules.isError ? (
@@ -495,6 +547,49 @@ export function SchedulePanel({
         <Alert variant="destructive">
           <AlertTitle>스케줄 명령 호출 실패</AlertTitle>
           <AlertDescription>{commandSchedule.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      {frozenScheduleMutation ? (
+        <Alert
+          data-testid="schedule-frozen-submission"
+          variant="destructive"
+        >
+          <AlertTitle>결과 확인 전 schedule 요청 고정됨</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              응답 유실 가능성이 있어 UUID, endpoint, 요청 본문을 탭에
+              보존했습니다. 다른 cron·명령으로 바꾸지 않고 이 요청만 같은
+              Idempotency-Key로 재확인합니다.
+            </p>
+            <p>
+              schedule{" "}
+              <span className="font-mono">
+                {frozenScheduleMutation.scheduleName}
+              </span>
+              {" · "}
+              {frozenScheduleMutation.submission.kind === "patch"
+                ? "cron 변경"
+                : COMMAND_LABELS[frozenScheduleMutation.submission.body.command]}
+              {" · key "}
+              <span className="font-mono">
+                {frozenScheduleMutation.idempotencyKey}
+              </span>
+            </p>
+            {recoveryClaim ? (
+              <p>Dagster 실제 상태 확인 후 아래 claim 해제를 진행하세요.</p>
+            ) : (
+              <Button
+                disabled={
+                  patchSchedule.isPending || commandSchedule.isPending
+                }
+                type="button"
+                variant="destructive"
+                onClick={retryFrozenScheduleMutation}
+              >
+                동일 요청 재확인
+              </Button>
+            )}
+          </AlertDescription>
         </Alert>
       ) : null}
       {recoveryClaim ? (

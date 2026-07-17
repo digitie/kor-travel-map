@@ -6,7 +6,6 @@ HTTP 요청 컨텍스트와 route metadata만 소유하며, Dagster 조회·파�
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -54,7 +53,7 @@ async def _execute_audited_command(
     reason: str | None,
     request_details: dict[str, object],
     command_id: UUID,
-    operation: Callable[[], Awaitable[DagsterScheduleCommandResponse]],
+    operation: dagster_schedule_service.AuditedScheduleOperation,
 ) -> DagsterScheduleCommandResponse:
     try:
         return await dagster_schedule_service.execute_audited_schedule_command(
@@ -179,13 +178,14 @@ async def update_dagster_schedule(
             reason=body.reason,
             request_details={"cron_schedule": body.cron_schedule},
             command_id=idempotency_key,
-            operation=lambda: dagster_schedule_service.update_schedule(
+            operation=lambda mutation_guard: dagster_schedule_service.update_schedule(
                 settings=settings,
                 client=client,
                 session=session,
                 schedule_name=schedule_name,
                 body=body,
                 actor=context.actor,
+                mutation_guard=mutation_guard,
             ),
         )
     except dagster_schedule_service.DagsterScheduleValidationError as exc:
@@ -218,11 +218,12 @@ async def reset_dagster_schedule_default(
         reason=reason,
         request_details={"target": "code_default"},
         command_id=idempotency_key,
-        operation=lambda: dagster_schedule_service.reset_schedule_default(
+        operation=lambda mutation_guard: dagster_schedule_service.reset_schedule_default(
             settings=settings,
             client=client,
             session=session,
             schedule_name=schedule_name,
+            mutation_guard=mutation_guard,
         ),
     )
     return schedule_command_response_or_raise(response)
@@ -249,12 +250,13 @@ async def mutate_schedule_state(
         reason=reason,
         request_details={"command": command},
         command_id=command_id,
-        operation=lambda: dagster_schedule_service.mutate_schedule_state(
+        operation=lambda mutation_guard: dagster_schedule_service.mutate_schedule_state(
             settings=settings,
             client=client,
             session=session,
             schedule_name=schedule_name,
             command=command,
+            mutation_guard=mutation_guard,
         ),
     )
     return schedule_command_response_or_raise(response)
@@ -360,13 +362,14 @@ async def run_dagster_schedule_now(
         reason=reason,
         request_details={"command": "run"},
         command_id=idempotency_key,
-        operation=lambda: dagster_schedule_service.run_schedule_now(
+        operation=lambda mutation_guard: dagster_schedule_service.run_schedule_now(
             settings=settings,
             client=client,
             session=session,
             schedule_name=schedule_name,
             body=body,
             actor=context.actor,
+            mutation_guard=mutation_guard,
         ),
     )
     return schedule_command_response_or_raise(response)

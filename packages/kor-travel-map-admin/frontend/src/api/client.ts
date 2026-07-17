@@ -65,6 +65,85 @@ function writeIdempotencyKey(operationKey: string, value: string | null): void {
   }
 }
 
+export interface FrozenIdempotencySubmission<T> {
+  idempotencyKey: string;
+  submission: T;
+}
+
+interface StoredFrozenIdempotencySubmission {
+  version: 1;
+  idempotency_key: string;
+  submission: unknown;
+}
+
+function frozenIdempotencyStorageKey(operationKey: string): string {
+  return idempotencyStorageKey(`${operationKey}:frozen-submission`);
+}
+
+function readFrozenIdempotencyValue(operationKey: string): string | null {
+  const storageKey = frozenIdempotencyStorageKey(operationKey);
+  try {
+    return (
+      window.sessionStorage.getItem(storageKey) ??
+      idempotencyFallback.get(storageKey) ??
+      null
+    );
+  } catch {
+    return idempotencyFallback.get(storageKey) ?? null;
+  }
+}
+
+function writeFrozenIdempotencyValue(
+  operationKey: string,
+  value: string | null,
+): void {
+  const storageKey = frozenIdempotencyStorageKey(operationKey);
+  if (value === null) {
+    idempotencyFallback.delete(storageKey);
+  } else {
+    idempotencyFallback.set(storageKey, value);
+  }
+  try {
+    if (value === null) {
+      window.sessionStorage.removeItem(storageKey);
+    } else {
+      window.sessionStorage.setItem(storageKey, value);
+    }
+  } catch {
+    // storage 차단 환경은 탭 수명 in-memory submission으로 동일 재시도를 보호한다.
+  }
+}
+
+export function readFrozenIdempotencySubmission<T>(
+  operationKey: string,
+): FrozenIdempotencySubmission<T> | null {
+  const raw = readFrozenIdempotencyValue(operationKey);
+  if (raw === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("저장된 idempotency 요청을 해석할 수 없습니다.");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (parsed as Partial<StoredFrozenIdempotencySubmission>).version !== 1 ||
+    typeof (parsed as Partial<StoredFrozenIdempotencySubmission>)
+      .idempotency_key !== "string" ||
+    !("submission" in parsed)
+  ) {
+    throw new Error("저장된 idempotency 요청 형식이 올바르지 않습니다.");
+  }
+  const stored = parsed as StoredFrozenIdempotencySubmission;
+  return {
+    idempotencyKey: stored.idempotency_key,
+    submission: stored.submission as T,
+  };
+}
+
 export function clearIdempotencyKeys(operationPrefix: string): void {
   const storagePrefix = idempotencyStorageKey(operationPrefix);
   for (const key of idempotencyFallback.keys()) {
@@ -164,6 +243,77 @@ export async function withIdempotencyKey<T>(
           (confirmedRecordedFailure || !uncertainTransport)))
     ) {
       writeIdempotencyKey(operationKey, null);
+    }
+    throw error;
+  }
+}
+
+/**
+ * 결과가 불명인 mutation의 UUID와 canonical 요청 전체를 한 원자적 storage 값으로
+ * 고정한다. 다음 호출은 caller가 새 body를 넘겨도 저장된 endpoint/body를 그대로
+ * 재전송하므로 response-loss 뒤 다른 schedule 조작으로 넘어갈 수 없다.
+ */
+export async function withFrozenIdempotencySubmission<TSubmission, TResult>(
+  operationKey: string,
+  requestedSubmission: TSubmission,
+  operation: (
+    submission: TSubmission,
+    idempotencyKey: string,
+  ) => Promise<TResult>,
+  options: { retainOnSuccess?: (result: TResult) => boolean } = {},
+): Promise<TResult> {
+  const frozen = readFrozenIdempotencySubmission<TSubmission>(operationKey) ?? {
+    idempotencyKey: globalThis.crypto.randomUUID(),
+    submission: requestedSubmission,
+  };
+  const stored: StoredFrozenIdempotencySubmission = {
+    version: 1,
+    idempotency_key: frozen.idempotencyKey,
+    submission: frozen.submission,
+  };
+  writeFrozenIdempotencyValue(operationKey, JSON.stringify(stored));
+  try {
+    const result = await operation(frozen.submission, frozen.idempotencyKey);
+    if (!options.retainOnSuccess?.(result)) {
+      writeFrozenIdempotencyValue(operationKey, null);
+    }
+    return result;
+  } catch (error) {
+    const problemDetails =
+      error instanceof ApiClientError &&
+      typeof error.problem?.details === "object" &&
+      error.problem.details !== null
+        ? (error.problem.details as Record<string, unknown>)
+        : null;
+    const confirmedRecordedFailure =
+      problemDetails?.outcome_certainty === "confirmed" &&
+      problemDetails.audit_status === "recorded";
+    const explicitPreMutationFailure =
+      error instanceof ApiClientError &&
+      [
+        "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
+        "INVALID_SCHEDULE_COMMAND",
+      ].includes(error.problem?.code ?? "");
+    const uncertainConflict =
+      error instanceof ApiClientError &&
+      [
+        "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+        "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
+      ].includes(error.problem?.code ?? "");
+    const uncertainTransport =
+      error instanceof ApiClientError &&
+      (error.status >= 500 ||
+        error.status === 408 ||
+        error.status === 425 ||
+        error.status === 429 ||
+        error.status === 499);
+    if (
+      error instanceof ApiClientError &&
+      (explicitPreMutationFailure ||
+        (!uncertainConflict &&
+          (confirmedRecordedFailure || !uncertainTransport)))
+    ) {
+      writeFrozenIdempotencyValue(operationKey, null);
     }
     throw error;
   }

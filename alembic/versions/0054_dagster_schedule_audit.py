@@ -193,13 +193,13 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("clock_timestamp()"),
             nullable=False,
         ),
         sa.Column(
             "resolvable_after",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now() + interval '5 minutes'"),
+            server_default=sa.text("clock_timestamp() + interval '5 minutes'"),
             nullable=False,
         ),
         sa.Column("operation_finished_at", sa.DateTime(timezone=True), nullable=True),
@@ -349,6 +349,11 @@ def upgrade() -> None:
               AND requested.reason IS NOT DISTINCT FROM NEW.reason
           ) THEN
             RAISE EXCEPTION 'terminal schedule audit event does not match requested event'
+              USING ERRCODE = '23514';
+          END IF;
+          IF NEW.details ->> 'outcome_certainty' IS NULL
+             OR NEW.details ->> 'outcome_certainty' NOT IN ('confirmed','uncertain') THEN
+            RAISE EXCEPTION 'terminal schedule audit event requires valid outcome certainty'
               USING ERRCODE = '23514';
           END IF;
           IF EXISTS (

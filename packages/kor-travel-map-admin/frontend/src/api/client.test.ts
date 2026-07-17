@@ -5,6 +5,8 @@ import {
   getJson,
   idempotencyOperationKey,
   postJson,
+  readFrozenIdempotencySubmission,
+  withFrozenIdempotencySubmission,
   withIdempotencyKey,
 } from "./client";
 
@@ -189,6 +191,75 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("응답 유실 뒤 UUID와 endpoint/body를 함께 고정해 다른 요청을 보내지 않는다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "abababab-abab-4bab-8bab-abababababab",
+      "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+    ]);
+    type Submission =
+      | { kind: "command"; body: { command: string; reason: string } }
+      | { kind: "patch"; body: { cron_schedule: string; reason: string } };
+    const seen: Array<{ key: string; submission: Submission }> = [];
+    const operation = async (submission: Submission, key: string) => {
+      seen.push({ key, submission });
+      if (seen.length === 1) {
+        throw new TypeError("response lost");
+      }
+      return "ok";
+    };
+    const original: Submission = {
+      kind: "command",
+      body: { command: "stop", reason: "원 요청" },
+    };
+    const changed: Submission = {
+      kind: "patch",
+      body: { cron_schedule: "30 2 * * *", reason: "바뀐 요청" },
+    };
+
+    await expect(
+      withFrozenIdempotencySubmission(
+        "pipeline:schedule:x:mutation",
+        original,
+        operation,
+      ),
+    ).rejects.toThrow("response lost");
+    expect(
+      readFrozenIdempotencySubmission<Submission>(
+        "pipeline:schedule:x:mutation",
+      ),
+    ).toEqual({
+      idempotencyKey: "abababab-abab-4bab-8bab-abababababab",
+      submission: original,
+    });
+
+    await withFrozenIdempotencySubmission(
+      "pipeline:schedule:x:mutation",
+      changed,
+      operation,
+    );
+    await withFrozenIdempotencySubmission(
+      "pipeline:schedule:x:mutation",
+      changed,
+      operation,
+    );
+
+    expect(seen).toEqual([
+      {
+        key: "abababab-abab-4bab-8bab-abababababab",
+        submission: original,
+      },
+      {
+        key: "abababab-abab-4bab-8bab-abababababab",
+        submission: original,
+      },
+      {
+        key: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+        submission: changed,
+      },
     ]);
     expect(randomUUID).toHaveBeenCalledTimes(2);
   });

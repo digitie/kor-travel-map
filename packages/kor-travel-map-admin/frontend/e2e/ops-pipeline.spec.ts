@@ -2240,22 +2240,31 @@ test.describe("/ops/pipeline", () => {
     });
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await page
-        .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
-        .click();
-      if (attempt === 0) {
-        await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
-      } else if (attempt === 1) {
-        await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(
-          0,
-        );
-      }
-    }
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+      .click();
+    await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
+    const frozenSubmission = page.getByTestId("schedule-frozen-submission");
+    await expect(frozenSubmission).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` }),
+    ).toBeDisabled();
+
+    await page.reload();
+    await expect(frozenSubmission).toContainText("동일 요청만");
+    await frozenSubmission
+      .getByRole("button", { name: "동일 요청 재확인" })
+      .click();
+    await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(0);
+    await frozenSubmission
+      .getByRole("button", { name: "동일 요청 재확인" })
+      .click();
 
     expect(counters.scheduleKeys).toHaveLength(3);
     expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
     expect(counters.scheduleKeys[2]).toBe(counters.scheduleKeys[0]);
+    expect(counters.commandBodies[1]).toEqual(counters.commandBodies[0]);
+    expect(counters.commandBodies[2]).toEqual(counters.commandBodies[0]);
     const recovery = page.getByTestId("schedule-claim-recovery");
     await expect(recovery).toContainText(counters.scheduleKeys[0]);
     await recovery

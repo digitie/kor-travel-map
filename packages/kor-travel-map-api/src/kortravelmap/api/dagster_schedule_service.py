@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -45,7 +46,9 @@ __all__ = [
     "DagsterScheduleClaimNotFound",
     "DagsterScheduleClaimResolutionConflict",
     "append_schedule_audit_event",
+    "AuditedScheduleOperation",
     "ScheduleCommand",
+    "ScheduleMutationGuard",
     "delete_schedule_override",
     "execute_audited_schedule_command",
     "mutate_schedule_state",
@@ -58,6 +61,11 @@ __all__ = [
 ]
 
 ScheduleCommand = Literal["update", "default", "start", "stop", "reset", "run"]
+ScheduleMutationGuard = Callable[[], Awaitable[None]]
+AuditedScheduleOperation = Callable[
+    [ScheduleMutationGuard], Awaitable[DagsterScheduleCommandResponse]
+]
+_SCHEDULE_OPERATION_TIMEOUT_SECONDS: Final = 120.0
 
 
 class DagsterScheduleValidationError(ValueError):
@@ -88,9 +96,16 @@ class DagsterScheduleIdempotencyConflict(RuntimeError):
 class DagsterScheduleUncertainOutcome(RuntimeError):
     """외부 반영 여부를 확정할 수 없어 운영자 확인이 필요한 명령 결과."""
 
-    def __init__(self, message: str, *, command_id: UUID) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        command_id: UUID,
+        active_command_id: UUID | None = None,
+    ) -> None:
         super().__init__(message)
         self.command_id = command_id
+        self.active_command_id = active_command_id
 
 
 class DagsterScheduleClaimNotFound(LookupError):
@@ -598,9 +613,7 @@ async def _claim_schedule_command(
             if active_row is not None and bool(active_row.is_resolvable)
             else None
         )
-        active_claim_resolvable_at = (
-            active_row.resolvable_after if active_row is not None else None
-        )
+        active_claim_resolvable_at = active_row.resolvable_after if active_row is not None else None
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
@@ -654,7 +667,11 @@ async def _claim_schedule_command(
             raise DagsterScheduleValidationError(message)
         if exception_kind == "storage_unavailable":
             raise DagsterScheduleStorageUnavailable(message)
-        raise DagsterScheduleUncertainOutcome(message, command_id=command_id)
+        raise DagsterScheduleUncertainOutcome(
+            message,
+            command_id=command_id,
+            active_command_id=command_id,
+        )
     try:
         data = DagsterScheduleCommandData.model_validate(terminal_details)
     except ValueError as exc:
@@ -769,6 +786,47 @@ async def _mark_schedule_claim_operation_finished(
         raise DagsterScheduleStorageUnavailable(
             "schedule active claim의 외부 호출 종료를 기록할 수 없습니다."
         ) from exc
+
+
+async def _assert_schedule_claim_mutation_allowed(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+    schedule_name: str,
+) -> None:
+    """실제 side effect 직전 claim 소유권과 아직 유효한 lease를 확인한다."""
+
+    try:
+        allowed = await session.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM ops.dagster_schedule_active_claims
+                  WHERE command_id = CAST(:command_id AS uuid)
+                    AND schedule_name = :schedule_name
+                    AND operation_finished_at IS NULL
+                    AND resolvable_after > clock_timestamp()
+                )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        await session.rollback()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule mutation 직전 active claim을 확인할 수 없습니다."
+        ) from exc
+    if allowed is not True:
+        raise DagsterScheduleUncertainOutcome(
+            "schedule active claim lease가 만료되거나 해제되어 기존 mutation을 중단했습니다.",
+            command_id=command_id,
+            active_command_id=None,
+        )
 
 
 async def resolve_schedule_active_claim(
@@ -984,7 +1042,7 @@ async def execute_audited_schedule_command(
     reason: str | None,
     request_details: dict[str, object],
     command_id: UUID,
-    operation: Callable[[], Awaitable[DagsterScheduleCommandResponse]],
+    operation: AuditedScheduleOperation,
 ) -> DagsterScheduleCommandResponse:
     """인증 actor 기반 request/result 두 이벤트로 외부 mutation을 감싼다."""
 
@@ -999,8 +1057,14 @@ async def execute_audited_schedule_command(
     )
     if replay is not None:
         return replay
+    mutation_guard = lambda: _assert_schedule_claim_mutation_allowed(
+        session,
+        command_id=command_id,
+        schedule_name=schedule_name,
+    )
     try:
-        response = await operation()
+        async with asyncio.timeout(_SCHEDULE_OPERATION_TIMEOUT_SECONDS):
+            response = await operation(mutation_guard)
     except Exception as exc:
         await session.rollback()
         exception_kind = (
@@ -1010,52 +1074,73 @@ async def execute_audited_schedule_command(
             if isinstance(exc, DagsterScheduleStorageUnavailable)
             else "unexpected"
         )
+        marker_persisted = False
         try:
             await _mark_schedule_claim_operation_finished(
                 session,
                 command_id=command_id,
                 schedule_name=schedule_name,
             )
-            await append_schedule_audit_event(
-                session,
-                command_id=command_id,
-                schedule_name=schedule_name,
-                command=command,
-                phase="failed",
-                actor=actor,
-                reason=reason,
-                details={
-                    "outcome": "exception",
-                    "outcome_version": 1,
-                    "exception_kind": exception_kind,
-                    "exception_type": type(exc).__name__,
-                    "message": str(exc),
-                    "outcome_certainty": (
-                        "confirmed"
-                        if exception_kind in {"validation", "storage_unavailable"}
-                        else "uncertain"
-                    ),
-                },
-                release_active_claim=exception_kind in {"validation", "storage_unavailable"},
-            )
+            marker_persisted = True
         except DagsterScheduleStorageUnavailable:
             _LOG.exception(
-                "schedule 실패 terminal audit 저장 실패 (command_id=%s)",
+                "schedule 실패 operation-finished marker 저장 실패 (command_id=%s)",
                 command_id,
             )
+        if marker_persisted:
+            try:
+                await append_schedule_audit_event(
+                    session,
+                    command_id=command_id,
+                    schedule_name=schedule_name,
+                    command=command,
+                    phase="failed",
+                    actor=actor,
+                    reason=reason,
+                    details={
+                        "outcome": "exception",
+                        "outcome_version": 1,
+                        "exception_kind": exception_kind,
+                        "exception_type": type(exc).__name__,
+                        "message": str(exc),
+                        "outcome_certainty": (
+                            "confirmed"
+                            if exception_kind in {"validation", "storage_unavailable"}
+                            else "uncertain"
+                        ),
+                    },
+                    release_active_claim=(exception_kind in {"validation", "storage_unavailable"}),
+                )
+            except DagsterScheduleStorageUnavailable:
+                _LOG.exception(
+                    "schedule 실패 terminal audit 저장 실패 (command_id=%s)",
+                    command_id,
+                )
         if exception_kind == "unexpected":
             raise DagsterScheduleUncertainOutcome(
                 str(exc),
                 command_id=command_id,
+                active_command_id=command_id if marker_persisted else None,
             ) from exc
         raise
-    response.data.audit_command_id = command_id
     try:
         await _mark_schedule_claim_operation_finished(
             session,
             command_id=command_id,
             schedule_name=schedule_name,
         )
+    except DagsterScheduleStorageUnavailable:
+        response.data.audit_command_id = None
+        response.data.audit_status = "terminal_record_failed"
+        _LOG.exception(
+            "schedule 원격 결과 operation-finished marker 저장 실패; "
+            "claim ID는 안전 lease 전까지 노출하지 않음 (command_id=%s, status=%s)",
+            command_id,
+            response.data.status,
+        )
+        return response
+    response.data.audit_command_id = command_id
+    try:
         await append_schedule_audit_event(
             session,
             command_id=command_id,
@@ -1343,6 +1428,7 @@ async def update_schedule(
     schedule_name: str,
     body: DagsterScheduleOverrideRequest,
     actor: str,
+    mutation_guard: ScheduleMutationGuard,
 ) -> DagsterScheduleCommandResponse:
     """cron override를 저장하고 code location을 reload한다."""
 
@@ -1395,6 +1481,7 @@ async def update_schedule(
             ),
             started_at=started_at,
         )
+    await mutation_guard()
     await upsert_schedule_override(
         session,
         schedule_name=schedule_name,
@@ -1402,6 +1489,7 @@ async def update_schedule(
         actor=actor,
         reason=body.reason,
     )
+    await mutation_guard()
     reload_result, reload_error, outcome_certainty = await _reload_location(
         client=client,
         dagster_urls=urls,
@@ -1446,6 +1534,7 @@ async def reset_schedule_default(
     client: httpx.AsyncClient,
     session: AsyncSession,
     schedule_name: str,
+    mutation_guard: ScheduleMutationGuard,
 ) -> DagsterScheduleCommandResponse:
     """cron override를 삭제하고 code location을 reload한다."""
 
@@ -1494,7 +1583,9 @@ async def reset_schedule_default(
             ),
             started_at=started_at,
         )
+    await mutation_guard()
     await delete_schedule_override(session, schedule_name=schedule_name)
+    await mutation_guard()
     reload_result, reload_error, outcome_certainty = await _reload_location(
         client=client,
         dagster_urls=urls,
@@ -1544,6 +1635,7 @@ async def mutate_schedule_state(
     session: AsyncSession,
     schedule_name: str,
     command: Literal["start", "stop", "reset"],
+    mutation_guard: ScheduleMutationGuard,
 ) -> DagsterScheduleCommandResponse:
     """스케줄의 실행 상태를 변경한다."""
 
@@ -1625,6 +1717,7 @@ async def mutate_schedule_state(
         }
         result_key = "stopRunningSchedule"
     try:
+        await mutation_guard()
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=urls.graphql_url,
@@ -1728,6 +1821,7 @@ async def run_schedule_now(
     schedule_name: str,
     body: DagsterScheduleCommandRequest | None = None,
     actor: str,
+    mutation_guard: ScheduleMutationGuard,
 ) -> DagsterScheduleCommandResponse:
     """스케줄이 가리키는 job을 1회 실행한다."""
 
@@ -1811,6 +1905,7 @@ async def run_schedule_now(
         },
     }
     try:
+        await mutation_guard()
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=urls.graphql_url,

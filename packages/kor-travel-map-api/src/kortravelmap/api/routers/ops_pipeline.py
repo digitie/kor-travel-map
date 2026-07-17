@@ -18,7 +18,6 @@ admin ops 통합 재작성 페이지 ①(`/ops/pipeline`)의 백엔드 리소스
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
@@ -971,7 +970,7 @@ async def _execute_audited_schedule_command(
     reason: str | None,
     request_details: dict[str, object],
     command_id: UUID,
-    operation: Callable[[], Awaitable[DagsterScheduleCommandResponse]],
+    operation: dagster_schedule_service.AuditedScheduleOperation,
 ) -> DagsterScheduleCommandResponse:
     try:
         return await dagster_schedule_service.execute_audited_schedule_command(
@@ -1666,11 +1665,12 @@ async def patch_pipeline_schedule(
             reason=body.reason,
             request_details={"target": "code_default"},
             command_id=idempotency_key,
-            operation=lambda: dagster_schedule_service.reset_schedule_default(
+            operation=lambda mutation_guard: dagster_schedule_service.reset_schedule_default(
                 settings=settings,
                 client=client,
                 session=session,
                 schedule_name=schedule_name,
+                mutation_guard=mutation_guard,
             ),
         )
     else:
@@ -1683,7 +1683,7 @@ async def patch_pipeline_schedule(
                 reason=body.reason,
                 request_details={"cron_schedule": body.cron_schedule},
                 command_id=idempotency_key,
-                operation=lambda: dagster_schedule_service.update_schedule(
+                operation=lambda mutation_guard: dagster_schedule_service.update_schedule(
                     settings=settings,
                     client=client,
                     session=session,
@@ -1693,6 +1693,7 @@ async def patch_pipeline_schedule(
                         reason=body.reason,
                     ),
                     actor=context.actor,
+                    mutation_guard=mutation_guard,
                 ),
             )
         except dagster_schedule_service.DagsterScheduleValidationError as exc:
@@ -1734,13 +1735,14 @@ async def post_pipeline_schedule_command(
             reason=body.reason,
             request_details={"command": command},
             command_id=idempotency_key,
-            operation=lambda: dagster_schedule_service.run_schedule_now(
+            operation=lambda mutation_guard: dagster_schedule_service.run_schedule_now(
                 settings=settings,
                 client=client,
                 session=session,
                 schedule_name=schedule_name,
                 body=DagsterScheduleCommandRequest(reason=body.reason),
                 actor=context.actor,
+                mutation_guard=mutation_guard,
             ),
         )
     else:
@@ -1752,12 +1754,13 @@ async def post_pipeline_schedule_command(
             reason=body.reason,
             request_details={"command": command},
             command_id=idempotency_key,
-            operation=lambda: dagster_schedule_service.mutate_schedule_state(
+            operation=lambda mutation_guard: dagster_schedule_service.mutate_schedule_state(
                 settings=settings,
                 client=client,
                 session=session,
                 schedule_name=schedule_name,
                 command=command,
+                mutation_guard=mutation_guard,
             ),
         )
     return PipelineScheduleCommandResponse(
