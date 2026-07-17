@@ -382,9 +382,10 @@ def test_visitkorea_all_fixtures(fixture_path):
 
 ## 11. 디버그 UI와 fixture 저장
 
-T-221e 재판정 결과 `/debug/fixtures` REST/UI는 만들지 않는다. Admin의 `/debug/etl`
-preview는 fixture/live 변환 결과를 확인하는 용도이고, fixture 저장·갱신은 이 문서의
-파일 기반 helper와 provider별 회귀 테스트를 정본으로 둔다. 운영자가 UI에서 fixture
+T-221e 재판정 결과 `/debug/fixtures` REST/UI는 만들지 않는다. Admin의
+`POST /ops/datasets/preview`는 fixture 변환 결과만 확인하며 외부 provider 호출 budget은
+0이다. fixture 저장·갱신은 이 문서의 파일 기반 helper와 provider별 회귀 테스트를
+정본으로 둔다. 운영자가 UI에서 fixture
 capture를 직접 trigger해야 하는 요구가 생기면 provider 라이브러리 fixture 도구와 함께
 별도 task로 설계한다.
 

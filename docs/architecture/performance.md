@@ -786,7 +786,7 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 
 - `/features/nearby`, `/features/in-bounds`, `/features/search`
 - `/features/in-bounds` 클러스터(`sido`/`sigungu`/`eupmyeondong`)
-- `/admin/features`, `/ops/import-jobs`, consistency report/issue 목록
+- `/admin/features`, `/ops/pipeline/executions`, consistency report/issue 목록
 - dedup refresh, dedup/enrichment review list
 - consistency F4/F6/F7/F8
 - `/admin/features` `sort=name`의 `idx_features_lower_name_keyset`

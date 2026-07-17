@@ -107,7 +107,7 @@ ADR-045 이후 PinVi와 kor-travel-map 사이의 운영 계약은 OpenAPI다.
 
 - PinVi는 generated OpenAPI client로 feature read API(`GET /features/*` 또는
   목표 v1 계약의 `GET /v1/features/*`)와 batch 조회를 호출한다. Feature update
-  request는 사용자/서비스 표면이 아니라 `/admin/features/update-requests*` 운영
+  request는 사용자/서비스 표면이 아니라 `/ops/pipeline/requests*` 운영
   표면에서만 실행한다.
 - PinVi는 kor-travel-map PostgreSQL에 직접 연결하지 않는다.
 - PinVi는 `kor-travel-map`을 직접 import하지 않는다.
@@ -134,15 +134,12 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 │                                                                  │
 │  uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701│
 │                                                                  │
-│   ├── /debug/health, /debug/version          (구현됨, PR#35)    │
-│   ├── /debug/etl/...   (provider preview)     (구현됨, PR#44~47) │
-│   ├── /features        (bbox 목록)            (구현됨, PR#73)    │
-│   ├── /features/{feature_id}  (단건 상세)     (구현됨, PR#73)    │
-│   ├── /features/nearby, /{id}/weather, /sources  (Sprint 3~4)   │
-│   ├── /providers/{name}/sync-state               (Sprint 4)     │
-│   ├── /ops/logs                                  (T-221e)       │
-│   ├── /admin/dedup-review, /admin/integrity      (Sprint 4~5)   │
-│   └── /admin/features/update-requests             (ADR-045)      │
+│   ├── /health, /version                  (public status)      │
+│   ├── /features*, /public*, /providers*  (public read)        │
+│   ├── /admin/*                           (operator CRUD)      │
+│   ├── /ops/datasets/*                    (상태·정책·preview) │
+│   ├── /ops/pipeline/*                    (실행·event·schedule) │
+│   └── /ops/{metrics,health-deep,consistency,logs} (관측)          │
 └──────────────────────────────────────────────────────────────────┘
         │  authentication: 없음 (내부망 / localhost 전제)
         │  내부 호출
@@ -154,10 +151,8 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 
 - **별도 Python 패키지** (`kor-travel-map-api`). 메인 라이브러리는 FastAPI
   의존이 없다 (ADR-020).
-- **인증 키 없음**. 내부망 / localhost / 사내망 전제 (ADR-005).
-- 외부 노출이 필요해지면 네트워크 계층(SSO 게이트웨이, IP allowlist,
-  Cloudflare Tunnel)에서 보호한다. 패키지 코드/응답에 인증 로직이 들어가지
-  않는다.
+- public read는 API key/service token, admin mutation은 trusted frontend proxy
+  actor/secret gate를 적용한다. 네트워크 계층 SSO/IP allowlist도 함께 사용한다.
 - PinVi는 이 패키지에 Python 의존하지 않는다. HTTP/OpenAPI로만 호출한다.
 - Admin UI, PinVi 연동, provider update queue는 이 패키지의 OpenAPI를 기준으로
   확장한다.

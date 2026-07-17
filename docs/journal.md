@@ -17,6 +17,10 @@
 - 기존 Codex codegraph index로 제거 대표 route의 영향도를 확인했다. legacy import-job route는
   route 자체 외 caller가 없었고 public last-sync는 route 단독 영향이라 소형 router로 동일 계약을
   옮겼다. canonical service caller는 별도 pipeline/datasets router에 남는다.
+- 적대 리뷰 1차는 production S1/S2 결함 0건으로 판정했다. S3로 확인된 CORS preflight,
+  canonical feature-update idempotency/strict DTO matrix, public provider empty-list 회귀를
+  canonical 테스트에 복원했다. 현행 architecture/runbook 문서의 legacy path도 두 그룹으로
+  정리했다. 2차 적대 리뷰와 테스트는 아직 진행 전이다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

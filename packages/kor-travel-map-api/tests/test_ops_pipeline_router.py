@@ -3139,6 +3139,179 @@ def test_create_request_rejects_dry_run_flag(
 
 
 @pytest.mark.unit
+def test_create_request_requires_uuid_idempotency_key(client: TestClient) -> None:
+    del client.headers["Idempotency-Key"]
+
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider": MOIS_PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_create_request_idempotency_replays_and_rejects_mismatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mapping: FeatureUpdateRequestIdempotency | None = None
+    terminal = _update_request(status="done", operator="local-dev", reason="same")
+
+    async def _enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return _update_request(operator="local-dev", reason="same")
+
+    async def _get_mapping(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequestIdempotency | None:
+        return mapping
+
+    async def _insert_mapping(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestIdempotency:
+        nonlocal mapping
+        mapping = FeatureUpdateRequestIdempotency(
+            idempotency_key=kwargs["idempotency_key"],
+            fingerprint_version=1,
+            request_fingerprint=kwargs["request_fingerprint"],
+            request_id=kwargs["request_id"],
+            actor=kwargs["actor"],
+            reused_active_request=kwargs["reused_active_request"],
+            created_at=_NOW,
+        )
+        return mapping
+
+    async def _get_request(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return terminal
+
+    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(fur_mod, "get_feature_update_request_idempotency", _get_mapping)
+    monkeypatch.setattr(fur_mod, "create_feature_update_request_idempotency", _insert_mapping)
+    monkeypatch.setattr(fur_mod, "get_update_request", _get_request)
+
+    body = {
+        "scope": {
+            "type": "provider_dataset",
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+        },
+        "reason": "same",
+    }
+    first = client.post("/v1/ops/pipeline/requests", json=body)
+    replay = client.post("/v1/ops/pipeline/requests", json=body)
+    mismatch = client.post(
+        "/v1/ops/pipeline/requests",
+        json={**body, "reason": "different"},
+    )
+
+    assert first.status_code == 201
+    assert first.json()["idempotent_replay"] is False
+    assert replay.status_code == 200
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["data"]["status"] == "done"
+    assert mismatch.status_code == 409
+    assert mismatch.json()["code"] == "FEATURE_UPDATE_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "update_policy": {"surprise": True},
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests/preview",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "update_policy": {"include_inactive": "false"},
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {
+                    "type": "center_radius",
+                    "center": {"lon": "127.0", "lat": 37.0},
+                    "radius_km": 5,
+                }
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "priority": "75",
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "reason": "   ",
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests/preview",
+            {
+                "scope": {
+                    "type": "cache_target_keys",
+                    "external_system": "pinvi",
+                    "target_keys": ["poi-1", "poi-1"],
+                }
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {
+                    "type": "provider_dataset",
+                    "provider": MOIS_PROVIDER_NAME,
+                    "dataset_key": DATASET_KEY_BULK,
+                },
+                "providers": [MOIS_PROVIDER_NAME],
+                "dataset_keys": [DATASET_KEY_BULK],
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "providers": [f"python-provider-{index}-api" for index in range(33)],
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+                "providers": [MOIS_PROVIDER_NAME, MOIS_PROVIDER_NAME],
+            },
+        ),
+    ],
+)
+def test_feature_update_contract_rejects_invalid_runtime_payloads(
+    client: TestClient,
+    session: _FakeSession,
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_create_request_persists_with_new_status_url(
     client: TestClient,
     session: _FakeSession,

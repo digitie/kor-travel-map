@@ -11,8 +11,10 @@
   credential settings·compose/load-env 주입을 제거했으며 preview catalog는 fixture/none만 가진다.
 - migration은 추가하지 않았다. OpenAPI/admin types는 C5/C6A rebase와 외부 적대 리뷰 반영 직전에
   실제 branch에서 재생성한다.
-- **다음 한 작업**: 구현 snapshot을 적대 리뷰어 2명에게 전달해 지적을 반영한다. 그 전에는 사용자
-  지시대로 테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
+- 적대 리뷰 1차는 production S1/S2 결함 0건, 테스트 회귀 S3 3건으로 판정했다. CORS,
+  feature-update idempotency/strict DTO, public provider empty-list 회귀를 복원했다.
+- **다음 한 작업**: 반영 snapshot을 2차 적대 리뷰어에게 전달한다. 그 전에는 사용자 지시대로
+  테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 

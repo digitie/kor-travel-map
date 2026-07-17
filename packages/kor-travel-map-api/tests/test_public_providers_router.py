@@ -79,6 +79,24 @@ def test_public_provider_list_is_bounded_and_hides_cursor(
 
 
 @pytest.mark.unit
+def test_public_provider_list_returns_empty_200(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import public_providers as module
+
+    async def _empty(_session: Any) -> list[SyncState]:
+        return []
+
+    monkeypatch.setattr(module.sync_state_repo, "list_all_sync_states", _empty)
+    _override_session(client)
+    response = client.get("/v1/providers")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"] == []
+
+
+@pytest.mark.unit
 def test_public_provider_last_sync_forwards_exact_filters_and_hides_cursor(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
