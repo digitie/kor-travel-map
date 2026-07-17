@@ -1059,6 +1059,30 @@ async function installPipelineMocks(
         options.scheduleActionResponseLossOnce &&
         counters.commandBodies.length === 2
       ) {
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+            title: "이전 명령 실행 확인 중",
+            status: 409,
+            detail: "안전 확인 시각 전에는 active claim을 해제할 수 없습니다.",
+            code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: {
+              command_id: counters.scheduleKeys[0],
+              active_command_id: null,
+              active_claim_resolvable_at: "2026-07-14T10:05:00.000Z",
+            },
+          },
+          409,
+        );
+        return;
+      }
+      if (
+        options.scheduleActionResponseLossOnce &&
+        counters.commandBodies.length === 3
+      ) {
         const activeCommandId = counters.scheduleKeys[0];
         await fulfillJson(
           route,
@@ -2208,7 +2232,7 @@ test.describe("/ops/pipeline", () => {
     await expect(recovery).toContainText(SCHEDULE_NAME);
   });
 
-  test("스케줄 응답 유실 재시도는 같은 key의 active claim을 해제한다", async ({
+  test("스케줄 응답 유실 claim은 lease 전 숨기고 만료 뒤 해제한다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -2216,17 +2240,22 @@ test.describe("/ops/pipeline", () => {
     });
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       await page
         .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
         .click();
       if (attempt === 0) {
         await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
+      } else if (attempt === 1) {
+        await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(
+          0,
+        );
       }
     }
 
-    expect(counters.scheduleKeys).toHaveLength(2);
+    expect(counters.scheduleKeys).toHaveLength(3);
     expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
+    expect(counters.scheduleKeys[2]).toBe(counters.scheduleKeys[0]);
     const recovery = page.getByTestId("schedule-claim-recovery");
     await expect(recovery).toContainText(counters.scheduleKeys[0]);
     await recovery

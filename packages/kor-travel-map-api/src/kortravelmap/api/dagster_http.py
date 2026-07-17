@@ -46,6 +46,11 @@ def schedule_idempotency_http_exception(
                 "active_command_id": (
                     str(exc.active_command_id) if exc.active_command_id is not None else None
                 ),
+                "active_claim_resolvable_at": (
+                    exc.active_claim_resolvable_at.isoformat()
+                    if exc.active_claim_resolvable_at is not None
+                    else None
+                ),
             },
         },
     )

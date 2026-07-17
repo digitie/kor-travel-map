@@ -196,9 +196,24 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.Column(
+            "resolvable_after",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now() + interval '5 minutes'"),
+            nullable=False,
+        ),
+        sa.Column("operation_finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
             "btrim(schedule_name) <> ''",
             name=op.f("ck_dagster_schedule_active_claims_schedule_name_not_blank"),
+        ),
+        sa.CheckConstraint(
+            "resolvable_after >= created_at + interval '5 minutes'",
+            name=op.f("ck_dagster_schedule_active_claims_resolution_lease"),
+        ),
+        sa.CheckConstraint(
+            "operation_finished_at IS NULL OR operation_finished_at >= created_at",
+            name=op.f("ck_dagster_schedule_active_claims_finished_after_create"),
         ),
         sa.PrimaryKeyConstraint(
             "command_id",
@@ -317,9 +332,10 @@ def upgrade() -> None:
           FROM ops.dagster_schedule_active_claims AS claim
           WHERE claim.command_id = NEW.command_id
             AND claim.schedule_name = NEW.schedule_name
+            AND claim.operation_finished_at IS NOT NULL
           FOR UPDATE;
           IF NOT FOUND THEN
-            RAISE EXCEPTION 'terminal schedule audit event requires active claim'
+            RAISE EXCEPTION 'terminal schedule audit event requires finished active claim'
               USING ERRCODE = '23514';
           END IF;
           IF NOT EXISTS (
@@ -376,14 +392,23 @@ def upgrade() -> None:
         RETURNS trigger
         LANGUAGE plpgsql
         AS $$
+        DECLARE
+          claim_finished_at timestamptz;
+          claim_resolvable_after timestamptz;
         BEGIN
-          PERFORM 1
+          SELECT claim.operation_finished_at, claim.resolvable_after
+          INTO claim_finished_at, claim_resolvable_after
           FROM ops.dagster_schedule_active_claims AS claim
           WHERE claim.command_id = NEW.command_id
             AND claim.schedule_name = NEW.schedule_name
           FOR UPDATE;
           IF NOT FOUND THEN
             RAISE EXCEPTION 'only an active uncertain schedule claim can be resolved'
+              USING ERRCODE = '23514';
+          END IF;
+          IF claim_finished_at IS NULL
+             AND clock_timestamp() < claim_resolvable_after THEN
+            RAISE EXCEPTION 'running schedule claim cannot be resolved before lease expires'
               USING ERRCODE = '23514';
           END IF;
           IF NOT EXISTS (
@@ -455,6 +480,10 @@ def upgrade() -> None:
             RAISE EXCEPTION 'active schedule claim requires matching requested event'
               USING ERRCODE = '23514';
           END IF;
+          IF NEW.operation_finished_at IS NOT NULL THEN
+            RAISE EXCEPTION 'new active schedule claim must start in progress'
+              USING ERRCODE = '23514';
+          END IF;
           RETURN NEW;
         END;
         $$
@@ -509,10 +538,31 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE TRIGGER trg_dagster_schedule_active_claim_update_rejected
+        CREATE FUNCTION ops.validate_dagster_schedule_active_claim_update()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF OLD.command_id IS DISTINCT FROM NEW.command_id
+             OR OLD.schedule_name IS DISTINCT FROM NEW.schedule_name
+             OR OLD.created_at IS DISTINCT FROM NEW.created_at
+             OR OLD.resolvable_after IS DISTINCT FROM NEW.resolvable_after
+             OR OLD.operation_finished_at IS NOT NULL
+             OR NEW.operation_finished_at IS NULL THEN
+            RAISE EXCEPTION 'active schedule claim only allows one-way operation completion'
+              USING ERRCODE = '55000';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_active_claim_update_valid
         BEFORE UPDATE ON ops.dagster_schedule_active_claims
         FOR EACH ROW
-        EXECUTE FUNCTION ops.reject_dagster_schedule_audit_mutation()
+        EXECUTE FUNCTION ops.validate_dagster_schedule_active_claim_update()
         """
     )
     op.execute(
@@ -572,9 +622,10 @@ def downgrade() -> None:
         "ON ops.dagster_schedule_active_claims"
     )
     op.execute(
-        "DROP TRIGGER trg_dagster_schedule_active_claim_update_rejected "
+        "DROP TRIGGER trg_dagster_schedule_active_claim_update_valid "
         "ON ops.dagster_schedule_active_claims"
     )
+    op.execute("DROP FUNCTION ops.validate_dagster_schedule_active_claim_update()")
     op.execute(
         "DROP TRIGGER trg_dagster_schedule_active_claim_delete_valid "
         "ON ops.dagster_schedule_active_claims"

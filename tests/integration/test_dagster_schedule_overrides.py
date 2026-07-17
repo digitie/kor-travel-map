@@ -85,6 +85,8 @@ async def _seed_active_schedule_claim(
     schedule_name: str,
     command: str = "reset",
     reason: str = "운영 확인",
+    operation_finished: bool = True,
+    stale: bool = False,
 ) -> None:
     await append_schedule_audit_event(
         session,
@@ -100,15 +102,37 @@ async def _seed_active_schedule_claim(
         text(
             """
             INSERT INTO ops.dagster_schedule_active_claims (
-              command_id, schedule_name
-            ) VALUES (CAST(:command_id AS uuid), :schedule_name)
+              command_id, schedule_name, created_at, resolvable_after
+            ) VALUES (
+              CAST(:command_id AS uuid), :schedule_name,
+              CASE
+                WHEN :stale THEN clock_timestamp() - interval '10 minutes'
+                ELSE clock_timestamp()
+              END,
+              CASE
+                WHEN :stale THEN clock_timestamp() - interval '5 minutes'
+                ELSE clock_timestamp() + interval '5 minutes'
+              END
+            )
             """
         ),
         {
             "command_id": str(command_id),
             "schedule_name": schedule_name,
+            "stale": stale,
         },
     )
+    if operation_finished:
+        await session.execute(
+            text(
+                """
+                UPDATE ops.dagster_schedule_active_claims
+                SET operation_finished_at = clock_timestamp()
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
     await session.commit()
 
 
@@ -439,7 +463,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
     try:
         await asyncio.wait_for(operation_started.wait(), timeout=5)
         async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-            with pytest.raises(DagsterScheduleIdempotencyConflict):
+            with pytest.raises(DagsterScheduleIdempotencyConflict) as new_key_conflict:
                 await execute_audited_schedule_command(
                     session,
                     schedule_name=_NAME,
@@ -449,6 +473,28 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
                     request_details={"command": "stop"},
                     command_id=second_command_id,
                     operation=_unexpected_operation,
+                )
+            assert new_key_conflict.value.active_command_id is None
+            with pytest.raises(DagsterScheduleIdempotencyConflict) as same_key_conflict:
+                await execute_audited_schedule_command(
+                    session,
+                    schedule_name=_NAME,
+                    command="start",
+                    actor="admin@example.test",
+                    reason="재개",
+                    request_details={"command": "start"},
+                    command_id=first_command_id,
+                    operation=_unexpected_operation,
+                )
+            assert same_key_conflict.value.active_command_id is None
+            with pytest.raises(DagsterScheduleClaimResolutionConflict):
+                await resolve_schedule_active_claim(
+                    session,
+                    schedule_name=_NAME,
+                    command_id=first_command_id,
+                    resolution="confirmed_not_applied",
+                    actor="admin@example.test",
+                    reason="아직 실행 중인 명령은 해제하지 않음",
                 )
     finally:
         release_operation.set()
@@ -467,6 +513,33 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
         )
 
     assert remote_calls == 2
+
+
+async def test_stale_requested_only_claim_can_be_resolved_after_lease(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_stale_requested"
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        await _seed_active_schedule_claim(
+            session,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            operation_finished=False,
+            stale=True,
+        )
+        resolved = await resolve_schedule_active_claim(
+            session,
+            schedule_name=schedule_name,
+            command_id=command_id,
+            resolution="confirmed_not_applied",
+            actor="admin@example.test",
+            reason="안전 lease 만료 후 Dagster 미반영 확인",
+        )
+
+    assert resolved.command_id == command_id
+    assert resolved.resolution == "confirmed_not_applied"
 
 
 async def test_exception_terminal_replays_original_storage_outcome_without_remote_call(

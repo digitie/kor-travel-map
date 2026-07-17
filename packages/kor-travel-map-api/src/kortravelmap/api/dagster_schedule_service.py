@@ -77,10 +77,12 @@ class DagsterScheduleIdempotencyConflict(RuntimeError):
         *,
         command_id: UUID,
         active_command_id: UUID | None = None,
+        active_claim_resolvable_at: datetime | None = None,
     ) -> None:
         super().__init__(message)
         self.command_id = command_id
         self.active_command_id = active_command_id
+        self.active_claim_resolvable_at = active_claim_resolvable_at
 
 
 class DagsterScheduleUncertainOutcome(RuntimeError):
@@ -527,27 +529,37 @@ async def _claim_schedule_command(
                 active = await session.execute(
                     text(
                         """
-                        SELECT command_id
+                        SELECT command_id, resolvable_after,
+                               operation_finished_at IS NOT NULL
+                                 OR resolvable_after <= clock_timestamp()
+                                 AS is_resolvable
                         FROM ops.dagster_schedule_active_claims
                         WHERE schedule_name = :schedule_name
                         """
                     ),
                     {"schedule_name": schedule_name},
                 )
-                active_command_id = active.scalar_one_or_none()
+                active_row = active.one_or_none()
+                active_command_id = (
+                    UUID(str(active_row.command_id))
+                    if active_row is not None and bool(active_row.is_resolvable)
+                    else None
+                )
+                active_claim_resolvable_at = (
+                    active_row.resolvable_after if active_row is not None else None
+                )
                 await session.rollback()
                 raise DagsterScheduleIdempotencyConflict(
-                    "이 schedule의 이전 명령 결과가 확정되지 않았습니다. "
-                    "새 키로 재실행하지 마세요"
+                    "이 schedule의 이전 명령이 실행 중이거나 결과가 확정되지 않았습니다. "
+                    "같은 키로 상태를 다시 확인하세요"
                     + (
                         f" (active_command_id={active_command_id})"
                         if active_command_id is not None
                         else ""
                     ),
                     command_id=command_id,
-                    active_command_id=(
-                        UUID(str(active_command_id)) if active_command_id is not None else None
-                    ),
+                    active_command_id=active_command_id,
+                    active_claim_resolvable_at=active_claim_resolvable_at,
                 )
             await session.commit()
             return None
@@ -566,7 +578,10 @@ async def _claim_schedule_command(
         active = await session.execute(
             text(
                 """
-                SELECT command_id
+                SELECT command_id, resolvable_after,
+                       operation_finished_at IS NOT NULL
+                         OR resolvable_after <= clock_timestamp()
+                         AS is_resolvable
                 FROM ops.dagster_schedule_active_claims
                 WHERE command_id = CAST(:command_id AS uuid)
                   AND schedule_name = :schedule_name
@@ -577,7 +592,15 @@ async def _claim_schedule_command(
                 "schedule_name": schedule_name,
             },
         )
-        active_command_id = active.scalar_one_or_none()
+        active_row = active.one_or_none()
+        active_command_id = (
+            UUID(str(active_row.command_id))
+            if active_row is not None and bool(active_row.is_resolvable)
+            else None
+        )
+        active_claim_resolvable_at = (
+            active_row.resolvable_after if active_row is not None else None
+        )
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
@@ -610,9 +633,8 @@ async def _claim_schedule_command(
         raise DagsterScheduleIdempotencyConflict(
             "이 schedule 명령은 실행 중이거나 결과 확인이 필요합니다. 새 키로 재실행하지 마세요.",
             command_id=command_id,
-            active_command_id=(
-                UUID(str(active_command_id)) if active_command_id is not None else None
-            ),
+            active_command_id=active_command_id,
+            active_claim_resolvable_at=active_claim_resolvable_at,
         )
     if (
         str(terminal.schedule_name) != str(requested.schedule_name)
@@ -694,6 +716,61 @@ async def _existing_claim_resolution(
     return result.one_or_none()
 
 
+async def _mark_schedule_claim_operation_finished(
+    session: AsyncSession,
+    *,
+    command_id: UUID,
+    schedule_name: str,
+) -> None:
+    """외부 호출 종료를 DB clock으로 단방향 기록해 안전한 claim 해제를 허용한다."""
+
+    try:
+        updated = await session.execute(
+            text(
+                """
+                UPDATE ops.dagster_schedule_active_claims
+                SET operation_finished_at = clock_timestamp()
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND schedule_name = :schedule_name
+                  AND operation_finished_at IS NULL
+                RETURNING command_id
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        if updated.scalar_one_or_none() is None:
+            existing = await session.execute(
+                text(
+                    """
+                    SELECT operation_finished_at IS NOT NULL
+                    FROM ops.dagster_schedule_active_claims
+                    WHERE command_id = CAST(:command_id AS uuid)
+                      AND schedule_name = :schedule_name
+                    """
+                ),
+                {
+                    "command_id": str(command_id),
+                    "schedule_name": schedule_name,
+                },
+            )
+            if existing.scalar_one_or_none() is not True:
+                raise DagsterScheduleStorageUnavailable(
+                    "schedule active claim의 외부 호출 종료를 기록할 수 없습니다."
+                )
+        await session.commit()
+    except DagsterScheduleStorageUnavailable:
+        await session.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule active claim의 외부 호출 종료를 기록할 수 없습니다."
+        ) from exc
+
+
 async def resolve_schedule_active_claim(
     session: AsyncSession,
     *,
@@ -727,7 +804,10 @@ async def resolve_schedule_active_claim(
         claim_result = await session.execute(
             text(
                 """
-                SELECT command_id
+                SELECT command_id, operation_finished_at, resolvable_after,
+                       operation_finished_at IS NOT NULL
+                         OR resolvable_after <= clock_timestamp()
+                         AS is_resolvable
                 FROM ops.dagster_schedule_active_claims
                 WHERE command_id = CAST(:command_id AS uuid)
                   AND schedule_name = :schedule_name
@@ -783,6 +863,12 @@ async def resolve_schedule_active_claim(
                     "이 schedule claim은 이미 해제됐거나 활성 상태가 아닙니다."
                 )
             raise DagsterScheduleClaimNotFound("지정한 schedule claim을 찾을 수 없습니다.")
+        if not bool(claim_row.is_resolvable):
+            await session.rollback()
+            raise DagsterScheduleClaimResolutionConflict(
+                "이 schedule 명령은 아직 실행 중일 수 있어 안전 확인 시각 전에는 "
+                "claim을 해제할 수 없습니다."
+            )
 
         audit_result = await session.execute(
             text(
@@ -925,6 +1011,11 @@ async def execute_audited_schedule_command(
             else "unexpected"
         )
         try:
+            await _mark_schedule_claim_operation_finished(
+                session,
+                command_id=command_id,
+                schedule_name=schedule_name,
+            )
             await append_schedule_audit_event(
                 session,
                 command_id=command_id,
@@ -960,6 +1051,11 @@ async def execute_audited_schedule_command(
         raise
     response.data.audit_command_id = command_id
     try:
+        await _mark_schedule_claim_operation_finished(
+            session,
+            command_id=command_id,
+            schedule_name=schedule_name,
+        )
         await append_schedule_audit_event(
             session,
             command_id=command_id,
