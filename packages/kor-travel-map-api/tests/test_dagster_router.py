@@ -14,12 +14,37 @@ from kortravelmap.api import dagster_graphql as dagster_mod
 from kortravelmap.api import dagster_query_service as dagster_query
 from kortravelmap.api import dagster_schedule_service as dagster_schedule
 from kortravelmap.api.app import create_app
+from kortravelmap.api.dagster_http import schedule_idempotency_http_exception
 from kortravelmap.api.dagster_schema import (
     DagsterScheduleCommandData,
     DagsterScheduleCommandResponse,
 )
 from kortravelmap.api.routers import dagster as dagster_router
 from kortravelmap.api.settings import ApiSettings
+
+
+@pytest.mark.unit
+def test_resolved_schedule_idempotency_conflict_is_confirmed() -> None:
+    command_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    error = schedule_idempotency_http_exception(
+        dagster_schedule.DagsterScheduleIdempotencyConflict(
+            "운영자 확인으로 이미 해제됨",
+            command_id=command_id,
+            resolved=True,
+            resolution="confirmed_not_applied",
+        )
+    )
+
+    assert error.status_code == 409
+    assert error.detail["code"] == "DAGSTER_SCHEDULE_CLAIM_RESOLVED"
+    assert error.detail["details"] == {
+        "command_id": str(command_id),
+        "active_command_id": None,
+        "active_claim_resolvable_at": None,
+        "outcome_certainty": "confirmed",
+        "audit_status": "recorded",
+        "resolution": "confirmed_not_applied",
+    }
 
 
 @pytest.fixture

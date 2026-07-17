@@ -39,7 +39,11 @@ def schedule_idempotency_http_exception(
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
-            "code": "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            "code": (
+                "DAGSTER_SCHEDULE_CLAIM_RESOLVED"
+                if exc.resolved
+                else "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT"
+            ),
             "message": str(exc),
             "details": {
                 "command_id": str(exc.command_id),
@@ -51,6 +55,9 @@ def schedule_idempotency_http_exception(
                     if exc.active_claim_resolvable_at is not None
                     else None
                 ),
+                "outcome_certainty": "confirmed" if exc.resolved else "uncertain",
+                "audit_status": "recorded" if exc.resolved else None,
+                "resolution": exc.resolution,
             },
         },
     )

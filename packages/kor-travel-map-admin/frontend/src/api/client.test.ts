@@ -264,6 +264,57 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(randomUUID).toHaveBeenCalledTimes(2);
   });
 
+  it("운영자 해제가 확정된 schedule key는 frozen submission을 폐기한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "12121212-1212-4212-8212-121212121212",
+      "34343434-3434-4434-8434-343434343434",
+    ]);
+    const resolved = new ApiClientError(
+      "claim resolved",
+      409,
+      "/v1/ops/pipeline/schedules/x/commands",
+      {
+        code: "DAGSTER_SCHEDULE_CLAIM_RESOLVED",
+        detail: "claim resolved",
+        details: {
+          outcome_certainty: "confirmed",
+          audit_status: "recorded",
+        },
+        errors: [],
+        request_id: "request-resolved",
+        status: 409,
+        title: "claim resolved",
+        type: "https://kor-travel-map/errors/dagster-schedule-claim-resolved",
+      },
+    );
+    const seen: string[] = [];
+
+    await expect(
+      withFrozenIdempotencySubmission(
+        "pipeline:schedule:x:mutation",
+        { command: "stop" },
+        async (_submission, key) => {
+          seen.push(key);
+          throw resolved;
+        },
+      ),
+    ).rejects.toBe(resolved);
+    await withFrozenIdempotencySubmission(
+      "pipeline:schedule:x:mutation",
+      { command: "start" },
+      async (_submission, key) => {
+        seen.push(key);
+        return "ok";
+      },
+    );
+
+    expect(seen).toEqual([
+      "12121212-1212-4212-8212-121212121212",
+      "34343434-3434-4434-8434-343434343434",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
   it("idempotency conflict도 결과 확인 전까지 같은 key를 유지한다", async () => {
     const randomUUID = stubIdempotencyBrowser([
       "cccccccc-cccc-4ccc-8ccc-cccccccccccc",

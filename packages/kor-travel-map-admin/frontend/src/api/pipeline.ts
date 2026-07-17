@@ -80,6 +80,15 @@ export interface PipelineFrozenScheduleMutation {
   idempotencyKey: string;
   submission: PipelineScheduleMutationSubmission;
 }
+export interface PipelineFrozenScheduleClaimResolution {
+  scheduleName: string;
+  idempotencyKey: string;
+  submission: {
+    scheduleName: string;
+    commandId: string;
+    body: PipelineScheduleClaimResolutionRequest;
+  };
+}
 export type FeatureUpdateRequestCreateRequest =
   Schemas["FeatureUpdateRequestCreateRequest"];
 export type FeatureUpdateRequestCreateResponse =
@@ -459,6 +468,10 @@ function pipelineScheduleMutationKey(scheduleName: string): string {
   return `pipeline:schedule:${scheduleName}:mutation`;
 }
 
+function pipelineScheduleClaimResolutionKey(scheduleName: string): string {
+  return `pipeline:schedule:${scheduleName}:claim-resolution`;
+}
+
 function isPipelineScheduleMutationSubmission(
   value: unknown,
 ): value is PipelineScheduleMutationSubmission {
@@ -503,6 +516,38 @@ export function readPipelineFrozenScheduleMutation(
     scheduleName,
     idempotencyKey: frozen.idempotencyKey,
     submission: frozen.submission,
+  };
+}
+
+export function readPipelineFrozenScheduleClaimResolution(
+  scheduleName: string,
+): PipelineFrozenScheduleClaimResolution | null {
+  type Submission = PipelineFrozenScheduleClaimResolution["submission"];
+  const frozen = readFrozenIdempotencySubmission<Submission>(
+    pipelineScheduleClaimResolutionKey(scheduleName),
+  );
+  if (frozen === null) {
+    return null;
+  }
+  const submission = frozen.submission;
+  if (
+    typeof submission !== "object" ||
+    submission === null ||
+    submission.scheduleName !== scheduleName ||
+    typeof submission.commandId !== "string" ||
+    typeof submission.body !== "object" ||
+    submission.body === null ||
+    !["confirmed_applied", "confirmed_not_applied"].includes(
+      String(submission.body.resolution),
+    ) ||
+    typeof submission.body.reason !== "string"
+  ) {
+    throw new Error("저장된 schedule claim 해제 요청 형식이 올바르지 않습니다.");
+  }
+  return {
+    scheduleName,
+    idempotencyKey: frozen.idempotencyKey,
+    submission,
   };
 }
 
@@ -624,9 +669,14 @@ export function useResolveScheduleClaimMutation() {
     }
   >({
     mutationFn: ({ scheduleName, commandId, body }) =>
-      postJson<PipelineScheduleClaimResolutionResponse>(
-        `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}/claims/${encodeURIComponent(commandId)}/resolve`,
-        body,
+      withFrozenIdempotencySubmission(
+        pipelineScheduleClaimResolutionKey(scheduleName),
+        { scheduleName, commandId, body },
+        (submission) =>
+          postJson<PipelineScheduleClaimResolutionResponse>(
+            `/v1/ops/pipeline/schedules/${encodeURIComponent(submission.scheduleName)}/claims/${encodeURIComponent(submission.commandId)}/resolve`,
+            submission.body,
+          ),
       ),
     onSuccess: (_response, variables) => {
       clearIdempotencyKeys(`pipeline:schedule:${variables.scheduleName}:`);

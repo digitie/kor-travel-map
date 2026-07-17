@@ -2562,6 +2562,14 @@ test.describe("/ops/pipeline", () => {
         ).toBeDisabled();
         await expect(page.getByText("claim 해제 실패")).toBeVisible();
         await expectScheduleControlsDisabled(page);
+        await page.reload();
+        await expect(recovery).toBeVisible();
+        await expect(
+          recovery.getByLabel("확인 근거·해제 사유 (필수)"),
+        ).toHaveValue("Dagster run 목록에서 미반영 확인");
+        await expect(
+          recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
+        ).toBeDisabled();
       }
     }
 

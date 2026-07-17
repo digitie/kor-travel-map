@@ -86,11 +86,15 @@ class DagsterScheduleIdempotencyConflict(RuntimeError):
         command_id: UUID,
         active_command_id: UUID | None = None,
         active_claim_resolvable_at: datetime | None = None,
+        resolved: bool = False,
+        resolution: str | None = None,
     ) -> None:
         super().__init__(message)
         self.command_id = command_id
         self.active_command_id = active_command_id
         self.active_claim_resolvable_at = active_claim_resolvable_at
+        self.resolved = resolved
+        self.resolution = resolution
 
 
 class DagsterScheduleUncertainOutcome(RuntimeError):
@@ -561,8 +565,7 @@ async def _claim_schedule_command(
                     text(
                         """
                         SELECT command_id, resolvable_after,
-                               operation_finished_at IS NOT NULL
-                                 OR resolvable_after <= clock_timestamp()
+                               resolvable_after <= clock_timestamp()
                                  AS is_resolvable
                         FROM ops.dagster_schedule_active_claims
                         WHERE schedule_name = :schedule_name
@@ -610,9 +613,7 @@ async def _claim_schedule_command(
             text(
                 """
                 SELECT command_id, resolvable_after,
-                       operation_finished_at IS NOT NULL
-                         OR resolvable_after <= clock_timestamp()
-                         AS is_resolvable
+                       resolvable_after <= clock_timestamp() AS is_resolvable
                 FROM ops.dagster_schedule_active_claims
                 WHERE command_id = CAST(:command_id AS uuid)
                   AND schedule_name = :schedule_name
@@ -630,6 +631,10 @@ async def _claim_schedule_command(
             else None
         )
         active_claim_resolvable_at = active_row.resolvable_after if active_row is not None else None
+        existing_resolution = await _existing_claim_resolution(
+            session,
+            command_id=command_id,
+        )
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
@@ -653,6 +658,14 @@ async def _claim_schedule_command(
         raise DagsterScheduleIdempotencyConflict(
             "같은 Idempotency-Key를 다른 schedule 명령에 재사용할 수 없습니다.",
             command_id=command_id,
+        )
+    if existing_resolution is not None:
+        raise DagsterScheduleIdempotencyConflict(
+            "이 idempotency key의 불명 결과는 운영자 확인으로 이미 해제됐습니다. "
+            "같은 key를 claim 복구에 다시 사용할 수 없습니다.",
+            command_id=command_id,
+            resolved=True,
+            resolution=str(existing_resolution.resolution),
         )
     terminal = next(
         (row for row in reversed(rows) if row.phase in {"succeeded", "failed"}),
@@ -686,7 +699,7 @@ async def _claim_schedule_command(
         raise DagsterScheduleUncertainOutcome(
             message,
             command_id=command_id,
-            active_command_id=command_id,
+            active_command_id=active_command_id,
         )
     try:
         data = DagsterScheduleCommandData.model_validate(terminal_details)
@@ -695,7 +708,9 @@ async def _claim_schedule_command(
             "저장된 schedule 명령 결과를 해석할 수 없습니다.",
             command_id=command_id,
         ) from exc
-    data.audit_command_id = command_id
+    data.audit_command_id = (
+        active_command_id if data.outcome_certainty == "uncertain" else command_id
+    )
     return _schedule_command_response(data, started_at=perf_counter())
 
 
@@ -879,9 +894,7 @@ async def resolve_schedule_active_claim(
             text(
                 """
                 SELECT command_id, operation_finished_at, resolvable_after,
-                       operation_finished_at IS NOT NULL
-                         OR resolvable_after <= clock_timestamp()
-                         AS is_resolvable
+                       resolvable_after <= clock_timestamp() AS is_resolvable
                 FROM ops.dagster_schedule_active_claims
                 WHERE command_id = CAST(:command_id AS uuid)
                   AND schedule_name = :schedule_name
@@ -1073,23 +1086,36 @@ async def execute_audited_schedule_command(
     )
     if replay is not None:
         return replay
-    mutation_guard = lambda: _assert_schedule_claim_mutation_allowed(
-        session,
-        command_id=command_id,
-        schedule_name=schedule_name,
-    )
+    mutation_started = False
+
+    async def mutation_guard() -> None:
+        nonlocal mutation_started
+        await _assert_schedule_claim_mutation_allowed(
+            session,
+            command_id=command_id,
+            schedule_name=schedule_name,
+        )
+        mutation_started = True
+
     try:
         async with asyncio.timeout(_SCHEDULE_OPERATION_TIMEOUT_SECONDS):
             response = await operation(mutation_guard)
     except Exception as exc:
         await session.rollback()
-        exception_kind = (
-            "validation"
-            if isinstance(exc, DagsterScheduleValidationError)
-            else "storage_unavailable"
-            if isinstance(exc, DagsterScheduleStorageUnavailable)
-            else "unexpected"
+        confirmed_pre_mutation_failure = not mutation_started and isinstance(
+            exc,
+            (DagsterScheduleValidationError, DagsterScheduleStorageUnavailable),
         )
+        if isinstance(exc, DagsterScheduleValidationError):
+            exception_kind = "validation" if not mutation_started else "validation_after_mutation"
+        elif isinstance(exc, DagsterScheduleStorageUnavailable):
+            exception_kind = (
+                "storage_unavailable"
+                if not mutation_started
+                else "storage_unavailable_after_mutation"
+            )
+        else:
+            exception_kind = "unexpected"
         marker_persisted = False
         try:
             await _mark_schedule_claim_operation_finished(
@@ -1120,23 +1146,21 @@ async def execute_audited_schedule_command(
                         "exception_type": type(exc).__name__,
                         "message": str(exc),
                         "outcome_certainty": (
-                            "confirmed"
-                            if exception_kind in {"validation", "storage_unavailable"}
-                            else "uncertain"
+                            "confirmed" if confirmed_pre_mutation_failure else "uncertain"
                         ),
                     },
-                    release_active_claim=(exception_kind in {"validation", "storage_unavailable"}),
+                    release_active_claim=confirmed_pre_mutation_failure,
                 )
             except DagsterScheduleStorageUnavailable:
                 _LOG.exception(
                     "schedule 실패 terminal audit 저장 실패 (command_id=%s)",
                     command_id,
                 )
-        if exception_kind == "unexpected":
+        if not marker_persisted or not confirmed_pre_mutation_failure:
             raise DagsterScheduleUncertainOutcome(
-                str(exc),
+                str(exc) or "schedule 명령 결과를 확정할 수 없습니다.",
                 command_id=command_id,
-                active_command_id=command_id if marker_persisted else None,
+                active_command_id=None,
             ) from exc
         raise
     try:
@@ -1170,12 +1194,18 @@ async def execute_audited_schedule_command(
         )
     except DagsterScheduleStorageUnavailable:
         response.data.audit_status = "terminal_record_failed"
+        response.data.audit_command_id = None
         _LOG.exception(
             "schedule 원격 결과 terminal audit 저장 실패; 결과는 재시도 유도 없이 반환 "
             "(command_id=%s, status=%s)",
             command_id,
             response.data.status,
         )
+    if (
+        response.data.outcome_certainty == "uncertain"
+        or response.data.audit_status == "terminal_record_failed"
+    ):
+        response.data.audit_command_id = None
     return response
 
 

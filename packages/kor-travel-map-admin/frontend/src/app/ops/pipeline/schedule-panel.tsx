@@ -9,6 +9,7 @@ import {
   type PipelineScheduleCommand,
   type PipelineScheduleCommandResponse,
   type PipelineScheduleClaimResolutionRequest,
+  readPipelineFrozenScheduleClaimResolution,
   readPipelineFrozenScheduleMutation,
   usePatchScheduleMutation,
   usePipelineSchedules,
@@ -254,6 +255,20 @@ export function SchedulePanel({
     resolveClaim.status,
     scheduleItems,
   ]);
+  useEffect(() => {
+    const frozen =
+      scheduleItems
+        .map((schedule) =>
+          readPipelineFrozenScheduleClaimResolution(schedule.name),
+        )
+        .find((submission) => submission !== null) ?? null;
+    if (frozen === null) {
+      return;
+    }
+    setClaimResolutionSubmission((current) => current ?? frozen.submission);
+    setClaimResolution(frozen.submission.body.resolution);
+    setClaimResolutionReason(frozen.submission.body.reason);
+  }, [resolveClaim.status, scheduleItems]);
   const sensors = data?.sensors ?? [];
   const scheduleMutationPending =
     patchSchedule.isPending ||
@@ -272,7 +287,13 @@ export function SchedulePanel({
     claimRecoveryFromConflict(
       commandSchedule.error,
       commandSchedule.variables?.scheduleName,
-    );
+    ) ??
+    (claimResolutionSubmission
+      ? {
+          scheduleName: claimResolutionSubmission.scheduleName,
+          commandId: claimResolutionSubmission.commandId,
+        }
+      : null);
   const frozenClaimResolution =
     recoveryClaim &&
     claimResolutionSubmission?.scheduleName === recoveryClaim.scheduleName &&

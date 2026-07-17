@@ -418,7 +418,6 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
     async def _fail_terminal_audit(*_args: object, **_kwargs: object) -> None:
         raise DagsterScheduleStorageUnavailable("terminal audit unavailable")
 
-    original_append = dagster_schedule_service.append_schedule_audit_event
     monkeypatch.setattr(
         dagster_schedule_service,
         "append_schedule_audit_event",
@@ -447,25 +446,9 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
                 command_id=command_id,
                 operation=_operation,
             )
-        assert conflict.value.active_command_id == command_id
-
-        monkeypatch.setattr(
-            dagster_schedule_service,
-            "append_schedule_audit_event",
-            original_append,
-        )
-        resolved = await resolve_schedule_active_claim(
-            session,
-            schedule_name=schedule_name,
-            command_id=command_id,
-            resolution="confirmed_applied",
-            actor="admin@example.test",
-            reason="Dagster schedule 상태에서 반영 확인",
-        )
-
     assert first.data.audit_status == "terminal_record_failed"
-    assert first.data.audit_command_id == command_id
-    assert resolved.resolution == "confirmed_applied"
+    assert first.data.audit_command_id is None
+    assert conflict.value.active_command_id is None
     assert remote_calls == 1
 
 
@@ -538,6 +521,11 @@ async def test_real_db_claim_lease_transition_blocks_then_allows_one_new_mutatio
         remote_calls += 1
         return _command_response()
 
+    async def _unexpected_existing_operation(
+        _mutation_guard: Callable[[], Awaitable[None]],
+    ) -> DagsterScheduleCommandResponse:
+        raise AssertionError("기존 claim 상태 확인에서 mutation을 호출하면 안 됩니다")
+
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
         await _seed_active_schedule_claim(
             session,
@@ -556,6 +544,18 @@ async def test_real_db_claim_lease_transition_blocks_then_allows_one_new_mutatio
                 reason="lease 전 해제 금지",
             )
         await asyncio.sleep(1.1)
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as recoverable:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="reset",
+                actor="admin@example.test",
+                reason="운영 확인",
+                request_details={"command": "reset"},
+                command_id=expired_command_id,
+                operation=_unexpected_existing_operation,
+            )
+        assert recoverable.value.active_command_id == expired_command_id
         resolved = await resolve_schedule_active_claim(
             session,
             schedule_name=schedule_name,
@@ -579,7 +579,7 @@ async def test_real_db_claim_lease_transition_blocks_then_allows_one_new_mutatio
     assert remote_calls == 1
 
 
-async def test_operation_deadline_cancels_old_owner_before_new_mutation(
+async def test_operation_deadline_keeps_lease_while_remote_continues(
     migrated_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -587,6 +587,7 @@ async def test_operation_deadline_cancels_old_owner_before_new_mutation(
     next_command_id = uuid4()
     schedule_name = f"{_NAME}_deadline_fencing"
     remote_calls = 0
+    remote_finished = asyncio.Event()
     monkeypatch.setattr(
         dagster_schedule_service,
         "_SCHEDULE_OPERATION_TIMEOUT_SECONDS",
@@ -596,19 +597,24 @@ async def test_operation_deadline_cancels_old_owner_before_new_mutation(
     async def _timed_out_operation(
         mutation_guard: Callable[[], Awaitable[None]],
     ) -> DagsterScheduleCommandResponse:
-        nonlocal remote_calls
-        await asyncio.sleep(0.2)
         await mutation_guard()
-        remote_calls += 1
+
+        async def _remote_continuation() -> None:
+            nonlocal remote_calls
+            await asyncio.sleep(0.2)
+            remote_calls += 1
+            remote_finished.set()
+
+        asyncio.create_task(_remote_continuation())
+        await asyncio.sleep(10)
         return _command_response()
 
-    async def _new_operation(
-        mutation_guard: Callable[[], Awaitable[None]],
+    async def _unexpected_new_operation(
+        _mutation_guard: Callable[[], Awaitable[None]],
     ) -> DagsterScheduleCommandResponse:
         nonlocal remote_calls
-        await mutation_guard()
         remote_calls += 1
-        return _command_response()
+        raise AssertionError("lease 전 새 remote mutation을 호출하면 안 됩니다")
 
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
         with pytest.raises(DagsterScheduleUncertainOutcome) as uncertain:
@@ -622,31 +628,30 @@ async def test_operation_deadline_cancels_old_owner_before_new_mutation(
                 command_id=timed_out_command_id,
                 operation=_timed_out_operation,
             )
-        assert uncertain.value.active_command_id == timed_out_command_id
-        await resolve_schedule_active_claim(
-            session,
-            schedule_name=schedule_name,
-            command_id=timed_out_command_id,
-            resolution="confirmed_not_applied",
-            actor="admin@example.test",
-            reason="deadline 취소 후 Dagster 미반영 확인",
-        )
-        monkeypatch.setattr(
-            dagster_schedule_service,
-            "_SCHEDULE_OPERATION_TIMEOUT_SECONDS",
-            1.0,
-        )
-        await execute_audited_schedule_command(
-            session,
-            schedule_name=schedule_name,
-            command="start",
-            actor="admin@example.test",
-            reason="fenced owner 해제 후 새 명령",
-            request_details={"command": "start"},
-            command_id=next_command_id,
-            operation=_new_operation,
-        )
+        assert uncertain.value.active_command_id is None
+        with pytest.raises(DagsterScheduleClaimResolutionConflict):
+            await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=timed_out_command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="remote가 계속될 수 있어 lease 전 해제 금지",
+            )
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as conflict:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="start",
+                actor="admin@example.test",
+                reason="lease 전 새 명령",
+                request_details={"command": "start"},
+                command_id=next_command_id,
+                operation=_unexpected_new_operation,
+            )
+        assert conflict.value.active_command_id is None
 
+    await asyncio.wait_for(remote_finished.wait(), timeout=1)
     assert remote_calls == 1
 
 
@@ -846,17 +851,16 @@ async def test_stale_requested_only_claim_can_be_resolved_after_lease(
     assert resolved.resolution == "confirmed_not_applied"
 
 
-async def test_exception_terminal_replays_original_storage_outcome_without_remote_call(
+async def test_pre_mutation_storage_failure_replays_confirmed_without_remote_call(
     migrated_engine: AsyncEngine,
 ) -> None:
     command_id = uuid4()
     remote_calls = 0
 
     async def _operation(
-        mutation_guard: Callable[[], Awaitable[None]],
+        _mutation_guard: Callable[[], Awaitable[None]],
     ) -> DagsterScheduleCommandResponse:
         nonlocal remote_calls
-        await mutation_guard()
         remote_calls += 1
         raise DagsterScheduleStorageUnavailable("override read unavailable")
 
@@ -890,6 +894,71 @@ async def test_exception_terminal_replays_original_storage_outcome_without_remot
                 operation=_operation,
             )
 
+    assert remote_calls == 1
+
+
+async def test_post_guard_storage_failure_stays_uncertain_and_keeps_claim(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    other_command_id = uuid4()
+    schedule_name = f"{_NAME}_post_guard_storage"
+    remote_calls = 0
+
+    async def _operation(
+        mutation_guard: Callable[[], Awaitable[None]],
+    ) -> DagsterScheduleCommandResponse:
+        nonlocal remote_calls
+        await mutation_guard()
+        remote_calls += 1
+        raise DagsterScheduleStorageUnavailable("commit acknowledgement lost")
+
+    async def _unexpected_operation(
+        _mutation_guard: Callable[[], Awaitable[None]],
+    ) -> DagsterScheduleCommandResponse:
+        raise AssertionError("불명 storage 결과 뒤 remote mutation을 재호출하면 안 됩니다")
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        with pytest.raises(DagsterScheduleUncertainOutcome) as uncertain:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="start",
+                actor="admin@example.test",
+                reason="commit unknown",
+                request_details={"command": "start"},
+                command_id=command_id,
+                operation=_operation,
+            )
+        assert uncertain.value.active_command_id is None
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as conflict:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="stop",
+                actor="admin@example.test",
+                reason="new key blocked",
+                request_details={"command": "stop"},
+                command_id=other_command_id,
+                operation=_unexpected_operation,
+            )
+        assert conflict.value.active_command_id is None
+        terminal = (
+            await session.execute(
+                text(
+                    """
+                    SELECT details
+                    FROM ops.dagster_schedule_audit_events
+                    WHERE command_id = CAST(:command_id AS uuid)
+                      AND phase = 'failed'
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        ).one()
+
+    assert terminal.details["exception_kind"] == "storage_unavailable_after_mutation"
+    assert terminal.details["outcome_certainty"] == "uncertain"
     assert remote_calls == 1
 
 
@@ -1002,7 +1071,9 @@ async def test_uncertain_remote_result_replays_same_key_and_blocks_new_key(
     assert first.data.outcome_certainty == "uncertain"
     assert replay.data.outcome_certainty == "uncertain"
     assert replay.data.audit_status == first.data.audit_status == "recorded"
-    assert conflict.value.active_command_id == command_id
+    assert first.data.audit_command_id is None
+    assert replay.data.audit_command_id is None
+    assert conflict.value.active_command_id is None
     assert remote_calls == 1
 
 
@@ -1014,19 +1085,6 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
     schedule_name = f"{_NAME}_manual_resolution"
     remote_calls = 0
 
-    async def _uncertain_operation(
-        mutation_guard: Callable[[], Awaitable[None]],
-    ) -> DagsterScheduleCommandResponse:
-        nonlocal remote_calls
-        await mutation_guard()
-        remote_calls += 1
-        response = _command_response()
-        response.data.status = "unavailable"
-        response.data.outcome_certainty = "uncertain"
-        response.data.effective_status = "unknown"
-        response.data.errors = ["response lost after POST"]
-        return response
-
     async def _confirmed_operation(
         mutation_guard: Callable[[], Awaitable[None]],
     ) -> DagsterScheduleCommandResponse:
@@ -1036,15 +1094,24 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
         return _command_response()
 
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-        await execute_audited_schedule_command(
+        await _seed_active_schedule_claim(
             session,
+            command_id=command_id,
             schedule_name=schedule_name,
             command="run",
+            reason="수동 실행",
+            stale=True,
+        )
+        await append_schedule_audit_event(
+            session,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command="run",
+            phase="failed",
             actor="admin@example.test",
             reason="수동 실행",
-            request_details={"command": "run"},
-            command_id=command_id,
-            operation=_uncertain_operation,
+            details={"outcome_certainty": "uncertain"},
+            release_active_claim=False,
         )
 
         # DB 경계도 resolution 없는 uncertain claim 삭제를 거부한다.
@@ -1148,6 +1215,21 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
             )
         await session.rollback()
 
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as resolved_key:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="run",
+                actor="admin@example.test",
+                reason="수동 실행",
+                request_details={"command": "run"},
+                command_id=command_id,
+                operation=_confirmed_operation,
+            )
+        assert resolved_key.value.active_command_id is None
+        assert resolved_key.value.resolved is True
+        assert resolved_key.value.resolution == "confirmed_not_applied"
+
         await execute_audited_schedule_command(
             session,
             schedule_name=schedule_name,
@@ -1159,7 +1241,7 @@ async def test_uncertain_claim_requires_append_only_resolution_before_new_comman
             operation=_confirmed_operation,
         )
 
-    assert remote_calls == 2
+    assert remote_calls == 1
 
 
 async def test_confirmed_terminal_wins_concurrent_claim_resolution(
@@ -1173,6 +1255,7 @@ async def test_confirmed_terminal_wins_concurrent_claim_resolution(
             command_id=command_id,
             schedule_name=schedule_name,
             command="reset",
+            stale=True,
         )
 
     resolution_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -1278,6 +1361,7 @@ async def test_uncertain_terminal_commit_is_visible_to_waiting_resolution(
             command_id=command_id,
             schedule_name=schedule_name,
             command="reset",
+            stale=True,
         )
 
     resolution_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -1374,6 +1458,7 @@ async def test_concurrent_identical_claim_resolution_replays_single_row(
             command_id=command_id,
             schedule_name=schedule_name,
             command="reset",
+            stale=True,
         )
 
     async def _resolve(actor: str) -> DagsterScheduleClaimResolution:
@@ -1421,6 +1506,7 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
             command_id=command_id,
             schedule_name=schedule_name,
             command="reset",
+            stale=True,
         )
 
     terminal_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -1531,6 +1617,7 @@ async def test_schedule_claim_triggers_enforce_terminal_resolution_xor_raw_sql(
             command_id=resolution_first_id,
             schedule_name=resolution_first_name,
             command="reset",
+            stale=True,
         )
         await _seed_active_schedule_claim(
             seed,

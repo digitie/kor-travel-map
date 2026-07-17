@@ -398,11 +398,10 @@ def upgrade() -> None:
         LANGUAGE plpgsql
         AS $$
         DECLARE
-          claim_finished_at timestamptz;
           claim_resolvable_after timestamptz;
         BEGIN
-          SELECT claim.operation_finished_at, claim.resolvable_after
-          INTO claim_finished_at, claim_resolvable_after
+          SELECT claim.resolvable_after
+          INTO claim_resolvable_after
           FROM ops.dagster_schedule_active_claims AS claim
           WHERE claim.command_id = NEW.command_id
             AND claim.schedule_name = NEW.schedule_name
@@ -411,9 +410,8 @@ def upgrade() -> None:
             RAISE EXCEPTION 'only an active uncertain schedule claim can be resolved'
               USING ERRCODE = '23514';
           END IF;
-          IF claim_finished_at IS NULL
-             AND clock_timestamp() < claim_resolvable_after THEN
-            RAISE EXCEPTION 'running schedule claim cannot be resolved before lease expires'
+          IF clock_timestamp() < claim_resolvable_after THEN
+            RAISE EXCEPTION 'uncertain schedule claim cannot be resolved before lease expires'
               USING ERRCODE = '23514';
           END IF;
           IF NOT EXISTS (
