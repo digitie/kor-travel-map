@@ -244,7 +244,6 @@ function OverviewStrip({
 
 export function PipelineClient({
   initialExecution,
-  initialFilters: _initialFilters,
   initialSchedule,
   initialTab,
 }: {
@@ -259,9 +258,7 @@ export function PipelineClient({
   const urlStateRef = useRef(searchParams.toString());
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
-  const urlExecution = searchParams.get("execution");
   const urlSchedule = searchParams.get("schedule");
-  const urlTab = searchParams.get("tab");
   const parsedExecution = useMemo(
     () => parseExecutionParam(initialExecution),
     [initialExecution],
@@ -322,18 +319,22 @@ export function PipelineClient({
   }, [searchParams]);
 
   useEffect(() => {
-    setSelected(parseExecutionParam(urlExecution ?? undefined));
-  }, [urlExecution]);
-
-  useEffect(() => {
-    setTab(
-      urlTab === "events" || urlTab === "schedules"
-        ? urlTab
-        : urlSchedule
-          ? "schedules"
-          : "executions",
-    );
-  }, [urlSchedule, urlTab]);
+    const syncHistoryState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const nextTab = params.get("tab");
+      urlStateRef.current = params.toString();
+      setSelected(parseExecutionParam(params.get("execution") ?? undefined));
+      setTab(
+        nextTab === "events" || nextTab === "schedules"
+          ? nextTab
+          : params.has("schedule")
+            ? "schedules"
+            : "executions",
+      );
+    };
+    window.addEventListener("popstate", syncHistoryState);
+    return () => window.removeEventListener("popstate", syncHistoryState);
+  }, []);
 
   const selectExecution = (
     kind: ExecutionKind,
@@ -364,6 +365,13 @@ export function PipelineClient({
       }),
     [searchParams],
   );
+  const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
+  const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
+  const timelineKey = JSON.stringify([
+    timelineFilters,
+    timelineLoadBatchId,
+    timelineParentJobId,
+  ]);
 
   useEffect(() => {
     if (selected || !focusAfterCloseRef.current) {
@@ -444,13 +452,10 @@ export function PipelineClient({
             >
               <div className="min-w-0 space-y-4">
                 <ExecutionTimeline
+                  key={timelineKey}
                   initialFilters={timelineFilters}
-                  initialLoadBatchId={
-                    searchParams.get("load_batch_id") ?? undefined
-                  }
-                  initialParentJobId={
-                    searchParams.get("parent_job_id") ?? undefined
-                  }
+                  initialLoadBatchId={timelineLoadBatchId}
+                  initialParentJobId={timelineParentJobId}
                   selectedExecutionId={selected?.id ?? null}
                   onSelectExecution={selectExecution}
                   onUrlChange={updateUrl}

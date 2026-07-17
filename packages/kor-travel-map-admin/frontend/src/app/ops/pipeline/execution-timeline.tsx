@@ -140,30 +140,6 @@ export function ExecutionTimeline({
   const [loadBatchId, setLoadBatchId] = useState(initialLoadBatchId ?? "");
   const [parentJobId, setParentJobId] = useState(initialParentJobId ?? "");
 
-  useEffect(() => {
-    setKind(initialFilters.kind ?? "all");
-    setStatus(initialFilters.status ?? "all");
-    setProvider(initialFilters.provider ?? "");
-    setDatasetKey(initialFilters.datasetKey ?? "");
-    setSyncScope(initialFilters.syncScope ?? "");
-    setCreatedFrom(datetimeLocalValue(initialFilters.createdFrom));
-    setCreatedTo(datetimeLocalValue(initialFilters.createdTo));
-    setLoadBatchId(initialLoadBatchId ?? "");
-    setParentJobId(initialParentJobId ?? "");
-    setCursorStack([]);
-    setBaselineTop(null);
-  }, [
-    initialFilters.createdFrom,
-    initialFilters.createdTo,
-    initialFilters.datasetKey,
-    initialFilters.kind,
-    initialFilters.provider,
-    initialFilters.status,
-    initialFilters.syncScope,
-    initialLoadBatchId,
-    initialParentJobId,
-  ]);
-
   const cursor = cursorStack.at(-1) ?? null;
   const filters = useMemo(
     () => ({

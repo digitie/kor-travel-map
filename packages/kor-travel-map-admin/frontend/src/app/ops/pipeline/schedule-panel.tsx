@@ -269,7 +269,10 @@ export function SchedulePanel({
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
   const scheduleControlsGuardRef = useRef(false);
-  scheduleControlsGuardRef.current = scheduleControlsDisabled;
+
+  useEffect(() => {
+    scheduleControlsGuardRef.current = scheduleControlsDisabled;
+  }, [scheduleControlsDisabled]);
 
   useEffect(() => {
     if (highlightSchedule && highlightRef.current) {

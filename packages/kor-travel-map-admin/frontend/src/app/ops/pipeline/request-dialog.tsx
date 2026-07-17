@@ -319,17 +319,18 @@ export function RequestCreateDialog({
   ): string | null => {
     if (scope.type === "provider_dataset") {
       const pairRows = catalogPair(rows, scope.provider, scope.dataset_key);
+      const requestedSyncScope = scope.sync_scope;
       if (pairRows.length === 0) {
         return "현재 canonical catalog에 없는 provider/dataset 조합입니다.";
       }
       if (
-        scope.sync_scope &&
+        requestedSyncScope &&
         !pairRows.some(
           (row) =>
             row.catalog?.scope_refresh.default_sync_scope ===
-              scope.sync_scope ||
+              requestedSyncScope ||
             row.catalog?.scope_refresh.allowed_sync_scopes.includes(
-              scope.sync_scope,
+              requestedSyncScope,
             ),
         )
       ) {
