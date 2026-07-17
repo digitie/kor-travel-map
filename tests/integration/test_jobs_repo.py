@@ -236,6 +236,7 @@ async def test_record_import_job_event_defaults_context(
     assert event is not None
     assert event.provider == "python-mois-api"
     assert event.dataset_key == "mois_license_features_bulk"
+    assert event.sync_scope is None
     assert event.stage == "fetching"
     assert event.payload == {"attempt": 2}
 

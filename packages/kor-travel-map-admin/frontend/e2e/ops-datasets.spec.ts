@@ -13,11 +13,12 @@ type OpsDatasetCatalogInfo = components["schemas"]["OpsDatasetCatalogInfo"];
 type OpsDatasetDetailData = components["schemas"]["OpsDatasetDetailData"];
 type OpsDatasetDetailResponse = components["schemas"]["OpsDatasetDetailResponse"];
 type OpsDatasetGridRow = components["schemas"]["OpsDatasetGridRow"];
+type OpsDatasetEventHistory = components["schemas"]["OpsDatasetEventHistory"];
+type OpsDatasetRunHistory = components["schemas"]["OpsDatasetRunHistory"];
 type OpsDatasetPreviewResponse = components["schemas"]["OpsDatasetPreviewResponse"];
 type OpsDatasetRefreshPolicyResponse =
   components["schemas"]["OpsDatasetRefreshPolicyResponse"];
-type OpsDatasetLatestExecution =
-  components["schemas"]["OpsDatasetLatestExecution"];
+type OpsDatasetExecution = components["schemas"]["OpsDatasetExecution"];
 type OpsDatasetsGridResponse = components["schemas"]["OpsDatasetsGridResponse"];
 type FeatureUpdateRequestCreateRequest =
   components["schemas"]["FeatureUpdateRequestCreateRequest"];
@@ -130,10 +131,13 @@ function makeCatalog(
 }
 
 function makeGridRow(overrides: Partial<OpsDatasetGridRow> = {}): OpsDatasetGridRow {
+  const provider = overrides.provider ?? KMA_PROVIDER;
+  const datasetKey = overrides.dataset_key ?? KMA_DATASET;
+  const syncScope = overrides.sync_scope ?? KMA_SCOPE;
   return {
-    provider: KMA_PROVIDER,
-    dataset_key: KMA_DATASET,
-    sync_scope: KMA_SCOPE,
+    provider,
+    dataset_key: datasetKey,
+    sync_scope: syncScope,
     status: "active",
     last_success_at: FRESH_AT,
     last_failure_at: null,
@@ -148,10 +152,12 @@ function makeGridRow(overrides: Partial<OpsDatasetGridRow> = {}): OpsDatasetGrid
     schedule: makeScheduleSummary(),
     dataset_issues: makeIssueSummary(),
     provider_issues: makeIssueSummary(),
+    active_execution: null,
     latest_execution: null,
     detail_url:
-      `/v1/ops/datasets/detail?provider=${KMA_PROVIDER}` +
-      `&dataset_key=${KMA_DATASET}&sync_scope=${encodeURIComponent(KMA_SCOPE)}`,
+      `/v1/ops/datasets/detail?provider=${encodeURIComponent(provider)}` +
+      `&dataset_key=${encodeURIComponent(datasetKey)}` +
+      `&sync_scope=${encodeURIComponent(syncScope)}`,
     ...overrides,
   };
 }
@@ -183,9 +189,9 @@ function makeRefreshPolicy(
   };
 }
 
-function makeLatestExecution(
-  overrides: Partial<OpsDatasetLatestExecution> = {},
-): OpsDatasetLatestExecution {
+function makeExecution(
+  overrides: Partial<OpsDatasetExecution> = {},
+): OpsDatasetExecution {
   return {
     id: REQUEST_ID,
     kind: "update_request",
@@ -235,9 +241,88 @@ function makeLatestExecution(
   };
 }
 
+function makeExactExecution(
+  provider: string,
+  datasetKey: string,
+  syncScope: string,
+  overrides: Partial<OpsDatasetExecution> = {},
+): OpsDatasetExecution {
+  const execution = makeExecution(overrides);
+  return {
+    ...execution,
+    providers: [provider],
+    dataset_keys: [datasetKey],
+    provider_datasets: [
+      {
+        provider,
+        dataset_key: datasetKey,
+        sync_scope: syncScope,
+        status: execution.pair_status,
+        operation_member_id: execution.operation_member_id,
+      },
+    ],
+    sync_scope: syncScope,
+    detail_url: `/v1/ops/pipeline/executions/${execution.kind}/${execution.id}`,
+  };
+}
+
+function exactScopeHistoryUrl(
+  resource: "events" | "executions",
+  provider: string,
+  datasetKey: string,
+  syncScope: string,
+): string {
+  return (
+    `/v1/ops/pipeline/${resource}?provider=${encodeURIComponent(provider)}` +
+    `&dataset_key=${encodeURIComponent(datasetKey)}` +
+    `&sync_scope=${encodeURIComponent(syncScope)}`
+  );
+}
+
+function makeRunHistory(
+  provider: string,
+  datasetKey: string,
+  syncScope: string,
+  overrides: Partial<OpsDatasetRunHistory> = {},
+): OpsDatasetRunHistory {
+  return {
+    canonical_url: exactScopeHistoryUrl(
+      "executions",
+      provider,
+      datasetKey,
+      syncScope,
+    ),
+    items: [],
+    next_cursor: null,
+    ...overrides,
+  };
+}
+
+function makeEventHistory(
+  provider: string,
+  datasetKey: string,
+  syncScope: string,
+  overrides: Partial<OpsDatasetEventHistory> = {},
+): OpsDatasetEventHistory {
+  return {
+    canonical_url: exactScopeHistoryUrl(
+      "events",
+      provider,
+      datasetKey,
+      syncScope,
+    ),
+    items: [],
+    next_cursor: null,
+    ...overrides,
+  };
+}
+
 function makeDetail(
   overrides: Partial<OpsDatasetDetailData> = {},
 ): OpsDatasetDetailData {
+  const provider = overrides.provider ?? KMA_PROVIDER;
+  const datasetKey = overrides.dataset_key ?? KMA_DATASET;
+  const syncScope = overrides.scopes?.[0]?.sync_scope ?? KMA_SCOPE;
   return {
     provider: KMA_PROVIDER,
     dataset_key: KMA_DATASET,
@@ -258,20 +343,14 @@ function makeDetail(
     orphan_reason: null,
     mutable: true,
     refresh_policy: null,
-    recent_runs: [],
-    recent_runs_coverage: "db_recorded_canonical_operations",
-    recent_runs_next_cursor: null,
-    recent_events: [],
-    recent_events_next_cursor: null,
-    event_history_url:
-      `/v1/ops/pipeline/events?provider=${KMA_PROVIDER}` +
-      `&dataset_key=${KMA_DATASET}&sync_scope=${encodeURIComponent(KMA_SCOPE)}`,
+    active_execution: null,
+    latest_execution: null,
+    execution_coverage: "db_recorded_canonical_operations",
+    run_history: makeRunHistory(provider, datasetKey, syncScope),
+    event_history: makeEventHistory(provider, datasetKey, syncScope),
     schedule: makeScheduleSummary(),
     schedule_source_status: "ok",
     schedule_source_errors: [],
-    pipeline_history_url:
-      `/v1/ops/pipeline/executions?provider=${KMA_PROVIDER}` +
-      `&dataset_key=${KMA_DATASET}&sync_scope=${encodeURIComponent(KMA_SCOPE)}`,
     dataset_issues: makeIssueSummary(),
     provider_issues: makeIssueSummary(),
     ...overrides,
@@ -288,7 +367,7 @@ function makeGridResponse(
   return {
     data: {
       items,
-      latest_execution_coverage: "db_recorded_canonical_operations",
+      execution_coverage: "db_recorded_canonical_operations",
       schedule_source_status: degrade.status ?? "ok",
       schedule_source_errors: degrade.errors ?? [],
     },
@@ -389,8 +468,11 @@ async function mockOpsDatasets(
     items: OpsDatasetGridRow[] | ((listCount: number) => OpsDatasetGridRow[]);
     details?: Record<
       string,
-      OpsDatasetDetailData | ((detailCount: number) => OpsDatasetDetailData)
+      | OpsDatasetDetailData
+      | ((detailCount: number, syncScope: string) => OpsDatasetDetailData)
     >;
+    detailDelayMs?: number | ((detailCount: number, syncScope: string) => number);
+    allowInvalidDetailContract?: boolean;
     previewStatus?: number;
     policyConflictCode?:
       | "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
@@ -531,6 +613,7 @@ async function mockOpsDatasets(
     counts.detail += 1;
     const provider = url.searchParams.get("provider") ?? "";
     const dataset = url.searchParams.get("dataset_key") ?? "";
+    const syncScope = url.searchParams.get("sync_scope") ?? "";
     const key = `${provider}/${dataset}`;
     const detailSource = options.details?.[key];
     if (!detailSource) {
@@ -551,8 +634,40 @@ async function mockOpsDatasets(
     }
     const detail =
       typeof detailSource === "function"
-        ? detailSource(counts.detail)
+        ? detailSource(counts.detail, syncScope)
         : detailSource;
+    if (!options.allowInvalidDetailContract) {
+      const expectedRunUrl = exactScopeHistoryUrl(
+        "executions",
+        provider,
+        dataset,
+        syncScope,
+      );
+      const expectedEventUrl = exactScopeHistoryUrl(
+        "events",
+        provider,
+        dataset,
+        syncScope,
+      );
+      if (
+        detail.provider !== provider ||
+        detail.dataset_key !== dataset ||
+        !detail.scopes.some((scope) => scope.sync_scope === syncScope) ||
+        detail.run_history.canonical_url !== expectedRunUrl ||
+        detail.event_history.canonical_url !== expectedEventUrl
+      ) {
+        throw new Error(
+          `Invalid exact-scope detail mock: ${provider}/${dataset}/${syncScope}`,
+        );
+      }
+    }
+    const delayMs =
+      typeof options.detailDelayMs === "function"
+        ? options.detailDelayMs(counts.detail, syncScope)
+        : (options.detailDelayMs ?? 0);
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
     await fulfillJson(route, makeDetailResponse(detail));
   });
 
@@ -815,7 +930,7 @@ function defaultGrid(): {
   const mois = makeGridRow({
     provider: MOIS_PROVIDER,
     dataset_key: MOIS_DATASET,
-    sync_scope: "default",
+    sync_scope: "dataset_wide",
     status: "never_run",
     last_success_at: null,
     catalog: makeCatalog({
@@ -845,7 +960,7 @@ function defaultGrid(): {
   const krex = makeGridRow({
     provider: KREX_PROVIDER,
     dataset_key: KREX_DATASET,
-    sync_scope: "default",
+    sync_scope: "dataset_wide",
     status: "active",
     last_success_at: MOCK_OLD,
     last_failure_at: "2026-07-14T23:30:00.000Z",
@@ -897,19 +1012,24 @@ function defaultGrid(): {
           burst_size: null,
           stale_after_minutes: null,
         }),
-        recent_runs: [makeLatestExecution()],
-        recent_events: [
-          {
-            event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-            job_id: JOB_ID,
-            sync_scope: KMA_SCOPE,
-            stage: "loading",
-            level: "error",
-            code: "provider.timeout",
-            message: "provider timeout",
-            occurred_at: MOCK_OLD,
-          },
-        ],
+        latest_execution: makeExecution(),
+        run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+          items: [makeExecution()],
+        }),
+        event_history: makeEventHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+          items: [
+            {
+              event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              job_id: JOB_ID,
+              sync_scope: KMA_SCOPE,
+              stage: "loading",
+              level: "error",
+              code: "provider.timeout",
+              message: "provider timeout",
+              occurred_at: MOCK_OLD,
+            },
+          ],
+        }),
       }),
       [`${MOIS_PROVIDER}/${MOIS_DATASET}`]: makeDetail({
         provider: MOIS_PROVIDER,
@@ -939,7 +1059,7 @@ function defaultGrid(): {
         }),
         scopes: [
           {
-            sync_scope: "default",
+            sync_scope: "dataset_wide",
             status: "never_run",
             cursor: {},
             last_success_at: null,
@@ -976,6 +1096,12 @@ function defaultGrid(): {
           provider: KREX_PROVIDER,
           dataset_key: KREX_DATASET,
         }),
+        scopes: [
+          {
+            ...makeDetail().scopes[0],
+            sync_scope: "dataset_wide",
+          },
+        ],
         dataset_issues: makeIssueSummary({
           open_count: 3,
           severity_counts: { error: 2, warning: 1 },
@@ -1146,6 +1272,19 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       "href",
       `/ops/pipeline?execution=update_request:${REQUEST_ID}`,
     );
+    const runHistoryLink = page.getByRole("link", {
+      name: "선택 범위 실행 전체 보기",
+    });
+    await expect(runHistoryLink).toHaveAttribute(
+      "href",
+      `/ops/pipeline?tab=executions&provider=${KMA_PROVIDER}` +
+        `&dataset_key=${KMA_DATASET}&sync_scope=${KMA_SCOPE}`,
+    );
+    await expect(runHistoryLink).toHaveAttribute(
+      "data-api-history-url",
+      `/v1/ops/pipeline/executions?provider=${KMA_PROVIDER}` +
+        `&dataset_key=${KMA_DATASET}&sync_scope=${KMA_SCOPE}`,
+    );
 
     // 최근 이벤트 + Feature 보기 링크.
     await expect(page.getByText("provider timeout")).toBeVisible();
@@ -1272,6 +1411,68 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(targetedPolicy).toHaveValue("disabled");
     await expect(page.getByText("서버 정책이 변경됨")).toHaveCount(0);
     await expect(saveButton).toBeEnabled();
+  });
+
+  test("정책 편집 — 같은 dataset의 exact scope 전환 중에도 draft를 보존한다", async ({
+    page,
+  }) => {
+    const scopes = [
+      ...makeDetail().scopes,
+      {
+        ...makeDetail().scopes[0],
+        sync_scope: ACTIVE_EXTERNAL_SCOPE,
+      },
+    ];
+    const items = [
+      makeGridRow(),
+      makeGridRow({ sync_scope: ACTIVE_EXTERNAL_SCOPE }),
+    ];
+    const mocks = await mockOpsDatasets(page, {
+      detailDelayMs: (_detailCount, syncScope) =>
+        syncScope === ACTIVE_EXTERNAL_SCOPE ? 300 : 0,
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: (_detailCount, syncScope) =>
+          makeDetail({
+            refresh_policy: makeRefreshPolicy({
+              targeted_policy: "follow_system",
+            }),
+            scopes,
+            run_history: makeRunHistory(
+              KMA_PROVIDER,
+              KMA_DATASET,
+              syncScope,
+            ),
+            event_history: makeEventHistory(
+              KMA_PROVIDER,
+              KMA_DATASET,
+              syncScope,
+            ),
+          }),
+      },
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
+    await targetedPolicy.selectOption("allow_targeted");
+
+    await page.getByRole("button", {
+      name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
+    }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`),
+    );
+    await expect(page.getByTestId("policy-readonly-alert")).toContainText(
+      "초안은 유지",
+    );
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
+
+    await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
+    await expect(page.getByTestId("policy-readonly-alert")).toHaveCount(0);
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
   });
 
   test("정책 편집 — CAS 409는 draft를 보존하고 3-way 조정 뒤 최신 revision으로 저장한다", async ({
@@ -1455,19 +1656,20 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
   });
 
-  test("정책 편집 — orphan 행은 저장 UI를 열지 않는다", async ({
+  test("정책 편집 — orphan 행은 draft를 표시하되 저장을 막는다", async ({
     page,
   }) => {
     const orphan = makeGridRow({
       provider: "retired-provider",
       dataset_key: "retired-dataset",
-      sync_scope: "legacy",
+      sync_scope: STALE_EXTERNAL_SCOPE,
       catalog: null,
       catalog_state: "orphan",
       orphan_reason: "카탈로그에서 제거됨",
       mutable: false,
       detail_url:
-        "/v1/ops/datasets/detail?provider=retired-provider&dataset_key=retired-dataset&sync_scope=legacy",
+        "/v1/ops/datasets/detail?provider=retired-provider&dataset_key=retired-dataset" +
+        `&sync_scope=${encodeURIComponent(STALE_EXTERNAL_SCOPE)}`,
     });
     const mocks = await mockOpsDatasets(page, {
       items: [orphan],
@@ -1482,7 +1684,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           scopes: [
             {
               ...makeDetail().scopes[0],
-              sync_scope: "legacy",
+              sync_scope: STALE_EXTERNAL_SCOPE,
             },
           ],
         }),
@@ -1492,15 +1694,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto(
       "/ops/datasets?provider=retired-provider&dataset=retired-dataset" +
-        "&sync_scope=legacy&panel=policy",
+        `&sync_scope=${encodeURIComponent(STALE_EXTERNAL_SCOPE)}&panel=policy`,
     );
 
     await expect(page.getByTestId("policy-readonly-alert")).toBeVisible();
-    await expect(page.getByRole("button", { name: "저장" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
     await expect.poll(() => mocks.policyPuts.length).toBe(0);
   });
 
-  test("정책 편집 — canonical mutable=false 행도 독립적으로 저장 UI를 막는다", async ({
+  test("정책 편집 — canonical mutable=false 행도 draft를 표시하되 저장을 막는다", async ({
     page,
   }) => {
     const row = makeGridRow({ mutable: false });
@@ -1517,7 +1719,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByTestId("policy-readonly-alert")).toContainText(
       "mutable=false",
     );
-    await expect(page.getByRole("button", { name: "저장" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
     await expect.poll(() => mocks.policyPuts.length).toBe(0);
   });
 
@@ -1551,7 +1753,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // fixture 버튼도 capability 없이는 활성화되지 않는다(#684 fail-closed).
     await page.goto(
       `/ops/datasets?provider=${MOIS_PROVIDER}&dataset=${MOIS_DATASET}` +
-        "&sync_scope=default&panel=preview",
+        "&sync_scope=dataset_wide&panel=preview",
     );
     await expect(page.getByRole("button", { name: "live 실행" })).toHaveCount(0);
     await expect(
@@ -1727,26 +1929,36 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => pipeline.posts.length).toBe(1);
   });
 
-  test("지금 갱신 — latest root/pair가 active면 POST 전에 기존 operation으로 연결한다", async ({
+  test("지금 갱신 — active와 최근 종료 실행을 분리하고 POST 전에 active로 연결한다", async ({
     page,
   }) => {
-    const activeExecution = makeLatestExecution({
+    const activeExecution = makeExecution({
       status: "running",
       pair_status: "running",
       finished_at: null,
       projected_job: {
-        ...makeLatestExecution().projected_job,
+        ...makeExecution().projected_job,
         status: "running",
         progress: 42,
         finished_at: null,
       },
     });
-    const row = makeGridRow({ latest_execution: activeExecution });
+    const terminalExecution = makeExecution({
+      id: "44444444-4444-4444-8444-444444444444",
+    });
+    const row = makeGridRow({
+      active_execution: activeExecution,
+      latest_execution: terminalExecution,
+    });
     await mockOpsDatasets(page, {
       items: [row],
       details: {
         [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
-          recent_runs: [activeExecution],
+          active_execution: activeExecution,
+          latest_execution: terminalExecution,
+          run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+            items: [activeExecution, terminalExecution],
+          }),
         }),
       },
     });
@@ -1754,79 +1966,56 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto(KMA_DEEP_LINK);
 
-    const active = page.getByTestId("active-latest-execution");
+    const active = page.getByTestId("active-execution");
     await expect(active).toBeVisible();
     await expect(active).toContainText("실행중");
     await expect(active.getByRole("link", { name: /실행 .* 보기/ })).toHaveAttribute(
       "href",
       `/ops/pipeline?execution=update_request:${REQUEST_ID}`,
     );
+    await expect(page.getByText("선택 범위 최근 종료 실행")).toBeVisible();
+    await expect(page.getByText(/update_request:44444444-444/)).toBeVisible();
     await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
     await expect.poll(() => pipeline.posts.length).toBe(0);
   });
 
-  for (const activeSide of ["root", "pair"] as const) {
-    test(`지금 갱신 — ${activeSide}만 active여도 기존 operation을 선제 사용한다`, async ({
-      page,
-    }) => {
-      const activeExecution = makeLatestExecution({
-        status: activeSide === "root" ? "running" : "done",
-        pair_status: activeSide === "pair" ? "running" : "done",
-        finished_at: null,
-      });
-      await mockOpsDatasets(page, {
-        items: [makeGridRow({ latest_execution: activeExecution })],
-        details: {
-          [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
-            recent_runs: [activeExecution],
-          }),
-        },
-      });
-      const pipeline = await mockPipelineRequests(page);
-
-      await page.goto(KMA_DEEP_LINK);
-
-      await expect(page.getByTestId("active-latest-execution")).toBeVisible();
-      await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
-      await expect.poll(() => pipeline.posts.length).toBe(0);
-    });
-  }
-
   test("지금 갱신 — 진입 전 active 작업의 terminal 전이를 polling해 버튼 차단을 해제한다", async ({
     page,
   }) => {
-    const activeExecution = makeLatestExecution({
+    const activeExecution = makeExecution({
       status: "running",
       pair_status: "running",
       finished_at: null,
     });
-    const terminalExecution = makeLatestExecution();
+    const terminalExecution = makeExecution();
     const datasets = await mockOpsDatasets(page, {
       items: (listCount) => [
         makeGridRow({
-          latest_execution:
-            listCount === 1 ? activeExecution : terminalExecution,
+          active_execution: listCount === 1 ? activeExecution : null,
+          latest_execution: listCount === 1 ? null : terminalExecution,
         }),
       ],
       details: {
         [`${KMA_PROVIDER}/${KMA_DATASET}`]: (detailCount) =>
           makeDetail({
-            recent_runs: [
-              detailCount === 1 ? activeExecution : terminalExecution,
-            ],
+            active_execution: detailCount === 1 ? activeExecution : null,
+            latest_execution: detailCount === 1 ? null : terminalExecution,
+            run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, KMA_SCOPE, {
+              items: [detailCount === 1 ? activeExecution : terminalExecution],
+            }),
           }),
       },
     });
     await mockPipelineRequests(page);
 
     await page.goto(KMA_DEEP_LINK);
-    await expect(page.getByTestId("active-latest-execution")).toBeVisible();
+    await expect(page.getByTestId("active-execution")).toBeVisible();
 
     await expect.poll(() => datasets.counts.list, { timeout: 6_000 }).toBeGreaterThan(1);
     await expect
       .poll(() => datasets.counts.detail, { timeout: 6_000 })
       .toBeGreaterThan(1);
-    await expect(page.getByTestId("active-latest-execution")).toHaveCount(0);
+    await expect(page.getByTestId("active-execution")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "지금 갱신" })).toBeEnabled();
     const recentRun = page
       .getByRole("table", { name: "최근 실행" })
@@ -1911,7 +2100,19 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         },
       ],
       // 다른 target scope의 이력만 존재 — external 첫 실행에는 섞이면 안 된다.
-      recent_runs: [makeLatestExecution()],
+      run_history: makeRunHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        ACTIVE_EXTERNAL_SCOPE,
+        {
+          items: [],
+        },
+      ),
+      event_history: makeEventHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        ACTIVE_EXTERNAL_SCOPE,
+      ),
     });
     await mockOpsDatasets(page, {
       items,
@@ -1944,11 +2145,22 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       last_success_at: null,
     });
     await mockOpsDatasets(page, {
+      allowInvalidDetailContract: true,
       items: [externalRow],
       details: {
         [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
           // capability allow-list에는 남아 있지만 exact state가 응답에서 사라진 경합.
           scopes: makeDetail().scopes,
+          run_history: makeRunHistory(
+            KMA_PROVIDER,
+            KMA_DATASET,
+            ACTIVE_EXTERNAL_SCOPE,
+          ),
+          event_history: makeEventHistory(
+            KMA_PROVIDER,
+            KMA_DATASET,
+            ACTIVE_EXTERNAL_SCOPE,
+          ),
         }),
       },
     });
@@ -1964,10 +2176,10 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => pipeline.posts.length).toBe(0);
   });
 
-  test("scope history — mixed 최근 실행에서 선택 external scope만 표시한다", async ({
+  test("scope history — 서버가 page limit 전에 고른 exact external scope를 그대로 표시한다", async ({
     page,
   }) => {
-    const externalExecution = makeLatestExecution({
+    const externalExecution = makeExecution({
       id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       sync_scope: ACTIVE_EXTERNAL_SCOPE,
       provider_datasets: [
@@ -1992,7 +2204,20 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
         },
       ],
-      recent_runs: [makeLatestExecution(), externalExecution],
+      latest_execution: externalExecution,
+      run_history: makeRunHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        ACTIVE_EXTERNAL_SCOPE,
+        {
+          items: [externalExecution],
+        },
+      ),
+      event_history: makeEventHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        ACTIVE_EXTERNAL_SCOPE,
+      ),
     });
     await mockOpsDatasets(page, {
       items: [externalRow],
@@ -2013,7 +2238,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
   test("scope capability — 삭제된 external scope는 상태만 보이고 실행은 fail-closed한다", async ({
     page,
   }) => {
-    const staleExecution = makeLatestExecution({
+    const staleExecution = makeExecution({
       id: "99999999-9999-4999-8999-999999999999",
       sync_scope: STALE_EXTERNAL_SCOPE,
       provider_datasets: [
@@ -2044,7 +2269,20 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
           consecutive_failures: 0,
         },
       ],
-      recent_runs: [makeLatestExecution(), staleExecution],
+      latest_execution: staleExecution,
+      run_history: makeRunHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        STALE_EXTERNAL_SCOPE,
+        {
+          items: [staleExecution],
+        },
+      ),
+      event_history: makeEventHistory(
+        KMA_PROVIDER,
+        KMA_DATASET,
+        STALE_EXTERNAL_SCOPE,
+      ),
     });
     await mockOpsDatasets(page, {
       items: [staleRow],
@@ -2070,35 +2308,30 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
   }) => {
     const { items, details } = defaultGrid();
     const moisDetail = details[`${MOIS_PROVIDER}/${MOIS_DATASET}`];
+    const datasetWideExecution = makeExactExecution(
+      MOIS_PROVIDER,
+      MOIS_DATASET,
+      "dataset_wide",
+      { id: "22222222-2222-4222-8222-222222222222" },
+    );
     details[`${MOIS_PROVIDER}/${MOIS_DATASET}`] = {
       ...moisDetail,
-      recent_runs: [
-        makeLatestExecution({
-          id: "11111111-1111-4111-8111-111111111111",
-          sync_scope: "default",
-        }),
-        makeLatestExecution({
-          id: "22222222-2222-4222-8222-222222222222",
-          sync_scope: "dataset_wide",
-        }),
-        makeLatestExecution({
-          id: "33333333-3333-4333-8333-333333333333",
-          sync_scope: null,
-        }),
-      ],
+      latest_execution: datasetWideExecution,
+      run_history: {
+        ...moisDetail.run_history,
+        items: [datasetWideExecution],
+      },
     };
     await mockOpsDatasets(page, { items, details });
     const pipeline = await mockPipelineRequests(page);
 
     await page.goto(
       `/ops/datasets?provider=${MOIS_PROVIDER}&dataset=${MOIS_DATASET}` +
-        "&sync_scope=default",
+        "&sync_scope=dataset_wide",
     );
     await expect(page.getByRole("button", { name: "지금 갱신" })).toBeEnabled();
     const recentRuns = page.getByRole("table", { name: "최근 실행" });
-    await expect(recentRuns).toContainText("11111111");
     await expect(recentRuns).toContainText("22222222");
-    await expect(recentRuns).toContainText("33333333");
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect.poll(() => pipeline.posts.length).toBe(1);
@@ -2191,7 +2424,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // KREX 행 선택 → URL query 반영.
     await page
       .getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} default 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide 상세 열기`,
       })
       .click();
     await expect(page).toHaveURL(/provider=python-krex-api/);
@@ -2253,7 +2486,10 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     const pipeline = await mockPipelineRequests(page);
 
-    await page.goto(`/ops/datasets?provider=${KMA_PROVIDER}`);
+    await page.goto(
+      `/ops/datasets?provider=${KMA_PROVIDER}` +
+        `&sync_scope=${encodeURIComponent(STALE_EXTERNAL_SCOPE)}`,
+    );
 
     await expect(page).toHaveURL(
       new RegExp(
@@ -2316,7 +2552,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 딥링크로 KREX 상세 진입.
     await page.goto(
       `/ops/datasets?provider=${KREX_PROVIDER}&dataset=${KREX_DATASET}` +
-        "&sync_scope=default",
+        "&sync_scope=dataset_wide",
     );
     await expect(
       page.getByText(`${KREX_PROVIDER}/${KREX_DATASET}`).first(),
@@ -2330,7 +2566,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("데이터셋 상세")).toHaveCount(0);
     await expect(
       page.getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} default 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide 상세 열기`,
       }),
     ).toBeFocused();
   });
@@ -2425,7 +2661,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto(
       `/ops/datasets?provider=${KREX_PROVIDER}&dataset=${KREX_DATASET}` +
-        `&sync_scope=default&panel=policy`,
+        `&sync_scope=dataset_wide&panel=policy`,
     );
 
     // 딥링크 행이 선택되어 drawer 부제와 정책 탭이 초기 활성.

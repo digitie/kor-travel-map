@@ -87,7 +87,10 @@ async def list_datasets_grid(
     "/detail",
     response_model=OpsDatasetDetailResponse,
     summary="dataset 상세 — scope 상태·실행·이벤트·정책",
-    responses={404: {"description": "카탈로그·sync state·policy 모두 없음"}},
+    responses={
+        404: {"description": "카탈로그·sync state·policy 또는 exact scope 없음"},
+        422: {"description": "canonical sync_scope 검증 실패"},
+    },
 )
 async def get_dataset_detail(
     request: Request,
@@ -109,6 +112,11 @@ async def get_dataset_detail(
         )
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     return OpsDatasetDetailResponse(
         data=data,
         meta=make_meta(started_at=started_at),

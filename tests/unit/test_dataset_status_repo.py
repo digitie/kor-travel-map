@@ -11,12 +11,15 @@ import pytest
 
 from kortravelmap.infra import dataset_status_repo
 from kortravelmap.infra.dataset_status_repo import (
+    DatasetExecutionSnapshot,
     DatasetIntegrityIssueCount,
     DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
+    list_dataset_execution_snapshots,
     list_latest_dataset_executions,
 )
 from kortravelmap.infra.pipeline_repo import (
+    PipelineDatasetExecutionSnapshot,
     PipelineDatasetLatestExecution,
     PipelineExecution,
     PipelineProjectedJob,
@@ -198,5 +201,71 @@ async def test_list_latest_dataset_executions_maps_common_projection(
             execution=projected.execution,
             operation_member_id="22222222-2222-2222-2222-222222222222",
             pair_status="running",
+        ),
+    )
+
+
+@pytest.mark.unit
+async def test_list_dataset_execution_snapshots_maps_both_status_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    at = datetime(2026, 7, 15, tzinfo=UTC)
+    session = _Session()
+    terminal = PipelineDatasetLatestExecution(
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        sync_scope="dataset_wide",
+        execution=_pipeline_execution(at=at),
+        operation_member_id="22222222-2222-2222-2222-222222222222",
+        pair_status="done",
+    )
+    active = PipelineDatasetLatestExecution(
+        provider=terminal.provider,
+        dataset_key=terminal.dataset_key,
+        sync_scope=terminal.sync_scope,
+        execution=terminal.execution,
+        operation_member_id=terminal.operation_member_id,
+        pair_status="running",
+    )
+    projected = PipelineDatasetExecutionSnapshot(
+        provider=terminal.provider,
+        dataset_key=terminal.dataset_key,
+        sync_scope=terminal.sync_scope,
+        latest_terminal=terminal,
+        active=active,
+    )
+
+    async def _snapshots(_session: Any) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
+        return (projected,)
+
+    monkeypatch.setattr(
+        dataset_status_repo,
+        "list_dataset_pipeline_execution_snapshots",
+        _snapshots,
+    )
+
+    snapshots = await list_dataset_execution_snapshots(cast(Any, session))
+
+    assert snapshots == (
+        DatasetExecutionSnapshot(
+            provider=terminal.provider,
+            dataset_key=terminal.dataset_key,
+            sync_scope=terminal.sync_scope,
+            latest_terminal=DatasetLatestExecution(
+                provider=terminal.provider,
+                dataset_key=terminal.dataset_key,
+                sync_scope=terminal.sync_scope,
+                execution=terminal.execution,
+                operation_member_id=terminal.operation_member_id,
+                pair_status="done",
+            ),
+            active=DatasetLatestExecution(
+                provider=active.provider,
+                dataset_key=active.dataset_key,
+                sync_scope=active.sync_scope,
+                execution=active.execution,
+                operation_member_id=active.operation_member_id,
+                pair_status="running",
+            ),
         ),
     )

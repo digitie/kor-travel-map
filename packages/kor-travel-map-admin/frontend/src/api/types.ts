@@ -6769,6 +6769,8 @@ export interface components {
         };
         /** OpsDatasetDetailData */
         OpsDatasetDetailData: {
+            /** @description 선택 scope에서 현재 queued/running인 canonical operation. */
+            active_execution: components["schemas"]["OpsDatasetExecution"] | null;
             catalog: components["schemas"]["OpsDatasetCatalogInfo"] | null;
             /**
              * Catalog State
@@ -6778,33 +6780,24 @@ export interface components {
             dataset_issues: components["schemas"]["OpsIssueSummary"];
             /** Dataset Key */
             dataset_key: string;
-            /** Event History Url */
-            event_history_url: string;
+            event_history: components["schemas"]["OpsDatasetEventHistory"];
+            /**
+             * Execution Coverage
+             * @description DB에 영속된 exact pair canonical operation 이력.
+             * @constant
+             */
+            execution_coverage: "db_recorded_canonical_operations";
+            /** @description 선택 scope에서 가장 최근에 끝난 canonical operation. */
+            latest_execution: components["schemas"]["OpsDatasetExecution"] | null;
             /** Mutable */
             mutable: boolean;
             /** Orphan Reason */
             orphan_reason: string | null;
-            /** Pipeline History Url */
-            pipeline_history_url: string;
             /** Provider */
             provider: string;
             provider_issues: components["schemas"]["OpsIssueSummary"];
-            /** Recent Events */
-            recent_events: components["schemas"]["OpsDatasetEventRecord"][];
-            /** Recent Events Next Cursor */
-            recent_events_next_cursor: string | null;
-            /** Recent Runs */
-            recent_runs: components["schemas"]["OpsDatasetLatestExecution"][];
-            /**
-             * Recent Runs Coverage
-             * @description DB에 영속된 exact pair canonical operation 이력.
-             * @default db_recorded_canonical_operations
-             * @constant
-             */
-            recent_runs_coverage: "db_recorded_canonical_operations";
-            /** Recent Runs Next Cursor */
-            recent_runs_next_cursor: string | null;
             refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            run_history: components["schemas"]["OpsDatasetRunHistory"];
             schedule: components["schemas"]["OpsDatasetScheduleSummary"];
             /** Schedule Source Errors */
             schedule_source_errors: string[];
@@ -6820,6 +6813,21 @@ export interface components {
         OpsDatasetDetailResponse: {
             data: components["schemas"]["OpsDatasetDetailData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsDatasetEventHistory
+         * @description 선택한 exact effective scope의 event 이력 첫 page.
+         */
+        OpsDatasetEventHistory: {
+            /**
+             * Canonical Url
+             * @description cursor를 제외한 exact-scope pipeline event 이력 URL.
+             */
+            canonical_url: string;
+            /** Items */
+            items: components["schemas"]["OpsDatasetEventRecord"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** OpsDatasetEventRecord */
         OpsDatasetEventRecord: {
@@ -6850,77 +6858,10 @@ export interface components {
             sync_scope: string;
         };
         /**
-         * OpsDatasetFreshness
-         * @description 정책 SLA와 마지막 성공으로 서버가 계산한 freshness.
+         * OpsDatasetExecution
+         * @description dataset exact scope에 귀속된 canonical operation projection.
          */
-        OpsDatasetFreshness: {
-            /**
-             * Basis
-             * @enum {string}
-             */
-            basis: "policy_stale_after" | "unknown" | "disabled";
-            /** Due At */
-            due_at: string | null;
-            /** Is Overdue */
-            is_overdue: boolean;
-            /** Overdue By Seconds */
-            overdue_by_seconds: number;
-            /** Sla Seconds */
-            sla_seconds: number | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "never_run" | "fresh" | "overdue" | "disabled" | "unknown";
-        };
-        /**
-         * OpsDatasetGridRow
-         * @description provider×dataset×sync_scope 그리드 1행.
-         */
-        OpsDatasetGridRow: {
-            catalog: components["schemas"]["OpsDatasetCatalogInfo"] | null;
-            /**
-             * Catalog State
-             * @enum {string}
-             */
-            catalog_state: "canonical" | "orphan";
-            /** Consecutive Failures */
-            consecutive_failures: number;
-            dataset_issues: components["schemas"]["OpsIssueSummary"];
-            /** Dataset Key */
-            dataset_key: string;
-            /** Detail Url */
-            detail_url: string;
-            /**
-             * Eligible After
-             * @description provider rate-limit/backoff상 다시 호출 가능한 시각. schedule 시각이 아님.
-             */
-            eligible_after: string | null;
-            freshness: components["schemas"]["OpsDatasetFreshness"];
-            /** Last Failure At */
-            last_failure_at: string | null;
-            /** Last Success At */
-            last_success_at: string | null;
-            latest_execution: components["schemas"]["OpsDatasetLatestExecution"] | null;
-            /** Mutable */
-            mutable: boolean;
-            /** Orphan Reason */
-            orphan_reason: string | null;
-            /** Provider */
-            provider: string;
-            provider_issues: components["schemas"]["OpsIssueSummary"];
-            refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
-            schedule: components["schemas"]["OpsDatasetScheduleSummary"];
-            /** Status */
-            status: string;
-            /** Sync Scope */
-            sync_scope: string;
-        };
-        /**
-         * OpsDatasetLatestExecution
-         * @description 그리드 N+1 없이 붙이는 최신 canonical operation.
-         */
-        OpsDatasetLatestExecution: {
+        OpsDatasetExecution: {
             cancellation: components["schemas"]["PipelineCancellationSummaryRecord"] | null;
             /**
              * Created At
@@ -6977,6 +6918,75 @@ export interface components {
             sync_scope: string | null;
             /** Trigger Kind */
             trigger_kind: string | null;
+        };
+        /**
+         * OpsDatasetFreshness
+         * @description 정책 SLA와 마지막 성공으로 서버가 계산한 freshness.
+         */
+        OpsDatasetFreshness: {
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "policy_stale_after" | "unknown" | "disabled";
+            /** Due At */
+            due_at: string | null;
+            /** Is Overdue */
+            is_overdue: boolean;
+            /** Overdue By Seconds */
+            overdue_by_seconds: number;
+            /** Sla Seconds */
+            sla_seconds: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "never_run" | "fresh" | "overdue" | "disabled" | "unknown";
+        };
+        /**
+         * OpsDatasetGridRow
+         * @description provider×dataset×sync_scope 그리드 1행.
+         */
+        OpsDatasetGridRow: {
+            /** @description 같은 provider/dataset/sync_scope의 queued/running canonical operation. 더 최신 terminal 실행과 독립적으로 조회한다. */
+            active_execution: components["schemas"]["OpsDatasetExecution"] | null;
+            catalog: components["schemas"]["OpsDatasetCatalogInfo"] | null;
+            /**
+             * Catalog State
+             * @enum {string}
+             */
+            catalog_state: "canonical" | "orphan";
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            dataset_issues: components["schemas"]["OpsIssueSummary"];
+            /** Dataset Key */
+            dataset_key: string;
+            /** Detail Url */
+            detail_url: string;
+            /**
+             * Eligible After
+             * @description provider rate-limit/backoff상 다시 호출 가능한 시각. schedule 시각이 아님.
+             */
+            eligible_after: string | null;
+            freshness: components["schemas"]["OpsDatasetFreshness"];
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            latest_execution: components["schemas"]["OpsDatasetExecution"] | null;
+            /** Mutable */
+            mutable: boolean;
+            /** Orphan Reason */
+            orphan_reason: string | null;
+            /** Provider */
+            provider: string;
+            provider_issues: components["schemas"]["OpsIssueSummary"];
+            refresh_policy: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            schedule: components["schemas"]["OpsDatasetScheduleSummary"];
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
         };
         /** OpsDatasetPreviewBudget */
         OpsDatasetPreviewBudget: {
@@ -7150,6 +7160,21 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * OpsDatasetRunHistory
+         * @description 선택한 exact logical scope의 canonical 실행 이력 첫 page.
+         */
+        OpsDatasetRunHistory: {
+            /**
+             * Canonical Url
+             * @description cursor를 제외한 exact-scope pipeline 실행 이력 URL.
+             */
+            canonical_url: string;
+            /** Items */
+            items: components["schemas"]["OpsDatasetExecution"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /**
          * OpsDatasetScheduleSummary
          * @description Dagster GraphQL 실제 schedule 정의/상태 기반 다음 tick.
          */
@@ -7226,15 +7251,14 @@ export interface components {
         };
         /** OpsDatasetsGridData */
         OpsDatasetsGridData: {
-            /** Items */
-            items: components["schemas"]["OpsDatasetGridRow"][];
             /**
-             * Latest Execution Coverage
+             * Execution Coverage
              * @description DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다.
-             * @default db_recorded_canonical_operations
              * @constant
              */
-            latest_execution_coverage: "db_recorded_canonical_operations";
+            execution_coverage: "db_recorded_canonical_operations";
+            /** Items */
+            items: components["schemas"]["OpsDatasetGridRow"][];
             /** Schedule Source Errors */
             schedule_source_errors: string[];
             /**
@@ -7711,6 +7735,11 @@ export interface components {
          * @description 전역 job 이벤트 목록 data.
          */
         PipelineEventsData: {
+            /**
+             * Canonical Url
+             * @description cursor를 제외한 현재 event filter의 첫 page canonical URL.
+             */
+            canonical_url: string;
             /** Items */
             items: components["schemas"]["PipelineJobEventRecord"][];
         };
@@ -7909,6 +7938,11 @@ export interface components {
          * @description 실행 타임라인 목록 data.
          */
         PipelineExecutionsData: {
+            /**
+             * Canonical Url
+             * @description cursor를 제외한 현재 실행 filter의 첫 page canonical URL.
+             */
+            canonical_url: string;
             /** Items */
             items: components["schemas"]["PipelineExecutionRootRecord"][];
         };
@@ -14711,7 +14745,7 @@ export interface operations {
                     "application/json": components["schemas"]["OpsDatasetDetailResponse"];
                 };
             };
-            /** @description 카탈로그·sync state·policy 모두 없음 */
+            /** @description 카탈로그·sync state·policy 또는 exact scope 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -14720,7 +14754,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description canonical sync_scope 검증 실패 */
             422: {
                 headers: {
                     [name: string]: unknown;

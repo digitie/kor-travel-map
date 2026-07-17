@@ -5,24 +5,30 @@ DB 조회 조립·freshness 계산·orphan mutation 가드를 router에서 분�
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import overload
 from urllib.parse import quote, urlencode
 
 import httpx
 from kortravelmap.core import kst_now
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    parse_canonical_sync_scope,
+)
 from kortravelmap.infra import sync_state_repo
 from kortravelmap.infra.dataset_status_repo import (
+    DatasetExecutionSnapshot,
     DatasetIntegrityIssueCount,
     DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
-    list_latest_dataset_executions,
+    list_dataset_execution_snapshots,
 )
 from kortravelmap.infra.ops_repo import (
     OpsImportJobEvent,
     list_ops_import_job_events,
 )
-from kortravelmap.infra.pipeline_repo import list_pipeline_executions
+from kortravelmap.infra.pipeline_repo import PipelineExecution, list_pipeline_executions
 from kortravelmap.infra.poi_cache_target_repo import (
     list_active_poi_cache_target_external_systems,
 )
@@ -51,13 +57,15 @@ from kortravelmap.api.ops_dataset_schedule import (
 from kortravelmap.api.ops_dataset_schema import (
     OpsDatasetCatalogInfo,
     OpsDatasetDetailData,
+    OpsDatasetEventHistory,
     OpsDatasetEventRecord,
+    OpsDatasetExecution,
     OpsDatasetFreshness,
     OpsDatasetGridRow,
-    OpsDatasetLatestExecution,
     OpsDatasetPreviewCapability,
     OpsDatasetProjectedJob,
     OpsDatasetProviderDataset,
+    OpsDatasetRunHistory,
     OpsDatasetScheduleSummary,
     OpsDatasetScopeRefreshCapability,
     OpsDatasetScopeState,
@@ -119,6 +127,24 @@ def _event_history_url(
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "sync_scope": effective_sync_scope,
+            },
+            quote_via=quote,
+        )
+    )
+
+
+def _run_history_url(
+    provider: str,
+    dataset_key: str,
+    logical_sync_scope: str,
+) -> str:
+    return (
+        "/v1/ops/pipeline/executions?"
+        + urlencode(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": logical_sync_scope,
             },
             quote_via=quote,
         )
@@ -191,12 +217,61 @@ def _catalog_state_sync_scopes(
     *,
     active_external_systems: tuple[str, ...],
 ) -> tuple[str, ...]:
-    scopes = [entry.sync_scope]
+    scopes = [
+        (
+            DATASET_WIDE_SYNC_SCOPE
+            if entry.scope_refresh_selector == "none"
+            else entry.sync_scope
+        )
+    ]
     if entry.scope_refresh_selector == "poi_cache_targets":
         scopes.extend(
             f"external_system:{name}" for name in active_external_systems
         )
     return tuple(dict.fromkeys(scopes))
+
+
+def _logical_state_scope(
+    entry: ProviderDatasetCatalogEntry | None,
+    state_scope: str,
+) -> str:
+    """내부 state namespace를 외부 canonical sync scope로 투영한다."""
+    if state_scope == "default" and (
+        entry is None or entry.scope_refresh_selector == "none"
+    ):
+        return DATASET_WIDE_SYNC_SCOPE
+    return state_scope
+
+
+def _api_state_scope(
+    entry: ProviderDatasetCatalogEntry | None,
+    state_scope: str,
+) -> str | None:
+    """내부 namespace를 변환하고 API에서 표현할 수 없는 legacy scope는 숨긴다."""
+    logical_scope = _logical_state_scope(entry, state_scope)
+    try:
+        return parse_canonical_sync_scope(logical_scope).value
+    except ValueError:
+        return None
+
+
+def _states_by_api_scope(
+    entry: ProviderDatasetCatalogEntry | None,
+    states: Sequence[SyncState],
+) -> dict[str, SyncState]:
+    """raw state alias를 logical API resource 하나로 deterministic하게 접는다."""
+    selected: dict[str, SyncState] = {}
+    for state in states:
+        logical_scope = _api_state_scope(entry, state.sync_scope)
+        if logical_scope is None:
+            continue
+        current = selected.get(logical_scope)
+        if current is None or (
+            current.sync_scope != logical_scope
+            and state.sync_scope == logical_scope
+        ):
+            selected[logical_scope] = state
+    return selected
 
 
 def _catalog_info(
@@ -293,23 +368,23 @@ def _schedule_summary(state: DatasetScheduleState) -> OpsDatasetScheduleSummary:
 
 
 @overload
-def _latest_execution(item: None) -> None:
+def _execution_record(item: None) -> None:
     ...
 
 
 @overload
-def _latest_execution(item: DatasetLatestExecution) -> OpsDatasetLatestExecution:
+def _execution_record(item: DatasetLatestExecution) -> OpsDatasetExecution:
     ...
 
 
-def _latest_execution(
+def _execution_record(
     item: DatasetLatestExecution | None,
-) -> OpsDatasetLatestExecution | None:
+) -> OpsDatasetExecution | None:
     if item is None:
         return None
     root = item.execution
     projected = root.projected_job
-    return OpsDatasetLatestExecution(
+    return OpsDatasetExecution(
         kind=root.kind,
         id=root.id,
         detail_url=f"/v1/ops/pipeline/executions/{root.kind}/{root.id}",
@@ -358,6 +433,88 @@ def _latest_execution(
     )
 
 
+def _dataset_execution_projection(
+    snapshots: tuple[DatasetExecutionSnapshot, ...],
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str,
+) -> tuple[DatasetLatestExecution | None, DatasetLatestExecution | None]:
+    """logical scope의 terminal 최신값과 active 최신값을 같은 snapshot에서 고른다."""
+    storage_scopes: tuple[str | None, ...] = (sync_scope,)
+    if sync_scope == DATASET_WIDE_SYNC_SCOPE:
+        storage_scopes = (DATASET_WIDE_SYNC_SCOPE, None)
+    candidates = tuple(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.provider == provider
+        and snapshot.dataset_key == dataset_key
+        and snapshot.sync_scope in storage_scopes
+    )
+
+    def latest(
+        selections: tuple[DatasetLatestExecution | None, ...],
+    ) -> DatasetLatestExecution | None:
+        present = tuple(selection for selection in selections if selection is not None)
+        if not present:
+            return None
+        return max(
+            present,
+            key=lambda item: (
+                item.execution.created_at,
+                item.execution.id,
+                item.execution.kind,
+            ),
+        )
+
+    return (
+        latest(tuple(snapshot.latest_terminal for snapshot in candidates)),
+        latest(tuple(snapshot.active for snapshot in candidates)),
+    )
+
+
+def _run_history_records(
+    executions: tuple[PipelineExecution, ...],
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scopes: tuple[str | None, ...],
+) -> list[OpsDatasetExecution]:
+    """canonical root마다 논리 scope pair 하나만 골라 중복 없는 이력을 만든다."""
+    records: list[OpsDatasetExecution] = []
+    for execution in executions:
+        pairs = tuple(
+            pair
+            for pair in execution.provider_datasets
+            if pair.provider == provider
+            and pair.dataset_key == dataset_key
+            and pair.sync_scope in sync_scopes
+        )
+        if not pairs:
+            continue
+        pair = max(
+            pairs,
+            key=lambda item: (
+                item.sync_scope == DATASET_WIDE_SYNC_SCOPE,
+                item.sync_scope is not None,
+                item.operation_member_id,
+            ),
+        )
+        records.append(
+            _execution_record(
+                DatasetLatestExecution(
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    sync_scope=pair.sync_scope,
+                    execution=execution,
+                    operation_member_id=pair.operation_member_id,
+                    pair_status=pair.status,
+                )
+            )
+        )
+    return records
+
+
 def _orphan_reason(*, has_state: bool, has_policy: bool) -> str:
     if has_state and has_policy:
         return "catalog_missing_with_sync_state_and_policy"
@@ -372,22 +529,23 @@ def _grid_row(
     dataset_key: str,
     sync_scope: str,
     state: SyncState | None,
+    has_persisted_state: bool,
     entry: ProviderDatasetCatalogEntry | None,
     policy: ProviderRefreshPolicy | None,
     dataset_issues: DatasetIntegrityIssueCount | None,
     provider_issues: DatasetIntegrityIssueCount | None,
     latest_execution: DatasetLatestExecution | None,
+    active_execution: DatasetLatestExecution | None,
     schedules: DatasetScheduleIndex,
     active_external_systems: tuple[str, ...],
     now: datetime,
 ) -> OpsDatasetGridRow:
     canonical = entry is not None
-    row_sync_scope = state.sync_scope if state is not None else sync_scope
     return OpsDatasetGridRow(
         provider=provider,
         dataset_key=dataset_key,
-        detail_url=_dataset_detail_url(provider, dataset_key, row_sync_scope),
-        sync_scope=row_sync_scope,
+        detail_url=_dataset_detail_url(provider, dataset_key, sync_scope),
+        sync_scope=sync_scope,
         status=state.status if state is not None else _NEVER_RUN_STATUS,
         last_success_at=state.last_success_at if state is not None else None,
         last_failure_at=state.last_failure_at if state is not None else None,
@@ -395,12 +553,16 @@ def _grid_row(
         eligible_after=state.next_run_after if state is not None else None,
         freshness=_freshness(state, policy, now=now),
         schedule=_schedule_summary(schedules.for_dataset(provider, dataset_key)),
-        latest_execution=_latest_execution(latest_execution),
+        latest_execution=_execution_record(latest_execution),
+        active_execution=_execution_record(active_execution),
         catalog_state="canonical" if canonical else "orphan",
         orphan_reason=(
             None
             if canonical
-            else _orphan_reason(has_state=state is not None, has_policy=policy is not None)
+            else _orphan_reason(
+                has_state=has_persisted_state,
+                has_policy=policy is not None,
+            )
         ),
         mutable=canonical,
         catalog=(
@@ -430,7 +592,7 @@ async def load_datasets_grid(
     states = await sync_state_repo.list_all_sync_states(session)
     policies = await list_all_provider_refresh_policies(session)
     issue_counts = await count_open_integrity_issues_by_dataset(session)
-    latest_executions = await list_latest_dataset_executions(session)
+    execution_snapshots = await list_dataset_execution_snapshots(session)
     active_external_systems = tuple(
         await list_active_poi_cache_target_external_systems(session)
     )
@@ -454,79 +616,47 @@ async def load_datasets_grid(
     provider_issues_by_key = {
         item.provider: item for item in issue_counts if item.dataset_key is None
     }
-    latest_by_key = {
-        (item.provider, item.dataset_key, item.sync_scope): item
-        for item in latest_executions
-    }
-
-    def latest_for(
-        *,
-        provider: str,
-        dataset_key: str,
-        sync_scope: str,
-        allow_unscoped: bool,
-    ) -> DatasetLatestExecution | None:
-        exact = latest_by_key.get((provider, dataset_key, sync_scope))
-        if not allow_unscoped:
-            return exact
-        candidates = tuple(
-            item
-            for item in (
-                exact,
-                latest_by_key.get((provider, dataset_key, "dataset_wide")),
-                latest_by_key.get((provider, dataset_key, None)),
-            )
-            if item is not None
-        )
-        if not candidates:
-            return None
-        return max(
-            candidates,
-            key=lambda item: (
-                item.execution.created_at,
-                item.execution.id,
-                item.execution.kind,
-            ),
-        )
-
     rows: list[OpsDatasetGridRow] = []
     for entry in PROVIDER_DATASET_CATALOG:
         key = (entry.provider, entry.dataset_key)
         entry_states = states_by_key.pop(key, [])
         policy = policies_by_key.pop(key, None)
-        states_by_scope = {state.sync_scope: state for state in entry_states}
+        states_by_scope = _states_by_api_scope(entry, entry_states)
         expected_scopes = _catalog_state_sync_scopes(
             entry,
             active_external_systems=active_external_systems,
         )
         stale_scopes = tuple(
-            state.sync_scope
-            for state in entry_states
-            if state.sync_scope not in expected_scopes
+            dict.fromkeys(
+                logical_scope
+                for state in entry_states
+                if (logical_scope := _api_state_scope(entry, state.sync_scope))
+                is not None
+                and logical_scope not in expected_scopes
+            )
         )
-        row_scopes = (*expected_scopes, *stale_scopes)
+        row_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
         for row_sync_scope in row_scopes:
             entry_state = states_by_scope.get(row_sync_scope)
+            latest_execution, active_execution = _dataset_execution_projection(
+                execution_snapshots,
+                provider=entry.provider,
+                dataset_key=entry.dataset_key,
+                sync_scope=row_sync_scope,
+            )
             rows.append(
                 _grid_row(
                     provider=entry.provider,
                     dataset_key=entry.dataset_key,
                     sync_scope=row_sync_scope,
                     state=entry_state,
+                    has_persisted_state=entry_state is not None,
                     entry=entry,
                     policy=policy,
                     dataset_issues=dataset_issues_by_key.get(key),
                     provider_issues=provider_issues_by_key.get(entry.provider),
-                    latest_execution=latest_for(
-                        provider=entry.provider,
-                        dataset_key=entry.dataset_key,
-                        sync_scope=(
-                            row_sync_scope
-                            if entry.scope_refresh_selector == "poi_cache_targets"
-                            else "dataset_wide"
-                        ),
-                        allow_unscoped=entry.scope_refresh_selector == "none",
-                    ),
+                    latest_execution=latest_execution,
+                    active_execution=active_execution,
                     schedules=schedules,
                     active_external_systems=active_external_systems,
                     now=reference,
@@ -536,47 +666,81 @@ async def load_datasets_grid(
     for (provider, dataset_key), orphan_states in states_by_key.items():
         key = (provider, dataset_key)
         policy = policies_by_key.pop(key, None)
-        for state in orphan_states:
+        orphan_states_by_scope = _states_by_api_scope(None, orphan_states)
+        for logical_scope, state in orphan_states_by_scope.items():
+            latest_execution, active_execution = _dataset_execution_projection(
+                execution_snapshots,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=logical_scope,
+            )
             rows.append(
                 _grid_row(
                     provider=provider,
                     dataset_key=dataset_key,
-                    sync_scope=state.sync_scope,
+                    sync_scope=logical_scope,
                     state=state,
+                    has_persisted_state=True,
                     entry=None,
                     policy=policy,
                     dataset_issues=dataset_issues_by_key.get(key),
                     provider_issues=provider_issues_by_key.get(provider),
-                    latest_execution=latest_for(
-                        provider=provider,
-                        dataset_key=dataset_key,
-                        sync_scope=state.sync_scope,
-                        allow_unscoped=False,
-                    ),
+                    latest_execution=latest_execution,
+                    active_execution=active_execution,
                     schedules=schedules,
                     active_external_systems=active_external_systems,
                     now=reference,
                 )
             )
-
-    for (provider, dataset_key), policy in policies_by_key.items():
-        key = (provider, dataset_key)
+        if orphan_states_by_scope:
+            continue
+        logical_scope = DATASET_WIDE_SYNC_SCOPE
+        latest_execution, active_execution = _dataset_execution_projection(
+            execution_snapshots,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=logical_scope,
+        )
         rows.append(
             _grid_row(
                 provider=provider,
                 dataset_key=dataset_key,
-                sync_scope="default",
+                sync_scope=logical_scope,
                 state=None,
+                has_persisted_state=True,
                 entry=None,
                 policy=policy,
                 dataset_issues=dataset_issues_by_key.get(key),
                 provider_issues=provider_issues_by_key.get(provider),
-                latest_execution=latest_for(
-                    provider=provider,
-                    dataset_key=dataset_key,
-                    sync_scope="default",
-                    allow_unscoped=False,
-                ),
+                latest_execution=latest_execution,
+                active_execution=active_execution,
+                schedules=schedules,
+                active_external_systems=active_external_systems,
+                now=reference,
+            )
+        )
+
+    for (provider, dataset_key), policy in policies_by_key.items():
+        key = (provider, dataset_key)
+        latest_execution, active_execution = _dataset_execution_projection(
+            execution_snapshots,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=DATASET_WIDE_SYNC_SCOPE,
+        )
+        rows.append(
+            _grid_row(
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=DATASET_WIDE_SYNC_SCOPE,
+                state=None,
+                has_persisted_state=False,
+                entry=None,
+                policy=policy,
+                dataset_issues=dataset_issues_by_key.get(key),
+                provider_issues=provider_issues_by_key.get(provider),
+                latest_execution=latest_execution,
+                active_execution=active_execution,
                 schedules=schedules,
                 active_external_systems=active_external_systems,
                 now=reference,
@@ -588,6 +752,7 @@ async def load_datasets_grid(
         items=rows,
         schedule_source_status=schedules.source_status,
         schedule_source_errors=list(schedules.errors),
+        execution_coverage="db_recorded_canonical_operations",
     )
 
 
@@ -595,10 +760,11 @@ def _scope_state(
     state: SyncState,
     policy: ProviderRefreshPolicy | None,
     *,
+    sync_scope: str,
     now: datetime,
 ) -> OpsDatasetScopeState:
     return OpsDatasetScopeState(
-        sync_scope=state.sync_scope,
+        sync_scope=sync_scope,
         status=state.status,
         cursor=state.cursor,
         last_success_at=state.last_success_at,
@@ -634,6 +800,7 @@ async def load_dataset_detail(
     sync_scope: str,
     now: datetime | None = None,
 ) -> OpsDatasetDetailData:
+    canonical_scope = parse_canonical_sync_scope(sync_scope).value
     reference = now or kst_now()
     entry = find_catalog_entry(provider, dataset_key)
     states = await sync_state_repo.list_sync_states(
@@ -648,28 +815,44 @@ async def load_dataset_detail(
     active_external_systems = tuple(
         await list_active_poi_cache_target_external_systems(session)
     )
-    states_by_scope = {state.sync_scope: state for state in states}
+    states_by_scope = _states_by_api_scope(entry, states)
     if entry is not None:
         expected_scopes = _catalog_state_sync_scopes(
             entry,
             active_external_systems=active_external_systems,
         )
         stale_scopes = tuple(
-            state.sync_scope
-            for state in states
-            if state.sync_scope not in expected_scopes
+            dict.fromkeys(
+                logical_scope
+                for state in states
+                if (logical_scope := _api_state_scope(entry, state.sync_scope))
+                is not None
+                and logical_scope not in expected_scopes
+            )
         )
-        detail_scopes = (*expected_scopes, *stale_scopes)
+        detail_scopes = tuple(dict.fromkeys((*expected_scopes, *stale_scopes)))
     else:
-        detail_scopes = tuple(state.sync_scope for state in states) or ("default",)
-    if sync_scope not in detail_scopes:
+        detail_scopes = tuple(
+            dict.fromkeys(
+                logical_scope
+                for state in states
+                if (logical_scope := _api_state_scope(None, state.sync_scope))
+                is not None
+            )
+        ) or (DATASET_WIDE_SYNC_SCOPE,)
+    if canonical_scope not in detail_scopes:
         raise DatasetNotFoundError(
             "ops dataset scope 없음: "
-            f"{provider!r}/{dataset_key!r}/{sync_scope!r}"
+            f"{provider!r}/{dataset_key!r}/{canonical_scope!r}"
         )
     scopes = [
         (
-            _scope_state(state, policy, now=reference)
+            _scope_state(
+                state,
+                policy,
+                sync_scope=sync_scope,
+                now=reference,
+            )
             if (state := states_by_scope.get(sync_scope)) is not None
             else OpsDatasetScopeState(
                 sync_scope=sync_scope,
@@ -688,10 +871,19 @@ async def load_dataset_detail(
     history_sync_scopes = resolve_dataset_history_sync_scopes(
         provider,
         dataset_key,
-        sync_scope,
+        canonical_scope,
     )
     event_sync_scope = (
-        "dataset_wide" if "dataset_wide" in history_sync_scopes else sync_scope
+        DATASET_WIDE_SYNC_SCOPE
+        if DATASET_WIDE_SYNC_SCOPE in history_sync_scopes
+        else canonical_scope
+    )
+    execution_snapshots = await list_dataset_execution_snapshots(session)
+    latest_execution, active_execution = _dataset_execution_projection(
+        execution_snapshots,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=canonical_scope,
     )
     executions_page = await list_pipeline_executions(
         session,
@@ -747,41 +939,31 @@ async def load_dataset_detail(
         refresh_policy=(
             provider_refresh_policy_record(policy) if policy is not None else None
         ),
-        recent_runs=[
-            _latest_execution(
-                DatasetLatestExecution(
-                    provider=provider,
-                    dataset_key=dataset_key,
-                    sync_scope=pair.sync_scope,
-                    execution=item,
-                    operation_member_id=pair.operation_member_id,
-                    pair_status=pair.status,
-                )
-            )
-            for item in executions_page.items
-            for pair in item.provider_datasets
-            if pair.provider == provider
-            and pair.dataset_key == dataset_key
-            and pair.sync_scope in history_sync_scopes
-        ],
-        recent_runs_next_cursor=executions_page.next_cursor,
-        pipeline_history_url=(
-            "/v1/ops/pipeline/executions?"
-            + urlencode(
-                {
-                    "provider": provider,
-                    "dataset_key": dataset_key,
-                    "sync_scope": sync_scope,
-                },
-                quote_via=quote,
-            )
+        latest_execution=_execution_record(latest_execution),
+        active_execution=_execution_record(active_execution),
+        execution_coverage="db_recorded_canonical_operations",
+        run_history=OpsDatasetRunHistory(
+            items=_run_history_records(
+                executions_page.items,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scopes=history_sync_scopes,
+            ),
+            next_cursor=executions_page.next_cursor,
+            canonical_url=_run_history_url(
+                provider,
+                dataset_key,
+                canonical_scope,
+            ),
         ),
-        recent_events=[_event_record(item) for item in events_page.items],
-        recent_events_next_cursor=events_page.next_cursor,
-        event_history_url=_event_history_url(
-            provider,
-            dataset_key,
-            event_sync_scope,
+        event_history=OpsDatasetEventHistory(
+            items=[_event_record(item) for item in events_page.items],
+            next_cursor=events_page.next_cursor,
+            canonical_url=_event_history_url(
+                provider,
+                dataset_key,
+                event_sync_scope,
+            ),
         ),
         dataset_issues=_issue_summary(dataset_issues),
         provider_issues=_issue_summary(provider_issues),

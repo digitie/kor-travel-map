@@ -1164,7 +1164,7 @@ async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_
     assert dataset_response.status_code == 200, dataset_response.text
     dataset_event_codes = [
         event["code"]
-        for event in dataset_response.json()["data"]["recent_events"]
+        for event in dataset_response.json()["data"]["event_history"]["items"]
     ]
     assert dataset_event_codes.count("kma.target_scope_empty") == 1
 

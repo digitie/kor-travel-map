@@ -913,6 +913,7 @@ CREATE TABLE ops.import_job_events (
   job_id UUID NOT NULL REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE,
   provider TEXT,
   dataset_key TEXT,
+  sync_scope TEXT,
   feature_id TEXT,
   stage TEXT,
   level TEXT NOT NULL, -- debug, info, warning, error, critical
@@ -931,9 +932,6 @@ CREATE INDEX idx_import_job_events_job_time
 CREATE INDEX idx_import_job_events_provider_time
   ON ops.import_job_events (provider, occurred_at DESC, event_id DESC)
   WHERE provider IS NOT NULL AND quarantined_at IS NULL;
-CREATE INDEX idx_import_job_events_dataset_time
-  ON ops.import_job_events (dataset_key, occurred_at DESC, event_id DESC)
-  WHERE dataset_key IS NOT NULL AND quarantined_at IS NULL;
 CREATE INDEX idx_import_job_events_provider_dataset_time
   ON ops.import_job_events (
     provider, dataset_key, occurred_at DESC, event_id DESC
@@ -944,6 +942,14 @@ CREATE INDEX idx_import_job_events_provider_dataset_time
 CREATE INDEX idx_import_job_events_level_time
   ON ops.import_job_events (level, occurred_at DESC, event_id DESC)
   WHERE quarantined_at IS NULL;
+CREATE INDEX idx_import_job_events_provider_dataset_scope_time
+  ON ops.import_job_events (
+    provider, dataset_key, sync_scope, occurred_at DESC, event_id DESC
+  )
+  WHERE provider IS NOT NULL
+    AND dataset_key IS NOT NULL
+    AND sync_scope IS NOT NULL
+    AND quarantined_at IS NULL;
 
 CREATE TABLE ops.import_job_event_clock (
   clock_id BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
@@ -960,6 +966,10 @@ CREATE TABLE ops.import_job_event_clock (
 `updated_at`은 진단용이고 변경 판정 정본은 `revision`이다. Clock은 event AFTER trigger 안의
 `revision+1` 외 직접 UPDATE/DELETE/TRUNCATE를 거부한다. Event TRUNCATE도 AFTER STATEMENT
 clock 증가를 거치므로 bulk cleanup이 invalidation을 우회하지 않는다.
+
+0057은 canonical update event에 owner의 typed `provider`/`dataset_key`/`sync_scope`를 고정한다.
+dataset key는 provider namespace에 속하므로 dataset-only event 조회와 단독 인덱스는 제거하고,
+provider+dataset 또는 exact-scope 인덱스만 사용한다.
 
 ## 14. 중복 후보 검토
 

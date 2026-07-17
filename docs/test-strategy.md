@@ -523,7 +523,7 @@ def mask_sensitive(obj):
 | overview | status/queued+running active/최근 24시간 failure는 canonical root 단위이며 timeline root count와 동일, multi-pair child N배 부풀림 0; 기존 import/update 분리 6필드 제거 |
 | progress/stage | child done=100, root progress=`floor(100*done/total)`; partial failure/cancel은 완료 비율 보존, exact SUCCESS는 100, stage는 고정 lifecycle 어휘 |
 | pagination | detail recent cursor가 pipeline total order와 같고 1,000 root 이상에서 page 누락·중복과 grid latest 누락 0 |
-| filter/index | provider+dataset 같은 pair filter, pair/provider-only/dataset-only 조회 각각 전용 `EXPLAIN` index gate |
+| filter/index | provider-only와 provider+dataset exact pair filter, event의 무필터/job/provider/pair/level/exact-scope별 전용 `EXPLAIN` index gate; provider 없는 dataset-only는 API/repository에서 422/`ValueError` |
 | 계약 drift | base/cancellation/nullable `dagster_run_status`/freshness/trigger status와 engine 시각 분리, pipeline/datasets 양쪽 OpenAPI admin/user drift와 admin generated type drift; cancellation member operation kind/run-termination 및 cancellation run engine start/finish 포함 |
 | writer | offline validate/load/reserve, MOIS 3종, exact update member는 실컬럼+event pair; multi-scope/batch aggregate NULL; event mismatch 거부 |
 | 배포 | API/manual/backfill/schedule/sensor ingress 차단, active 0 drain, 두 번 backfill, Dagster 전 구성 재기동, 신 API/Dagster 정지 후 migration-image downgrade |

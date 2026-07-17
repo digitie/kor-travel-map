@@ -652,7 +652,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": PROVIDER_NAME,
                         "dataset_key": DATASET_KEY_BULK,
-                        "sync_scope": "default",
+                        "sync_scope": "dataset_wide",
                     },
                 )
                 pipeline_first_response = await client.get(
@@ -661,7 +661,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": PROVIDER_NAME,
                         "dataset_key": DATASET_KEY_BULK,
-                        "sync_scope": "default",
+                        "sync_scope": "dataset_wide",
                         "page_size": _PAGE_SIZE,
                     },
                 )
@@ -803,18 +803,18 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 detail = detail_response.json()["data"]
                 pipeline_first = pipeline_first_response.json()
                 first_items = pipeline_first["data"]["items"]
-                detail_cursor = detail["recent_runs_next_cursor"]
+                detail_cursor = detail["run_history"]["next_cursor"]
                 first_cursor = pipeline_first["meta"]["page"]["next_cursor"]
                 assert detail_cursor is not None
                 assert first_cursor == detail_cursor
 
-                history = urlsplit(detail["pipeline_history_url"])
+                history = urlsplit(detail["run_history"]["canonical_url"])
                 history_query = parse_qs(history.query, strict_parsing=True)
                 assert history.path == "/v1/ops/pipeline/executions"
                 assert history_query == {
                     "provider": [PROVIDER_NAME],
                     "dataset_key": [DATASET_KEY_BULK],
-                    "sync_scope": ["default"],
+                    "sync_scope": ["dataset_wide"],
                 }
                 pipeline_second_response = await client.get(
                     history.path,
@@ -834,7 +834,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     params={
                         "provider": seed.orphan_provider,
                         "dataset_key": seed.orphan_dataset_key,
-                        "sync_scope": "default",
+                        "sync_scope": "dataset_wide",
                     },
                 )
                 assert orphan_detail_response.status_code == 200, (
@@ -842,7 +842,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 )
                 orphan_detail = orphan_detail_response.json()["data"]
                 orphan_history = urlsplit(
-                    orphan_detail["pipeline_history_url"]
+                    orphan_detail["run_history"]["canonical_url"]
                 )
                 assert orphan_history.scheme == ""
                 assert orphan_history.netloc == ""
@@ -854,7 +854,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 assert orphan_history_query == {
                     "provider": [seed.orphan_provider],
                     "dataset_key": [seed.orphan_dataset_key],
-                    "sync_scope": ["default"],
+                    "sync_scope": ["dataset_wide"],
                 }
                 orphan_pipeline_response = await client.get(
                     orphan_history.path,
@@ -882,7 +882,8 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         first_keys = [(item["kind"], item["id"]) for item in first_items]
         second_keys = [(item["kind"], item["id"]) for item in second_items]
         detail_keys = [
-            (item["kind"], item["id"]) for item in detail["recent_runs"]
+            (item["kind"], item["id"])
+            for item in detail["run_history"]["items"]
         ]
 
         assert len(expected_keys) == 12
@@ -899,7 +900,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             _assert_pipeline_projection(
                 item, expected_by_key[(item["kind"], item["id"])]
             )
-        for item in detail["recent_runs"]:
+        for item in detail["run_history"]["items"]:
             _assert_dataset_projection(
                 item, expected_by_key[(item["kind"], item["id"])]
             )
@@ -919,11 +920,11 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert parse_qs(orphan_grid_detail.query, strict_parsing=True) == {
             "provider": [seed.orphan_provider],
             "dataset_key": [seed.orphan_dataset_key],
-            "sync_scope": ["default"],
+            "sync_scope": ["dataset_wide"],
         }
-        assert len(orphan_detail["recent_runs"]) == 1
+        assert len(orphan_detail["run_history"]["items"]) == 1
         _assert_dataset_projection(
-            orphan_detail["recent_runs"][0], seed.orphan_operation
+            orphan_detail["run_history"]["items"][0], seed.orphan_operation
         )
         assert len(orphan_pipeline_items) == 1
         _assert_pipeline_projection(
@@ -947,7 +948,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             for item in grid["items"]
             if item["provider"] == PROVIDER_NAME
             and item["dataset_key"] == DATASET_KEY_BULK
-            and item["sync_scope"] == "default"
+            and item["sync_scope"] == "dataset_wide"
         ]
         assert len(target_rows) == 1
         target_detail_url = urlsplit(target_rows[0]["detail_url"])
@@ -955,20 +956,24 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         assert parse_qs(target_detail_url.query, strict_parsing=True) == {
             "provider": [PROVIDER_NAME],
             "dataset_key": [DATASET_KEY_BULK],
-            "sync_scope": ["default"],
+            "sync_scope": ["dataset_wide"],
         }
-        grid_latest = target_rows[0]["latest_execution"]
-        assert grid_latest is not None
-        _assert_dataset_projection(grid_latest, expected[0])
+        assert target_rows[0]["latest_execution"] is None
+        grid_active = target_rows[0]["active_execution"]
+        assert grid_active is not None
+        _assert_dataset_projection(grid_active, expected[0])
 
-        assert grid["latest_execution_coverage"] == (
+        assert grid["execution_coverage"] == (
             "db_recorded_canonical_operations"
         )
         assert detail["provider"] == PROVIDER_NAME
         assert detail["dataset_key"] == DATASET_KEY_BULK
-        assert detail["recent_runs_coverage"] == (
+        assert detail["execution_coverage"] == (
             "db_recorded_canonical_operations"
         )
+        assert detail["latest_execution"] is None
+        assert detail["active_execution"] is not None
+        _assert_dataset_projection(detail["active_execution"], expected[0])
         assert grid["schedule_source_status"] == "ok"
         assert grid["schedule_source_errors"] == []
         assert detail["schedule_source_status"] == "ok"

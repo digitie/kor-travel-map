@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex, agent A) — C7B-API 적대 리뷰·전체 backend gate 완료
+
+- datasets canonical root projection을 scope별 활성/종료 두 그룹으로 나눠 더 최신 terminal이
+  아직 살아 있는 실행을 가리거나 active가 마지막 완료 결과를 지우지 않게 했다. grid/detail은
+  같은 DB snapshot을 사용하고 실행·event 첫 페이지를 독립
+  `{items,next_cursor,canonical_url}`로 반환한다.
+- Alembic 0057은 visible event의 provider/dataset을 owning job에서 복구하고 canonical direct
+  update event에만 typed `sync_scope`를 backfill한다. trigger·constraint로 owner identity를
+  불변화하고 exact-scope partial index에서 조건→keyset→LIMIT 순서를 고정했다. run/event cursor에는
+  전체 filter fingerprint를 묶어 다른 filter 재사용과 non-canonical scope를 typed `422`로 닫았다.
+- 첫 natural-plan gate에서 dataset-only no-cursor가 시간 index로 4,001행을 버리는 실제 plan과
+  Bitmap Heap→Bitmap Index child를 놓치는 assertion을 분리 진단했다. dataset key는 provider
+  namespace라는 clean contract에 맞춰 provider 없는 event filter를 REST/repository에서 거부하고
+  dead `idx_import_job_events_dataset_time`을 제거했으며, EXPLAIN assertion은 전체 plan tree의
+  index와 relation touch/removed bound를 각각 검증하도록 고쳤다.
+- 두 독립 DB/API 적대 리뷰어가 migration up/down, lock·DDL 순서, 0052 역사 계약, 최신 ORM
+  metadata, production caller와 EXPLAIN 정당성을 검토해 P0/P1/P2/P3 잔여 0건으로 승인했다.
+  승인 뒤 migration 0057 3건, ops 8건, pipeline 23건, jobs 14건, dataset status 2건, API
+  projection 1건, feature executor 21건, C7B unit metadata/repository 9건을 순차 재실행해
+  81/81 green을 확인했다. root unit/lint 1,430건, API 504건, Ruff, strict mypy 167개 소스,
+  frontend unit 210건·type-check·lint, admin/user OpenAPI·생성 타입 drift도 모두 green이다.
+- `T-ADM-C7B-API`를 완료 이력으로 옮겼다. 다음은 최신 main 위 C7B-UI 소비를 완결하고 마지막
+  C7 n150 파괴적 live E2E에서 #712/#719를 종결하는 것이다.
+
 ## 2026-07-18 (codex, agent A) — AUD-718 적대 리뷰·전체 로컬 gate 완료
 
 - DB/API와 frontend 적대 리뷰어가 실제 row-lock 경쟁, BIGINT 최댓값 소진, source 불변과

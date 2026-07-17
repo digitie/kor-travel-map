@@ -10,7 +10,6 @@ import {
   datasetRefreshConflict,
   fetchOpsDataset,
   fetchDatasetRefreshExecution,
-  filterDatasetRecentRuns,
   hasActiveDatasetDetailExecution,
   hasActiveDatasetExecution,
   opsDatasetCatalogOptions,
@@ -19,7 +18,6 @@ import {
   resolveDatasetRefreshScope,
   resolveOpsDatasetRefetchInterval,
   upsertOpsDatasetRefreshPolicy,
-  type OpsDatasetLatestExecution,
   type OpsDatasetGridRow,
   type OpsDatasetDetailResponse,
   type OpsDatasetScopeRefreshCapability,
@@ -59,10 +57,6 @@ const TARGET_CAPABILITY: OpsDatasetScopeRefreshCapability = {
   allowed_sync_scopes: ["target_grids", "external_system:concierge"],
   reason: null,
 };
-
-function execution(syncScope: string | null): OpsDatasetLatestExecution {
-  return { id: syncScope ?? "unscoped", sync_scope: syncScope } as OpsDatasetLatestExecution;
-}
 
 describe("ops datasets current REST contract", () => {
   afterEach(() => {
@@ -214,15 +208,13 @@ describe("ops datasets scope capability", () => {
     expect(
       resolveDatasetRefreshScope(
         DATASET_WIDE_CAPABILITY,
-        "default",
-        "default",
+        "dataset_wide",
       ),
     ).toEqual({ allowed: true, syncScope: null });
     expect(
       resolveDatasetRefreshScope(
         TARGET_CAPABILITY,
         "external_system:concierge",
-        "target_grids",
       ),
     ).toEqual({
       allowed: true,
@@ -232,88 +224,28 @@ describe("ops datasets scope capability", () => {
       resolveDatasetRefreshScope(
         TARGET_CAPABILITY,
         "external_system:deleted",
-        "target_grids",
       ),
     ).toMatchObject({ allowed: false });
   });
 
   it("누락되거나 모순된 capability는 fail-closed한다", () => {
     expect(
-      resolveDatasetRefreshScope(null, "target_grids", "target_grids"),
+      resolveDatasetRefreshScope(null, "target_grids"),
     ).toMatchObject({ allowed: false });
     expect(
       resolveDatasetRefreshScope(
         { ...DATASET_WIDE_CAPABILITY, supported: true },
-        "default",
-        "default",
+        "dataset_wide",
       ),
     ).toMatchObject({ allowed: false });
     expect(
       resolveDatasetRefreshScope(
         DATASET_WIDE_CAPABILITY,
         "stale_scope",
-        "default",
       ),
     ).toMatchObject({ allowed: false });
   });
 
-  it("최근 실행은 선택 scope만 남기고 dataset-wide에는 unscoped fallback을 포함한다", () => {
-    const runs = [
-      execution("target_grids"),
-      execution("external_system:concierge"),
-      execution("external_system:other"),
-      execution("default"),
-      execution("dataset_wide"),
-      execution(null),
-    ];
-
-    expect(
-      filterDatasetRecentRuns(
-        runs,
-        "external_system:concierge",
-        TARGET_CAPABILITY,
-        "target_grids",
-      ).map((run) => run.sync_scope),
-    ).toEqual(["external_system:concierge"]);
-    expect(
-      filterDatasetRecentRuns(
-        runs,
-        "default",
-        DATASET_WIDE_CAPABILITY,
-        "default",
-      ).map((run) => run.sync_scope),
-    ).toEqual(["default", "dataset_wide", null]);
-  });
-
-  it("mutation allow-list에서 빠진 stale scope와 orphan scope의 이력을 숨기지 않는다", () => {
-    const runs = [
-      execution("target_grids"),
-      execution("external_system:deleted"),
-      execution("orphan_scope"),
-    ];
-
-    expect(
-      filterDatasetRecentRuns(
-        runs,
-        "external_system:deleted",
-        TARGET_CAPABILITY,
-        "target_grids",
-      ).map((run) => run.sync_scope),
-    ).toEqual(["external_system:deleted"]);
-    expect(
-      filterDatasetRecentRuns(runs, "orphan_scope", null, undefined).map(
-        (run) => run.sync_scope,
-      ),
-    ).toEqual(["orphan_scope"]);
-    expect(
-      filterDatasetRecentRuns(
-        [execution("default"), execution("dataset_wide"), execution(null)],
-        "default",
-        null,
-        undefined,
-      ).map((run) => run.sync_scope),
-    ).toEqual(["default", "dataset_wide", null]);
-  });
 });
 
 describe("dataset refresh status query identity", () => {
@@ -345,54 +277,38 @@ describe("dataset refresh status query identity", () => {
 });
 
 describe("ops datasets active polling gate", () => {
-  function responseWithStatuses(
-    status: OpsDatasetLatestExecution["status"],
-    pairStatus: OpsDatasetLatestExecution["pair_status"],
-  ): OpsDatasetsGridResponse {
+  function gridWithActiveExecution(active: boolean): OpsDatasetsGridResponse {
     return {
       data: {
         items: [
           {
-            latest_execution: { status, pair_status: pairStatus },
+            active_execution: active ? { status: "running" } : null,
           },
         ],
       },
     } as OpsDatasetsGridResponse;
   }
 
-  it("root 또는 pair가 active인 동안만 목록 polling을 유지한다", () => {
-    expect(hasActiveDatasetExecution(responseWithStatuses("running", "done"))).toBe(
-      true,
-    );
-    expect(hasActiveDatasetExecution(responseWithStatuses("done", "queued"))).toBe(
-      true,
-    );
-    expect(hasActiveDatasetExecution(responseWithStatuses("done", "done"))).toBe(
-      false,
-    );
+  it("서버가 exact scope active execution을 투영한 동안만 목록 polling을 유지한다", () => {
+    expect(hasActiveDatasetExecution(gridWithActiveExecution(true))).toBe(true);
+    expect(hasActiveDatasetExecution(gridWithActiveExecution(false))).toBe(false);
     expect(hasActiveDatasetExecution(undefined)).toBe(false);
   });
 
-  it("선택 scope 상세의 root 또는 pair가 active인 동안만 상세 polling을 유지한다", () => {
-    const detailWithStatuses = (
-      status: OpsDatasetLatestExecution["status"],
-      pairStatus: OpsDatasetLatestExecution["pair_status"],
-    ) =>
+  it("서버가 선택 scope active execution을 투영한 동안만 상세 polling을 유지한다", () => {
+    const detailWithActiveExecution = (active: boolean) =>
       ({
         data: {
-          recent_runs: [{ status, pair_status: pairStatus }],
+          active_execution: active ? { status: "running" } : null,
         },
       }) as OpsDatasetDetailResponse;
 
-    expect(
-      hasActiveDatasetDetailExecution(detailWithStatuses("running", "done")),
-    ).toBe(true);
-    expect(
-      hasActiveDatasetDetailExecution(detailWithStatuses("done", "queued")),
-    ).toBe(true);
-    expect(
-      hasActiveDatasetDetailExecution(detailWithStatuses("done", "done")),
-    ).toBe(false);
+    expect(hasActiveDatasetDetailExecution(detailWithActiveExecution(true))).toBe(
+      true,
+    );
+    expect(hasActiveDatasetDetailExecution(detailWithActiveExecution(false))).toBe(
+      false,
+    );
     expect(hasActiveDatasetDetailExecution(undefined)).toBe(false);
   });
 
