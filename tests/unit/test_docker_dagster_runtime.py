@@ -48,6 +48,18 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
     assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
+    assert (
+        dagster["environment"][
+            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
+        ]
+        == "true"
+    )
+    assert (
+        daemon["environment"][
+            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
+        ]
+        == "true"
+    )
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
 
