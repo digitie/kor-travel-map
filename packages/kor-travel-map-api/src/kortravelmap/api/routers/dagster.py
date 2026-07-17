@@ -12,16 +12,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api import dagster_graphql, dagster_query_service, dagster_schedule_service
+from kortravelmap.api import dagster_query_service, dagster_schedule_service
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.dagster_http import (
     SCHEDULE_WRITE_ERROR_RESPONSES,
     dagster_http_dependencies,
+    http_client_from_request,
     schedule_command_response_or_raise,
     schedule_idempotency_http_exception,
     schedule_storage_http_exception,
     schedule_uncertain_outcome_http_exception,
     schedule_validation_http_exception,
+    settings_from_request,
 )
 from kortravelmap.api.dagster_schema import (
     DagsterNuxSeenResponse,
@@ -90,16 +92,11 @@ async def get_dagster_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
     page_size: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
-    settings, client = dagster_http_dependencies(request)
-    try:
-        dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError:
-        return await dagster_query_service.get_summary(
-            settings=settings,
-            client=client,
-            overrides={},
-            page_size=page_size,
-        )
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_summary_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
     try:
         overrides = await dagster_schedule_service.schedule_overrides(session)
     except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:

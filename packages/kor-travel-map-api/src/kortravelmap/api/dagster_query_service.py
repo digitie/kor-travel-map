@@ -19,7 +19,12 @@ from kortravelmap.api.dagster_schema import (
 from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
 
-__all__ = ["get_run_detail", "get_summary", "mark_nux_seen"]
+__all__ = [
+    "get_run_detail",
+    "get_summary",
+    "get_summary_configuration_error",
+    "mark_nux_seen",
+]
 
 _DAGSTER_SUMMARY_QUERY = """
 query KorTravelMapDagsterSummary($limit: Int!) {
@@ -173,27 +178,19 @@ def _run_detail_response(
     return DagsterRunDetailResponse(data=data, meta=make_meta(started_at=started_at))
 
 
-async def get_summary(
-    *,
-    settings: ApiSettings,
-    client: httpx.AsyncClient,
-    overrides: dict[str, str],
-    page_size: int,
-) -> DagsterSummaryResponse:
-    """Dagster summary를 조회해 legacy 응답 계약으로 반환한다."""
+def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResponse | None:
+    """잘못된 Dagster URL 설정을 외부 자원 접근 전에 안전한 응답으로 바꾼다."""
 
     started_at = perf_counter()
-    checked_at = datetime.now(UTC)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     try:
-        urls = dagster_graphql.dagster_urls(settings)
+        dagster_graphql.dagster_urls(settings)
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return _summary_response(
             DagsterSummaryData(
                 status="error",
-                dagster_url=settings.dagster_url,
-                graphql_url=raw_graphql_url,
-                checked_at=checked_at,
+                dagster_url="",
+                graphql_url="",
+                checked_at=datetime.now(UTC),
                 repository_count=0,
                 job_count=0,
                 asset_count=0,
@@ -206,6 +203,25 @@ async def get_summary(
             ),
             started_at=started_at,
         )
+    return None
+
+
+async def get_summary(
+    *,
+    settings: ApiSettings,
+    client: httpx.AsyncClient,
+    overrides: dict[str, str],
+    page_size: int,
+) -> DagsterSummaryResponse:
+    """Dagster summary를 조회해 legacy 응답 계약으로 반환한다."""
+
+    configuration_error = get_summary_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+
+    started_at = perf_counter()
+    checked_at = datetime.now(UTC)
+    urls = dagster_graphql.dagster_urls(settings)
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,

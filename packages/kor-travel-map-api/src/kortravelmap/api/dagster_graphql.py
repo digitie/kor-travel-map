@@ -124,7 +124,11 @@ def _validated_http_url(
     require_graphql_path: bool = False,
 ) -> str:
     value = raw_url.strip()
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as exc:
+        raise DagsterUrlConfigurationError(f"{setting_name} is not a valid URL") from exc
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_DAGSTER_SCHEMES:
         raise DagsterUrlConfigurationError(f"{setting_name} scheme must be http or https")
