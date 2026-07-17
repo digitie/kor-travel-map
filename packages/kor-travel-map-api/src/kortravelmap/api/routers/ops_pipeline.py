@@ -1511,14 +1511,16 @@ async def get_pipeline_dagster_run_detail(
     ] = None,
 ) -> DagsterRunDetailResponse:
     settings = _settings_from_request(request)
-    client = _http_client_from_request(request, settings)
-    response = await dagster_query_service.get_run_detail(
-        settings=settings,
-        client=client,
-        run_id=run_id,
-        page_size=page_size,
-        after=after,
-    )
+    response = dagster_query_service.get_run_detail_configuration_error(settings)
+    if response is None:
+        client = _http_client_from_request(request, settings)
+        response = await dagster_query_service.get_run_detail(
+            settings=settings,
+            client=client,
+            run_id=run_id,
+            page_size=page_size,
+            after=after,
+        )
     if response.data.status == "ok":
         return response
 

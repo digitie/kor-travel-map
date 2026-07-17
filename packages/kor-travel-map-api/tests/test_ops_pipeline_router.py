@@ -1797,6 +1797,17 @@ def test_dagster_run_detail_upstream_response_error_is_problem_502(
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
+    if failure_kind == "disallowed_url":
+
+        def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+            raise AssertionError("disallowed Dagster URL must not create an HTTP client")
+
+        monkeypatch.setattr(
+            pipeline_mod,
+            "_http_client_from_request",
+            _unexpected_http_client,
+        )
+
     dagster_url = (
         "http://disallowed.example:12302"
         if failure_kind == "disallowed_url"
