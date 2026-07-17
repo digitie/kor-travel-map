@@ -715,7 +715,7 @@ async def _claim_schedule_command(
 
 
 class _ClaimResolutionRow(Protocol):
-    resolution_id: object
+    resolution_id: int
     command_id: object
     schedule_name: object
     resolution: object
