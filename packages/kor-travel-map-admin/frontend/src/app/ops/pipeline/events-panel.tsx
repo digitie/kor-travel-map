@@ -42,25 +42,46 @@ const PAGE_SIZE = 50;
 
 export function PipelineEventsPanel({
   onSelectExecution,
-  initialProvider = "",
-  initialDatasetKey = "",
-  initialSyncScope = "",
+  onUrlChange,
+  provider,
+  datasetKey,
+  syncScope,
 }: {
   onSelectExecution: (kind: ExecutionKind, id: string) => void;
-  initialProvider?: string;
-  initialDatasetKey?: string;
-  initialSyncScope?: string;
+  onUrlChange: (
+    updates: Record<string, string | null>,
+    mode?: "push" | "replace",
+  ) => void;
+  provider: string;
+  datasetKey: string;
+  syncScope: string;
 }) {
   const [level, setLevel] = useState<JobEventLevel | "all">("all");
-  const [provider, setProvider] = useState(initialProvider);
-  const [datasetKey, setDatasetKey] = useState(initialDatasetKey);
-  const [syncScope, setSyncScope] = useState(initialSyncScope);
   const [jobId, setJobId] = useState("");
+  const filterSignature = JSON.stringify([
+    level,
+    provider,
+    datasetKey,
+    syncScope,
+    jobId,
+  ]);
+  const [paginationSignature, setPaginationSignature] =
+    useState(filterSignature);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
 
-  const cursor = cursorStack.at(-1) ?? null;
+  // URL Back/Forward와 same-route pushState가 필터를 바꾸면 이전 filter의
+  // opaque cursor를 같은 렌더에서 폐기한다. 서버 cursor fingerprint에 기대기
+  // 전에 UI도 잘못된 재사용을 만들지 않는다.
+  const paginationIsCurrent = paginationSignature === filterSignature;
+  const activeCursorStack = paginationIsCurrent ? cursorStack : [];
+  if (!paginationIsCurrent) {
+    setPaginationSignature(filterSignature);
+    setCursorStack([]);
+  }
+
+  const cursor = activeCursorStack.at(-1) ?? null;
   const providerFilter = provider.trim() || undefined;
-  const datasetFilter = datasetKey.trim() || undefined;
+  const datasetFilter = providerFilter ? datasetKey.trim() || undefined : undefined;
   const syncScopeFilter = syncScope.trim() || undefined;
   const events = usePipelineEvents({
     level: level === "all" ? undefined : level,
@@ -184,28 +205,39 @@ export function PipelineEventsPanel({
               aria-label="이벤트 provider 필터"
               value={provider}
               onChange={(event) => {
-                setProvider(event.target.value);
                 resetPage();
+                onUrlChange(
+                  { provider: event.target.value.trim() || null },
+                  "replace",
+                );
               }}
             />
           </FilterField>
           <FilterField label="데이터셋">
             <Input
               aria-label="이벤트 데이터셋 필터"
+              disabled={!providerFilter}
               value={datasetKey}
               onChange={(event) => {
-                setDatasetKey(event.target.value);
                 resetPage();
+                onUrlChange(
+                  { dataset_key: event.target.value.trim() || null },
+                  "replace",
+                );
               }}
             />
           </FilterField>
           <FilterField label="sync scope">
             <Input
               aria-label="이벤트 sync scope 필터"
+              disabled={!providerFilter || !datasetFilter}
               value={syncScope}
               onChange={(event) => {
-                setSyncScope(event.target.value);
                 resetPage();
+                onUrlChange(
+                  { sync_scope: event.target.value.trim() || null },
+                  "replace",
+                );
               }}
             />
           </FilterField>
@@ -242,8 +274,8 @@ export function PipelineEventsPanel({
           ariaPrefix="job 이벤트"
           hasNext={Boolean(nextCursor)}
           isFetching={events.isFetching}
-          isFirst={cursorStack.length === 0}
-          summary={`page ${cursorStack.length + 1} · 이 페이지 ${items.length}건`}
+          isFirst={activeCursorStack.length === 0}
+          summary={`page ${activeCursorStack.length + 1} · 이 페이지 ${items.length}건`}
           onFirst={resetPage}
           onNext={() =>
             nextCursor

@@ -125,6 +125,10 @@ export function ExecutionTimeline({
   const createdTo = datetimeLocalValue(initialFilters.createdTo);
   const loadBatchId = initialLoadBatchId ?? "";
   const parentJobId = initialParentJobId ?? "";
+  const providerFilter = provider.trim() || undefined;
+  const datasetFilter = providerFilter ? datasetKey.trim() || undefined : undefined;
+  const syncScopeFilter =
+    providerFilter && datasetFilter ? syncScope.trim() || undefined : undefined;
   const filterSignature = JSON.stringify([
     kind,
     status,
@@ -158,9 +162,9 @@ export function ExecutionTimeline({
     () => ({
       kind: kind === "all" ? undefined : kind,
       status: status === "all" ? undefined : status,
-      provider: provider.trim() || undefined,
-      dataset_key: datasetKey.trim() || undefined,
-      sync_scope: syncScope.trim() || undefined,
+      provider: providerFilter,
+      dataset_key: datasetFilter,
+      sync_scope: syncScopeFilter,
       load_batch_id: loadBatchId.trim() || undefined,
       parent_job_id: parentJobId.trim() || undefined,
       created_from: datetimeLocalIsoValue(createdFrom),
@@ -170,9 +174,9 @@ export function ExecutionTimeline({
     [
       kind,
       status,
-      provider,
-      datasetKey,
-      syncScope,
+      providerFilter,
+      datasetFilter,
+      syncScopeFilter,
       loadBatchId,
       parentJobId,
       createdFrom,
@@ -457,7 +461,9 @@ export function ExecutionTimeline({
           </FilterField>
           <FilterField label="데이터셋">
             <Input
+              aria-describedby={!providerFilter ? "timeline-dataset-prerequisite" : undefined}
               aria-label="데이터셋 필터"
+              disabled={!providerFilter}
               placeholder="예: kma_short_forecast"
               value={datasetKey}
               onChange={(event) => {
@@ -469,10 +475,21 @@ export function ExecutionTimeline({
                 );
               }}
             />
+            {!providerFilter ? (
+              <p className="text-xs text-text-tertiary" id="timeline-dataset-prerequisite">
+                provider를 먼저 입력하세요.
+              </p>
+            ) : null}
           </FilterField>
           <FilterField label="sync scope">
             <Input
+              aria-describedby={
+                !providerFilter || !datasetFilter
+                  ? "timeline-scope-prerequisite"
+                  : undefined
+              }
               aria-label="sync scope 필터"
+              disabled={!providerFilter || !datasetFilter}
               placeholder="예: target_grids"
               value={syncScope}
               onChange={(event) => {
@@ -484,6 +501,11 @@ export function ExecutionTimeline({
                 );
               }}
             />
+            {!providerFilter || !datasetFilter ? (
+              <p className="text-xs text-text-tertiary" id="timeline-scope-prerequisite">
+                provider와 데이터셋을 먼저 입력하세요.
+              </p>
+            ) : null}
           </FilterField>
           <FilterField label="시작일">
             <Input

@@ -286,13 +286,36 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       updates: Record<string, string | null>,
       mode: "push" | "replace" = "push",
     ) => {
-      const next = new URLSearchParams(urlStateRef.current);
+      const previous = new URLSearchParams(urlStateRef.current);
+      const next = new URLSearchParams(previous);
       for (const [key, value] of Object.entries(updates)) {
         if (value === null || value === "") {
           next.delete(key);
         } else {
           next.set(key, value);
         }
+      }
+      const provider = next.get("provider")?.trim() ?? "";
+      const datasetKey = next.get("dataset_key")?.trim() ?? "";
+      const providerChanged =
+        Object.hasOwn(updates, "provider") &&
+        provider !== (previous.get("provider")?.trim() ?? "");
+      const datasetChanged =
+        Object.hasOwn(updates, "dataset_key") &&
+        datasetKey !== (previous.get("dataset_key")?.trim() ?? "");
+      const datasetExplicitlyUpdated = Object.hasOwn(updates, "dataset_key");
+      const scopeExplicitlyUpdated = Object.hasOwn(updates, "sync_scope");
+      // provider가 없으면 dataset/scope 모두 invalid다. exact pair의 어느 축이
+      // 바뀌어도 같은 전이에 새 scope를 명시하지 않았다면 이전 pair scope를
+      // cursor와 함께 폐기한다.
+      if (!provider) {
+        next.delete("dataset_key");
+        next.delete("sync_scope");
+      } else if (providerChanged && !datasetExplicitlyUpdated) {
+        next.delete("dataset_key");
+        next.delete("sync_scope");
+      } else if (!datasetKey || ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)) {
+        next.delete("sync_scope");
       }
       const query = next.toString();
       const href = query ? `${pathname}?${query}` : pathname;
@@ -315,6 +338,27 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
     urlStateRef.current = searchParams.toString();
   }, [searchParams]);
 
+  const urlProvider = searchParams.get("provider")?.trim() ?? "";
+  const urlDatasetKey = searchParams.get("dataset_key")?.trim() ?? "";
+  const urlSyncScope = searchParams.get("sync_scope")?.trim() ?? "";
+  const hasExactScopeTuple = Boolean(urlProvider && urlDatasetKey);
+
+  // 외부 deep link나 browser history가 불완전 tuple을 복원해도 scope를
+  // fail-closed한다. 하위 목록은 정규화된 props를 받아 cursor를 함께 비운다.
+  useEffect(() => {
+    if (!urlProvider && (urlDatasetKey || urlSyncScope)) {
+      updateUrl({ dataset_key: null, sync_scope: null }, "replace");
+    } else if (urlSyncScope && !hasExactScopeTuple) {
+      updateUrl({ sync_scope: null }, "replace");
+    }
+  }, [
+    hasExactScopeTuple,
+    updateUrl,
+    urlDatasetKey,
+    urlProvider,
+    urlSyncScope,
+  ]);
+
   const selectExecution = (
     kind: ExecutionKind,
     id: string,
@@ -334,13 +378,13 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       normalizeTimelineFilters({
         kind: searchParams.get("kind") ?? undefined,
         status: searchParams.get("status") ?? undefined,
-        provider: searchParams.get("provider") ?? undefined,
-        datasetKey: searchParams.get("dataset_key") ?? undefined,
-        syncScope: searchParams.get("sync_scope") ?? undefined,
+        provider: urlProvider || undefined,
+        datasetKey: urlProvider ? urlDatasetKey || undefined : undefined,
+        syncScope: hasExactScopeTuple ? urlSyncScope || undefined : undefined,
         createdFrom: searchParams.get("created_from") ?? undefined,
         createdTo: searchParams.get("created_to") ?? undefined,
       }),
-    [searchParams],
+    [hasExactScopeTuple, searchParams, urlDatasetKey, urlProvider, urlSyncScope],
   );
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
@@ -451,10 +495,11 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
           </TabsContent>
           <TabsContent className="mt-4" value="events">
             <PipelineEventsPanel
-              initialDatasetKey={searchParams.get("dataset_key") ?? ""}
-              initialProvider={searchParams.get("provider") ?? ""}
-              initialSyncScope={searchParams.get("sync_scope") ?? ""}
+              datasetKey={urlProvider ? urlDatasetKey : ""}
+              provider={urlProvider}
+              syncScope={hasExactScopeTuple ? urlSyncScope : ""}
               onSelectExecution={selectExecution}
+              onUrlChange={updateUrl}
             />
           </TabsContent>
           <TabsContent className="mt-4" value="schedules">

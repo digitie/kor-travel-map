@@ -215,6 +215,27 @@ export function RequestCreateDialog({
       ].sort(),
     [catalogRows, scopeProvider],
   );
+  const selectedScopeCapability = useMemo(
+    () =>
+      catalogRows.find(
+        (row) =>
+          row.provider === scopeProvider.trim() &&
+          row.dataset_key === scopeDataset.trim(),
+      )?.catalog?.scope_refresh ?? null,
+    [catalogRows, scopeDataset, scopeProvider],
+  );
+  const explicitScopeSupported = Boolean(
+    selectedScopeCapability?.effect === "sync_scope" &&
+      selectedScopeCapability.supported &&
+      selectedScopeCapability.selector !== "none",
+  );
+  if (
+    scopeSyncScope &&
+    selectedScopeCapability &&
+    !explicitScopeSupported
+  ) {
+    setScopeSyncScope("");
+  }
 
   const createRequest = useCreateUpdateRequestMutation();
   const previewRequest = usePreviewUpdateRequestMutation();
@@ -326,15 +347,22 @@ export function RequestCreateDialog({
       if (
         requestedSyncScope &&
         !pairRows.some(
-          (row) =>
-            row.catalog?.scope_refresh.default_sync_scope ===
-              requestedSyncScope ||
-            row.catalog?.scope_refresh.allowed_sync_scopes.includes(
-              requestedSyncScope,
-            ),
+          (row) => {
+            const capability = row.catalog?.scope_refresh;
+            return Boolean(
+              capability?.effect === "sync_scope" &&
+                capability.supported &&
+                capability.selector !== "none" &&
+                capability.allowed_sync_scopes.includes(requestedSyncScope),
+            );
+          },
         )
       ) {
-        return "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
+        return pairRows.some(
+          (row) => row.catalog?.scope_refresh.effect === "dataset_wide",
+        )
+          ? "dataset-wide 갱신은 sync_scope를 비워 서버가 범위를 정규화하게 해야 합니다."
+          : "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
       }
       return null;
     }
@@ -637,7 +665,11 @@ export function RequestCreateDialog({
                   placeholder="예: python-kma-api"
                   required
                   value={scopeProvider}
-                  onChange={(event) => setScopeProvider(event.target.value)}
+                  onChange={(event) => {
+                    setScopeProvider(event.target.value);
+                    setScopeDataset("");
+                    setScopeSyncScope("");
+                  }}
                 />
                 <FormField
                   list="pipeline-provider-dataset-catalog"
@@ -645,7 +677,10 @@ export function RequestCreateDialog({
                   placeholder="예: kma_short_forecast"
                   required
                   value={scopeDataset}
-                  onChange={(event) => setScopeDataset(event.target.value)}
+                  onChange={(event) => {
+                    setScopeDataset(event.target.value);
+                    setScopeSyncScope("");
+                  }}
                 />
                 <datalist id="pipeline-provider-catalog">
                   {providerOptions.map((option) => (
@@ -658,7 +693,14 @@ export function RequestCreateDialog({
                   ))}
                 </datalist>
                 <FormField
-                  hint="비우면 기본 sync scope 전체."
+                  disabled={
+                    selectedScopeCapability !== null && !explicitScopeSupported
+                  }
+                  hint={
+                    selectedScopeCapability?.effect === "dataset_wide"
+                      ? "dataset-wide 갱신은 비워 두며 서버가 정규화합니다."
+                      : "비우면 서버가 기본 sync scope를 선택합니다."
+                  }
                   label="sync_scope (선택)"
                   value={scopeSyncScope}
                   onChange={(event) => setScopeSyncScope(event.target.value)}
