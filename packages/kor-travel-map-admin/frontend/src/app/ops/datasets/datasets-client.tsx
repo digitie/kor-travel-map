@@ -377,10 +377,12 @@ const POLICY_REPLAY_FIELDS = [
   ...POLICY_INT_FIELDS,
   "enabled",
 ] as const satisfies readonly (keyof PolicyDraft)[];
+const BIGINT_MAX_REVISION = "9223372036854775807";
 
 type PolicyRevisionConflict = {
   currentPolicy: ProviderRefreshPolicyRecord | null;
   currentRevision: string | null;
+  terminal: boolean;
 };
 
 function policyDraftsEqual(left: PolicyDraft, right: PolicyDraft): boolean {
@@ -414,16 +416,18 @@ function reconcilePolicyDraft(
 }
 
 function policyRevisionConflict(error: Error): PolicyRevisionConflict | null {
+  const problem = error instanceof ApiClientError ? error.problem : null;
   if (
-    !(error instanceof ApiClientError) ||
+    problem === null ||
     ![
       "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT",
       "PROVIDER_REFRESH_POLICY_SOURCE_KIND_IMMUTABLE",
-    ].includes(error.problem?.code ?? "")
+      "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+    ].includes(problem.code)
   ) {
     return null;
   }
-  const details = error.problem.details;
+  const details = problem.details;
   if (typeof details !== "object" || details === null) {
     return null;
   }
@@ -434,7 +438,11 @@ function policyRevisionConflict(error: Error): PolicyRevisionConflict | null {
     typeof raw.current_record === "object" && raw.current_record !== null
       ? (raw.current_record as ProviderRefreshPolicyRecord)
       : null;
-  return { currentPolicy, currentRevision };
+  return {
+    currentPolicy,
+    currentRevision,
+    terminal: problem.code === "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+  };
 }
 
 function PolicyEditor({
@@ -466,9 +474,18 @@ function PolicyEditor({
     {},
   );
   const draftDirty = useRef(false);
-  const observedPropRevision = useRef<string | null>(policy?.revision ?? null);
+  const incomingPropRevision = policy?.revision ?? null;
+  const [acknowledgedPropRevision, setAcknowledgedPropRevision] = useState<
+    string | null
+  >(incomingPropRevision);
   const upsertPolicy = useUpsertOpsDatasetRefreshPolicyMutation();
-  const saveBlocked = hasDeferredServerPolicy || revisionConflict !== null;
+  const resetPolicyMutation = upsertPolicy.reset;
+  const incomingPolicyPending =
+    incomingPropRevision !== acknowledgedPropRevision;
+  const saveBlocked =
+    incomingPolicyPending ||
+    hasDeferredServerPolicy ||
+    revisionConflict !== null;
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
     draftDirty.current = true;
@@ -498,26 +515,34 @@ function PolicyEditor({
   // 단조 revision이 실제로 바뀌었을 때만 동기화하고, 작성 중이면 명시적 선택 전까지
   // 보류해 운영자가 입력한 값을 조용히 덮어쓰지 않는다.
   useEffect(() => {
-    const incomingRevision = policy?.revision ?? null;
-    if (incomingRevision === observedPropRevision.current) {
+    if (incomingPropRevision === acknowledgedPropRevision) {
       return;
     }
-    observedPropRevision.current = incomingRevision;
+    setAcknowledgedPropRevision(incomingPropRevision);
     // 409 본문의 current record를 이미 반영한 뒤 query refetch가 같은 revision을
     // 전달하면 새 서버 변경으로 오인하지 않는다.
-    if (incomingRevision === latestObservedRevision) {
+    if (incomingPropRevision === latestObservedRevision) {
       return;
     }
     setLatestObservedPolicy(policy ?? null);
-    setLatestObservedRevision(incomingRevision);
+    setLatestObservedRevision(incomingPropRevision);
     if (draftDirty.current) {
       setHasDeferredServerPolicy(true);
       return;
     }
     applyServerPolicy(policy);
-  }, [applyServerPolicy, latestObservedRevision, policy]);
+  }, [
+    acknowledgedPropRevision,
+    applyServerPolicy,
+    incomingPropRevision,
+    latestObservedRevision,
+    policy,
+  ]);
 
   const rebaseLocalDraftOnLatest = useCallback(() => {
+    if (revisionConflict?.terminal) {
+      return;
+    }
     const reconciled = reconcilePolicyDraft(
       draftBasePolicy,
       draft,
@@ -530,13 +555,26 @@ function PolicyEditor({
     draftDirty.current = !policyDraftsEqual(reconciled.draft, latestDraft);
     setHasDeferredServerPolicy(false);
     setRevisionConflict(null);
+    resetPolicyMutation();
     setError(null);
     setReconcileMessage(
       reconciled.conflicts.length > 0
         ? `서버와 겹친 ${reconciled.conflicts.length}개 필드는 내 입력을 유지했습니다. 최신 revision 기준으로 다시 저장하세요.`
         : "서버 변경과 겹치지 않은 내 입력을 최신 revision 위에 다시 적용했습니다.",
     );
-  }, [draft, draftBasePolicy, latestObservedPolicy, latestObservedRevision]);
+  }, [
+    draft,
+    draftBasePolicy,
+    latestObservedPolicy,
+    latestObservedRevision,
+    revisionConflict?.terminal,
+    resetPolicyMutation,
+  ]);
+
+  const reloadLatestPolicy = useCallback(() => {
+    resetPolicyMutation();
+    applyServerPolicy(latestObservedPolicy);
+  }, [applyServerPolicy, latestObservedPolicy, resetPolicyMutation]);
 
   const submit = () => {
     if (saveBlocked) {
@@ -795,7 +833,16 @@ function PolicyEditor({
           </p>
         </div>
       ) : null}
-      {revisionConflict ? (
+      {revisionConflict?.terminal ? (
+        <Alert className="mt-3" variant="destructive">
+          <AlertTitle>정책 revision 소진</AlertTitle>
+          <AlertDescription>
+            서버 revision이 {revisionConflict.currentRevision ?? BIGINT_MAX_REVISION}로
+            BIGINT 최댓값에 도달했습니다. 이 정책은 더 저장할 수 없으며 운영 DB에서
+            정책 행을 재생성하기 전에는 재시도하지 않습니다.
+          </AlertDescription>
+        </Alert>
+      ) : revisionConflict ? (
         <Alert className="mt-3" variant="destructive">
           <AlertTitle>정책 저장 충돌</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center gap-2">
@@ -815,7 +862,7 @@ function PolicyEditor({
               size="sm"
               type="button"
               variant="outline"
-              onClick={() => applyServerPolicy(latestObservedPolicy)}
+              onClick={reloadLatestPolicy}
             >
               서버 값 다시 불러오기
             </Button>
@@ -841,7 +888,7 @@ function PolicyEditor({
               size="sm"
               type="button"
               variant="outline"
-              onClick={() => applyServerPolicy(latestObservedPolicy)}
+              onClick={reloadLatestPolicy}
             >
               서버 값 다시 불러오기
             </Button>

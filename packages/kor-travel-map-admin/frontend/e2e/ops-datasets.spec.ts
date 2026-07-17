@@ -388,6 +388,9 @@ async function mockOpsDatasets(
       OpsDatasetDetailData | ((detailCount: number) => OpsDatasetDetailData)
     >;
     previewStatus?: number;
+    policyConflictCode?:
+      | "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
+      | "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED";
     policyConflictOnce?: ProviderRefreshPolicyRecord;
     scheduleSourceStatus?: "ok" | "unavailable" | "error";
     scheduleSourceErrors?: string[];
@@ -427,14 +430,21 @@ async function mockOpsDatasets(
       const dataset = url.searchParams.get("dataset_key") ?? "";
       if (options.policyConflictOnce && policyPuts.length === 1) {
         const current = options.policyConflictOnce;
+        const code =
+          options.policyConflictCode ??
+          "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT";
+        const message =
+          code === "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED"
+            ? "provider refresh policy revision exhausted"
+            : "provider refresh policy revision conflict";
         await fulfillJson(
           route,
           {
-            type: "https://kor-travel-map/errors/provider-refresh-policy-revision-conflict",
-            title: "provider refresh policy revision conflict",
+            type: `https://kor-travel-map/errors/${code.toLowerCase().replaceAll("_", "-")}`,
+            title: message,
             status: 409,
-            detail: "provider refresh policy revision conflict",
-            code: "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT",
+            detail: message,
+            code,
             request_id: "e2e-policy-conflict",
             errors: [],
             details: {
@@ -1156,7 +1166,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("갱신 정책", { exact: true }).first()).toBeVisible();
 
     await page.getByLabel("타깃 갱신 정책", { exact: true }).selectOption("allow_targeted");
-    await page.getByRole("button", { name: "저장" }).click();
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await saveButton.click();
 
     await expect.poll(() => mocks.policyPuts.length).toBe(1);
     expect(mocks.policyPuts[0].path).toBe(
@@ -1183,6 +1194,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       (mocks.policyPuts[0].body as Record<string, unknown>).rate_limit_source,
     ).toBeUndefined();
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
+    await expect(saveButton).toBeEnabled();
   });
 
   test("정책 편집 — 양의 정수 검증 실패는 PUT을 막는다", async ({ page }) => {
@@ -1230,8 +1242,45 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(targetedPolicy).toHaveValue("follow_system");
     await targetedPolicy.selectOption("allow_targeted");
 
+    // 새 prop revision render 직후 passive effect 전에 disabled DOM 변화를
+    // 관측해 React click handler를 강제 호출한다. submit의 derived revision
+    // guard가 없으면 stale revision PUT이 여기서 발생한다.
+    await page.evaluate(() => {
+      const save = [...document.querySelectorAll("button")].find(
+        (button) => button.textContent?.trim() === "저장",
+      );
+      if (!(save instanceof HTMLButtonElement)) {
+        throw new Error("policy save button missing");
+      }
+      (window as typeof window & { __policyImmediateClick?: boolean })
+        .__policyImmediateClick = false;
+      const observer = new MutationObserver(() => {
+        if (!save.disabled) return;
+        observer.disconnect();
+        save.disabled = false;
+        save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        save.disabled = true;
+        (window as typeof window & { __policyImmediateClick?: boolean })
+          .__policyImmediateClick = true;
+      });
+      observer.observe(save, {
+        attributes: true,
+        attributeFilter: ["disabled"],
+      });
+    });
+
     await page.getByRole("button", { name: "새로고침" }).click();
     await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as typeof window & { __policyImmediateClick?: boolean })
+              .__policyImmediateClick ?? false,
+        ),
+      )
+      .toBe(true);
+    await expect.poll(() => mocks.policyPuts.length).toBe(0);
     await expect(page.getByText("서버 정책이 변경됨")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
     const saveButton = page.getByRole("button", { name: "저장" });
@@ -1300,6 +1349,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       .getByRole("button", { name: "서버 기준으로 초안 조정" })
       .click();
     await expect(page.getByText("초안 조정 완료")).toBeVisible();
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
     await expect(targetedPolicy).toHaveValue("allow_targeted");
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
@@ -1309,6 +1359,52 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     expect(mocks.policyPuts[1].body.targeted_policy).toBe("allow_targeted");
     expect(mocks.policyPuts[1].body.enabled).toBe(false);
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
+  });
+
+  test("정책 편집 — BIGINT max revision 소진은 terminal 상태로 재시도를 막는다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const maxPolicy = makeRefreshPolicy({
+      targeted_policy: "follow_system",
+      revision: "9223372036854775807",
+    });
+    const mocks = await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: maxPolicy,
+        }),
+      },
+      policyConflictCode: "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+      policyConflictOnce: maxPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page
+      .getByLabel("타깃 갱신 정책", { exact: true })
+      .selectOption("allow_targeted");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await saveButton.click();
+
+    await expect(page.getByText("정책 revision 소진")).toBeVisible();
+    await expect(page.getByText(/9223372036854775807/)).toBeVisible();
+    await expect(saveButton).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "서버 기준으로 초안 조정" }),
+    ).toHaveCount(0);
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
+    await saveButton.evaluate((button) => {
+      const save = button as HTMLButtonElement;
+      save.disabled = false;
+      save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      save.disabled = true;
+    });
+    await expect.poll(() => mocks.policyPuts.length).toBe(1);
+    expect(mocks.policyPuts[0].body.expected_revision).toBe(
+      "9223372036854775807",
+    );
   });
 
   test("정책 편집 — concurrent create loser는 서버 source_kind를 강제한다", async ({
@@ -1348,6 +1444,42 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => mocks.policyPuts.length).toBe(2);
     expect(mocks.policyPuts[1].body.expected_revision).toBe("1");
     expect(mocks.policyPuts[1].body.source_kind).toBe("manual");
+  });
+
+  test("정책 편집 — CAS 409 뒤 서버값 reload는 stale mutation error를 지운다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const currentPolicy = makeRefreshPolicy({
+      targeted_policy: "disabled",
+      revision: "2",
+    });
+    await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: makeRefreshPolicy({
+            targeted_policy: "follow_system",
+            revision: "1",
+          }),
+        }),
+      },
+      policyConflictOnce: currentPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
+    await targetedPolicy.selectOption("allow_targeted");
+    await page.getByRole("button", { name: "저장" }).click();
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+
+    await page.getByRole("button", { name: "서버 값 다시 불러오기" }).click();
+
+    await expect(page.getByText("정책 저장 충돌")).toHaveCount(0);
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
+    await expect(targetedPolicy).toHaveValue("disabled");
+    await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
   });
 
   test("정책 편집 — orphan 행은 저장 UI를 열지 않는다", async ({
