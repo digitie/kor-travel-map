@@ -67,6 +67,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api import dagster_graphql
 from kortravelmap.api.auth import require_admin_destructive_enabled
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
@@ -491,10 +492,14 @@ def _settings_from_request(request: Request) -> ApiSettings:
     return ApiSettings()
 
 
-def _graphql_url(settings: ApiSettings) -> str:
-    if settings.dagster_graphql_url:
-        return settings.dagster_graphql_url
-    return f"{settings.dagster_url.rstrip('/')}/graphql"
+def _validated_graphql_url(settings: ApiSettings) -> str:
+    try:
+        return dagster_graphql.dagster_urls(settings).graphql_url
+    except dagster_graphql.DagsterUrlConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Dagster GraphQL URL 설정이 올바르지 않습니다.",
+        ) from exc
 
 
 def _dict(value: object) -> dict[str, Any]:
@@ -718,7 +723,7 @@ async def launch_offline_upload_load(
 ) -> _DagsterLaunch:
     """Dagster ``offline_upload_load`` run을 시작한다."""
     settings = _settings_from_request(request)
-    graphql_url = _graphql_url(settings)
+    graphql_url = _validated_graphql_url(settings)
     try:
         payload = await _post_graphql(
             graphql_url,
@@ -729,7 +734,7 @@ async def launch_offline_upload_load(
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Dagster GraphQL launch 호출 실패: {exc}",
+            detail="Dagster GraphQL launch 호출에 실패했습니다.",
         ) from exc
 
     errors = payload.get("errors")
@@ -1248,6 +1253,7 @@ async def load_offline_upload_request(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OfflineUploadLaunchResponse:
     started_at = perf_counter()
+    _validated_graphql_url(_settings_from_request(request))
     try:
         async with session.begin():
             row = await get_offline_upload(session, upload_id)

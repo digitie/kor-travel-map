@@ -617,6 +617,52 @@ def test_load_offline_upload_launches_dagster(
 
 
 @pytest.mark.unit
+def test_load_offline_upload_rejects_invalid_dagster_url_before_db_or_http(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    app = create_app(
+        ApiSettings(
+            dagster_url="http://dagster.example:12302",
+            dagster_graphql_url=(
+                "http://user:super-secret@dagster.example:12302/graphql?token=secret"
+            ),
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+    calls: list[str] = []
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    async def _unexpected_get(_session: Any, upload_id: str) -> OfflineUpload:
+        calls.append("get")
+        raise AssertionError("invalid Dagster URL must fail before DB lookup")
+
+    async def _unexpected_post(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        calls.append("post")
+        raise AssertionError("invalid Dagster URL must fail before HTTP")
+
+    app.dependency_overrides[get_session] = _fake_session
+    monkeypatch.setattr(router_mod, "get_offline_upload", _unexpected_get)
+    monkeypatch.setattr(router_mod, "_post_graphql", _unexpected_post)
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Dagster GraphQL URL 설정이 올바르지 않습니다."
+    assert calls == []
+    assert session.begin_count == 0
+    assert "super-secret" not in response.text
+    assert "token=secret" not in response.text
+
+
+@pytest.mark.unit
 def test_dagster_launch_variables_use_settings() -> None:
     from kortravelmap.api.routers import offline_uploads as router_mod
 
