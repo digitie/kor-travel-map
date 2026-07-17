@@ -3,7 +3,7 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useOpsLiveInvalidation } from "@/api/live";
 import {
@@ -242,38 +242,25 @@ function OverviewStrip({
   );
 }
 
-export function PipelineClient({
-  initialExecution,
-  initialSchedule,
-  initialTab,
-}: {
-  initialExecution?: string;
-  initialFilters: InitialFilters;
-  initialSchedule?: string;
-  initialTab?: string;
-}) {
+export function PipelineClient({ initialQuery }: { initialQuery: string }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const urlStateRef = useRef(searchParams.toString());
+  const urlStateRef = useRef(initialQuery);
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
-  const parsedExecution = useMemo(
-    () => parseExecutionParam(initialExecution),
-    [initialExecution],
+  const selected = useMemo(
+    () => parseExecutionParam(searchParams.get("execution") ?? undefined),
+    [searchParams],
   );
-  const [selected, setSelected] = useState<{
-    kind: ExecutionKind;
-    id: string;
-  } | null>(parsedExecution);
-  const [tab, setTab] = useState<string>(
-    initialTab === "events" || initialTab === "schedules"
-      ? initialTab
-      : initialSchedule
+  const urlTab = searchParams.get("tab");
+  const tab =
+    urlTab === "events" || urlTab === "schedules"
+      ? urlTab
+      : urlSchedule
         ? "schedules"
-        : "executions",
-  );
+        : "executions";
 
   const live = useOpsLiveInvalidation({
     topics: ["import_jobs", "feature_update_requests", "dagster_runs"],
@@ -318,24 +305,6 @@ export function PipelineClient({
     urlStateRef.current = searchParams.toString();
   }, [searchParams]);
 
-  useEffect(() => {
-    const syncHistoryState = () => {
-      const params = new URLSearchParams(window.location.search);
-      const nextTab = params.get("tab");
-      urlStateRef.current = params.toString();
-      setSelected(parseExecutionParam(params.get("execution") ?? undefined));
-      setTab(
-        nextTab === "events" || nextTab === "schedules"
-          ? nextTab
-          : params.has("schedule")
-            ? "schedules"
-            : "executions",
-      );
-    };
-    window.addEventListener("popstate", syncHistoryState);
-    return () => window.removeEventListener("popstate", syncHistoryState);
-  }, []);
-
   const selectExecution = (
     kind: ExecutionKind,
     id: string,
@@ -347,8 +316,6 @@ export function PipelineClient({
         queryKey: ["pipeline", "execution", kind, id],
       });
     }
-    setSelected({ kind, id });
-    setTab("executions");
     updateUrl({ execution: `${kind}:${id}`, tab: "executions" });
   };
 
@@ -367,11 +334,6 @@ export function PipelineClient({
   );
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
-  const timelineKey = JSON.stringify([
-    timelineFilters,
-    timelineLoadBatchId,
-    timelineParentJobId,
-  ]);
 
   useEffect(() => {
     if (selected || !focusAfterCloseRef.current) {
@@ -433,7 +395,6 @@ export function PipelineClient({
         <Tabs
           value={tab}
           onValueChange={(value) => {
-            setTab(value);
             updateUrl({ tab: value });
           }}
         >
@@ -452,7 +413,6 @@ export function PipelineClient({
             >
               <div className="min-w-0 space-y-4">
                 <ExecutionTimeline
-                  key={timelineKey}
                   initialFilters={timelineFilters}
                   initialLoadBatchId={timelineLoadBatchId}
                   initialParentJobId={timelineParentJobId}
@@ -471,7 +431,6 @@ export function PipelineClient({
                     queueOperational={queueOperational}
                     onClose={() => {
                       focusAfterCloseRef.current = true;
-                      setSelected(null);
                       updateUrl({ execution: null });
                     }}
                     onSelectExecution={selectExecution}
@@ -487,7 +446,6 @@ export function PipelineClient({
             <SchedulePanel
               highlightSchedule={urlSchedule ?? undefined}
               onHighlightSchedule={(scheduleName) => {
-                setTab("schedules");
                 updateUrl({ schedule: scheduleName, tab: "schedules" });
               }}
             />

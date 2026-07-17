@@ -1492,6 +1492,20 @@ test.describe("/ops/pipeline", () => {
       .toBe("running|python-kma-api|kma_short_forecast|target_grids");
   });
 
+  test("텍스트 필터는 여러 글자를 입력해도 focus와 URL 상태를 유지한다", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+    const provider = page.getByLabel("provider 필터");
+
+    await provider.pressSequentially("python-kma-api");
+
+    await expect(provider).toBeFocused();
+    await expect(provider).toHaveValue("python-kma-api");
+    await expect(page).toHaveURL(/provider=python-kma-api/);
+  });
+
   test("필터·탭 URL을 초기 복원하고 back/forward로 조사 상태를 재현", async ({
     page,
   }) => {
@@ -1902,6 +1916,37 @@ test.describe("/ops/pipeline", () => {
     ).toBeFocused();
     await page.goBack();
     await expect(page.getByTestId("pipeline-execution-detail")).toBeVisible();
+  });
+
+  test("programmatic history 변경도 detail과 tab의 단일 URL 상태를 반영", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+
+    await page.evaluate((requestId) => {
+      window.history.pushState(
+        null,
+        "",
+        `/ops/pipeline?execution=update_request%3A${requestId}&tab=executions`,
+      );
+    }, REQUEST_ID);
+    await expect(page.getByTestId("pipeline-execution-detail")).toBeVisible();
+
+    await page.evaluate((scheduleName) => {
+      window.history.pushState(
+        null,
+        "",
+        `/ops/pipeline?schedule=${encodeURIComponent(scheduleName)}&tab=schedules`,
+      );
+    }, SCHEDULE_NAME);
+    await expect(page.getByRole("tab", { name: "스케줄" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(
+      page.getByTestId(`pipeline-schedule-row-${SCHEDULE_NAME}`),
+    ).toHaveClass(/ring-2/);
   });
 
   test("상세 원 행이 필터로 사라지면 닫기 focus를 첫 표시 행으로 복귀", async ({

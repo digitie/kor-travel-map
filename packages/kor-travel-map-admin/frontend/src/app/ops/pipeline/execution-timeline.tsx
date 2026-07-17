@@ -116,29 +116,21 @@ export function ExecutionTimeline({
   ) => void;
   onUrlChange: (updates: TimelineUrlUpdates, mode?: "push" | "replace") => void;
 }) {
-  const [kind, setKind] = useState<ExecutionKind | "all">(
-    initialFilters.kind ?? "all",
-  );
-  const [status, setStatus] = useState<ExecutionStatus | "all">(
-    initialFilters.status ?? "all",
-  );
-  const [provider, setProvider] = useState(initialFilters.provider ?? "");
-  const [datasetKey, setDatasetKey] = useState(initialFilters.datasetKey ?? "");
-  const [syncScope, setSyncScope] = useState(initialFilters.syncScope ?? "");
-  const [createdFrom, setCreatedFrom] = useState(() =>
-    datetimeLocalValue(initialFilters.createdFrom),
-  );
-  const [createdTo, setCreatedTo] = useState(() =>
-    datetimeLocalValue(initialFilters.createdTo),
-  );
+  const kind = initialFilters.kind ?? "all";
+  const status = initialFilters.status ?? "all";
+  const provider = initialFilters.provider ?? "";
+  const datasetKey = initialFilters.datasetKey ?? "";
+  const syncScope = initialFilters.syncScope ?? "";
+  const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
+  const createdTo = datetimeLocalValue(initialFilters.createdTo);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [baselineTop, setBaselineTop] = useState<{
     createdAt: string;
     kind: ExecutionKind;
     id: string;
   } | null>(null);
-  const [loadBatchId, setLoadBatchId] = useState(initialLoadBatchId ?? "");
-  const [parentJobId, setParentJobId] = useState(initialParentJobId ?? "");
+  const loadBatchId = initialLoadBatchId ?? "";
+  const parentJobId = initialParentJobId ?? "";
 
   const cursor = cursorStack.at(-1) ?? null;
   const filters = useMemo(
@@ -399,7 +391,6 @@ export function ExecutionTimeline({
               value={kind}
               onChange={(event) => {
                 const value = event.target.value as ExecutionKind | "all";
-                setKind(value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange({ kind: value === "all" ? null : value });
@@ -418,7 +409,6 @@ export function ExecutionTimeline({
               value={status}
               onChange={(event) => {
                 const value = event.target.value as ExecutionStatus | "all";
-                setStatus(value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange({ status: value === "all" ? null : value });
@@ -437,7 +427,6 @@ export function ExecutionTimeline({
               placeholder="예: python-kma-api"
               value={provider}
               onChange={(event) => {
-                setProvider(event.target.value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange(
@@ -453,7 +442,6 @@ export function ExecutionTimeline({
               placeholder="예: kma_short_forecast"
               value={datasetKey}
               onChange={(event) => {
-                setDatasetKey(event.target.value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange(
@@ -469,7 +457,6 @@ export function ExecutionTimeline({
               placeholder="예: target_grids"
               value={syncScope}
               onChange={(event) => {
-                setSyncScope(event.target.value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange(
@@ -485,7 +472,6 @@ export function ExecutionTimeline({
               type="datetime-local"
               value={createdFrom}
               onChange={(event) => {
-                setCreatedFrom(event.target.value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange(
@@ -501,7 +487,6 @@ export function ExecutionTimeline({
               type="datetime-local"
               value={createdTo}
               onChange={(event) => {
-                setCreatedTo(event.target.value);
                 setCursorStack([]);
                 setBaselineTop(null);
                 onUrlChange(
@@ -523,7 +508,6 @@ export function ExecutionTimeline({
                   className="ml-1"
                   type="button"
                   onClick={() => {
-                    setLoadBatchId("");
                     onUrlChange({ load_batch_id: null });
                   }}
                 >
@@ -539,7 +523,6 @@ export function ExecutionTimeline({
                   className="ml-1"
                   type="button"
                   onClick={() => {
-                    setParentJobId("");
                     onUrlChange({ parent_job_id: null });
                   }}
                 >

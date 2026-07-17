@@ -23,22 +23,14 @@ export default async function OpsPipelinePage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
+  const initialQuery = new URLSearchParams();
+  for (const [key, rawValue] of Object.entries(params)) {
+    const value = firstParam(rawValue);
+    if (value !== undefined) {
+      initialQuery.set(key, value);
+    }
+  }
   return (
-    <PipelineClient
-      initialExecution={firstParam(params.execution)}
-      initialFilters={{
-        kind: firstParam(params.kind),
-        status: firstParam(params.status),
-        provider: firstParam(params.provider),
-        datasetKey: firstParam(params.dataset_key),
-        syncScope: firstParam(params.sync_scope),
-        createdFrom: firstParam(params.created_from),
-        createdTo: firstParam(params.created_to),
-        loadBatchId: firstParam(params.load_batch_id),
-        parentJobId: firstParam(params.parent_job_id),
-      }}
-      initialSchedule={firstParam(params.schedule)}
-      initialTab={firstParam(params.tab)}
-    />
+    <PipelineClient initialQuery={initialQuery.toString()} />
   );
 }
