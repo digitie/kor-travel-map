@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex, agent B) — C7B-UI 적대 리뷰·전체 frontend gate 완료
+
+- `/ops/datasets`가 exact scope의 active/terminal 실행과 nested run/event history,
+  canonical continuation URL을 직접 소비하게 했다. invalid deep link는 다른 행으로 폴백하지
+  않고, 정책 draft는 같은 dataset의 scope 전환과 지연 응답 중에도 보존한다.
+- `/ops/pipeline`의 provider/dataset/scope를 URL controlled state로 통일했다. 불완전 tuple과
+  상위 filter 변경은 종속 filter와 cursor를 함께 제거하고 browser Back/Forward를 그대로
+  추종한다. dataset-wide request는 명시적 scope 입력을 차단해 서버 정규화와 일치시켰다.
+- 독립 적대 리뷰 2인이 P0~P3 잔여 0건으로 승인했다. Vitest 26 files·210 tests,
+  앱·E2E type-check, lint 오류 0건, `git diff --check`, package-lock 무변경과 31-route
+  production build를 확인했다. 실제 Playwright와 #712/#719 종결은 최종 C7 n150 gate에 남겼다.
+
 ## 2026-07-18 (codex, agent A) — C7B-API 적대 리뷰·전체 backend gate 완료
 
 - datasets canonical root projection을 scope별 활성/종료 두 그룹으로 나눠 더 최신 terminal이

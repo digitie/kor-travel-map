@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex, agent B) — T-ADM-C7B-UI 로컬 종결·PR 준비
+
+- datasets UI는 exact tuple을 기준으로 활성 실행과 최근 종료 실행, run/event continuation과
+  canonical history URL을 소비한다. 잘못된 deep link와 mutation 불가능 scope는 fail-closed하며
+  scope 전환 중 로컬 정책 draft와 CAS 저장 기준을 보존한다.
+- pipeline filter는 provider→dataset→scope prerequisite를 강제한다. 상위 축 변경과 불완전 tuple,
+  URL Back/Forward에서 stale scope와 cursor를 원자적으로 제거하고 dataset-wide 요청에는
+  명시적 scope를 보내지 않는다.
+- 독립 적대 리뷰 2인이 P0~P3 잔여 0건으로 승인했다. Vitest 26 files·210 tests, 앱·E2E
+  type-check, lint 오류 0건, `git diff --check`와 31-route production build가 green이다.
+  Playwright는 최종 n150 live gate에 남겼다.
+- **다음 한 작업**: 최신 main rebase와 보안 감사 뒤 C7B-UI PR을 CI green·승인으로 병합한다.
+  직후 `T-ADM-C7` n150 prod 파괴적 live E2E를 수행하고 #684/#686/#712/#718/#719/#720을
+  증거와 함께 종결한다.
+
 ## 2026-07-18 (codex, agent A) — T-ADM-C7B-API 로컬 종결·PR 준비
 
 - Alembic 0057로 `ops.import_job_events.sync_scope`를 추가하고 visible legacy event pair를

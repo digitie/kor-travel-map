@@ -3,6 +3,24 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin exact-scope 조작·이력 UI 소비 (2026-07-18, `T-ADM-C7B-UI`)
+
+- [x] **T-ADM-C7B-UI — exact provider/dataset/scope를 조작과 이력의 단일 정본으로 소비.**
+  `/ops/datasets`는 잘못되거나 사라진 dataset/scope deep link를 다른 행으로 폴백하지 않고
+  fail-closed한다. provider-only URL은 실제 선택 tuple로 canonicalize한 뒤에만 갱신·정책
+  mutation을 허용한다.
+- [x] **활성 실행·최근 종료·이력 continuation을 독립 표시.** `active_execution`과 최근 terminal
+  `latest_execution`을 분리하고, exact scope의 `run_history`·`event_history`와 서버가 반환한
+  `canonical_url`을 그대로 사용한다. scope 전환 중 정책 draft를 보존하며 orphan 또는
+  `mutable=false` 행은 draft를 표시하되 저장을 차단한다.
+- [x] **pipeline filter를 URL controlled state로 완결.** provider/dataset tuple이 불완전해지거나
+  상위 축이 바뀌면 stale dataset/scope와 cursor를 같은 전이에서 제거한다. browser
+  Back/Forward도 exact filter state에 반영하며 dataset-wide capability에는 명시적
+  `sync_scope` 입력을 막고 서버 정규화에 맡긴다.
+- [x] **적대 리뷰와 frontend gate 완료.** 독립 리뷰어 2인이 P0/P1/P2/P3 잔여 0건으로 승인했다.
+  Vitest 26 files·210 tests, 앱·E2E type-check, lint 오류 0건과 31-route production build를
+  통과했다. Playwright와 issue #712/#719 종결은 최종 `T-ADM-C7` n150 live E2E에 남긴다.
+
 ## Admin active projection·exact-scope 이력 API (2026-07-18, `T-ADM-C7B-API`)
 
 - [x] **T-ADM-C7B-API — 활성 실행과 마지막 종료 실행을 독립 projection으로 완결.**

@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### exact-scope 조작·이력 UI 소비 (2026-07-18, ADR-064 T-ADM-C7B-UI)
+
+- **CHANGED**: `/ops/pipeline`의 provider/dataset/scope filter를 URL controlled state로
+  통일했다. 상위 축 변경과 불완전 tuple은 종속 filter와 cursor를 함께 제거하며 browser
+  Back/Forward를 그대로 반영한다.
+- **FIXED**: dataset-wide 갱신은 명시적 `sync_scope` 입력과 전송을 차단하고 서버 정규화에
+  맡긴다. provider/dataset pair 변경 시 이전 scope를 재사용하지 않는다.
+- **CHANGED**: exact tuple이 완성되기 전 dataset/scope filter와 조작을 비활성화하고, 서버가
+  반환한 canonical history URL과 active operation link를 그대로 소비한다.
+
 ### exact-scope 실행·이벤트 projection (2026-07-18, ADR-064 T-ADM-C7B-API)
 
 - **ADDED**: migration 0057에서 canonical update event의 owner
