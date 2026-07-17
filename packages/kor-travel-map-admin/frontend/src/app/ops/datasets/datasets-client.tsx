@@ -390,6 +390,92 @@ type PolicyRevisionConflict = {
   terminal: boolean;
 };
 
+type PolicyEditorState = {
+  acknowledgedPropRevision: string | null;
+  dirty: boolean;
+  draft: PolicyDraft;
+  draftBasePolicy: ProviderRefreshPolicyRecord | null;
+  draftBaseRevision: string | null;
+  error: string | null;
+  fieldErrors: Partial<Record<string, string>>;
+  hasDeferredServerPolicy: boolean;
+  latestObservedPolicy: ProviderRefreshPolicyRecord | null;
+  latestObservedRevision: string | null;
+  reconcileMessage: string | null;
+  revisionConflict: PolicyRevisionConflict | null;
+};
+
+function initialPolicyEditorState(
+  policy: ProviderRefreshPolicyRecord | null | undefined,
+): PolicyEditorState {
+  const canonicalPolicy = policy ?? null;
+  const revision = policy?.revision ?? null;
+  return {
+    acknowledgedPropRevision: revision,
+    dirty: false,
+    draft: policyToDraft(policy),
+    draftBasePolicy: canonicalPolicy,
+    draftBaseRevision: revision,
+    error: null,
+    fieldErrors: {},
+    hasDeferredServerPolicy: false,
+    latestObservedPolicy: canonicalPolicy,
+    latestObservedRevision: revision,
+    reconcileMessage: null,
+    revisionConflict: null,
+  };
+}
+
+function applyServerPolicyState(
+  state: PolicyEditorState,
+  policy: ProviderRefreshPolicyRecord | null | undefined,
+): PolicyEditorState {
+  const canonicalPolicy = policy ?? null;
+  const revision = policy?.revision ?? null;
+  return {
+    ...state,
+    dirty: false,
+    draft: policyToDraft(policy),
+    draftBasePolicy: canonicalPolicy,
+    draftBaseRevision: revision,
+    error: null,
+    fieldErrors: {},
+    hasDeferredServerPolicy: false,
+    latestObservedPolicy: canonicalPolicy,
+    latestObservedRevision: revision,
+    reconcileMessage: null,
+    revisionConflict: null,
+  };
+}
+
+function observePolicyProp(
+  state: PolicyEditorState,
+  policy: ProviderRefreshPolicyRecord | null | undefined,
+): PolicyEditorState {
+  const incomingRevision = policy?.revision ?? null;
+  if (incomingRevision === state.acknowledgedPropRevision) {
+    return state;
+  }
+
+  const acknowledgedState = {
+    ...state,
+    acknowledgedPropRevision: incomingRevision,
+  };
+  // mutation 응답이나 409 본문으로 이미 본 revision의 query refetch는 새 변경이 아니다.
+  if (incomingRevision === state.latestObservedRevision) {
+    return acknowledgedState;
+  }
+  if (!state.dirty) {
+    return applyServerPolicyState(acknowledgedState, policy);
+  }
+  return {
+    ...acknowledgedState,
+    hasDeferredServerPolicy: true,
+    latestObservedPolicy: policy ?? null,
+    latestObservedRevision: incomingRevision,
+  };
+}
+
 function policyDraftsEqual(left: PolicyDraft, right: PolicyDraft): boolean {
   return POLICY_DRAFT_FIELDS.every((field) => left[field] === right[field]);
 }
@@ -459,32 +545,32 @@ function PolicyEditor({
   datasetKey: string;
   policy: ProviderRefreshPolicyRecord | null | undefined;
 }) {
-  const [draft, setDraft] = useState<PolicyDraft>(() => policyToDraft(policy));
-  const [draftBasePolicy, setDraftBasePolicy] =
-    useState<ProviderRefreshPolicyRecord | null>(policy ?? null);
-  const [draftBaseRevision, setDraftBaseRevision] = useState<string | null>(
-    policy?.revision ?? null,
+  const [editorState, setEditorState] = useState<PolicyEditorState>(() =>
+    initialPolicyEditorState(policy),
   );
-  const [latestObservedPolicy, setLatestObservedPolicy] =
-    useState<ProviderRefreshPolicyRecord | null>(policy ?? null);
-  const [latestObservedRevision, setLatestObservedRevision] = useState<
-    string | null
-  >(policy?.revision ?? null);
-  const [hasDeferredServerPolicy, setHasDeferredServerPolicy] = useState(false);
-  const [revisionConflict, setRevisionConflict] =
-    useState<PolicyRevisionConflict | null>(null);
-  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<string, string>>>(
-    {},
-  );
-  const draftDirty = useRef(false);
   const incomingPropRevision = policy?.revision ?? null;
-  const [acknowledgedPropRevision, setAcknowledgedPropRevision] = useState<
-    string | null
-  >(incomingPropRevision);
   const upsertPolicy = useUpsertOpsDatasetRefreshPolicyMutation();
   const resetPolicyMutation = upsertPolicy.reset;
+  // React가 이 render 결과를 commit하기 전에 prop revision과 편집 상태를 한 번에
+  // 맞춘다. dirty 초안은 유지하며, effect의 한 frame 늦은 저장 가능 구간을 만들지 않는다.
+  if (
+    incomingPropRevision !== editorState.acknowledgedPropRevision
+  ) {
+    setEditorState(observePolicyProp(editorState, policy));
+  }
+  const {
+    acknowledgedPropRevision,
+    draft,
+    draftBasePolicy,
+    draftBaseRevision,
+    error,
+    fieldErrors,
+    hasDeferredServerPolicy,
+    latestObservedPolicy,
+    latestObservedRevision,
+    reconcileMessage,
+    revisionConflict,
+  } = editorState;
   const saveGuard: PolicySaveGuard = {
     acknowledgedPropRevision,
     hasDeferredServerPolicy,
@@ -494,98 +580,73 @@ function PolicyEditor({
   const saveBlocked = isPolicySaveBlocked(saveGuard);
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
-    draftDirty.current = true;
-    setReconcileMessage(null);
-    setDraft((current) => ({ ...current, [field]: value }));
-    setFieldErrors((current) => ({ ...current, [field]: undefined }));
+    setEditorState((current) => ({
+      ...current,
+      dirty: true,
+      draft: { ...current.draft, [field]: value },
+      fieldErrors: { ...current.fieldErrors, [field]: undefined },
+      reconcileMessage: null,
+    }));
   };
 
   const applyServerPolicy = useCallback(
     (nextPolicy: ProviderRefreshPolicyRecord | null | undefined) => {
-      setDraft(policyToDraft(nextPolicy));
-      setDraftBasePolicy(nextPolicy ?? null);
-      setDraftBaseRevision(nextPolicy?.revision ?? null);
-      setLatestObservedPolicy(nextPolicy ?? null);
-      setLatestObservedRevision(nextPolicy?.revision ?? null);
-      setFieldErrors({});
-      setError(null);
-      draftDirty.current = false;
-      setHasDeferredServerPolicy(false);
-      setRevisionConflict(null);
-      setReconcileMessage(null);
+      setEditorState((current) =>
+        applyServerPolicyState(current, nextPolicy),
+      );
     },
     [],
   );
-
-  // 같은 정책의 background refetch는 작성 중인 draft를 건드리지 않는다. 서버의
-  // 단조 revision이 실제로 바뀌었을 때만 동기화하고, 작성 중이면 명시적 선택 전까지
-  // 보류해 운영자가 입력한 값을 조용히 덮어쓰지 않는다.
-  useEffect(() => {
-    if (incomingPropRevision === acknowledgedPropRevision) {
-      return;
-    }
-    setAcknowledgedPropRevision(incomingPropRevision);
-    // 409 본문의 current record를 이미 반영한 뒤 query refetch가 같은 revision을
-    // 전달하면 새 서버 변경으로 오인하지 않는다.
-    if (incomingPropRevision === latestObservedRevision) {
-      return;
-    }
-    setLatestObservedPolicy(policy ?? null);
-    setLatestObservedRevision(incomingPropRevision);
-    if (draftDirty.current) {
-      setHasDeferredServerPolicy(true);
-      return;
-    }
-    applyServerPolicy(policy);
-  }, [
-    acknowledgedPropRevision,
-    applyServerPolicy,
-    incomingPropRevision,
-    latestObservedRevision,
-    policy,
-  ]);
 
   const rebaseLocalDraftOnLatest = useCallback(() => {
     if (revisionConflict?.terminal) {
       return;
     }
-    const reconciled = reconcilePolicyDraft(
-      draftBasePolicy,
-      draft,
-      latestObservedPolicy,
-    );
-    const latestDraft = policyToDraft(latestObservedPolicy);
-    setDraft(reconciled.draft);
-    setDraftBasePolicy(latestObservedPolicy);
-    setDraftBaseRevision(latestObservedRevision);
-    draftDirty.current = !policyDraftsEqual(reconciled.draft, latestDraft);
-    setHasDeferredServerPolicy(false);
-    setRevisionConflict(null);
     resetPolicyMutation();
-    setError(null);
-    setReconcileMessage(
-      reconciled.conflicts.length > 0
-        ? `서버와 겹친 ${reconciled.conflicts.length}개 필드는 내 입력을 유지했습니다. 최신 revision 기준으로 다시 저장하세요.`
-        : "서버 변경과 겹치지 않은 내 입력을 최신 revision 위에 다시 적용했습니다.",
-    );
+    setEditorState((current) => {
+      if (current.revisionConflict?.terminal) {
+        return current;
+      }
+      const reconciled = reconcilePolicyDraft(
+        current.draftBasePolicy,
+        current.draft,
+        current.latestObservedPolicy,
+      );
+      const latestDraft = policyToDraft(current.latestObservedPolicy);
+      return {
+        ...current,
+        dirty: !policyDraftsEqual(reconciled.draft, latestDraft),
+        draft: reconciled.draft,
+        draftBasePolicy: current.latestObservedPolicy,
+        draftBaseRevision: current.latestObservedRevision,
+        error: null,
+        hasDeferredServerPolicy: false,
+        reconcileMessage:
+          reconciled.conflicts.length > 0
+            ? `서버와 겹친 ${reconciled.conflicts.length}개 필드는 내 입력을 유지했습니다. 최신 revision 기준으로 다시 저장하세요.`
+            : "서버 변경과 겹치지 않은 내 입력을 최신 revision 위에 다시 적용했습니다.",
+        revisionConflict: null,
+      };
+    });
   }, [
-    draft,
-    draftBasePolicy,
-    latestObservedPolicy,
-    latestObservedRevision,
     revisionConflict?.terminal,
     resetPolicyMutation,
   ]);
 
   const reloadLatestPolicy = useCallback(() => {
     resetPolicyMutation();
-    applyServerPolicy(latestObservedPolicy);
-  }, [applyServerPolicy, latestObservedPolicy, resetPolicyMutation]);
+    setEditorState((current) =>
+      applyServerPolicyState(current, current.latestObservedPolicy),
+    );
+  }, [resetPolicyMutation]);
 
   const submitAllowedPolicy = () => {
-    setError(null);
-    setRevisionConflict(null);
-    setReconcileMessage(null);
+    setEditorState((current) => ({
+      ...current,
+      error: null,
+      reconcileMessage: null,
+      revisionConflict: null,
+    }));
     // 빈 필드는 "null 유지" 의미라 검증하지 않는다 — 값이 있을 때만 양의 정수 검증.
     const filledIntFields = POLICY_INT_FIELDS.filter((field) =>
       String(draft[field] ?? "").trim(),
@@ -616,19 +677,24 @@ function PolicyEditor({
         : []),
     ]);
     if (!result.isValid) {
-      setFieldErrors(result.errors);
+      setEditorState((current) => ({
+        ...current,
+        fieldErrors: result.errors,
+      }));
       return;
     }
-    setFieldErrors({});
+    setEditorState((current) => ({ ...current, fieldErrors: {} }));
     let body: ProviderRefreshPolicyUpsertRequest;
     try {
       body = buildPolicyBody(draft, draftBaseRevision);
     } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "policy payload를 만들 수 없습니다.",
-      );
+      setEditorState((current) => ({
+        ...current,
+        error:
+          submitError instanceof Error
+            ? submitError.message
+            : "policy payload를 만들 수 없습니다.",
+      }));
       return;
     }
     upsertPolicy.mutate(
@@ -638,16 +704,22 @@ function PolicyEditor({
         onError: (submitError) => {
           const conflict = policyRevisionConflict(submitError);
           if (conflict === null) return;
-          setLatestObservedPolicy(conflict.currentPolicy);
-          setLatestObservedRevision(conflict.currentRevision);
-          if (conflict.currentPolicy !== null) {
-            setDraft((current) => ({
-              ...current,
-              source_kind: sourceKindValue(conflict.currentPolicy?.source_kind),
-            }));
-          }
-          setHasDeferredServerPolicy(true);
-          setRevisionConflict(conflict);
+          setEditorState((current) => ({
+            ...current,
+            draft:
+              conflict.currentPolicy === null
+                ? current.draft
+                : {
+                    ...current.draft,
+                    source_kind: sourceKindValue(
+                      conflict.currentPolicy.source_kind,
+                    ),
+                  },
+            hasDeferredServerPolicy: true,
+            latestObservedPolicy: conflict.currentPolicy,
+            latestObservedRevision: conflict.currentRevision,
+            revisionConflict: conflict,
+          }));
         },
       },
     );
