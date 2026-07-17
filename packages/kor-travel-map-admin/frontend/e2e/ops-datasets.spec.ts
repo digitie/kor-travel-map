@@ -1013,6 +1013,60 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     ).toHaveCount(0);
   });
 
+  test("이슈 있음은 dataset 또는 provider open issue가 있는 행을 모두 남긴다", async ({
+    page,
+  }) => {
+    const issueRows = [
+      makeGridRow({
+        provider: "provider-only",
+        dataset_key: "provider_issue_dataset",
+        provider_issues: makeIssueSummary({ open_count: 1 }),
+      }),
+      makeGridRow({
+        provider: "dataset-only",
+        dataset_key: "dataset_issue_dataset",
+        dataset_issues: makeIssueSummary({ open_count: 2 }),
+      }),
+      makeGridRow({
+        provider: "both",
+        dataset_key: "both_issue_dataset",
+        dataset_issues: makeIssueSummary({ open_count: 3 }),
+        provider_issues: makeIssueSummary({ open_count: 4 }),
+      }),
+      makeGridRow({
+        provider: "neither",
+        dataset_key: "no_issue_dataset",
+      }),
+    ];
+    await mockOpsDatasets(page, { items: issueRows, details: {} });
+    await mockPipelineRequests(page);
+
+    await page.goto("/ops/datasets");
+    const grid = page.getByRole("table", { name: "데이터셋 그리드" });
+    const providerOnly = grid.getByRole("row", {
+      name: /provider_issue_dataset/,
+    });
+    const datasetOnly = grid.getByRole("row", {
+      name: /dataset_issue_dataset/,
+    });
+    const both = grid.getByRole("row", { name: /both_issue_dataset/ });
+    const neither = grid.getByRole("row", { name: /no_issue_dataset/ });
+
+    await expect(providerOnly.getByTitle("제공자 이슈")).toContainText("P1");
+    await expect(providerOnly.getByTitle("데이터셋 이슈")).toHaveCount(0);
+    await expect(datasetOnly.getByTitle("데이터셋 이슈")).toContainText("2");
+    await expect(both.getByTitle("데이터셋 이슈")).toContainText("3");
+    await expect(both.getByTitle("제공자 이슈")).toContainText("P4");
+    await expect(neither.getByTitle(/이슈/)).toHaveCount(0);
+    await expect(page.getByText("이슈 10", { exact: true })).toBeVisible();
+
+    await page.locator("#datasets-status").selectOption("issues");
+    await expect(providerOnly).toBeVisible();
+    await expect(datasetOnly).toBeVisible();
+    await expect(both).toBeVisible();
+    await expect(neither).toHaveCount(0);
+  });
+
   test("drawer 상태·이력 — scope 배열, cursor JSON, 최근 실행 파이프라인 딥링크, 이벤트", async ({
     page,
   }) => {
