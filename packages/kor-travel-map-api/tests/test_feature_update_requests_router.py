@@ -6,23 +6,28 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestIdempotency,
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.providers.kma import (
+    KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
+    KMA_WEATHER_ALERT_DATASET_KEY,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
 from kortravelmap.api import feature_update_service as service_mod
+from kortravelmap.api import mois_source_precheck
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.pipeline_cancellation_schema import PipelineCancellationDetailRecord
@@ -69,13 +74,62 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _no_active_request(*_args: Any, **_kwargs: Any) -> None:
         return None
 
+    async def _lock_idempotency(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _no_idempotency(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _record_idempotency(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestIdempotency:
+        return FeatureUpdateRequestIdempotency(
+            idempotency_key=kwargs["idempotency_key"],
+            fingerprint_version=1,
+            request_fingerprint=kwargs["request_fingerprint"],
+            request_id=kwargs["request_id"],
+            actor=kwargs["actor"],
+            reused_active_request=kwargs["reused_active_request"],
+            created_at=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+
+    async def _ready_mois_source_sync(
+        _resolved_pairs: frozenset[tuple[str, str]],
+        **_kwargs: Any,
+    ) -> None:
+        return None
+
     app.dependency_overrides[get_session] = _fake_session
     monkeypatch.setattr(
         service_mod,
         "find_active_provider_dataset_request",
         _no_active_request,
     )
-    return TestClient(app)
+    monkeypatch.setattr(
+        service_mod,
+        "lock_feature_update_request_idempotency",
+        _lock_idempotency,
+    )
+    monkeypatch.setattr(
+        service_mod,
+        "get_feature_update_request_idempotency",
+        _no_idempotency,
+    )
+    monkeypatch.setattr(
+        service_mod,
+        "create_feature_update_request_idempotency",
+        _record_idempotency,
+    )
+    monkeypatch.setattr(
+        mois_source_precheck,
+        "ensure_mois_source_sync_for_plan",
+        _ready_mois_source_sync,
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+    )
 
 
 def _request(
@@ -193,9 +247,7 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert record_schema["properties"]["job_id"]["format"] == "uuid"
     assert record_schema["properties"]["scope"]["discriminator"]["propertyName"] == "type"
     assert len(record_schema["properties"]["scope"]["oneOf"]) == 6
-    assert record_schema["properties"]["update_policy"]["$ref"].endswith(
-        "/FeatureUpdatePolicy"
-    )
+    assert record_schema["properties"]["update_policy"]["$ref"].endswith("/FeatureUpdatePolicy")
     preview_schema = spec["components"]["schemas"]["FeatureUpdateRequestPreviewRecord"]
     assert {
         "request_id",
@@ -211,10 +263,28 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         "properties"
     ]["data"]
     assert create_data_schema["$ref"].endswith("/FeatureUpdateRequestCreatedRecord")
-    reused_response = spec["paths"]["/v1/admin/features/update-requests"]["post"][
-        "responses"
-    ]["200"]["content"]["application/json"]["schema"]
+    reused_response = spec["paths"]["/v1/admin/features/update-requests"]["post"]["responses"][
+        "200"
+    ]["content"]["application/json"]["schema"]
     assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
+    create_operation = spec["paths"]["/v1/admin/features/update-requests"]["post"]
+    idempotency_header = next(
+        parameter
+        for parameter in create_operation["parameters"]
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True
+    assert idempotency_header["schema"]["format"] == "uuid"
+    assert {
+        "data",
+        "idempotent_replay",
+        "reused_active_request",
+        "meta",
+    } <= set(spec["components"]["schemas"]["FeatureUpdateRequestCreateResponse"]["required"])
+    create_responses = spec["paths"]["/v1/admin/features/update-requests"]["post"]["responses"]
+    for code in ("409", "502", "503"):
+        schema = create_responses[code]["content"]["application/problem+json"]["schema"]
+        assert schema["$ref"].endswith("/ProblemDetail")
     preview_response = spec["paths"]["/v1/admin/features/update-requests/preview"]["post"][
         "responses"
     ]["200"]["content"]["application/json"]["schema"]
@@ -226,13 +296,9 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert "dry_run" not in request_schema["properties"]
     assert "operator" not in request_schema["properties"]
-    preview_request_schema = spec["components"]["schemas"][
-        "FeatureUpdateRequestPreviewRequest"
-    ]
+    preview_request_schema = spec["components"]["schemas"]["FeatureUpdateRequestPreviewRequest"]
     assert "dry_run" not in preview_request_schema["properties"]
-    sigungu_match = spec["components"]["schemas"]["SigunguByRadiusScope"][
-        "properties"
-    ]["match"]
+    sigungu_match = spec["components"]["schemas"]["SigunguByRadiusScope"]["properties"]["match"]
     assert sigungu_match["const"] == "intersects"
     scope_schema = request_schema["properties"]["scope"]
     assert scope_schema["discriminator"]["propertyName"] == "type"
@@ -252,17 +318,13 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
         assert bbox_properties[field]["minimum"] == -90
         assert bbox_properties[field]["maximum"] == 90
         assert {"ge", "le"}.isdisjoint(bbox_properties[field])
-    point_properties = spec["components"]["schemas"]["FeatureUpdatePoint"][
-        "properties"
-    ]
+    point_properties = spec["components"]["schemas"]["FeatureUpdatePoint"]["properties"]
     assert point_properties["lon"]["minimum"] == -180
     assert point_properties["lon"]["maximum"] == 180
     assert point_properties["lat"]["minimum"] == -90
     assert point_properties["lat"]["maximum"] == 90
     for scope_name in ("CenterRadiusScope", "SigunguByRadiusScope"):
-        radius_schema = spec["components"]["schemas"][scope_name]["properties"][
-            "radius_km"
-        ]
+        radius_schema = spec["components"]["schemas"][scope_name]["properties"]["radius_km"]
         assert radius_schema["exclusiveMinimum"] == 0
         assert radius_schema["maximum"] == 500
         assert {"gt", "le"}.isdisjoint(radius_schema)
@@ -273,15 +335,22 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     )
     assert reason_schema["minLength"] == 1
     assert reason_schema["maxLength"] == 500
-    assert spec["components"]["schemas"]["FeatureIdsScope"]["properties"][
-        "feature_ids"
-    ]["uniqueItems"] is True
-    assert spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"][
-        "target_keys"
-    ]["uniqueItems"] is True
-    assert spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"][
-        "external_system"
-    ]["maxLength"] == 112
+    assert (
+        spec["components"]["schemas"]["FeatureIdsScope"]["properties"]["feature_ids"]["uniqueItems"]
+        is True
+    )
+    assert (
+        spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"]["target_keys"][
+            "uniqueItems"
+        ]
+        is True
+    )
+    assert (
+        spec["components"]["schemas"]["CacheTargetKeysScope"]["properties"]["external_system"][
+            "maxLength"
+        ]
+        == 112
+    )
     update_policy_schema = spec["components"]["schemas"]["FeatureUpdatePolicy"]
     assert update_policy_schema["additionalProperties"] is False
     assert "required" not in update_policy_schema
@@ -289,9 +358,7 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "anyOf" not in update_policy_schema["properties"]["include_inactive"]
     list_parameters = {
         parameter["name"]: parameter["schema"]
-        for parameter in spec["paths"]["/v1/admin/features/update-requests"]["get"][
-            "parameters"
-        ]
+        for parameter in spec["paths"]["/v1/admin/features/update-requests"]["get"]["parameters"]
     }
     assert set(list_parameters["scope_type"]["anyOf"][0]["enum"]) == {
         "feature_ids",
@@ -437,10 +504,220 @@ def test_create_actual_request_uses_transaction(
     assert data["created_at"] is not None
     assert data["generation"] == 1
     assert response.json()["reused_active_request"] is False
-    assert data["status_url"] == (
-        f"/v1/admin/features/update-requests/{_REQUEST_ID}"
-    )
+    assert response.json()["idempotent_replay"] is False
+    assert data["status_url"] == (f"/v1/admin/features/update-requests/{_REQUEST_ID}")
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_create_requires_uuid_idempotency_key(client: TestClient) -> None:
+    del client.headers["Idempotency-Key"]
+
+    response = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [MOIS_PROVIDER_NAME],
+            "dataset_keys": [DATASET_KEY_BULK],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_create_idempotency_replays_canonical_body_and_conflicts_on_mismatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mapping: FeatureUpdateRequestIdempotency | None = None
+    terminal = replace(_request(), status="done", operator="local-dev", reason="same")
+
+    async def _enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return replace(_request(), operator="local-dev", reason="same")
+
+    async def _get_mapping(*_args: Any, **_kwargs: Any) -> Any:
+        return mapping
+
+    async def _insert_mapping(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestIdempotency:
+        nonlocal mapping
+        mapping = FeatureUpdateRequestIdempotency(
+            idempotency_key=kwargs["idempotency_key"],
+            fingerprint_version=1,
+            request_fingerprint=kwargs["request_fingerprint"],
+            request_id=kwargs["request_id"],
+            actor=kwargs["actor"],
+            reused_active_request=kwargs["reused_active_request"],
+            created_at=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+        return mapping
+
+    async def _get_request(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return terminal
+
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(
+        service_mod,
+        "get_feature_update_request_idempotency",
+        _get_mapping,
+    )
+    monkeypatch.setattr(
+        service_mod,
+        "create_feature_update_request_idempotency",
+        _insert_mapping,
+    )
+    monkeypatch.setattr(service_mod, "get_update_request", _get_request)
+
+    base = {
+        "providers": [MOIS_PROVIDER_NAME],
+        "dataset_keys": [DATASET_KEY_BULK],
+        "reason": "same",
+    }
+    first = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            **base,
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["feature-b", "feature-a"],
+            },
+        },
+    )
+    replay = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            **base,
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["feature-a", "feature-b"],
+            },
+        },
+    )
+    mismatch = client.post(
+        "/v1/admin/features/update-requests",
+        json={
+            **base,
+            "reason": "different",
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["feature-a", "feature-b"],
+            },
+        },
+    )
+
+    assert first.status_code == 201
+    assert first.json()["idempotent_replay"] is False
+    assert replay.status_code == 200
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["data"]["status"] == "done"
+    assert mismatch.status_code == 409
+    assert mismatch.json()["code"] == "FEATURE_UPDATE_IDEMPOTENCY_CONFLICT"
+    assert mismatch.json()["details"]["request_id"] == _REQUEST_ID
+
+
+@pytest.mark.unit
+def test_distinct_keys_enqueue_the_same_canonical_set_plan(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enqueued: list[dict[str, Any]] = []
+    ledger_keys: list[str] = []
+
+    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        enqueued.append(kwargs)
+        return replace(
+            _request(request_id=str(uuid4())),
+            scope=kwargs["scope"],
+            providers=tuple(kwargs["providers"]),
+            dataset_keys=tuple(kwargs["dataset_keys"]),
+            operator=kwargs["operator"],
+            reason=kwargs["reason"],
+        )
+
+    async def _insert_mapping(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestIdempotency:
+        ledger_keys.append(kwargs["idempotency_key"])
+        return FeatureUpdateRequestIdempotency(
+            idempotency_key=kwargs["idempotency_key"],
+            fingerprint_version=1,
+            request_fingerprint=kwargs["request_fingerprint"],
+            request_id=kwargs["request_id"],
+            actor=kwargs["actor"],
+            reused_active_request=kwargs["reused_active_request"],
+            created_at=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(service_mod, "enqueue_feature_update_request", _enqueue)
+    monkeypatch.setattr(
+        service_mod,
+        "create_feature_update_request_idempotency",
+        _insert_mapping,
+    )
+    first_key = "10000000-0000-4000-8000-000000000001"
+    second_key = "10000000-0000-4000-8000-000000000002"
+    base = {
+        "providers": [KMA_PROVIDER_NAME],
+        "reason": "canonical plan",
+    }
+    first = client.post(
+        "/v1/admin/features/update-requests",
+        headers={"Idempotency-Key": first_key},
+        json={
+            **base,
+            "dataset_keys": [
+                KMA_WEATHER_ALERT_DATASET_KEY,
+                KMA_MID_FORECAST_DATASET_KEY,
+            ],
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["feature-b", "feature-a"],
+            },
+        },
+    )
+    second = client.post(
+        "/v1/admin/features/update-requests",
+        headers={"Idempotency-Key": second_key},
+        json={
+            **base,
+            "dataset_keys": [
+                KMA_MID_FORECAST_DATASET_KEY,
+                KMA_WEATHER_ALERT_DATASET_KEY,
+            ],
+            "scope": {
+                "type": "feature_ids",
+                "feature_ids": ["feature-a", "feature-b"],
+            },
+        },
+    )
+
+    assert (first.status_code, second.status_code) == (201, 201)
+    assert ledger_keys == [first_key, second_key]
+    assert len(enqueued) == 2
+    assert (
+        enqueued[0]["scope"]
+        == enqueued[1]["scope"]
+        == {
+            "type": "feature_ids",
+            "feature_ids": ["feature-a", "feature-b"],
+        }
+    )
+    assert (
+        enqueued[0]["dataset_keys"]
+        == enqueued[1]["dataset_keys"]
+        == tuple(
+            sorted(
+                (
+                    KMA_MID_FORECAST_DATASET_KEY,
+                    KMA_WEATHER_ALERT_DATASET_KEY,
+                )
+            )
+        )
+    )
 
 
 @pytest.mark.unit
@@ -599,12 +876,8 @@ def test_kma_external_system_scope_requires_active_targets(
 
     assert response.status_code == 201
     assert calls == ["concierge"]
-    assert response.json()["data"]["requested_sync_scope"] == (
-        "external_system:concierge"
-    )
-    assert response.json()["data"]["effective_sync_scope"] == (
-        "external_system:concierge"
-    )
+    assert response.json()["data"]["requested_sync_scope"] == ("external_system:concierge")
+    assert response.json()["data"]["effective_sync_scope"] == ("external_system:concierge")
 
     response = client.post(
         "/v1/admin/features/update-requests",
@@ -1052,9 +1325,7 @@ def test_get_request_404_when_missing(
 
     monkeypatch.setattr(router_mod, "get_update_request", _missing)
 
-    response = client.get(
-        f"/v1/admin/features/update-requests/{_MISSING_REQUEST_ID}"
-    )
+    response = client.get(f"/v1/admin/features/update-requests/{_MISSING_REQUEST_ID}")
 
     assert response.status_code == 404
 

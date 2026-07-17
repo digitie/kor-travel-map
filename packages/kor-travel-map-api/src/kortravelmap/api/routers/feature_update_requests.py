@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPage,
     get_update_request,
@@ -21,9 +21,17 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from kortravelmap.api import feature_update_service, pipeline_cancellation_service
+from kortravelmap.api import (
+    feature_update_service,
+    mois_source_precheck,
+    pipeline_cancellation_service,
+)
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
-from kortravelmap.api.dagster_http import dagster_http_dependencies
+from kortravelmap.api.dagster_http import (
+    dagster_http_dependencies,
+    http_client_from_request,
+    settings_from_request,
+)
 from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
@@ -77,19 +85,40 @@ router = APIRouter(
 
 
 async def _create_request_response(
+    request: Request,
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
     *,
+    idempotency_key: UUID,
     operator: str,
 ) -> FeatureUpdateRequestCreateResponse:
+    api_settings = settings_from_request(request)
+    dagster_client = http_client_from_request(request, api_settings)
+
+    async def _resolved_plan_guard(
+        resolved_pairs: frozenset[tuple[str, str]],
+    ) -> None:
+        await mois_source_precheck.ensure_mois_source_sync_for_plan(
+            resolved_pairs,
+            settings=api_settings,
+            client=dagster_client,
+        )
+
     try:
         return await feature_update_service.create_feature_update_request(
             body,
             session,
+            idempotency_key=idempotency_key,
             operator=operator,
             status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
             settings=KorTravelMapSettings(),
+            resolved_plan_guard=_resolved_plan_guard,
         )
+    except (
+        mois_source_precheck.MoisSourceSyncPrecheckError,
+        mois_source_precheck.MoisSourceSyncRequired,
+    ) as exc:
+        raise mois_source_precheck.to_http_exception(exc) from exc
     except feature_update_service.FeatureUpdateServiceError as exc:
         raise to_http_exception(exc) from exc
 
@@ -116,23 +145,31 @@ async def _preview_request_response(
     responses={
         200: {
             "model": FeatureUpdateRequestCreateResponse,
-            "description": "같은 계획의 활성 canonical request 재사용",
+            "description": (
+                "같은 계획의 활성 canonical request 재사용 또는 같은 "
+                "Idempotency-Key의 terminal 결과 재생"
+            ),
         },
         **FEATURE_UPDATE_CONFLICT_RESPONSES,
+        **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES,
     },
 )
 async def create_feature_update_request(
+    request: Request,
     body: FeatureUpdateRequestCreateRequest,
     response: Response,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
     result = await _create_request_response(
+        request,
         body,
         session,
+        idempotency_key=idempotency_key,
         operator=context.actor,
     )
-    if result.reused_active_request:
+    if result.idempotent_replay or result.reused_active_request:
         response.status_code = status.HTTP_200_OK
     return result
 

@@ -8737,6 +8737,10 @@
             "title": "Can Reset",
             "type": "boolean"
           },
+          "can_run_now": {
+            "title": "Can Run Now",
+            "type": "boolean"
+          },
           "cron_schedule": {
             "anyOf": [
               {
@@ -8781,6 +8785,28 @@
             ],
             "title": "Description"
           },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "effective_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Cron Schedule"
+          },
           "execution_timezone": {
             "anyOf": [
               {
@@ -8817,6 +8843,21 @@
               }
             ],
             "title": "Override Cron Schedule"
+          },
+          "override_effective": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Effective"
+          },
+          "override_saved": {
+            "title": "Override Saved",
+            "type": "boolean"
           },
           "pipeline_name": {
             "anyOf": [
@@ -8904,15 +8945,97 @@
           }
         },
         "required": [
-          "name"
+          "name",
+          "effective_cron_schedule",
+          "override_saved",
+          "override_effective",
+          "can_run_now",
+          "disabled_reason"
         ],
         "title": "DagsterSchedule",
+        "type": "object"
+      },
+      "DagsterScheduleClaimResolution": {
+        "additionalProperties": false,
+        "description": "불명 schedule claim에 대한 운영자 확인 감사 레코드.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "command_id": {
+            "format": "uuid",
+            "title": "Command Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "resolution": {
+            "enum": [
+              "confirmed_applied",
+              "confirmed_not_applied"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "resolution_id": {
+            "title": "Resolution Id",
+            "type": "integer"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "schedule_name": {
+            "title": "Schedule Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution_id",
+          "command_id",
+          "schedule_name",
+          "resolution",
+          "actor",
+          "reason",
+          "resolved_at",
+          "replayed"
+        ],
+        "title": "DagsterScheduleClaimResolution",
         "type": "object"
       },
       "DagsterScheduleCommandData": {
         "additionalProperties": false,
         "description": "Schedule write 명령 결과.",
         "properties": {
+          "audit_command_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Command Id"
+          },
+          "audit_status": {
+            "default": "recorded",
+            "enum": [
+              "recorded",
+              "terminal_record_failed"
+            ],
+            "title": "Audit Status",
+            "type": "string"
+          },
           "checked_at": {
             "format": "date-time",
             "title": "Checked At",
@@ -8956,6 +9079,27 @@
             ],
             "title": "Default Cron Schedule"
           },
+          "effective_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Cron Schedule"
+          },
+          "effective_status": {
+            "enum": [
+              "confirmed",
+              "pending_verification",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Effective Status",
+            "type": "string"
+          },
           "errors": {
             "items": {
               "type": "string"
@@ -8965,6 +9109,15 @@
           },
           "graphql_url": {
             "title": "Graphql Url",
+            "type": "string"
+          },
+          "outcome_certainty": {
+            "default": "confirmed",
+            "enum": [
+              "confirmed",
+              "uncertain"
+            ],
+            "title": "Outcome Certainty",
             "type": "string"
           },
           "override_cron_schedule": {
@@ -8978,10 +9131,14 @@
             ],
             "title": "Override Cron Schedule"
           },
-          "reloaded": {
-            "default": false,
-            "title": "Reloaded",
-            "type": "boolean"
+          "reload_status": {
+            "enum": [
+              "not_requested",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Reload Status",
+            "type": "string"
           },
           "run_id": {
             "anyOf": [
@@ -9004,6 +9161,15 @@
               }
             ],
             "title": "Run Status"
+          },
+          "save_status": {
+            "enum": [
+              "not_applicable",
+              "saved",
+              "cleared"
+            ],
+            "title": "Save Status",
+            "type": "string"
           },
           "schedule_name": {
             "title": "Schedule Name",
@@ -9036,7 +9202,11 @@
           "graphql_url",
           "checked_at",
           "schedule_name",
-          "command"
+          "command",
+          "effective_cron_schedule",
+          "save_status",
+          "reload_status",
+          "effective_status"
         ],
         "title": "DagsterScheduleCommandData",
         "type": "object"
@@ -9045,18 +9215,6 @@
         "additionalProperties": false,
         "description": "Schedule start/stop/reset/run-now 명령 body.",
         "properties": {
-          "operator": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
-          },
           "reason": {
             "anyOf": [
               {
@@ -9100,18 +9258,6 @@
             "minLength": 1,
             "title": "Cron Schedule",
             "type": "string"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
           },
           "reason": {
             "anyOf": [
@@ -11388,10 +11534,14 @@
       },
       "FeatureUpdateRequestCreateResponse": {
         "additionalProperties": false,
-        "description": "새 요청 또는 동일한 활성 canonical 요청 재사용 응답.",
+        "description": "새 요청, 활성 canonical 요청 재사용 또는 terminal 결과 재생 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/FeatureUpdateRequestCreatedRecord"
+          },
+          "idempotent_replay": {
+            "title": "Idempotent Replay",
+            "type": "boolean"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -11403,6 +11553,7 @@
         },
         "required": [
           "data",
+          "idempotent_replay",
           "reused_active_request",
           "meta"
         ],
@@ -18537,6 +18688,91 @@
         "title": "PipelineJobEventRecord",
         "type": "object"
       },
+      "PipelineJobPrecheckData": {
+        "additionalProperties": false,
+        "description": "Dagster 선행 job의 최신 완료 상태와 freshness 판정.",
+        "properties": {
+          "age_hours": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Hours"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "job_name": {
+            "title": "Job Name",
+            "type": "string"
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DagsterRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_age_hours": {
+            "minimum": 0.0,
+            "title": "Max Age Hours",
+            "type": "integer"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_name",
+          "ready",
+          "checked_at",
+          "max_age_hours",
+          "latest_run",
+          "disabled_reason"
+        ],
+        "title": "PipelineJobPrecheckData",
+        "type": "object"
+      },
+      "PipelineJobPrecheckResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/pipeline/prechecks/mois-source-sync`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineJobPrecheckData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PipelineJobPrecheckResponse",
+        "type": "object"
+      },
       "PipelineOverviewData": {
         "additionalProperties": false,
         "description": "``GET /ops/pipeline/overview`` data — 상태 스트립 집계.",
@@ -18830,10 +19066,74 @@
         "title": "PipelineProviderDatasetIdentityRecord",
         "type": "object"
       },
+      "PipelineScheduleClaimResolutionRequest": {
+        "additionalProperties": false,
+        "description": "불명 schedule claim을 운영자 확인 후 해제하는 요청.",
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "confirmed_applied",
+              "confirmed_not_applied"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution",
+          "reason"
+        ],
+        "title": "PipelineScheduleClaimResolutionRequest",
+        "type": "object"
+      },
+      "PipelineScheduleClaimResolutionResponse": {
+        "additionalProperties": false,
+        "description": "불명 schedule claim 해제 감사 결과.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DagsterScheduleClaimResolution"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PipelineScheduleClaimResolutionResponse",
+        "type": "object"
+      },
       "PipelineScheduleCommandData": {
         "additionalProperties": false,
         "description": "schedule write(PATCH/commands) 결과.",
         "properties": {
+          "audit_command_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Command Id"
+          },
+          "audit_status": {
+            "enum": [
+              "recorded",
+              "terminal_record_failed"
+            ],
+            "title": "Audit Status",
+            "type": "string"
+          },
           "checked_at": {
             "format": "date-time",
             "title": "Checked At",
@@ -18877,6 +19177,27 @@
             ],
             "title": "Default Cron Schedule"
           },
+          "effective_cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Cron Schedule"
+          },
+          "effective_status": {
+            "enum": [
+              "confirmed",
+              "pending_verification",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Effective Status",
+            "type": "string"
+          },
           "errors": {
             "items": {
               "type": "string"
@@ -18886,6 +19207,15 @@
           },
           "graphql_url": {
             "title": "Graphql Url",
+            "type": "string"
+          },
+          "outcome_certainty": {
+            "default": "confirmed",
+            "enum": [
+              "confirmed",
+              "uncertain"
+            ],
+            "title": "Outcome Certainty",
             "type": "string"
           },
           "override_cron_schedule": {
@@ -18899,10 +19229,14 @@
             ],
             "title": "Override Cron Schedule"
           },
-          "reloaded": {
-            "default": false,
-            "title": "Reloaded",
-            "type": "boolean"
+          "reload_status": {
+            "enum": [
+              "not_requested",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Reload Status",
+            "type": "string"
           },
           "run_id": {
             "anyOf": [
@@ -18925,6 +19259,15 @@
               }
             ],
             "title": "Run Status"
+          },
+          "save_status": {
+            "enum": [
+              "not_applicable",
+              "saved",
+              "cleared"
+            ],
+            "title": "Save Status",
+            "type": "string"
           },
           "schedule_name": {
             "title": "Schedule Name",
@@ -18957,7 +19300,12 @@
           "graphql_url",
           "checked_at",
           "schedule_name",
-          "command"
+          "command",
+          "effective_cron_schedule",
+          "save_status",
+          "reload_status",
+          "effective_status",
+          "audit_status"
         ],
         "title": "PipelineScheduleCommandData",
         "type": "object"
@@ -18975,18 +19323,6 @@
             ],
             "title": "Command",
             "type": "string"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
           },
           "reason": {
             "anyOf": [
@@ -19041,18 +19377,6 @@
               }
             ],
             "title": "Cron Schedule"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
           },
           "reason": {
             "anyOf": [
@@ -27060,6 +27384,18 @@
       },
       "post": {
         "operationId": "create_feature_update_request_v1_admin_features_update_requests_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27079,7 +27415,7 @@
                 }
               }
             },
-            "description": "같은 계획의 활성 canonical request 재사용"
+            "description": "같은 계획의 활성 canonical request 재사용 또는 같은 Idempotency-Key의 terminal 결과 재생"
           },
           "201": {
             "content": {
@@ -27099,7 +27435,7 @@
                 }
               }
             },
-            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
+            "description": "요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족"
           },
           "422": {
             "content": {
@@ -27110,6 +27446,26 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster precheck 응답 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster precheck transport/설정 오류"
           },
           "default": {
             "content": {
@@ -27437,7 +27793,7 @@
                 }
               }
             },
-            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
+            "description": "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -34685,6 +35041,16 @@
               "title": "Schedule Name",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -34708,6 +35074,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -34716,7 +35092,37 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {
@@ -34749,74 +35155,14 @@
               "title": "Schedule Name",
               "type": "string"
             }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
           },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "운영 스케줄 기본값 복귀",
-        "tags": [
-          "ops",
-          "dagster"
-        ]
-      }
-    },
-    "/v1/ops/dagster/schedules/{schedule_name}/reset": {
-      "post": {
-        "operationId": "reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post",
-        "parameters": [
           {
-            "in": "path",
-            "name": "schedule_name",
+            "in": "header",
+            "name": "Idempotency-Key",
             "required": true,
             "schema": {
-              "title": "Schedule Name",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -34849,6 +35195,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -34857,7 +35213,157 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 기본값 복귀",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/reset": {
+      "post": {
+        "operationId": "reset_dagster_schedule_state_v1_ops_dagster_schedules__schedule_name__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {
@@ -34890,6 +35396,16 @@
               "title": "Schedule Name",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -34920,6 +35436,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -34928,7 +35454,37 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {
@@ -34960,74 +35516,14 @@
               "title": "Schedule Name",
               "type": "string"
             }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
           },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "운영 스케줄 시작",
-        "tags": [
-          "ops",
-          "dagster"
-        ]
-      }
-    },
-    "/v1/ops/dagster/schedules/{schedule_name}/stop": {
-      "post": {
-        "operationId": "stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post",
-        "parameters": [
           {
-            "in": "path",
-            "name": "schedule_name",
+            "in": "header",
+            "name": "Idempotency-Key",
             "required": true,
             "schema": {
-              "title": "Schedule Name",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -35060,6 +35556,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -35068,7 +35574,157 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "운영 스케줄 시작",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/schedules/{schedule_name}/stop": {
+      "post": {
+        "operationId": "stop_dagster_schedule_v1_ops_dagster_schedules__schedule_name__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DagsterScheduleCommandRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterScheduleCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {
@@ -36959,10 +37615,84 @@
         ]
       }
     },
+    "/v1/ops/pipeline/prechecks/mois-source-sync": {
+      "get": {
+        "description": "Dagster runs를 exact jobName=mois_localdata_source_sync로 직접 필터링한다. 최신 run이 SUCCESS이고, 현재 PROMOTED slug 집합의 SHA-256을 포함한 full-coverage tag가 일치하며, endTime이 존재하고 미래가 아닌 TTL 이내 시각일 때만 ready다. 조건 누락·불일치는 fail-closed로 거부하며 provider sync_state의 가상 dataset key를 사용하지 않는다.",
+        "operationId": "get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineJobPrecheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster GraphQL/응답 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결/설정 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "MOIS source sync 선행 job freshness 확인",
+        "tags": [
+          "ops-pipeline"
+        ]
+      }
+    },
     "/v1/ops/pipeline/requests": {
       "post": {
         "description": "6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.",
         "operationId": "create_pipeline_update_request_v1_ops_pipeline_requests_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -36982,7 +37712,7 @@
                 }
               }
             },
-            "description": "같은 계획의 활성 canonical request 재사용"
+            "description": "같은 계획의 활성 canonical request 재사용 또는 같은 Idempotency-Key의 terminal 결과 재생"
           },
           "201": {
             "content": {
@@ -37002,7 +37732,7 @@
                 }
               }
             },
-            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
+            "description": "요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족"
           },
           "422": {
             "content": {
@@ -37013,6 +37743,26 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster precheck 응답 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster precheck transport/설정 오류"
           },
           "default": {
             "content": {
@@ -37145,7 +37895,7 @@
                 }
               }
             },
-            "description": "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
+            "description": "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함)"
           },
           "422": {
             "content": {
@@ -37228,6 +37978,16 @@
               "title": "Schedule Name",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -37251,6 +38011,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -37259,7 +38029,37 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {
@@ -37278,6 +38078,109 @@
         ]
       }
     },
+    "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve": {
+      "post": {
+        "description": "transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다. 외부 호출 종료가 기록되지 않은 requested-only claim은 5분 안전 lease가 만료되기 전까지 active command ID를 노출하지 않고 해제도 거부한다. 응답 유실 뒤 같은 command_id·resolution·정규화된 사유로 재요청하면 기존 결과를 replayed=true로 재생하고, resolution 또는 사유가 다르면 409로 거부한다.",
+        "operationId": "resolve_pipeline_schedule_claim_v1_ops_pipeline_schedules__schedule_name__claims__command_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_name",
+            "required": true,
+            "schema": {
+              "title": "Schedule Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineScheduleClaimResolutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineScheduleClaimResolutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "schedule claim 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "확정 결과인 claim 또는 기존 해제 결과와 요청 body 불일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "해제 사유 또는 resolution 검증 실패"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "schedule 감사 저장소 장애"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "summary": "결과 불명 schedule claim 수동 확인 및 해제",
+        "tags": [
+          "ops-pipeline"
+        ]
+      }
+    },
     "/v1/ops/pipeline/schedules/{schedule_name}/commands": {
       "post": {
         "description": "run은 스케줄이 가리키는 job을 현재 설정으로 1회 즉시 실행하고, start/stop은 스케줄 상태를 전환하며, reset은 코드 기본 상태로 되돌린다.",
@@ -37289,6 +38192,16 @@
             "required": true,
             "schema": {
               "title": "Schedule Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -37314,6 +38227,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Idempotency-Key 충돌/결과 확인 필요"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -37322,7 +38245,37 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "요청 body/header 또는 cron 검증 실패"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "외부 반영 여부 불명 — 운영자 확인 필요"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 명령 의미 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "저장소 또는 Dagster transport 장애"
           },
           "default": {
             "content": {

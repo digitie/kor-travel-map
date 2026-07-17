@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin pipeline 통합 화면 (2026-07-17, `T-ADM-C5`)
+
+- [x] **T-ADM-C5 — `/ops/pipeline` 실행·스케줄 조작 단일 표면.** canonical root 기준
+  상태 strip·타임라인·Dagster run·전역 event·schedule audit/claim·feature update 요청을
+  한 화면에 통합했다. provider/dataset pair와 request root/projected job을 분리해 표시하고,
+  URL 상태·1페이지 자동 갱신·신규 실행 배지·degraded 경계를 일관되게 적용했다.
+- [x] **멱등·동시성·불확실 결과 폐루프.** Alembic 0054로 feature update idempotency와
+  schedule command audit/active claim/resolution ledger를 append-only로 고정했다. DB clock 기반
+  lease와 advisory lock, 120초 operation timeout, mutation guard를 사용하며 응답 유실 뒤에도
+  동일 command/request를 복원한다. mutation 이후 결과가 불확실하면 claim을 보존하고 운영자가
+  audit 근거로 명시 해소하기 전 재실행하지 않는다.
+- [x] **적대 리뷰와 회귀 검증.** 의미 있는 최종 제품 커밋과 session 복원 변경을 backend/UI
+  적대 리뷰어 2명이 각각 재검토해 S1/S2/S3 0건으로 승인했다. append-only cleanup은 테스트
+  transaction에만 제한하고 실제 trigger 검증은 유지했다. #693·#716의 지적을 구현과 회귀
+  테스트로 흡수했다.
+
 ## Admin datasets 통합·scope 폐루프 (2026-07-17, `T-ADM-C45X-B`·`C4R`·`C4`)
 
 - [x] **T-ADM-C45X-B — sync_scope·active request 백엔드 정본.** PR #701에서 direct

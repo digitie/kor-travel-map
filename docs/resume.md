@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent B) — T-ADM-C5 pipeline 통합·조작 폐루프 완료
+
+- `/ops/pipeline`에 canonical 작업 상태, root 단위 타임라인, Dagster run, 전역 event,
+  schedule 상태·audit·claim 해소, feature update 요청을 통합했다. provider/dataset pair와
+  request/projected job 상태를 분리하고 URL·자동 갱신·degraded 처리를 단일 계약으로 맞췄다.
+- Alembic 0054는 feature update 멱등 ledger와 schedule command audit/claim/resolution을
+  append-only로 저장한다. DB clock lease·advisory lock·hard timeout·mutation guard로 동시성과
+  응답 유실을 다루며, mutation 뒤 불확실 결과는 명시적 운영 해소 전까지 재실행을 막는다.
+- 의미 있는 제품 변경은 backend/UI 적대 리뷰어 2명이 최종 S1/S2/S3 0건으로 승인했다.
+  frontend unit·type·lint·production build, Python unit·정적 분석과 실제 PostGIS schedule
+  동시성/append-only 회귀를 통과했다.
+- **다음 한 작업**: PR #691을 CI green 뒤 병합하고 #693·#716을 닫은 다음, 준비 완료된
+  C6a를 최신 main에 rebase해 구 화면 제거 전 모든 존치 링크를 canonical 두 화면으로 옮긴다.
+
 ## 2026-07-17 (codex, agent A) — T-ADM-C4R/C4 구현·로컬 gate 완료
 
 - `/ops/datasets`를 provider×dataset×`sync_scope` 3원 그리드와 상세 drawer로 통합했다.

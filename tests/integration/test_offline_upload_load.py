@@ -50,6 +50,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     resolve_pipeline_cancellation_scope,
 )
 from kortravelmap.infra.pipeline_cancellation_types import PipelineCancellationConflict
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -747,7 +748,7 @@ async def _create_upload(
 
 async def _truncate(engine: AsyncEngine) -> None:
     async with AsyncSession(engine) as session, session.begin():
-        await session.execute(text(_TRUNCATE_SQL))
+        await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def _fake_address_resolver(address: Address) -> Address | None:

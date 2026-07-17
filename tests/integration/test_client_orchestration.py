@@ -36,6 +36,7 @@ from kortravelmap.providers.airkorea import (
     air_quality_to_weather_values,
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -140,7 +141,7 @@ async def map_client(
         yield client
     finally:
         async with AsyncSession(migrated_engine) as session, session.begin():
-            await session.execute(text(_TRUNCATE_SQL))
+            await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def _seed_temples(engine: AsyncEngine, *feature_ids: str) -> None:

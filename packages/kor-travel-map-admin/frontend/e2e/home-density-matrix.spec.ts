@@ -9,6 +9,8 @@ type PublicHealthResponse = components["schemas"]["PublicHealthResponse"];
 type PublicVersionResponse = components["schemas"]["PublicVersionResponse"];
 type OpsMetricsResponse = components["schemas"]["OpsMetricsResponse"];
 type OpsMetricsData = components["schemas"]["OpsMetricsData"];
+type PipelineOverviewResponse =
+  components["schemas"]["PipelineOverviewResponse"];
 type OpsImportJobsListResponse =
   components["schemas"]["OpsImportJobsListResponse"];
 type OpsImportJobRecord = components["schemas"]["OpsImportJobRecord"];
@@ -34,6 +36,7 @@ const NAV_ITEMS = [
   { label: "이슈", href: "/admin/issues" },
   { label: "큐레이션 관리", href: "/admin/features/curated" },
   { label: "큐레이션 지도", href: "/curated-features" },
+  { label: "파이프라인", href: "/ops/pipeline" },
   { label: "Provider 상태", href: "/ops/providers" },
   { label: "적재 작업", href: "/ops/import-jobs" },
   { label: "갱신 요청", href: "/admin/features/update-requests" },
@@ -51,6 +54,7 @@ type HomeEndpoint =
   | "health"
   | "version"
   | "metrics"
+  | "pipeline"
   | "importJobs"
   | "dedup"
   | "dagster";
@@ -61,6 +65,7 @@ interface HomeMockOptions {
   health?: PublicHealthResponse;
   version?: PublicVersionResponse;
   metrics?: OpsMetricsResponse;
+  pipeline?: PipelineOverviewResponse;
   importJobs?: OpsImportJobRecord[];
   dedup?: DedupReviewRecord[];
   dagster?: DagsterSummaryResponse;
@@ -145,6 +150,28 @@ function makeMetrics(overrides: Partial<OpsMetricsData> = {}): OpsMetricsRespons
     ...overrides,
   };
   return { data, meta: simpleMeta("e2e-density-metrics") };
+}
+
+function makePipelineOverview(
+  overrides: Partial<components["schemas"]["PipelineOverviewData"]> = {},
+): PipelineOverviewResponse {
+  return {
+    data: {
+      active_operations: 3,
+      checked_at: MOCK_NOW,
+      dagster: {
+        dagster_url: "http://127.0.0.1:12702",
+        graphql_url: "http://127.0.0.1:12702/graphql",
+        schedule_count: 1,
+        sensor_count: 0,
+        status: "ok",
+      },
+      failed_operations_24h: 1,
+      operations_by_status: { queued: 1, running: 2 },
+      ...overrides,
+    },
+    meta: simpleMeta("e2e-density-pipeline"),
+  };
 }
 
 function makeImportJob(
@@ -253,6 +280,7 @@ function emptyCounts(): CallCounts {
     health: 0,
     importJobs: 0,
     metrics: 0,
+    pipeline: 0,
     version: 0,
   };
 }
@@ -323,6 +351,15 @@ async function setupHomeMocks(
     counts,
     options,
     () => options.metrics ?? makeMetrics(),
+  );
+  await routeEndpoint(
+    page,
+    "**/v1/ops/pipeline/overview**",
+    "/v1/ops/pipeline/overview",
+    "pipeline",
+    counts,
+    options,
+    () => options.pipeline ?? makePipelineOverview(),
   );
   await routeEndpoint(
     page,
@@ -542,16 +579,20 @@ test.describe("home metrics dense matrix", () => {
     { counts: { queued: 12, running: 34, done: 56, failed: 7 }, value: "109" },
     { counts: { done: 1000000 }, value: "1,000,000" },
   ] satisfies Array<{ counts: Record<string, number>; value: string }>) {
-    test(`import jobs metric value: ${item.value}`, async ({ page }) => {
+    test(`pipeline operations metric value: ${item.value}`, async ({ page }) => {
       await gotoHome(page, {
-        metrics: makeMetrics({
-          import_jobs_by_status: item.counts as Record<string, number>,
+        pipeline: makePipelineOverview({
+          active_operations:
+            (item.counts.queued ?? 0) + (item.counts.running ?? 0),
+          operations_by_status: item.counts as Record<string, number>,
         }),
       });
-      await expect(card(page, "적재 작업").getByText(item.value, { exact: true })).toBeVisible();
+      await expect(
+        card(page, "파이프라인 작업").getByText(item.value, { exact: true }),
+      ).toBeVisible();
     });
 
-    test(`import jobs metric description remains stable: ${item.value}`, async ({
+    test(`pipeline operations metric description remains stable: ${item.value}`, async ({
       page,
     }) => {
       const activeJobs = (item.counts.queued ?? 0) + (item.counts.running ?? 0);
@@ -560,12 +601,13 @@ test.describe("home metrics dense matrix", () => {
           ? `${activeJobs.toLocaleString("ko-KR")}건 진행 중`
           : "대기 중인 작업 없음";
       await gotoHome(page, {
-        metrics: makeMetrics({
-          import_jobs_by_status: item.counts as Record<string, number>,
+        pipeline: makePipelineOverview({
+          active_operations: activeJobs,
+          operations_by_status: item.counts as Record<string, number>,
         }),
       });
       await expect(
-        card(page, "적재 작업").getByText(expectedDescription, {
+        card(page, "파이프라인 작업").getByText(expectedDescription, {
           exact: true,
         }),
       ).toBeVisible();
@@ -858,6 +900,12 @@ test.describe("home backend/dagster/error dense matrix", () => {
   for (const item of [
     { endpoint: "health", status: 503, surface: "Backend", statusTextVisible: true },
     { endpoint: "metrics", status: 500, surface: "Feature", statusTextVisible: true },
+    {
+      endpoint: "pipeline",
+      status: 503,
+      surface: "파이프라인 작업",
+      statusTextVisible: true,
+    },
     { endpoint: "dagster", status: 503, surface: "Dagster", statusTextVisible: true },
     { endpoint: "importJobs", status: 502, surface: "최근 적재 작업", statusTextVisible: true },
     { endpoint: "dedup", status: 500, surface: "중복 검수 대기", statusTextVisible: false },
@@ -891,6 +939,7 @@ test.describe("home refresh dense matrix", () => {
     "health",
     "version",
     "metrics",
+    "pipeline",
     "importJobs",
     "dedup",
     "dagster",

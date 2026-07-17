@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### pipeline 운영 화면·조작 원장 통합 (2026-07-17, ADR-064 T-ADM-C5)
+
+- **ADDED**: `/ops/pipeline`에 canonical 작업 상태, root 타임라인, Dagster run, 전역 event,
+  schedule 상태·audit·claim 해소와 feature update 요청을 한 화면으로 통합했다.
+- **ADDED**: feature update idempotency와 schedule command audit/active claim/resolution을
+  append-only DB ledger로 저장하고 DB clock lease·advisory lock·hard timeout을 적용했다.
+- **CHANGED**: request root와 projected job의 상태·진행률을 분리하고 provider/dataset pair,
+  URL 상태, 1페이지 자동 갱신과 degraded 표시를 canonical pipeline 계약으로 통일했다.
+- **FIXED**: 응답 유실·reload·동시 schedule command·mutation 이후 불확실 결과에서 새 identity로
+  중복 실행되던 경로를 막고, frozen 제출을 복원해 동일 command/request로 재확인하도록 했다.
+
 ### datasets 운영 화면 통합 (2026-07-17, ADR-064 T-ADM-C4R/C4)
 
 - **ADDED**: `/ops/datasets`에 provider×dataset×`sync_scope` 3원 상태 그리드와 상세

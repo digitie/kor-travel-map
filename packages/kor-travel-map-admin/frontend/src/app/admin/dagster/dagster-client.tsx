@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { ApiClientError } from "@/api/client";
 import {
   DAGSTER_UI_URL,
   type DagsterGraphqlError,
@@ -68,6 +69,26 @@ const checkedAtFormatter = new Intl.DateTimeFormat("ko-KR", {
   minute: "2-digit",
   second: "2-digit",
 });
+
+function scheduleCommandResultFromError(
+  error: Error,
+): DagsterScheduleCommandResponse["data"] | null {
+  if (!(error instanceof ApiClientError)) {
+    return null;
+  }
+  const details = error.problem?.details;
+  if (
+    typeof details !== "object" ||
+    details === null ||
+    typeof (details as Record<string, unknown>).status !== "string" ||
+    typeof (details as Record<string, unknown>).schedule_name !== "string" ||
+    typeof (details as Record<string, unknown>).command !== "string" ||
+    !Array.isArray((details as Record<string, unknown>).errors)
+  ) {
+    return null;
+  }
+  return details as unknown as DagsterScheduleCommandResponse["data"];
+}
 
 function statusVariant(status: string) {
   if (status === "ok" || status === "SUCCESS" || status === "STARTED") {
@@ -754,6 +775,8 @@ function ScheduleControls({
       confirmLabel: "주기 변경",
     });
     if (!ok) return;
+    command.reset();
+    patchSchedule.reset();
     setLastResult(null);
     setEditError(null);
     patchSchedule.mutate({
@@ -762,8 +785,13 @@ function ScheduleControls({
       reason: reasonDraft || "운영 화면 스케줄 수정",
     }, {
       onSuccess: (response) => {
-        closeEdit();
         setLastResult(response.data);
+        if (response.data.audit_status === "recorded") {
+          closeEdit();
+        }
+      },
+      onError: (mutationError) => {
+        setLastResult(scheduleCommandResultFromError(mutationError));
       },
     });
   };
@@ -780,6 +808,8 @@ function ScheduleControls({
       });
       if (!ok) return;
     }
+    command.reset();
+    patchSchedule.reset();
     setLastResult(null);
     command.mutate({
       scheduleName,
@@ -788,6 +818,9 @@ function ScheduleControls({
     }, {
       onSuccess: (response) => {
         setLastResult(response.data);
+      },
+      onError: (mutationError) => {
+        setLastResult(scheduleCommandResultFromError(mutationError));
       },
     });
   };
@@ -813,7 +846,12 @@ function ScheduleControls({
         ) : null}
         {lastResult ? (
           <Alert
-            variant={lastResult.status === "ok" ? "default" : "destructive"}
+            variant={
+              lastResult.status === "ok" &&
+              lastResult.audit_status === "recorded"
+                ? "default"
+                : "destructive"
+            }
           >
             <Clock3Icon data-icon="inline-start" />
             <AlertTitle>스케줄 명령 결과</AlertTitle>
@@ -824,13 +862,16 @@ function ScheduleControls({
                   <span className="font-mono">{lastResult.schedule_name}</span>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs">
+                  <span>저장 {lastResult.save_status}</span>
+                  <span>reload {lastResult.reload_status}</span>
+                  <span>실제 반영 {lastResult.effective_status}</span>
                   {lastResult.schedule_status ? (
                     <span>상태 {statusLabel(lastResult.schedule_status)}</span>
                   ) : null}
                   {lastResult.cron_schedule ? (
                     <span>{sentenceFromCron(lastResult.cron_schedule)}</span>
                   ) : null}
-                  {lastResult.reloaded ? (
+                  {lastResult.reload_status === "succeeded" ? (
                     <span className="inline-flex items-center gap-1">
                       코드 위치 새로고침 요청됨
                       <HelpTip label="코드 위치 새로고침">
@@ -842,7 +883,18 @@ function ScheduleControls({
                   {lastResult.run_id ? (
                     <span className="font-mono">run {shortRunId(lastResult.run_id)}</span>
                   ) : null}
+                  {lastResult.audit_command_id ? (
+                    <span className="font-mono">
+                      audit {lastResult.audit_command_id}
+                    </span>
+                  ) : null}
                 </div>
+                {lastResult.audit_status === "terminal_record_failed" ? (
+                  <div className="font-medium text-destructive">
+                    원격 명령 결과는 반환됐지만 terminal 감사 기록에 실패했습니다.
+                    같은 명령을 새 키로 다시 실행하지 말고 감사 명령 ID로 확인하세요.
+                  </div>
+                ) : null}
                 {lastResult.errors?.length ? (
                   <div className="text-destructive">
                     {lastResult.errors.join(" / ")}
@@ -881,8 +933,11 @@ function ScheduleControls({
                     <Badge variant={statusVariant(schedule.status ?? "")}>
                       {statusLabel(schedule.status ?? "unknown")}
                     </Badge>
-                    {schedule.override_cron_schedule ? (
-                      <Badge variant="outline">수정됨</Badge>
+                    {schedule.override_saved ? (
+                      <Badge variant="outline">override 저장됨</Badge>
+                    ) : null}
+                    {schedule.override_effective === false ? (
+                      <Badge variant="destructive">저장/실제 불일치</Badge>
                     ) : null}
                     {providerHref ? (
                       <Link
@@ -896,7 +951,7 @@ function ScheduleControls({
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">
                     {sentenceFromCron(
-                      schedule.cron_schedule,
+                      schedule.effective_cron_schedule,
                       schedule.execution_timezone,
                     )}
                   </div>
@@ -917,6 +972,11 @@ function ScheduleControls({
                       {schedule.schedule_note}
                     </p>
                   ) : null}
+                  {schedule.disabled_reason ? (
+                    <p className="mt-1 text-xs text-destructive">
+                      즉시 실행 불가: {schedule.disabled_reason}
+                    </p>
+                  ) : null}
                   {schedule.recent_ticks?.length ? (
                     <div className="mt-3">
                       <TickRows
@@ -928,10 +988,11 @@ function ScheduleControls({
                 </div>
                 <div className="flex flex-wrap items-center gap-1 lg:justify-end">
                   <Button
-                    disabled={pending}
+                    disabled={pending || !schedule.can_run_now}
                     size="sm"
                     type="button"
                     variant="outline"
+                    title={schedule.disabled_reason ?? undefined}
                     onClick={() => void runCommand(schedule.name, "run")}
                   >
                     <PlayIcon data-icon="inline-start" />

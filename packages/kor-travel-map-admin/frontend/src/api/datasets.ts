@@ -14,7 +14,12 @@ import {
   pathWithQuery,
   postJson,
   putJson,
+  withIdempotencyKey,
 } from "./client";
+import {
+  canonicalFeatureUpdateIdempotencyBody,
+  featureUpdateIdempotencyOperationKey,
+} from "./feature-update-idempotency";
 import type { components, paths } from "./types";
 
 type DatasetSchemas = components["schemas"];
@@ -212,12 +217,22 @@ export function buildDatasetRefreshNowRequest({
   };
 }
 
-export function createDatasetRefreshNow(
+export async function createDatasetRefreshNow(
   input: DatasetRefreshNowInput,
 ): Promise<DatasetRefreshRequestCreateResponse> {
-  return postJson<DatasetRefreshRequestCreateResponse>(
-    DATASET_REFRESH_REQUESTS_PATH,
+  const body = canonicalFeatureUpdateIdempotencyBody(
     buildDatasetRefreshNowRequest(input),
+  );
+  const operationKey = await featureUpdateIdempotencyOperationKey(
+    "datasets:update-request:create",
+    body,
+  );
+  return withIdempotencyKey(operationKey, (idempotencyKey) =>
+    postJson<DatasetRefreshRequestCreateResponse>(
+      DATASET_REFRESH_REQUESTS_PATH,
+      body,
+      { headers: { "Idempotency-Key": idempotencyKey } },
+    ),
   );
 }
 

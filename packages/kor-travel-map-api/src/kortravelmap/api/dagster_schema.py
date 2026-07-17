@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +32,7 @@ __all__ = [
     "DagsterScheduleCommandData",
     "DagsterScheduleCommandRequest",
     "DagsterScheduleCommandResponse",
+    "DagsterScheduleClaimResolution",
     "DagsterScheduleOverrideRequest",
     "DagsterSensor",
     "DagsterSummaryData",
@@ -105,6 +107,9 @@ class DagsterSchedule(BaseModel):
     cron_schedule: str | None = None
     default_cron_schedule: str | None = None
     override_cron_schedule: str | None = None
+    effective_cron_schedule: str | None
+    override_saved: bool
+    override_effective: bool | None
     execution_timezone: str | None = None
     default_status: str | None = None
     can_reset: bool = False
@@ -114,6 +119,8 @@ class DagsterSchedule(BaseModel):
     repository_name: str | None = None
     repository_location_name: str | None = None
     schedule_note: str | None = None
+    can_run_now: bool
+    disabled_reason: str | None
     recent_ticks: list[DagsterInstigationTick] = Field(default_factory=list)
 
 
@@ -289,7 +296,6 @@ class DagsterScheduleOverrideRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cron_schedule: str = Field(min_length=1, max_length=120)
-    operator: str | None = Field(default=None, max_length=120)
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -298,7 +304,6 @@ class DagsterScheduleCommandRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operator: str | None = Field(default=None, max_length=120)
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -316,10 +321,16 @@ class DagsterScheduleCommandData(BaseModel):
     cron_schedule: str | None = None
     default_cron_schedule: str | None = None
     override_cron_schedule: str | None = None
+    effective_cron_schedule: str | None
     schedule_status: str | None = None
     run_id: str | None = None
     run_status: str | None = None
-    reloaded: bool = False
+    save_status: Literal["not_applicable", "saved", "cleared"]
+    reload_status: Literal["not_requested", "succeeded", "failed"]
+    effective_status: Literal["confirmed", "pending_verification", "mismatch", "unknown"]
+    outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed"
+    audit_command_id: UUID | None = None
+    audit_status: Literal["recorded", "terminal_record_failed"] = "recorded"
     errors: list[str] = Field(default_factory=list)
 
 
@@ -330,3 +341,18 @@ class DagsterScheduleCommandResponse(BaseModel):
 
     data: DagsterScheduleCommandData
     meta: Meta
+
+
+class DagsterScheduleClaimResolution(BaseModel):
+    """불명 schedule claim에 대한 운영자 확인 감사 레코드."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_id: int
+    command_id: UUID
+    schedule_name: str
+    resolution: Literal["confirmed_applied", "confirmed_not_applied"]
+    actor: str
+    reason: str
+    resolved_at: datetime
+    replayed: bool

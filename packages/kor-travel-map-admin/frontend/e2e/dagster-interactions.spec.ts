@@ -10,8 +10,8 @@ import type { components } from "../src/api/types";
 type DagsterSummaryData = components["schemas"]["DagsterSummaryData"];
 type DagsterSummaryResponse = components["schemas"]["DagsterSummaryResponse"];
 type DagsterRunSummary = components["schemas"]["DagsterRunSummary"];
-type DagsterRepository = components["schemas"]["DagsterRepository"];
 type DagsterSchedule = components["schemas"]["DagsterSchedule"];
+type DagsterRepository = components["schemas"]["DagsterRepository"];
 type DagsterInstigationTick =
   components["schemas"]["DagsterInstigationTick"];
 type DagsterRunEvent = components["schemas"]["DagsterRunEvent"];
@@ -87,6 +87,9 @@ function makeSchedule(
     can_reset: false,
     cron_schedule: "0 6 * * *",
     default_cron_schedule: "0 6 * * *",
+    effective_cron_schedule: "0 6 * * *",
+    override_saved: false,
+    override_effective: null,
     default_status: "STOPPED",
     description: "기상 데이터 적재",
     execution_timezone: "Asia/Seoul",
@@ -97,6 +100,8 @@ function makeSchedule(
     repository_location_name: "kortravelmap.dagster.definitions",
     repository_name: "__repository__",
     schedule_note: "provider rate limit의 약 90% 이하를 목표로 한 기본값입니다.",
+    can_run_now: true,
+    disabled_reason: null,
     selector_id: "weather-selector",
     state_id: "weather-origin::weather-selector",
     status: "STOPPED",
@@ -199,7 +204,13 @@ function makeScheduleCommandResponse(
     errors: [],
     graphql_url: GRAPHQL_URL,
     override_cron_schedule: null,
-    reloaded: false,
+    effective_cron_schedule: "0 6 * * *",
+    save_status: "not_applicable",
+    reload_status: "not_requested",
+    effective_status: "confirmed",
+    audit_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    audit_status: "recorded",
+    outcome_certainty: "confirmed",
     run_id: null,
     run_status: null,
     schedule_name: "weather_daily",
@@ -226,6 +237,8 @@ interface DagsterRouteOptions {
   // nux-seen을 등록하지 않으면 negative control(POST가 절대 안 오는 status≠ok 경로)에서
   // 미등록 그대로 두고 카운터로 0을 검증한다.
   mockNuxSeen?: boolean;
+  scheduleFailure?: { body: unknown; status: number };
+  scheduleFailureCount?: number;
 }
 
 interface DagsterRequestCounters {
@@ -234,6 +247,7 @@ interface DagsterRequestCounters {
   scheduleCommands: Array<{
     body: unknown;
     command: string;
+    idempotencyKey: string;
     method: string;
     scheduleName: string;
   }>;
@@ -248,6 +262,7 @@ async function mockDagster(
     runDetailUrls: [],
     scheduleCommands: [],
   };
+  let scheduleFailuresRemaining = options.scheduleFailureCount;
 
   await page.route("**/ops/dagster/summary**", async (route) => {
     if (route.request().method() !== "GET") {
@@ -325,9 +340,25 @@ async function mockDagster(
     counters.scheduleCommands.push({
       body,
       command,
+      idempotencyKey: route.request().headers()["idempotency-key"] ?? "",
       method: route.request().method(),
       scheduleName,
     });
+
+    if (
+      options.scheduleFailure &&
+      (scheduleFailuresRemaining === undefined || scheduleFailuresRemaining > 0)
+    ) {
+      if (scheduleFailuresRemaining !== undefined) {
+        scheduleFailuresRemaining -= 1;
+      }
+      await fulfillJson(
+        route,
+        options.scheduleFailure.body,
+        options.scheduleFailure.status,
+      );
+      return;
+    }
 
     const cron =
       typeof body === "object" && body && "cron_schedule" in body
@@ -341,7 +372,21 @@ async function mockDagster(
         command: command as DagsterScheduleCommandResponse["data"]["command"],
         cron_schedule: cron,
         override_cron_schedule: command === "update" ? cron : null,
-        reloaded: command === "update" || command === "default",
+        effective_cron_schedule: "0 6 * * *",
+        save_status:
+          command === "update"
+            ? "saved"
+            : command === "default"
+              ? "cleared"
+              : "not_applicable",
+        reload_status:
+          command === "update" || command === "default"
+            ? "succeeded"
+            : "not_requested",
+        effective_status:
+          command === "update" || command === "default"
+            ? "pending_verification"
+            : "confirmed",
         run_id: command === "run" ? "run-now-001abcdef" : null,
         run_status: command === "run" ? "STARTED" : null,
         schedule_name: scheduleName,
@@ -649,7 +694,9 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
             makeRepository({
               schedules: [
                 makeSchedule({
+                  can_run_now: false,
                   description: "큐레이션 후보와 detail snapshot refresh",
+                  disabled_reason: "schedule job 이름이 없습니다.",
                   name: scheduleName,
                   pipeline_name: "curated_features_refresh",
                 }),
@@ -665,7 +712,10 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
     const row = page.getByTestId(`dagster-schedule-row-${scheduleName}`);
     await expect(row).toBeVisible();
     await expect(row).toHaveClass(/ring-2/);
-    await expect(row.getByRole("button", { name: "즉시 실행" })).toBeVisible();
+    await expect(
+      row.getByText("즉시 실행 불가: schedule job 이름이 없습니다."),
+    ).toBeVisible();
+    await expect(row.getByRole("button", { name: "즉시 실행" })).toBeDisabled();
   });
 
   test("스케줄 수정/기본값/시작/즉시 실행 명령을 API로 보낸다", async ({
@@ -697,6 +747,10 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
     await dialog.getByLabel("weather_daily time").fill("05:15");
     await dialog.getByLabel("weather_daily reason").fill("e2e 스케줄 변경");
     await dialog.getByRole("button", { name: "저장" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "주기 변경", exact: true })
+      .click();
 
     await expect(page.getByText("스케줄 명령 결과")).toBeVisible();
     await expect(page.getByText("스케줄 수정 ·")).toBeVisible();
@@ -709,6 +763,10 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
       cron_schedule: "15 5 * * *",
       reason: "e2e 스케줄 변경",
     });
+    expect(counters.scheduleCommands.at(-1)?.body).not.toHaveProperty("operator");
+    expect(counters.scheduleCommands.at(-1)?.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
 
     await scheduleCard.getByRole("button", { name: "기본값으로 되돌리기" }).click();
     await expect(page.getByText("기본값으로 되돌리기 ·")).toBeVisible();
@@ -719,6 +777,10 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
     });
 
     await scheduleCard.getByRole("button", { name: "스케줄 시작" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "스케줄 시작", exact: true })
+      .click();
     await expect(page.getByText("스케줄 시작 ·")).toBeVisible();
     await expect.poll(() => counters.scheduleCommands.at(-1)).toMatchObject({
       command: "start",
@@ -727,6 +789,10 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
     });
 
     await scheduleCard.getByRole("button", { name: "즉시 실행" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "즉시 실행", exact: true })
+      .click();
     await expect(page.getByText("즉시 실행 ·")).toBeVisible();
     await expect(page.getByText(/run run-now/)).toBeVisible();
     await expect.poll(() => counters.scheduleCommands.at(-1)).toMatchObject({
@@ -734,6 +800,121 @@ test.describe("admin dagster interactions (/admin/dagster)", () => {
       method: "POST",
       scheduleName: "weather_daily",
     });
+  });
+
+  test("구 작업 자동화 화면도 502 problem의 부분 저장·reload 결과를 보존", async ({
+    page,
+  }) => {
+    const partial = makeScheduleCommandResponse({
+      audit_status: "recorded",
+      command: "update",
+      effective_status: "mismatch",
+      errors: ["Dagster code location reload failed"],
+      reload_status: "failed",
+      save_status: "saved",
+      status: "error",
+    });
+    await mockDagster(page, {
+      summary: () =>
+        makeSummary({
+          repositories: [makeRepository({ schedules: [makeSchedule()] })],
+        }),
+      runDetail: () => makeRunDetail(),
+      scheduleFailure: {
+        status: 502,
+        body: {
+          type: "https://kor-travel-map/errors/dagster-schedule-command-failed",
+          title: "Dagster mutation failed",
+          status: 502,
+          detail: "Dagster mutation failed",
+          code: "DAGSTER_SCHEDULE_COMMAND_FAILED",
+          request_id: "e2e-dagster-schedule",
+          errors: [],
+          details: partial.data,
+        },
+      },
+    });
+    await page.goto("/admin/dagster");
+
+    const scheduleCard = page
+      .locator('div[data-slot="card"]')
+      .filter({ has: page.getByRole("heading", { name: "스케줄" }) });
+    await scheduleCard.getByRole("button", { name: "스케줄 수정" }).click();
+    const dialog = page.getByRole("dialog", { name: "스케줄 수정" });
+    await dialog.getByLabel("weather_daily frequency").selectOption("daily");
+    await dialog.getByLabel("weather_daily time").fill("05:15");
+    await dialog.getByRole("button", { name: "저장" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "주기 변경", exact: true })
+      .click();
+
+    await expect(page.getByText("스케줄 명령 실패")).toBeVisible();
+    const result = page
+      .getByRole("alert")
+      .filter({ hasText: "스케줄 명령 결과" });
+    await expect(result).toContainText("저장 saved");
+    await expect(result).toContainText("reload failed");
+    await expect(result).toContainText("실제 반영 mismatch");
+    await expect(result).toContainText("Dagster code location reload failed");
+  });
+
+  test("구 작업 자동화도 cron 502 후 다른 명령 성공 시 이전 오류를 제거", async ({
+    page,
+  }) => {
+    const partial = makeScheduleCommandResponse({
+      command: "update",
+      effective_status: "mismatch",
+      errors: ["Dagster code location reload failed"],
+      reload_status: "failed",
+      save_status: "saved",
+      status: "error",
+    });
+    await mockDagster(page, {
+      summary: () =>
+        makeSummary({
+          repositories: [makeRepository({ schedules: [makeSchedule()] })],
+        }),
+      runDetail: () => makeRunDetail(),
+      scheduleFailure: {
+        status: 502,
+        body: {
+          type: "https://kor-travel-map/errors/dagster-schedule-command-failed",
+          title: "Dagster mutation failed",
+          status: 502,
+          detail: "Dagster mutation failed",
+          code: "DAGSTER_SCHEDULE_COMMAND_FAILED",
+          request_id: "e2e-dagster-schedule-reset",
+          errors: [],
+          details: partial.data,
+        },
+      },
+      scheduleFailureCount: 1,
+    });
+    await page.goto("/admin/dagster");
+
+    const scheduleCard = page
+      .locator('div[data-slot="card"]')
+      .filter({ has: page.getByRole("heading", { name: "스케줄" }) });
+    await scheduleCard.getByRole("button", { name: "스케줄 수정" }).click();
+    const dialog = page.getByRole("dialog", { name: "스케줄 수정" });
+    await dialog.getByLabel("weather_daily frequency").selectOption("daily");
+    await dialog.getByLabel("weather_daily time").fill("05:15");
+    await dialog.getByRole("button", { name: "저장" }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "주기 변경", exact: true })
+      .click();
+    await expect(page.getByText("스케줄 명령 실패")).toBeVisible();
+
+    await dialog.getByRole("button", { name: "스케줄 수정 닫기" }).click();
+    await scheduleCard.getByRole("button", { name: "기본값으로 되돌리기" }).click();
+
+    await expect(page.getByText("기본값으로 되돌리기 ·")).toBeVisible();
+    await expect(page.getByText("스케줄 명령 실패")).toHaveCount(0);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "스케줄 명령 결과" }),
+    ).not.toContainText("Dagster code location reload failed");
   });
 
   test("실행 중인 스케줄은 중지 명령을 API로 보낸다", async ({ page }) => {

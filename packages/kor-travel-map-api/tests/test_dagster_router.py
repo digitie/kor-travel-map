@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from uuid import UUID
 
 import httpx
 import pytest
@@ -10,18 +12,74 @@ from fastapi.testclient import TestClient
 
 from kortravelmap.api import dagster_graphql as dagster_mod
 from kortravelmap.api import dagster_query_service as dagster_query
+from kortravelmap.api import dagster_schedule_service as dagster_schedule
 from kortravelmap.api.app import create_app
+from kortravelmap.api.dagster_http import schedule_idempotency_http_exception
+from kortravelmap.api.dagster_schema import (
+    DagsterScheduleCommandData,
+    DagsterScheduleCommandResponse,
+)
+from kortravelmap.api.routers import dagster as dagster_router
 from kortravelmap.api.settings import ApiSettings
 
 
+@pytest.mark.unit
+def test_resolved_schedule_idempotency_conflict_is_confirmed() -> None:
+    command_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    error = schedule_idempotency_http_exception(
+        dagster_schedule.DagsterScheduleIdempotencyConflict(
+            "운영자 확인으로 이미 해제됨",
+            command_id=command_id,
+            resolved=True,
+            resolution="confirmed_not_applied",
+        )
+    )
+
+    assert error.status_code == 409
+    assert error.detail["code"] == "DAGSTER_SCHEDULE_CLAIM_RESOLVED"
+    assert error.detail["details"] == {
+        "command_id": str(command_id),
+        "active_command_id": None,
+        "active_claim_resolvable_at": None,
+        "outcome_certainty": "confirmed",
+        "audit_status": "recorded",
+        "resolution": "confirmed_not_applied",
+    }
+
+
+@pytest.mark.unit
+def test_schedule_url_error_redacts_invalid_configuration_secrets() -> None:
+    data = dagster_schedule._schedule_url_error(
+        checked_at=datetime(2026, 7, 17, tzinfo=UTC),
+        schedule_name="safe_schedule",
+        command="run",
+        error=dagster_mod.DagsterUrlConfigurationError(
+            "dagster_graphql_url must not include userinfo"
+        ),
+    )
+
+    assert data.dagster_url == ""
+    assert data.graphql_url == ""
+    assert "secret" not in data.model_dump_json()
+
+
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app = create_app(
         ApiSettings(
             dagster_url="http://dagster.example:12302",
             dagster_allowed_hosts=["dagster.example"],
             dagster_request_timeout_seconds=1.0,
         )
+    )
+
+    async def _empty_schedule_overrides(_session: object) -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr(
+        dagster_schedule,
+        "schedule_overrides",
+        _empty_schedule_overrides,
     )
     with TestClient(app) as test_client:
         yield test_client
@@ -207,6 +265,13 @@ def test_dagster_summary_parses_graphql_response(
     assert data["sensor_count"] == 1
     assert data["run_counts"] == {"SUCCESS": 1}
     repository = data["repositories"][0]
+    assert repository["schedules"][0]["effective_cron_schedule"] == "0 2 * * *"
+    assert repository["schedules"][0]["override_saved"] is False
+    assert repository["schedules"][0]["override_effective"] is None
+    assert repository["schedules"][0]["can_run_now"] is False
+    assert repository["schedules"][0]["disabled_reason"] == (
+        "schedule job 이름이 없습니다."
+    )
     assert repository["schedules"][0]["recent_ticks"] == [
         {
             "tick_id": "schedule-tick-1",
@@ -253,6 +318,77 @@ def test_dagster_summary_parses_graphql_response(
     assert calls == [
         {"query": dagster_query._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
     ]
+
+
+@pytest.mark.unit
+def test_dagster_schedule_write_contract_has_no_client_actor(
+    client: TestClient,
+) -> None:
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    assert set(schemas["DagsterScheduleOverrideRequest"]["properties"]) == {
+        "cron_schedule",
+        "reason",
+    }
+    assert set(schemas["DagsterScheduleCommandRequest"]["properties"]) == {
+        "reason"
+    }
+
+
+@pytest.mark.unit
+def test_legacy_schedule_command_uses_server_actor_and_idempotency_key(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_audited_command(
+        _session: object,
+        **kwargs: object,
+    ) -> DagsterScheduleCommandResponse:
+        captured.update(kwargs)
+        return DagsterScheduleCommandResponse(
+            data=DagsterScheduleCommandData(
+                status="ok",
+                dagster_url="http://dagster.example:12302",
+                graphql_url="http://dagster.example:12302/graphql",
+                checked_at=datetime.now(UTC),
+                schedule_name="weather_daily",
+                command="start",
+                effective_cron_schedule="0 6 * * *",
+                schedule_status="RUNNING",
+                save_status="not_applicable",
+                reload_status="not_requested",
+                effective_status="confirmed",
+            ),
+            meta={"duration_ms": 0, "request_id": "unit"},
+        )
+
+    monkeypatch.setattr(
+        dagster_router,
+        "_execute_audited_command",
+        _fake_audited_command,
+    )
+    command_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    response = client.post(
+        "/v1/ops/dagster/schedules/weather_daily/start",
+        headers={"Idempotency-Key": command_id},
+        json={"reason": "운영 재개"},
+    )
+
+    assert response.status_code == 200
+    assert captured["actor"] == "local-dev"
+    assert captured["reason"] == "운영 재개"
+    assert captured["request_details"] == {"command": "start"}
+    assert captured["command_id"] == UUID(command_id)
+
+    spoofed = client.post(
+        "/v1/ops/dagster/schedules/weather_daily/start",
+        headers={"Idempotency-Key": command_id},
+        json={"operator": "spoofed"},
+    )
+    assert spoofed.status_code == 422
 
 
 @pytest.mark.unit
@@ -578,7 +714,15 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
     ) -> dict[str, object]:
         raise AssertionError("disallowed Dagster URL must not be requested")
 
+    async def _unexpected_schedule_overrides(_session: object) -> dict[str, str]:
+        raise AssertionError("disallowed Dagster URL must not access schedule storage")
+
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("disallowed Dagster URL must not create an HTTP client")
+
     monkeypatch.setattr(dagster_mod, "post_graphql", _unexpected_post_graphql)
+    monkeypatch.setattr(dagster_schedule, "schedule_overrides", _unexpected_schedule_overrides)
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
 
     with TestClient(app) as test_client:
         response = test_client.get("/v1/ops/dagster/summary")
@@ -587,8 +731,75 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
     body = response.json()
     data = body["data"]
     assert data["status"] == "error"
+    assert data["dagster_url"] == ""
+    assert data["graphql_url"] == ""
     assert data["repository_count"] == 0
     assert data["errors"] == ["dagster_url host is not in dagster_allowed_hosts"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("dagster_url", "dagster_graphql_url", "expected_error"),
+    [
+        ("http://[::1", "", "dagster_url is not a valid URL"),
+        (
+            "http://dagster.example:not-a-port",
+            "",
+            "dagster_url is not a valid URL",
+        ),
+        ("http://dagster.example:70000", "", "dagster_url is not a valid URL"),
+        (
+            "http://dagster.example:12302",
+            "http://user:super-secret@dagster.example:12302/graphql?token=secret",
+            "dagster_graphql_url must not include userinfo",
+        ),
+    ],
+)
+def test_dagster_summary_rejects_malformed_url_without_resource_access_or_reflection(
+    monkeypatch: pytest.MonkeyPatch,
+    dagster_url: str,
+    dagster_graphql_url: str,
+    expected_error: str,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            dagster_url=dagster_url,
+            dagster_graphql_url=dagster_graphql_url,
+            dagster_allowed_hosts=["dagster.example", "::1"],
+        )
+    )
+
+    async def _unexpected_schedule_overrides(_session: object) -> dict[str, str]:
+        raise AssertionError("invalid Dagster URL must not access schedule storage")
+
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("invalid Dagster URL must not create an HTTP client")
+
+    monkeypatch.setattr(dagster_schedule, "schedule_overrides", _unexpected_schedule_overrides)
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/v1/ops/dagster/summary")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "error",
+        "dagster_url": "",
+        "graphql_url": "",
+        "version": None,
+        "checked_at": response.json()["data"]["checked_at"],
+        "repository_count": 0,
+        "job_count": 0,
+        "asset_count": 0,
+        "schedule_count": 0,
+        "sensor_count": 0,
+        "run_counts": {},
+        "repositories": [],
+        "recent_runs": [],
+        "errors": [expected_error],
+    }
+    assert "super-secret" not in response.text
+    assert "token=secret" not in response.text
 
 
 @pytest.mark.unit
@@ -611,7 +822,11 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
     ) -> dict[str, object]:
         raise AssertionError("invalid GraphQL URL must not be requested")
 
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("invalid GraphQL URL must not create an HTTP client")
+
     monkeypatch.setattr(dagster_mod, "post_graphql", _unexpected_post_graphql)
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
 
     with TestClient(app) as test_client:
         response = test_client.post("/v1/ops/dagster/nux-seen")
@@ -620,8 +835,51 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
     body = response.json()
     data = body["data"]
     assert data["status"] == "error"
+    assert data["dagster_url"] == ""
+    assert data["graphql_url"] == ""
     assert data["seen"] is False
     assert data["errors"] == ["dagster_graphql_url path must end with /graphql"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/v1/ops/dagster/runs/run-secret"),
+        ("post", "/v1/ops/dagster/nux-seen"),
+    ],
+)
+def test_dagster_sibling_routes_do_not_reflect_invalid_url_secrets_or_create_client(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            dagster_url="http://dagster.example:12302",
+            dagster_graphql_url=(
+                "http://user:super-secret@dagster.example:12302/graphql?token=secret"
+            ),
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("invalid GraphQL URL must not create an HTTP client")
+
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
+
+    with TestClient(app) as test_client:
+        response = test_client.request(method, path)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "error"
+    assert data["dagster_url"] == ""
+    assert data["graphql_url"] == ""
+    assert data["errors"] == ["dagster_graphql_url must not include userinfo"]
+    assert "super-secret" not in response.text
+    assert "token=secret" not in response.text
 
 
 @pytest.mark.unit

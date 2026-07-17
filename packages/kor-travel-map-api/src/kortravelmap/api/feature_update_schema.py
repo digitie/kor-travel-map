@@ -81,9 +81,7 @@ FeatureIdString = Annotated[
 TargetKeyString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
 ]
-AuditReason = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
-]
+AuditReason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 MAX_PROVIDER_FILTERS = 32
 MAX_DATASET_FILTERS = 64
 MAX_SCOPE_FEATURE_IDS = 1000
@@ -269,9 +267,7 @@ class _FeatureUpdateRequestPlan(BaseModel):
             raise ValueError("providers items must be unique")
         if len(self.dataset_keys) != len(set(self.dataset_keys)):
             raise ValueError("dataset_keys items must be unique")
-        if self.scope.type == "provider_dataset" and (
-            self.providers or self.dataset_keys
-        ):
+        if self.scope.type == "provider_dataset" and (self.providers or self.dataset_keys):
             raise ValueError(
                 "provider_dataset scope must not repeat providers or dataset_keys filters"
             )
@@ -359,11 +355,12 @@ class FeatureUpdateRequestPreviewRecord(BaseModel):
 
 
 class FeatureUpdateRequestCreateResponse(BaseModel):
-    """새 요청 또는 동일한 활성 canonical 요청 재사용 응답."""
+    """새 요청, 활성 canonical 요청 재사용 또는 terminal 결과 재생 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureUpdateRequestCreatedRecord
+    idempotent_replay: bool
     reused_active_request: bool
     meta: Meta
 

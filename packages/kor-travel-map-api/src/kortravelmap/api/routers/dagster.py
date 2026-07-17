@@ -7,12 +7,24 @@ HTTP 요청 컨텍스트와 route metadata만 소유하며, Dagster 조회·파�
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_query_service, dagster_schedule_service
-from kortravelmap.api.dagster_http import dagster_http_dependencies
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.dagster_http import (
+    SCHEDULE_WRITE_ERROR_RESPONSES,
+    dagster_http_dependencies,
+    http_client_from_request,
+    schedule_command_response_or_raise,
+    schedule_idempotency_http_exception,
+    schedule_storage_http_exception,
+    schedule_uncertain_outcome_http_exception,
+    schedule_validation_http_exception,
+    settings_from_request,
+)
 from kortravelmap.api.dagster_schema import (
     DagsterNuxSeenResponse,
     DagsterRunDetailResponse,
@@ -34,6 +46,36 @@ __all__ = [
 router = APIRouter(prefix="/ops/dagster", tags=["ops", "dagster"])
 
 
+async def _execute_audited_command(
+    session: AsyncSession,
+    *,
+    schedule_name: str,
+    command: dagster_schedule_service.ScheduleCommand,
+    actor: str,
+    reason: str | None,
+    request_details: dict[str, object],
+    command_id: UUID,
+    operation: dagster_schedule_service.AuditedScheduleOperation,
+) -> DagsterScheduleCommandResponse:
+    try:
+        return await dagster_schedule_service.execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command=command,
+            actor=actor,
+            reason=reason,
+            request_details=request_details,
+            command_id=command_id,
+            operation=operation,
+        )
+    except dagster_schedule_service.DagsterScheduleIdempotencyConflict as exc:
+        raise schedule_idempotency_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleUncertainOutcome as exc:
+        raise schedule_uncertain_outcome_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
+        raise schedule_storage_http_exception(exc) from exc
+
+
 @router.get(
     "/summary",
     response_model=DagsterSummaryResponse,
@@ -50,8 +92,15 @@ async def get_dagster_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
     page_size: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
-    settings, client = dagster_http_dependencies(request)
-    overrides = await dagster_schedule_service.schedule_overrides(session)
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_summary_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
+    try:
+        overrides = await dagster_schedule_service.schedule_overrides(session)
+    except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
+        raise schedule_storage_http_exception(exc) from exc
     return await dagster_query_service.get_summary(
         settings=settings,
         client=client,
@@ -82,7 +131,11 @@ async def get_dagster_run_detail(
         ),
     ),
 ) -> DagsterRunDetailResponse:
-    settings, client = dagster_http_dependencies(request)
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_run_detail_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
     return await dagster_query_service.get_run_detail(
         settings=settings,
         client=client,
@@ -103,7 +156,11 @@ async def get_dagster_run_detail(
     ),
 )
 async def mark_dagster_nux_seen(request: Request) -> DagsterNuxSeenResponse:
-    settings, client = dagster_http_dependencies(request)
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_nux_seen_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
     return await dagster_query_service.mark_nux_seen(settings=settings, client=client)
 
 
@@ -115,21 +172,39 @@ async def mark_dagster_nux_seen(request: Request) -> DagsterNuxSeenResponse:
         "운영 스케줄의 cron override를 저장하고 code location reload를 요청한다. "
         "cron은 코드 정의를 직접 변경하지 않고 ops.dagster_schedule_overrides에 보관된다."
     ),
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def update_dagster_schedule(
     request: Request,
     schedule_name: str,
     body: DagsterScheduleOverrideRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> DagsterScheduleCommandResponse:
     settings, client = dagster_http_dependencies(request)
-    return await dagster_schedule_service.update_schedule(
-        settings=settings,
-        client=client,
-        session=session,
-        schedule_name=schedule_name,
-        body=body,
-    )
+    try:
+        response = await _execute_audited_command(
+            session,
+            schedule_name=schedule_name,
+            command="update",
+            actor=context.actor,
+            reason=body.reason,
+            request_details={"cron_schedule": body.cron_schedule},
+            command_id=idempotency_key,
+            operation=lambda mutation_guard: dagster_schedule_service.update_schedule(
+                settings=settings,
+                client=client,
+                session=session,
+                schedule_name=schedule_name,
+                body=body,
+                actor=context.actor,
+                mutation_guard=mutation_guard,
+            ),
+        )
+    except dagster_schedule_service.DagsterScheduleValidationError as exc:
+        raise schedule_validation_http_exception(exc) from exc
+    return schedule_command_response_or_raise(response)
 
 
 @router.post(
@@ -137,21 +212,35 @@ async def update_dagster_schedule(
     response_model=DagsterScheduleCommandResponse,
     summary="운영 스케줄 기본값 복귀",
     description="운영 스케줄 cron override를 삭제하고 code location reload를 요청한다.",
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def reset_dagster_schedule_default(
     request: Request,
     schedule_name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: DagsterScheduleCommandRequest | None = None,
 ) -> DagsterScheduleCommandResponse:
-    del body
     settings, client = dagster_http_dependencies(request)
-    return await dagster_schedule_service.reset_schedule_default(
-        settings=settings,
-        client=client,
-        session=session,
+    reason = body.reason if body else None
+    response = await _execute_audited_command(
+        session,
         schedule_name=schedule_name,
+        command="default",
+        actor=context.actor,
+        reason=reason,
+        request_details={"target": "code_default"},
+        command_id=idempotency_key,
+        operation=lambda mutation_guard: dagster_schedule_service.reset_schedule_default(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
+            mutation_guard=mutation_guard,
+        ),
     )
+    return schedule_command_response_or_raise(response)
 
 
 async def mutate_schedule_state(
@@ -160,36 +249,55 @@ async def mutate_schedule_state(
     schedule_name: str,
     command: Literal["start", "stop", "reset"],
     session: AsyncSession,
+    actor: str,
+    reason: str | None,
+    command_id: UUID,
 ) -> DagsterScheduleCommandResponse:
     """Legacy route wrapper for the shared schedule mutation service."""
 
     settings, client = dagster_http_dependencies(request)
-    return await dagster_schedule_service.mutate_schedule_state(
-        settings=settings,
-        client=client,
-        session=session,
+    response = await _execute_audited_command(
+        session,
         schedule_name=schedule_name,
         command=command,
+        actor=actor,
+        reason=reason,
+        request_details={"command": command},
+        command_id=command_id,
+        operation=lambda mutation_guard: dagster_schedule_service.mutate_schedule_state(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
+            command=command,
+            mutation_guard=mutation_guard,
+        ),
     )
+    return schedule_command_response_or_raise(response)
 
 
 @router.post(
     "/schedules/{schedule_name}/start",
     response_model=DagsterScheduleCommandResponse,
     summary="운영 스케줄 시작",
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def start_dagster_schedule(
     request: Request,
     schedule_name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: DagsterScheduleCommandRequest | None = None,
 ) -> DagsterScheduleCommandResponse:
-    del body
     return await mutate_schedule_state(
         request=request,
         schedule_name=schedule_name,
         command="start",
         session=session,
+        actor=context.actor,
+        reason=body.reason if body else None,
+        command_id=idempotency_key,
     )
 
 
@@ -197,19 +305,24 @@ async def start_dagster_schedule(
     "/schedules/{schedule_name}/stop",
     response_model=DagsterScheduleCommandResponse,
     summary="운영 스케줄 중지",
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def stop_dagster_schedule(
     request: Request,
     schedule_name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: DagsterScheduleCommandRequest | None = None,
 ) -> DagsterScheduleCommandResponse:
-    del body
     return await mutate_schedule_state(
         request=request,
         schedule_name=schedule_name,
         command="stop",
         session=session,
+        actor=context.actor,
+        reason=body.reason if body else None,
+        command_id=idempotency_key,
     )
 
 
@@ -217,19 +330,24 @@ async def stop_dagster_schedule(
     "/schedules/{schedule_name}/reset",
     response_model=DagsterScheduleCommandResponse,
     summary="운영 스케줄 상태 기본값 복귀",
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def reset_dagster_schedule_state(
     request: Request,
     schedule_name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: DagsterScheduleCommandRequest | None = None,
 ) -> DagsterScheduleCommandResponse:
-    del body
     return await mutate_schedule_state(
         request=request,
         schedule_name=schedule_name,
         command="reset",
         session=session,
+        actor=context.actor,
+        reason=body.reason if body else None,
+        command_id=idempotency_key,
     )
 
 
@@ -238,18 +356,34 @@ async def reset_dagster_schedule_state(
     response_model=DagsterScheduleCommandResponse,
     summary="운영 스케줄 즉시 실행",
     description="스케줄이 가리키는 job을 현재 설정으로 1회 실행한다.",
+    responses=SCHEDULE_WRITE_ERROR_RESPONSES,
 )
 async def run_dagster_schedule_now(
     request: Request,
     schedule_name: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: DagsterScheduleCommandRequest | None = None,
 ) -> DagsterScheduleCommandResponse:
     settings, client = dagster_http_dependencies(request)
-    return await dagster_schedule_service.run_schedule_now(
-        settings=settings,
-        client=client,
-        session=session,
+    reason = body.reason if body else None
+    response = await _execute_audited_command(
+        session,
         schedule_name=schedule_name,
-        body=body,
+        command="run",
+        actor=context.actor,
+        reason=reason,
+        request_details={"command": "run"},
+        command_id=idempotency_key,
+        operation=lambda mutation_guard: dagster_schedule_service.run_schedule_now(
+            settings=settings,
+            client=client,
+            session=session,
+            schedule_name=schedule_name,
+            body=body,
+            actor=context.actor,
+            mutation_guard=mutation_guard,
+        ),
     )
+    return schedule_command_response_or_raise(response)

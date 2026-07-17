@@ -1,4 +1,9 @@
-const ALLOWED_FORWARD_HEADERS = new Set(["accept", "content-type", "user-agent"]);
+const ALLOWED_FORWARD_HEADERS = new Set([
+  "accept",
+  "content-type",
+  "idempotency-key",
+  "user-agent",
+]);
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
 
 export type ProxyRequestInit = RequestInit & { duplex?: "half" };

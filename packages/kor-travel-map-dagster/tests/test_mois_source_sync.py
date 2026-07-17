@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from types import ModuleType
@@ -9,7 +11,11 @@ from typing import Any, cast
 
 import pytest
 from dagster import build_op_context
-from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
+from kortravelmap.providers.mois import (
+    MOIS_SOURCE_SYNC_COVERAGE_TAG,
+    MOIS_SOURCE_SYNC_FULL_COVERAGE,
+    PROMOTED_SERVICE_SLUGS,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster.mois_source_sync import (
@@ -94,6 +100,14 @@ def test_sync_raises_when_db_path_unset() -> None:
         sync_mois_source_db(settings)
 
 
+def test_full_coverage_version_is_derived_from_current_promoted_slug_set() -> None:
+    expected_digest = hashlib.sha256(
+        "\n".join(sorted(PROMOTED_SERVICE_SLUGS)).encode("utf-8")
+    ).hexdigest()
+
+    assert (f"promoted-national-sha256:{expected_digest}") == MOIS_SOURCE_SYNC_FULL_COVERAGE
+
+
 def test_sync_uses_promoted_slugs_commits_and_closes(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -148,9 +162,7 @@ def test_sync_passes_custom_slugs_org_and_batch(
     assert all(call["batch_size"] == 250 for call in calls["sync_calls"])
 
 
-def test_sync_creates_parent_directory(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_sync_creates_parent_directory(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_mois(monkeypatch)
     nested = tmp_path / "missing" / "dir" / "mois.sqlite"
     settings = KorTravelMapSettings(mois_source_db_path=str(nested))
@@ -215,15 +227,18 @@ def test_checkpoint_is_noop_for_non_sqlite_engine() -> None:
     _checkpoint_sqlite_wal(cast("Any", _Engine()))
 
 
-def test_op_runs_sync_and_emits_metadata(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_op_runs_sync_and_emits_metadata(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mois(monkeypatch)
     db_file = tmp_path / "op-source.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
     monkeypatch.setenv("KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH", str(db_file))
 
-    context = build_op_context(
-        config={"service_slugs": [], "org_code": None, "batch_size": 1000}
+    context = build_op_context(config={"service_slugs": [], "org_code": None, "batch_size": 1000})
+    run_tags: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        context.instance,
+        "add_run_tags",
+        lambda run_id, tags: run_tags.append((run_id, tags)),
     )
     metadata = mois_localdata_source_sync_op(context)
 
@@ -231,7 +246,73 @@ def test_op_runs_sync_and_emits_metadata(
     assert metadata["upserted_count"] == 8 * len(PROMOTED_SERVICE_SLUGS)
     assert metadata["service_slug_count"] == len(PROMOTED_SERVICE_SLUGS)
     assert metadata["db_path"] == str(db_file)
+    assert metadata["coverage"] == MOIS_SOURCE_SYNC_FULL_COVERAGE
+    assert run_tags == [
+        (
+            context.run_id,
+            {MOIS_SOURCE_SYNC_COVERAGE_TAG: MOIS_SOURCE_SYNC_FULL_COVERAGE},
+        )
+    ]
     assert all(call["commit"] is True for call in calls["sync_calls"])
+    marker = db_file.parent / (db_file.name + ".synced")
+    assert marker.exists()
+    marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+    datetime.fromisoformat(marker_payload["synced_at"])
+    assert marker_payload["coverage"] == MOIS_SOURCE_SYNC_FULL_COVERAGE
+
+    settings = KorTravelMapSettings(
+        mois_source_db_path=str(db_file),
+        mois_source_sync_ttl_hours=24,
+    )
+    sync_calls = _stub_sync(monkeypatch)
+    assert ensure_mois_source_db_fresh(settings) is None
+    assert sync_calls["n"] == 0
+
+
+def test_op_tags_custom_scope_as_partial(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mois(monkeypatch)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH",
+        str(tmp_path / "partial.sqlite"),
+    )
+    db_file = tmp_path / "partial.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    context = build_op_context(
+        config={
+            "service_slugs": ["restaurants"],
+            "org_code": "6110000",
+            "batch_size": 1000,
+        }
+    )
+    run_tags: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        context.instance,
+        "add_run_tags",
+        lambda run_id, tags: run_tags.append((run_id, tags)),
+    )
+
+    metadata = mois_localdata_source_sync_op(context)
+
+    assert metadata["coverage"] == "partial"
+    assert run_tags == [(context.run_id, {MOIS_SOURCE_SYNC_COVERAGE_TAG: "partial"})]
+    assert not (db_file.parent / (db_file.name + ".synced")).exists()
+
+
+def test_op_refuses_to_race_existing_source_sync_lock(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _install_fake_mois(monkeypatch)
+    db_file = tmp_path / "locked.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    (db_file.parent / (db_file.name + ".lock")).write_text("held", encoding="utf-8")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH", str(db_file))
+    context = build_op_context(config={"service_slugs": [], "org_code": None, "batch_size": 1000})
+
+    with pytest.raises(RuntimeError, match="이미 진행 중"):
+        mois_localdata_source_sync_op(context)
+
+    assert calls["sync_calls"] == []
+    assert not (db_file.parent / (db_file.name + ".synced")).exists()
 
 
 # -- ensure_mois_source_db_fresh: freshness 게이트(#617 리뷰) --------------------
@@ -249,7 +330,7 @@ def _stub_sync(monkeypatch: pytest.MonkeyPatch, *, creates: Any = None) -> dict[
             creates.write_bytes(_SQLITE_HEADER)
         return MoisSourceSyncSummary(
             db_path="x",
-            service_slugs=("a",),
+            service_slugs=tuple(sorted(_kwargs.get("service_slugs") or PROMOTED_SERVICE_SLUGS)),
             sync_kind="localdata_full",
             scanned_count=0,
             upserted_count=0,
@@ -258,28 +339,28 @@ def _stub_sync(monkeypatch: pytest.MonkeyPatch, *, creates: Any = None) -> dict[
             unknown_status_count=0,
         )
 
-    monkeypatch.setattr(
-        "kortravelmap.dagster.mois_source_sync.sync_mois_source_db", _spy
-    )
+    monkeypatch.setattr("kortravelmap.dagster.mois_source_sync.sync_mois_source_db", _spy)
     return calls
 
 
 def _write_marker(db_file: Any, *, hours_ago: float = 0.0) -> None:
     stamp = datetime.now(UTC) - timedelta(hours=hours_ago)
     (db_file.parent / (db_file.name + ".synced")).write_text(
-        stamp.isoformat(), encoding="utf-8"
+        json.dumps(
+            {
+                "synced_at": stamp.isoformat(),
+                "coverage": MOIS_SOURCE_SYNC_FULL_COVERAGE,
+            }
+        ),
+        encoding="utf-8",
     )
 
 
-def test_ensure_skips_sync_when_db_fresh(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ensure_skips_sync_when_db_fresh(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     db_file = tmp_path / "mois.sqlite"
     db_file.write_bytes(_SQLITE_HEADER)
     _write_marker(db_file, hours_ago=1.0)
-    settings = KorTravelMapSettings(
-        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
-    )
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
     calls = _stub_sync(monkeypatch)
     assert ensure_mois_source_db_fresh(settings) is None
     assert calls["n"] == 0  # fresh → Phase A sync 생략
@@ -289,9 +370,7 @@ def test_ensure_syncs_when_missing_then_skips_within_ttl(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_file = tmp_path / "mois.sqlite"
-    settings = KorTravelMapSettings(
-        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
-    )
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
     calls = _stub_sync(monkeypatch, creates=db_file)
     # 1) DB 없음 → sync 1회 + 마커 기록
     assert ensure_mois_source_db_fresh(settings) is not None
@@ -302,15 +381,65 @@ def test_ensure_syncs_when_missing_then_skips_within_ttl(
     assert calls["n"] == 1
 
 
-def test_ensure_syncs_when_marker_stale(
+def test_ensure_syncs_when_marker_stale(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    _write_marker(db_file, hours_ago=48.0)
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
+    calls = _stub_sync(monkeypatch)
+    assert ensure_mois_source_db_fresh(settings) is not None
+    assert calls["n"] == 1  # 마커 stale → 재sync
+
+
+def test_ensure_syncs_when_marker_coverage_is_from_old_promoted_set(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_file = tmp_path / "mois.sqlite"
     db_file.write_bytes(_SQLITE_HEADER)
-    _write_marker(db_file, hours_ago=48.0)
-    settings = KorTravelMapSettings(
-        mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24
+    marker = db_file.parent / (db_file.name + ".synced")
+    marker.write_text(
+        json.dumps(
+            {
+                "synced_at": datetime.now(UTC).isoformat(),
+                "coverage": "promoted-national-sha256:old",
+            }
+        ),
+        encoding="utf-8",
     )
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
     calls = _stub_sync(monkeypatch)
+
     assert ensure_mois_source_db_fresh(settings) is not None
-    assert calls["n"] == 1  # 마커 stale → 재sync
+    assert calls["n"] == 1
+
+
+def test_ensure_syncs_when_marker_timestamp_is_in_future(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    _write_marker(db_file, hours_ago=-1.0)
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
+    calls = _stub_sync(monkeypatch)
+
+    assert ensure_mois_source_db_fresh(settings) is not None
+    assert calls["n"] == 1
+
+
+def test_ensure_partial_sync_does_not_mark_full_coverage_fresh(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_file = tmp_path / "mois.sqlite"
+    db_file.write_bytes(_SQLITE_HEADER)
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file), mois_source_sync_ttl_hours=24)
+    calls = _stub_sync(monkeypatch)
+
+    assert (
+        ensure_mois_source_db_fresh(
+            settings,
+            service_slugs=["general_restaurants"],
+        )
+        is not None
+    )
+    assert calls["n"] == 1
+    assert not (db_file.parent / (db_file.name + ".synced")).exists()

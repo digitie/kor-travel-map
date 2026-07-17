@@ -38,6 +38,8 @@ const QUEUED_REQUEST_ID = "bbbbbbbb-2222-4222-8222-222222222222";
 const RUNNING_REQUEST_ID = "cccccccc-4444-4444-8444-444444444444";
 const CREATED_REQUEST_ID = "dddddddd-0000-4000-8000-000000000001";
 const JOB_ID = "cccccccc-3333-4333-8333-333333333333";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -99,12 +101,17 @@ function listResponse(
 
 function createResponse(
   record: FeatureUpdateRequestRecord,
+  flags: {
+    idempotentReplay?: boolean;
+    reusedActiveRequest?: boolean;
+  } = {},
 ): FeatureUpdateRequestCreateResponse {
   return {
     data: { ...record, result_kind: "request" },
-    reused_active_request: false,
+    idempotent_replay: flags.idempotentReplay ?? false,
+    reused_active_request: flags.reusedActiveRequest ?? false,
     meta: { duration_ms: 1, request_id: "e2e-feature-update-create" },
-  } as FeatureUpdateRequestCreateResponse & { reused_active_request: boolean };
+  } as FeatureUpdateRequestCreateResponse;
 }
 
 function previewResponse(
@@ -150,11 +157,14 @@ interface FeatureUpdateMocks {
   cancel: number;
   /** GET list 호출 수(2초 폴링이 있으므로 create/mutation count만 정확하다). */
   list: number;
+  createKeys: string[];
+  createBodyJson: string[];
   createBodies: FeatureUpdateRequestCreateRequest[];
   previewBodies: FeatureUpdateRequestPreviewRequest[];
   runNowBodies: FeatureUpdateRequestRunNowRequest[];
   runNowRecords: ScopeDispatchFeatureUpdateRequestRecord[];
   cancelBodies: PipelineCancellationRequest[];
+  persistedCreateCount: () => number;
 }
 
 /**
@@ -168,23 +178,31 @@ async function mockFeatureUpdateRequests(
     initial?: FeatureUpdateRequestRecord[];
     createStatus?: number;
     createErrorBody?: unknown;
+    createResponseLossOnce?: boolean;
     previewStatus?: number;
     previewErrorBody?: unknown;
     previewMatchedScopes?: Record<string, unknown>[];
   } = {},
 ): Promise<FeatureUpdateMocks> {
   let items = [...(options.initial ?? [])];
+  const createLedger = new Map<
+    string,
+    { bodyJson: string; record: FeatureUpdateRequestRecord }
+  >();
   const mocks: FeatureUpdateMocks = {
     create: 0,
     preview: 0,
     runNow: 0,
     cancel: 0,
     list: 0,
+    createKeys: [],
+    createBodyJson: [],
     createBodies: [],
     previewBodies: [],
     runNowBodies: [],
     runNowRecords: [],
     cancelBodies: [],
+    persistedCreateCount: () => createLedger.size,
   };
   const base = "/v1/admin/features/update-requests";
   const providersResponse: ProvidersResponse = {
@@ -250,7 +268,16 @@ async function mockFeatureUpdateRequests(
 
     if (method === "POST" && pathname === base) {
       mocks.create += 1;
+      const idempotencyKey = request.headers()["idempotency-key"] ?? "";
+      if (!UUID_PATTERN.test(idempotencyKey)) {
+        throw new Error(
+          `create Idempotency-Key must be UUID: ${idempotencyKey}`,
+        );
+      }
+      const bodyJson = request.postData() ?? "";
       const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
+      mocks.createKeys.push(idempotencyKey);
+      mocks.createBodyJson.push(bodyJson);
       mocks.createBodies.push(body);
       if (options.createStatus && options.createStatus >= 400) {
         await fulfillJson(
@@ -260,10 +287,34 @@ async function mockFeatureUpdateRequests(
         );
         return;
       }
-      const createdRequestId = `dddddddd-0000-4000-8000-${String(mocks.create).padStart(12, "0")}`;
+      const existing = createLedger.get(idempotencyKey);
+      if (existing) {
+        if (existing.bodyJson !== bodyJson) {
+          await fulfillJson(
+            route,
+            {
+              type: "https://kor-travel-map/errors/idempotency-conflict",
+              title: "Idempotency conflict",
+              status: 409,
+              detail: "같은 Idempotency-Key의 body가 다릅니다.",
+              code: "IDEMPOTENCY_CONFLICT",
+              request_id: "e2e",
+            },
+            409,
+          );
+          return;
+        }
+        await fulfillJson(
+          route,
+          createResponse(existing.record, { idempotentReplay: true }),
+        );
+        return;
+      }
+      const persistedIndex = createLedger.size + 1;
+      const createdRequestId = `dddddddd-0000-4000-8000-${String(persistedIndex).padStart(12, "0")}`;
       const created = makeRequest({
         request_id: createdRequestId,
-        job_id: `abababab-0000-4000-8000-${String(mocks.create).padStart(12, "0")}`,
+        job_id: `abababab-0000-4000-8000-${String(persistedIndex).padStart(12, "0")}`,
         status_url: `/v1/admin/features/update-requests/${createdRequestId}`,
         providers: body.providers ?? [],
         dataset_keys: body.dataset_keys ?? [],
@@ -277,6 +328,11 @@ async function mockFeatureUpdateRequests(
       });
       // invalidateQueries refetch가 새 행을 보도록 list에 push.
       items = [created, ...items];
+      createLedger.set(idempotencyKey, { bodyJson, record: created });
+      if (options.createResponseLossOnce && mocks.create === 1) {
+        await route.abort("connectionreset");
+        return;
+      }
       await fulfillJson(route, createResponse(created));
       return;
     }
@@ -381,7 +437,7 @@ test.describe("admin/features/update-requests list + create depth", () => {
     // 성공 Alert(role=status): request_id + status 노출.
     const successAlert = page
       .getByRole("status")
-      .filter({ hasText: "요청 처리 완료" });
+      .filter({ hasText: "새 요청 생성" });
     await expect(successAlert).toBeVisible();
     await expect(successAlert).toContainText("대기");
     await expect(successAlert).toContainText(CREATED_REQUEST_ID);
@@ -393,6 +449,42 @@ test.describe("admin/features/update-requests list + create depth", () => {
         name: new RegExp(CREATED_REQUEST_ID.slice(0, 12)),
       }),
     ).toBeVisible();
+  });
+
+  test("create 응답 유실은 UUID key와 canonical body를 그대로 replay한다", async ({
+    page,
+  }) => {
+    const mocks = await mockFeatureUpdateRequests(page, {
+      createResponseLossOnce: true,
+    });
+    await page.goto("/admin/features/update-requests");
+    await page.getByLabel(/미리보기/).uncheck();
+    await page.getByLabel("데이터셋 키").fill("weather_short, tour_spot");
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect.poll(() => mocks.create).toBe(1);
+    await expect(page.getByText("요청 생성 실패")).toBeVisible();
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => mocks.create).toBe(2);
+    await expect(
+      page.getByRole("status").filter({ hasText: "동일 요청 결과 재생" }),
+    ).toBeVisible();
+    expect(mocks.createKeys).toHaveLength(2);
+    expect(mocks.createKeys[0]).toMatch(UUID_PATTERN);
+    expect(mocks.createKeys[1]).toBe(mocks.createKeys[0]);
+    expect(mocks.createBodyJson[1]).toBe(mocks.createBodyJson[0]);
+    expect(mocks.createBodies[0].dataset_keys).toEqual([
+      "tour_spot",
+      "weather_short",
+    ]);
+    expect(mocks.persistedCreateCount()).toBe(1);
+    await page.getByLabel("요청 상태 필터").selectOption("all");
+    await expect(
+      page.getByRole("row", {
+        name: new RegExp(CREATED_REQUEST_ID.slice(0, 12)),
+      }),
+    ).toHaveCount(1);
   });
 
   test("preview endpoint와 create now: preview는 비영속, now 요청은 생성", async ({
@@ -535,7 +627,9 @@ test.describe("admin/features/update-requests list + create depth", () => {
     const runningSuccessAlert = page
       .getByRole("status")
       .filter({ hasText: "즉시 실행 요청 완료" });
-    await expect(runningSuccessAlert).toContainText("요청이 이미 실행 중입니다.");
+    await expect(runningSuccessAlert).toContainText(
+      "요청이 이미 실행 중입니다.",
+    );
 
     await page.getByLabel("요청 상태 필터").selectOption("queued");
     const queuedRow = page.getByRole("row", {
@@ -663,7 +757,9 @@ test.describe("admin/features/update-requests list + create depth", () => {
     expect(mocks.create).toBe(0);
   });
 
-  test("provider와 dataset filter가 모두 비면 제출을 차단한다", async ({ page }) => {
+  test("provider와 dataset filter가 모두 비면 제출을 차단한다", async ({
+    page,
+  }) => {
     const mocks = await mockFeatureUpdateRequests(page);
 
     await page.goto("/admin/features/update-requests");

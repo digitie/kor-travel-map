@@ -9,7 +9,6 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
-  - [ ] `T-ADM-C5` — frontend `/ops/pipeline` (agent B)
   - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
   - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
   - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (선착)
@@ -35,19 +34,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
   인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
   전에 반드시 머지한다.
-- [ ] `T-ADM-C5` — **frontend `/ops/pipeline`** (agent **B**, 의존 C3e·C45X-B): 상태
-  스트립(+sensor)·타임라인(자동 갱신 1페이지 한정+"새 실행 N건" 배지)·Dagster runs
-  패널(degrade)·전역 이벤트 탭·스케줄 패널·요청 dialog(MOIS 조건부 경고)+mock e2e.
-  홈 작업 상태 위젯은 `/v1/ops/pipeline/overview.operations_by_status`를 정본으로 사용한다.
-  `/ops/metrics.import_jobs_by_status` raw physical-row count를 작업 수로 표시하지 않는다.
-  **C3b API 소비 정본**(#689):
-  (a) 타임라인은 request branch 또는 standalone root를 행 하나로 노출하며,
-  descendant job을 별도 행으로 중복 노출하지 않는다. (b) provider/dataset 필터와
-  표시는 effective `providers[]`/`dataset_keys[]`와 typed `provider_datasets[]` pair를
-  사용한다. (c) request root의 상태와 `projected_job` 상태·진행률·단계를
-  분리해 표시한다. standalone root는 자체 진행률을 쓰고 `projected_job.detail_url`로
-  대표 descendant 상세에 연결한다. Dagster run 상세는 C3c가
-  `GET /v1/ops/pipeline/dagster-runs/{run_id}`로 추가하며 C5는 이 정본을 소비한다.
 - [ ] `T-ADM-C6a` — **존치 화면 링크 재배선** (선착, 의존 C4·C5): entity-link kind
   재매핑(1급)+직접 href 9파일+live.ts topic 매핑+HATEOAS `_job_links`+
   scenario catalog. 구 페이지 제거 **전** 독립 PR.
@@ -66,10 +52,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   fingerprint 변화와 grid cap 초과 fail-closed·scope별 durable failure를 검증한다.
   C4R의 운영 종결 이슈 #684/#686/#712도 이 live 증거를 첨부한 뒤 닫는다.
 
-현재 codex 실행 순서는 사용자 지시로 **C5 PR 적대 리뷰·수정·merge와 C7A 독립 범위 병행
-→ C6a → C6b → C7A 결선 → C7 n150**이다. C45X-B와 C4/C4R은 완료 이력으로 옮겼다.
-C5는 기존 PR을 정본에 맞게 보강하며 새 구현을 중복 생성하지 않는다. C7A의 query-key 결선은
-C5 merge 뒤 rebase하고, C6 착수 전 원격에서 관련 PR의 실제 merge·CI 상태를 확인한다.
+현재 codex 실행 순서는 사용자 지시로 **C6a → C6b → C7A 결선 → C7 n150**이다.
+C45X-B·C4/C4R·C5는 완료 이력으로 옮겼다. C7A의 query-key 결선은 C6b merge 뒤
+rebase하고, 각 단계 착수 전 원격에서 관련 PR의 실제 merge·CI 상태를 확인한다.
 
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전

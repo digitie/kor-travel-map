@@ -124,7 +124,11 @@ def _validated_http_url(
     require_graphql_path: bool = False,
 ) -> str:
     value = raw_url.strip()
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as exc:
+        raise DagsterUrlConfigurationError(f"{setting_name} is not a valid URL") from exc
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_DAGSTER_SCHEMES:
         raise DagsterUrlConfigurationError(f"{setting_name} scheme must be http or https")
@@ -286,15 +290,22 @@ def _parse_schedules(
         name = _string(entry.get("name"), "unknown_schedule")
         cron_schedule = optional_string(entry.get("cronSchedule"))
         default_cron = default_cron_for_schedule(name, cron_schedule)
+        pipeline_name = optional_string(entry.get("pipelineName"))
+        override_cron = overrides.get(name)
         schedules.append(
             DagsterSchedule(
                 name=name,
                 description=optional_string(entry.get("description")),
-                pipeline_name=optional_string(entry.get("pipelineName")),
+                pipeline_name=pipeline_name,
                 mode=optional_string(entry.get("mode")),
                 cron_schedule=cron_schedule,
                 default_cron_schedule=default_cron,
-                override_cron_schedule=overrides.get(name),
+                override_cron_schedule=override_cron,
+                effective_cron_schedule=cron_schedule,
+                override_saved=override_cron is not None,
+                override_effective=(
+                    None if override_cron is None else override_cron == cron_schedule
+                ),
                 execution_timezone=optional_string(entry.get("executionTimezone")),
                 default_status=optional_string(entry.get("defaultStatus")),
                 can_reset=bool(entry.get("canReset")),
@@ -304,6 +315,10 @@ def _parse_schedules(
                 repository_name=optional_string(state.get("repositoryName")),
                 repository_location_name=optional_string(state.get("repositoryLocationName")),
                 schedule_note=_schedule_note(name, default_cron),
+                can_run_now=pipeline_name is not None,
+                disabled_reason=(
+                    None if pipeline_name is not None else "schedule job 이름이 없습니다."
+                ),
                 recent_ticks=_parse_ticks(state.get("ticks")),
             )
         )

@@ -938,9 +938,11 @@ function RefreshNowSection({
             data-testid="refresh-create-result"
             variant={refreshNow.data.reused_active_request ? "warning" : "outline"}
           >
-            {refreshNow.data.reused_active_request
-              ? "활성 요청 재사용(200)"
-              : "새 요청 생성(201)"}
+            {refreshNow.data.idempotent_replay
+              ? "동일 요청 결과 재생(200)"
+              : refreshNow.data.reused_active_request
+                ? "활성 요청 재사용(200)"
+                : "새 요청 생성(201)"}
           </Badge>
         ) : null}
         {requestId && currentStatus && !statusQuery.isError ? (

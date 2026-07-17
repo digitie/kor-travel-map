@@ -40,6 +40,7 @@ from kortravelmap.providers.mois import (
     DATASET_KEY_HISTORY,
     PROVIDER_NAME,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 pytestmark = pytest.mark.integration
 
@@ -463,7 +464,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
 async def _cleanup_committed_operations(engine: AsyncEngine) -> None:
     """append-only 행은 저장소 integration 관례의 TRUNCATE로 별도 commit 정리한다."""
     async with AsyncSession(engine) as session, session.begin():
-        await session.execute(text(_CLEANUP_SQL))
+        await truncate_committed_test_rows(session, _CLEANUP_SQL)
         await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
 

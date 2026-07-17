@@ -131,6 +131,7 @@ describe("ops datasets current REST contract", () => {
     const response = {
       data: { request_id: "request-1" },
       meta: {},
+      idempotent_replay: false,
       reused_active_request: true,
     };
     const fetchMock = vi.fn<FetchMock>(() =>

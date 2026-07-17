@@ -7,7 +7,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, patchJson, pathWithQuery, postJson } from "./client";
+import {
+  getJson,
+  patchJson,
+  pathWithQuery,
+  postJson,
+  withIdempotencyKey,
+} from "./client";
 import { publicUrlEnv } from "./env";
 import type { components } from "./types";
 
@@ -51,22 +57,40 @@ function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
 
 function patchDagsterSchedule(
   scheduleName: string,
-  body: { cron_schedule: string; operator?: string; reason?: string },
+  body: { cron_schedule: string; reason?: string },
 ): Promise<DagsterScheduleCommandResponse> {
-  return patchJson<DagsterScheduleCommandResponse>(
-    `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}`,
-    body,
+  return withIdempotencyKey(
+    `dagster:schedule:${scheduleName}:patch`,
+    (idempotencyKey) =>
+      patchJson<DagsterScheduleCommandResponse>(
+        `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}`,
+        body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
+    {
+      retainOnSuccess: (response) =>
+        response.data.audit_status === "terminal_record_failed",
+    },
   );
 }
 
 function postDagsterScheduleCommand(
   scheduleName: string,
   command: "default" | "reset" | "run" | "start" | "stop",
-  body: { operator?: string; reason?: string } = {},
+  body: { reason?: string } = {},
 ): Promise<DagsterScheduleCommandResponse> {
-  return postJson<DagsterScheduleCommandResponse>(
-    `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}/${command}`,
-    body,
+  return withIdempotencyKey(
+    `dagster:schedule:${scheduleName}:${command}`,
+    (idempotencyKey) =>
+      postJson<DagsterScheduleCommandResponse>(
+        `/v1/ops/dagster/schedules/${encodeURIComponent(scheduleName)}/${command}`,
+        body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
+    {
+      retainOnSuccess: (response) =>
+        response.data.audit_status === "terminal_record_failed",
+    },
   );
 }
 
@@ -113,10 +137,9 @@ export function usePatchDagsterSchedule() {
     mutationFn: ({ cronSchedule, reason, scheduleName }) =>
       patchDagsterSchedule(scheduleName, {
         cron_schedule: cronSchedule,
-        operator: "admin-ui",
         reason,
       }),
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
     },
   });
@@ -135,10 +158,9 @@ export function useDagsterScheduleCommand() {
   >({
     mutationFn: ({ command, reason, scheduleName }) =>
       postDagsterScheduleCommand(scheduleName, command, {
-        operator: "admin-ui",
         reason,
       }),
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
     },
   });

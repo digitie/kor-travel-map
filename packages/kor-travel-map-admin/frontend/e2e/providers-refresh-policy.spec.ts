@@ -26,6 +26,10 @@ type ProviderRefreshPolicyResponse =
   components["schemas"]["ProviderRefreshPolicyResponse"];
 type ProviderRefreshPolicyUpsertRequest =
   components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
+type FeatureUpdateRequestCreateRequest =
+  components["schemas"]["FeatureUpdateRequestCreateRequest"];
+type FeatureUpdateRequestCreateResponse =
+  components["schemas"]["FeatureUpdateRequestCreateResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const KMA_PROVIDER = "python-kma-api";
@@ -242,7 +246,72 @@ async function mockPolicyUpsert(page: Page) {
   return { puts };
 }
 
+async function mockFeatureUpdateCreateReplay(page: Page) {
+  const posts: FeatureUpdateRequestCreateRequest[] = [];
+  await page.route(
+    "**/v1/admin/features/update-requests",
+    async (route) => {
+      const body =
+        route.request().postDataJSON() as FeatureUpdateRequestCreateRequest;
+      posts.push(body);
+      const response: FeatureUpdateRequestCreateResponse = {
+        data: {
+          created_at: MOCK_NOW,
+          dagster_run_id: null,
+          dataset_keys: [],
+          dispatch_requested_at: null,
+          effective_sync_scope: "default",
+          error_message: null,
+          finished_at: null,
+          generation: 1,
+          job_id: JOB_ID,
+          matched_scope: {},
+          operator: "e2e-authenticated-admin",
+          priority: body.priority ?? 50,
+          providers: [],
+          reason: body.reason ?? null,
+          request_id: REQUEST_ID,
+          requested_sync_scope: null,
+          result_kind: "request",
+          run_mode: body.run_mode ?? "queued",
+          scope: body.scope,
+          scope_type: body.scope.type,
+          started_at: null,
+          status: "running",
+          status_url: `/v1/admin/features/update-requests/${REQUEST_ID}`,
+          update_policy: body.update_policy ?? {},
+        },
+        idempotent_replay: true,
+        reused_active_request: true,
+        meta: makeMeta("e2e-provider-create-replay"),
+      };
+      await fulfillJson(route, response);
+    },
+  );
+  return { posts };
+}
+
 test.describe("/ops/providers refresh policy depth", () => {
+  test("요청 생성 결과는 active reuse보다 idempotent replay를 우선 표시한다", async ({
+    page,
+  }) => {
+    await mockOpsProviders(page, {
+      items: [makeOpsProviderDataset()],
+      details: { [KMA_PROVIDER]: [makeDatasetDetail()] },
+    });
+    const create = await mockFeatureUpdateCreateReplay(page);
+    await page.goto("/ops/providers");
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => create.posts.length).toBe(1);
+    await expect(
+      page.getByRole("status").filter({ hasText: "동일 요청 결과 재생" }),
+    ).toBeVisible();
+    await expect(page.getByText("기존 활성 요청 재사용")).toHaveCount(0);
+  });
+
   test("detail 응답의 기존 policy로 editor draft를 초기화한다", async ({
     page,
   }) => {
