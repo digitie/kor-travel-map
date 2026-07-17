@@ -744,6 +744,31 @@ scoped_job_seeds AS MATERIALIZED (
     + _SCOPED_COMPONENT_SOURCE_BODY_SQL
 )
 
+_MEMBERSHIP_SCOPED_SOURCE_SQL: Final[str] = (
+    """
+scoped_request_seeds(request_id, job_id) AS MATERIALIZED (
+    SELECT NULL::uuid, NULL::uuid
+    WHERE FALSE
+),
+scoped_job_seeds AS MATERIALIZED (
+    SELECT job.job_id
+    FROM ops.import_jobs AS job
+    WHERE CAST(:load_batch_id AS uuid) IS NOT NULL
+      AND job.load_batch_id = CAST(:load_batch_id AS uuid)
+      AND job.quarantined_at IS NULL
+
+    UNION
+
+    SELECT job.job_id
+    FROM ops.import_jobs AS job
+    WHERE CAST(:parent_job_id AS uuid) IS NOT NULL
+      AND job.parent_job_id = CAST(:parent_job_id AS uuid)
+      AND job.quarantined_at IS NULL
+),
+"""
+    + _SCOPED_COMPONENT_SOURCE_BODY_SQL
+)
+
 _DETAIL_SCOPED_SOURCE_SQL: Final[str] = (
     """
 scoped_request_seeds AS MATERIALIZED (
@@ -945,6 +970,17 @@ ORDER BY page.created_at DESC, page.id DESC, page.kind DESC
 _LIST_EXECUTIONS_SQL: Final[str] = (
     "WITH RECURSIVE\n"
     + _IDENTITY_SCOPED_SOURCE_SQL
+    + ",\n"
+    + PIPELINE_LINEAGE_BODY_SQL
+    + ",\n"
+    + _PIPELINE_ROOT_BODY_SQL
+    + ",\n"
+    + _LIST_EXECUTIONS_BODY_SQL
+)
+
+_LIST_MEMBERSHIP_EXECUTIONS_SQL: Final[str] = (
+    "WITH RECURSIVE\n"
+    + _MEMBERSHIP_SCOPED_SOURCE_SQL
     + ",\n"
     + PIPELINE_LINEAGE_BODY_SQL
     + ",\n"
@@ -1274,11 +1310,12 @@ async def list_pipeline_executions(
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
     cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(cursor)
-    query = (
-        _LIST_ALL_EXECUTIONS_SQL
-        if provider is None and dataset_key is None
-        else _LIST_EXECUTIONS_SQL
-    )
+    if normalized_load_batch_id is not None or normalized_parent_job_id is not None:
+        query = _LIST_MEMBERSHIP_EXECUTIONS_SQL
+    elif provider is None and dataset_key is None:
+        query = _LIST_ALL_EXECUTIONS_SQL
+    else:
+        query = _LIST_EXECUTIONS_SQL
     rows = (
         await session.execute(
             text(query),

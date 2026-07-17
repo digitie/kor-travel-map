@@ -13,7 +13,7 @@ describe("hrefFor", () => {
     [
       "loadBatch",
       "batch/id",
-      "/ops/pipeline?kind=import_job&load_batch_id=batch%2Fid",
+      "/ops/pipeline?load_batch_id=batch%2Fid",
     ],
     [
       "schedule",
@@ -63,7 +63,7 @@ describe("hrefFor", () => {
         kind: "update_request",
         load_batch_id: "wrong-batch",
       }),
-    ).toBe("/ops/pipeline?kind=import_job&load_batch_id=batch-a");
+    ).toBe("/ops/pipeline?load_batch_id=batch-a");
     expect(
       hrefFor("schedule", "daily-a", {
         tab: "executions",

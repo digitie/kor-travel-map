@@ -1267,11 +1267,13 @@ async def _seed_selective_projection_cardinality(
     dataset_array_request_id = "74444444-4444-4444-8444-444444444444"
     provider_only_job_id = "76666666-6666-4666-8666-666666666666"
     dataset_only_job_id = "77777777-7777-4777-8777-777777777777"
+    membership_load_batch_id = "78888888-8888-4888-8888-888888888888"
 
     await _job(session, _JOB_ROOT, kind="feature_update_request")
     await _job(
         session,
         _JOB_CHILD,
+        load_batch_id=membership_load_batch_id,
         parent_job_id=_JOB_ROOT,
         provider="typed-provider",
         dataset_key="typed-dataset",
@@ -1558,6 +1560,7 @@ async def _seed_selective_projection_cardinality(
         "direct_request": direct_request_id,
         "provider_array_request": provider_array_request_id,
         "dataset_array_request": dataset_array_request_id,
+        "membership_load_batch": membership_load_batch_id,
     }
 
 
@@ -1633,6 +1636,58 @@ async def test_selective_projection_plans_use_natural_bounded_access_paths(
         ).scalar_one()
         _assert_bounded_selective_access(plan, expected_index=expected_index)
         assert all(node.get("Relation Name") != "import_job_events" for node in _plan_nodes(plan))
+
+
+async def test_membership_projection_plans_use_natural_bounded_access_paths(
+    migrated_session: AsyncSession,
+) -> None:
+    targets = await _seed_selective_projection_cardinality(migrated_session)
+    await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
+    cases = (
+        (
+            "load-batch-membership",
+            targets["membership_load_batch"],
+            None,
+            "idx_import_jobs_load_batch_created",
+        ),
+        (
+            "parent-membership",
+            None,
+            _JOB_ROOT,
+            "idx_import_jobs_parent_created",
+        ),
+    )
+    for label, load_batch_id, parent_job_id, expected_index in cases:
+        plan = (
+            await migrated_session.execute(
+                text(
+                    "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
+                    f"/* {label} */ {pipeline_repo._LIST_MEMBERSHIP_EXECUTIONS_SQL}"
+                ),
+                {
+                    "kind": None,
+                    "status": None,
+                    "provider": None,
+                    "dataset_key": None,
+                    "filter_sync_scopes": False,
+                    "sync_scopes": [],
+                    "include_unscoped_scope": False,
+                    "load_batch_id": load_batch_id,
+                    "parent_job_id": parent_job_id,
+                    "created_from": None,
+                    "created_to": None,
+                    "cursor_created_at": None,
+                    "cursor_id": None,
+                    "cursor_item_kind": None,
+                    "page_limit": 51,
+                },
+            )
+        ).scalar_one()
+        _assert_bounded_selective_access(plan, expected_index=expected_index)
+        assert all(
+            node.get("Relation Name") != "import_job_events"
+            for node in _plan_nodes(plan)
+        )
 
 
 async def test_uuid_detail_plans_expand_only_selected_component(

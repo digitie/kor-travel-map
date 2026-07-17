@@ -62,12 +62,15 @@ function hrefFor(
     }
     case "issue":
       return withQuery("/admin/issues", { ...params });
-    case "loadBatch":
+    case "loadBatch": {
+      const rest = { ...params };
+      delete rest.kind;
+      delete rest.load_batch_id;
       return withQuery("/ops/pipeline", {
-        ...params,
-        kind: "import_job",
+        ...rest,
         load_batch_id: id,
       });
+    }
     case "schedule":
       return withQuery("/ops/pipeline", {
         ...params,
