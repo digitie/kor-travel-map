@@ -105,7 +105,7 @@ def test_full_coverage_version_is_derived_from_current_promoted_slug_set() -> No
         "\n".join(sorted(PROMOTED_SERVICE_SLUGS)).encode("utf-8")
     ).hexdigest()
 
-    assert MOIS_SOURCE_SYNC_FULL_COVERAGE == (f"promoted-national-sha256:{expected_digest}")
+    assert (f"promoted-national-sha256:{expected_digest}") == MOIS_SOURCE_SYNC_FULL_COVERAGE
 
 
 def test_sync_uses_promoted_slugs_commits_and_closes(

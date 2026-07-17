@@ -722,9 +722,9 @@ def _claim_resolution_from_row(
     normalized_reason: str,
     replayed: bool,
 ) -> DagsterScheduleClaimResolution:
-    row_schedule_name = str(getattr(row, "schedule_name"))
-    row_resolution = str(getattr(row, "resolution"))
-    row_reason = str(getattr(row, "reason"))
+    row_schedule_name = str(row.schedule_name)
+    row_resolution = str(row.resolution)
+    row_reason = str(row.reason)
     if (
         row_schedule_name != schedule_name
         or row_resolution != resolution
@@ -734,13 +734,13 @@ def _claim_resolution_from_row(
             "이미 기록된 claim 해제 결과와 resolution 또는 사유가 다릅니다."
         )
     return DagsterScheduleClaimResolution(
-        resolution_id=int(getattr(row, "resolution_id")),
-        command_id=UUID(str(getattr(row, "command_id"))),
+        resolution_id=int(row.resolution_id),
+        command_id=UUID(str(row.command_id)),
         schedule_name=row_schedule_name,
         resolution=resolution,
-        actor=str(getattr(row, "actor")),
+        actor=str(row.actor),
         reason=row_reason,
-        resolved_at=getattr(row, "created_at"),
+        resolved_at=row.created_at,
         replayed=replayed,
     )
 

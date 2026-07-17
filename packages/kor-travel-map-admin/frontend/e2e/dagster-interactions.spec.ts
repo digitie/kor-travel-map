@@ -210,6 +210,7 @@ function makeScheduleCommandResponse(
     effective_status: "confirmed",
     audit_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     audit_status: "recorded",
+    outcome_certainty: "confirmed",
     run_id: null,
     run_status: null,
     schedule_name: "weather_daily",

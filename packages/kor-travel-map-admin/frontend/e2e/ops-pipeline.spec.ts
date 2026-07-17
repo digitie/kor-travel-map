@@ -1860,7 +1860,10 @@ test.describe("/ops/pipeline", () => {
               cancellation_id: "77777777-7777-4777-8777-777777777777",
               committed_data_rolled_back: false,
               dagster_runs: [],
-              error: "Dagster 종료 여부를 확정할 수 없음",
+              error: {
+                code: "DAGSTER_TERMINATION_UNCERTAIN",
+                message: "Dagster 종료 여부를 확정할 수 없음",
+              },
               finished_at: "2026-07-14T10:04:00.000Z",
               members: [],
               previous_cancellation_id: null,
@@ -2091,11 +2094,12 @@ test.describe("/ops/pipeline", () => {
     page,
   }) => {
     const schedules = makeSchedules();
-    const firstSchedule = schedules.data.schedules[0];
+    const scheduleList = schedules.data.schedules;
+    const firstSchedule = scheduleList?.[0];
     if (!firstSchedule) {
       throw new Error("schedule fixture가 필요합니다.");
     }
-    schedules.data.schedules[0] = {
+    scheduleList[0] = {
       ...firstSchedule,
       pipeline_name: null,
       can_run_now: false,
@@ -2378,8 +2382,8 @@ test.describe("/ops/pipeline", () => {
     await page
       .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
       .evaluate((button) => {
-        button.click();
-        button.click();
+        (button as HTMLElement).click();
+        (button as HTMLElement).click();
       });
 
     await expect.poll(() => counters.commandBodies.length).toBe(1);

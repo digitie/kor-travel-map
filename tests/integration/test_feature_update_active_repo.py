@@ -354,7 +354,7 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
                 if hold_resolved_plan_guard:
                     first_guard_entered.set()
                     await release_first_guard.wait()
-                return None
+                return
 
             async with isolated_engine.connect() as connection:
                 backend_pid = int(

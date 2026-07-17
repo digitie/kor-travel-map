@@ -17,6 +17,8 @@ from fastapi import HTTPException
 from kortravelmap.providers.mois import (
     MOIS_SOURCE_SYNC_COVERAGE_TAG,
     MOIS_SOURCE_SYNC_FULL_COVERAGE,
+)
+from kortravelmap.providers.mois import (
     PROVIDER_NAME as MOIS_PROVIDER_NAME,
 )
 
