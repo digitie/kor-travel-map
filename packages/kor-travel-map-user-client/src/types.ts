@@ -355,11 +355,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 전 provider 데이터 신선도 목록(대시보드)
-         * @description 전 provider×dataset×scope의 last-sync/최근 실패 요약 (T-217g, D-07).
-         *
-         *     행 수가 유한(provider×dataset 수십 개)하므로 페이지네이션 없이 전량 반환한다
-         *     (``/v1/categories`` bounded reference 패턴). 빈 환경은 200 + 빈 ``items``.
+         * 전 provider 데이터 신선도 목록
+         * @description bounded provider×dataset×scope 신선도 목록을 반환한다.
          */
         get: operations["list_providers_freshness_v1_providers_get"];
         put?: never;
@@ -1599,18 +1596,12 @@ export interface components {
             /** Provider */
             provider: string;
         };
-        /**
-         * ProviderLastSyncResponse
-         * @description ``GET /providers/{provider}/last-sync`` 응답.
-         */
+        /** ProviderLastSyncResponse */
         ProviderLastSyncResponse: {
             data: components["schemas"]["ProviderLastSyncData"];
             meta: components["schemas"]["Meta"];
         };
-        /**
-         * ProviderSyncStateSummary
-         * @description 전체 목록의 1행 — ``SyncStateSummary`` + ``provider`` (cursor 제외).
-         */
+        /** ProviderSyncStateSummary */
         ProviderSyncStateSummary: {
             /** Consecutive Failures */
             consecutive_failures: number;
@@ -1632,10 +1623,7 @@ export interface components {
             /** Items */
             items: components["schemas"]["ProviderSyncStateSummary"][];
         };
-        /**
-         * ProvidersFreshnessResponse
-         * @description ``GET /providers`` 응답 — 전 provider×dataset 신선도 목록.
-         */
+        /** ProvidersFreshnessResponse */
         ProvidersFreshnessResponse: {
             data: components["schemas"]["ProvidersFreshnessData"];
             meta: components["schemas"]["Meta"];
@@ -1779,7 +1767,7 @@ export interface components {
         };
         /**
          * SyncStateSummary
-         * @description provider 1 (dataset_key, sync_scope) 신선도 — cursor 제외.
+         * @description provider dataset 신선도. 내부 cursor는 공개하지 않는다.
          */
         SyncStateSummary: {
             /** Consecutive Failures */

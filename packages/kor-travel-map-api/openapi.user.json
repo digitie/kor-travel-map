@@ -3023,7 +3023,6 @@
       },
       "ProviderLastSyncResponse": {
         "additionalProperties": false,
-        "description": "``GET /providers/{provider}/last-sync`` 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ProviderLastSyncData"
@@ -3041,7 +3040,6 @@
       },
       "ProviderSyncStateSummary": {
         "additionalProperties": false,
-        "description": "전체 목록의 1행 — ``SyncStateSummary`` + ``provider`` (cursor 제외).",
         "properties": {
           "consecutive_failures": {
             "title": "Consecutive Failures",
@@ -3089,13 +3087,13 @@
           }
         },
         "required": [
-          "provider",
           "dataset_key",
           "sync_scope",
           "status",
           "last_success_at",
           "last_failure_at",
-          "consecutive_failures"
+          "consecutive_failures",
+          "provider"
         ],
         "title": "ProviderSyncStateSummary",
         "type": "object"
@@ -3119,7 +3117,6 @@
       },
       "ProvidersFreshnessResponse": {
         "additionalProperties": false,
-        "description": "``GET /providers`` 응답 — 전 provider×dataset 신선도 목록.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ProvidersFreshnessData"
@@ -3441,7 +3438,7 @@
       },
       "SyncStateSummary": {
         "additionalProperties": false,
-        "description": "provider 1 (dataset_key, sync_scope) 신선도 — cursor 제외.",
+        "description": "provider dataset 신선도. 내부 cursor는 공개하지 않는다.",
         "properties": {
           "consecutive_failures": {
             "title": "Consecutive Failures",
@@ -7577,7 +7574,7 @@
     },
     "/v1/providers": {
       "get": {
-        "description": "전 provider×dataset×scope의 last-sync/최근 실패 요약 (T-217g, D-07).\n\n행 수가 유한(provider×dataset 수십 개)하므로 페이지네이션 없이 전량 반환한다\n(``/v1/categories`` bounded reference 패턴). 빈 환경은 200 + 빈 ``items``.",
+        "description": "bounded provider×dataset×scope 신선도 목록을 반환한다.",
         "operationId": "list_providers_freshness_v1_providers_get",
         "parameters": [
           {
@@ -7633,7 +7630,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "전 provider 데이터 신선도 목록(대시보드)",
+        "summary": "전 provider 데이터 신선도 목록",
         "tags": [
           "providers"
         ]
