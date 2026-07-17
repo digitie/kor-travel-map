@@ -1021,6 +1021,52 @@ def test_overview_dagster_unavailable_keeps_db_counts(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/ops/pipeline/overview",
+        "/v1/ops/pipeline/dagster-runs",
+        "/v1/ops/pipeline/schedules",
+    ],
+)
+def test_pipeline_projections_redact_invalid_dagster_url_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            dagster_url="http://dagster.example:12302",
+            dagster_graphql_url=(
+                "http://user:super-secret@dagster.example:12302/graphql?token=secret"
+            ),
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield _FakeSession()
+
+    async def _fake_counts(_session: Any) -> PipelineStatusCounts:
+        return _counts()
+
+    app.dependency_overrides[get_session] = _fake_session
+    monkeypatch.setattr(pipeline_mod, "get_pipeline_status_counts", _fake_counts)
+
+    with TestClient(app) as test_client:
+        response = test_client.get(path)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    projection = data["dagster"] if path.endswith("/overview") else data
+    assert projection["status"] == "error"
+    assert projection["dagster_url"] == ""
+    assert projection["graphql_url"] == ""
+    assert "super-secret" not in response.text
+    assert "token=secret" not in response.text
+
+
+@pytest.mark.unit
 def test_executions_list_passes_filters_and_maps_rows(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

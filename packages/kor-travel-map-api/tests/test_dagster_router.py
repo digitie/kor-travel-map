@@ -47,6 +47,22 @@ def test_resolved_schedule_idempotency_conflict_is_confirmed() -> None:
     }
 
 
+@pytest.mark.unit
+def test_schedule_url_error_redacts_invalid_configuration_secrets() -> None:
+    data = dagster_schedule._schedule_url_error(
+        checked_at=datetime(2026, 7, 17, tzinfo=UTC),
+        schedule_name="safe_schedule",
+        command="run",
+        error=dagster_mod.DagsterUrlConfigurationError(
+            "dagster_graphql_url must not include userinfo"
+        ),
+    )
+
+    assert data.dagster_url == ""
+    assert data.graphql_url == ""
+    assert "secret" not in data.model_dump_json()
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app = create_app(

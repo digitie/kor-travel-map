@@ -1017,15 +1017,14 @@ async def get_pipeline_overview(
     counts = await get_pipeline_status_counts(session)
 
     settings = _settings_from_request(request)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     dagster_part: PipelineDagsterOverview
     try:
         dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         dagster_part = PipelineDagsterOverview(
             status="error",
-            dagster_url=settings.dagster_url,
-            graphql_url=raw_graphql_url,
+            dagster_url="",
+            graphql_url="",
             errors=[str(exc)],
         )
     else:
@@ -1376,15 +1375,14 @@ async def list_dagster_runs(
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
     settings = _settings_from_request(request)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     try:
         dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         return PipelineDagsterRunsResponse(
             data=PipelineDagsterRunsData(
                 status="error",
-                dagster_url=settings.dagster_url,
-                graphql_url=raw_graphql_url,
+                dagster_url="",
+                graphql_url="",
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),
@@ -1566,15 +1564,14 @@ async def list_pipeline_schedules(
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
     settings = _settings_from_request(request)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
     try:
         dagster_urls = dagster_graphql.dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
         return PipelineSchedulesResponse(
             data=PipelineSchedulesData(
                 status="error",
-                dagster_url=settings.dagster_url,
-                graphql_url=raw_graphql_url,
+                dagster_url="",
+                graphql_url="",
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),

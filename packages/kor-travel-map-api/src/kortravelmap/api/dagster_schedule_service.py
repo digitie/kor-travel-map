@@ -1455,7 +1455,6 @@ async def _reload_location(
 
 def _schedule_url_error(
     *,
-    settings: ApiSettings,
     checked_at: datetime,
     schedule_name: str,
     command: ScheduleCommand,
@@ -1463,8 +1462,8 @@ def _schedule_url_error(
 ) -> DagsterScheduleCommandData:
     return DagsterScheduleCommandData(
         status="unavailable",
-        dagster_url=settings.dagster_url,
-        graphql_url=dagster_graphql.candidate_graphql_url(settings),
+        dagster_url="",
+        graphql_url="",
         checked_at=checked_at,
         schedule_name=schedule_name,
         command=command,
@@ -1495,7 +1494,6 @@ async def update_schedule(
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return _schedule_command_response(
             _schedule_url_error(
-                settings=settings,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command="update",
@@ -1601,7 +1599,6 @@ async def reset_schedule_default(
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return _schedule_command_response(
             _schedule_url_error(
-                settings=settings,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command="default",
@@ -1702,7 +1699,6 @@ async def mutate_schedule_state(
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return _schedule_command_response(
             _schedule_url_error(
-                settings=settings,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command=command,
@@ -1888,7 +1884,6 @@ async def run_schedule_now(
     except dagster_graphql.DagsterUrlConfigurationError as exc:
         return _schedule_command_response(
             _schedule_url_error(
-                settings=settings,
                 checked_at=checked_at,
                 schedule_name=schedule_name,
                 command="run",
