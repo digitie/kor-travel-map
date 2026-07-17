@@ -107,6 +107,24 @@ def _dataset_detail_url(provider: str, dataset_key: str, sync_scope: str) -> str
     )
 
 
+def _event_history_url(
+    provider: str,
+    dataset_key: str,
+    effective_sync_scope: str,
+) -> str:
+    return (
+        "/v1/ops/pipeline/events?"
+        + urlencode(
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": effective_sync_scope,
+            },
+            quote_via=quote,
+        )
+    )
+
+
 class DatasetNotFoundError(LookupError):
     """카탈로그·sync state·policy 어디에도 dataset이 없음."""
 
@@ -592,9 +610,12 @@ def _scope_state(
 
 
 def _event_record(event: OpsImportJobEvent) -> OpsDatasetEventRecord:
+    if event.sync_scope is None:
+        raise AssertionError("dataset canonical event must have an effective sync_scope")
     return OpsDatasetEventRecord(
         event_id=event.event_id,
         job_id=event.job_id,
+        sync_scope=event.sync_scope,
         stage=event.stage,
         level=event.level,
         code=event.code,
@@ -669,6 +690,9 @@ async def load_dataset_detail(
         dataset_key,
         sync_scope,
     )
+    event_sync_scope = (
+        "dataset_wide" if "dataset_wide" in history_sync_scopes else sync_scope
+    )
     executions_page = await list_pipeline_executions(
         session,
         provider=provider,
@@ -680,6 +704,7 @@ async def load_dataset_detail(
         session,
         provider=provider,
         dataset_key=dataset_key,
+        sync_scope=event_sync_scope,
         limit=_RECENT_EVENTS_LIMIT,
     )
     issue_counts = await count_open_integrity_issues_by_dataset(
@@ -752,6 +777,12 @@ async def load_dataset_detail(
             )
         ),
         recent_events=[_event_record(item) for item in events_page.items],
+        recent_events_next_cursor=events_page.next_cursor,
+        event_history_url=_event_history_url(
+            provider,
+            dataset_key,
+            event_sync_scope,
+        ),
         dataset_issues=_issue_summary(dataset_issues),
         provider_issues=_issue_summary(provider_issues),
     )

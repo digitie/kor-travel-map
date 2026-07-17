@@ -1386,12 +1386,18 @@ function EventRow({ event }: { event: OpsDatasetEventRecord }) {
       {event.code ? (
         <span className="font-mono text-xs text-text-secondary">{event.code}</span>
       ) : null}
+      <Badge variant="outline">{event.sync_scope}</Badge>
       <span className="min-w-0 flex-1 break-all">{event.message}</span>
       <span className="text-xs text-text-tertiary">
         {formatDateTime(event.occurred_at)}
       </span>
     </li>
   );
+}
+
+function pipelineEventHistoryHref(apiHistoryUrl: string): string {
+  const query = apiHistoryUrl.split("?", 2)[1] ?? "";
+  return `/ops/pipeline?tab=events${query ? `&${query}` : ""}`;
 }
 
 function HistoryPanel({
@@ -1492,7 +1498,25 @@ function HistoryPanel({
         />
       </div>
       <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">최근 이벤트</div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium">최근 이벤트</span>
+          {detail ? (
+            <Link
+              className="text-xs text-primary underline-offset-2 hover:underline"
+              data-api-history-url={detail.event_history_url}
+              href={pipelineEventHistoryHref(detail.event_history_url)}
+            >
+              선택 범위 이벤트 전체 보기
+            </Link>
+          ) : null}
+        </div>
+        <p className="mb-2 text-xs text-text-tertiary">
+          canonical job/request의 effective sync scope가 선택 범위와 정확히 같은
+          이벤트만 표시합니다.
+          {detail?.recent_events_next_cursor
+            ? " 더 오래된 이벤트가 있습니다."
+            : ""}
+        </p>
         {detail && detail.recent_events.length > 0 ? (
           <ul>
             {detail.recent_events.map((event) => (

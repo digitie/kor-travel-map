@@ -44,8 +44,10 @@ class _Session:
     def __init__(self, *results: _Result) -> None:
         self._results = list(results)
         self.params: list[dict[str, Any]] = []
+        self.statements: list[str] = []
 
     async def execute(self, _statement: Any, params: dict[str, Any] | None = None) -> _Result:
+        self.statements.append(str(_statement))
         self.params.append(dict(params or {}))
         return self._results.pop(0)
 
@@ -89,6 +91,7 @@ def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
         job_id="11111111-1111-1111-1111-111111111111",
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
+        sync_scope="dataset_wide",
         feature_id=None,
         stage="loading",
         level="error",
@@ -131,10 +134,13 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
         level=None,
         provider=None,
         dataset_key=None,
+        sync_scope=None,
         cursor_occurred_at=None,
     )
-    assert "quarantined_at IS NULL" in events_sql
-    assert "ops.import_jobs" not in events_sql
+    assert "event.quarantined_at IS NULL" in events_sql
+    assert "job.quarantined_at IS NULL" in events_sql
+    assert "JOIN ops.import_jobs AS job" in events_sql
+    assert "ops.feature_update_requests" not in events_sql
 
 
 @pytest.mark.unit
@@ -228,6 +234,7 @@ async def test_import_job_events_list_and_cursor() -> None:
         limit=1,
     )
     assert isinstance(page.items[0], OpsImportJobEvent)
+    assert page.items[0].sync_scope == "dataset_wide"
     assert page.items[0].payload == {"attempt": 2}
     assert page.next_cursor is not None
 
@@ -264,6 +271,48 @@ async def test_import_job_events_global_filters() -> None:
     assert session.params[0]["level"] == "warning"
     assert session.params[0]["provider"] == "python-mois-api"
     assert session.params[0]["dataset_key"] == "mois_license_features_bulk"
+
+
+@pytest.mark.unit
+async def test_import_job_events_scope_filter_uses_canonical_request_join() -> None:
+    at = datetime(2026, 6, 3, tzinfo=UTC)
+    session = _Session(
+        _Result([_event_row("11111111-1111-1111-1111-111111111111", at=at)])
+    )
+
+    page = await list_ops_import_job_events(
+        cast(Any, session),
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        sync_scope="dataset_wide",
+        limit=20,
+    )
+
+    assert len(page.items) == 1
+    sql = session.statements[0]
+    assert "JOIN ops.import_jobs AS job" in sql
+    assert "JOIN ops.feature_update_requests AS request" in sql
+    assert "request.scope_type = 'provider_dataset'" in sql
+    assert "job.sync_scope = CAST(:sync_scope AS text)" in sql
+    assert (
+        sql.index("job.sync_scope = CAST(:sync_scope AS text)")
+        < sql.index("ORDER BY")
+        < sql.index("LIMIT")
+    )
+    assert session.params[0]["sync_scope"] == "dataset_wide"
+
+
+@pytest.mark.unit
+async def test_import_job_events_scope_filter_requires_typed_pair() -> None:
+    session = _Session()
+
+    with pytest.raises(ValueError, match="requires provider and dataset_key"):
+        await list_ops_import_job_events(
+            cast(Any, session),
+            sync_scope="target_grids",
+        )
+
+    assert session.params == []
 
 
 @pytest.mark.unit

@@ -10,7 +10,14 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import pytest
+from kortravelmap.api import ops_dataset_service as dataset_service
+from kortravelmap.api.app import create_app
+from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
+from kortravelmap.api.db import get_session
+from kortravelmap.api.ops_dataset_schedule import DatasetScheduleIndex
+from kortravelmap.api.settings import ApiSettings
 from kortravelmap.dagster import feature_update_runner as dagster_runner_mod
 from kortravelmap.dagster import kma_weather as kma_weather_mod
 from kortravelmap.dagster.assets import run_feature_event_datagokr_cultural_festivals
@@ -20,6 +27,7 @@ from kortravelmap.dagster.feature_update_runner import (
     RunnerResources,
     _bind_client_to_session,
 )
+from pydantic import SecretStr
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -620,6 +628,18 @@ async def test_failed_runner_rolls_back_refresh_writes(
     assert failed_target is not None
     assert failed_target.last_failed_at is not None
     assert failed_target.last_refreshed_at is None
+    typed_kma_event_count = await execution_session.scalar(
+        text(
+            """
+            SELECT count(*)
+            FROM ops.import_job_events
+            WHERE job_id = CAST(:job_id AS uuid)
+              AND code = 'kma.target_scope_empty'
+            """
+        ),
+        {"job_id": request.job_id},
+    )
+    assert typed_kma_event_count == 0
 
 
 async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
@@ -778,7 +798,11 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
         dagster_runner_mod,
         "_kma_weather_resources",
         lambda _settings, _scope: RunnerResources(
-            {"kma_weather_client": SimpleNamespace(forecast=forecast)}
+            {
+                "kma_weather_client_factory": lambda: SimpleNamespace(
+                    forecast=forecast
+                )
+            }
         ),
     )
     monkeypatch.setattr(
@@ -837,6 +861,437 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
     assert sync_state["consecutive_failures"] == 1
     assert sync_state["last_failure_at"] is not None
     assert sync_state["last_success_at"] is None
+    empty_scope_event_count = await execution_session.scalar(
+        text(
+            """
+            SELECT count(*)
+            FROM ops.import_job_events
+            WHERE job_id = CAST(:job_id AS uuid)
+              AND code = 'kma.target_scope_empty'
+            """
+        ),
+        {"job_id": request.job_id},
+    )
+    assert empty_scope_event_count == 0
+
+
+async def test_bound_kma_empty_target_fails_operation_without_provider_or_state_write(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_params = {
+        "provider": KMA_PROVIDER_NAME,
+        "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        "sync_scope": "target_grids",
+    }
+    await execution_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_sync_state (
+                provider,
+                dataset_key,
+                sync_scope,
+                status,
+                cursor,
+                last_success_at,
+                last_failure_at,
+                consecutive_failures,
+                next_run_after,
+                updated_at
+            ) VALUES (
+                :provider,
+                :dataset_key,
+                :sync_scope,
+                'paused',
+                '{"sentinel":"must-remain-unchanged"}'::jsonb,
+                TIMESTAMPTZ '2026-05-01 01:02:03+00',
+                TIMESTAMPTZ '2026-05-02 04:05:06+00',
+                7,
+                TIMESTAMPTZ '2026-05-03 07:08:09+00',
+                TIMESTAMPTZ '2026-05-04 10:11:12+00'
+            )
+            """
+        ),
+        state_params,
+    )
+    sync_state_sql = text(
+        """
+        SELECT
+            provider,
+            dataset_key,
+            sync_scope,
+            status,
+            cursor,
+            last_success_at,
+            last_failure_at,
+            consecutive_failures,
+            next_run_after,
+            updated_at
+        FROM provider_sync.provider_sync_state
+        WHERE provider = :provider
+          AND dataset_key = :dataset_key
+          AND sync_scope = :sync_scope
+        """
+    )
+    before_sync_state = dict(
+        (await execution_session.execute(sync_state_sql, state_params)).mappings().one()
+    )
+    request = await enqueue_feature_update_request(
+        execution_session,
+        scope={
+            "type": "provider_dataset",
+            "provider": KMA_PROVIDER_NAME,
+            "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+            "sync_scope": "target_grids",
+        },
+        effective_sync_scope="target_grids",
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+    assert request.job_id is not None
+    await execution_session.commit()
+
+    lazy_client_calls: list[tuple[KorTravelMapSettings, ProviderDatasetRefreshScope]] = []
+
+    def _forbidden_client_creation(
+        settings: KorTravelMapSettings,
+        scope: ProviderDatasetRefreshScope,
+    ) -> object:
+        lazy_client_calls.append((settings, scope))
+        raise AssertionError("empty target preflight 뒤 KMA client를 만들면 안 된다")
+
+    monkeypatch.setattr(
+        dagster_runner_mod,
+        "_new_kma_weather_client",
+        _forbidden_client_creation,
+    )
+    asset_runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": AsyncKorTravelMapClient(migrated_engine),
+            "reverse_geocoder": None,
+            "fetched_at": _FETCHED,
+            "strict_address": "off",
+        },
+        log=logging.getLogger(__name__),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(
+            data_go_kr_service_key=None,
+            kma_weather_extra_points=None,
+            kma_weather_max_grids_per_run=50,
+        ),
+    )
+    client = AsyncKorTravelMapClient(migrated_engine)
+    runner_entered = asyncio.Event()
+    release_runner = asyncio.Event()
+
+    async def runner(
+        session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        runner_entered.set()
+        await release_runner.wait()
+        return await asset_runner(session, scope)
+
+    first_execution = asyncio.create_task(
+        client.execute_feature_update_request(
+            request.request_id,
+            runner=runner,
+            dagster_run_id="dagster-kma-empty-target",
+        )
+    )
+    await asyncio.wait_for(runner_entered.wait(), timeout=5)
+    try:
+        with pytest.raises(FeatureUpdateLockBusy):
+            await client.execute_feature_update_request(
+                request.request_id,
+                runner=runner,
+                dagster_run_id="dagster-kma-empty-target-concurrent-loser",
+            )
+    finally:
+        release_runner.set()
+    result = await first_execution
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.results == ()
+    assert result.error_message is not None
+    assert lazy_client_calls == []
+
+    after_first_sync_state = dict(
+        (await execution_session.execute(sync_state_sql, state_params)).mappings().one()
+    )
+    assert after_first_sync_state == before_sync_state
+
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.error_message == result.error_message
+    job = await _job_status(execution_session, request.job_id)
+    assert job["status"] == "failed"
+    assert job["error_message"] == result.error_message
+    await execution_session.commit()
+
+    replay = await client.execute_feature_update_request(
+        request.request_id,
+        runner=runner,
+        dagster_run_id="dagster-kma-empty-target-terminal-replay",
+    )
+
+    assert replay is not None
+    assert replay.status == "failed"
+    assert replay.results == ()
+    assert lazy_client_calls == []
+    after_replay_sync_state = dict(
+        (await execution_session.execute(sync_state_sql, state_params)).mappings().one()
+    )
+    assert after_replay_sync_state == before_sync_state
+
+    operation_counts = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT count(*) FROM ops.feature_update_requests
+                     AS request
+                     JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+                     WHERE request.scope_type = 'provider_dataset'
+                       AND request.scope ->> 'provider' = :provider
+                       AND request.scope ->> 'dataset_key' = :dataset_key
+                       AND request.scope ->> 'sync_scope' = :sync_scope
+                       AND job.kind = 'feature_update_request'
+                       AND job.provider = :provider
+                       AND job.dataset_key = :dataset_key
+                       AND job.sync_scope = :sync_scope) AS requests,
+                    (SELECT count(*) FROM ops.import_jobs
+                     WHERE kind = 'feature_update_request'
+                       AND provider = :provider
+                       AND dataset_key = :dataset_key
+                       AND sync_scope = :sync_scope) AS jobs
+                """
+            ),
+            state_params,
+        )
+    ).mappings().one()
+    assert operation_counts["requests"] == 1
+    assert operation_counts["jobs"] == 1
+
+    terminal_events = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT job_id, provider, dataset_key, level, code, message, payload
+                FROM ops.import_job_events
+                WHERE provider = :provider
+                  AND dataset_key = :dataset_key
+                  AND code = 'kma.target_scope_empty'
+                ORDER BY occurred_at, event_id
+                """
+            ),
+            state_params,
+        )
+    ).mappings().all()
+    assert len(terminal_events) == 1
+    terminal_event = terminal_events[0]
+    assert str(terminal_event["job_id"]) == request.job_id
+    assert terminal_event["level"] == "error"
+    assert terminal_event["code"] == "kma.target_scope_empty"
+    assert terminal_event["message"] == result.error_message
+    assert terminal_event["payload"] == {
+        "status": "failed",
+        "failure_code": "kma.target_scope_empty",
+    }
+    await execution_session.commit()
+
+    async def _request_session() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            yield session
+
+    async def _empty_schedule_index(**_kwargs: object) -> DatasetScheduleIndex:
+        return DatasetScheduleIndex(source_status="ok", errors=(), by_dataset={})
+
+    monkeypatch.setattr(
+        dataset_service,
+        "load_dataset_schedule_index",
+        _empty_schedule_index,
+    )
+    proxy_secret = "kma-empty-target-integration-proxy-secret"
+    app = create_app(
+        ApiSettings(
+            _env_file=None,
+            debug_routes_enabled=False,
+            features_routes_enabled=False,
+            admin_routes_enabled=False,
+            ops_routes_enabled=True,
+            api_call_log_enabled=False,
+            prometheus_metrics_enabled=False,
+            admin_proxy_secret=SecretStr(proxy_secret),
+            admin_trusted_proxy_cidrs=["127.0.0.1/32"],
+            dagster_url="http://127.0.0.1:12702",
+            dagster_graphql_url=None,
+            dagster_allowed_hosts=["127.0.0.1"],
+        )
+    )
+    app.dependency_overrides[get_session] = _request_session
+    auth_headers = {
+        ADMIN_ACTOR_HEADER: "admin:kma-empty-target-integration",
+        ADMIN_PROXY_SECRET_HEADER: proxy_secret,
+    }
+    async with (
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+        as dagster_http_client,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(
+                app=app,
+                client=("127.0.0.1", 43123),
+            ),
+            base_url="http://testserver",
+            headers=auth_headers,
+        ) as api_client,
+    ):
+        app.state.dagster_http_client = dagster_http_client
+        pipeline_response = await api_client.get(
+            f"/v1/ops/pipeline/executions/update_request/{request.request_id}"
+        )
+        dataset_response = await api_client.get(
+            "/v1/ops/datasets/detail",
+            params=state_params,
+        )
+
+    assert pipeline_response.status_code == 200, pipeline_response.text
+    pipeline_event_codes = [
+        event["code"] for event in pipeline_response.json()["data"]["events"]
+    ]
+    assert pipeline_event_codes.count("kma.target_scope_empty") == 1
+    assert dataset_response.status_code == 200, dataset_response.text
+    dataset_event_codes = [
+        event["code"]
+        for event in dataset_response.json()["data"]["recent_events"]
+    ]
+    assert dataset_event_codes.count("kma.target_scope_empty") == 1
+
+
+async def test_kma_empty_terminal_event_failure_rolls_back_job_and_preserves_state(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_params = {
+        "provider": KMA_PROVIDER_NAME,
+        "dataset_key": KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+        "sync_scope": "target_grids",
+    }
+    await execution_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_sync_state (
+                provider, dataset_key, sync_scope, status, cursor,
+                last_success_at, last_failure_at, consecutive_failures,
+                next_run_after, updated_at
+            ) VALUES (
+                :provider, :dataset_key, :sync_scope, 'disabled',
+                '{"atomic":"sentinel"}'::jsonb,
+                TIMESTAMPTZ '2026-05-11 01:02:03+00',
+                TIMESTAMPTZ '2026-05-12 04:05:06+00',
+                9,
+                TIMESTAMPTZ '2026-05-13 07:08:09+00',
+                TIMESTAMPTZ '2026-05-14 10:11:12+00'
+            )
+            """
+        ),
+        state_params,
+    )
+    state_sql = text(
+        """
+        SELECT provider, dataset_key, sync_scope, status, cursor,
+               last_success_at, last_failure_at, consecutive_failures,
+               next_run_after, updated_at
+        FROM provider_sync.provider_sync_state
+        WHERE provider = :provider
+          AND dataset_key = :dataset_key
+          AND sync_scope = :sync_scope
+        """
+    )
+    before_state = dict(
+        (await execution_session.execute(state_sql, state_params)).mappings().one()
+    )
+    request = await enqueue_feature_update_request(
+        execution_session,
+        scope={
+            "type": "provider_dataset",
+            **state_params,
+        },
+        effective_sync_scope="target_grids",
+    )
+    await execution_session.commit()
+    client_creations: list[bool] = []
+
+    def _forbidden_client_creation(
+        _settings: KorTravelMapSettings,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> object:
+        client_creations.append(True)
+        raise AssertionError("empty preflight 뒤 client를 만들면 안 된다")
+
+    async def _fail_terminal_event(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("injected terminal event failure")
+
+    monkeypatch.setattr(
+        dagster_runner_mod,
+        "_new_kma_weather_client",
+        _forbidden_client_creation,
+    )
+    monkeypatch.setattr(
+        executor_mod,
+        "record_import_job_event",
+        _fail_terminal_event,
+    )
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": AsyncKorTravelMapClient(migrated_engine),
+            "reverse_geocoder": None,
+            "fetched_at": _FETCHED,
+            "strict_address": "off",
+        },
+        log=logging.getLogger(__name__),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(
+            data_go_kr_service_key=None,
+            kma_weather_extra_points=None,
+            kma_weather_max_grids_per_run=50,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="injected terminal event failure"):
+        await AsyncKorTravelMapClient(
+            migrated_engine
+        ).execute_feature_update_request(
+            request.request_id,
+            runner=runner,
+            dagster_run_id="dagster-kma-empty-event-fault",
+        )
+
+    assert client_creations == []
+    after_state = dict(
+        (await execution_session.execute(state_sql, state_params)).mappings().one()
+    )
+    assert after_state == before_state
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "running"
+    job = await _job_status(execution_session, request.job_id)
+    assert job["status"] == "running"
+    assert job["finished_at"] is None
+    assert job["error_message"] is None
+    terminal_event_count = await execution_session.scalar(
+        text(
+            """
+            SELECT count(*)
+            FROM ops.import_job_events
+            WHERE job_id = CAST(:job_id AS uuid)
+              AND code = 'kma.target_scope_empty'
+            """
+        ),
+        {"job_id": request.job_id},
+    )
+    assert terminal_event_count == 0
 
 
 async def test_transaction_bound_asset_client_rejects_engine_connection_escape(

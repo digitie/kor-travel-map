@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import build_asset_context
+from dagster import build_asset_context, materialize
 from kortravelmap.dto import ForecastStyle, WeatherDomain
+from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFailure
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
@@ -25,6 +27,9 @@ from kortravelmap.dagster.feature_operation_tracking import (
 from kortravelmap.dagster.kma_weather import (
     KmaForecastRow,
     KmaNowcastRow,
+    feature_weather_kma_short_forecast,
+    feature_weather_kma_ultra_short_forecast,
+    feature_weather_kma_ultra_short_nowcast,
     forecast_rows_from_items,
     map_grid_targets,
     mid_land_rows_from_items,
@@ -183,7 +188,7 @@ class _FakeKrtourClient:
         target_coords: list[tuple[float, float]] | None = None,
         target_coords_by_external_system: (dict[str, list[tuple[float, float]]] | None) = None,
         place_coords: list[tuple[str, float, float]] | None = None,
-        load_error: Exception | None = None,
+        load_error: BaseException | None = None,
     ) -> None:
         self.sync_state = sync_state
         self.sync_states = sync_states
@@ -355,10 +360,15 @@ def _context(
     extra_points: str | None = None,
     max_grids: int = 50,
     failure_managed_by_executor: bool | None = None,
+    client_factory: Any | None = None,
 ) -> Any:
     resource_values: dict[str, object] = {
         "kor_travel_map_client": kor_travel_map_client,
-        "kma_weather_client": SimpleNamespace(forecast=forecast),
+        "kma_weather_client_factory": (
+            client_factory
+            if client_factory is not None
+            else lambda: SimpleNamespace(forecast=forecast)
+        ),
         "kma_weather_extra_points": extra_points,
         "kma_weather_max_grids_per_run": max_grids,
         # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
@@ -564,13 +574,145 @@ async def test_external_system_scope_without_active_target_fails_before_provider
 
     assert forecast.calls == []
     assert kor_travel_map_client.get_state_calls == []
-    assert kor_travel_map_client.failure_scope_calls == [
-        {
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
-            "sync_scope": "external_system:missing-system",
-        }
-    ]
+    assert kor_travel_map_client.failure_scope_calls == []
+    assert kor_travel_map_client.success_scope_calls == []
+    assert kor_travel_map_client.loaded_bundles == []
+    assert kor_travel_map_client.loaded_values == []
+
+
+async def test_target_grids_without_active_target_or_extra_fails_before_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient()
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+    factory_calls: list[bool] = []
+
+    def _forbidden_factory() -> object:
+        factory_calls.append(True)
+        raise AssertionError("empty target 뒤 KMA client factory를 호출하면 안 된다")
+
+    with pytest.raises(
+        kma_weather.KmaWeatherTargetScopeEmptyError,
+        match="no active POI cache targets or effective grids",
+    ) as exc_info:
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(
+                kor_travel_map_client,
+                forecast,
+                sync_scope="target_grids",
+                client_factory=_forbidden_factory,
+            )
+        )
+
+    assert exc_info.value.sync_scope == "target_grids"
+    assert exc_info.value.record_sync_failure is False
+    assert kor_travel_map_client.target_coord_calls == [None]
+    assert forecast.calls == []
+    assert kor_travel_map_client.get_state_calls == []
+    assert kor_travel_map_client.failure_scope_calls == []
+    assert kor_travel_map_client.success_scope_calls == []
+    assert kor_travel_map_client.loaded_bundles == []
+    assert kor_travel_map_client.loaded_values == []
+    assert factory_calls == []
+
+
+async def test_effective_grid_creates_and_closes_factory_owned_kma_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5)])
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+    factory_calls: list[bool] = []
+    close_calls: list[bool] = []
+
+    def _close() -> None:
+        close_calls.append(True)
+
+    def _factory() -> object:
+        factory_calls.append(True)
+        return SimpleNamespace(forecast=forecast, close=_close)
+
+    result = await run_feature_weather_kma_ultra_short_nowcast(
+        _context(
+            kor_travel_map_client,
+            forecast,
+            sync_scope="target_grids",
+            client_factory=_factory,
+        )
+    )
+
+    assert result.grids_fetched == 1
+    assert factory_calls == [True]
+    assert close_calls == [True]
+    assert forecast.calls == [("now", 126, 37)]
+
+
+async def test_cancellation_remains_primary_when_owned_client_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    cancellation = asyncio.CancelledError()
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.9, 37.5)],
+        load_error=cancellation,
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+    close_calls: list[bool] = []
+
+    def _close() -> None:
+        close_calls.append(True)
+        raise RuntimeError("secondary close failure")
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(
+                kor_travel_map_client,
+                forecast,
+                sync_scope="target_grids",
+                client_factory=lambda: SimpleNamespace(
+                    forecast=forecast,
+                    close=_close,
+                ),
+            )
+        )
+
+    assert exc_info.value is cancellation
+    assert close_calls == [True]
+    assert kor_travel_map_client.failure_scope_calls == []
+
+
+async def test_refresh_failure_remains_primary_when_owned_client_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5)])
+    close_calls: list[bool] = []
+
+    class _FailingForecast:
+        def now(self, *, nx: int, ny: int) -> object:
+            raise RuntimeError(f"primary provider failure: {nx},{ny}")
+
+    def _close() -> None:
+        close_calls.append(True)
+        raise RuntimeError("secondary close failure")
+
+    with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
+        await run_feature_weather_kma_ultra_short_nowcast(
+            _context(
+                kor_travel_map_client,
+                cast(Any, _FailingForecast()),
+                sync_scope="target_grids",
+                client_factory=lambda: SimpleNamespace(
+                    forecast=_FailingForecast(),
+                    close=_close,
+                ),
+            )
+        )
+
+    assert "primary provider failure" in str(exc_info.value.__cause__)
+    assert "secondary close failure" not in str(exc_info.value)
+    assert close_calls == [True]
 
 
 async def test_target_grids_default_includes_global_extra_points(
@@ -613,6 +755,7 @@ async def test_grid_limit_max_plus_one_fails_before_provider_or_cursor_io(
     assert exc_info.value.provider == "python-kma-api"
     assert exc_info.value.dataset_key == "kma_ultra_short_nowcast"
     assert exc_info.value.sync_scope == "target_grids"
+    assert exc_info.value.event_code is None
     assert forecast.calls == []
     assert kor_travel_map_client.get_state_calls == []
     assert kor_travel_map_client.success_calls == []
@@ -805,7 +948,7 @@ def test_lazy_kma_helpers_use_provider_modules(
     assert kma_weather._latest_short_forecast_base() == ("20260611", "0200")
 
 
-# -- kma_weather_client resource ---------------------------------------------
+# -- kma_weather_client_factory resource -------------------------------------
 
 
 class _FakeKmaClient:
@@ -820,13 +963,19 @@ class _FakeKmaClient:
         self.closed = True
 
 
-def test_kma_weather_client_resource_yields_client_and_closes(
+def test_kma_weather_client_factory_resource_defers_credential_import_and_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeKmaClient.instances = []
     module = ModuleType("kma")
     module.__dict__["KmaClient"] = _FakeKmaClient
-    monkeypatch.setitem(sys.modules, "kma", module)
+    import_calls: list[str] = []
+
+    def _import_module(name: str) -> object:
+        import_calls.append(name)
+        return module
+
+    monkeypatch.setattr(resources.importlib, "import_module", _import_module)
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",
@@ -834,40 +983,143 @@ def test_kma_weather_client_resource_yields_client_and_closes(
     )
 
     resource_fn = cast(
-        "Any", resources.kma_weather_client_resource.resource_fn
+        "Any", resources.kma_weather_client_factory_resource.resource_fn
     )
-    resource_iter = resource_fn(_guarded_init_resource_context())
-    client = next(resource_iter)
+    factory = resource_fn(_guarded_init_resource_context())
 
+    assert callable(factory)
+    assert import_calls == []
+    assert _FakeKmaClient.instances == []
+
+    client = factory()
     assert client.service_key == "kma-key"
     assert client.closed is False
-
-    with pytest.raises(StopIteration):
-        next(resource_iter)
-
-    assert client.closed is True
+    assert import_calls == ["kma"]
 
 
-def test_kma_weather_client_resource_guard_without_credential(
+def test_kma_weather_client_factory_resource_allows_missing_credential_until_use(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import_calls: list[str] = []
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",
         lambda: SimpleNamespace(data_go_kr_service_key=None),
     )
-
-    resource_fn = cast(
-        "Any", resources.kma_weather_client_resource.resource_fn
+    monkeypatch.setattr(
+        resources.importlib,
+        "import_module",
+        lambda name: import_calls.append(name),
     )
 
+    resource_fn = cast(
+        "Any", resources.kma_weather_client_factory_resource.resource_fn
+    )
+    factory = resource_fn(_guarded_init_resource_context())
+
+    assert callable(factory)
+    assert import_calls == []
     with pytest.raises(RuntimeError) as exc_info:
-        next(resource_fn(_guarded_init_resource_context()))
+        factory()
 
     message = str(exc_info.value)
-    assert "kma_weather_client" in message
+    assert "kma_weather_client_factory" in message
     assert "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in message
     assert "python-kma-api" in message
+    assert import_calls == []
+
+
+@pytest.mark.parametrize(
+    ("asset", "base_key"),
+    [
+        (feature_weather_kma_ultra_short_nowcast, "202606110500"),
+        (feature_weather_kma_ultra_short_forecast, "202606110530"),
+        (feature_weather_kma_short_forecast, "202606110200"),
+    ],
+    ids=["nowcast", "ultra-short-forecast", "short-forecast"],
+)
+@pytest.mark.parametrize("preflight", ["empty", "cursor_same"])
+@pytest.mark.parametrize(
+    "service_key",
+    [None, SecretStr("configured-kma-key")],
+    ids=["credential-missing", "constructor-sentinel"],
+)
+def test_scheduled_kma_materialization_defers_public_client_until_after_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    asset: Any,
+    base_key: str,
+    preflight: str,
+    service_key: SecretStr | None,
+) -> None:
+    _patch_grid_and_bases(monkeypatch)
+    # 실제 asset의 retry policy 자체는 보존하되 failure matrix가 운영 지연
+    # (60/120/240초)을 기다리지 않도록 in-process delay 계산만 0으로 둔다.
+    monkeypatch.setattr(
+        type(kma_weather.FEATURE_LOAD_RETRY_POLICY),
+        "calculate_delay",
+        lambda _self, _attempt: 0,
+    )
+    target_coords = [] if preflight == "empty" else [(126.9, 37.5)]
+    membership = map_grid_targets(
+        target_coords=target_coords,
+        extra_points=(),
+        to_grid=_int_grid,
+        max_grids=50,
+    ).membership_fingerprint
+    sync_state = (
+        SimpleNamespace(
+            cursor={
+                "base_datetime": base_key,
+                "membership_fingerprint": membership,
+            }
+        )
+        if preflight == "cursor_same"
+        else None
+    )
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=target_coords,
+        sync_state=sync_state,
+    )
+    constructor_calls: list[str] = []
+    import_calls: list[str] = []
+
+    class _ForbiddenKmaClient:
+        def __init__(self, *, service_key: str) -> None:
+            constructor_calls.append(service_key)
+            raise AssertionError("KMA preflight skip 뒤 client를 만들면 안 된다")
+
+    module = ModuleType("kma")
+    module.__dict__["KmaClient"] = _ForbiddenKmaClient
+
+    def _import_module(name: str) -> object:
+        import_calls.append(name)
+        return module
+
+    monkeypatch.setattr(resources.importlib, "import_module", _import_module)
+    monkeypatch.setattr(
+        resources,
+        "KorTravelMapSettings",
+        lambda: SimpleNamespace(data_go_kr_service_key=service_key),
+    )
+
+    result = materialize(
+        [asset],
+        resources={
+            "kor_travel_map_client": kor_travel_map_client,
+            "feature_operation_guard": resources.feature_operation_guard_resource,
+            "kma_weather_client_factory": (
+                resources.kma_weather_client_factory_resource
+            ),
+            "kma_weather_extra_points": None,
+            "kma_weather_max_grids_per_run": 50,
+            "reverse_geocoder": None,
+        },
+        raise_on_error=False,
+    )
+
+    assert result.success is (preflight == "cursor_same")
+    assert import_calls == []
+    assert constructor_calls == []
 
 
 # -- T-219c: 중기예보 -------------------------------------------------------

@@ -450,7 +450,12 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
             </div>
           </TabsContent>
           <TabsContent className="mt-4" value="events">
-            <PipelineEventsPanel onSelectExecution={selectExecution} />
+            <PipelineEventsPanel
+              initialDatasetKey={searchParams.get("dataset_key") ?? ""}
+              initialProvider={searchParams.get("provider") ?? ""}
+              initialSyncScope={searchParams.get("sync_scope") ?? ""}
+              onSelectExecution={selectExecution}
+            />
           </TabsContent>
           <TabsContent className="mt-4" value="schedules">
             <SchedulePanel

@@ -34,6 +34,23 @@
   회귀를 추가했다. 적대 리뷰 2인에게 넘기기 위한 구현 스냅샷이며 지시에 따라 리뷰 전 테스트·lint·
   build는 아직 실행하지 않았다.
 
+## 2026-07-17 (codex, agent A) — AUD-686 2차 적대 리뷰 지적 반영
+
+- 정규 schedule resource가 client를 asset preflight 전에 생성하던 경로를
+  `kma_weather_client_factory`로 교체했다. 세 grid asset의 actual materialization에서 empty와
+  동일 cursor는 credential 검증·`kma` import·constructor 호출이 모두 0이며, client는 통과한
+  task가 동기 생성·소유·close한다.
+- cleanup은 `BaseException` primary identity를 보존한다. cancellation/provider failure 뒤 close와
+  진단 logger까지 실패해도 원래 오류를 유지하고, primary가 없을 때만 close 오류를 전파한다.
+- dataset event는 canonical event/job/request를 JOIN해 typed job scope를 cursor/ORDER/LIMIT 전에
+  제한한다. scope A cursor와 더 최신인 scope B 22건 격리, DTO/URL/다음 cursor, pipeline events
+  filter와 UI history link를 추가했다. 0057 migration은 후속 C7B-API 소유로 남겼다.
+- empty terminal 전이의 event writer fault는 request/job/event transaction을 rollback하고 기존
+  provider state를 byte-for-byte 보존한다. 같은 active request 경쟁 loser와 terminal replay도
+  event를 늘리지 않으며 generic/GridLimit/다른 provider는 empty code를 만들지 않는다.
+- 이 snapshot에서는 사용자 지시에 따라 테스트·lint·build를 실행하지 않았다. 동일 2인 적대
+  재리뷰 승인 뒤에만 검증한다.
+
 ## 2026-07-17 (codex, agent B) — C7A 적대 리뷰·전체 로컬 gate 완료
 
 - backend/DB/security 리뷰어와 frontend 상태 모델 리뷰어가 테스트 전에 same-origin ticket,

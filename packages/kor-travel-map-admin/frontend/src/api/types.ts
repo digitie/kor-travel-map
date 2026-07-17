@@ -6778,6 +6778,8 @@ export interface components {
             dataset_issues: components["schemas"]["OpsIssueSummary"];
             /** Dataset Key */
             dataset_key: string;
+            /** Event History Url */
+            event_history_url: string;
             /** Mutable */
             mutable: boolean;
             /** Orphan Reason */
@@ -6789,6 +6791,8 @@ export interface components {
             provider_issues: components["schemas"]["OpsIssueSummary"];
             /** Recent Events */
             recent_events: components["schemas"]["OpsDatasetEventRecord"][];
+            /** Recent Events Next Cursor */
+            recent_events_next_cursor: string | null;
             /** Recent Runs */
             recent_runs: components["schemas"]["OpsDatasetLatestExecution"][];
             /**
@@ -6842,6 +6846,8 @@ export interface components {
             occurred_at: string;
             /** Stage */
             stage: string | null;
+            /** Sync Scope */
+            sync_scope: string;
         };
         /**
          * OpsDatasetFreshness
@@ -8009,6 +8015,8 @@ export interface components {
             provider: string | null;
             /** Stage */
             stage: string | null;
+            /** Sync Scope */
+            sync_scope: string | null;
         };
         /**
          * PipelineJobPrecheckData
@@ -15043,6 +15051,7 @@ export interface operations {
                 level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
+                sync_scope?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };

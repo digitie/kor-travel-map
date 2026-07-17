@@ -855,6 +855,23 @@ provider/dataset identity를 기준으로 처리한다.
   effective scope를 실패 namespace로 사용한다. target selector는 catalog 기본 scope와
   활성 `external_system:*` scope를 DB state 유무와 관계없이 grid/detail에 `never_run`으로
   구체화하고, 삭제된 system의 잔존 state도 감사 목적으로 유지한다.
+- KMA grid 3종은 `target_grids`와 `external_system:*`의 active target을 격자로 해석하고
+  cap을 적용한 뒤 유효 격자가 0개면 typed `KmaWeatherTargetScopeEmptyError`로 canonical
+  operation을 `failed` 처리한다. provider를 시도하지 않은 preflight 실패이므로 provider
+  호출·적재·sync-state failure/success/cursor/timestamp write는 없고 operation 오류가 durable
+  증거다. credential 확인·`kma` import·public client 생성도 target read → grid mapping/dedupe →
+  cap → empty 판정과 cursor skip 뒤로 지연한다. canonical terminal 전이와 같은 transaction에
+  `ops.import_job_events.code=kma.target_scope_empty`를 정확히 1건 기록하며, terminal replay는
+  중복 event를 만들지 않는다. UI는 오류 문자열을 파싱하지 않고 pipeline 상세 `events[].code`와
+  dataset 상세 `recent_events[].code`에서 같은 code를 읽는다.
+- dataset 상세의 `recent_events[]`는 선택한 논리 scope의 canonical effective scope를
+  event 쿼리의 ORDER/LIMIT 전에 제한한 결과다. 각 event는 non-null `sync_scope`를 포함하고,
+  `recent_events_next_cursor`와 `event_history_url`은 같은 exact scope를 끝까지 이어 간다.
+  전역 `GET /v1/ops/pipeline/events`도 `provider`·`dataset_key`와 함께 `sync_scope`를 받으며
+  응답 event에 nullable `sync_scope`를 싣는다. 0057 전에는 이 값을 event payload나 복제 열이
+  아니라 canonical `import_job_events → import_jobs → feature_update_requests` JOIN의 typed
+  job scope에서 파생한다. C7B-API 0057이 별도 열·제약·access path를 도입하기 전까지 이
+  join-derived 계약이 정본이고, 본 단계는 0057 migration을 만들지 않는다.
 - integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
 - 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
@@ -1004,6 +1021,12 @@ page를 채워도 stale external/orphan exact-scope 이력이 pagination 뒤에�
 `recent_runs_next_cursor`와 같은 논리 scope 별칭을 적용한
 `pipeline_history_url`을 함께 반환한다. 다음 cursor는 그 URL에서 다른 scope를 섞지 않고
 누락·중복 없이 이어져야 한다.
+
+같은 상세의 `recent_events`는 `recent_runs`의 다중 scope 별칭을 그대로 합치지 않는다.
+target 선택형 dataset은 선택한 exact scope, 일반 dataset의 기본 논리 scope는 canonical
+`dataset_wide` effective scope 하나를 사용한다. `recent_events_next_cursor`와
+`event_history_url`은 그 effective scope를 명시하며, 전역 events 화면은 URL의
+provider/dataset/scope filter를 그대로 초기화한다.
 
 Dagster feature-load operation은 run root 하나와 exact pair child들이다. timeline에는 root 한
 행만 보이고 datasets는 같은 `(kind,id)` root와 해당 pair child status를 노출한다. 같은 run의

@@ -19,6 +19,20 @@
 - **다음 한 작업**: 완료 문서와 보안 감사를 포함한 PR을 올려 CI green·승인 후 병합한다.
   issue #718은 닫지 않고 최종 n150 live 증거를 첨부한 뒤 종결한다.
 
+## 2026-07-17 (codex, agent A) — T-ADM-AUD-686 2차 적대 리뷰 반영 snapshot
+
+- direct runner뿐 아니라 정규 Dagster KMA grid asset 3종도 target mapping/dedupe/cap/empty와
+  cursor skip 뒤에 public client를 동기 생성하도록 resource를 lazy factory로 바꿨다. credential
+  부재·constructor sentinel materialization과 cancellation/close 이중 실패 계약을 보강했다.
+- `kma.target_scope_empty` terminal event는 canonical 전이와 같은 transaction에서 한 번만
+  기록한다. active duplicate loser, terminal replay, event writer fault rollback, generic KMA·
+  grid-limit·다른 provider의 오분류 0건을 회귀 계약으로 고정했다.
+- dataset 최근 event는 canonical job/request JOIN의 effective scope를 ORDER/LIMIT 전에 제한하고,
+  DTO scope·다음 cursor·history URL과 pipeline events exact filter를 API/UI/OpenAPI/generated
+  type에 연결했다. migration은 만들지 않았고 후속 C7B-API 0057 전 join-derived 경계를 문서화했다.
+- **다음 한 작업**: 테스트를 실행하지 않은 이 snapshot을 동일 적대 리뷰어 2명에게 다시 보내
+  S1/S2/S3 0건 승인을 받은 뒤에만 집중/전체 gate와 PR 절차를 진행한다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 
 - same-origin ticket BFF, HMAC subprotocol ticket, DB nonce 단일 소비와 60초 lease를 완결했다.

@@ -43,7 +43,7 @@ from kortravelmap.dagster.resources import (
     build_provider_record_live_resource,
     datagokr_file_data_dataset_key_resource,
     kma_datagokr_client_resource,
-    kma_weather_client_resource,
+    kma_weather_client_factory_resource,
 )
 
 
@@ -1314,7 +1314,7 @@ def test_actual_definitions_mcst_pair_shape_drift_has_zero_io(
         PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_point_records"],
         PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_file_data_records"],
         datagokr_file_data_dataset_key_resource,
-        kma_weather_client_resource,
+        kma_weather_client_factory_resource,
         kma_datagokr_client_resource,
     ],
 )
