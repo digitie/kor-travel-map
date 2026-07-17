@@ -46,4 +46,29 @@ describe("hrefFor", () => {
       }),
     ).toBe("/ops/datasets?provider=python-kma-api");
   });
+
+  it("호출부 query가 canonical 엔티티 identity를 덮어쓰지 못한다", () => {
+    expect(
+      hrefFor("provider", "python-kma-api", {
+        provider: "wrong-provider",
+        dataset: "wrong-dataset",
+        dataset_key: "kma_vilage_fcst",
+        sync_scope: "target_grids",
+      }),
+    ).toBe(
+      "/ops/datasets?provider=python-kma-api&dataset=kma_vilage_fcst&sync_scope=target_grids",
+    );
+    expect(
+      hrefFor("loadBatch", "batch-a", {
+        kind: "update_request",
+        load_batch_id: "wrong-batch",
+      }),
+    ).toBe("/ops/pipeline?kind=import_job&load_batch_id=batch-a");
+    expect(
+      hrefFor("schedule", "daily-a", {
+        tab: "executions",
+        schedule: "wrong-schedule",
+      }),
+    ).toBe("/ops/pipeline?tab=schedules&schedule=daily-a");
+  });
 });

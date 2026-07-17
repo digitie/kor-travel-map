@@ -54,30 +54,30 @@ function hrefFor(
       // 기존 호출부의 dataset_key를 datasets 페이지 URL 계약의 dataset으로 번역한다.
       const { dataset_key: dataset, sync_scope, ...rest } = params ?? {};
       return withQuery("/ops/datasets", {
+        ...rest,
         provider: id,
         dataset,
         sync_scope,
-        ...rest,
       });
     }
     case "issue":
       return withQuery("/admin/issues", { ...params });
     case "loadBatch":
       return withQuery("/ops/pipeline", {
+        ...params,
         kind: "import_job",
         load_batch_id: id,
-        ...params,
       });
     case "schedule":
       return withQuery("/ops/pipeline", {
+        ...params,
         tab: "schedules",
         schedule: id,
-        ...params,
       });
     case "changeRequest":
       return withQuery("/admin/features/change-requests", {
-        request_id: id,
         ...params,
+        request_id: id,
       });
     case "dagsterRun":
       // import-job-detail의 기존 규약과 동일: public Dagster UI /runs/{id}.

@@ -550,8 +550,8 @@ export function ExecutionTimeline({
               </Badge>
             ) : null}
             <span className="text-xs text-muted-foreground">
-              로드된 root의 대표 작업에서만 좁히는 클라이언트 필터입니다 — 다음
-              페이지로 추가 탐색하세요.
+              root 전체 구성 작업을 서버에서 cursor와 page limit 적용 전에
+              필터링합니다.
             </span>
           </div>
         ) : null}
