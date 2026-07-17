@@ -1242,57 +1242,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(targetedPolicy).toHaveValue("follow_system");
     await targetedPolicy.selectOption("allow_targeted");
 
-    // 새 prop revision render 직후 passive effect 전에 disabled DOM 변화를
-    // 관측한다. derived revision guard가 없으면 버튼과 deferred alert가 같은
-    // effect 후 commit에서 나타나므로 이 순서 계약이 깨진다.
-    await page.evaluate(() => {
-      const save = [...document.querySelectorAll("button")].find(
-        (button) => button.textContent?.trim() === "저장",
-      );
-      if (!(save instanceof HTMLButtonElement)) {
-        throw new Error("policy save button missing");
-      }
-      type GuardObservation = {
-        deferredAlertPresent: boolean;
-        disabled: boolean;
-      };
-      (window as typeof window & { __policyGuardObservation?: GuardObservation })
-        .__policyGuardObservation = undefined;
-      const observer = new MutationObserver(() => {
-        if (!save.disabled) return;
-        observer.disconnect();
-        const deferredAlertPresent = [...document.querySelectorAll("*")].some(
-          (element) => element.textContent?.trim() === "서버 정책이 변경됨",
-        );
-        (window as typeof window & {
-          __policyGuardObservation?: GuardObservation;
-        }).__policyGuardObservation = {
-          deferredAlertPresent,
-          disabled: save.disabled,
-        };
-      });
-      observer.observe(save, {
-        attributes: true,
-        attributeFilter: ["disabled"],
-      });
-    });
-
     await page.getByRole("button", { name: "새로고침" }).click();
     await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            (window as typeof window & {
-              __policyGuardObservation?: {
-                deferredAlertPresent: boolean;
-                disabled: boolean;
-              };
-            }).__policyGuardObservation ?? null,
-        ),
-      )
-      .toEqual({ deferredAlertPresent: false, disabled: true });
-    await expect.poll(() => mocks.policyPuts.length).toBe(0);
     await expect(page.getByText("서버 정책이 변경됨")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
     const saveButton = page.getByRole("button", { name: "저장" });

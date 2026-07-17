@@ -71,8 +71,19 @@ import {
   datasetRowOpenIssueCount,
 } from "./dataset-issues";
 import {
+  applyPolicyMutationConflict,
+  applyPolicyMutationSuccess,
+  applyServerPolicyState,
+  initialPolicyEditorState,
   isPolicySaveBlocked,
+  observePolicyProp,
+  type PolicyDraft,
+  type PolicyEditorState,
+  type PolicyRevisionConflict,
   type PolicySaveGuard,
+  POLICY_SOURCE_KINDS,
+  POLICY_TARGETED_POLICIES,
+  policyToDraft,
   submitPolicyIfAllowed,
 } from "./policy-editor-guard";
 
@@ -214,70 +225,6 @@ function pipelineExecutionHref(kind: "update_request" | "import_job", id: string
 
 // ── 갱신 정책 편집 (PUT /ops/datasets/refresh-policy?provider=&dataset_key=) ──
 
-const sourceKinds = ["openapi", "filedata", "manual", "system"] as const;
-const targetedPolicies = ["follow_system", "allow_targeted", "disabled"] as const;
-
-type PolicyDraft = {
-  source_kind: ProviderRefreshPolicyUpsertRequest["source_kind"] | "";
-  targeted_policy: ProviderRefreshPolicyUpsertRequest["targeted_policy"];
-  system_interval_seconds: string;
-  optimal_interval_seconds: string;
-  min_interval_seconds: string;
-  max_requests_per_minute: string;
-  max_requests_per_hour: string;
-  max_requests_per_day: string;
-  max_concurrent: string;
-  burst_size: string;
-  stale_after_minutes: string;
-  enabled: boolean;
-};
-
-function numberText(value: number | null | undefined): string {
-  return value === null || value === undefined ? "" : String(value);
-}
-
-/** 서버 정본 source_kind만 신뢰한다 — 없으면 명시 선택을 요구(추측 금지, #684). */
-function sourceKindValue(
-  value: string | null | undefined,
-): ProviderRefreshPolicyUpsertRequest["source_kind"] | "" {
-  return sourceKinds.includes(
-    value as ProviderRefreshPolicyUpsertRequest["source_kind"],
-  )
-    ? (value as ProviderRefreshPolicyUpsertRequest["source_kind"])
-    : "";
-}
-
-function targetedPolicyValue(
-  value: string | null | undefined,
-): ProviderRefreshPolicyUpsertRequest["targeted_policy"] {
-  return targetedPolicies.includes(
-    value as ProviderRefreshPolicyUpsertRequest["targeted_policy"],
-  )
-    ? (value as ProviderRefreshPolicyUpsertRequest["targeted_policy"])
-    : "follow_system";
-}
-
-// full PUT에서 기존 nullable interval/quota를 임의 기본값으로 바꾸지 않는다
-// (#684 — enabled만 바꿔도 기존 null은 null로 남아야 한다). 빈 입력 = null 유지.
-function policyToDraft(
-  policy: ProviderRefreshPolicyRecord | null | undefined,
-): PolicyDraft {
-  return {
-    source_kind: sourceKindValue(policy?.source_kind),
-    targeted_policy: targetedPolicyValue(policy?.targeted_policy),
-    system_interval_seconds: numberText(policy?.system_interval_seconds),
-    optimal_interval_seconds: numberText(policy?.optimal_interval_seconds),
-    min_interval_seconds: numberText(policy?.min_interval_seconds),
-    max_requests_per_minute: numberText(policy?.max_requests_per_minute),
-    max_requests_per_hour: numberText(policy?.max_requests_per_hour),
-    max_requests_per_day: numberText(policy?.max_requests_per_day),
-    max_concurrent: numberText(policy?.max_concurrent ?? 1),
-    burst_size: numberText(policy?.burst_size),
-    stale_after_minutes: numberText(policy?.stale_after_minutes),
-    enabled: policy?.enabled ?? true,
-  };
-}
-
 /** 빈 입력은 **null**로 보낸다 — full PUT에서 기존 null이 임의 기본값으로 덮이지 않게. */
 function optionalPositiveInt(value: string, label: string): number | null {
   const trimmed = value.trim();
@@ -384,98 +331,6 @@ const POLICY_REPLAY_FIELDS = [
 ] as const satisfies readonly (keyof PolicyDraft)[];
 const BIGINT_MAX_REVISION = "9223372036854775807";
 
-type PolicyRevisionConflict = {
-  currentPolicy: ProviderRefreshPolicyRecord | null;
-  currentRevision: string | null;
-  terminal: boolean;
-};
-
-type PolicyEditorState = {
-  acknowledgedPropRevision: string | null;
-  dirty: boolean;
-  draft: PolicyDraft;
-  draftBasePolicy: ProviderRefreshPolicyRecord | null;
-  draftBaseRevision: string | null;
-  error: string | null;
-  fieldErrors: Partial<Record<string, string>>;
-  hasDeferredServerPolicy: boolean;
-  latestObservedPolicy: ProviderRefreshPolicyRecord | null;
-  latestObservedRevision: string | null;
-  reconcileMessage: string | null;
-  revisionConflict: PolicyRevisionConflict | null;
-};
-
-function initialPolicyEditorState(
-  policy: ProviderRefreshPolicyRecord | null | undefined,
-): PolicyEditorState {
-  const canonicalPolicy = policy ?? null;
-  const revision = policy?.revision ?? null;
-  return {
-    acknowledgedPropRevision: revision,
-    dirty: false,
-    draft: policyToDraft(policy),
-    draftBasePolicy: canonicalPolicy,
-    draftBaseRevision: revision,
-    error: null,
-    fieldErrors: {},
-    hasDeferredServerPolicy: false,
-    latestObservedPolicy: canonicalPolicy,
-    latestObservedRevision: revision,
-    reconcileMessage: null,
-    revisionConflict: null,
-  };
-}
-
-function applyServerPolicyState(
-  state: PolicyEditorState,
-  policy: ProviderRefreshPolicyRecord | null | undefined,
-): PolicyEditorState {
-  const canonicalPolicy = policy ?? null;
-  const revision = policy?.revision ?? null;
-  return {
-    ...state,
-    dirty: false,
-    draft: policyToDraft(policy),
-    draftBasePolicy: canonicalPolicy,
-    draftBaseRevision: revision,
-    error: null,
-    fieldErrors: {},
-    hasDeferredServerPolicy: false,
-    latestObservedPolicy: canonicalPolicy,
-    latestObservedRevision: revision,
-    reconcileMessage: null,
-    revisionConflict: null,
-  };
-}
-
-function observePolicyProp(
-  state: PolicyEditorState,
-  policy: ProviderRefreshPolicyRecord | null | undefined,
-): PolicyEditorState {
-  const incomingRevision = policy?.revision ?? null;
-  if (incomingRevision === state.acknowledgedPropRevision) {
-    return state;
-  }
-
-  const acknowledgedState = {
-    ...state,
-    acknowledgedPropRevision: incomingRevision,
-  };
-  // mutation 응답이나 409 본문으로 이미 본 revision의 query refetch는 새 변경이 아니다.
-  if (incomingRevision === state.latestObservedRevision) {
-    return acknowledgedState;
-  }
-  if (!state.dirty) {
-    return applyServerPolicyState(acknowledgedState, policy);
-  }
-  return {
-    ...acknowledgedState,
-    hasDeferredServerPolicy: true,
-    latestObservedPolicy: policy ?? null,
-    latestObservedRevision: incomingRevision,
-  };
-}
-
 function policyDraftsEqual(left: PolicyDraft, right: PolicyDraft): boolean {
   return POLICY_DRAFT_FIELDS.every((field) => left[field] === right[field]);
 }
@@ -553,9 +408,7 @@ function PolicyEditor({
   const resetPolicyMutation = upsertPolicy.reset;
   // React가 이 render 결과를 commit하기 전에 prop revision과 편집 상태를 한 번에
   // 맞춘다. dirty 초안은 유지하며, effect의 한 frame 늦은 저장 가능 구간을 만들지 않는다.
-  if (
-    incomingPropRevision !== editorState.acknowledgedPropRevision
-  ) {
+  if (incomingPropRevision !== editorState.acknowledgedPropRevision) {
     setEditorState(observePolicyProp(editorState, policy));
   }
   const {
@@ -566,6 +419,7 @@ function PolicyEditor({
     error,
     fieldErrors,
     hasDeferredServerPolicy,
+    lastSavedAt,
     latestObservedPolicy,
     latestObservedRevision,
     reconcileMessage,
@@ -588,15 +442,6 @@ function PolicyEditor({
       reconcileMessage: null,
     }));
   };
-
-  const applyServerPolicy = useCallback(
-    (nextPolicy: ProviderRefreshPolicyRecord | null | undefined) => {
-      setEditorState((current) =>
-        applyServerPolicyState(current, nextPolicy),
-      );
-    },
-    [],
-  );
 
   const rebaseLocalDraftOnLatest = useCallback(() => {
     if (revisionConflict?.terminal) {
@@ -628,10 +473,7 @@ function PolicyEditor({
         revisionConflict: null,
       };
     });
-  }, [
-    revisionConflict?.terminal,
-    resetPolicyMutation,
-  ]);
+  }, [revisionConflict?.terminal, resetPolicyMutation]);
 
   const reloadLatestPolicy = useCallback(() => {
     resetPolicyMutation();
@@ -644,6 +486,7 @@ function PolicyEditor({
     setEditorState((current) => ({
       ...current,
       error: null,
+      lastSavedAt: null,
       reconcileMessage: null,
       revisionConflict: null,
     }));
@@ -700,26 +543,27 @@ function PolicyEditor({
     upsertPolicy.mutate(
       { provider, datasetKey, body },
       {
-        onSuccess: (response) => applyServerPolicy(response.data),
+        onSuccess: (response) => {
+          // mutation hook의 늦은 data/error는 직접 표시하지 않는다. 현재 editor
+          // revision을 기준으로 적용된 결과만 아래 순수 전이가 UI 상태로 남긴다.
+          resetPolicyMutation();
+          setEditorState((current) =>
+            applyPolicyMutationSuccess(current, response.data),
+          );
+        },
         onError: (submitError) => {
+          resetPolicyMutation();
           const conflict = policyRevisionConflict(submitError);
-          if (conflict === null) return;
-          setEditorState((current) => ({
-            ...current,
-            draft:
-              conflict.currentPolicy === null
-                ? current.draft
-                : {
-                    ...current.draft,
-                    source_kind: sourceKindValue(
-                      conflict.currentPolicy.source_kind,
-                    ),
-                  },
-            hasDeferredServerPolicy: true,
-            latestObservedPolicy: conflict.currentPolicy,
-            latestObservedRevision: conflict.currentRevision,
-            revisionConflict: conflict,
-          }));
+          if (conflict === null) {
+            setEditorState((current) => ({
+              ...current,
+              error: submitError.message,
+            }));
+            return;
+          }
+          setEditorState((current) =>
+            applyPolicyMutationConflict(current, conflict),
+          );
         },
       },
     );
@@ -764,7 +608,7 @@ function PolicyEditor({
             }
           >
             <NativeSelectOption value="">선택하세요</NativeSelectOption>
-            {sourceKinds.map((value) => (
+            {POLICY_SOURCE_KINDS.map((value) => (
               <NativeSelectOption key={value} value={value}>
                 {value}
               </NativeSelectOption>
@@ -782,7 +626,7 @@ function PolicyEditor({
             )
           }
         >
-          {targetedPolicies.map((value) => (
+          {POLICY_TARGETED_POLICIES.map((value) => (
             <NativeSelectOption key={value} value={value}>
               {value}
             </NativeSelectOption>
@@ -989,16 +833,16 @@ function PolicyEditor({
           <SaveIcon data-icon="inline-start" />
           저장
         </Button>
-        {upsertPolicy.data ? (
+        {lastSavedAt ? (
           <Badge variant="outline">
-            저장됨 {formatDateTime(upsertPolicy.data.data.updated_at)}
+            저장됨 {formatDateTime(lastSavedAt)}
           </Badge>
         ) : null}
       </div>
-      {!revisionConflict && (error || upsertPolicy.isError) ? (
+      {!revisionConflict && error ? (
         <Alert className="mt-3" variant="destructive">
           <AlertTitle>정책 저장 실패</AlertTitle>
-          <AlertDescription>{error ?? upsertPolicy.error?.message}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
     </div>
