@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+from kortravelmap.api.routers.ops_live import collect_live_topic_snapshots
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from kortravelmap.api.routers.ops_live import collect_live_topic_snapshots
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -19,7 +18,7 @@ pytestmark = pytest.mark.integration
 
 _INSERT_INTEGRITY_SQL = """
 INSERT INTO ops.data_integrity_violations (
-  violation_key, dataset_key, violation_type, severity, message
+  issue_id, dataset_key, violation_type, severity, message
 )
 VALUES (
   CAST(:key AS uuid), 'live-projection', 'live_projection_test',
@@ -108,13 +107,13 @@ async def test_ops_live_topic_revision_rolls_back_with_source_write(
 async def test_dataset_projection_revision_rolls_back_with_source_write(
     migrated_engine: AsyncEngine,
 ) -> None:
-    violation_key = str(uuid4())
+    issue_id = str(uuid4())
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "dataset_projection")
         await session.rollback()
         await session.execute(
             text(_INSERT_INTEGRITY_SQL),
-            {"key": violation_key},
+            {"key": issue_id},
         )
         assert await _revision(session, "dataset_projection") == baseline + 1
         await session.rollback()
@@ -124,9 +123,9 @@ async def test_dataset_projection_revision_rolls_back_with_source_write(
         count = await session.scalar(
             text(
                 "SELECT COUNT(*) FROM ops.data_integrity_violations "
-                "WHERE violation_key = CAST(:key AS uuid)"
+                "WHERE issue_id = CAST(:key AS uuid)"
             ),
-            {"key": violation_key},
+            {"key": issue_id},
         )
         assert count == 0
 
@@ -236,8 +235,10 @@ async def test_each_ops_live_source_bumps_its_topic_once(
     await migrated_session.execute(
         text(
             "INSERT INTO ops.dagster_schedule_active_claims "
-            "(command_id, schedule_name) "
-            "VALUES (CAST(:command_id AS uuid), :schedule_name)"
+            "(command_id, schedule_name, created_at, resolvable_after) "
+            "VALUES (CAST(:command_id AS uuid), :schedule_name, "
+            "clock_timestamp() - interval '10 minutes', "
+            "clock_timestamp() - interval '5 minutes')"
         ),
         {"command_id": command_id, "schedule_name": schedule_name},
     )
@@ -334,7 +335,7 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
     migrated_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
-    violation_key = str(uuid4())
+    issue_id = str(uuid4())
     target_key = f"lock-target-{suffix}"
     async with AsyncSession(migrated_engine) as session:
         baseline = await _revision(session, "dataset_projection")
@@ -351,7 +352,7 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
                 assert second_pid is not None
                 await first.execute(
                     text(_INSERT_INTEGRITY_SQL),
-                    {"key": violation_key},
+                    {"key": issue_id},
                 )
 
                 async def _second_writer() -> None:
@@ -385,9 +386,9 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
             await cleanup.execute(
                 text(
                     "DELETE FROM ops.data_integrity_violations "
-                    "WHERE violation_key = CAST(:key AS uuid)"
+                    "WHERE issue_id = CAST(:key AS uuid)"
                 ),
-                {"key": violation_key},
+                {"key": issue_id},
             )
             await cleanup.execute(
                 text(

@@ -502,10 +502,13 @@ def test_admin_proxy_secret_minimum_is_enforced_at_runtime_boundaries() -> None:
     api_entrypoint = _script("docker/api-entrypoint.sh")
     admin_launcher = _script("scripts/run-admin-stack.sh")
 
-    for script in (api_entrypoint, admin_launcher):
+    for script, length_expression in (
+        (api_entrypoint, "${#api_proxy_secret}"),
+        (admin_launcher, "${#frontend_proxy_secret}"),
+    ):
         assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in script
         assert "at least 32 characters" in script
-        assert "#admin_proxy_secret" in script
+        assert length_expression in script
 
 
 @pytest.mark.unit

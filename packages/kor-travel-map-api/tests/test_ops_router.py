@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
     OpsConsistencyReportPage,
@@ -22,6 +21,7 @@ from kortravelmap.infra.ops_repo import (
     OpsIntegrityIssuePage,
 )
 from kortravelmap.infra.status_repo import StatusCounts
+from starlette.websockets import WebSocketDisconnect
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -161,9 +161,11 @@ def test_ops_live_websocket_rejects_logged_out_connection(
     live_client: TestClient,
     session: _FakeSession,
 ) -> None:
-    with live_client.websocket_connect("/v1/ops/live") as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    with (
+        live_client.websocket_connect("/v1/ops/live") as websocket,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+    ):
+        websocket.receive_json()
 
     assert exc_info.value.code == 4401
     assert session.rollback_calls == 1
@@ -180,9 +182,8 @@ def test_ops_live_websocket_rejects_tampered_ticket(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[tampered],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 4401
     assert session.rollback_calls == 1
@@ -208,9 +209,8 @@ def test_ops_live_websocket_rejects_expired_ticket(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[protocol],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 4408
     assert session.rollback_calls == 1
@@ -269,9 +269,8 @@ def test_ops_live_websocket_rejects_replayed_ticket(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[_live_subprotocol()],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 4401
     assert session.rollback_calls == 1
@@ -327,9 +326,8 @@ def test_ops_live_ticket_claim_timeout_rolls_back_and_closes_expired(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[_live_subprotocol()],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 4408
     assert session.rollback_calls == 1
@@ -359,9 +357,8 @@ def test_ops_live_ticket_claim_timeout_bounds_rollback_before_expired_close(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[_live_subprotocol()],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 4408
     assert session.rollback_calls == 1
@@ -389,9 +386,8 @@ def test_ops_live_ticket_claim_failure_rolls_back_and_retries_later(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[_live_subprotocol()],
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            websocket.receive_json()
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
+        websocket.receive_json()
 
     assert exc_info.value.code == 1013
     assert session.rollback_calls == 1

@@ -9,10 +9,9 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+from kortravelmap.api.ops_live_auth import OpsLiveTicketContext, claim_ops_live_ticket
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from kortravelmap.api.ops_live_auth import OpsLiveTicketContext, claim_ops_live_ticket
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine

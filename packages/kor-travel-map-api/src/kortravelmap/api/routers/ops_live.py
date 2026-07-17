@@ -989,7 +989,8 @@ async def _receive_command(websocket: WebSocket, timeout_seconds: float) -> obje
     poll_timeout = asyncio.timeout(timeout_seconds)
     try:
         async with poll_timeout:
-            return await websocket.receive_json()
+            command: object = await websocket.receive_json()
+            return command
     except TimeoutError:
         if poll_timeout.expired():
             return None
@@ -1134,7 +1135,7 @@ async def ops_live(
         return
     sequence += 1
     revisions: dict[str, str] = {}
-    sequence = await _send_snapshots(
+    next_sequence = await _send_snapshots(
         websocket,
         session,
         topics,
@@ -1143,8 +1144,9 @@ async def ops_live(
         force=True,
         expires_at=auth_context.expires_at,
     )
-    if sequence is None:
+    if next_sequence is None:
         return
+    sequence = next_sequence
     last_heartbeat = _utcnow()
     try:
         while True:
@@ -1180,15 +1182,16 @@ async def ops_live(
                 try:
                     topics, ack_type = _apply_command(topics, command)
                 except ValueError as exc:
-                    sequence = await _send_error(
+                    next_sequence = await _send_error(
                         websocket,
                         session,
                         sequence=sequence,
                         message=str(exc),
                         expires_at=auth_context.expires_at,
                     )
-                    if sequence is None:
+                    if next_sequence is None:
                         return
+                    sequence = next_sequence
                     continue
                 ack_sent = await _send_json_before_expiry(
                     websocket,
@@ -1202,7 +1205,7 @@ async def ops_live(
                 if not ack_sent:
                     return
                 sequence += 1
-                sequence = await _send_snapshots(
+                next_sequence = await _send_snapshots(
                     websocket,
                     session,
                     topics,
@@ -1211,11 +1214,12 @@ async def ops_live(
                     force=True,
                     expires_at=auth_context.expires_at,
                 )
-                if sequence is None:
+                if next_sequence is None:
                     return
+                sequence = next_sequence
                 last_heartbeat = _utcnow()
                 continue
-            sequence = await _send_snapshots(
+            next_sequence = await _send_snapshots(
                 websocket,
                 session,
                 topics,
@@ -1224,8 +1228,9 @@ async def ops_live(
                 force=False,
                 expires_at=auth_context.expires_at,
             )
-            if sequence is None:
+            if next_sequence is None:
                 return
+            sequence = next_sequence
             now = _utcnow()
             if (now - last_heartbeat).total_seconds() >= _HEARTBEAT_INTERVAL_SECONDS:
                 heartbeat_sent = await _send_json_before_expiry(

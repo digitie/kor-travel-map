@@ -109,6 +109,8 @@ describe("ops live invalidation", () => {
       false,
     );
     expect(queryClient.getQueryState(eventsPagedKey)?.isInvalidated).toBe(false);
+  });
+
   it("WebSocket URL에 topic, ticket, server secret을 넣지 않는다", () => {
     const url = new URL(__testing.buildOpsLiveUrl(5_000));
 
