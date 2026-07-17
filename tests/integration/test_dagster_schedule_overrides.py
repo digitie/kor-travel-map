@@ -19,11 +19,13 @@ import pytest
 from kortravelmap.api import dagster_schedule_service
 from kortravelmap.api.dagster_schedule_service import (
     DagsterScheduleIdempotencyConflict,
-    DagsterScheduleReplayedFailure,
+    DagsterScheduleClaimNotFound,
+    DagsterScheduleUncertainOutcome,
     DagsterScheduleStorageUnavailable,
     append_schedule_audit_event,
     delete_schedule_override,
     execute_audited_schedule_command,
+    resolve_schedule_active_claim,
     schedule_overrides,
     upsert_schedule_override,
 )
@@ -120,10 +122,7 @@ async def test_schedule_override_upsert_read_conflict_delete(
             assert await _row(session, _NAME) is None
         finally:
             await session.execute(
-                text(
-                    "DELETE FROM ops.dagster_schedule_overrides "
-                    "WHERE schedule_name = :name"
-                ),
+                text("DELETE FROM ops.dagster_schedule_overrides WHERE schedule_name = :name"),
                 {"name": _NAME},
             )
             await session.commit()
@@ -186,9 +185,7 @@ async def test_schedule_audit_events_are_append_only_and_correlated(
         await session.rollback()
 
         with pytest.raises(DBAPIError):
-            await session.execute(
-                text("TRUNCATE TABLE ops.dagster_schedule_audit_events")
-            )
+            await session.execute(text("TRUNCATE TABLE ops.dagster_schedule_audit_events"))
         await session.rollback()
 
         with pytest.raises(DBAPIError):
@@ -295,6 +292,7 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
     async def _fail_terminal_audit(*_args: object, **_kwargs: object) -> None:
         raise DagsterScheduleStorageUnavailable("terminal audit unavailable")
 
+    original_append = dagster_schedule_service.append_schedule_audit_event
     monkeypatch.setattr(
         dagster_schedule_service,
         "append_schedule_audit_event",
@@ -324,8 +322,23 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
                 operation=_operation,
             )
 
+        monkeypatch.setattr(
+            dagster_schedule_service,
+            "append_schedule_audit_event",
+            original_append,
+        )
+        resolved = await resolve_schedule_active_claim(
+            session,
+            schedule_name=schedule_name,
+            command_id=command_id,
+            resolution="confirmed_applied",
+            actor="admin@example.test",
+            reason="Dagster schedule 상태에서 반영 확인",
+        )
+
     assert first.data.audit_status == "terminal_record_failed"
     assert first.data.audit_command_id == command_id
+    assert resolved.resolution == "confirmed_applied"
     assert remote_calls == 1
 
 
@@ -452,7 +465,10 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
         raise RuntimeError("unexpected remote result")
 
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-        with pytest.raises(RuntimeError, match="unexpected remote result"):
+        with pytest.raises(
+            DagsterScheduleUncertainOutcome,
+            match="unexpected remote result",
+        ):
             await execute_audited_schedule_command(
                 session,
                 schedule_name=_NAME,
@@ -464,7 +480,7 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
                 operation=_operation,
             )
         with pytest.raises(
-            DagsterScheduleReplayedFailure,
+            DagsterScheduleUncertainOutcome,
             match="unexpected remote result",
         ):
             await execute_audited_schedule_command(
@@ -479,3 +495,178 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
             )
 
     assert remote_calls == 1
+
+
+async def test_uncertain_remote_result_replays_same_key_and_blocks_new_key(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    other_command_id = uuid4()
+    schedule_name = f"{_NAME}_uncertain_remote"
+    remote_calls = 0
+
+    async def _operation() -> DagsterScheduleCommandResponse:
+        nonlocal remote_calls
+        remote_calls += 1
+        response = _command_response()
+        response.data.status = "unavailable"
+        response.data.outcome_certainty = "uncertain"
+        response.data.effective_status = "unknown"
+        response.data.errors = ["response lost after POST"]
+        return response
+
+    async def _unexpected_operation() -> DagsterScheduleCommandResponse:
+        raise AssertionError("uncertain claim 뒤 새 key로 remote 호출하면 안 됩니다")
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        first = await execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command="run",
+            actor="admin@example.test",
+            reason="수동 실행",
+            request_details={"command": "run"},
+            command_id=command_id,
+            operation=_operation,
+        )
+        replay = await execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command="run",
+            actor="admin@example.test",
+            reason="수동 실행",
+            request_details={"command": "run"},
+            command_id=command_id,
+            operation=_operation,
+        )
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as conflict:
+            await execute_audited_schedule_command(
+                session,
+                schedule_name=schedule_name,
+                command="run",
+                actor="admin@example.test",
+                reason="수동 실행",
+                request_details={"command": "run"},
+                command_id=other_command_id,
+                operation=_unexpected_operation,
+            )
+
+    assert first.data.outcome_certainty == "uncertain"
+    assert replay.data.outcome_certainty == "uncertain"
+    assert conflict.value.active_command_id == command_id
+    assert remote_calls == 1
+
+
+async def test_uncertain_claim_requires_append_only_resolution_before_new_command(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    next_command_id = uuid4()
+    schedule_name = f"{_NAME}_manual_resolution"
+    remote_calls = 0
+
+    async def _uncertain_operation() -> DagsterScheduleCommandResponse:
+        nonlocal remote_calls
+        remote_calls += 1
+        response = _command_response()
+        response.data.status = "unavailable"
+        response.data.outcome_certainty = "uncertain"
+        response.data.effective_status = "unknown"
+        response.data.errors = ["response lost after POST"]
+        return response
+
+    async def _confirmed_operation() -> DagsterScheduleCommandResponse:
+        nonlocal remote_calls
+        remote_calls += 1
+        return _command_response()
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        await execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command="run",
+            actor="admin@example.test",
+            reason="수동 실행",
+            request_details={"command": "run"},
+            command_id=command_id,
+            operation=_uncertain_operation,
+        )
+
+        # DB 경계도 resolution 없는 uncertain claim 삭제를 거부한다.
+        with pytest.raises(DBAPIError):
+            await session.execute(
+                text(
+                    """
+                    DELETE FROM ops.dagster_schedule_active_claims
+                    WHERE command_id = CAST(:command_id AS uuid)
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        await session.rollback()
+
+        with pytest.raises(DagsterScheduleClaimNotFound):
+            await resolve_schedule_active_claim(
+                session,
+                schedule_name=f"{schedule_name}_other",
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="Dagster run 목록 직접 확인",
+            )
+
+        resolved = await resolve_schedule_active_claim(
+            session,
+            schedule_name=schedule_name,
+            command_id=command_id,
+            resolution="confirmed_not_applied",
+            actor="admin@example.test",
+            reason="  Dagster run 목록 직접 확인  ",
+        )
+        assert resolved.command_id == command_id
+        assert resolved.resolution == "confirmed_not_applied"
+        assert resolved.reason == "Dagster run 목록 직접 확인"
+
+        stored = (
+            await session.execute(
+                text(
+                    """
+                    SELECT resolution, actor, reason
+                    FROM ops.dagster_schedule_claim_resolutions
+                    WHERE command_id = CAST(:command_id AS uuid)
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        ).one()
+        assert tuple(stored) == (
+            "confirmed_not_applied",
+            "admin@example.test",
+            "Dagster run 목록 직접 확인",
+        )
+
+        with pytest.raises(DBAPIError):
+            await session.execute(
+                text(
+                    """
+                    UPDATE ops.dagster_schedule_claim_resolutions
+                    SET reason = '변조'
+                    WHERE command_id = CAST(:command_id AS uuid)
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        await session.rollback()
+
+        await execute_audited_schedule_command(
+            session,
+            schedule_name=schedule_name,
+            command="run",
+            actor="admin@example.test",
+            reason="확인 후 재실행",
+            request_details={"command": "run"},
+            command_id=next_command_id,
+            operation=_confirmed_operation,
+        )
+
+    assert remote_calls == 2

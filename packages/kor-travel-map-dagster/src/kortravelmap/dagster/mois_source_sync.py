@@ -22,6 +22,7 @@ NOTE: 본 모듈은 ``from __future__ import annotations``를 쓰지 않는다 �
 
 import contextlib
 import importlib
+import json
 import logging
 import os
 import pathlib
@@ -117,9 +118,7 @@ def _checkpoint_sqlite_wal(engine: Engine) -> None:
     if engine.dialect.name != "sqlite":
         return
     try:
-        with engine.connect().execution_options(
-            isolation_level="AUTOCOMMIT"
-        ) as connection:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
             row = connection.execute(text("PRAGMA wal_checkpoint(TRUNCATE)")).first()
     except Exception as exc:  # noqa: BLE001 — best-effort cleanup, 절대 sync를 깨지 않는다
         _LOGGER.warning("MOIS source WAL checkpoint 실패(무시): %s", exc)
@@ -178,9 +177,7 @@ def sync_mois_source_db(
     if str(parent) and not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)
 
-    slugs = tuple(
-        sorted(service_slugs if service_slugs is not None else PROMOTED_SERVICE_SLUGS)
-    )
+    slugs = tuple(sorted(service_slugs if service_slugs is not None else PROMOTED_SERVICE_SLUGS))
     if not slugs:
         # 명시적 빈 목록은 fail-fast — provider도 동일 메시지로 거부한다. op 경로는
         # 빈 설정을 None→PROMOTED로 collapse하므로 여기 도달하지 않는다.
@@ -192,9 +189,7 @@ def sync_mois_source_db(
     mois = cast(Any, importlib.import_module("mois"))
 
     # busy_timeout(초) — 동시 writer 경합 시 즉시 SQLITE_BUSY로 죽지 않고 대기(#617 리뷰).
-    engine = create_engine(
-        f"sqlite:///{db_path}", connect_args={"timeout": 30}
-    )
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"timeout": 30})
     scanned_count = 0
     upserted_count = 0
     open_count = 0
@@ -240,11 +235,7 @@ def sync_mois_source_db(
     # 슬러그별 sync_kind를 distinct하게 모은다 — 현재 provider는 항상 'localdata_full'을
     # 돌려주지만, 향후 분기 시 마지막 슬러그 값으로 조용히 collapse되지 않게 한다.
     if sync_kinds:
-        sync_kind = (
-            next(iter(sync_kinds))
-            if len(sync_kinds) == 1
-            else ",".join(sorted(sync_kinds))
-        )
+        sync_kind = next(iter(sync_kinds)) if len(sync_kinds) == 1 else ",".join(sorted(sync_kinds))
 
     summary = MoisSourceSyncSummary(
         db_path=str(db_path),
@@ -289,7 +280,7 @@ def _write_sync_marker(
     *,
     synced_at: datetime | None = None,
 ) -> None:
-    """Phase A 성공 시각을 같은 디렉터리의 marker에 원자적으로 교체한다."""
+    """현재 full coverage 성공 시각/버전을 marker에 원자적으로 교체한다."""
 
     marker = _sync_marker_path(db_path)
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -302,7 +293,15 @@ def _write_sync_marker(
     temporary = pathlib.Path(temporary_name)
     try:
         with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
-            handle.write((synced_at or datetime.now(UTC)).isoformat())
+            json.dump(
+                {
+                    "synced_at": (synced_at or datetime.now(UTC)).isoformat(),
+                    "coverage": MOIS_SOURCE_SYNC_FULL_COVERAGE,
+                },
+                handle,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, marker)
@@ -322,12 +321,21 @@ def _source_db_is_fresh(db_path: str, ttl_hours: float) -> bool:
         marker = _sync_marker_path(db_path)
         if not marker.exists():
             return False
-        stamp = datetime.fromisoformat(marker.read_text().strip())
-    except (OSError, ValueError):
+        marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+        if not isinstance(marker_payload, dict):
+            return False
+        if marker_payload.get("coverage") != MOIS_SOURCE_SYNC_FULL_COVERAGE:
+            return False
+        synced_at = marker_payload.get("synced_at")
+        if not isinstance(synced_at, str):
+            return False
+        stamp = datetime.fromisoformat(synced_at)
+    except (OSError, ValueError, json.JSONDecodeError):
         return False
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=UTC)
-    return datetime.now(UTC) - stamp < timedelta(hours=ttl_hours)
+    age = datetime.now(UTC) - stamp
+    return timedelta(0) <= age < timedelta(hours=ttl_hours)
 
 
 def _acquire_sync_lock(lock: pathlib.Path) -> int | None:
@@ -403,7 +411,8 @@ def ensure_mois_source_db_fresh(
             org_code=org_code,
             batch_size=batch_size,
         )
-        _write_sync_marker(db_path)
+        if summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS)) and org_code is None:
+            _write_sync_marker(db_path)
         return summary
     finally:
         _release_sync_lock(fd, lock)
@@ -460,23 +469,38 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
     org_code = str(org_code_value) if org_code_value else None
     batch_size = int(cast("int", config.get("batch_size") or 1000))
 
-    summary = sync_mois_source_db(
-        settings,
-        service_slugs=service_slugs,
-        org_code=org_code,
-        batch_size=batch_size,
-        dagster_run_id=context.run_id,
-    )
+    db_path = settings.mois_source_db_path
+    if db_path is None:
+        raise ProviderCredentialMissing(
+            "MOIS Phase A 소스 DB sync에는 대상 SQLite DB 경로가 필요하다. "
+            "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH를 설정하라."
+        )
+    parent = pathlib.Path(db_path).parent
+    if str(parent) and not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+    lock = _sync_lock_path(db_path)
+    fd = _acquire_sync_lock(lock)
+    if fd is None:
+        raise RuntimeError("MOIS 소스 DB sync가 이미 진행 중입니다. 기존 run 완료 후 재시도하세요.")
+    try:
+        summary = sync_mois_source_db(
+            settings,
+            service_slugs=service_slugs,
+            org_code=org_code,
+            batch_size=batch_size,
+            dagster_run_id=context.run_id,
+        )
+        full_coverage = (
+            summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS)) and org_code is None
+        )
+        if full_coverage:
+            # Phase-B resource/feature-update runner도 같은 marker를 freshness 정본으로
+            # 읽는다. full sync 성공과 marker 교체가 분리되면 바로 전국 sync를 재실행한다.
+            _write_sync_marker(summary.db_path)
+    finally:
+        _release_sync_lock(fd, lock)
     metadata = summary.as_metadata()
-    full_coverage = (
-        summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS))
-        and org_code is None
-    )
     coverage = MOIS_SOURCE_SYNC_FULL_COVERAGE if full_coverage else "partial"
-    if full_coverage:
-        # Phase-B resource/feature-update runner도 같은 marker를 freshness 정본으로
-        # 읽는다. full sync 성공과 marker 교체가 분리되면 바로 전국 sync를 재실행한다.
-        _write_sync_marker(summary.db_path)
     # Run SUCCESS만으로는 custom service_slugs/org_code 부분 동기화와
     # PROMOTED 전체·전국 동기화를 구분할 수 없다. 실제 provider 결과를
     # 확인한 op 성공 경로에서만 durable run tag를 남긴다.
@@ -514,8 +538,7 @@ MOIS_SOURCE_SYNC_SCHEDULES: Final = [
         default_status=DefaultScheduleStatus.STOPPED,
         tags=MOIS_SOURCE_SYNC_JOB_TAGS,
         description=(
-            "MOIS LOCALDATA 소스 DB를 주 1회(월 04:00 KST) 갱신한다. 운영 enable "
-            "전까지 STOPPED."
+            "MOIS LOCALDATA 소스 DB를 주 1회(월 04:00 KST) 갱신한다. 운영 enable 전까지 STOPPED."
         ),
     )
 ]

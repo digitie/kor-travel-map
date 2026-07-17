@@ -58,6 +58,7 @@ from kortravelmap.api import mois_source_precheck
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
 from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.dagster_schema import DagsterScheduleClaimResolution
 from kortravelmap.api.pipeline_cancellation_schema import (
     PipelineCancellationDetailRecord,
     PipelineCancellationRootRecord,
@@ -79,6 +80,7 @@ _PIPELINE_PATHS = [
     "/v1/ops/pipeline/schedules",
     "/v1/ops/pipeline/schedules/{schedule_name}",
     "/v1/ops/pipeline/schedules/{schedule_name}/commands",
+    "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve",
     "/v1/ops/pipeline/requests",
     "/v1/ops/pipeline/requests/preview",
     "/v1/ops/pipeline/requests/{request_id}/run-now",
@@ -187,6 +189,7 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         except Exception:
             audit_session.schedule_audit_events.append({**base, "phase": "failed"})
             raise
+        response.data.audit_command_id = command_id
         audit_session.schedule_audit_events.append(
             {
                 **base,
@@ -600,9 +603,7 @@ def _single_schedule_payload(schedule_name: str, job_name: str) -> dict[str, Any
                                 "scheduleState": {
                                     "status": "STOPPED",
                                     "repositoryName": "__repository__",
-                                    "repositoryLocationName": (
-                                        "kortravelmap.dagster.definitions"
-                                    ),
+                                    "repositoryLocationName": ("kortravelmap.dagster.definitions"),
                                 },
                             }
                         ],
@@ -611,6 +612,7 @@ def _single_schedule_payload(schedule_name: str, job_name: str) -> dict[str, Any
             }
         }
     }
+
 
 _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
     "data": {
@@ -666,13 +668,9 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "content"
     ]["application/json"]["schema"]
     assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
-    create_responses = spec["paths"]["/v1/ops/pipeline/requests"]["post"][
-        "responses"
-    ]
+    create_responses = spec["paths"]["/v1/ops/pipeline/requests"]["post"]["responses"]
     for code in ("409", "502", "503"):
-        schema = create_responses[code]["content"]["application/problem+json"][
-            "schema"
-        ]
+        schema = create_responses[code]["content"]["application/problem+json"]["schema"]
         assert schema["$ref"].endswith("/ProblemDetail")
     preview_response = spec["paths"]["/v1/ops/pipeline/requests/preview"]["post"]["responses"][
         "200"
@@ -731,9 +729,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "can_run_now",
         "disabled_reason",
     } <= set(schedule_schema["required"])
-    command_result_schema = spec["components"]["schemas"][
-        "PipelineScheduleCommandData"
-    ]
+    command_result_schema = spec["components"]["schemas"]["PipelineScheduleCommandData"]
     assert {
         "effective_cron_schedule",
         "save_status",
@@ -742,13 +738,20 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "audit_status",
     } <= set(command_result_schema["required"])
     assert "audit_command_id" in command_result_schema["properties"]
-    assert "reloaded" not in command_result_schema["properties"]
-    schedule_patch = spec["paths"]["/v1/ops/pipeline/schedules/{schedule_name}"][
-        "patch"
+    assert command_result_schema["properties"]["outcome_certainty"]["enum"] == [
+        "confirmed",
+        "uncertain",
     ]
+    assert "reloaded" not in command_result_schema["properties"]
+    resolution_schema = spec["components"]["schemas"]["PipelineScheduleClaimResolutionRequest"]
+    assert resolution_schema["properties"]["resolution"]["enum"] == [
+        "confirmed_applied",
+        "confirmed_not_applied",
+    ]
+    assert set(resolution_schema["required"]) == {"resolution", "reason"}
+    schedule_patch = spec["paths"]["/v1/ops/pipeline/schedules/{schedule_name}"]["patch"]
     assert any(
-        parameter.get("name") == "Idempotency-Key"
-        and parameter.get("required") is True
+        parameter.get("name") == "Idempotency-Key" and parameter.get("required") is True
         for parameter in schedule_patch["parameters"]
     )
     for method, path in (
@@ -760,6 +763,16 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         for code in ("409", "422", "500", "502", "503"):
             schema = responses[code]["content"]["application/problem+json"]["schema"]
             assert schema["$ref"].endswith("/ProblemDetail")
+    resolution_operation = spec["paths"][
+        "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve"
+    ]["post"]
+    assert {"404", "409", "422", "503"} <= set(resolution_operation["responses"])
+    precheck_description = spec["paths"]["/v1/ops/pipeline/prechecks/mois-source-sync"]["get"][
+        "description"
+    ]
+    assert "full-coverage" in precheck_description
+    assert "endTime" in precheck_description
+    assert "미래" in precheck_description
     detail_operation = spec["paths"]["/v1/ops/pipeline/dagster-runs/{run_id}"]["get"]
     assert {"200", "404", "422", "502", "503", "default"} <= set(detail_operation["responses"])
     assert "/v1/ops/pipeline/nux-seen" not in spec["paths"]
@@ -788,9 +801,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     assert cancellation_summary["properties"]["cancellation_id"]["format"] == "uuid"
     assert cancellation_detail["properties"]["cancellation_id"]["format"] == "uuid"
     assert (
-        cancellation_detail["properties"]["previous_cancellation_id"]["anyOf"][0][
-            "format"
-        ]
+        cancellation_detail["properties"]["previous_cancellation_id"]["anyOf"][0]["format"]
         == "uuid"
     )
     root = spec["components"]["schemas"]["PipelineExecutionRootRecord"]
@@ -1455,9 +1466,7 @@ def test_cancel_execution_maps_typed_failures_to_problem_details(
         assert response.json()["code"] == expected_code
         assert response.headers.get("retry-after") == retry_after
         if expected_status != 404:
-            assert response.json()["details"]["cancellation_id"] == str(
-                detail.cancellation_id
-            )
+            assert response.json()["details"]["cancellation_id"] == str(detail.cancellation_id)
 
 
 @pytest.mark.unit
@@ -1826,9 +1835,7 @@ def test_mois_source_sync_precheck_filters_exact_job_and_checks_fresh_success(
 ) -> None:
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == mois_source_precheck._QUERY
-        assert kwargs["variables"] == {
-            "filter": {"pipelineName": "mois_localdata_source_sync"}
-        }
+        assert kwargs["variables"] == {"filter": {"pipelineName": "mois_localdata_source_sync"}}
         now = datetime.now(UTC).timestamp()
         return {
             "data": {
@@ -2335,6 +2342,172 @@ def test_schedule_transport_error_is_problem_503(
 
 
 @pytest.mark.unit
+def test_schedule_mutation_response_loss_is_marked_uncertain(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            return _SCHEDULES_GRAPHQL_PAYLOAD
+        assert kwargs["query"] == dagster_schedule._DAGSTER_START_SCHEDULE_MUTATION
+        raise httpx.ReadTimeout("response lost after mutation POST")
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule/commands",
+        json={"command": "start"},
+    )
+
+    assert response.status_code == 503
+    problem = response.json()
+    assert problem["code"] == "DAGSTER_SCHEDULE_UNAVAILABLE"
+    assert problem["details"]["outcome_certainty"] == "uncertain"
+    assert problem["details"]["audit_command_id"] == ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+
+
+@pytest.mark.unit
+def test_schedule_uncertain_claim_resolution_uses_authenticated_actor(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _resolve(_session: Any, **kwargs: Any) -> DagsterScheduleClaimResolution:
+        captured.update(kwargs)
+        return DagsterScheduleClaimResolution(
+            resolution_id=42,
+            command_id=kwargs["command_id"],
+            schedule_name=kwargs["schedule_name"],
+            resolution=kwargs["resolution"],
+            actor=kwargs["actor"],
+            reason=kwargs["reason"],
+            resolved_at=_NOW,
+        )
+
+    monkeypatch.setattr(dagster_schedule, "resolve_schedule_active_claim", _resolve)
+    command_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/some_schedule/claims/{command_id}/resolve",
+        json={
+            "resolution": "confirmed_not_applied",
+            "reason": "Dagster 실행 목록에서 미반영 확인",
+            "actor": "spoofed",
+        },
+    )
+    assert response.status_code == 422
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/some_schedule/claims/{command_id}/resolve",
+        json={
+            "resolution": "confirmed_not_applied",
+            "reason": "Dagster 실행 목록에서 미반영 확인",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["resolution_id"] == 42
+    assert captured == {
+        "schedule_name": "some_schedule",
+        "command_id": UUID(command_id),
+        "resolution": "confirmed_not_applied",
+        "actor": "local-dev",
+        "reason": "Dagster 실행 목록에서 미반영 확인",
+    }
+
+
+@pytest.mark.unit
+def test_schedule_claim_resolution_not_found_is_problem(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _not_found(*_args: Any, **_kwargs: Any) -> None:
+        raise dagster_schedule.DagsterScheduleClaimNotFound("claim 없음")
+
+    monkeypatch.setattr(
+        dagster_schedule,
+        "resolve_schedule_active_claim",
+        _not_found,
+    )
+    command_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/some_schedule/claims/{command_id}/resolve",
+        json={
+            "resolution": "confirmed_applied",
+            "reason": "Dagster schedule 상태에서 반영 확인",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "DAGSTER_SCHEDULE_CLAIM_NOT_FOUND"
+
+
+@pytest.mark.unit
+def test_schedule_mutation_rejects_malformed_success_as_uncertain(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            return _SCHEDULES_GRAPHQL_PAYLOAD
+        assert kwargs["query"] == dagster_schedule._DAGSTER_START_SCHEDULE_MUTATION
+        return {
+            "data": {
+                "startSchedule": {
+                    "__typename": "ScheduleStateResult",
+                    "scheduleState": {},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule/commands",
+        json={"command": "start"},
+    )
+
+    assert response.status_code == 502
+    problem = response.json()
+    assert problem["details"]["outcome_certainty"] == "uncertain"
+    assert "scheduleState.status" in problem["detail"]
+
+
+@pytest.mark.unit
+def test_schedule_run_rejects_success_without_run_id_as_uncertain(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            return _SCHEDULES_GRAPHQL_PAYLOAD
+        assert kwargs["query"] == dagster_schedule._DAGSTER_LAUNCH_RUN_MUTATION
+        return {
+            "data": {
+                "launchRun": {
+                    "__typename": "LaunchRunSuccess",
+                    "run": {"status": "QUEUED"},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        "/v1/ops/pipeline/schedules/feature_weather_kma_short_forecast_hourly_schedule/commands",
+        json={"command": "run"},
+    )
+
+    assert response.status_code == 502
+    problem = response.json()
+    assert problem["details"]["outcome_certainty"] == "uncertain"
+    assert "run.runId" in problem["detail"]
+
+
+@pytest.mark.unit
 def test_schedule_command_run_launches_job(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2377,10 +2550,7 @@ def test_schedule_command_run_launches_job(
     assert data["run_status"] == "QUEUED"
     assert len(launches) == 1
     execution_params = launches[0]["executionParams"]
-    tags = {
-        tag["key"]: tag["value"]
-        for tag in execution_params["executionMetadata"]["tags"]
-    }
+    tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
     assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
     assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
     assert tags["kor_travel_map.operator"] == "local-dev"
@@ -2440,16 +2610,11 @@ def test_schedule_command_knps_manual_launch_persists_resolved_config_and_tags(
     run_config = execution_params["runConfigData"]
     assert run_config == {
         "resources": {
-            "knps_point_dataset_key": {
-                "config": {"dataset_key": "knps_restrooms"}
-            },
+            "knps_point_dataset_key": {"config": {"dataset_key": "knps_restrooms"}},
             "knps_point_records": {"config": {"dataset_key": "knps_restrooms"}},
         }
     }
-    tags = {
-        tag["key"]: tag["value"]
-        for tag in execution_params["executionMetadata"]["tags"]
-    }
+    tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
     identity = parse_feature_operation_identity_tags(tags)
     assert identity is not None
     assert identity.pairs[0].dataset_key == "knps_restrooms"
@@ -2504,18 +2669,11 @@ def test_schedule_command_filedata_manual_launch_persists_exact_config_and_tags(
     run_config = execution_params["runConfigData"]
     assert run_config == {
         "resources": {
-            "datagokr_file_data_dataset_key": {
-                "config": {"dataset_key": dataset_key}
-            },
-            "datagokr_file_data_records": {
-                "config": {"dataset_key": dataset_key}
-            },
+            "datagokr_file_data_dataset_key": {"config": {"dataset_key": dataset_key}},
+            "datagokr_file_data_records": {"config": {"dataset_key": dataset_key}},
         }
     }
-    tags = {
-        tag["key"]: tag["value"]
-        for tag in execution_params["executionMetadata"]["tags"]
-    }
+    tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
     assert tags[FEATURE_OPERATION_TRIGGER_TAG] == "manual"
     assert tags[ADMIN_MANUAL_TRIGGER_TAG] == "admin-ui"
     identity = parse_feature_operation_identity_tags(tags)
@@ -2911,9 +3069,7 @@ def test_run_now_dispatch_race_rejects_cancellation_requested(
         )
     )
 
-    async def _get_request(
-        _session: Any, _request_id: str
-    ) -> FeatureUpdateRequest | None:
+    async def _get_request(_session: Any, _request_id: str) -> FeatureUpdateRequest | None:
         return next(requests)
 
     async def _dispatch(_session: Any, request_id: str) -> FeatureUpdateRequest:

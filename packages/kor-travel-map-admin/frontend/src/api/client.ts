@@ -37,7 +37,11 @@ function idempotencyStorageKey(operationKey: string): string {
 function readIdempotencyKey(operationKey: string): string | null {
   const storageKey = idempotencyStorageKey(operationKey);
   try {
-    return window.sessionStorage.getItem(storageKey) ?? idempotencyFallback.get(storageKey) ?? null;
+    return (
+      window.sessionStorage.getItem(storageKey) ??
+      idempotencyFallback.get(storageKey) ??
+      null
+    );
   } catch {
     return idempotencyFallback.get(storageKey) ?? null;
   }
@@ -58,6 +62,25 @@ function writeIdempotencyKey(operationKey: string, value: string | null): void {
     }
   } catch {
     // storage 차단 환경은 탭 수명 in-memory key로 동일 재시도를 보호한다.
+  }
+}
+
+export function clearIdempotencyKeys(operationPrefix: string): void {
+  const storagePrefix = idempotencyStorageKey(operationPrefix);
+  for (const key of idempotencyFallback.keys()) {
+    if (key.startsWith(storagePrefix)) {
+      idempotencyFallback.delete(key);
+    }
+  }
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(storagePrefix)) {
+        window.sessionStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // storage 차단 환경은 위 in-memory key 제거만으로 충분하다.
   }
 }
 
@@ -147,7 +170,8 @@ async function apiClientErrorFromResponse(
   );
 }
 
-export type QueryParamValue = string | number | boolean | Date | null | undefined;
+export type QueryParamValue =
+  string | number | boolean | Date | null | undefined;
 export type QueryParams = Record<
   string,
   QueryParamValue | readonly QueryParamValue[]
@@ -202,13 +226,17 @@ async function requestJson<T>(
     method,
     headers: {
       Accept: "application/json",
-      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(options.body !== undefined
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...options.headers,
     },
     credentials: "same-origin",
     cache: options.cache ?? "no-store",
     signal: options.signal,
-    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+    ...(options.body !== undefined
+      ? { body: JSON.stringify(options.body) }
+      : {}),
   });
   if (!response.ok) {
     redirectToLoginOnAuthRequired(response.status);
@@ -217,7 +245,10 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-export function getJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export function getJson<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   return requestJson<T>(path, {
     headers: options.headers,
     signal: options.signal,
@@ -297,12 +328,16 @@ export function deleteJson<T>(
 }
 
 /** `GET /health` — backend liveness probe. */
-export function fetchHealth(options: RequestOptions = {}): Promise<HealthResponse> {
+export function fetchHealth(
+  options: RequestOptions = {},
+): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health", options);
 }
 
 /** `GET /version` — backend + lib version 정보. */
-export function fetchVersion(options: RequestOptions = {}): Promise<VersionResponse> {
+export function fetchVersion(
+  options: RequestOptions = {},
+): Promise<VersionResponse> {
   return getJson<VersionResponse>("/version", options);
 }
 

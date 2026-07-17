@@ -75,18 +75,15 @@ export function ExecutionDetailPanel({
   const root = data?.root;
   const importJob = data?.import_job ?? null;
   const updateRequest = data?.update_request ?? null;
-  const cancellation =
-    data?.cancellation ?? cancelExecution.data?.data ?? null;
+  const cancellation = data?.cancellation ?? cancelExecution.data?.data ?? null;
   const events = data?.events ?? [];
   const eventsNextCursor = data?.events_next_cursor ?? null;
   const cancellationInProgress = cancellation?.status === "in_progress";
-  const cancellationCompleted = cancellation?.status === "completed";
 
   const canCancel =
     execution !== undefined &&
     ["queued", "running"].includes(execution.status) &&
-    !cancellationInProgress &&
-    !cancellationCompleted;
+    (cancellation === null || cancellation.retryable);
   const canRunNow =
     execution !== undefined &&
     execution.kind === "update_request" &&
@@ -110,8 +107,8 @@ export function ExecutionDetailPanel({
     : null;
   const hasCancellationFailures = Boolean(
     cancellationFailures &&
-      (cancellationFailures.members.length > 0 ||
-        cancellationFailures.dagster_runs.length > 0),
+    (cancellationFailures.members.length > 0 ||
+      cancellationFailures.dagster_runs.length > 0),
   );
 
   const submitCancel = async () => {
@@ -153,7 +150,9 @@ export function ExecutionDetailPanel({
           <div className="min-w-0">
             <CardTitle className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">
-                {execution ? executionKindLabel(execution.kind) : executionKindLabel(kind)}
+                {execution
+                  ? executionKindLabel(execution.kind)
+                  : executionKindLabel(kind)}
               </Badge>
               <span className="font-mono text-sm">{shortId(executionId)}</span>
               {execution ? <StatusBadge status={execution.status} /> : null}
@@ -205,7 +204,8 @@ export function ExecutionDetailPanel({
             <AlertTitle>취소 작업 {cancellation.status}</AlertTitle>
             <AlertDescription className="space-y-2">
               <p>
-                {cancellation.reason ?? "취소 사유 없음"} · 미해결 member {cancellation.unresolved_member_count}개
+                {cancellation.reason ?? "취소 사유 없음"} · 미해결 member{" "}
+                {cancellation.unresolved_member_count}개
                 {cancellation.retryable ? " · 재시도 가능" : ""}
               </p>
               {cancellation.error ? (
@@ -245,7 +245,11 @@ export function ExecutionDetailPanel({
                     : `${execution.progress ?? 0}% · ${execution.current_stage ?? "-"}`,
               },
               { label: "provider", value: execution.provider ?? "-" },
-              { label: "dataset", value: execution.dataset_key ?? "-", mono: true },
+              {
+                label: "dataset",
+                value: execution.dataset_key ?? "-",
+                mono: true,
+              },
               {
                 label: "scope",
                 value: execution.scope_type ?? execution.job_kind ?? "-",
@@ -278,7 +282,7 @@ export function ExecutionDetailPanel({
             <ul className="space-y-1 text-sm">
               {root ? (
                 <li>
-                  대표 작업: {" "}
+                  대표 작업:{" "}
                   <Button
                     data-detail-url={root.projected_job.detail_url}
                     size="sm"
@@ -303,10 +307,15 @@ export function ExecutionDetailPanel({
                     type="button"
                     variant="ghost"
                     onClick={() =>
-                      onSelectExecution("import_job", execution.job_id as string)
+                      onSelectExecution(
+                        "import_job",
+                        execution.job_id as string,
+                      )
                     }
                   >
-                    <span className="font-mono">{shortId(execution.job_id)}</span>
+                    <span className="font-mono">
+                      {shortId(execution.job_id)}
+                    </span>
                   </Button>
                 </li>
               ) : null}
@@ -524,9 +533,9 @@ export function ExecutionDetailPanel({
                   : "즉시 재큐잉 (run-now)"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                새 요청을 만들지 않고 같은 canonical request/job을 사용합니다. queued는
-                우선 dispatch를 요청하고 running 재호출은 현재 요청을 200으로 멱등
-                반환합니다.
+                새 요청을 만들지 않고 같은 canonical request/job을 사용합니다.
+                queued는 우선 dispatch를 요청하고 running 재호출은 현재 요청을
+                200으로 멱등 반환합니다.
               </p>
             </div>
           ) : null}
@@ -536,7 +545,8 @@ export function ExecutionDetailPanel({
             <Alert variant="destructive">
               <AlertTitle>run-now 차단됨</AlertTitle>
               <AlertDescription>
-                큐 sensor가 RUNNING으로 확인될 때까지 dispatch 요청을 만들지 않습니다.
+                큐 sensor가 RUNNING으로 확인될 때까지 dispatch 요청을 만들지
+                않습니다.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -544,7 +554,8 @@ export function ExecutionDetailPanel({
             <Alert>
               <AlertTitle>취소 진행 중</AlertTitle>
               <AlertDescription>
-                취소 coordinator가 완료될 때까지 run-now와 중복 취소를 차단합니다.
+                취소 coordinator가 완료될 때까지 run-now와 중복 취소를
+                차단합니다.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -560,7 +571,8 @@ export function ExecutionDetailPanel({
                 <p>{cancelExecution.error.message}</p>
                 {cancelProblem ? (
                   <p>
-                    오류 코드 <span className="font-mono">{cancelProblem.code}</span>
+                    오류 코드{" "}
+                    <span className="font-mono">{cancelProblem.code}</span>
                     {cancelExecution.error.retryAfterSeconds !== null
                       ? ` · ${cancelExecution.error.retryAfterSeconds}초 후 재시도 가능`
                       : ""}

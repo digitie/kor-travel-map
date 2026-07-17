@@ -15,7 +15,7 @@ __all__ = [
     "http_client_from_request",
     "schedule_command_response_or_raise",
     "schedule_idempotency_http_exception",
-    "schedule_replayed_failure_http_exception",
+    "schedule_uncertain_outcome_http_exception",
     "schedule_storage_http_exception",
     "schedule_validation_http_exception",
     "SCHEDULE_WRITE_ERROR_RESPONSES",
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 SCHEDULE_WRITE_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    500: {"model": ProblemDetail, "description": "저장된 예상 밖 terminal 실패 재생"},
+    500: {"model": ProblemDetail, "description": "외부 반영 여부 불명 — 운영자 확인 필요"},
     409: {"model": ProblemDetail, "description": "Idempotency-Key 충돌/결과 확인 필요"},
     422: {"model": ProblemDetail, "description": "요청 body/header 또는 cron 검증 실패"},
     502: {"model": ProblemDetail, "description": "Dagster 명령 의미 오류"},
@@ -41,22 +41,31 @@ def schedule_idempotency_http_exception(
         detail={
             "code": "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
             "message": str(exc),
-            "details": {"command_id": str(exc.command_id)},
+            "details": {
+                "command_id": str(exc.command_id),
+                "active_command_id": (
+                    str(exc.active_command_id) if exc.active_command_id is not None else None
+                ),
+            },
         },
     )
 
 
-def schedule_replayed_failure_http_exception(
-    exc: dagster_schedule_service.DagsterScheduleReplayedFailure,
+def schedule_uncertain_outcome_http_exception(
+    exc: dagster_schedule_service.DagsterScheduleUncertainOutcome,
 ) -> HTTPException:
-    """예상 밖 terminal 실패를 같은 key에서 원격 재실행 없이 500으로 재생한다."""
+    """불명 외부 결과를 원격 재실행 없이 operator recovery 정보와 반환한다."""
 
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={
-            "code": "DAGSTER_SCHEDULE_REPLAYED_FAILURE",
+            "code": "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
             "message": str(exc),
-            "details": {"command_id": str(exc.command_id)},
+            "details": {
+                "command_id": str(exc.command_id),
+                "active_command_id": str(exc.command_id),
+                "outcome_certainty": "uncertain",
+            },
         },
     )
 

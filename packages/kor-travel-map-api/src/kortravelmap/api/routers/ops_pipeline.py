@@ -65,7 +65,7 @@ from kortravelmap.api.dagster_http import (
     SCHEDULE_WRITE_ERROR_RESPONSES,
     dagster_http_dependencies,
     schedule_idempotency_http_exception,
-    schedule_replayed_failure_http_exception,
+    schedule_uncertain_outcome_http_exception,
     schedule_storage_http_exception,
     schedule_validation_http_exception,
 )
@@ -79,6 +79,7 @@ from kortravelmap.api.dagster_schema import (
     DagsterRunDetailResponse,
     DagsterRunSummary,
     DagsterSchedule,
+    DagsterScheduleClaimResolution,
     DagsterScheduleCommandData,
     DagsterScheduleCommandRequest,
     DagsterScheduleCommandResponse,
@@ -127,6 +128,7 @@ __all__ = [
     "PipelineOverviewResponse",
     "PipelineSchedulesResponse",
     "PipelineScheduleCommandResponse",
+    "PipelineScheduleClaimResolutionResponse",
 ]
 
 
@@ -136,6 +138,7 @@ ExecutionKind = Literal["import_job", "update_request"]
 ExecutionState = OperationState
 JobEventLevel = Literal["debug", "info", "warning", "error", "critical"]
 PipelineScheduleCommand = Literal["run", "start", "stop", "reset"]
+PipelineScheduleClaimResolution = Literal["confirmed_applied", "confirmed_not_applied"]
 
 _EXECUTIONS_URL_PREFIX = "/v1/ops/pipeline/executions"
 _UPDATE_REQUEST_STATUS_URL_PREFIX = f"{_EXECUTIONS_URL_PREFIX}/update_request"
@@ -523,9 +526,8 @@ class PipelineScheduleCommandData(BaseModel):
     run_status: str | None = None
     save_status: Literal["not_applicable", "saved", "cleared"]
     reload_status: Literal["not_requested", "succeeded", "failed"]
-    effective_status: Literal[
-        "confirmed", "pending_verification", "mismatch", "unknown"
-    ]
+    effective_status: Literal["confirmed", "pending_verification", "mismatch", "unknown"]
+    outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed"
     audit_command_id: UUID | None = None
     audit_status: Literal["recorded", "terminal_record_failed"] = "recorded"
     errors: list[str] = Field(default_factory=list)
@@ -537,6 +539,27 @@ class PipelineScheduleCommandResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: PipelineScheduleCommandData
+    meta: Meta
+
+
+class PipelineScheduleClaimResolutionRequest(BaseModel):
+    """불명 schedule claim을 운영자 확인 후 해제하는 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: PipelineScheduleClaimResolution
+    reason: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+    ]
+
+
+class PipelineScheduleClaimResolutionResponse(BaseModel):
+    """불명 schedule claim 해제 감사 결과."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: DagsterScheduleClaimResolution
     meta: Meta
 
 
@@ -903,6 +926,7 @@ def _pipeline_command_data(
         save_status=data.save_status,
         reload_status=data.reload_status,
         effective_status=data.effective_status,
+        outcome_certainty=data.outcome_certainty,
         audit_command_id=data.audit_command_id,
         audit_status=data.audit_status,
         errors=data.errors,
@@ -927,11 +951,7 @@ def _pipeline_command_data_or_raise(
         if canonical.status == "unavailable"
         else "DAGSTER_SCHEDULE_COMMAND_FAILED"
     )
-    message = (
-        canonical.errors[0]
-        if canonical.errors
-        else "Dagster schedule 명령에 실패했습니다."
-    )
+    message = canonical.errors[0] if canonical.errors else "Dagster schedule 명령에 실패했습니다."
     raise HTTPException(
         status_code=status_code,
         detail={
@@ -966,8 +986,8 @@ async def _execute_audited_schedule_command(
         )
     except dagster_schedule_service.DagsterScheduleIdempotencyConflict as exc:
         raise schedule_idempotency_http_exception(exc) from exc
-    except dagster_schedule_service.DagsterScheduleReplayedFailure as exc:
-        raise schedule_replayed_failure_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleUncertainOutcome as exc:
+        raise schedule_uncertain_outcome_http_exception(exc) from exc
     except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
         raise schedule_storage_http_exception(exc) from exc
 
@@ -1425,9 +1445,11 @@ async def list_dagster_runs(
     response_model=PipelineJobPrecheckResponse,
     summary="MOIS source sync 선행 job freshness 확인",
     description=(
-        "Dagster runs를 jobName=mois_localdata_source_sync로 직접 필터링해 최신 run이 "
-        "SUCCESS이고 MOIS source DB TTL 이내인지 판정한다. provider sync_state의 "
-        "가상 dataset key를 사용하지 않는다."
+        "Dagster runs를 exact jobName=mois_localdata_source_sync로 직접 필터링한다. "
+        "최신 run이 SUCCESS이고, 현재 PROMOTED slug 집합의 SHA-256을 포함한 full-coverage "
+        "tag가 일치하며, endTime이 존재하고 미래가 아닌 TTL 이내 시각일 때만 ready다. "
+        "조건 누락·불일치는 fail-closed로 거부하며 provider sync_state의 가상 dataset "
+        "key를 사용하지 않는다."
     ),
     responses={
         502: {"model": ProblemDetail, "description": "Dagster GraphQL/응답 오류"},
@@ -1740,6 +1762,71 @@ async def post_pipeline_schedule_command(
         )
     return PipelineScheduleCommandResponse(
         data=_pipeline_command_data_or_raise(response.data),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@router.post(
+    "/schedules/{schedule_name}/claims/{command_id}/resolve",
+    response_model=PipelineScheduleClaimResolutionResponse,
+    summary="결과 불명 schedule claim 수동 확인 및 해제",
+    description=(
+        "transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 "
+        "schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 "
+        "반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다."
+    ),
+    responses={
+        404: {"model": ProblemDetail, "description": "schedule claim 없음"},
+        409: {"model": ProblemDetail, "description": "이미 해제되었거나 확정 결과인 claim"},
+        422: {"model": ProblemDetail, "description": "해제 사유 또는 resolution 검증 실패"},
+        503: {"model": ProblemDetail, "description": "schedule 감사 저장소 장애"},
+    },
+)
+async def resolve_pipeline_schedule_claim(
+    schedule_name: str,
+    command_id: UUID,
+    body: PipelineScheduleClaimResolutionRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> PipelineScheduleClaimResolutionResponse:
+    started_at = perf_counter()
+    try:
+        resolution = await dagster_schedule_service.resolve_schedule_active_claim(
+            session,
+            schedule_name=schedule_name,
+            command_id=command_id,
+            resolution=body.resolution,
+            actor=context.actor,
+            reason=body.reason,
+        )
+    except dagster_schedule_service.DagsterScheduleClaimNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "DAGSTER_SCHEDULE_CLAIM_NOT_FOUND",
+                "message": str(exc),
+                "details": {
+                    "schedule_name": schedule_name,
+                    "command_id": str(command_id),
+                },
+            },
+        ) from exc
+    except dagster_schedule_service.DagsterScheduleClaimResolutionConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "DAGSTER_SCHEDULE_CLAIM_RESOLUTION_CONFLICT",
+                "message": str(exc),
+                "details": {
+                    "schedule_name": schedule_name,
+                    "command_id": str(command_id),
+                },
+            },
+        ) from exc
+    except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
+        raise schedule_storage_http_exception(exc) from exc
+    return PipelineScheduleClaimResolutionResponse(
+        data=resolution,
         meta=make_meta(started_at=started_at),
     )
 

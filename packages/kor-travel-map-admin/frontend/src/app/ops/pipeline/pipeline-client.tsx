@@ -1,7 +1,8 @@
 "use client";
 
 import { RefreshCwIcon } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useOpsLiveInvalidation } from "@/api/live";
@@ -33,6 +34,7 @@ interface InitialFilters {
   status?: string;
   provider?: string;
   datasetKey?: string;
+  syncScope?: string;
   createdFrom?: string;
   createdTo?: string;
   loadBatchId?: string;
@@ -55,6 +57,7 @@ function normalizeTimelineFilters(initial: InitialFilters): TimelineFilters {
         : undefined,
     provider: initial.provider,
     datasetKey: initial.datasetKey,
+    syncScope: initial.syncScope,
     createdFrom: initial.createdFrom,
     createdTo: initial.createdTo,
   };
@@ -169,7 +172,7 @@ function OverviewStrip({
               : "갱신 요청 큐 sensor 실행 불가"}
           </AlertTitle>
           <AlertDescription>
-            <span className="font-mono">{QUEUE_SENSOR_NAME}</span> — {" "}
+            <span className="font-mono">{QUEUE_SENSOR_NAME}</span> —{" "}
             {queueState.description} 스케줄 탭에서 sensor 상태를 확인하세요.
           </AlertDescription>
         </Alert>
@@ -219,7 +222,9 @@ function OverviewStrip({
               {(dagster?.sensors ?? []).map((sensor) => (
                 <Badge
                   key={sensor.name}
-                  variant={sensor.status === "RUNNING" ? "secondary" : "destructive"}
+                  variant={
+                    sensor.status === "RUNNING" ? "secondary" : "destructive"
+                  }
                 >
                   {sensor.name === QUEUE_SENSOR_NAME
                     ? "큐 sensor"
@@ -239,7 +244,7 @@ function OverviewStrip({
 
 export function PipelineClient({
   initialExecution,
-  initialFilters,
+  initialFilters: _initialFilters,
   initialSchedule,
   initialTab,
 }: {
@@ -249,9 +254,14 @@ export function PipelineClient({
   initialTab?: string;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const urlStateRef = useRef(searchParams.toString());
+  const focusReturnExecutionIdRef = useRef<string | null>(null);
+  const focusAfterCloseRef = useRef(false);
+  const urlExecution = searchParams.get("execution");
+  const urlSchedule = searchParams.get("schedule");
+  const urlTab = searchParams.get("tab");
   const parsedExecution = useMemo(
     () => parseExecutionParam(initialExecution),
     [initialExecution],
@@ -298,9 +308,13 @@ export function PipelineClient({
         return;
       }
       urlStateRef.current = query;
-      router[mode](href, { scroll: false });
+      window.history[mode === "push" ? "pushState" : "replaceState"](
+        null,
+        "",
+        href,
+      );
     },
-    [pathname, router, searchParams],
+    [pathname],
   );
 
   useEffect(() => {
@@ -308,29 +322,69 @@ export function PipelineClient({
   }, [searchParams]);
 
   useEffect(() => {
-    setSelected(parseExecutionParam(initialExecution));
-  }, [initialExecution]);
+    setSelected(parseExecutionParam(urlExecution ?? undefined));
+  }, [urlExecution]);
 
   useEffect(() => {
     setTab(
-      initialTab === "events" || initialTab === "schedules"
-        ? initialTab
-        : initialSchedule
+      urlTab === "events" || urlTab === "schedules"
+        ? urlTab
+        : urlSchedule
           ? "schedules"
           : "executions",
     );
-  }, [initialSchedule, initialTab]);
+  }, [urlSchedule, urlTab]);
 
-  const selectExecution = (kind: ExecutionKind, id: string) => {
+  const selectExecution = (
+    kind: ExecutionKind,
+    id: string,
+    focusExecutionId = id,
+  ) => {
+    focusReturnExecutionIdRef.current = focusExecutionId;
+    if (selected?.kind === kind && selected.id === id) {
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "execution", kind, id],
+      });
+    }
     setSelected({ kind, id });
     setTab("executions");
     updateUrl({ execution: `${kind}:${id}`, tab: "executions" });
   };
 
   const timelineFilters = useMemo(
-    () => normalizeTimelineFilters(initialFilters),
-    [initialFilters],
+    () =>
+      normalizeTimelineFilters({
+        kind: searchParams.get("kind") ?? undefined,
+        status: searchParams.get("status") ?? undefined,
+        provider: searchParams.get("provider") ?? undefined,
+        datasetKey: searchParams.get("dataset_key") ?? undefined,
+        syncScope: searchParams.get("sync_scope") ?? undefined,
+        createdFrom: searchParams.get("created_from") ?? undefined,
+        createdTo: searchParams.get("created_to") ?? undefined,
+      }),
+    [searchParams],
   );
+
+  useEffect(() => {
+    if (selected || !focusAfterCloseRef.current) {
+      return;
+    }
+    focusAfterCloseRef.current = false;
+    const focusExecutionId = focusReturnExecutionIdRef.current;
+    const frame = requestAnimationFrame(() => {
+      const originalRow = focusExecutionId
+        ? document.querySelector<HTMLElement>(
+            `[data-testid="pipeline-execution-row-${focusExecutionId}"]`,
+          )
+        : null;
+      const fallback =
+        document.querySelector<HTMLElement>(
+          '[data-testid^="pipeline-execution-row-"]',
+        ) ?? document.querySelector<HTMLElement>('[aria-label="실행 종류"]');
+      (originalRow ?? fallback)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected]);
 
   return (
     <AdminShell
@@ -391,8 +445,12 @@ export function PipelineClient({
               <div className="min-w-0 space-y-4">
                 <ExecutionTimeline
                   initialFilters={timelineFilters}
-                  initialLoadBatchId={initialFilters.loadBatchId}
-                  initialParentJobId={initialFilters.parentJobId}
+                  initialLoadBatchId={
+                    searchParams.get("load_batch_id") ?? undefined
+                  }
+                  initialParentJobId={
+                    searchParams.get("parent_job_id") ?? undefined
+                  }
                   selectedExecutionId={selected?.id ?? null}
                   onSelectExecution={selectExecution}
                   onUrlChange={updateUrl}
@@ -407,6 +465,7 @@ export function PipelineClient({
                     kind={selected.kind}
                     queueOperational={queueOperational}
                     onClose={() => {
+                      focusAfterCloseRef.current = true;
                       setSelected(null);
                       updateUrl({ execution: null });
                     }}
@@ -421,7 +480,7 @@ export function PipelineClient({
           </TabsContent>
           <TabsContent className="mt-4" value="schedules">
             <SchedulePanel
-              highlightSchedule={initialSchedule}
+              highlightSchedule={urlSchedule ?? undefined}
               onHighlightSchedule={(scheduleName) => {
                 setTab("schedules");
                 updateUrl({ schedule: scheduleName, tab: "schedules" });

@@ -57,11 +57,45 @@ export interface TimelineFilters {
   status?: ExecutionStatus;
   provider?: string;
   datasetKey?: string;
+  syncScope?: string;
   createdFrom?: string;
   createdTo?: string;
 }
 
 type TimelineUrlUpdates = Record<string, string | null>;
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+export function datetimeLocalValue(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  return [
+    parsed.getFullYear(),
+    "-",
+    padDatePart(parsed.getMonth() + 1),
+    "-",
+    padDatePart(parsed.getDate()),
+    "T",
+    padDatePart(parsed.getHours()),
+    ":",
+    padDatePart(parsed.getMinutes()),
+  ].join("");
+}
+
+export function datetimeLocalIsoValue(value: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
 
 export function ExecutionTimeline({
   initialFilters,
@@ -75,11 +109,12 @@ export function ExecutionTimeline({
   initialLoadBatchId?: string;
   initialParentJobId?: string;
   selectedExecutionId: string | null;
-  onSelectExecution: (kind: ExecutionKind, id: string) => void;
-  onUrlChange: (
-    updates: TimelineUrlUpdates,
-    mode?: "push" | "replace",
+  onSelectExecution: (
+    kind: ExecutionKind,
+    id: string,
+    focusExecutionId?: string,
   ) => void;
+  onUrlChange: (updates: TimelineUrlUpdates, mode?: "push" | "replace") => void;
 }) {
   const [kind, setKind] = useState<ExecutionKind | "all">(
     initialFilters.kind ?? "all",
@@ -89,8 +124,13 @@ export function ExecutionTimeline({
   );
   const [provider, setProvider] = useState(initialFilters.provider ?? "");
   const [datasetKey, setDatasetKey] = useState(initialFilters.datasetKey ?? "");
-  const [createdFrom, setCreatedFrom] = useState(initialFilters.createdFrom ?? "");
-  const [createdTo, setCreatedTo] = useState(initialFilters.createdTo ?? "");
+  const [syncScope, setSyncScope] = useState(initialFilters.syncScope ?? "");
+  const [createdFrom, setCreatedFrom] = useState(() =>
+    datetimeLocalValue(initialFilters.createdFrom),
+  );
+  const [createdTo, setCreatedTo] = useState(() =>
+    datetimeLocalValue(initialFilters.createdTo),
+  );
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [baselineTop, setBaselineTop] = useState<{
     createdAt: string;
@@ -105,8 +145,9 @@ export function ExecutionTimeline({
     setStatus(initialFilters.status ?? "all");
     setProvider(initialFilters.provider ?? "");
     setDatasetKey(initialFilters.datasetKey ?? "");
-    setCreatedFrom(initialFilters.createdFrom ?? "");
-    setCreatedTo(initialFilters.createdTo ?? "");
+    setSyncScope(initialFilters.syncScope ?? "");
+    setCreatedFrom(datetimeLocalValue(initialFilters.createdFrom));
+    setCreatedTo(datetimeLocalValue(initialFilters.createdTo));
     setLoadBatchId(initialLoadBatchId ?? "");
     setParentJobId(initialParentJobId ?? "");
     setCursorStack([]);
@@ -118,6 +159,7 @@ export function ExecutionTimeline({
     initialFilters.kind,
     initialFilters.provider,
     initialFilters.status,
+    initialFilters.syncScope,
     initialLoadBatchId,
     initialParentJobId,
   ]);
@@ -129,11 +171,12 @@ export function ExecutionTimeline({
       status: status === "all" ? undefined : status,
       provider: provider.trim() || undefined,
       dataset_key: datasetKey.trim() || undefined,
-      created_from: createdFrom ? new Date(createdFrom).toISOString() : undefined,
-      created_to: createdTo ? new Date(createdTo).toISOString() : undefined,
+      sync_scope: syncScope.trim() || undefined,
+      created_from: datetimeLocalIsoValue(createdFrom),
+      created_to: datetimeLocalIsoValue(createdTo),
       page_size: PAGE_SIZE,
     }),
-    [kind, status, provider, datasetKey, createdFrom, createdTo],
+    [kind, status, provider, datasetKey, syncScope, createdFrom, createdTo],
   );
 
   const executions = usePipelineExecutions({ ...filters, cursor });
@@ -295,7 +338,11 @@ export function ExecutionTimeline({
               variant="ghost"
               onClick={(event) => {
                 event.stopPropagation();
-                onSelectExecution("import_job", row.original.projected_job.id);
+                onSelectExecution(
+                  "import_job",
+                  row.original.projected_job.id,
+                  row.original.id,
+                );
               }}
             >
               대표 작업 {shortId(row.original.projected_job.id)}
@@ -324,8 +371,8 @@ export function ExecutionTimeline({
               <EntityLink id={runId} kind="dagsterRun" newTab>
                 {shortId(runId, 8)}
               </EntityLink>
-              {row.original.dagster_run_status ??
-              row.original.projected_job.dagster_run_status ? (
+              {(row.original.dagster_run_status ??
+              row.original.projected_job.dagster_run_status) ? (
                 <StatusBadge
                   status={
                     row.original.dagster_run_status ??
@@ -440,6 +487,22 @@ export function ExecutionTimeline({
               }}
             />
           </FilterField>
+          <FilterField label="sync scope">
+            <Input
+              aria-label="sync scope 필터"
+              placeholder="예: target_grids"
+              value={syncScope}
+              onChange={(event) => {
+                setSyncScope(event.target.value);
+                setCursorStack([]);
+                setBaselineTop(null);
+                onUrlChange(
+                  { sync_scope: event.target.value.trim() || null },
+                  "replace",
+                );
+              }}
+            />
+          </FilterField>
           <FilterField label="시작일">
             <Input
               aria-label="생성 시작일"
@@ -535,7 +598,7 @@ export function ExecutionTimeline({
               row.projected_job?.id === selectedExecutionId)
           }
           rowTestId={(row) => `pipeline-execution-row-${row.id}`}
-          onRowClick={(row) => onSelectExecution(row.kind, row.id)}
+          onRowClick={(row) => onSelectExecution(row.kind, row.id, row.id)}
         />
 
         <CursorPager

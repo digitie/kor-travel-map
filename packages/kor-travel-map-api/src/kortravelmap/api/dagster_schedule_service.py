@@ -28,6 +28,7 @@ from kortravelmap.api.dagster_graphql import DagsterUrls, JsonDict
 from kortravelmap.api.dagster_schema import (
     DagsterRepository,
     DagsterSchedule,
+    DagsterScheduleClaimResolution,
     DagsterScheduleCommandData,
     DagsterScheduleCommandRequest,
     DagsterScheduleCommandResponse,
@@ -40,13 +41,16 @@ __all__ = [
     "DagsterScheduleValidationError",
     "DagsterScheduleStorageUnavailable",
     "DagsterScheduleIdempotencyConflict",
-    "DagsterScheduleReplayedFailure",
+    "DagsterScheduleUncertainOutcome",
+    "DagsterScheduleClaimNotFound",
+    "DagsterScheduleClaimResolutionConflict",
     "append_schedule_audit_event",
     "ScheduleCommand",
     "delete_schedule_override",
     "execute_audited_schedule_command",
     "mutate_schedule_state",
     "reset_schedule_default",
+    "resolve_schedule_active_claim",
     "run_schedule_now",
     "schedule_overrides",
     "upsert_schedule_override",
@@ -67,17 +71,32 @@ class DagsterScheduleStorageUnavailable(RuntimeError):
 class DagsterScheduleIdempotencyConflict(RuntimeError):
     """같은 idempotency key가 다른 요청이거나 결과 불명 상태다."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        command_id: UUID,
+        active_command_id: UUID | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.command_id = command_id
+        self.active_command_id = active_command_id
+
+
+class DagsterScheduleUncertainOutcome(RuntimeError):
+    """외부 반영 여부를 확정할 수 없어 운영자 확인이 필요한 명령 결과."""
+
     def __init__(self, message: str, *, command_id: UUID) -> None:
         super().__init__(message)
         self.command_id = command_id
 
 
-class DagsterScheduleReplayedFailure(RuntimeError):
-    """이미 terminal 실패가 기록되어 원격 조작 없이 재생된 예상 밖 오류."""
+class DagsterScheduleClaimNotFound(LookupError):
+    """지정한 schedule/command의 감사 claim이 존재하지 않는다."""
 
-    def __init__(self, message: str, *, command_id: UUID) -> None:
-        super().__init__(message)
-        self.command_id = command_id
+
+class DagsterScheduleClaimResolutionConflict(RuntimeError):
+    """claim이 이미 해제됐거나 결과가 불명 상태가 아니어서 해제할 수 없다."""
 
 
 _LOG = logging.getLogger(__name__)
@@ -363,9 +382,7 @@ async def upsert_schedule_override(
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
-        raise DagsterScheduleStorageUnavailable(
-            "schedule override를 저장할 수 없습니다."
-        ) from exc
+        raise DagsterScheduleStorageUnavailable("schedule override를 저장할 수 없습니다.") from exc
 
 
 async def append_schedule_audit_event(
@@ -378,6 +395,7 @@ async def append_schedule_audit_event(
     actor: str,
     reason: str | None,
     details: dict[str, object],
+    release_active_claim: bool = True,
 ) -> None:
     """schedule 명령 감사 이벤트를 덮어쓰기 없이 1행 추가한다."""
 
@@ -403,7 +421,7 @@ async def append_schedule_audit_event(
                 "details": json.dumps(details, ensure_ascii=False, sort_keys=True),
             },
         )
-        if phase != "requested":
+        if phase != "requested" and release_active_claim:
             await session.execute(
                 text(
                     """
@@ -506,6 +524,9 @@ async def _claim_schedule_command(
                         else ""
                     ),
                     command_id=command_id,
+                    active_command_id=(
+                        UUID(str(active_command_id)) if active_command_id is not None else None
+                    ),
                 )
             await session.commit()
             return None
@@ -566,15 +587,13 @@ async def _claim_schedule_command(
         )
     terminal_details = dict(terminal.details)
     if terminal_details.get("outcome") == "exception":
-        message = str(
-            terminal_details.get("message") or "schedule 명령이 예외로 실패했습니다."
-        )
+        message = str(terminal_details.get("message") or "schedule 명령이 예외로 실패했습니다.")
         exception_kind = terminal_details.get("exception_kind")
         if exception_kind == "validation":
             raise DagsterScheduleValidationError(message)
         if exception_kind == "storage_unavailable":
             raise DagsterScheduleStorageUnavailable(message)
-        raise DagsterScheduleReplayedFailure(message, command_id=command_id)
+        raise DagsterScheduleUncertainOutcome(message, command_id=command_id)
     try:
         data = DagsterScheduleCommandData.model_validate(terminal_details)
     except ValueError as exc:
@@ -584,6 +603,153 @@ async def _claim_schedule_command(
         ) from exc
     data.audit_command_id = command_id
     return _schedule_command_response(data, started_at=perf_counter())
+
+
+async def resolve_schedule_active_claim(
+    session: AsyncSession,
+    *,
+    schedule_name: str,
+    command_id: UUID,
+    resolution: Literal["confirmed_applied", "confirmed_not_applied"],
+    actor: str,
+    reason: str,
+) -> DagsterScheduleClaimResolution:
+    """운영자가 외부 상태를 확인한 불명 claim을 감사 이력과 함께 해제한다."""
+
+    normalized_reason = reason.strip()
+    if not normalized_reason:
+        raise DagsterScheduleValidationError("claim 해제 사유를 입력하세요.")
+    try:
+        claim_result = await session.execute(
+            text(
+                """
+                SELECT terminal.event_id AS terminal_event_id, terminal.details
+                FROM ops.dagster_schedule_active_claims AS claim
+                JOIN ops.dagster_schedule_audit_events AS requested
+                  ON requested.command_id = claim.command_id
+                 AND requested.phase = 'requested'
+                LEFT JOIN ops.dagster_schedule_audit_events AS terminal
+                  ON terminal.command_id = claim.command_id
+                 AND terminal.phase IN ('succeeded','failed')
+                WHERE claim.command_id = CAST(:command_id AS uuid)
+                  AND claim.schedule_name = :schedule_name
+                  AND requested.schedule_name = :schedule_name
+                  AND (
+                    terminal.command_id IS NULL
+                    OR terminal.schedule_name = :schedule_name
+                  )
+                FOR UPDATE OF claim
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        claim_row = claim_result.one_or_none()
+        if claim_row is None:
+            known_result = await session.execute(
+                text(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1
+                      FROM ops.dagster_schedule_audit_events
+                      WHERE command_id = CAST(:command_id AS uuid)
+                        AND schedule_name = :schedule_name
+                    ) OR EXISTS (
+                      SELECT 1
+                      FROM ops.dagster_schedule_claim_resolutions
+                      WHERE command_id = CAST(:command_id AS uuid)
+                        AND schedule_name = :schedule_name
+                    )
+                    """
+                ),
+                {
+                    "command_id": str(command_id),
+                    "schedule_name": schedule_name,
+                },
+            )
+            known = bool(known_result.scalar_one())
+            await session.rollback()
+            if known:
+                raise DagsterScheduleClaimResolutionConflict(
+                    "이 schedule claim은 이미 해제됐거나 활성 상태가 아닙니다."
+                )
+            raise DagsterScheduleClaimNotFound("지정한 schedule claim을 찾을 수 없습니다.")
+        details = dict(claim_row.details) if claim_row.details is not None else {}
+        if (
+            claim_row.terminal_event_id is not None
+            and details.get("outcome_certainty") != "uncertain"
+        ):
+            await session.rollback()
+            raise DagsterScheduleClaimResolutionConflict(
+                "결과가 확정된 schedule claim은 수동 해제할 수 없습니다."
+            )
+        inserted = await session.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_claim_resolutions (
+                  command_id, schedule_name, resolution, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name, :resolution,
+                  :actor, :reason, CAST(:details AS jsonb)
+                )
+                RETURNING resolution_id, created_at
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+                "resolution": resolution,
+                "actor": actor,
+                "reason": normalized_reason,
+                "details": json.dumps(
+                    {
+                        "terminal_recorded": claim_row.terminal_event_id is not None,
+                        "terminal_outcome_certainty": details.get("outcome_certainty"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        )
+        resolution_row = inserted.one()
+        deleted = await session.execute(
+            text(
+                """
+                DELETE FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND schedule_name = :schedule_name
+                RETURNING command_id
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        if deleted.scalar_one_or_none() is None:
+            raise DagsterScheduleClaimResolutionConflict(
+                "schedule claim이 동시에 변경되어 해제하지 못했습니다."
+            )
+        await session.commit()
+    except (DagsterScheduleClaimNotFound, DagsterScheduleClaimResolutionConflict):
+        await session.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise DagsterScheduleStorageUnavailable(
+            "schedule claim 해제 감사 이력을 저장할 수 없습니다."
+        ) from exc
+    return DagsterScheduleClaimResolution(
+        resolution_id=int(resolution_row.resolution_id),
+        command_id=command_id,
+        schedule_name=schedule_name,
+        resolution=resolution,
+        actor=actor,
+        reason=normalized_reason,
+        resolved_at=resolution_row.created_at,
+    )
 
 
 async def execute_audited_schedule_command(
@@ -636,13 +802,24 @@ async def execute_audited_schedule_command(
                     "exception_kind": exception_kind,
                     "exception_type": type(exc).__name__,
                     "message": str(exc),
+                    "outcome_certainty": (
+                        "confirmed"
+                        if exception_kind in {"validation", "storage_unavailable"}
+                        else "uncertain"
+                    ),
                 },
+                release_active_claim=exception_kind in {"validation", "storage_unavailable"},
             )
         except DagsterScheduleStorageUnavailable:
             _LOG.exception(
                 "schedule 실패 terminal audit 저장 실패 (command_id=%s)",
                 command_id,
             )
+        if exception_kind == "unexpected":
+            raise DagsterScheduleUncertainOutcome(
+                str(exc),
+                command_id=command_id,
+            ) from exc
         raise
     response.data.audit_command_id = command_id
     try:
@@ -655,6 +832,7 @@ async def execute_audited_schedule_command(
             actor=actor,
             reason=reason,
             details=response.data.model_dump(mode="json"),
+            release_active_claim=response.data.outcome_certainty == "confirmed",
         )
     except DagsterScheduleStorageUnavailable:
         response.data.audit_status = "terminal_record_failed"
@@ -685,14 +863,16 @@ async def delete_schedule_override(
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
-        raise DagsterScheduleStorageUnavailable(
-            "schedule override를 삭제할 수 없습니다."
-        ) from exc
+        raise DagsterScheduleStorageUnavailable("schedule override를 삭제할 수 없습니다.") from exc
 
 
 def _schedule_command_response(
-    data: DagsterScheduleCommandData, *, started_at: float
+    data: DagsterScheduleCommandData,
+    *,
+    started_at: float,
+    outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed",
 ) -> DagsterScheduleCommandResponse:
+    data.outcome_certainty = outcome_certainty
     return DagsterScheduleCommandResponse(
         data=data,
         meta=make_meta(started_at=started_at),
@@ -813,9 +993,13 @@ async def _reload_location(
     client: httpx.AsyncClient,
     dagster_urls: DagsterUrls,
     repository_location_name: str | None,
-) -> tuple[Literal["succeeded", "unavailable", "error"], str | None]:
+) -> tuple[
+    Literal["succeeded", "unavailable", "error"],
+    str | None,
+    Literal["confirmed", "uncertain"],
+]:
     if not repository_location_name:
-        return "error", "repository location 이름이 없습니다."
+        return "error", "repository location 이름이 없습니다.", "confirmed"
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,
@@ -824,13 +1008,15 @@ async def _reload_location(
             query=_DAGSTER_RELOAD_LOCATION_MUTATION,
         )
     except httpx.HTTPError as exc:
-        return "unavailable", f"code location reload 요청 실패: {exc}"
+        return "unavailable", f"code location reload 요청 실패: {exc}", "uncertain"
     except ValueError as exc:
-        return "error", f"code location reload 응답 해석 실패: {exc}"
+        return "error", f"code location reload 응답 해석 실패: {exc}", "uncertain"
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
-        return "error", " / ".join(
-            dagster_graphql.graphql_error_message(error) for error in graphql_errors
+        return (
+            "error",
+            " / ".join(dagster_graphql.graphql_error_message(error) for error in graphql_errors),
+            "uncertain",
         )
     result = dagster_graphql.as_dict(
         dagster_graphql.as_dict(payload.get("data")).get("reloadRepositoryLocation")
@@ -838,19 +1024,21 @@ async def _reload_location(
     if result.get("__typename") == "WorkspaceLocationEntry":
         load_status = dagster_graphql.optional_string(result.get("loadStatus"))
         location = dagster_graphql.as_dict(result.get("locationOrLoadError"))
-        if (
-            load_status == "LOADED"
-            and location.get("__typename") == "RepositoryLocation"
-        ):
-            return "succeeded", None
+        if load_status == "LOADED" and location.get("__typename") == "RepositoryLocation":
+            return "succeeded", None, "confirmed"
         location_error = _graphql_result_error(location)
         return (
             "error",
             "code location reload 후 load 실패"
             f"(loadStatus={load_status or 'unknown'}): {location_error}",
+            "confirmed",
         )
     error = _graphql_result_error(result)
-    return "error", error or "code location reload 응답을 확인할 수 없습니다."
+    return (
+        "error",
+        error or "code location reload 응답을 확인할 수 없습니다.",
+        "confirmed",
+    )
 
 
 def _schedule_url_error(
@@ -943,7 +1131,7 @@ async def update_schedule(
         actor=actor,
         reason=body.reason,
     )
-    reload_result, reload_error = await _reload_location(
+    reload_result, reload_error, outcome_certainty = await _reload_location(
         client=client,
         dagster_urls=urls,
         repository_location_name=schedule.repository_location_name,
@@ -968,21 +1156,16 @@ async def update_schedule(
             effective_cron_schedule=schedule.cron_schedule,
             schedule_status=schedule.status,
             save_status="saved",
-            reload_status=(
-                "succeeded" if reload_result == "succeeded" else "failed"
-            ),
+            reload_status=("succeeded" if reload_result == "succeeded" else "failed"),
             effective_status=(
                 "pending_verification"
                 if reload_result == "succeeded"
-                else (
-                    "confirmed"
-                    if schedule.cron_schedule == cron_schedule
-                    else "mismatch"
-                )
+                else ("confirmed" if schedule.cron_schedule == cron_schedule else "mismatch")
             ),
             errors=[] if reload_error is None else [reload_error],
         ),
         started_at=started_at,
+        outcome_certainty=outcome_certainty,
     )
 
 
@@ -1041,7 +1224,7 @@ async def reset_schedule_default(
             started_at=started_at,
         )
     await delete_schedule_override(session, schedule_name=schedule_name)
-    reload_result, reload_error = await _reload_location(
+    reload_result, reload_error, outcome_certainty = await _reload_location(
         client=client,
         dagster_urls=urls,
         repository_location_name=schedule.repository_location_name,
@@ -1066,9 +1249,7 @@ async def reset_schedule_default(
             effective_cron_schedule=schedule.cron_schedule,
             schedule_status=schedule.status,
             save_status="cleared",
-            reload_status=(
-                "succeeded" if reload_result == "succeeded" else "failed"
-            ),
+            reload_status=("succeeded" if reload_result == "succeeded" else "failed"),
             effective_status=(
                 "pending_verification"
                 if reload_result == "succeeded"
@@ -1081,6 +1262,7 @@ async def reset_schedule_default(
             errors=[] if reload_error is None else [reload_error],
         ),
         started_at=started_at,
+        outcome_certainty=outcome_certainty,
     )
 
 
@@ -1189,6 +1371,7 @@ async def mutate_schedule_state(
                 status="unavailable",
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     except ValueError as exc:
         return _schedule_command_response(
@@ -1200,6 +1383,7 @@ async def mutate_schedule_state(
                 error=str(exc),
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
@@ -1213,10 +1397,15 @@ async def mutate_schedule_state(
                 error=error,
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     result = dagster_graphql.as_dict(dagster_graphql.as_dict(payload.get("data")).get(result_key))
     result_error = _graphql_result_error(result)
     state = dagster_graphql.as_dict(result.get("scheduleState"))
+    state_status = dagster_graphql.optional_string(state.get("status"))
+    malformed_success = result_error is None and state_status is None
+    if malformed_success:
+        result_error = "Dagster schedule mutation 성공 응답에 scheduleState.status가 없습니다."
     return _schedule_command_response(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
@@ -1229,13 +1418,14 @@ async def mutate_schedule_state(
             default_cron_schedule=schedule.default_cron_schedule,
             override_cron_schedule=schedule.override_cron_schedule,
             effective_cron_schedule=schedule.effective_cron_schedule,
-            schedule_status=dagster_graphql.optional_string(state.get("status")) or schedule.status,
+            schedule_status=state_status or schedule.status,
             save_status="not_applicable",
             reload_status="not_requested",
-            effective_status="confirmed",
+            effective_status="unknown" if malformed_success else "confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
+        outcome_certainty="uncertain" if malformed_success else "confirmed",
     )
 
 
@@ -1297,9 +1487,7 @@ async def run_schedule_now(
         )
     reason = body.reason if body else None
     try:
-        run_config, operation_tags = _admin_feature_operation_launch(
-            schedule.pipeline_name
-        )
+        run_config, operation_tags = _admin_feature_operation_launch(schedule.pipeline_name)
     except FeatureOperationRegistryError as exc:
         return _schedule_command_response(
             _command_error_data(
@@ -1328,10 +1516,7 @@ async def run_schedule_now(
         "mode": schedule.mode or "default",
         "runConfigData": run_config,
         "executionMetadata": {
-            "tags": [
-                {"key": key, "value": value}
-                for key, value in sorted(metadata_tags.items())
-            ]
+            "tags": [{"key": key, "value": value} for key, value in sorted(metadata_tags.items())]
         },
     }
     try:
@@ -1352,6 +1537,7 @@ async def run_schedule_now(
                 status="unavailable",
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     except ValueError as exc:
         return _schedule_command_response(
@@ -1363,6 +1549,7 @@ async def run_schedule_now(
                 error=str(exc),
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
@@ -1376,10 +1563,15 @@ async def run_schedule_now(
                 error=error,
             ),
             started_at=started_at,
+            outcome_certainty="uncertain",
         )
     result = dagster_graphql.as_dict(dagster_graphql.as_dict(payload.get("data")).get("launchRun"))
     result_error = _graphql_result_error(result)
     run = dagster_graphql.as_dict(result.get("run"))
+    run_id = dagster_graphql.optional_string(run.get("runId"))
+    malformed_success = result_error is None and run_id is None
+    if malformed_success:
+        result_error = "Dagster launch 성공 응답에 run.runId가 없습니다."
     return _schedule_command_response(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
@@ -1393,12 +1585,13 @@ async def run_schedule_now(
             override_cron_schedule=schedule.override_cron_schedule,
             effective_cron_schedule=schedule.effective_cron_schedule,
             schedule_status=schedule.status,
-            run_id=dagster_graphql.optional_string(run.get("runId")),
+            run_id=run_id,
             run_status=dagster_graphql.optional_string(run.get("status")),
             save_status="not_applicable",
             reload_status="not_requested",
-            effective_status="confirmed",
+            effective_status="unknown" if malformed_success else "confirmed",
             errors=[] if result_error is None else [result_error],
         ),
         started_at=started_at,
+        outcome_certainty="uncertain" if malformed_success else "confirmed",
     )

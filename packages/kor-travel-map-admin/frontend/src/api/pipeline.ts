@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   ApiClientError,
+  clearIdempotencyKeys,
   getJson,
   patchJson,
   pathWithQuery,
@@ -36,8 +37,7 @@ export type PipelineExecutionsListResponse =
 export type PipelineExecutionRecord = Schemas["PipelineExecutionRecord"];
 export type PipelineExecutionRootRecord =
   Schemas["PipelineExecutionRootRecord"];
-export type PipelineProjectedJobRecord =
-  Schemas["PipelineProjectedJobRecord"];
+export type PipelineProjectedJobRecord = Schemas["PipelineProjectedJobRecord"];
 export type PipelineDagsterRunDetailResponse =
   Schemas["DagsterRunDetailResponse"];
 export type PipelineExecutionDetailResponse =
@@ -62,6 +62,10 @@ export type PipelineScheduleUpdateRequest =
   Schemas["PipelineScheduleUpdateRequest"];
 export type PipelineScheduleCommandRequest =
   Schemas["PipelineScheduleCommandRequest"];
+export type PipelineScheduleClaimResolutionRequest =
+  Schemas["PipelineScheduleClaimResolutionRequest"];
+export type PipelineScheduleClaimResolutionResponse =
+  Schemas["PipelineScheduleClaimResolutionResponse"];
 export type FeatureUpdateRequestCreateRequest =
   Schemas["FeatureUpdateRequestCreateRequest"];
 export type FeatureUpdateRequestCreateResponse =
@@ -72,8 +76,7 @@ export type FeatureUpdateRequestPreviewResponse =
   Schemas["FeatureUpdateRequestPreviewResponse"];
 export type FeatureUpdateRequestMutationResponse =
   Schemas["FeatureUpdateRequestMutationResponse"];
-export type FeatureUpdateScope =
-  FeatureUpdateRequestCreateRequest["scope"];
+export type FeatureUpdateScope = FeatureUpdateRequestCreateRequest["scope"];
 
 type ExecutionsQuery = NonNullable<
   paths["/v1/ops/pipeline/executions"]["get"]["parameters"]["query"]
@@ -91,8 +94,7 @@ export type ExecutionStatus = Exclude<
   null | undefined
 >;
 export type JobEventLevel = Exclude<EventsQuery["level"], null | undefined>;
-export type PipelineScheduleCommand =
-  PipelineScheduleCommandRequest["command"];
+export type PipelineScheduleCommand = PipelineScheduleCommandRequest["command"];
 
 export const EXECUTION_KINDS: readonly ExecutionKind[] = [
   "import_job",
@@ -118,6 +120,7 @@ export interface PipelineExecutionsParams {
   status?: ExecutionStatus;
   provider?: string;
   dataset_key?: string;
+  sync_scope?: string;
   created_from?: string;
   created_to?: string;
   page_size?: number;
@@ -159,6 +162,7 @@ function fetchExecutions(
       status: params.status,
       provider: params.provider,
       dataset_key: params.dataset_key,
+      sync_scope: params.sync_scope,
       created_from: params.created_from,
       created_to: params.created_to,
       page_size: params.page_size,
@@ -374,9 +378,17 @@ export function useCancelExecutionMutation() {
         queryKey: ["pipeline", "executions"],
       });
       void queryClient.invalidateQueries({
-        queryKey: ["pipeline", "execution", variables.kind, variables.executionId],
+        queryKey: [
+          "pipeline",
+          "execution",
+          variables.kind,
+          variables.executionId,
+        ],
       });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
+      invalidatePipelineDatasetQueries(queryClient);
     },
   });
 }
@@ -393,13 +405,14 @@ export function useCreateUpdateRequestMutation() {
         "/v1/ops/pipeline/requests",
         body,
       ),
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "executions"],
       });
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "overview"],
       });
+      invalidatePipelineDatasetQueries(queryClient);
     },
   });
 }
@@ -429,11 +442,22 @@ export function useRunNowUpdateRequestMutation() {
       postJson<FeatureUpdateRequestMutationResponse>(
         `/v1/ops/pipeline/requests/${encodeURIComponent(requestId)}/run-now`,
       ),
-    onSuccess: () => {
+    onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "executions"],
       });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "pipeline",
+          "execution",
+          "update_request",
+          variables.requestId,
+        ],
+      });
+      invalidatePipelineDatasetQueries(queryClient);
     },
   });
 }
@@ -447,7 +471,7 @@ export function usePatchScheduleMutation() {
   >({
     mutationFn: ({ scheduleName, body }) =>
       withIdempotencyKey(
-        `pipeline:schedule:${scheduleName}:patch`,
+        `pipeline:schedule:${scheduleName}:patch:${JSON.stringify(body)}`,
         (idempotencyKey) =>
           patchJson<PipelineScheduleCommandResponse>(
             `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}`,
@@ -460,8 +484,13 @@ export function usePatchScheduleMutation() {
         },
       ),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "schedules"] });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "schedules"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
+      invalidatePipelineDatasetQueries(queryClient);
     },
   });
 }
@@ -475,7 +504,7 @@ export function useScheduleCommandMutation() {
   >({
     mutationFn: ({ scheduleName, body }) =>
       withIdempotencyKey(
-        `pipeline:schedule:${scheduleName}:command:${body.command}`,
+        `pipeline:schedule:${scheduleName}:command:${JSON.stringify(body)}`,
         (idempotencyKey) =>
           postJson<PipelineScheduleCommandResponse>(
             `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}/commands`,
@@ -488,13 +517,59 @@ export function useScheduleCommandMutation() {
         },
       ),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "schedules"] });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "schedules"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
       void queryClient.invalidateQueries({
         queryKey: ["pipeline", "dagster-runs"],
       });
+      invalidatePipelineDatasetQueries(queryClient);
     },
   });
+}
+
+export function useResolveScheduleClaimMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    PipelineScheduleClaimResolutionResponse,
+    Error,
+    {
+      scheduleName: string;
+      commandId: string;
+      body: PipelineScheduleClaimResolutionRequest;
+    }
+  >({
+    mutationFn: ({ scheduleName, commandId, body }) =>
+      postJson<PipelineScheduleClaimResolutionResponse>(
+        `/v1/ops/pipeline/schedules/${encodeURIComponent(scheduleName)}/claims/${encodeURIComponent(commandId)}/resolve`,
+        body,
+      ),
+    onSuccess: (_response, variables) => {
+      clearIdempotencyKeys(`pipeline:schedule:${variables.scheduleName}:`);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "schedules"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "overview"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "dagster-runs"],
+      });
+      invalidatePipelineDatasetQueries(queryClient);
+    },
+  });
+}
+
+function invalidatePipelineDatasetQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({ queryKey: ["ops-datasets"] });
+  void queryClient.invalidateQueries({ queryKey: ["ops-dataset"] });
 }
 
 /**

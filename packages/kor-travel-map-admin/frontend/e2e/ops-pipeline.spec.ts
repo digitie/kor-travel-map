@@ -59,23 +59,24 @@ function makeCatalogRow(
   datasetKey: string,
   syncScope: string,
 ): OpsDatasetGridRow {
-  const scopeRefresh = syncScope === "target_grids"
-    ? {
-        supported: true,
-        selector: "poi_cache_targets" as const,
-        effect: "sync_scope" as const,
-        default_sync_scope: "target_grids",
-        allowed_sync_scopes: ["target_grids"],
-        reason: null,
-      }
-    : {
-        supported: true,
-        selector: "none" as const,
-        effect: "dataset_wide" as const,
-        default_sync_scope: "dataset_wide",
-        allowed_sync_scopes: [],
-        reason: null,
-      };
+  const scopeRefresh =
+    syncScope === "target_grids"
+      ? {
+          supported: true,
+          selector: "poi_cache_targets" as const,
+          effect: "sync_scope" as const,
+          default_sync_scope: "target_grids",
+          allowed_sync_scopes: ["target_grids"],
+          reason: null,
+        }
+      : {
+          supported: true,
+          selector: "none" as const,
+          effect: "dataset_wide" as const,
+          default_sync_scope: "dataset_wide",
+          allowed_sync_scopes: [],
+          reason: null,
+        };
   return {
     provider,
     dataset_key: datasetKey,
@@ -581,6 +582,7 @@ function makeCommandResult(options: {
         options.command === "update" || options.command === "clear_override"
           ? "pending_verification"
           : "confirmed",
+      outcome_certainty: "confirmed",
       audit_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       audit_status: options.auditStatus ?? "recorded",
       errors: options.errors ?? [],
@@ -606,6 +608,9 @@ async function fulfillJson(
 
 interface MockOptions {
   executions?: PipelineExecutionRootRecord[];
+  executionsForQuery?: (
+    query: URLSearchParams,
+  ) => PipelineExecutionRootRecord[];
   headExecution?: PipelineExecutionRootRecord;
   headExecutions?: PipelineExecutionRootRecord[];
   nextCursor?: string;
@@ -613,6 +618,7 @@ interface MockOptions {
   scheduleCommandStatus?: "ok" | "error";
   schedulePatchStatus?: "ok" | "error";
   scheduleActionStatus?: "ok" | "error";
+  scheduleActionConflict?: boolean;
   scheduleAuditStatus?: "recorded" | "terminal_record_failed";
   scheduleResponseDelayMs?: number;
   schedulesResponse?: PipelineSchedulesResponse;
@@ -642,6 +648,7 @@ interface MockCounters {
   patchBodies: unknown[];
   commandBodies: unknown[];
   scheduleKeys: string[];
+  claimResolutionBodies: unknown[];
   requestBodies: unknown[];
   previewBodies: unknown[];
   runNowBodies: Array<string | null>;
@@ -661,6 +668,7 @@ async function installPipelineMocks(
     patchBodies: [],
     commandBodies: [],
     scheduleKeys: [],
+    claimResolutionBodies: [],
     requestBodies: [],
     previewBodies: [],
     runNowBodies: [],
@@ -704,18 +712,21 @@ async function installPipelineMocks(
     }
     if (pathname.endsWith("/v1/ops/pipeline/executions")) {
       counters.executionQueries.push(url.searchParams);
+      const queriedExecutions =
+        options.executionsForQuery?.(url.searchParams) ?? executions;
       const cursor = url.searchParams.get("cursor");
       if (!cursor) {
         firstPageQueries += 1;
       }
       const items = cursor
-        ? executions.slice(1)
-        : (options.headExecutions || options.headExecution) && firstPageQueries > 1
+        ? queriedExecutions.slice(1)
+        : (options.headExecutions || options.headExecution) &&
+            firstPageQueries > 1
           ? [
               ...(options.headExecutions ?? [options.headExecution!]),
-              ...executions,
+              ...queriedExecutions,
             ]
-          : executions;
+          : queriedExecutions;
       const body: PipelineExecutionsListResponse = {
         data: { items },
         meta: {
@@ -855,6 +866,27 @@ async function installPipelineMocks(
       await fulfillJson(route, options.schedulesResponse ?? makeSchedules());
       return;
     }
+    if (
+      /\/v1\/ops\/pipeline\/schedules\/[^/]+\/claims\/[^/]+\/resolve$/.test(
+        pathname,
+      )
+    ) {
+      counters.claimResolutionBodies.push(request.postDataJSON());
+      const parts = pathname.split("/");
+      await fulfillJson(route, {
+        data: {
+          resolution_id: 42,
+          command_id: decodeURIComponent(parts.at(-2) ?? ""),
+          schedule_name: decodeURIComponent(parts.at(-4) ?? ""),
+          resolution: request.postDataJSON().resolution,
+          actor: "admin:e2e",
+          reason: request.postDataJSON().reason,
+          resolved_at: "2026-07-14T10:06:00.000Z",
+        },
+        meta: META,
+      });
+      return;
+    }
     if (/\/v1\/ops\/pipeline\/schedules\/[^/]+$/.test(pathname)) {
       counters.patchBodies.push(request.postDataJSON());
       counters.scheduleKeys.push(request.headers()["idempotency-key"] ?? "");
@@ -906,6 +938,26 @@ async function installPipelineMocks(
         await new Promise((resolve) =>
           setTimeout(resolve, options.scheduleResponseDelayMs),
         );
+      }
+      if (options.scheduleActionConflict) {
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+            title: "이전 명령 결과 확인 필요",
+            status: 409,
+            detail: "이 schedule의 이전 명령 결과가 확정되지 않았습니다.",
+            code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: {
+              command_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              active_command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            },
+          },
+          409,
+        );
+        return;
       }
       if (
         (options.scheduleActionStatus ?? options.scheduleCommandStatus) ===
@@ -1046,9 +1098,10 @@ async function installPipelineMocks(
 
   // 요청 dialog는 C4와 같은 canonical ops datasets catalog만 사용한다.
   await page.route("**/v1/ops/datasets", async (route) => {
-    const sequenceResponse = options.catalogResponses?.[
-      Math.min(counters.catalogCalls, options.catalogResponses.length - 1)
-    ];
+    const sequenceResponse =
+      options.catalogResponses?.[
+        Math.min(counters.catalogCalls, options.catalogResponses.length - 1)
+      ];
     counters.catalogCalls += 1;
     const configuredResponse = sequenceResponse ?? options.catalogResponse;
     if (configuredResponse) {
@@ -1125,8 +1178,12 @@ test.describe("/ops/pipeline", () => {
     // Dagster 보조 패널 — 순수 Dagster 실패 가시성 + C3c run 상세 소비.
     const panel = page.getByTestId("pipeline-dagster-runs-panel");
     await expect(panel.getByText("run-orph")).toBeVisible();
-    await panel.getByRole("button", { name: "run run-orph... 상세 열기" }).click();
-    const runDetail = page.getByTestId("pipeline-dagster-run-detail-run-orphan");
+    await panel
+      .getByRole("button", { name: "run run-orph... 상세 열기" })
+      .click();
+    const runDetail = page.getByTestId(
+      "pipeline-dagster-run-detail-run-orphan",
+    );
     await expect(runDetail).toBeVisible();
     await expect(runDetail).toContainText("STEP_FAILURE: kma fetch timeout");
   });
@@ -1141,7 +1198,9 @@ test.describe("/ops/pipeline", () => {
     await expect(alert).toBeVisible();
     await expect(alert).toContainText("갱신 요청 큐 sensor 중지됨");
     await expect(
-      page.getByRole("button", { name: "갱신 요청 생성 (큐 sensor 확인 필요)" }),
+      page.getByRole("button", {
+        name: "갱신 요청 생성 (큐 sensor 확인 필요)",
+      }),
     ).toBeDisabled();
   });
 
@@ -1190,7 +1249,9 @@ test.describe("/ops/pipeline", () => {
     ).toBeEnabled();
   });
 
-  test("Dagster overview degrade 중에도 DB 타임라인은 유지", async ({ page }) => {
+  test("Dagster overview degrade 중에도 DB 타임라인은 유지", async ({
+    page,
+  }) => {
     await installPipelineMocks(page, {
       overview: makeOverview({ dagsterStatus: "unavailable" }),
     });
@@ -1211,13 +1272,20 @@ test.describe("/ops/pipeline", () => {
 
     await page.getByLabel("실행 상태").selectOption("running");
     await page.getByLabel("provider 필터").fill("python-kma-api");
+    await page.getByLabel("데이터셋 필터").fill("kma_short_forecast");
+    await page.getByLabel("sync scope 필터").fill("target_grids");
 
     await expect
       .poll(() => {
         const last = counters.executionQueries.at(-1);
-        return `${last?.get("status")}|${last?.get("provider")}`;
+        return [
+          last?.get("status"),
+          last?.get("provider"),
+          last?.get("dataset_key"),
+          last?.get("sync_scope"),
+        ].join("|");
       })
-      .toBe("running|python-kma-api");
+      .toBe("running|python-kma-api|kma_short_forecast|target_grids");
   });
 
   test("필터·탭 URL을 초기 복원하고 back/forward로 조사 상태를 재현", async ({
@@ -1225,14 +1293,19 @@ test.describe("/ops/pipeline", () => {
   }) => {
     await installPipelineMocks(page);
     await page.goto(
-      "/ops/pipeline?kind=update_request&status=running&provider=python-kma-api&dataset_key=kma_short_forecast&created_from=2026-07-14T09%3A00&created_to=2026-07-14T12%3A00&tab=executions",
+      "/ops/pipeline?kind=update_request&status=running&provider=python-kma-api&dataset_key=kma_short_forecast&sync_scope=target_grids&created_from=2026-07-14T09%3A00&created_to=2026-07-14T12%3A00&tab=executions",
     );
 
     await expect(page.getByLabel("실행 종류")).toHaveValue("update_request");
     await expect(page.getByLabel("실행 상태")).toHaveValue("running");
-    await expect(page.getByLabel("provider 필터")).toHaveValue("python-kma-api");
+    await expect(page.getByLabel("provider 필터")).toHaveValue(
+      "python-kma-api",
+    );
     await expect(page.getByLabel("데이터셋 필터")).toHaveValue(
       "kma_short_forecast",
+    );
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+      "target_grids",
     );
     await expect(page.getByLabel("생성 시작일")).toHaveValue(
       "2026-07-14T09:00",
@@ -1247,15 +1320,55 @@ test.describe("/ops/pipeline", () => {
     await expect(page).toHaveURL(/tab=events/);
 
     await page.goBack();
-    await expect(page.getByRole("tab", { name: "실행 타임라인" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await expect(
+      page.getByRole("tab", { name: "실행 타임라인" }),
+    ).toHaveAttribute("aria-selected", "true");
     await expect(page.getByLabel("실행 상태")).toHaveValue("failed");
     await page.goBack();
     await expect(page.getByLabel("실행 상태")).toHaveValue("running");
     await page.goForward();
     await expect(page.getByLabel("실행 상태")).toHaveValue("failed");
+  });
+
+  test("잘못된 날짜 딥링크는 화면을 깨뜨리지 않고 서버 필터에서 제외", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto(
+      "/ops/pipeline?created_from=not-a-date&created_to=%25invalid&tab=executions",
+    );
+
+    await expect(
+      page.getByRole("heading", { name: "파이프라인" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("생성 시작일")).toHaveValue("");
+    await expect(page.getByLabel("생성 종료일")).toHaveValue("");
+    await expect
+      .poll(() => {
+        const last = counters.executionQueries.at(-1);
+        return `${last?.has("created_from")}|${last?.has("created_to")}`;
+      })
+      .toBe("false|false");
+  });
+
+  test("UTC 날짜 딥링크를 datetime-local로 표시하고 같은 instant를 조회", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    const source = "2026-07-14T00:30:00.000Z";
+    await page.goto(
+      `/ops/pipeline?created_from=${encodeURIComponent(source)}&tab=executions`,
+    );
+    const expectedLocal = await page.evaluate((iso) => {
+      const value = new Date(iso);
+      const pad = (part: number) => String(part).padStart(2, "0");
+      return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+    }, source);
+
+    await expect(page.getByLabel("생성 시작일")).toHaveValue(expectedLocal);
+    await expect
+      .poll(() => counters.executionQueries.at(-1)?.get("created_from"))
+      .toBe(source);
   });
 
   test("cursor 페이지 조사 중에는 목록을 재정렬하지 않고 새 실행 배지를 표시", async ({
@@ -1301,7 +1414,10 @@ test.describe("/ops/pipeline", () => {
     };
     const headExecutions = Array.from({ length: 50 }, (_, index) => ({
       ...sameIdentityOtherKind,
-      id: index === 0 ? baseline.id : `ffffffff-ffff-4fff-8fff-${String(index).padStart(12, "0")}`,
+      id:
+        index === 0
+          ? baseline.id
+          : `ffffffff-ffff-4fff-8fff-${String(index).padStart(12, "0")}`,
       created_at:
         index === 0 ? baseline.created_at : "2026-07-14T12:00:00.000Z",
     }));
@@ -1326,9 +1442,7 @@ test.describe("/ops/pipeline", () => {
     await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
 
-    await page
-      .getByTestId(`pipeline-execution-row-${REQUEST_ID}`)
-      .click();
+    await page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`).click();
 
     const panel = page.getByTestId("pipeline-execution-detail");
     await expect(panel).toBeVisible();
@@ -1449,12 +1563,56 @@ test.describe("/ops/pipeline", () => {
     await page.goto(`/ops/pipeline?execution=update_request:${REQUEST_ID}`);
 
     const panel = page.getByTestId("pipeline-execution-detail");
-    await expect(panel.getByText("취소 진행 중", { exact: true })).toBeVisible();
     await expect(
-      panel.getByRole("button", { name: "취소 요청" }),
-    ).toHaveCount(0);
+      panel.getByText("취소 진행 중", { exact: true }),
+    ).toBeVisible();
+    await expect(panel.getByRole("button", { name: "취소 요청" })).toHaveCount(
+      0,
+    );
+    await expect(panel.getByRole("button", { name: /run-now/ })).toHaveCount(0);
+  });
+
+  test("재시도 불가 취소 이력이 있으면 활성 실행도 중복 취소를 차단", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, {
+      detailFactory: () => {
+        const detail = makeDetail();
+        return {
+          ...detail,
+          data: {
+            ...detail.data,
+            cancellation: {
+              cancellation_id: "77777777-7777-4777-8777-777777777777",
+              committed_data_rolled_back: false,
+              dagster_runs: [],
+              error: "Dagster 종료 여부를 확정할 수 없음",
+              finished_at: "2026-07-14T10:04:00.000Z",
+              members: [],
+              previous_cancellation_id: null,
+              reason: "operator request",
+              requested_at: "2026-07-14T10:03:00.000Z",
+              requested_by: "admin:e2e",
+              retryable: false,
+              root: { kind: "update_request", id: REQUEST_ID },
+              status: "failed",
+              unresolved_member_count: 1,
+              updated_at: "2026-07-14T10:04:00.000Z",
+              warnings: [],
+            },
+          },
+        };
+      },
+    });
+    await page.goto(`/ops/pipeline?execution=update_request:${REQUEST_ID}`);
+
+    const panel = page.getByTestId("pipeline-execution-detail");
+    await expect(panel.getByText("취소 작업 failed")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "취소 요청" })).toHaveCount(
+      0,
+    );
     await expect(
-      panel.getByRole("button", { name: /run-now/ }),
+      panel.getByRole("button", { name: "취소 재시도" }),
     ).toHaveCount(0);
   });
 
@@ -1463,15 +1621,23 @@ test.describe("/ops/pipeline", () => {
   }) => {
     const counters = await installPipelineMocks(page);
     await page.goto(`/ops/pipeline?execution=update_request:${REQUEST_ID}`);
+    await expect.poll(() => counters.catalogCalls).toBeGreaterThan(0);
+    const catalogCallsBeforeRunNow = counters.catalogCalls;
 
     const panel = page.getByTestId("pipeline-execution-detail");
-    await panel
-      .getByRole("button", { name: "즉시 재큐잉 (run-now)" })
-      .click();
+    await panel.getByRole("button", { name: "즉시 재큐잉 (run-now)" }).click();
 
     await expect(panel.getByText("우선 dispatch 요청됨")).toBeVisible();
     await expect(panel.getByText(REQUEST_ID.slice(0, 12))).toBeVisible();
     expect(counters.runNowBodies).toEqual([null]);
+    await expect
+      .poll(() => counters.catalogCalls)
+      .toBeGreaterThan(catalogCallsBeforeRunNow);
+    const detailCallsBeforeSameSelection = counters.detailQueries.length;
+    await panel.getByRole("button", { name: "같은 요청 다시 열기" }).click();
+    await expect
+      .poll(() => counters.detailQueries.length)
+      .toBeGreaterThan(detailCallsBeforeSameSelection);
   });
 
   test("running request run-now는 동일 canonical 요청을 멱등 확인", async ({
@@ -1522,11 +1688,37 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
 
     await page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`).click();
-    await expect(page).toHaveURL(new RegExp(`execution=update_request%3A${REQUEST_ID}`));
+    await expect(page).toHaveURL(
+      new RegExp(`execution=update_request%3A${REQUEST_ID}`),
+    );
     await page.getByRole("button", { name: "실행 상세 닫기" }).click();
     await expect(page).not.toHaveURL(/execution=/);
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`),
+    ).toBeFocused();
     await page.goBack();
     await expect(page.getByTestId("pipeline-execution-detail")).toBeVisible();
+  });
+
+  test("상세 원 행이 필터로 사라지면 닫기 focus를 첫 표시 행으로 복귀", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, {
+      executionsForQuery: (query) =>
+        query.get("status") === "failed" ? [makeRoots()[1]!] : makeRoots(),
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`).click();
+    await page.getByLabel("실행 상태").selectOption("failed");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`),
+    ).toHaveCount(0);
+
+    await page.getByRole("button", { name: "실행 상세 닫기" }).click();
+
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${SOLO_JOB_ID}`),
+    ).toBeFocused();
   });
 
   test("스케줄 조작 시작은 tab/schedule URL을 기록", async ({ page }) => {
@@ -1605,9 +1797,7 @@ test.describe("/ops/pipeline", () => {
     expect(counters.patchBodies.at(1)).toMatchObject({ cron_schedule: null });
   });
 
-  test("스케줄 명령 502 problem은 호출 실패 alert로 표시", async ({
-    page,
-  }) => {
+  test("스케줄 명령 502 problem은 호출 실패 alert로 표시", async ({ page }) => {
     const counters = await installPipelineMocks(page, {
       scheduleCommandStatus: "error",
     });
@@ -1621,7 +1811,9 @@ test.describe("/ops/pipeline", () => {
     await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
 
     await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
-    await expect(page.getByText("Dagster mutation failed").first()).toBeVisible();
+    await expect(
+      page.getByText("Dagster mutation failed").first(),
+    ).toBeVisible();
     await expect(page.getByTestId("schedule-command-result")).toBeVisible();
     await expect(page.getByTestId("schedule-command-result")).toContainText(
       "실패(error)",
@@ -1634,6 +1826,24 @@ test.describe("/ops/pipeline", () => {
     expect(counters.scheduleKeys.at(0)).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+  });
+
+  test("스케줄 409 active command ID를 claim recovery 조작으로 연결", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, { scheduleActionConflict: true });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+      .click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(recovery).toContainText(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    await expect(recovery).toContainText(SCHEDULE_NAME);
   });
 
   test("명령 502 후 다른 cron 수정 성공은 이전 오류 상태를 제거", async ({
@@ -1652,7 +1862,9 @@ test.describe("/ops/pipeline", () => {
       .getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` })
       .click();
     const dialog = page.getByRole("dialog", { name: "스케줄 cron 수정" });
-    await dialog.getByRole("textbox", { name: "cron", exact: true }).fill("10 4 * * *");
+    await dialog
+      .getByRole("textbox", { name: "cron", exact: true })
+      .fill("10 4 * * *");
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
 
     const result = page.getByTestId("schedule-command-result");
@@ -1681,9 +1893,7 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toBeVisible();
   });
 
-  test("스케줄 명령의 terminal 감사 성공은 사유를 비운다", async ({
-    page,
-  }) => {
+  test("스케줄 명령의 terminal 감사 성공은 사유를 비운다", async ({ page }) => {
     await installPipelineMocks(page);
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
     const reason = page.getByLabel("명령 사유 (선택)");
@@ -1703,7 +1913,7 @@ test.describe("/ops/pipeline", () => {
     await expect(reason).toHaveValue("");
   });
 
-  test("cron terminal audit 실패는 dialog와 동일 action key를 유지한다", async ({
+  test("cron terminal audit 실패 후 body 변경은 새 action key를 사용한다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -1715,7 +1925,9 @@ test.describe("/ops/pipeline", () => {
       .click();
     const dialog = page.getByRole("dialog", { name: "스케줄 cron 수정" });
     const reason = dialog.getByLabel("수정 사유");
-    await dialog.getByRole("textbox", { name: "cron", exact: true }).fill("15 5 * * *");
+    await dialog
+      .getByRole("textbox", { name: "cron", exact: true })
+      .fill("15 5 * * *");
     await reason.fill("감사 결과 확인 필요");
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
 
@@ -1724,11 +1936,13 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toContainText(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
-    await dialog.getByRole("textbox", { name: "cron", exact: true }).fill("25 5 * * *");
+    await dialog
+      .getByRole("textbox", { name: "cron", exact: true })
+      .fill("25 5 * * *");
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
 
     expect(counters.scheduleKeys).toHaveLength(2);
-    expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
+    expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
     expect(counters.patchBodies[1]).not.toEqual(counters.patchBodies[0]);
   });
 
@@ -1746,7 +1960,9 @@ test.describe("/ops/pipeline", () => {
       await page
         .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
         .click();
-      await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+      await page
+        .getByRole("button", { name: "즉시 실행", exact: true })
+        .click();
       await expect(page.getByTestId("schedule-command-result")).toContainText(
         "terminal 감사 기록에 실패",
       );
@@ -1759,6 +1975,59 @@ test.describe("/ops/pipeline", () => {
     expect(counters.scheduleKeys).toHaveLength(2);
     expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
     expect(counters.commandBodies[1]).toEqual(counters.commandBodies[0]);
+  });
+
+  test("결과 불명 schedule claim을 실제 상태 확인 근거와 함께 해제", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleAuditStatus: "terminal_record_failed",
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(recovery).toContainText(
+      "Dagster 실행 목록과 스케줄 상태를 직접 확인",
+    );
+    await expect(
+      recovery.getByRole("button", { name: "claim 해제" }),
+    ).toBeDisabled();
+    await recovery
+      .getByLabel("schedule claim 실제 반영 확인 결과")
+      .selectOption("confirmed_not_applied");
+    await recovery
+      .getByLabel("확인 근거·해제 사유 (필수)")
+      .fill("Dagster run 목록에 해당 실행이 없음을 확인");
+    await recovery.getByRole("button", { name: "claim 해제" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "확인 결과 기록 후 해제" })
+      .click();
+
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toContainText("Dagster 미반영 확인");
+    expect(counters.claimResolutionBodies).toEqual([
+      {
+        resolution: "confirmed_not_applied",
+        reason: "Dagster run 목록에 해당 실행이 없음을 확인",
+      },
+    ]);
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "즉시 실행", exact: true })
+      .click();
+    await expect.poll(() => counters.scheduleKeys.length).toBe(2);
+    expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
   });
 
   test("요청 dialog — scope 전환·MOIS 경고·별도 preview", async ({ page }) => {
@@ -1843,12 +2112,16 @@ test.describe("/ops/pipeline", () => {
     await dialog.getByLabel("priority").fill("");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
-    await expect(dialog.getByText("priority는 비울 수 없습니다.")).toBeVisible();
+    await expect(
+      dialog.getByText("priority는 비울 수 없습니다."),
+    ).toBeVisible();
     expect(counters.previewBodies).toHaveLength(0);
     expect(counters.requestBodies).toHaveLength(0);
   });
 
-  test("요청 dialog — canonical catalog 장애는 fail-closed", async ({ page }) => {
+  test("요청 dialog — canonical catalog 장애는 fail-closed", async ({
+    page,
+  }) => {
     const counters = await installPipelineMocks(page, {
       catalogResponse: {
         status: 503,
@@ -1868,7 +2141,9 @@ test.describe("/ops/pipeline", () => {
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
 
     await expect(dialog.getByText("canonical catalog 조회 실패")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "dry-run 실행" })).toBeDisabled();
+    await expect(
+      dialog.getByRole("button", { name: "dry-run 실행" }),
+    ).toBeDisabled();
     expect(counters.previewBodies).toHaveLength(0);
     expect(counters.legacyProviderCalls).toBe(0);
   });
@@ -1929,7 +2204,9 @@ test.describe("/ops/pipeline", () => {
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
     await expect(
-      dialog.getByText("현재 canonical catalog에 없는 provider/dataset 조합입니다."),
+      dialog.getByText(
+        "현재 canonical catalog에 없는 provider/dataset 조합입니다.",
+      ),
     ).toBeVisible();
     expect(counters.previewBodies).toHaveLength(0);
   });
@@ -1959,7 +2236,9 @@ test.describe("/ops/pipeline", () => {
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
     await dialog.getByLabel("provider").first().fill("python-mois-api");
     await dialog.getByLabel("dataset_key").fill("mois_licenses");
-    await expect(dialog.getByTestId("mois-precheck-notice")).toContainText("정상");
+    await expect(dialog.getByTestId("mois-precheck-notice")).toContainText(
+      "정상",
+    );
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
 
     await expect(
@@ -2002,9 +2281,7 @@ test.describe("/ops/pipeline", () => {
     expect(counters.previewBodies).toHaveLength(0);
   });
 
-  test("요청 dialog — MOIS 최근 run이 TTL을 넘으면 차단", async ({
-    page,
-  }) => {
+  test("요청 dialog — MOIS 최근 run이 TTL을 넘으면 차단", async ({ page }) => {
     const stalePrecheck: PipelineJobPrecheckResponse = {
       data: {
         job_name: "mois_localdata_source_sync",
@@ -2021,7 +2298,8 @@ test.describe("/ops/pipeline", () => {
           update_time: Date.parse("2026-07-15T09:00:00.000Z") / 1000,
           tags: {},
         },
-        disabled_reason: "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+        disabled_reason:
+          "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
       },
       meta: META,
     };
@@ -2038,7 +2316,9 @@ test.describe("/ops/pipeline", () => {
     await expect(notice).toContainText("TTL(24시간)을 넘었습니다");
     await dialog.getByRole("button", { name: "dry-run 실행" }).click();
     await expect(
-      dialog.getByText("MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다."),
+      dialog.getByText(
+        "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+      ),
     ).toBeVisible();
   });
 
@@ -2053,10 +2333,7 @@ test.describe("/ops/pipeline", () => {
     await dialog.getByLabel("provider").first().fill("python-kma-api");
     await dialog.getByLabel("dataset_key").fill("kma_short_forecast");
     await dialog.getByLabel("실행 모드").selectOption("now");
-    await dialog
-      .getByRole("checkbox")
-      .first()
-      .uncheck();
+    await dialog.getByRole("checkbox").first().uncheck();
     await dialog.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(dialog.getByText("요청 생성 실패")).toBeVisible();

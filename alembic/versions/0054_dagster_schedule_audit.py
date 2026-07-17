@@ -101,6 +101,61 @@ def upgrade() -> None:
         ),
         schema="ops",
     )
+    op.create_table(
+        "dagster_schedule_claim_resolutions",
+        sa.Column(
+            "resolution_id",
+            sa.BigInteger(),
+            sa.Identity(always=True),
+            nullable=False,
+        ),
+        sa.Column("command_id", postgresql.UUID(as_uuid=False), nullable=False),
+        sa.Column("schedule_name", sa.Text(), nullable=False),
+        sa.Column("resolution", sa.Text(), nullable=False),
+        sa.Column("actor", sa.Text(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column(
+            "details",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "btrim(schedule_name) <> ''",
+            name=op.f("ck_dagster_schedule_claim_resolutions_schedule_name_not_blank"),
+        ),
+        sa.CheckConstraint(
+            "resolution IN ('confirmed_applied','confirmed_not_applied')",
+            name=op.f("ck_dagster_schedule_claim_resolutions_resolution"),
+        ),
+        sa.CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=op.f("ck_dagster_schedule_claim_resolutions_actor"),
+        ),
+        sa.CheckConstraint(
+            "btrim(reason) <> '' AND char_length(reason) <= 500",
+            name=op.f("ck_dagster_schedule_claim_resolutions_reason"),
+        ),
+        sa.CheckConstraint(
+            "jsonb_typeof(details) = 'object'",
+            name=op.f("ck_dagster_schedule_claim_resolutions_details_object"),
+        ),
+        sa.PrimaryKeyConstraint(
+            "resolution_id",
+            name=op.f("pk_dagster_schedule_claim_resolutions"),
+        ),
+        sa.UniqueConstraint(
+            "command_id",
+            name=op.f("uq_dagster_schedule_claim_resolutions_command_id"),
+        ),
+        schema="ops",
+    )
     op.create_index(
         "idx_dagster_schedule_audit_schedule_created",
         "dagster_schedule_audit_events",
@@ -130,6 +185,17 @@ def upgrade() -> None:
         unique=True,
         schema="ops",
         postgresql_where=sa.text("phase IN ('succeeded','failed')"),
+    )
+    op.create_index(
+        "idx_dagster_schedule_claim_resolutions_schedule_created",
+        "dagster_schedule_claim_resolutions",
+        [
+            "schedule_name",
+            sa.literal_column("created_at DESC"),
+            sa.literal_column("resolution_id DESC"),
+        ],
+        unique=False,
+        schema="ops",
     )
     op.execute(
         """
@@ -172,10 +238,154 @@ def upgrade() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
-          RAISE EXCEPTION 'dagster schedule audit events are append-only'
+          RAISE EXCEPTION 'dagster schedule audit records are append-only'
             USING ERRCODE = '55000';
         END;
         $$
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.validate_dagster_schedule_claim_resolution()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_active_claims AS claim
+            JOIN ops.dagster_schedule_audit_events AS requested
+              ON requested.command_id = claim.command_id
+             AND requested.phase = 'requested'
+            LEFT JOIN ops.dagster_schedule_audit_events AS terminal
+              ON terminal.command_id = claim.command_id
+             AND terminal.phase IN ('succeeded','failed')
+            WHERE claim.command_id = NEW.command_id
+              AND claim.schedule_name = NEW.schedule_name
+              AND requested.schedule_name = NEW.schedule_name
+              AND (
+                terminal.command_id IS NULL
+                OR (
+                  terminal.schedule_name = NEW.schedule_name
+                  AND terminal.details ->> 'outcome_certainty' = 'uncertain'
+                )
+              )
+          ) THEN
+            RAISE EXCEPTION 'only an active uncertain schedule claim can be resolved'
+              USING ERRCODE = '23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_claim_resolution_valid
+        BEFORE INSERT ON ops.dagster_schedule_claim_resolutions
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.validate_dagster_schedule_claim_resolution()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_claim_resolution_append_only
+        BEFORE UPDATE OR DELETE ON ops.dagster_schedule_claim_resolutions
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.reject_dagster_schedule_audit_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_claim_resolution_no_truncate
+        BEFORE TRUNCATE ON ops.dagster_schedule_claim_resolutions
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION ops.reject_dagster_schedule_audit_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.validate_dagster_schedule_active_claim_insert()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_audit_events AS requested
+            WHERE requested.command_id = NEW.command_id
+              AND requested.schedule_name = NEW.schedule_name
+              AND requested.phase = 'requested'
+          ) THEN
+            RAISE EXCEPTION 'active schedule claim requires matching requested event'
+              USING ERRCODE = '23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_active_claim_insert_valid
+        BEFORE INSERT ON ops.dagster_schedule_active_claims
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.validate_dagster_schedule_active_claim_insert()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.validate_dagster_schedule_active_claim_delete()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_audit_events AS terminal
+            WHERE terminal.command_id = OLD.command_id
+              AND terminal.schedule_name = OLD.schedule_name
+              AND terminal.phase IN ('succeeded','failed')
+              AND terminal.details ->> 'outcome_certainty' = 'confirmed'
+          ) THEN
+            RETURN OLD;
+          END IF;
+          IF EXISTS (
+            SELECT 1
+            FROM ops.dagster_schedule_claim_resolutions AS resolution
+            WHERE resolution.command_id = OLD.command_id
+              AND resolution.schedule_name = OLD.schedule_name
+          ) THEN
+            RETURN OLD;
+          END IF;
+          RAISE EXCEPTION 'active schedule claim requires confirmed outcome or resolution'
+            USING ERRCODE = '23514';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_active_claim_delete_valid
+        BEFORE DELETE ON ops.dagster_schedule_active_claims
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.validate_dagster_schedule_active_claim_delete()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_active_claim_update_rejected
+        BEFORE UPDATE ON ops.dagster_schedule_active_claims
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.reject_dagster_schedule_audit_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_dagster_schedule_active_claim_no_truncate
+        BEFORE TRUNCATE ON ops.dagster_schedule_active_claims
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION ops.reject_dagster_schedule_audit_mutation()
         """
     )
     op.execute(
@@ -198,16 +408,45 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
+        "DROP TRIGGER trg_dagster_schedule_active_claim_insert_valid "
+        "ON ops.dagster_schedule_active_claims"
+    )
+    op.execute("DROP FUNCTION ops.validate_dagster_schedule_active_claim_insert()")
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_active_claim_no_truncate "
+        "ON ops.dagster_schedule_active_claims"
+    )
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_active_claim_update_rejected "
+        "ON ops.dagster_schedule_active_claims"
+    )
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_active_claim_delete_valid "
+        "ON ops.dagster_schedule_active_claims"
+    )
+    op.execute("DROP FUNCTION ops.validate_dagster_schedule_active_claim_delete()")
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_claim_resolution_no_truncate "
+        "ON ops.dagster_schedule_claim_resolutions"
+    )
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_claim_resolution_append_only "
+        "ON ops.dagster_schedule_claim_resolutions"
+    )
+    op.execute(
+        "DROP TRIGGER trg_dagster_schedule_claim_resolution_valid "
+        "ON ops.dagster_schedule_claim_resolutions"
+    )
+    op.execute("DROP FUNCTION ops.validate_dagster_schedule_claim_resolution()")
+    op.execute(
         "DROP TRIGGER trg_dagster_schedule_audit_terminal_matches_request "
         "ON ops.dagster_schedule_audit_events"
     )
     op.execute(
-        "DROP TRIGGER trg_dagster_schedule_audit_no_truncate "
-        "ON ops.dagster_schedule_audit_events"
+        "DROP TRIGGER trg_dagster_schedule_audit_no_truncate ON ops.dagster_schedule_audit_events"
     )
     op.execute(
-        "DROP TRIGGER trg_dagster_schedule_audit_append_only "
-        "ON ops.dagster_schedule_audit_events"
+        "DROP TRIGGER trg_dagster_schedule_audit_append_only ON ops.dagster_schedule_audit_events"
     )
     op.execute("DROP FUNCTION ops.reject_dagster_schedule_audit_mutation()")
     op.execute("DROP FUNCTION ops.validate_dagster_schedule_audit_terminal()")
@@ -231,5 +470,11 @@ def downgrade() -> None:
         table_name="dagster_schedule_audit_events",
         schema="ops",
     )
+    op.drop_index(
+        "idx_dagster_schedule_claim_resolutions_schedule_created",
+        table_name="dagster_schedule_claim_resolutions",
+        schema="ops",
+    )
+    op.drop_table("dagster_schedule_claim_resolutions", schema="ops")
     op.drop_table("dagster_schedule_active_claims", schema="ops")
     op.drop_table("dagster_schedule_audit_events", schema="ops")

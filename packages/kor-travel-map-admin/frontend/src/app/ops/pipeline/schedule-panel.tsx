@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  PencilIcon,
-  PlayIcon,
-  RotateCcwIcon,
-  SquareIcon,
-} from "lucide-react";
+import { PencilIcon, PlayIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiClientError } from "@/api/client";
@@ -13,8 +8,10 @@ import {
   type PipelineSchedule,
   type PipelineScheduleCommand,
   type PipelineScheduleCommandResponse,
+  type PipelineScheduleClaimResolutionRequest,
   usePatchScheduleMutation,
   usePipelineSchedules,
+  useResolveScheduleClaimMutation,
   useScheduleCommandMutation,
 } from "@/api/pipeline";
 import { HelpTip } from "@/components/help-tip";
@@ -38,6 +35,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field";
+import { NativeSelect } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { useConfirm } from "@/components/confirm-dialog";
 
 import { describeCron } from "./pipeline-shared";
@@ -100,7 +99,8 @@ function ScheduleCommandResultAlert({
         {result.audit_status === "terminal_record_failed" ? (
           <p className="font-medium text-destructive">
             원격 명령 결과는 반환됐지만 terminal 감사 기록에 실패했습니다. 같은
-            명령을 새 키로 다시 실행하지 말고 명령 ID로 운영자 확인이 필요합니다.
+            명령을 새 키로 다시 실행하지 말고 명령 ID로 운영자 확인이
+            필요합니다.
           </p>
         ) : null}
         {result.effective_cron_schedule ? (
@@ -152,6 +152,47 @@ function commandResultFromError(
   return details as unknown as PipelineScheduleCommandResponse["data"];
 }
 
+interface ScheduleClaimRecovery {
+  scheduleName: string;
+  commandId: string;
+}
+
+function claimRecoveryFromResult(
+  result: PipelineScheduleCommandResponse["data"] | null,
+): ScheduleClaimRecovery | null {
+  if (
+    !result?.audit_command_id ||
+    (result.outcome_certainty !== "uncertain" &&
+      result.audit_status !== "terminal_record_failed")
+  ) {
+    return null;
+  }
+  return {
+    scheduleName: result.schedule_name,
+    commandId: result.audit_command_id,
+  };
+}
+
+function claimRecoveryFromConflict(
+  error: Error | null,
+  scheduleName: string | undefined,
+): ScheduleClaimRecovery | null {
+  if (!(error instanceof ApiClientError) || !scheduleName) {
+    return null;
+  }
+  const details = error.problem?.details;
+  if (typeof details !== "object" || details === null) {
+    return null;
+  }
+  const record = details as Record<string, unknown>;
+  const commandId =
+    record.active_command_id ?? record.audit_command_id ?? record.command_id;
+  if (typeof commandId !== "string" || commandId.length === 0) {
+    return null;
+  }
+  return { scheduleName, commandId };
+}
+
 export function SchedulePanel({
   highlightSchedule,
   onHighlightSchedule,
@@ -162,6 +203,7 @@ export function SchedulePanel({
   const schedules = usePipelineSchedules();
   const patchSchedule = usePatchScheduleMutation();
   const commandSchedule = useScheduleCommandMutation();
+  const resolveClaim = useResolveScheduleClaimMutation();
   const confirm = useConfirm();
 
   const [editing, setEditing] = useState<PipelineSchedule | null>(null);
@@ -173,16 +215,33 @@ export function SchedulePanel({
   const [lastResult, setLastResult] = useState<
     PipelineScheduleCommandResponse["data"] | null
   >(null);
+  const [claimResolution, setClaimResolution] = useState<
+    PipelineScheduleClaimResolutionRequest["resolution"]
+  >("confirmed_not_applied");
+  const [claimResolutionReason, setClaimResolutionReason] = useState("");
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   const data = schedules.data?.data;
   const scheduleItems = useMemo(() => data?.schedules ?? [], [data]);
   const sensors = data?.sensors ?? [];
   const scheduleMutationPending =
-    patchSchedule.isPending || commandSchedule.isPending;
+    patchSchedule.isPending ||
+    commandSchedule.isPending ||
+    resolveClaim.isPending;
   const failedResult =
     commandResultFromError(patchSchedule.error) ??
     commandResultFromError(commandSchedule.error);
+  const recoveryClaim =
+    claimRecoveryFromResult(lastResult) ??
+    claimRecoveryFromResult(failedResult) ??
+    claimRecoveryFromConflict(
+      patchSchedule.error,
+      patchSchedule.variables?.scheduleName,
+    ) ??
+    claimRecoveryFromConflict(
+      commandSchedule.error,
+      commandSchedule.variables?.scheduleName,
+    );
 
   useEffect(() => {
     if (highlightSchedule && highlightRef.current) {
@@ -210,6 +269,7 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
     commandSchedule.mutate(
       {
@@ -251,6 +311,7 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -280,6 +341,7 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -303,6 +365,40 @@ export function SchedulePanel({
     );
   };
 
+  const submitClaimResolution = async () => {
+    if (!recoveryClaim || !claimResolutionReason.trim()) {
+      return;
+    }
+    const confirmed = await confirm({
+      title: `${recoveryClaim.scheduleName} 결과 불명 claim 해제`,
+      description:
+        "Dagster 실행·스케줄 상태를 직접 확인한 경우에만 진행하세요. 해제 후 같은 조작은 새 명령으로 실행됩니다.",
+      confirmLabel: "확인 결과 기록 후 해제",
+      destructive: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+    resolveClaim.mutate(
+      {
+        scheduleName: recoveryClaim.scheduleName,
+        commandId: recoveryClaim.commandId,
+        body: {
+          resolution: claimResolution,
+          reason: claimResolutionReason.trim(),
+        },
+      },
+      {
+        onSuccess: () => {
+          patchSchedule.reset();
+          commandSchedule.reset();
+          setLastResult(null);
+          setClaimResolutionReason("");
+        },
+      },
+    );
+  };
+
   return (
     <div className="space-y-4">
       {schedules.isError ? (
@@ -312,7 +408,9 @@ export function SchedulePanel({
         </Alert>
       ) : null}
       {data && data.status !== "ok" ? (
-        <Alert variant={data.status === "unavailable" ? "destructive" : "default"}>
+        <Alert
+          variant={data.status === "unavailable" ? "destructive" : "default"}
+        >
           <AlertTitle>스케줄 상태 확인 필요</AlertTitle>
           <AlertDescription>
             {(data.errors ?? []).length > 0
@@ -322,7 +420,9 @@ export function SchedulePanel({
         </Alert>
       ) : null}
       {lastResult ? <ScheduleCommandResultAlert result={lastResult} /> : null}
-      {failedResult ? <ScheduleCommandResultAlert result={failedResult} /> : null}
+      {failedResult ? (
+        <ScheduleCommandResultAlert result={failedResult} />
+      ) : null}
       {patchSchedule.isError ? (
         <Alert variant="destructive">
           <AlertTitle>cron 수정 호출 실패</AlertTitle>
@@ -333,6 +433,84 @@ export function SchedulePanel({
         <Alert variant="destructive">
           <AlertTitle>스케줄 명령 호출 실패</AlertTitle>
           <AlertDescription>{commandSchedule.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      {recoveryClaim ? (
+        <Alert data-testid="schedule-claim-recovery" variant="destructive">
+          <AlertTitle>Dagster 실제 결과 확인 필요</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              응답 유실 또는 terminal 감사 기록 실패로 명령 반영 여부를 자동
+              확정할 수 없습니다. Dagster 실행 목록과 스케줄 상태를 직접
+              확인하기 전에는 같은 schedule 명령을 다시 보내지 마세요.
+            </p>
+            <p>
+              schedule{" "}
+              <span className="font-mono">{recoveryClaim.scheduleName}</span>
+              {" · claim "}
+              <span className="font-mono">{recoveryClaim.commandId}</span>
+            </p>
+            <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-end">
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                실제 반영 확인 결과
+                <NativeSelect
+                  aria-label="schedule claim 실제 반영 확인 결과"
+                  value={claimResolution}
+                  onChange={(event) =>
+                    setClaimResolution(
+                      event.target
+                        .value as PipelineScheduleClaimResolutionRequest["resolution"],
+                    )
+                  }
+                >
+                  <NativeSelectOption value="confirmed_not_applied">
+                    미반영 확인
+                  </NativeSelectOption>
+                  <NativeSelectOption value="confirmed_applied">
+                    반영 확인
+                  </NativeSelectOption>
+                </NativeSelect>
+              </label>
+              <FormField
+                label="확인 근거·해제 사유 (필수)"
+                placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
+                value={claimResolutionReason}
+                onChange={(event) =>
+                  setClaimResolutionReason(event.target.value)
+                }
+              />
+              <Button
+                disabled={
+                  resolveClaim.isPending || !claimResolutionReason.trim()
+                }
+                type="button"
+                variant="destructive"
+                onClick={() => void submitClaimResolution()}
+              >
+                claim 해제
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {resolveClaim.isSuccess ? (
+        <Alert data-testid="schedule-claim-resolution-result">
+          <AlertTitle>claim 해제 완료</AlertTitle>
+          <AlertDescription>
+            {resolveClaim.data.data.resolution === "confirmed_applied"
+              ? "Dagster 반영 확인"
+              : "Dagster 미반영 확인"}
+            {" · 감사 이력 "}
+            <span className="font-mono">
+              {resolveClaim.data.data.resolution_id}
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {resolveClaim.isError ? (
+        <Alert variant="destructive">
+          <AlertTitle>claim 해제 실패</AlertTitle>
+          <AlertDescription>{resolveClaim.error.message}</AlertDescription>
         </Alert>
       ) : null}
 

@@ -31,6 +31,7 @@ export default async function OpsPipelinePage({
         status: firstParam(params.status),
         provider: firstParam(params.provider),
         datasetKey: firstParam(params.dataset_key),
+        syncScope: firstParam(params.sync_scope),
         createdFrom: firstParam(params.created_from),
         createdTo: firstParam(params.created_to),
         loadBatchId: firstParam(params.load_batch_id),

@@ -20,7 +20,7 @@ from kortravelmap.api.dagster_http import (
     dagster_http_dependencies,
     schedule_command_response_or_raise,
     schedule_idempotency_http_exception,
-    schedule_replayed_failure_http_exception,
+    schedule_uncertain_outcome_http_exception,
     schedule_storage_http_exception,
     schedule_validation_http_exception,
 )
@@ -69,8 +69,8 @@ async def _execute_audited_command(
         )
     except dagster_schedule_service.DagsterScheduleIdempotencyConflict as exc:
         raise schedule_idempotency_http_exception(exc) from exc
-    except dagster_schedule_service.DagsterScheduleReplayedFailure as exc:
-        raise schedule_replayed_failure_http_exception(exc) from exc
+    except dagster_schedule_service.DagsterScheduleUncertainOutcome as exc:
+        raise schedule_uncertain_outcome_http_exception(exc) from exc
     except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
         raise schedule_storage_http_exception(exc) from exc
 

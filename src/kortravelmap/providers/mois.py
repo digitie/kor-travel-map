@@ -35,6 +35,7 @@ ADR 참조
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
@@ -111,13 +112,8 @@ MOIS_MARKER_COLOR: Final[str] = "P-01"
 MOIS_DEFAULT_MARKER_ICON: Final[str] = "marker"
 """category maki 미상 시 fallback marker icon."""
 
-MOIS_SOURCE_SYNC_COVERAGE_TAG: Final[str] = (
-    "kor_travel_map.mois_source_sync.coverage"
-)
+MOIS_SOURCE_SYNC_COVERAGE_TAG: Final[str] = "kor_travel_map.mois_source_sync.coverage"
 """Dagster MOIS Phase A run이 성공적으로 실행한 범위 tag."""
-
-MOIS_SOURCE_SYNC_FULL_COVERAGE: Final[str] = "promoted-national-v1"
-"""PROMOTED 전체 업종·전국 동기화를 증명하는 coverage 값."""
 
 # source_natural_key 구분자. make_feature_id/make_source_record_key는 구성요소
 # 내부 ``|``를 금지하므로 ``::`` 사용 (kma.py alert×region 패턴과 동일).
@@ -180,6 +176,12 @@ PROMOTED_SERVICE_SLUGS: Final[frozenset[str]] = frozenset(
     }
 )
 """feature로 승격하는 42 업종 슬러그 (docs §4.1). 모두 mois.catalog 195건 일치."""
+
+MOIS_SOURCE_SYNC_FULL_COVERAGE: Final[str] = (
+    "promoted-national-sha256:"
+    + hashlib.sha256("\n".join(sorted(PROMOTED_SERVICE_SLUGS)).encode("utf-8")).hexdigest()
+)
+"""현재 PROMOTED 전체 업종·전국 동기화를 증명하는 content-addressed coverage 값."""
 
 EXCLUDED_SERVICE_SLUGS: Final[frozenset[str]] = frozenset(
     {
@@ -608,9 +610,7 @@ def _facility_info(record: MoisLicensePlaceRecord) -> dict[str, Any]:
         base["culture_sports"] = {
             "type": record.culture_sports_business_type_name,
             "designation_date": (
-                record.designation_date.isoformat()
-                if record.designation_date is not None
-                else None
+                record.designation_date.isoformat() if record.designation_date is not None else None
             ),
             "facility_total_scale": record.facility_total_scale,
         }
@@ -666,9 +666,7 @@ async def license_record_to_bundle(
     slug = record.service_slug
     category = resolve_license_category(slug)
     if category is None:
-        raise ValueError(
-            f"service_slug={slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가."
-        )
+        raise ValueError(f"service_slug={slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가.")
     place_kind = resolve_license_place_kind(slug)
     natural_key = license_source_entity_id(record)
 
@@ -804,16 +802,8 @@ async def license_records_to_bundles(
         결과가 모두 없을 때 road/lot 주소로 ``/v2/geocode``를 호출한다. 중복 주소는
         ``cached_address_resolver``로 1회만 호출.
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     bundles: list[FeatureBundle] = []
     for record in records:
         slug = record.service_slug

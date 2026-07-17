@@ -2203,7 +2203,7 @@ export interface paths {
         };
         /**
          * MOIS source sync 선행 job freshness 확인
-         * @description Dagster runs를 jobName=mois_localdata_source_sync로 직접 필터링해 최신 run이 SUCCESS이고 MOIS source DB TTL 이내인지 판정한다. provider sync_state의 가상 dataset key를 사용하지 않는다.
+         * @description Dagster runs를 exact jobName=mois_localdata_source_sync로 직접 필터링한다. 최신 run이 SUCCESS이고, 현재 PROMOTED slug 집합의 SHA-256을 포함한 full-coverage tag가 일치하며, endTime이 존재하고 미래가 아닌 TTL 이내 시각일 때만 ready다. 조건 누락·불일치는 fail-closed로 거부하며 provider sync_state의 가상 dataset key를 사용하지 않는다.
          */
         get: operations["get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get"];
         put?: never;
@@ -2309,6 +2309,26 @@ export interface paths {
          * @description `cron_schedule`이 문자열이면 override를 저장하고, 명시적 `null`이면 override를 삭제해 코드 기본값으로 되돌린다(구 `default` 명령 대체). override는 code location reload 이후 반영되므로 지연이 있을 수 있다.
          */
         patch: operations["patch_pipeline_schedule_v1_ops_pipeline_schedules__schedule_name__patch"];
+        trace?: never;
+    };
+    "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 결과 불명 schedule claim 수동 확인 및 해제
+         * @description transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다.
+         */
+        post: operations["resolve_pipeline_schedule_claim_v1_ops_pipeline_schedules__schedule_name__claims__command_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/ops/pipeline/schedules/{schedule_name}/commands": {
@@ -5540,6 +5560,35 @@ export interface components {
             status?: string | null;
         };
         /**
+         * DagsterScheduleClaimResolution
+         * @description 불명 schedule claim에 대한 운영자 확인 감사 레코드.
+         */
+        DagsterScheduleClaimResolution: {
+            /** Actor */
+            actor: string;
+            /**
+             * Command Id
+             * Format: uuid
+             */
+            command_id: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "confirmed_applied" | "confirmed_not_applied";
+            /** Resolution Id */
+            resolution_id: number;
+            /**
+             * Resolved At
+             * Format: date-time
+             */
+            resolved_at: string;
+            /** Schedule Name */
+            schedule_name: string;
+        };
+        /**
          * DagsterScheduleCommandData
          * @description Schedule write 명령 결과.
          */
@@ -5579,6 +5628,12 @@ export interface components {
             errors?: string[];
             /** Graphql Url */
             graphql_url: string;
+            /**
+             * Outcome Certainty
+             * @default confirmed
+             * @enum {string}
+             */
+            outcome_certainty: "confirmed" | "uncertain";
             /** Override Cron Schedule */
             override_cron_schedule?: string | null;
             /**
@@ -9159,6 +9214,27 @@ export interface components {
             sync_scope: string | null;
         };
         /**
+         * PipelineScheduleClaimResolutionRequest
+         * @description 불명 schedule claim을 운영자 확인 후 해제하는 요청.
+         */
+        PipelineScheduleClaimResolutionRequest: {
+            /** Reason */
+            reason: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "confirmed_applied" | "confirmed_not_applied";
+        };
+        /**
+         * PipelineScheduleClaimResolutionResponse
+         * @description 불명 schedule claim 해제 감사 결과.
+         */
+        PipelineScheduleClaimResolutionResponse: {
+            data: components["schemas"]["DagsterScheduleClaimResolution"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * PipelineScheduleCommandData
          * @description schedule write(PATCH/commands) 결과.
          */
@@ -9198,6 +9274,12 @@ export interface components {
             errors?: string[];
             /** Graphql Url */
             graphql_url: string;
+            /**
+             * Outcome Certainty
+             * @default confirmed
+             * @enum {string}
+             */
+            outcome_certainty: "confirmed" | "uncertain";
             /** Override Cron Schedule */
             override_cron_schedule?: string | null;
             /**
@@ -16446,7 +16528,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -16528,7 +16610,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -16610,7 +16692,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -16692,7 +16774,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -16774,7 +16856,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -16856,7 +16938,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -18182,7 +18264,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -18201,6 +18283,78 @@ export interface operations {
                 };
             };
             /** @description 저장소 또는 Dagster transport 장애 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    resolve_pipeline_schedule_claim_v1_ops_pipeline_schedules__schedule_name__claims__command_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_name: string;
+                command_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineScheduleClaimResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineScheduleClaimResolutionResponse"];
+                };
+            };
+            /** @description schedule claim 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 이미 해제되었거나 확정 결과인 claim */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 해제 사유 또는 resolution 검증 실패 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description schedule 감사 저장소 장애 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -18264,7 +18418,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 저장된 예상 밖 terminal 실패 재생 */
+            /** @description 외부 반영 여부 불명 — 운영자 확인 필요 */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -32,6 +32,7 @@ __all__ = [
     "DagsterScheduleCommandData",
     "DagsterScheduleCommandRequest",
     "DagsterScheduleCommandResponse",
+    "DagsterScheduleClaimResolution",
     "DagsterScheduleOverrideRequest",
     "DagsterSensor",
     "DagsterSummaryData",
@@ -326,9 +327,8 @@ class DagsterScheduleCommandData(BaseModel):
     run_status: str | None = None
     save_status: Literal["not_applicable", "saved", "cleared"]
     reload_status: Literal["not_requested", "succeeded", "failed"]
-    effective_status: Literal[
-        "confirmed", "pending_verification", "mismatch", "unknown"
-    ]
+    effective_status: Literal["confirmed", "pending_verification", "mismatch", "unknown"]
+    outcome_certainty: Literal["confirmed", "uncertain"] = "confirmed"
     audit_command_id: UUID | None = None
     audit_status: Literal["recorded", "terminal_record_failed"] = "recorded"
     errors: list[str] = Field(default_factory=list)
@@ -341,3 +341,17 @@ class DagsterScheduleCommandResponse(BaseModel):
 
     data: DagsterScheduleCommandData
     meta: Meta
+
+
+class DagsterScheduleClaimResolution(BaseModel):
+    """불명 schedule claim에 대한 운영자 확인 감사 레코드."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_id: int
+    command_id: UUID
+    schedule_name: str
+    resolution: Literal["confirmed_applied", "confirmed_not_applied"]
+    actor: str
+    reason: str
+    resolved_at: datetime
