@@ -113,7 +113,7 @@ dataset당 1 run 상한 `KOR_TRAVEL_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 50000
 
 ## 6. ETL preview fixture
 
-admin `/v1/debug/etl` preview: `python-mcst-api` × 방언 대표 3종 —
+admin `/v1/ops/datasets/preview` fixture preview: `python-mcst-api` × 방언 대표 3종 —
 `mcst_world_restaurants_csv`(공통 A) / `mcst_independent_bookstores_csv`
 (CNTC_RESRCE) / `mcst_children_bookstores_csv`(분리좌표).
 

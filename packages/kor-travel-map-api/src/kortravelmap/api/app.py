@@ -2,7 +2,7 @@
 
 ADR 참조
 --------
-- ADR-005 — 인증 없음 (네트워크 계층 책임)
+- ADR-005 — 네트워크 인증 + 앱 레벨 defense-in-depth
 - ADR-020 — 디버그 UI는 별도 패키지 (메인 라이브러리에 FastAPI 의존 X)
 - ADR-031 — OpenAPI export drift gate (`scripts/export_openapi.py`)
 - ADR-035 — 운영 범위 확장 (디버그 + admin + 유지보수 + 프로덕션 운영)
@@ -10,12 +10,12 @@ ADR 참조
 
 운영
 ----
-uvicorn 직접 호출:
-    ``uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701``
+표준 기동:
+    package-scoped API env와 root 공유 env를 준비하고 ``npm run admin:stack`` 사용
 
-uvicorn 설정은 ``ApiSettings``(``KOR_TRAVEL_MAP_API_*`` env) 또는 호출자가
-명시. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO 게이트웨이 뒤에
-둔다.
+launcher는 ``ApiSettings``(``KOR_TRAVEL_MAP_API_*`` env)와 process별 credential
+allowlist를 검증한다. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO
+게이트웨이 뒤에 둔다.
 """
 
 from __future__ import annotations
@@ -57,13 +57,10 @@ from kortravelmap.api.routers import (
     categories_router,
     curated_router,
     curations_router,
-    dagster_router,
     dedup_review_router,
     enrichment_review_router,
-    etl_router,
     feature_dedup_review_router,
     feature_enrichment_review_router,
-    feature_update_requests_router,
     features_router,
     mois_detail_router,
     offline_uploads_router,
@@ -73,8 +70,7 @@ from kortravelmap.api.routers import (
     ops_pipeline_router,
     ops_router,
     poi_cache_targets_router,
-    provider_refresh_policies_router,
-    providers_router,
+    public_providers_router,
     public_status_router,
     public_views_router,
     weather_router,
@@ -484,9 +480,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     # 상태확인은 `/health`·`/version`(public) + `/ops/health-deep`(readiness)로 수렴.
     application.include_router(public_status_router)
 
-    if settings.debug_routes_enabled:
-        application.include_router(etl_router, prefix="/v1")
-
     if settings.features_routes_enabled:
         # 사용자/서비스 표면 ``/features`` · ``/categories`` · ``/providers``는 ``/v1``
         # prefix로 노출한다(T-214b, ADR-048 — clean cut, unversioned alias 없음). 브라우저
@@ -522,7 +515,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=public_dependencies,
         )
         application.include_router(
-            providers_router,
+            public_providers_router,
             prefix="/v1",
             dependencies=public_dependencies,
         )
@@ -579,11 +572,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=admin_dependencies,
         )
         application.include_router(
-            feature_update_requests_router,
-            prefix="/v1",
-            dependencies=admin_dependencies,
-        )
-        application.include_router(
             admin_features_router,
             prefix="/v1",
             dependencies=admin_dependencies,
@@ -609,11 +597,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=admin_dependencies,
         )
         application.include_router(
-            provider_refresh_policies_router,
-            prefix="/v1",
-            dependencies=admin_dependencies,
-        )
-        application.include_router(
             offline_uploads_router,
             prefix="/v1",
             dependencies=admin_dependencies,
@@ -623,7 +606,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         application.include_router(ops_router, prefix="/v1")
         application.include_router(ops_live_router, prefix="/v1")
         application.include_router(ops_logs_router, prefix="/v1")
-        application.include_router(dagster_router, prefix="/v1")
 
     # ADR-064 (T-ADM-C2) — 신규 `/ops/datasets` 그룹. 조작(PUT/POST)이 포함되어
     # 위의 무인증 ops 패턴을 승계하지 않고 admin frontend 게이트를 강제한다.
@@ -666,6 +648,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 app: FastAPI = create_app()
 """모듈-레벨 FastAPI instance.
 
-``uvicorn kortravelmap.api.app:app``로 직접 실행, ``scripts/export_openapi.
-py``가 ``app.openapi()``를 호출.
+검증된 launcher가 이 instance를 실행하고, ``scripts/export_openapi.py``가
+``app.openapi()``를 호출한다.
 """

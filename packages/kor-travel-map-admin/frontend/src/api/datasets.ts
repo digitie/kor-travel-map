@@ -86,6 +86,28 @@ export type DatasetRefreshConflict = {
   detailUrl: string | null;
 };
 
+export type OpsDatasetCatalogOption = {
+  provider: string;
+  datasets: string[];
+};
+
+/** canonical dataset 행을 provider 필터/입력 보조용 2원 목록으로 축약한다. */
+export function opsDatasetCatalogOptions(
+  rows: readonly OpsDatasetGridRow[],
+): OpsDatasetCatalogOption[] {
+  const datasetsByProvider = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.catalog_state !== "canonical") continue;
+    const datasets = datasetsByProvider.get(row.provider) ?? new Set<string>();
+    datasets.add(row.dataset_key);
+    datasetsByProvider.set(row.provider, datasets);
+  }
+  return Array.from(datasetsByProvider, ([provider, datasets]) => ({
+    provider,
+    datasets: Array.from(datasets).sort(),
+  })).sort((left, right) => left.provider.localeCompare(right.provider));
+}
+
 /** "지금 갱신" 요청 생성 endpoint — pipeline 그룹(T-ADM-C3) 소유. */
 export const DATASET_REFRESH_REQUESTS_PATH = "/v1/ops/pipeline/requests";
 
@@ -309,6 +331,15 @@ export function useOpsDatasets() {
   });
 }
 
+/** provider/dataset 입력 후보용 observer — 운영 grid의 active-run polling을 승계하지 않는다. */
+export function useOpsDatasetCatalog() {
+  return useQuery<OpsDatasetsGridResponse, Error>({
+    queryKey: ["ops-datasets"],
+    queryFn: ({ signal }) => fetchOpsDatasets(signal),
+    staleTime: 60_000,
+  });
+}
+
 export function useOpsDataset(
   selection: {
     provider: string;
@@ -415,7 +446,10 @@ export function useOpsDatasetRefreshNowMutation() {
   >({
     mutationFn: createDatasetRefreshNow,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["feature-update-requests"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "executions"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
       invalidateOpsDatasetQueries(queryClient);
     },
   });

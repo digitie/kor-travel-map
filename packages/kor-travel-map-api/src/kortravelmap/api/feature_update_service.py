@@ -85,7 +85,7 @@ __all__ = [
     "run_feature_update_request_now",
 ]
 
-DEFAULT_STATUS_URL_PREFIX = "/v1/admin/features/update-requests"
+DEFAULT_STATUS_URL_PREFIX = "/v1/ops/pipeline/executions/update_request"
 _SIGUNGU_RESOLVER_REQUIRED_MESSAGE = (
     "sigungu_by_radius scope에는 KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL 설정이 필요합니다."
 )
@@ -144,7 +144,7 @@ class FeatureUpdateDispatchStateConflict(RuntimeError, FeatureUpdateServiceError
 
 
 class FeatureUpdateIdempotencyConflict(RuntimeError, FeatureUpdateServiceError):
-    """Global key가 다른 canonical body 또는 actor에 이미 사용됐다."""
+    """같은 actor namespace의 key가 다른 canonical body에 이미 사용됐다."""
 
     code = "FEATURE_UPDATE_IDEMPOTENCY_CONFLICT"
 

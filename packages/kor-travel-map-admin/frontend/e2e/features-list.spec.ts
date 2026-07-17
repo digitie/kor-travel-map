@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 
 // admin-ops.spec.ts house pattern: 손으로 쓴 record shape 대신 생성된 OpenAPI
 // 스키마(components["schemas"])에 mock factory를 바인딩한다(#308). 백엔드 DTO가
@@ -246,6 +247,7 @@ async function mockFeaturesList(
     detail?: AdminFeatureDetailResponse;
   },
 ) {
+  await mockOpsDatasetCatalog(page);
   const listSearches: URLSearchParams[] = [];
   const deactivateBodies: Record<string, unknown>[] = [];
   const deactivateUrls: string[] = [];

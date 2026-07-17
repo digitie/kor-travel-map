@@ -121,13 +121,15 @@ test.describe("curated-features live: page load + controls", () => {
     const link = page.getByRole("link", { name: "관련 job 실행" });
     await expect(link).toHaveAttribute(
       "href",
-      `/admin/dagster?schedule=${CURATED_REFRESH_SCHEDULE}`,
+      `/ops/pipeline?tab=schedules&schedule=${CURATED_REFRESH_SCHEDULE}`,
       TIMEOUT,
     );
 
     await link.click();
     await expect(page).toHaveURL(
-      new RegExp(`/admin/dagster\\?schedule=${CURATED_REFRESH_SCHEDULE}$`),
+      new RegExp(
+        `/ops/pipeline\\?tab=schedules&schedule=${CURATED_REFRESH_SCHEDULE}$`,
+      ),
       TIMEOUT,
     );
     const row = page.getByTestId(

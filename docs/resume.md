@@ -1,5 +1,37 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent A) — T-ADM-C6b clean-cut 최종 gate 완료
+
+- C6A exact commit 위 독립 branch에서 legacy REST operation 28개를 제거했다. 삭제 범위는
+  Dagster 9, provider 운영 2, refresh policy 3, import job/event 5, feature update request 6,
+  debug ETL 3개다. `/ops/datasets/*`, `/ops/pipeline/*`, `/ops/live`, 관측 read와 public
+  provider read 2종은 유지한다.
+- public provider read를 운영 결합 로직이 없는 `public_providers.py`로 옮기고 기존 응답 schema
+  이름과 cursor 비노출 계약을 보존했다. `etl_live.py`, live adapter tests, API 전용 provider
+  credential settings·compose/load-env 주입을 제거했으며 preview catalog는 fixture/none만 가진다.
+- migration은 추가하지 않았다. UI 통합 뒤 admin/user OpenAPI와 generated type을 모두
+  재생성했고, 삭제된 legacy path가 tracked 계약에 남지 않음을 확인했다.
+- 반복 적대 리뷰에서 provider secret 과다 주입, BFF bridge peer 403, raw env inline comment,
+  deleted status URL과 문서 drift를 보강했다. API/frontend는 env allowlist, Dagster만 provider
+  비밀을 소유하고 bridge는 frontend 고정 `/32`, host는 loopback만 신뢰한다.
+- 두 독립 리뷰어가 최종 제품과 테스트 보강을 S1/S2/S3 0건으로 승인했다. root unit 1,410,
+  API 450, Dagster 457(1 skip), 실제 PostGIS 92, frontend 142건과 Ruff, strict mypy
+  115+51파일, import 4/4, OpenAPI/admin/user type drift, Compose base·host rendering,
+  production build를 통과했다. local Playwright는 실행하지 않고 최종 n150 C7 gate에 남겼다.
+- **다음 한 작업**: 완료 task를 아카이브한 문서 commit을 만든 뒤 보안 감사·PR·CI green으로
+  C6b를 병합한다. 이어 C7A를 최신 main에 rebase하고 migration을 0055/down 0054로 확정한다.
+## 2026-07-17 (agent B) — T-ADM-C6b UI clean-cut 리뷰 반영 완료
+
+- 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,
+  `/etl` UI와 전용 hook/mock E2E를 redirect 없이 삭제했다. navigation·홈·운영 로그·frontend
+  README inventory는 `/ops/pipeline`과 `/ops/datasets` 정본으로 수렴했다.
+- 외부 리뷰 B 지적에 따라 홈 Dagster 링크 E2E의 hard-coded 개발 fallback을 제거하고,
+  offline validation/load와 POI target upsert/delete의 canonical pipeline/datasets query
+  invalidation을 hook+QueryClient spy 단위 계약으로 고정했다. POI mutation도 pipeline
+  executions/overview를 직접 무효화한다.
+- **다음 한 작업**: backend/API branch와 결합해 OpenAPI/admin type을 재생성하고 최종 통합
+  SHA를 적대 리뷰어 2명에게 전달한다. 승인 전에는 테스트를 실행하지 않는다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 
 - `/ops/datasets`의 `이슈 있음` 필터·정렬·행 badge를 dataset/provider open issue 합계로

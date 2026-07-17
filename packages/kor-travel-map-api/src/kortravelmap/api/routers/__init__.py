@@ -24,7 +24,6 @@ from kortravelmap.api.routers.curated import admin_router as admin_curated_route
 from kortravelmap.api.routers.curated import router as curated_router
 from kortravelmap.api.routers.curations import admin_router as admin_curations_router
 from kortravelmap.api.routers.curations import router as curations_router
-from kortravelmap.api.routers.dagster import router as dagster_router
 from kortravelmap.api.routers.dedup_review import (
     feature_router as feature_dedup_review_router,
 )
@@ -34,10 +33,6 @@ from kortravelmap.api.routers.enrichment_review import (
 )
 from kortravelmap.api.routers.enrichment_review import (
     router as enrichment_review_router,
-)
-from kortravelmap.api.routers.etl import router as etl_router
-from kortravelmap.api.routers.feature_update_requests import (
-    router as feature_update_requests_router,
 )
 from kortravelmap.api.routers.features import (
     router as features_router,
@@ -52,16 +47,12 @@ from kortravelmap.api.routers.ops_pipeline import router as ops_pipeline_router
 from kortravelmap.api.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
-from kortravelmap.api.routers.provider_refresh_policies import (
-    router as provider_refresh_policies_router,
-)
-from kortravelmap.api.routers.providers import router as providers_router
+from kortravelmap.api.routers.public_providers import router as public_providers_router
 from kortravelmap.api.routers.public_status import router as public_status_router
 from kortravelmap.api.routers.public_views import router as public_views_router
 from kortravelmap.api.routers.weather import router as weather_router
 
 __all__ = [
-    "etl_router",
     "admin_backups_router",
     "admin_auth_router",
     "admin_restore_router",
@@ -74,9 +65,7 @@ __all__ = [
     "feature_dedup_review_router",
     "enrichment_review_router",
     "feature_enrichment_review_router",
-    "feature_update_requests_router",
     "poi_cache_targets_router",
-    "provider_refresh_policies_router",
     "features_router",
     "categories_router",
     "mois_detail_router",
@@ -86,9 +75,8 @@ __all__ = [
     "ops_live_router",
     "ops_logs_router",
     "ops_pipeline_router",
-    "dagster_router",
     "public_status_router",
-    "providers_router",
+    "public_providers_router",
     "public_views_router",
     "weather_router",
     "curated_router",

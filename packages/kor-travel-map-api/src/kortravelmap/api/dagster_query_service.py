@@ -1,4 +1,4 @@
-"""Dagster summary, run detail, and NUX query application service."""
+"""Dagster summary and run-detail query application service."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import httpx
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.dagster_schema import (
-    DagsterNuxSeenData,
-    DagsterNuxSeenResponse,
     DagsterRunDetailData,
     DagsterRunDetailResponse,
     DagsterSummaryData,
@@ -20,12 +18,10 @@ from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
-    "get_nux_seen_configuration_error",
     "get_run_detail",
     "get_run_detail_configuration_error",
     "get_summary",
     "get_summary_configuration_error",
-    "mark_nux_seen",
 ]
 
 _DAGSTER_SUMMARY_QUERY = """
@@ -159,19 +155,8 @@ query KorTravelMapDagsterRunDetail(
 }
 """
 
-_DAGSTER_SET_NUX_SEEN_MUTATION = """
-mutation KorTravelMapSetNuxSeen {
-  setNuxSeen
-}
-"""
-
-
 def _summary_response(data: DagsterSummaryData, *, started_at: float) -> DagsterSummaryResponse:
     return DagsterSummaryResponse(data=data, meta=make_meta(started_at=started_at))
-
-
-def _nux_seen_response(data: DagsterNuxSeenData, *, started_at: float) -> DagsterNuxSeenResponse:
-    return DagsterNuxSeenResponse(data=data, meta=make_meta(started_at=started_at))
 
 
 def _run_detail_response(
@@ -223,27 +208,6 @@ def get_run_detail_configuration_error(
                 dagster_url="",
                 graphql_url="",
                 checked_at=datetime.now(UTC),
-                errors=[str(exc)],
-            ),
-            started_at=started_at,
-        )
-    return None
-
-
-def get_nux_seen_configuration_error(settings: ApiSettings) -> DagsterNuxSeenResponse | None:
-    """잘못된 Dagster URL을 NUX mutation 외부 자원 접근 전에 차단한다."""
-
-    started_at = perf_counter()
-    try:
-        dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError as exc:
-        return _nux_seen_response(
-            DagsterNuxSeenData(
-                status="error",
-                dagster_url="",
-                graphql_url="",
-                checked_at=datetime.now(UTC),
-                seen=False,
                 errors=[str(exc)],
             ),
             started_at=started_at,
@@ -411,64 +375,6 @@ async def get_run_detail(
             dagster_urls=urls,
             checked_at=checked_at,
             expected_run_id=run_id,
-        ),
-        started_at=started_at,
-    )
-
-
-async def mark_nux_seen(
-    *, settings: ApiSettings, client: httpx.AsyncClient
-) -> DagsterNuxSeenResponse:
-    """Dagster NUX 상태를 명시적 mutation으로 변경한다."""
-
-    configuration_error = get_nux_seen_configuration_error(settings)
-    if configuration_error is not None:
-        return configuration_error
-
-    started_at = perf_counter()
-    checked_at = datetime.now(UTC)
-    urls = dagster_graphql.dagster_urls(settings)
-    try:
-        payload = await dagster_graphql.post_graphql(
-            client=client,
-            graphql_url=urls.graphql_url,
-            variables={},
-            query=_DAGSTER_SET_NUX_SEEN_MUTATION,
-        )
-    except (httpx.HTTPError, ValueError) as exc:
-        return _nux_seen_response(
-            DagsterNuxSeenData(
-                status="unavailable",
-                dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
-                checked_at=checked_at,
-                seen=False,
-                errors=[str(exc)],
-            ),
-            started_at=started_at,
-        )
-    graphql_errors = payload.get("errors")
-    if isinstance(graphql_errors, list) and graphql_errors:
-        return _nux_seen_response(
-            DagsterNuxSeenData(
-                status="error",
-                dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
-                checked_at=checked_at,
-                seen=False,
-                errors=[str(error) for error in graphql_errors],
-            ),
-            started_at=started_at,
-        )
-    seen = dagster_graphql.as_dict(payload.get("data")).get("setNuxSeen") is True
-    return _nux_seen_response(
-        DagsterNuxSeenData(
-            status="ok" if seen else "error",
-            dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
-            checked_at=checked_at,
-            seen=seen,
-            errors=[] if seen else ["Dagster setNuxSeen mutation did not return true"],
         ),
         started_at=started_at,
     )

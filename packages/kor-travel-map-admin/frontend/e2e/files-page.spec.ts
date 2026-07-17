@@ -99,7 +99,11 @@ function makeDetail(file: ManagedFileModel): ManagedFileDetailResponse {
     data: {
       file,
       links: [
-        { rel: "import-job", label: "적재 작업", href: "/ops/import-jobs/job-a" },
+        {
+          rel: "import-job",
+          label: "파이프라인 작업",
+          href: "/ops/pipeline?execution=import_job%3Ajob-a",
+        },
         {
           rel: "offline-upload",
           label: "오프라인 업로드",
@@ -203,9 +207,16 @@ test.describe("/admin/files — 파일 관리 (mocked)", () => {
     await page.getByRole("row", { name: /festival-2026\.csv/ }).click();
     await expect(
       page
-        .getByRole("link", { name: "적재 작업", exact: true })
-        .and(page.locator('a[href="/ops/import-jobs/job-a"]')),
-    ).toHaveAttribute("href", "/ops/import-jobs/job-a");
+        .getByRole("link", { name: "파이프라인 작업", exact: true })
+        .and(
+          page.locator(
+            'a[href="/ops/pipeline?execution=import_job%3Ajob-a"]',
+          ),
+        ),
+    ).toHaveAttribute(
+      "href",
+      "/ops/pipeline?execution=import_job%3Ajob-a",
+    );
     await expect(
       page
         .getByRole("link", { name: "오프라인 업로드", exact: true })

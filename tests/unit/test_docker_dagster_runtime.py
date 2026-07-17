@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,22 @@ def _dockerfile(path: str) -> str:
 
 def _script(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def _assigned_env_keys(text: str, *, prefix: str) -> set[str]:
+    keys: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line.removeprefix("export ")
+        if "=" not in line:
+            continue
+        key = line.split("=", maxsplit=1)[0]
+        if key.startswith(prefix):
+            keys.add(key)
+    return keys
 
 
 @pytest.mark.unit
@@ -65,6 +83,42 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
 
 @pytest.mark.unit
+def test_bridge_admin_bff_uses_exact_trusted_peer_address() -> None:
+    compose = _compose()
+    services = compose["services"]
+
+    assert compose["networks"]["admin-control"]["ipam"]["config"] == [
+        {"subnet": "172.31.254.0/29"}
+    ]
+    assert services["api"]["networks"]["admin-control"]["ipv4_address"] == (
+        "172.31.254.2"
+    )
+    assert services["frontend"]["networks"]["admin-control"]["ipv4_address"] == (
+        "172.31.254.3"
+    )
+    assert services["api"]["environment"][
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS"
+    ] == '["172.31.254.3/32"]'
+
+    host_compose = _script("docker-compose.host.yml")
+    assert host_compose.count("networks: !reset []") == 2
+    assert (
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: "
+        "'[\"127.0.0.1/32\",\"::1/128\"]'"
+    ) in host_compose
+
+
+@pytest.mark.unit
+def test_root_env_example_has_no_inline_comments_in_assignments() -> None:
+    assignments = (
+        line
+        for line in _script(".env.example").splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    assert all(" #" not in line for line in assignments)
+
+
+@pytest.mark.unit
 def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
     services = _compose()["services"]
 
@@ -82,17 +136,112 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
 
 
 @pytest.mark.unit
-def test_docker_compose_maps_opinet_scope_to_runtime_services() -> None:
+def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     services = _compose()["services"]
-    expected_keys = {
+    shared_provider_keys = {
+        "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_OPINET_API_KEY",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
+        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
+        "KOR_TRAVEL_MAP_KREX_GO_API_KEY",
+    }
+    all_provider_keys = shared_provider_keys | {"KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH"}
+
+    api = services["api"]
+    assert api["env_file"] == [
+        {
+            "path": "packages/kor-travel-map-api/.env",
+            "required": True,
+            "format": "raw",
+        }
+    ]
+    assert all_provider_keys.isdisjoint(api["environment"])
+    assert {
+        "KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX",
+        "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS",
+        "KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS",
+        "KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS",
+    } <= set(api["environment"])
+    assert {
+        key for key in api["environment"] if key.startswith("KOR_TRAVEL_MAP_API_")
+    } == {
+        "KOR_TRAVEL_MAP_API_HOST",
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_DAGSTER_URL",
+        "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
+        "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS",
+    }
+    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
+
+    root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
+    assert root_api_keys == {
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_INTERNAL_URL",
     }
 
-    for service_name in ("api", "dagster", "dagster-daemon"):
+    package_api_keys = _assigned_env_keys(
+        _script("packages/kor-travel-map-api/.env.example"),
+        prefix="KOR_TRAVEL_MAP_API_",
+    )
+    assert {
+        "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
+        "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
+        "KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED",
+        "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
+        "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
+        "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
+    } <= package_api_keys
+
+    load_env_api_keys = _assigned_env_keys(
+        _script("scripts/load-env.sh"), prefix="KOR_TRAVEL_MAP_API_"
+    )
+    assert load_env_api_keys == {
+        "KOR_TRAVEL_MAP_API_HOST",
+        "KOR_TRAVEL_MAP_API_PORT",
+        "KOR_TRAVEL_MAP_API_DAGSTER_URL",
+        "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
+    }
+
+    for service_name in ("dagster", "dagster-daemon"):
         environment = services[service_name]["environment"]
-        assert expected_keys <= set(environment), service_name
+        assert shared_provider_keys <= set(environment), service_name
+        assert services[service_name]["env_file"] == [
+            {"path": ".env", "required": False, "format": "raw"}
+        ]
+
+    assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in services["dagster-daemon"]["environment"]
+
+    frontend_environment = services["frontend"]["environment"]
+    assert {
+        "KOR_TRAVEL_MAP_API_INTERNAL_URL",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        "KOR_TRAVEL_MAP_UI_ADMIN_USERNAME",
+        "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH",
+        "KOR_TRAVEL_MAP_UI_SESSION_SECRET",
+        "KOR_TRAVEL_MAP_UI_TRUST_PROXY_HEADERS",
+        "KOR_TRAVEL_MAP_UI_PUBLIC_ORIGINS",
+    } <= set(frontend_environment)
+
+    entrypoint = _script("docker/api-entrypoint.sh")
+    for removed_key in (
+        "KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KMA_APIHUB_KEY",
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_DATAGOKR_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_VISITKOREA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KREX_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KNPS_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED",
+    ):
+        assert removed_key in entrypoint
+    assert "removed provider runtime key must not enter API container" in entrypoint
 
 
 @pytest.mark.unit
@@ -148,6 +297,24 @@ def test_dagster_image_config_serializes_provider_pools() -> None:
 def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
     script = _script("scripts/run-admin-stack.sh")
 
+    assert "KOR_TRAVEL_MAP_API_ENV_FILE" in script
+    assert "required API env file is missing" in script
+    assert "inline comments are not allowed in API env values" in script
+    assert "shared admin proxy secret must be configured only in root env" in script
+    assert "frontend admin proxy secret must not have surrounding whitespace" in script
+    assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
+    assert "start_bg api env -i" in script
+    assert "start_bg web env -i" in script
+    assert "start_bg dagster env -i" in script
+    assert "start_bg dagster-daemon env -i" in script
+    assert '"${API_SHARED_ENV[@]}"' in script
+    assert '"${API_SCOPED_ENV[@]}"' in script
+    assert '"${FRONTEND_PROCESS_ENV[@]}"' in script
+    assert '"${DAGSTER_PROCESS_ENV[@]}"' in script
+    assert "KOR_TRAVEL_MAP_FILE_REGISTRY_*" in script
+    assert "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS" in script
+    assert 'KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root"' in script
+    assert 'KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET="$frontend_proxy_secret"' in script
     assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
     assert "CREATE DATABASE" in script
     assert "dagster-webserver" in script
@@ -156,6 +323,170 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert 'KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in script
     assert "start_bg dagster-daemon env" in script
     assert "ensure_bg_alive dagster-daemon" in script
+
+    host_compose = _script("docker-compose.host.yml")
+    assert "KOR_TRAVEL_MAP_HOST_API_INTERNAL_URL" in host_compose
+
+
+@pytest.mark.unit
+def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Path) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret\n", encoding="utf-8")
+
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+        "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+        "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+    }
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
+        encoding="utf-8",
+    )
+    valid = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert valid.returncode == 0, valid.stderr
+    assert valid.stdout.strip() == "admin stack environment is valid"
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups # ambiguous\n",
+        encoding="utf-8",
+    )
+    inline_comment = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert inline_comment.returncode != 0
+    assert "inline comments are not allowed" in inline_comment.stderr
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n",
+        encoding="utf-8",
+    )
+    duplicate_secret_source = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert duplicate_secret_source.returncode != 0
+    assert "shared admin proxy secret must be configured only in root env" in (
+        duplicate_secret_source.stderr
+    )
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
+        encoding="utf-8",
+    )
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=' shared-secret '\n",
+        encoding="utf-8",
+    )
+    frontend_whitespace = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert frontend_whitespace.returncode != 0
+    assert "frontend admin proxy secret must not have surrounding whitespace" in (
+        frontend_whitespace.stderr
+    )
+
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY=stale-secret\n",
+        encoding="utf-8",
+    )
+    removed_provider_key = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert removed_provider_key.returncode != 0
+    assert "removed provider runtime key is not allowed" in removed_provider_key.stderr
+
+
+@pytest.mark.unit
+def test_api_container_rejects_stale_provider_env_even_when_empty() -> None:
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY": "",
+    }
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "removed provider runtime key must not enter API container" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "proxy_secret",
+    [None, "", " shared-secret", "shared-secret "],
+)
+def test_api_container_requires_unambiguous_proxy_secret(
+    proxy_secret: str | None,
+) -> None:
+    process_env = {"PATH": os.environ["PATH"]}
+    if proxy_secret is not None:
+        process_env["KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"] = proxy_secret
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required" in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "shared-secret",
+            "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET": "shared-secret",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "legacy API-specific admin proxy secret" in result.stderr
 
 
 @pytest.mark.unit

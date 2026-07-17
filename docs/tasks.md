@@ -9,7 +9,6 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
-  - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
   - [ ] `T-ADM-AUD-718` — 갱신 정책 BIGINT revision CAS (issue #718, migration 0056, PR 1개)
   - [ ] `T-ADM-AUD-686` — KMA 유효 대상 0건 fail-closed (issue #686, PR 1개)
   - [ ] `T-ADM-C7B-API` — active projection·exact-scope 이력 API (issues #712/#719, migration 0057, PR 1개)
@@ -37,14 +36,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
   인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
   전에 반드시 머지한다.
-- [ ] `T-ADM-C6b` — **구 표면 삭제** (선착, 의존 C6a): 라우트 6종·라우터
-  ~30 endpoint·구 훅·mock spec 19파일 삭제 + nav/홈 정리 + OpenAPI 재생성(삭제분).
-  C3a/#687에서 Dagster application service/schema와 feature update service/schema의
-  public 공유 모듈 추출을 완료했다. legacy router를 삭제해도 이 public 모듈은
-  유지하며, 스케줄 쓰기의 200+`status=error` envelope을 404/502
-  problem+json으로 승격할지만 이 시점에 검토한다.
-  ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
-  이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔

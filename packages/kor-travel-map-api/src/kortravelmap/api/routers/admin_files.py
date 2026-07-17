@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from kortravelmap.core.managed_file_states import (
@@ -289,7 +290,10 @@ def _build_links(row: file_registry.ManagedFile) -> list[ManagedFileLink]:
             ManagedFileLink(
                 rel="import-job",
                 label="적재 작업",
-                href=f"/ops/import-jobs/{row.origin_import_job_id}",
+                href=(
+                    "/ops/pipeline?execution=import_job:"
+                    f"{quote(str(row.origin_import_job_id), safe='')}"
+                ),
             )
         )
     if row.upload_id:
@@ -315,8 +319,8 @@ def _build_links(row: file_registry.ManagedFile) -> list[ManagedFileLink]:
         links.append(
             ManagedFileLink(
                 rel="provider",
-                label="Provider 상태",
-                href=f"/ops/providers?provider={row.provider}",
+                label="데이터셋 상태",
+                href=f"/ops/datasets?provider={quote(row.provider, safe='')}",
             )
         )
     if row.origin_dagster_run_id:

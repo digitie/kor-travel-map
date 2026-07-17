@@ -39,8 +39,9 @@ def test_http_exception_uses_error_envelope() -> None:
 def test_request_validation_error_uses_error_envelope() -> None:
     app = create_app(ApiSettings())
     response = TestClient(app).post(
-        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
-        "?source=bogus"
+        "/v1/ops/datasets/preview"
+        "?provider=data.go.kr-standard&dataset_key=datagokr_cultural_festivals",
+        json={"source": "live", "max_items": 20},
     )
 
     assert response.status_code == 422

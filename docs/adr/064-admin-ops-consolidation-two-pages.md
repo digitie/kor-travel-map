@@ -71,3 +71,6 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
   entity-link 단일 URL 테이블 재매핑(14개 화면 전파).
 - 백엔드 라우터 삭제 ~30 endpoint, 신규 2그룹 ~16 endpoint, alembic 1건.
 - OpenAPI(admin)·user-client는 admin 표면만 변경(공용 read 표면 불변).
+- C6B에서 legacy OpenAPI operation 28개와 raw live ETL 경계를 실제 삭제했다. public
+  provider read 두 종은 `public_providers.py`로 분리해 유지하고, REST API backend의
+  provider credential 복제 설정은 제거했다. C6B 자체 DB migration은 없다.

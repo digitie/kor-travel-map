@@ -2,11 +2,11 @@
 
 배경
 ----
-admin UI의 **ETL preview**(`/etl`)와 **Providers**(`/ops/providers`) 메뉴는
-지금까지 서로 다른, 불완전한 source에서 provider 목록을 그렸다:
+admin UI의 데이터셋 상태와 fixture preview는 서로 다른 source에서 provider
+목록을 그리던 과거 표면을 대체한다:
 
-- `/etl`  → `etl_fixtures.list_providers()` (fixture-backed 9종)
-- `/ops/providers` → `provider_sync_state` row (한 번이라도 RUN 된 6종)
+- fixture preview → `etl_fixtures.FIXTURE_REGISTRY`
+- dataset 상태 → `provider_sync_state` row
 
 둘 중 어느 쪽도 mois/knps/krheritage/mcst 같은 "구현은 됐으나 fixture/sync
 state가 아직 없는" provider를 나타내지 못했다. 본 모듈은 **시스템이 ETL 하는
@@ -17,9 +17,9 @@ state가 아직 없는" provider를 나타내지 못했다. 본 모듈은 **시�
 - **drift-safe**: dataset_key/provider 이름은 가능한 한 provider 모듈의 **상수·
   dict를 import 해서** 참조한다 (literal 중복 금지). provider 모듈이 dataset_key
   를 바꾸면 본 카탈로그도 자동으로 따라간다.
-- **preview 가용성**: 각 dataset의 `preview`(`fixture`/`live`/`none`)는 import
-  시점에 `etl_fixtures.FIXTURE_REGISTRY`/`etl_live.LIVE_LOADER_REGISTRY`를 조회해
-  결정한다 — 카탈로그와 registry가 어긋나면 자동으로 드러난다.
+- **preview 가용성**: 각 dataset의 `preview`(`fixture`/`none`)는 import 시점에
+  `etl_fixtures.FIXTURE_REGISTRY`를 조회해 결정한다. 제품 API는 외부 provider를
+  호출하지 않는다.
 - 본 모듈은 **데이터(상수)만** 둔다 — DB/외부 호출 없음. 라우터가 이 카탈로그를
   sync state와 LEFT JOIN 해서 응답을 만든다.
 
@@ -123,7 +123,6 @@ from kortravelmap.providers.visitkorea import (
 )
 
 from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
-from kortravelmap.api.etl_live import LIVE_LOADER_REGISTRY
 
 __all__ = [
     "PreviewKind",
@@ -138,8 +137,8 @@ __all__ = [
 ]
 
 
-PreviewKind = Literal["fixture", "live", "none"]
-"""dataset preview 가용성 — fixture(오프라인 replay) / live(provider 실호출) / none."""
+PreviewKind = Literal["fixture", "none"]
+"""dataset preview 가용성 — fixture(오프라인 replay) / none."""
 
 ScopeRefreshSelector = Literal["none", "poi_cache_targets"]
 """dataset refresh가 운영자 선택형 sync scope를 지원하는 방식."""
@@ -174,7 +173,7 @@ class ProviderDatasetCatalogEntry:
         운영자가 선택할 수 있는 refresh scope의 종류. ``poi_cache_targets``는
         활성 POI cache target 전체 또는 특정 ``external_system``만 선택한다.
     preview:
-        ETL preview 가용성 — import 시점에 fixture/live registry 조회로 결정.
+        ETL preview 가용성 — import 시점에 fixture registry 조회로 결정.
     """
 
     provider: str
@@ -194,15 +193,9 @@ _FIXTURE_KEYS: Final[frozenset[tuple[str, str]]] = frozenset(
 
 
 def _preview_for(provider: str, dataset_key: str) -> PreviewKind:
-    """fixture/live registry를 조회해 dataset의 preview 가용성을 결정.
-
-    fixture가 있으면 ``fixture``(오프라인이라 가장 견고), 없고 live loader만 있으면
-    ``live``, 둘 다 없으면 ``none``.
-    """
+    """fixture registry를 조회해 dataset의 preview 가용성을 결정."""
     if (provider, dataset_key) in _FIXTURE_KEYS:
         return "fixture"
-    if (provider, dataset_key) in LIVE_LOADER_REGISTRY:
-        return "live"
     return "none"
 
 
@@ -551,7 +544,7 @@ PROVIDER_DATASET_CATALOG: Final[tuple[ProviderDatasetCatalogEntry, ...]] = (
 """시스템이 ETL 하는 전 provider×dataset 카탈로그 (단일 정본).
 
 새 provider/dataset 추가 시 본 tuple에 1행(또는 provider dict 참조) 추가하면
-`/etl`·`/ops/providers` 양쪽 메뉴에 자동 반영된다.
+canonical ``/ops/datasets`` 상태 그리드와 fixture preview에 자동 반영된다.
 """
 
 

@@ -25,7 +25,10 @@ import {
   useOfflineUploadValidation,
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
-import { useOpsProviders } from "@/api/providers";
+import {
+  opsDatasetCatalogOptions,
+  useOpsDatasetCatalog,
+} from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
@@ -566,28 +569,24 @@ export function OfflineUploadsClient() {
   const selectedUpload = useOfflineUpload(selectedUploadId);
   const createUpload = useCreateOfflineUploadMutation();
   // §4: provider/dataset 입력 어시스트 — 등록된 provider×dataset에서 후보 제공.
-  const opsProviders = useOpsProviders();
+  const datasetsQuery = useOpsDatasetCatalog();
+  const catalogOptions = useMemo(
+    () => opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []),
+    [datasetsQuery.data?.data.items],
+  );
   const providerOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (opsProviders.data?.data.items ?? []).map((item) => item.provider),
-        ),
-      ).sort(),
-    [opsProviders.data],
+    () => catalogOptions.map((item) => item.provider),
+    [catalogOptions],
   );
   const datasetOptions = useMemo(
     () =>
-      Array.from(
-        new Set(
-          (opsProviders.data?.data.items ?? [])
-            .filter(
-              (item) => !provider.trim() || item.provider === provider.trim(),
-            )
-            .map((item) => item.dataset_key),
-        ),
-      ).sort(),
-    [opsProviders.data, provider],
+      provider.trim()
+        ? (catalogOptions.find((item) => item.provider === provider.trim())
+            ?.datasets ?? [])
+        : Array.from(
+            new Set(catalogOptions.flatMap((item) => item.datasets)),
+          ).sort(),
+    [catalogOptions, provider],
   );
   // §4: disabled 제출 버튼의 이유를 표시한다.
   const uploadMissingFields = [

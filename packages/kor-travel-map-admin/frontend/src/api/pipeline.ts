@@ -31,7 +31,14 @@ import {
   canonicalFeatureUpdateIdempotencyBody,
   featureUpdateIdempotencyOperationKey,
 } from "./feature-update-idempotency";
+import { publicUrlEnv } from "./env";
 import type { components, paths } from "./types";
+
+export const DAGSTER_UI_URL = publicUrlEnv(
+  process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL,
+  "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
+  "http://127.0.0.1:12702",
+);
 
 type Schemas = components["schemas"];
 

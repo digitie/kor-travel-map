@@ -10,11 +10,12 @@ import { expect, test } from "@playwright/test";
 const ADMIN_WRITE = process.env.E2E_ADMIN_WRITE === "1";
 
 test.describe("PR #617/#613 후속 UI", () => {
-  test("운영 로그 — 'live live' 중복 대신 '실시간' 표기(#617)", async ({ page }) => {
+  test("운영 로그 — system/API 두 canonical stream만 노출", async ({ page }) => {
     await page.goto("/ops/logs");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    // 라이브 배지 중복('live live')이 사라지고 '실시간'으로 정리됐다.
-    await expect(page.getByText(/live\s+live/i)).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "System logs" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "API call logs" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Job events" })).toHaveCount(0);
   });
 
   test("중복 검토 — 다중 선택 combobox 필터(#617)", async ({ page }) => {
@@ -35,13 +36,13 @@ test.describe("PR #617/#613 후속 UI", () => {
     await expect(page.getByLabel(/시군구/).first()).toBeVisible();
   });
 
-  test("적재 작업 상세 — payload 시각화 영역(#617)", async ({ page }) => {
-    await page.goto("/ops/import-jobs");
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  test("파이프라인 — 실행 타임라인 렌더", async ({ page }) => {
+    await page.goto("/ops/pipeline");
+    await expect(page.getByRole("heading", { name: "실행 타임라인" })).toBeVisible();
   });
 
-  test("작업 자동화 — 스케줄 컨트롤 렌더(#617 polish)", async ({ page }) => {
-    await page.goto("/admin/dagster");
+  test("파이프라인 — 스케줄 컨트롤 렌더", async ({ page }) => {
+    await page.goto("/ops/pipeline?tab=schedules");
     await expect(page.getByRole("heading", { name: "스케줄" })).toBeVisible();
   });
 
@@ -54,7 +55,7 @@ test.describe("PR #617/#613 후속 UI", () => {
     test("스케줄 시작/즉시 실행은 확인 다이얼로그를 띄운다(즉시 mutate 금지)", async ({
       page,
     }) => {
-      await page.goto("/admin/dagster");
+      await page.goto("/ops/pipeline?tab=schedules");
       const control = page
         .getByRole("button", { name: /시작|즉시 실행/ })
         .first();

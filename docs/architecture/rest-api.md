@@ -101,9 +101,8 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 (`le=5000`/`500`/`200`)이 공존하고 `search`는 cursor인데 `limit`을 썼다. **T-216b/c로
 아래 표준으로 통일 완료** — cursor 페이지네이션 표면의 page-size 파라미터(`limit`/`run_limit`/
 `event_limit`)는 `page_size`로 통일됐다. **단 예외**: bounded top-N list 엔드포인트
-(`/v1/{curated-themes,curated-sources}` 등 curated read + admin curated 미러,
-`/v1/admin/provider-refresh-policies`)는 cursor가 아니라 결과 상한 cap으로서 `limit`(`le=500`,
-기본 200)을 명시적으로 유지한다(curated.py / provider_refresh_policies.py).
+(`/v1/{curated-themes,curated-sources}` 등 curated read + admin curated 미러)는 cursor가
+아니라 결과 상한 cap으로서 `limit`(`le=500`, 기본 200)을 명시적으로 유지한다.
 **표준(현행)**:
 - cursor 페이지네이션 표면은 `page_size`(정수)+opaque `cursor`(base64 keyset)로 통일.
   `limit`/`run_limit`/`event_limit`은 cursor 표면에서 **폐기**(bounded top-N의 `limit` cap은
@@ -114,8 +113,15 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - `meta.page.total`은 `?include_total=true` opt-in(기본 `null`; 현재 `search`는 항상 COUNT).
 
 ### 1.7 idempotency · rate limit (T-214g)
-- 변경 호출(admin mutation 등) POST: `Idempotency-Key` 허용. rate limit `429`+`RateLimit-*`+
-  `Retry-After`, lock 경합 `409 LOCK_BUSY`+`Retry-After: 15`.
+- 일반 변경 POST는 endpoint 계약에 따라 `Idempotency-Key`를 사용할 수 있다. canonical
+  feature update 생성 `POST /v1/ops/pipeline/requests`는 UUID 형식
+  `Idempotency-Key`가 **필수**다. 같은 인증 actor namespace에서 같은 key와 동일한
+  정규화 body를 보내면 최초 결과를 `200`으로 재생하고 `idempotent_replay=true`, 최초
+  생성은 `201`과 `idempotent_replay=false`를 반환한다. 같은 actor가 같은 key를 다른
+  body에 재사용하면 `409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`다. 다른 actor의 key 공간은
+  독립되어 서로의 결과를 조회·재생·충돌시키지 않는다.
+- rate limit은 `429`+`RateLimit-*`+`Retry-After`, lock 경합은
+  `409 LOCK_BUSY`+`Retry-After: 15`를 사용한다.
 
 ### 1.8 좌표 · datetime
 - WGS84 lon,lat. bbox=`min_lon,min_lat,max_lon,max_lat`. 목록 좌표는 평면 `lon`/`lat`.
@@ -174,8 +180,8 @@ GET /v1/providers                        # 전 provider×dataset 신선도 목�
 - `GET /v1/providers`(T-217g): `provider_sync_state` 전량을 `data={items:[...]}`로 반환
   (provider/dataset_key/sync_scope/status/last_success_at/last_failure_at/
   consecutive_failures, 내부 cursor 비노출). provider×dataset 조합이 유한해
-  `/v1/categories`처럼 비페이지네이션 bounded reference 패턴. 운영 신선도 대시보드
-  (`admin UI /ops/providers`)와 PinVi Admin 상태판용. 빈 환경은 200 + 빈 `items`.
+  `/v1/categories`처럼 비페이지네이션 bounded reference 패턴. 외부 소비자 상태판용이며,
+  admin 운영 화면은 더 완결된 `/ops/datasets` 계약을 사용한다. 빈 환경은 200 + 빈 `items`.
 
 ### 2.4.1 `/v1/public/*` — 공개 해수욕장/축제 뷰 (PinVi T-130)
 
@@ -297,17 +303,10 @@ POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
-GET/POST /v1/admin/features/update-requests             # 재적재 조회/영속 생성(201) 또는 활성 작업 재사용(200)
-POST   /v1/admin/features/update-requests/preview       # 비영속 실행 계획 미리보기(200)
-GET    /v1/admin/features/update-requests/{request_id}
-POST   /v1/admin/features/update-requests/{request_id}/cancel
-POST   /v1/admin/features/update-requests/{request_id}/run-now    # 200 동일 canonical job 우선 dispatch
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키
-GET    /v1/admin/provider-refresh-policies                                 # provider×dataset 갱신정책 목록
-GET/PUT /v1/admin/provider-refresh-policies/{provider}/{dataset_key}       # 정책 단건 조회/갱신(복합 자연키)
 # T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.
 # PinVi 직접 write 미허용 — service-safe /v1/poi-cache-targets/* write 경로 안 둠.
 # PinVi는 등록된 target 기준 read(GET /v1/features/nearby/by-target)만 소비.
@@ -382,23 +381,34 @@ POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 
 
 ### 2.6 `/v1/ops/*` — 옵저버빌리티
 ```
-GET /v1/ops/health-deep · metrics · import-jobs[/{job_id}] · consistency/{reports,issues}
-  · system-logs · api-call-logs · dagster/{summary,runs/{run_id}}   POST /v1/ops/dagster/nux-seen
-GET  /v1/ops/providers                              # 전 provider 운영 신선도 목록(/ops/providers 대시보드)
-GET  /v1/ops/providers/{provider}                   # provider 단건 신선도/dataset 상태
-GET  /v1/ops/import-job-events                       # import job 이벤트 스트림(필터: job_id/status/시각)
-GET  /v1/ops/import-jobs/{job_id}/events             # 단일 job 이벤트 타임라인
-POST /v1/ops/import-jobs/{job_id}/cancel             # job 취소(action sub-resource, kill-switch)
+GET  /v1/ops/health-deep · metrics · consistency/{reports,issues}
+GET  /v1/ops/system-logs · api-call-logs
+GET  /v1/ops/datasets · datasets/detail
+PUT  /v1/ops/datasets/refresh-policy
+POST /v1/ops/datasets/preview                        # fixture-only, 외부 호출 budget 0
+GET  /v1/ops/pipeline/overview · executions · events · dagster-runs · schedules
 GET  /v1/ops/pipeline/executions                     # root 목록 + current cancellation summary
 GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
                                                       # root 상세 + current member/run 결과
 POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
-POST /v1/ops/pipeline/requests                        # 영속 생성(201) 또는 같은 활성 계획 재사용(200)
+POST /v1/ops/pipeline/requests                        # 필수 UUID Idempotency-Key; 생성(201)/재생·활성 재사용(200)
 POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)
 POST /v1/ops/pipeline/requests/{request_id}/run-now   # 동일 canonical job 우선 dispatch(200)
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
 ```
+
+Dagster 실행·스케줄 조작, import job/event, 갱신 요청, provider 상태·정책은 위 두
+canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/import-jobs*`,
+`/ops/import-job-events`, `/ops/providers*`, `/admin/features/update-requests*`,
+`/admin/provider-refresh-policies*`는 존재하지 않는다.
+
+`POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.
+`idempotent_replay`는 동일 `Idempotency-Key` 요청 재생 여부이고,
+`reused_active_request`는 새 key로 제출한 계획이 이미 실행 중인 같은 canonical 계획을
+재사용했는지 여부다. 따라서 두 필드는 서로 대체하지 않는다. 같은 인증 actor namespace에서
+같은 key의 body가 최초 요청과 다르면 기존 결과를 반환하지 않고
+`409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`로 거절한다. 다른 actor의 동일 key는 별도 요청이다.
 
 - **Canonical provider operation(T-ADM-C3e, #679)**: schedule/manual/sensor/backfill
   feature-load는 Dagster run당 `import_job` root 한 건과 exact provider/dataset pair child로
@@ -528,11 +538,9 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
   in-progress overlay와 5xx `details.members[]`/`dagster_runs[]`는 같은 result enum을
   사용하므로 `pending`을 반환할 수 있다. 실패 attempt와 대상별 error는 응답 전에 영속되며
   marker는 유지된다.
-- **legacy/mutator 차단**: 신규 pipeline action, legacy `/ops/import-jobs/{job_id}/cancel`,
-  `/admin/features/update-requests/{request_id}/cancel`은 모두 reason-only body,
-  endpoint의 `AdminProxyContext.actor`, 같은 coordinator/DTO/error adapter에 위임한다. 세 route는
-  direct `cancel_import_job`/`cancel_update_request`를 호출하지 않는다. 특히 legacy ops route도
-  endpoint 자체에서 admin frontend context를 요구한다. main-library
+- **mutator 차단**: pipeline cancellation은 reason-only body와 endpoint의
+  `AdminProxyContext.actor`, 단일 coordinator/DTO/error adapter를 사용한다. direct
+  `cancel_import_job`/`cancel_update_request`를 호출하지 않는다. main-library
   `AsyncKorTravelMapClient.cancel_update_request`는 Dagster HTTP 경계가 아니므로 marker-guarded
   low-level API로만 남고 REST coordinator로 사용하지 않는다.
   cancel/requeue, payload update, stale recovery, batch/load-batch attach를 포함한 모든 base
@@ -550,10 +558,9 @@ WS   /v1/ops/live                                    # admin UI 실시간 invali
 
 ### 2.7 `/v1/debug/*`
 ```
-GET /v1/debug/etl/providers · etl/{provider}/datasets · mois-license/{license_id}
-POST /v1/debug/etl/{provider}/{dataset}/preview
+GET /v1/debug/mois-license/{license_id}
 ✅ /debug/health · /debug/version 제거됨(T-214h, clean cut). 상태확인은 /health·/version·
-   /v1/ops/health-deep로 수렴. (나머지 debug 표면은 dev 전용, debug_routes_enabled로 gate.)
+   /v1/ops/health-deep로 수렴. dataset preview는 `/v1/ops/datasets/preview` fixture-only다.
 ```
 - **action sub-resource 규약(ADR-048 #8)**: 부수효과 상태전이는 `POST {col}/{id}/{verb}`
   (`deactivate`/`cancel`/`run-now`/`approve`/`reject`/`load`/`validate`/`swap`), 순수 수정은
@@ -614,7 +621,7 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 |------|------|------|------|
 | `X-Request-ID` | 응답(전체) | 요청 상관추적. `meta.request_id`/problem+json `request_id`와 동일 | **구현됨** |
 | `Retry-After` | 응답(429/409/502/503) | rate limit·lock 경합·pipeline 취소 재시도 지연(초). LOCK_BUSY=15 | **부분 구현**(LOCK_BUSY, pipeline은 T-ADM-C3d) |
-| `Idempotency-Key` | 요청(변경 POST) | 동일 key 재시도 = 동일 결과 | 규약(구현 T-216) |
+| `Idempotency-Key` | 요청(변경 POST) | endpoint별 멱등 key. `/ops/pipeline/requests`는 actor-scoped UUID 필수이며 같은 actor+body만 재생 | **구현됨** |
 | `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` | 응답(429) | rate limit 상태 | 규약(구현 T-216) |
 | `Deprecation`/`Sunset` | 응답 | GA 후 `/v1`→`/v2` 전환 예고(ADR-048 #13). pre-1.0 clean cut에선 미사용 | 규약(GA 후) |
 

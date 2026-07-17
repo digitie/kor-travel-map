@@ -704,7 +704,6 @@ interface MockCounters {
   runNowBodies: Array<string | null>;
   detailQueries: Array<{ executionId: string; query: URLSearchParams }>;
   cancelBodies: unknown[];
-  legacyProviderCalls: number;
   catalogCalls: number;
   moisPrecheckCalls: number;
 }
@@ -729,7 +728,6 @@ async function installPipelineMocks(
     runNowBodies: [],
     detailQueries: [],
     cancelBodies: [],
-    legacyProviderCalls: 0,
     catalogCalls: 0,
     moisPrecheckCalls: 0,
   };
@@ -1357,11 +1355,6 @@ async function installPipelineMocks(
       return;
     }
     await route.continue();
-  });
-
-  await page.route("**/v1/debug/etl/providers**", async (route) => {
-    counters.legacyProviderCalls += 1;
-    await fulfillJson(route, { data: { providers: [] }, meta: META });
   });
 
   // 요청 dialog는 C4와 같은 canonical ops datasets catalog만 사용한다.
@@ -2755,7 +2748,6 @@ test.describe("/ops/pipeline", () => {
       scope: { type: "provider_dataset", provider: "python-mois-api" },
     });
     expect(counters.requestBodies).toHaveLength(0);
-    expect(counters.legacyProviderCalls).toBe(0);
   });
 
   test("요청 dialog — 입력 변경 즉시 이전 dry-run 결과를 무효화", async ({
@@ -2979,7 +2971,6 @@ test.describe("/ops/pipeline", () => {
       dialog.getByRole("button", { name: "dry-run 실행" }),
     ).toBeDisabled();
     expect(counters.previewBodies).toHaveLength(0);
-    expect(counters.legacyProviderCalls).toBe(0);
   });
 
   test("요청 dialog — 열린 후 catalog 장애도 제출 직전 재확인으로 차단", async ({

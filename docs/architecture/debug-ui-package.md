@@ -6,7 +6,7 @@
 
 본 문서는 `kor-travel-map` 저장소 내 별도 Python API 패키지
 `kor-travel-map-api`와 admin frontend 패키지 `kor-travel-map-admin`의 사양
-reference다. 결정 근거는 `docs/adr/README.md`의 ADR-005(인증 없음, 내부망 전용) +
+reference다. 결정 근거는 `docs/adr/README.md`의 ADR-005(네트워크 경계 + 앱 방어) +
 ADR-020(메인 패키지에서 FastAPI 분리) + ADR-045(Docker 독립 프로그램, 독립
 DB/Dagster, PinVi OpenAPI 연동) + ADR-055(API/admin 패키지 분리).
 
@@ -32,7 +32,7 @@ Admin 우선 OpenAPI와 Dagster feature update queue 계약은
 | Admin UI 위치 | `packages/kor-travel-map-admin/frontend/` |
 | 별도 `pyproject.toml` | 예 |
 | 의존성 | `kor-travel-map`, FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
-| 인증 | **없음** (ADR-005, 내부망 전제) |
+| 인증 | 공개 API key/service token + admin frontend proxy actor/shared secret. reverse proxy SSO/IP allowlist 병행 |
 | PinVi 의존 | **없음** — ADR-045 이후 PinVi는 OpenAPI client로만 연동 |
 | 운영 형태 | Docker 독립 프로그램의 API backend + admin frontend |
 | DB | 독립 PostgreSQL/PostGIS (`kor_travel_map`) |
@@ -79,20 +79,18 @@ packages/kor-travel-map-api/
 │   │   ├── public_views.py        — 공개 read view
 │   │   ├── public_status.py       — 공개 status
 │   │   ├── categories.py
-│   │   ├── providers.py           — sync-state
-│   │   ├── provider_refresh_policies.py
+│   │   ├── public_providers.py    — 공개 sync-state read 2종
 │   │   ├── poi_cache_targets.py
 │   │   ├── dedup_review.py
 │   │   ├── enrichment_review.py
 │   │   ├── admin_features.py      — feature change API (#317)
 │   │   ├── admin_issues.py        — /admin/issues/{issue_id}
 │   │   ├── admin_backups.py
-│   │   ├── feature_update_requests.py
 │   │   ├── offline_uploads.py
 │   │   ├── mois_detail.py
-│   │   ├── etl.py                 — /debug/etl
-│   │   ├── dagster.py             — /ops/dagster/*
-│   │   ├── ops.py / ops_live.py
+│   │   ├── ops_datasets.py        — /ops/datasets/*
+│   │   ├── ops_pipeline.py        — /ops/pipeline/*
+│   │   ├── ops.py / ops_live.py   — 관측 read / WS invalidation
 │   │   └── ops_logs.py            — /ops/system-logs, /ops/api-call-logs
 │   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
 ├── scripts/export_openapi.py
@@ -161,19 +159,17 @@ class ApiSettings(BaseSettings):
     debug_routes_enabled: bool = True         # /debug/* 활성
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
     admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
-    ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
+    ops_routes_enabled: bool | None = None    # /ops/* 활성. None이면 features flag 추종
     prometheus_metrics_enabled: bool = True   # HTTP/DB metrics pull scrape endpoint
     prometheus_metrics_path: str = "/metrics"
     cors_allow_origins: list[str] = [         # frontend(12705) cross-origin
         "http://localhost:12705", "http://127.0.0.1:12705",
     ]
-    # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
-    #   kma_service_key / kma_apihub_key / opinet_service_key /
-    #   datagokr_service_key / visitkorea_service_key / krex_service_key /
-    #   knps_service_key / airkorea_service_key / krforest_service_key
+    # provider credential은 Dagster/provider runtime만 소유한다.
 ```
 
-각 provider key의 출처(.env 이름)는 `settings.py` 필드 docstring 참조.
+provider loader credential은 API settings에 존재하지 않으며 Dagster/provider runtime만
+소유한다. API는 fixture preview와 canonical pipeline/datasets application service만 제공한다.
 
 메인 라이브러리 settings는 별도 `KorTravelMapSettings`를 그대로 import해서 사용한다.
 `pg_dsn`, `object_store_*` 같은 항목은 본 패키지에서 재정의하지 않는다.
@@ -185,37 +181,31 @@ class ApiSettings(BaseSettings):
 uv pip install -e .
 uv pip install -e packages/kor-travel-map-api
 
-# 기동 (인증 없음, localhost 전용)
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
-
-# 환경변수로 override
-KOR_TRAVEL_MAP_API_HOST=127.0.0.1 \
-KOR_TRAVEL_MAP_API_PORT=12701 \
-KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://... \
-uvicorn kortravelmap.api.app:app
+# scoped API env 생성 후 검증된 local stack 기동
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 
 ```
 
-`0.0.0.0` 바인드 시 경고 로그 (ADR-005 후속). 코드 작성 단계에서
-`warn_if_external_bind(host)` helper를 박는다.
+root cwd 직접 `uvicorn`은 package `.env`와 process별 credential allowlist를 우회하므로
+지원하지 않는다.
 
 ## 6. 엔드포인트
 
-모두 인증 없음. `OpenAPI` 자동 노출 — `/docs` (Swagger UI), `/openapi.json`.
+공개 read와 admin/ops gate를 구분한다. `OpenAPI` 자동 노출 — `/docs`, `/openapi.json`.
 
-> **구현 현황 (2026-05-29 기준)**: 아래 표는 **전체 계획**이다. 실제 구현·노출
-> 중인 엔드포인트는 다음과 같다 (`openapi.json`이 single source of truth):
+> **구현 현황 (2026-07-17 기준)**: 실제 구현·노출 endpoint의 기계 정본은
+> `openapi.json`이다.
 >
 > | Path | 메서드 | 비고 |
 > |------|--------|------|
-> | `/debug/health` | GET | liveness (PR#35) |
-> | `/debug/version` | GET | 패키지 version (PR#35) |
-> | `/debug/etl/providers`, `/debug/etl/{provider}/datasets`, `/debug/etl/{provider}/{dataset}/preview` | GET/POST | ETL preview (PR#44~47) |
-> | `/features` | GET | **bbox 목록** (`min_lon/min_lat/max_lon/max_lat`, `kind[]`, `limit`) — PR#73 |
-> | `/features/{feature_id}` | GET | 단건 상세 (PR#73) |
+> | `/health`, `/version` | GET | public liveness/version |
+> | `/ops/datasets/*` | GET/PUT/POST | 상태·정책·fixture preview 통합 |
+> | `/ops/pipeline/*` | GET/POST/PATCH | 실행·event·Dagster·schedule 통합 |
+> | `/providers`, `/providers/{provider}/last-sync` | GET | public bounded read |
 >
-> 나머지 행(`/features/nearby`, `/{id}/weather`, `/sources`, `/import-jobs`,
-> `/dedup-review` 등)은 **Sprint 3~5 예정**. 활성 라우터는
+> 활성 라우터는
 > `settings.debug_routes_enabled` / `settings.features_routes_enabled` /
 > `settings.admin_routes_enabled` / `settings.ops_routes_enabled` flag로 제어.
 > `admin_routes_enabled`와 `ops_routes_enabled`가 `None`이면
@@ -233,13 +223,12 @@ uvicorn kortravelmap.api.app:app
 | `/features/{feature_id}/weather` | GET | `WeatherCard` |
 | `/features/{feature_id}/sources` | GET | source_links |
 | `/features/{feature_id}/files` | GET | feature_files |
-| `/providers/{name}/sync-state` | GET | `ProviderSyncState` |
-| `/import-jobs` | GET, POST | 작업 큐 조회/등록 |
-| `/import-jobs/{job_id}` | GET, PATCH | 상태 변경 |
+| `/providers`, `/providers/{provider}/last-sync` | GET | 공개 provider 신선도 |
+| `/ops/datasets/*` | GET, PUT, POST | provider×dataset 상태·정책·fixture preview |
+| `/ops/pipeline/*` | GET, POST, PATCH | 실행·event·Dagster·schedule 조작 |
 | `/dedup-review` | GET | pending 큐 |
 | `/dedup-review/{review_id}` | PATCH | accept/reject/merged |
 | `/integrity-violations` | GET | `data_integrity_violations` |
-| `/debug/etl` | GET, POST | provider fixture/live 변환 preview. DB write 없음 |
 
 Admin 운영 콘솔에서 새로 도입할 권장 경로는 `debug-ui-admin-workflows.md`가 더
 구체적이다. 특히 기존 `GET /features`는 bbox 지도 조회로 유지하고, 전역 feature
@@ -303,18 +292,17 @@ type drift 부채 0).
   `httpx.AsyncClient(ASGITransport)`. DB 없이 라우터 응답 셰입 검증.
 - **e2e** (`tests/e2e/`): testcontainers PostGIS + 실제 메인 라이브러리 wiring.
   EXPLAIN 통합 테스트는 메인 라이브러리 책임이지만, 라우터 통합 path도 검증.
-- 인증 없음 동작 회귀 테스트 (Authorization 헤더 무시 확인).
+- 공개 API key/service token과 admin proxy actor/shared secret 인증 회귀 테스트.
 - `0.0.0.0` 바인드 경고 로그 회귀 테스트.
 
 자세한 매트릭스는 `docs/test-strategy.md`.
 
 ## 10. 운영 시 주의 사항
 
-- **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
+- **직접 외부 노출 금지**. host default `127.0.0.1`; 외부 접근은 인증된 reverse proxy만 허용.
 - **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from <lan-cidr>
   to any port 12701`(예: 사내망 RFC1918 대역) 같은 사내망 한정 허용만.
-- **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
-  계층에서.
+- **Cloudflare Tunnel** 또는 **Tailscale** 원격 접근은 네트워크 인증과 앱 인증을 함께 적용.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준
   (`provider`, `dataset_key`, `request_id`, `feature_id`).
 - **PII 노출**: provider raw payload, location 데이터가 응답에 그대로 노출되므로
@@ -325,7 +313,7 @@ type drift 부채 0).
 본 패키지는 다음을 하지 않는다:
 
 - 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — PinVi)
-- 인증/세션/권한 (네트워크 계층 책임)
+- 사용자 계정·조직 권한 모델. 앱은 API key/service token과 admin proxy actor 경계만 소유한다.
 - SQL write/DDL
 - 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
 - PinVi 사용자/여행계획/POI 도메인 화면
@@ -417,8 +405,10 @@ cd ~/dev/kor-travel-map
 uv pip install -e ".[dev]"
 uv pip install -e packages/kor-travel-map-api
 
-# 2. backend (FastAPI) 기동
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
+# 2. scoped env를 준비하고 backend/frontend/Dagster stack 기동
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 
 # 3. frontend (Next.js dev) 기동
 cd packages/kor-travel-map-admin/frontend
@@ -456,8 +446,8 @@ npm run dev                  # http://127.0.0.1:12705
 | `<MarkerClusterer>` | viewport culling + KDBush | 10만+ feature 동시 표시 (MOIS 인허가 등) |
 | `<FeatureMakiMarker>` (custom) | maki + 카테고리 color (P-01~P-16) | category code → maki + 색상 dispatch |
 | `<DetailPanel>` | feature 클릭 시 상세 | `GET /features/{id}` |
-| `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{name}/sync-state` |
-| `<DebugEtlPreview>` | provider fixture/live 변환 preview | `GET/POST /debug/etl/*` |
+| `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{provider}/last-sync` |
+| `<DatasetPreview>` | fixture-only 변환 preview | `POST /ops/datasets/preview` |
 
 ### 14.5 카테고리 → maki icon 매핑
 

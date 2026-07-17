@@ -1,8 +1,8 @@
 """``kortravelmap.api.etl_fixtures`` — ETL preview용 fixture sample.
 
-본 모듈은 디버그 UI에서 `/debug/etl/{provider}/{dataset}/preview?source=
-fixture` 라우터가 사용하는 hard-coded fixture를 모은다. 실 provider client
-없이 본 lib `providers/*` 변환 함수의 동작을 확인할 수 있다.
+본 모듈은 canonical ``POST /ops/datasets/preview``가 사용하는 hard-coded
+fixture를 모은다. 실 provider client 없이 본 lib ``providers/*`` 변환 함수의
+동작을 확인할 수 있다.
 
 설계 메모
 --------
@@ -10,12 +10,11 @@ fixture` 라우터가 사용하는 hard-coded fixture를 모은다. 실 provider
   model.
 - registry는 `(provider, dataset_key)` 튜플 → `(variant, build_fixture,
   convert)` 매핑. 신규 변환 함수가 들어오면 본 registry에 1행 추가.
-- live source(`?source=live`)는 본 PR에서는 501 Not Implemented — 후속 PR로
-  실 provider client 호출 wiring.
+- 제품 API의 preview는 fixture-only이며 외부 provider 호출 budget은 0이다.
 
 ADR 참조
 --------
-- ADR-005 + ADR-035 — 디버그/관리 UI 운영 범위. ETL preview는 디버그 prefix.
+- ADR-064 — 데이터셋 상태·fixture preview는 ``/ops/datasets``로 수렴.
 - ADR-006 — provider wrapper 금지. 본 모듈은 본 lib 변환 함수만 호출.
 - ADR-019 — KST aware datetime.
 """
@@ -66,8 +65,6 @@ from kortravelmap.providers.standard_data import (
 __all__ = [
     "EtlFixtureEntry",
     "FIXTURE_REGISTRY",
-    "list_providers",
-    "list_datasets",
     "run_fixture_preview",
 ]
 
@@ -1304,16 +1301,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_mcst_split_coord,
     ),
 )
-
-
-def list_providers() -> list[str]:
-    """등록된 provider canonical name 목록 (중복 제거, 정렬)."""
-    return sorted({e.provider for e in FIXTURE_REGISTRY})
-
-
-def list_datasets(provider: str) -> list[str]:
-    """주어진 provider의 dataset 목록 (정렬)."""
-    return sorted(e.dataset for e in FIXTURE_REGISTRY if e.provider == provider)
 
 
 def _find_entry(provider: str, dataset: str) -> EtlFixtureEntry | None:

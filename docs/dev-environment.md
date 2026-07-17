@@ -182,6 +182,8 @@ uv pip install "gdal==$(gdal-config --version)"
 # .env
 cp .env.example .env
 $EDITOR .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+$EDITOR packages/kor-travel-map-api/.env
 
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data
@@ -292,7 +294,7 @@ debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 **WSL에서 실�
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
-| backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12701` |
+| backend (FastAPI) | **WSL `/mnt/f` worktree** | `npm run admin:stack` (scoped API env 필수, root 직접 uvicorn 금지) |
 | frontend (Next.js) | **WSL `/mnt/f` worktree** | `npm run start` (`next start :12705`) |
 | **Playwright (chromium)** | **n150 Linux 우선** | `cd packages/kor-travel-map-admin/frontend && npm run e2e` |
 | **Playwright fallback** | **Windows만** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |

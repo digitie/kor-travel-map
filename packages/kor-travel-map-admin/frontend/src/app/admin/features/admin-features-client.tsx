@@ -29,7 +29,10 @@ import {
   type FeatureKind,
   type SortOrder,
 } from "@/api/features";
-import { useProviders } from "@/api/etl";
+import {
+  opsDatasetCatalogOptions,
+  useOpsDatasetCatalog,
+} from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
@@ -283,16 +286,16 @@ export function AdminFeaturesClient({
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
   const confirm = useConfirm();
-  const providersQuery = useProviders();
+  const datasetsQuery = useOpsDatasetCatalog();
   const providerOptions = useMemo(
-    () => providersQuery.data?.data.providers ?? [],
-    [providersQuery.data?.data.providers],
+    () => opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []),
+    [datasetsQuery.data?.data.items],
   );
   const datasetOptions = useMemo(
     () =>
       providerOptions
         .find((item) => item.provider === provider)
-        ?.datasets.map((entry) => entry.dataset) ?? [],
+        ?.datasets ?? [],
     [provider, providerOptions],
   );
   const items = features.data?.data.items ?? [];

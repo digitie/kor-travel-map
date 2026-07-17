@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(admin-ops.spec
@@ -319,6 +320,7 @@ interface FeaturesRouteOptions {
  * 반환된 카운터로 요청 shape를 expect.poll 단언한다.
  */
 async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {}) {
+  await mockOpsDatasetCatalog(page);
   const items = options.items ?? [makeFeatureSummary()];
   const requests = {
     list: 0,

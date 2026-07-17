@@ -2,10 +2,10 @@
 
 `kor-travel-map`의 **REST API + OpenAPI backend** 별도 Python 패키지.
 
-> **현재 상태 (Sprint 3 완료, Sprint 4 진입 준비)**: health/version, ETL preview,
-> `/features` bbox 조회와 frontend 지도 화면이 구현되어 있다.
-> Sprint 4부터는 ADR-035에 따라 provider 적재, dedup 검토, 이슈 처리, 오프라인
-> 업로드를 포함한 admin 운영 콘솔로 확장한다. 패키지 경계는
+> **현재 상태**: 공개 feature/provider 조회와 admin 기능을 제공하며, Dagster job·provider
+> 운영은 `/ops/pipeline/*`와 `/ops/datasets/*` 두 canonical API에 통합되어 있다.
+> Dataset preview는 fixture-only이고 provider credential은 Dagster runtime만 소유한다.
+> 패키지 경계는
 > `docs/architecture/debug-ui-package.md`, 상세 구현 사양은
 > `docs/debug-ui-admin-workflows.md`, OpenAPI/Dagster update queue 계약은
 > `docs/architecture/openapi-admin-contract.md`를 기준으로 한다.
@@ -16,7 +16,8 @@
 - **위치**: `kor-travel-map` 저장소 내 `packages/kor-travel-map-api/`
   (monorepo)
 - **목적**: PinVi/user-facing REST + debug/admin/ops REST API
-- **인증**: 없음. 내부망 / localhost / WSL / 사내망 전제 (ADR-005)
+- **인증**: 공개 API key/service token + admin frontend proxy actor/shared secret.
+  네트워크 경계에서도 reverse proxy SSO/IP allowlist를 적용한다.
 - **PinVi 의존**: 없음. ADR-045 이후 PinVi는 OpenAPI client로만 연동.
 - **운영 형태**: Docker에서 실행되는 kor-travel-map 독립 프로그램의 API 서버.
 - **DB/Dagster**: 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 사용.
@@ -38,12 +39,14 @@ cd ~/dev/kor-travel-map
 uv pip install -e ".[dev,geo,providers]"
 uv pip install -e packages/kor-travel-map-api
 
-# 실행 — 인증 없음, localhost 전용
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701 --reload
+# scoped API env와 root 공유 infra env를 검증한 뒤 전체 local stack 실행
+cp .env.example .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+npm run admin:stack
 ```
 
-기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고
-로그 (ADR-005 후속).
+`admin:stack`은 API를 package cwd에서 실행하고 API/frontend/Dagster별 환경 allowlist를
+적용한다. root cwd 직접 `uvicorn`은 scoped env와 인증 검증을 우회하므로 지원하지 않는다.
 
 ### Frontend (Next.js + React 19 + maplibre-vworld, ADR-025 2차 보강)
 
@@ -87,7 +90,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` | `http://localhost:12705` | Next.js dev 서버 |
 | `KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED` | `true` | `/features/*` 조회 라우터 활성화 |
 | `KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
-| `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
+| `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` | unset | `/ops/*` 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | `true` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12701`에서 노출되며 OpenAPI에는 포함하지 않음 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KOR_TRAVEL_MAP_API_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
@@ -124,22 +127,24 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 `../../docs/debug-ui-admin-workflows.md`. 요약:
 
 - `/health`, `/version`
-- `/features/{id}`, `/features/in-bounds`, `/features/nearby`
-- `/admin/features`, `/admin/features/{id}`, `/admin/features/{id}/deactivate`,
-  `/admin/features/change-requests`
-- `/admin/providers`, `/admin/providers/{provider}/datasets/{dataset_key}/runs`
-- `/admin/features/update-requests` (6종 scope 기준 preview/생성/조회/취소/run-now 재큐잉)
-- `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 target
+- `/v1/features/{id}`, `/v1/features/in-bounds`, `/v1/features/nearby`
+- `/v1/admin/features`, `/v1/admin/features/{id}`, `/v1/admin/features/{id}/deactivate`,
+  `/v1/admin/features/change-requests`
+- `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
-- `/admin/provider-refresh-policies` (provider별 update 주기/rate limit 정책)
-- `/features/{id}/weather`, `/features/{id}/sources`, `/features/{id}/files`
-- `/providers/{name}/sync-state`
-- `/import-jobs`, `/import-jobs/{job_id}`
-- `/dedup-review`, `/integrity-violations`
-- `/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load), `/ops/error-logs`
-- `/debug/explain`, `/debug/fixtures`
+- `/v1/features/{id}/weather`, `/v1/features/{id}/sources`, `/v1/features/{id}/files`
+- `/v1/providers`, `/v1/providers/{provider}/last-sync` (공개 provider 신선도)
+- `/v1/ops/datasets`, `/v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`
+  (상태·정책·fixture preview)
+- `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions`, `/v1/ops/pipeline/requests`
+  (실행·event·Dagster·schedule 통합)
+- `/v1/admin/features/dedup-reviews`, `/v1/ops/consistency/issues`,
+  `/v1/ops/system-logs`
+- `/v1/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load)
 
-admin/ops 엔드포인트는 admin frontend proxy 인증 context를 요구한다. 런타임
+`/v1/admin/*`와 조작을 포함하는 canonical `/v1/ops/pipeline/*`·`/v1/ops/datasets/*`는
+admin frontend proxy 인증 context를 요구한다. health·metrics·live·운영 로그·정합성 같은
+관측용 ops read는 별도 인프라 접근 제어 경계에서 제공한다. 런타임
 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
 PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.

@@ -5,6 +5,13 @@
 기준이고, 본 문서는 실제 화면, API, 진행 상태, 검토 흐름을 AI agent가 바로
 구현할 수 있도록 풀어 쓴 작업 지시서다.
 
+> **2026-07-17 ADR-064 clean-cut**: Dagster job·provider 운영의 현행 정본은
+> `/ops/pipeline`과 `/ops/datasets` 두 화면 및 같은 이름의 REST 그룹이다.
+> 이 문서 아래에 남은 `/admin/dagster`, `/ops/providers`, `/ops/import-jobs`,
+> `/admin/features/update-requests`, `/admin/provider-refresh-policies`, `/debug/etl`
+> 설명은 이전 구현 이력이며 신규 구현 계약이 아니다. public provider read 두 종은
+> `/v1/providers`와 `/v1/providers/{provider}/last-sync`로 존치한다.
+
 > **2026-06-11 재점검**: T-218 이후 실제 프론트엔드 17개 경로와 백엔드/OpenAPI를 다시
 > 대조한 최신 간극/실시간 판단은
 > [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를
@@ -15,7 +22,8 @@
 
 관련 결정:
 
-- ADR-005: 인증 없음, 내부망/네트워크 계층 보호.
+- ADR-005 amendment: 운영 인증의 1차 책임은 네트워크 계층에 두고 앱에는 defense-in-depth
+  gate를 둔다. admin UI는 login/session과 same-origin BFF 인증을 사용한다.
 - ADR-020: 메인 라이브러리와 별도 Python 패키지.
 - ADR-031: OpenAPI export drift gate.
 - ADR-035: debug UI를 프로덕션 admin/유지보수 UI로도 운영.
@@ -52,8 +60,9 @@ kor-travel-map 독립 프로그램의 admin frontend/backend다. PinVi와는 Ope
 
 ## 2. 비목표와 금지 사항
 
-- 인증, 세션, 권한을 애플리케이션 코드에 넣지 않는다. 접근 제어는 Cloudflare
-  Tunnel, SSO gateway, IP allowlist, SSH tunnel 등 네트워크 계층 책임이다.
+- 외부 사용자 IAM·역할 체계를 이 패키지에 만들지 않는다. 운영 접근 제어의 1차 책임은
+  Cloudflare Tunnel, SSO gateway, IP allowlist, SSH tunnel 등 네트워크 계층에 두되,
+  admin UI의 login/session과 same-origin BFF gate는 반드시 유지한다.
 - PinVi 사용자용 지도 UI를 만들지 않는다. 본 UI는 개발자/운영자 전용이다.
 - 메인 패키지 `kortravelmap`에 FastAPI, Uvicorn, React, Next.js 의존을 추가하지
   않는다.

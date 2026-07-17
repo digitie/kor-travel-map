@@ -31,21 +31,37 @@ wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:up"
 
 ## 1. 환경변수
 
-실제 키는 루트 `.env`에 둔다. `.env`는 git에 커밋하지 않는다.
+provider 실행 키는 루트 `.env`, API auth/route/backup 설정은 API 전용 `.env`에
+분리한다. 두 파일 모두 git에 커밋하지 않는다. API 전용 파일은 Compose 기동의 필수
+입력이라 없으면 API를 인증 기본값으로 시작하지 않고 즉시 실패한다.
 
 ```bash
 cp .env.example .env
 chmod 600 .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+chmod 600 packages/kor-travel-map-api/.env
 ```
 
+Compose frontend는 root `.env`에서 UI login/session/BFF 변수만 명시적으로 전달하며 root
+파일 전체를 `env_file`로 읽지 않는다. `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`은 BFF 공유
+secret의 단일 정본이며 API와 frontend server가 같은 이름을 직접 읽는다. 이 값과 password
+hash, session secret이 없으면 Compose 해석 단계에서
+실패한다.
+
 `scripts/load-env.sh`와 `docker-compose.yml`은 기존 provider repo에서 쓰던 키 이름을
-실행용 환경변수로 매핑한다.
+Dagster/provider 실행용 환경변수로 매핑한다. REST API backend는 provider credential을
+받지 않으며 dataset preview는 fixture-only다. Compose의 API service도 root `.env`를
+`env_file`로 읽지 않아 provider secret을 process environment에 보유하지 않는다.
+기존 설치를 갱신할 때는 BFF 공유 secret만 root `.env`에 두고 나머지
+`KOR_TRAVEL_MAP_API_*` auth/route/backup 값을 API 전용 파일로 옮긴 다음 기동한다.
+CORS/metrics도 API 전용 파일이 정본이며 root
+`.env.example`과 `scripts/load-env.sh`는 이 runtime 설정을 더 이상 주입하지 않는다.
 
 | 입력 키 예 | 실행 시 export |
 |------------|----------------|
-| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY` | `KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY`, `KOR_TRAVEL_MAP_API_DATAGOKR_SERVICE_KEY` |
-| `OPINET_API_KEY` | `KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY` |
-| `KEX_GO_API_KEY`, `KREX_API_KEY` | `KOR_TRAVEL_MAP_API_KREX_SERVICE_KEY` |
+| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` |
+| `OPINET_API_KEY` | `KOR_TRAVEL_MAP_OPINET_API_KEY` |
+| `KEX_GO_API_KEY`, `KREX_API_KEY` | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY` |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`, `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` |
 
 객체 저장소는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
@@ -266,6 +282,16 @@ Dagster webserver, Dagster daemon을 백그라운드로 시작한다. 로컬 `DA
 `kor_travel_map_dagster` DB 존재도 확인/생성하므로 schedule/run/event metadata가
 `$DAGSTER_HOME` 아래 SQLite로 폴백하면 회귀다. 로그는 기본 `.codex_tmp/admin-stack/`에
 남는다.
+
+`admin:stack`도 API 전용 `packages/kor-travel-map-api/.env`를 필수로 읽는다. API는
+package 디렉터리를 cwd로 사용하고 scoped API 설정+DB/object-store 공유 설정만 받으며,
+frontend는 `NEXT_PUBLIC_*`와 UI/BFF 설정만 받는다. 두 process는 빈 환경에서 allowlist를
+채우므로 root `.env`의 provider loader credential을 상속하지 않는다. Dagster
+webserver/daemon만 main `KOR_TRAVEL_MAP_*` provider 설정을 받는다. root
+`KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`이 비어 있거나 주변 공백을 포함하면 process를 시작하기
+전에 실패하고, launcher가 검증된 같은 값을 두 process에 각각 주입한다.
+상대 `KOR_TRAVEL_MAP_API_BACKUP_ROOT`는 project root 기준 절대경로로 정규화한다. API env의
+inline comment와 root proxy secret 주변 공백도 모호한 값으로 간주해 기동 전에 거절한다.
 
 ## 6. 스모크
 

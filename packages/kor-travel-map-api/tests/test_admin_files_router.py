@@ -53,6 +53,28 @@ def test_admin_files_routes_mounted_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_managed_file_links_use_canonical_admin_pages() -> None:
+    from kortravelmap.api.routers.admin_files import _build_links
+
+    links = _build_links(
+        SimpleNamespace(
+            origin_import_job_id="job/1",
+            upload_id=None,
+            location="object_store",
+            kind="provider_source",
+            path="source/file.csv",
+            provider="provider/name",
+            origin_dagster_run_id=None,
+        )
+    )
+
+    assert [(link.rel, link.href) for link in links] == [
+        ("import-job", "/ops/pipeline?execution=import_job:job%2F1"),
+        ("provider", "/ops/datasets?provider=provider%2Fname"),
+    ]
+
+
+@pytest.mark.unit
 def test_list_rejects_unknown_status(client: TestClient) -> None:
     # enum 검증은 세션 사용 전에 422로 끊는다.
     response = client.get("/v1/admin/files", params={"status": "bogus"})

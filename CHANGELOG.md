@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+### admin ops legacy REST clean-cut (2026-07-17, ADR-064 T-ADM-C6b)
+
+- **REMOVED**: `/ops/dagster*`, `/ops/providers*`, `/ops/import-jobs*`,
+  `/ops/import-job-events`, `/admin/provider-refresh-policies*`,
+  `/admin/features/update-requests*`, `/debug/etl*`의 legacy operation 28개를 삭제했다.
+- **CHANGED**: admin 실행·event·Dagster·schedule은 `/ops/pipeline/*`, dataset 상태·정책·
+  fixture preview는 `/ops/datasets/*`만 사용한다. public provider read 2종은 운영 결합이
+  없는 소형 router로 분리해 유지한다.
+- **REMOVED**: raw HTTP live ETL loader, REST API 전용 provider credential settings·runtime
+  주입, 사용되지 않는 Dagster NUX mutation/schema를 삭제했다. dataset preview는
+  fixture-only이며 외부 호출 budget은 0이다.
+- **CHANGED**: API container는 package-scoped `.env`만 읽고 root provider credential
+  `.env`를 주입받지 않는다. 이 파일은 Compose 필수 입력이며 provider 비밀은 Dagster
+  webserver/daemon 경계에만 둔다.
+- **CHANGED**: 로컬 `admin:stack`도 process별 `env -i` allowlist를 사용한다. API/frontend는
+  provider loader credential을 상속하지 않고 Dagster process만 이를 받는다.
+- **CHANGED**: 구 API provider env 9종은 Docker/local 기동에서 fail-closed하고, MOIS
+  freshness·file-registry TTL·offline upload prefix는 API와 Dagster가 같은 root 설정을 쓴다.
+  Compose frontend도 login/session/BFF env만 명시적으로 전달한다.
+- **CHANGED**: BFF 공유 secret은 root `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` 하나만 정본으로
+  두고 API/frontend가 같은 이름을 직접 읽는다. API package env의 중복 secret과
+  사용되지 않는 fixture provider/dataset 목록 helper도 제거했다.
+
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 
 - **FIXED**: `/ops/datasets`의 `이슈 있음` 필터와 정렬이 dataset issue만 보던 경로를
@@ -12,7 +35,7 @@
 - **CHANGED**: 행 badge와 전체 이슈 요약도 같은 합계 의미를 사용하고, scope 반복 행은
   dataset/provider 귀속 단위로 한 번만 집계한다.
 
-### admin ops 통합 링크 정본화 (2026-07-17, ADR-064 T-ADM-C6a)
+### admin ops UI clean-cut (2026-07-17, ADR-064 T-ADM-C6a/C6b)
 
 - **CHANGED**: import job·갱신 요청·load batch·provider/dataset 딥링크와 홈·Feature·큐레이션·
   운영 로그의 작업 링크를 `/ops/pipeline`과 `/ops/datasets` 두 운영 화면으로 통합했다.
@@ -22,6 +45,14 @@
   pipeline endpoint를 가리킨다.
 - **TEST**: load batch·parent UUID deep link의 partial-index access path와 두 통합 화면의
   read/write·cross-surface 반영 시나리오를 회귀 계약으로 고정했다.
+- **CHANGED**: 홈은 canonical pipeline root와 pipeline overview의 작업 수를 표시하고,
+  운영 로그는 system/API 감사 로그만 소유한다. 작업 event·실행 이력·Dagster run·스케줄은
+  `/ops/pipeline`, provider×dataset×scope 상태·정책·preview는 `/ops/datasets`가 소유한다.
+- **REMOVED**: 구 `/ops/import-jobs*`, `/ops/providers`,
+  `/admin/features/update-requests*`, `/admin/dagster`, `/etl` UI route와 전용 hook/mock E2E를
+  redirect·호환 shim 없이 삭제하고 navigation을 두 canonical 운영 화면으로 정리했다.
+- **TEST**: offline validation/load와 POI target upsert/delete가 canonical pipeline/datasets
+  query를 무효화하는 hook 단위 계약을 추가했다.
 
 ### pipeline 운영 화면·조작 원장 통합 (2026-07-17, ADR-064 T-ADM-C5)
 

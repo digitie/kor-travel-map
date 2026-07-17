@@ -15,14 +15,12 @@ test.describe("home page (/)", () => {
     const navigation = page.getByRole("navigation");
     for (const linkName of [
       "Feature 지도",
-      "적재 작업",
-      "Provider 상태",
+      "파이프라인",
+      "데이터셋",
       "정합성 점검",
       "중복 검토",
-      "갱신 요청",
       "POI 캐시 대상",
-      "작업 자동화",
-      "ETL 미리보기",
+      "오프라인 업로드",
     ]) {
       await expect(
         navigation.getByRole("link", { name: linkName, exact: true }),
@@ -35,7 +33,7 @@ test.describe("home page (/)", () => {
 
     for (const heading of [
       "Feature",
-      "적재 작업",
+      "파이프라인 작업",
       "중복 검수",
       "이슈",
       "서비스 상태",
@@ -49,22 +47,22 @@ test.describe("home page (/)", () => {
     await expect(page.getByTestId("service-backend")).toBeVisible();
     await expect(page.getByTestId("service-dagster")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "최근 적재 작업" }),
+      page.getByRole("heading", { name: "최근 파이프라인 실행" }),
     ).toBeVisible();
   });
 
   test("홈에서 새 운영 화면으로 이동", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: "적재 작업" }).click();
-    await expect(page).toHaveURL(/\/ops\/import-jobs$/);
+    await page.getByRole("link", { name: "파이프라인", exact: true }).click();
+    await expect(page).toHaveURL(/\/ops\/pipeline$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "적재 작업" }),
+      page.getByRole("heading", { level: 1, name: "파이프라인" }),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "갱신 요청" }).click();
-    await expect(page).toHaveURL(/\/admin\/features\/update-requests$/);
+    await page.getByRole("link", { name: "데이터셋", exact: true }).click();
+    await expect(page).toHaveURL(/\/ops\/datasets$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "갱신 요청" }),
+      page.getByRole("heading", { level: 1, name: "데이터셋" }),
     ).toBeVisible();
   });
 });

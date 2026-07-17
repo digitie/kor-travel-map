@@ -57,7 +57,7 @@ const FEATURE_STATUSES = [
   "broken",
   "deleted",
 ] as const;
-const LOG_TABS = ["system", "api", "job"] as const;
+const LOG_TABS = ["system", "api"] as const;
 const LOG_LEVELS = ["all", "info", "warning", "error"] as const;
 const REVIEW_STATUSES = [
   "all",
@@ -83,9 +83,9 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "운영 홈",
     readApis: [
       "/v1/ops/metrics",
-      "/v1/ops/import-jobs",
+      "/v1/ops/pipeline/overview",
+      "/v1/ops/pipeline/executions",
       "/v1/admin/features/dedup-reviews",
-      "/v1/ops/dagster/summary",
     ],
     writeApis: [],
     reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
@@ -145,7 +145,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     id: "features-map",
     route: "/features",
     readyHeading: "Feature 지도",
-    readApis: ["/v1/features", "/v1/features/{feature_id}"],
+    readApis: [
+      "/v1/features",
+      "/v1/features/{feature_id}",
+      "/v1/ops/datasets",
+    ],
     writeApis: [],
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
   },
@@ -170,6 +174,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/features",
       "/v1/admin/features/{feature_id}",
       "/v1/features/{feature_id}",
+      "/v1/ops/datasets",
     ],
     writeApis: [
       writeApi("POST", "/v1/admin/features/{feature_id}/deactivate"),
@@ -280,43 +285,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/features/{feature_id}", "/ops/consistency"],
   },
   {
-    id: "import-jobs",
-    route: "/ops/import-jobs",
-    readyHeading: "적재 작업",
-    readApis: ["/v1/ops/import-jobs", "/v1/ops/live"],
-    writeApis: [],
-    reflectedSurfaces: ["/ops/pipeline", "/ops/logs"],
-  },
-  {
-    id: "import-job-detail",
-    route: "/ops/import-jobs/{job_id}",
-    readyHeading: "적재 작업 상세",
-    readApis: [
-      "/v1/ops/import-jobs/{job_id}",
-      "/v1/ops/import-jobs/{job_id}/events",
-    ],
-    writeApis: [writeApi("POST", "/v1/ops/import-jobs/{job_id}/cancel")],
-    reflectedSurfaces: ["/ops/pipeline", "/ops/logs"],
-  },
-  {
-    id: "providers",
-    route: "/ops/providers",
-    readyHeading: "Provider 상태",
-    readApis: [
-      "/v1/ops/providers",
-      "/v1/ops/providers/{provider}",
-      "/v1/admin/provider-refresh-policies",
-    ],
-    writeApis: [
-      writeApi(
-        "PUT",
-        "/v1/admin/provider-refresh-policies/{provider}/{dataset_key}",
-      ),
-      writeApi("POST", "/v1/admin/features/update-requests"),
-    ],
-    reflectedSurfaces: ["/ops/datasets", "/ops/pipeline"],
-  },
-  {
     id: "consistency",
     route: "/ops/consistency",
     readyHeading: "정합성 점검",
@@ -335,7 +303,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readApis: [
       "/v1/ops/system-logs",
       "/v1/ops/api-call-logs",
-      "/v1/ops/import-job-events",
     ],
     writeApis: [],
     reflectedSurfaces: ["/ops/pipeline", "/admin/settings"],
@@ -360,41 +327,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/admin/features", "/features/{feature_id}"],
   },
   {
-    id: "feature-update-requests",
-    route: "/admin/features/update-requests",
-    readyHeading: "갱신 요청",
-    readApis: ["/v1/admin/features/update-requests"],
-    writeApis: [
-      writeApi("POST", "/v1/admin/features/update-requests"),
-      writeApi(
-        "POST",
-        "/v1/admin/features/update-requests/{request_id}/cancel",
-      ),
-      writeApi(
-        "POST",
-        "/v1/admin/features/update-requests/{request_id}/run-now",
-      ),
-    ],
-    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets", "/features"],
-  },
-  {
-    id: "feature-update-request-detail",
-    route: "/admin/features/update-requests/{request_id}",
-    readyHeading: "갱신 요청 상세",
-    readApis: ["/v1/admin/features/update-requests/{request_id}"],
-    writeApis: [
-      writeApi(
-        "POST",
-        "/v1/admin/features/update-requests/{request_id}/cancel",
-      ),
-      writeApi(
-        "POST",
-        "/v1/admin/features/update-requests/{request_id}/run-now",
-      ),
-    ],
-    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
-  },
-  {
     id: "poi-cache-targets",
     route: "/admin/poi-cache-targets",
     readyHeading: "POI 캐시 대상",
@@ -409,7 +341,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
         "/v1/admin/poi-cache-targets/{external_system}/{target_key}",
         "destructive",
       ),
-      writeApi("POST", "/v1/admin/features/update-requests"),
+      writeApi("POST", "/v1/ops/pipeline/requests"),
     ],
     reflectedSurfaces: ["/features", "/ops/pipeline"],
   },
@@ -421,6 +353,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/offline-uploads",
       "/v1/admin/offline-uploads/{upload_id}/preview",
       "/v1/admin/offline-uploads/{upload_id}/validation",
+      "/v1/ops/datasets",
     ],
     writeApis: [
       writeApi("POST", "/v1/admin/offline-uploads"),
@@ -464,24 +397,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/ops/pipeline", "/admin/offline-uploads"],
   },
   {
-    id: "dagster",
-    route: "/admin/dagster",
-    readyHeading: "작업 자동화",
-    readApis: [
-      "/v1/ops/dagster/summary",
-      "/v1/ops/dagster/runs/{run_id}",
-    ],
-    writeApis: [
-      writeApi("POST", "/v1/ops/dagster/nux-seen"),
-      writeApi("PATCH", "/v1/ops/dagster/schedules/{schedule_name}"),
-      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/default"),
-      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/run"),
-      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/start"),
-      writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/stop"),
-    ],
-    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
-  },
-  {
     id: "settings",
     route: "/admin/settings",
     readyHeading: "설정",
@@ -492,14 +407,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi("POST", "/v1/admin/auth-events"),
     ],
     reflectedSurfaces: ["/admin/settings", "/ops/logs"],
-  },
-  {
-    id: "etl-preview",
-    route: "/etl",
-    readyHeading: "ETL 미리보기",
-    readApis: ["/v1/debug/etl/providers", "/v1/debug/etl/preview"],
-    writeApis: [],
-    reflectedSurfaces: ["/ops/datasets", "/admin/features"],
   },
 ];
 
@@ -663,12 +570,10 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
             apiExpectation:
               tab === "api"
                 ? "/v1/ops/api-call-logs"
-                : tab === "job"
-                  ? "/v1/ops/import-job-events"
-                  : "/v1/ops/system-logs",
+                : "/v1/ops/system-logs",
             idParts: ["logs", tab, term, String(size), level],
             mode: "catalog",
-            reflectedSurface: "/ops/import-jobs",
+            reflectedSurface: "/ops/pipeline",
             risk: "read",
             route: `/ops/logs?tab=${tab}&q=${encodeURIComponent(term)}&page_size=${size}&level=${level}`,
             surface: "logs",

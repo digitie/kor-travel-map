@@ -20,11 +20,7 @@ TargetedPolicy = Literal["follow_system", "allow_targeted", "disabled"]
 
 
 class ProviderRefreshPolicyUpsertRequest(BaseModel):
-    """provider/dataset refresh policy full upsert 요청 본문.
-
-    ``/admin/provider-refresh-policies``(구)와 ``/ops/datasets``(ADR-064 신규)
-    라우터가 공유한다 — 구 라우터가 삭제(T-ADM-C6b)돼도 계약은 여기 남는다.
-    """
+    """canonical ``/ops/datasets/refresh-policy`` full upsert 요청 본문."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -427,7 +427,7 @@ Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_pol
 
 ### 7.4 Target 기반 update request
 
-#### `POST /admin/features/update-requests`
+#### `POST /ops/pipeline/requests`
 
 feature update request는 운영자/admin 영역이다. scope에 `cache_target_keys`를
 추가해 등록된 target 묶음 기준 refresh를 실행한다. PinVi 사용자 제안 큐는
@@ -457,7 +457,7 @@ PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 �
 - provider policy가 `follow_system`이면 targeted update에서 제외하고
   `follow_system_skipped`에 기록한다.
 - provider policy가 `disabled`이면 제외한다.
-- `/v1/admin/features/update-requests/preview`로 보내면 실제 job을 만들지 않고 대상
+- `/v1/ops/pipeline/requests/preview`로 보내면 실제 job을 만들지 않고 대상
   feature 수, provider call scope, skipped reason만 반환한다.
 
 ## 8. 업데이트 시간 규칙

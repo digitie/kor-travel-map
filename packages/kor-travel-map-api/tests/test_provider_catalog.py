@@ -1,8 +1,8 @@
 """``test_provider_catalog`` — 전 provider×dataset 카탈로그 정본 검증.
 
-ETL preview(`/etl`)와 Providers(`/ops/providers`) 메뉴가 동일 카탈로그를
-source로 쓰도록, 카탈로그가 fixture-backed 9종을 넘어 mois/knps/krheritage/mcst
-등 시스템이 ETL 하는 모든 provider×dataset을 담는지 검증한다.
+통합 데이터셋 화면과 fixture preview가 동일 카탈로그를 source로 쓰도록,
+카탈로그가 fixture-backed 항목을 넘어 시스템이 ETL 하는 모든
+provider×dataset을 담는지 검증한다.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from kortravelmap.providers.feature_operation_registry import (
 )
 
 from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY
-from kortravelmap.api.etl_live import LIVE_LOADER_REGISTRY
 from kortravelmap.api.provider_catalog import (
     PROVIDER_DATASET_CATALOG,
     catalog_datasets,
@@ -56,20 +55,11 @@ def test_catalog_includes_specific_dataset_keys() -> None:
 def test_catalog_covers_all_fixture_datasets() -> None:
     """모든 fixture-backed (provider, dataset)은 카탈로그에 존재해야 한다.
 
-    누락되면 /etl preview가 카탈로그에서 그 dataset을 못 그린다 → drift 방지.
+    누락되면 /v1/ops/datasets/preview가 카탈로그에서 그 dataset을 못 그린다 → drift 방지.
     """
     for entry in FIXTURE_REGISTRY:
         assert find_catalog_entry(entry.provider, entry.dataset) is not None, (
             f"fixture {entry.provider}/{entry.dataset}이 카탈로그에 없음"
-        )
-
-
-@pytest.mark.unit
-def test_catalog_covers_all_live_loader_datasets() -> None:
-    """모든 live loader (provider, dataset)도 카탈로그에 존재해야 한다."""
-    for provider, dataset in LIVE_LOADER_REGISTRY:
-        assert find_catalog_entry(provider, dataset) is not None, (
-            f"live loader {provider}/{dataset}이 카탈로그에 없음"
         )
 
 
@@ -116,15 +106,13 @@ def test_refreshable_catalog_exactly_matches_feature_operation_registry() -> Non
 
 
 @pytest.mark.unit
-def test_preview_field_matches_registries() -> None:
-    """preview 필드는 fixture/live registry 조회 결과와 정합한다."""
+def test_preview_field_matches_fixture_registry() -> None:
+    """preview 필드는 fixture registry 조회 결과와 정합한다."""
     fixture_keys = {(e.provider, e.dataset) for e in FIXTURE_REGISTRY}
     for entry in PROVIDER_DATASET_CATALOG:
         key = (entry.provider, entry.dataset_key)
         if key in fixture_keys:
             assert entry.preview == "fixture"
-        elif key in LIVE_LOADER_REGISTRY:
-            assert entry.preview == "live"
         else:
             assert entry.preview == "none"
 

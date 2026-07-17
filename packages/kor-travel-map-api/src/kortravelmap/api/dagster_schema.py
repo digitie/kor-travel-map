@@ -1,7 +1,6 @@
-"""Dagster 운영 API의 공유 HTTP schema.
+"""Canonical ``/ops/pipeline``과 Dagster application service의 공유 schema.
 
-legacy ``/ops/dagster``와 신규 ``/ops/pipeline``이 같은 DTO를 사용하도록 router와
-분리한다. 이 모듈은 FastAPI router/dependency나 외부 I/O를 소유하지 않는다.
+이 모듈은 FastAPI router/dependency나 외부 I/O를 소유하지 않는다.
 """
 
 from __future__ import annotations
@@ -20,8 +19,6 @@ __all__ = [
     "DagsterGraphqlError",
     "DagsterInstigationTick",
     "DagsterJob",
-    "DagsterNuxSeenData",
-    "DagsterNuxSeenResponse",
     "DagsterRepository",
     "DagsterRunSummary",
     "DagsterRunDetailData",
@@ -163,7 +160,7 @@ class DagsterRunSummary(BaseModel):
 
 
 class DagsterSummaryData(BaseModel):
-    """`GET /ops/dagster/summary` data."""
+    """Dagster repository/run summary application-service data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -184,7 +181,7 @@ class DagsterSummaryData(BaseModel):
 
 
 class DagsterSummaryResponse(BaseModel):
-    """`GET /ops/dagster/summary` 응답 (DA-D-03 envelope)."""
+    """Dagster repository/run summary application-service envelope."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -221,7 +218,7 @@ class DagsterRunFailure(BaseModel):
 
 
 class DagsterRunDetailData(BaseModel):
-    """Dagster run 상세 data(legacy + ``/ops/pipeline/dagster-runs/{run_id}``)."""
+    """``/ops/pipeline/dagster-runs/{run_id}`` 상세 data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -265,28 +262,6 @@ class DagsterRunDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterRunDetailData
-    meta: Meta
-
-
-class DagsterNuxSeenData(BaseModel):
-    """`POST /ops/dagster/nux-seen` data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal["ok", "unavailable", "error"]
-    dagster_url: str
-    graphql_url: str
-    checked_at: datetime
-    seen: bool
-    errors: list[str] = Field(default_factory=list)
-
-
-class DagsterNuxSeenResponse(BaseModel):
-    """`POST /ops/dagster/nux-seen` 응답 (DA-D-03 envelope)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: DagsterNuxSeenData
     meta: Meta
 
 

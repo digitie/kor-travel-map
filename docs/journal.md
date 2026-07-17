@@ -2,6 +2,67 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent A) — C6b 최종 리뷰·로컬 gate 완료
+
+- C7B-720 병합 commit 위로 최종 rebase하고 admin/user OpenAPI와 generated type을 다시
+  대조했다. 두 적대 리뷰어가 bridge/host/external overlay, BFF 인증, credential 격리,
+  legacy 부재, canonical status URL과 C7B 필터 보존을 최종 S1/S2/S3 0건으로 승인했다.
+- 테스트에서 드러난 live envelope exact assertion과 direct service test의 canonical status
+  prefix를 두 리뷰어 재승인 뒤 보강했다. root unit 1,410, API 450, Dagster 457(1 skip),
+  실제 PostGIS 92, frontend 142건 및 전체 정적·생성·build gate가 green이다.
+- local Playwright는 실행하지 않았다. live UI·파괴적 시나리오는 C7에서 n150 prod에 배포한
+  뒤 file-by-file 저부하 실행과 상태 복원으로 종결한다.
+
+## 2026-07-17 (codex, agent A) — C6b backend/API legacy clean-cut 구현
+
+- Dagster 9, provider ops 2, refresh policy 3, import job/event 5, feature update request 6,
+  debug ETL 3개 등 legacy OpenAPI operation 28개와 전용 router를 삭제했다. canonical
+  `/ops/pipeline/*`·`/ops/datasets/*`, 관측 read, `/ops/live` WS와 public provider read는
+  유지했다.
+- public provider 계약은 운영 정책·request 결합이 없는 소형 router로 옮겼다. raw HTTP live
+  ETL loader와 adapter tests를 제거하고 catalog preview를 fixture/none으로 닫았으며 REST API
+  settings·Docker·load-env에서 provider credential 복제 경로도 제거했다.
+- legacy 부재 28개와 canonical/public 존치를 기계적으로 고정하는 테스트를 추가하고 public
+  provider parser/필터/cursor 비노출 회귀를 보존했다. migration은 만들지 않았다. 외부 적대
+  리뷰 2인 전이므로 테스트·push·PR은 실행하지 않았고 C5/C6A merge 뒤 rebase가 필요하다.
+- 기존 Codex codegraph index로 제거 대표 route의 영향도를 확인했다. legacy import-job route는
+  route 자체 외 caller가 없었고 public last-sync는 route 단독 영향이라 소형 router로 동일 계약을
+  옮겼다. canonical service caller는 별도 pipeline/datasets router에 남는다.
+- 적대 리뷰 1차는 production S1/S2 결함 0건으로 판정했다. S3로 확인된 CORS preflight,
+  canonical feature-update idempotency/strict DTO matrix, public provider empty-list 회귀를
+  canonical 테스트에 복원했다. 현행 architecture/runbook 문서의 legacy path도 두 그룹으로
+  정리했다.
+- 적대 리뷰 2차는 API container가 root `.env`와 main provider secret을 받는 S2 경계를
+  발견했다. API를 package-scoped `.env`로 격리하고 data.go/OpiNet/KREX/MOIS 설정은 Dagster
+  service에만 남겼다. 사용되지 않는 Dagster NUX mutation/schema를 삭제하고 canonical
+  request의 필수 UUID `Idempotency-Key`, 재생/active 재사용 분리, 충돌 계약을 문서에
+  명시했다.
+- 반영 snapshot 재리뷰는 actor-scoped ledger를 전역 key처럼 설명한 문서 오류와 API 전용
+  env 부재 시 인증 기본값 기동 가능성을 S2로 확인했다. 문서는 actor별 독립 namespace로
+  정정하고 API env를 Compose 필수 입력으로 바꿨다. root 예시의 중복 API runtime 설정도
+  제거하고 provider secret 격리 회귀 테스트를 추가했다. 후속 재검토의 운영 CORS 문서와
+  오래된 전역 key/provider 주입 주석도 정정하고, root/Compose/load-env의 허용 API 설정을
+  allowlist로 고정했다. 추가 재검토에서 발견한 local `admin:stack` 우회도 process별
+  `env -i` allowlist와 필수 scoped API env로 닫았다. API cwd 변경에 따른 backup root 분기와
+  env inline comment/proxy-secret 공백도 root 절대경로·strict parser로 보강했다. 재리뷰와
+  테스트는 아직 진행 전이다. 독립 runtime 재검토의 구 API provider key, MOIS/file-registry/
+  offline prefix, Compose frontend auth/BFF, direct uvicorn 문서 지적도 fail-closed runtime과
+  현행 기동 문서에 반영했다. BFF shared secret은 root 단일 이름을 API/frontend가 직접
+  읽도록 바꾸고 package env의 구 API 전용 중복 secret을 금지했으며, dead fixture 목록 helper와
+  no-auth/legacy endpoint 설명도 제거했다. 생성 OpenAPI와 admin type은 C6A/UI 최종 rebase 뒤
+  반드시 갱신하고 drift green을 확인하기 전에는 C6b를 병합하지 않는다.
+## 2026-07-17 (agent B) — C6b 구 UI clean-cut 리뷰 반영
+
+- 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,
+  `/etl` route와 전용 hook/mock E2E를 redirect 없이 삭제했다. 홈은 canonical pipeline root와
+  overview 집계를 쓰고, 운영 로그는 system/API 감사 로그만 남겨 작업 event를 pipeline으로
+  일원화했다. frontend README의 route/API inventory도 같은 현행 표면으로 갱신했다.
+- 외부 적대 리뷰 B의 지적을 반영해 홈 Dagster 외부 링크 E2E를 배포별 환경 URL과 독립적인
+  절대 URL·새 탭 계약으로 바꿨다. offline validation/load와 POI target upsert/delete가
+  pipeline executions/overview 및 ops dataset grid/detail을 무효화하는 hook 단위 계약을
+  추가했고 POI mutation의 누락된 pipeline 무효화도 연결했다. 테스트는 최종 통합 리뷰 뒤로
+  보류했다.
+
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 
 - dataset/provider issue count를 합산하는 순수 projection을 두고 필터·정렬·행 badge가 같은
