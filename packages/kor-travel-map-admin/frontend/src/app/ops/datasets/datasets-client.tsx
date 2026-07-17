@@ -70,6 +70,11 @@ import {
   datasetRowHasOpenIssue,
   datasetRowOpenIssueCount,
 } from "./dataset-issues";
+import {
+  isPolicySaveBlocked,
+  type PolicySaveGuard,
+  submitPolicyIfAllowed,
+} from "./policy-editor-guard";
 
 const PANELS = ["history", "policy", "preview"] as const;
 type DrawerPanel = (typeof PANELS)[number];
@@ -480,12 +485,13 @@ function PolicyEditor({
   >(incomingPropRevision);
   const upsertPolicy = useUpsertOpsDatasetRefreshPolicyMutation();
   const resetPolicyMutation = upsertPolicy.reset;
-  const incomingPolicyPending =
-    incomingPropRevision !== acknowledgedPropRevision;
-  const saveBlocked =
-    incomingPolicyPending ||
-    hasDeferredServerPolicy ||
-    revisionConflict !== null;
+  const saveGuard: PolicySaveGuard = {
+    acknowledgedPropRevision,
+    hasDeferredServerPolicy,
+    hasRevisionConflict: revisionConflict !== null,
+    incomingPropRevision,
+  };
+  const saveBlocked = isPolicySaveBlocked(saveGuard);
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
     draftDirty.current = true;
@@ -576,10 +582,7 @@ function PolicyEditor({
     applyServerPolicy(latestObservedPolicy);
   }, [applyServerPolicy, latestObservedPolicy, resetPolicyMutation]);
 
-  const submit = () => {
-    if (saveBlocked) {
-      return;
-    }
+  const submitAllowedPolicy = () => {
     setError(null);
     setRevisionConflict(null);
     setReconcileMessage(null);
@@ -648,6 +651,10 @@ function PolicyEditor({
         },
       },
     );
+  };
+
+  const submit = () => {
+    submitPolicyIfAllowed(saveGuard, submitAllowedPolicy);
   };
 
   return (

@@ -1243,8 +1243,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await targetedPolicy.selectOption("allow_targeted");
 
     // 새 prop revision render 직후 passive effect 전에 disabled DOM 변화를
-    // 관측해 React click handler를 강제 호출한다. submit의 derived revision
-    // guard가 없으면 stale revision PUT이 여기서 발생한다.
+    // 관측한다. derived revision guard가 없으면 버튼과 deferred alert가 같은
+    // effect 후 commit에서 나타나므로 이 순서 계약이 깨진다.
     await page.evaluate(() => {
       const save = [...document.querySelectorAll("button")].find(
         (button) => button.textContent?.trim() === "저장",
@@ -1252,16 +1252,24 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       if (!(save instanceof HTMLButtonElement)) {
         throw new Error("policy save button missing");
       }
-      (window as typeof window & { __policyImmediateClick?: boolean })
-        .__policyImmediateClick = false;
+      type GuardObservation = {
+        deferredAlertPresent: boolean;
+        disabled: boolean;
+      };
+      (window as typeof window & { __policyGuardObservation?: GuardObservation })
+        .__policyGuardObservation = undefined;
       const observer = new MutationObserver(() => {
         if (!save.disabled) return;
         observer.disconnect();
-        save.disabled = false;
-        save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        save.disabled = true;
-        (window as typeof window & { __policyImmediateClick?: boolean })
-          .__policyImmediateClick = true;
+        const deferredAlertPresent = [...document.querySelectorAll("*")].some(
+          (element) => element.textContent?.trim() === "서버 정책이 변경됨",
+        );
+        (window as typeof window & {
+          __policyGuardObservation?: GuardObservation;
+        }).__policyGuardObservation = {
+          deferredAlertPresent,
+          disabled: save.disabled,
+        };
       });
       observer.observe(save, {
         attributes: true,
@@ -1275,17 +1283,20 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       .poll(() =>
         page.evaluate(
           () =>
-            (window as typeof window & { __policyImmediateClick?: boolean })
-              .__policyImmediateClick ?? false,
+            (window as typeof window & {
+              __policyGuardObservation?: {
+                deferredAlertPresent: boolean;
+                disabled: boolean;
+              };
+            }).__policyGuardObservation ?? null,
         ),
       )
-      .toBe(true);
+      .toEqual({ deferredAlertPresent: false, disabled: true });
     await expect.poll(() => mocks.policyPuts.length).toBe(0);
     await expect(page.getByText("서버 정책이 변경됨")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
     const saveButton = page.getByRole("button", { name: "저장" });
     await expect(saveButton).toBeDisabled();
-    await saveButton.evaluate((button) => (button as HTMLButtonElement).click());
     await expect.poll(() => mocks.policyPuts.length).toBe(0);
 
     await page.getByRole("button", { name: "서버 값 다시 불러오기" }).click();
@@ -1328,7 +1339,6 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     expect(mocks.policyPuts[0].body.expected_revision).toBe("9007199254740993");
     const saveButton = page.getByRole("button", { name: "저장" });
     await expect(saveButton).toBeDisabled();
-    await saveButton.evaluate((button) => (button as HTMLButtonElement).click());
     await expect.poll(() => mocks.policyPuts.length).toBe(1);
 
     // keepMounted policy panel은 URL tab history와 Back/Forward 사이에서도
@@ -1395,12 +1405,6 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       page.getByRole("button", { name: "서버 기준으로 초안 조정" }),
     ).toHaveCount(0);
     await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
-    await saveButton.evaluate((button) => {
-      const save = button as HTMLButtonElement;
-      save.disabled = false;
-      save.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      save.disabled = true;
-    });
     await expect.poll(() => mocks.policyPuts.length).toBe(1);
     expect(mocks.policyPuts[0].body.expected_revision).toBe(
       "9223372036854775807",
