@@ -103,12 +103,22 @@ def test_ops_live_websocket_initial_snapshot(
         snapshot = websocket.receive_json()
 
     assert hello["type"] == "hello"
-    assert snapshot == {
-        "type": "snapshot",
-        "topic": "import_jobs",
-        "revision": "import_jobs:1",
-        "data": {"topic": "import_jobs", "ok": True},
+    assert set(snapshot) == {
+        "type",
+        "version",
+        "sequence",
+        "sent_at",
+        "topic",
+        "revision",
+        "data",
     }
+    assert snapshot["type"] == "snapshot"
+    assert snapshot["version"] == 1
+    assert snapshot["sequence"] == 2
+    assert datetime.fromisoformat(snapshot["sent_at"]).tzinfo is not None
+    assert snapshot["topic"] == "import_jobs"
+    assert snapshot["revision"] == "import_jobs:1"
+    assert snapshot["data"] == {"topic": "import_jobs", "ok": True}
 
 
 @pytest.mark.unit
