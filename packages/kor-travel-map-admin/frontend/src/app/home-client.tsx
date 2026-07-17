@@ -43,6 +43,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
+import { canonicalPipelineRootRowId } from "./home-row-id";
+
 function MetricCard({
   title,
   value,
@@ -360,7 +362,7 @@ export function HomePageClient() {
               <DataTable
                 columns={pipelineExecutionColumns}
                 data={pipelineExecutionItems}
-                getRowId={(row) => row.id}
+                getRowId={canonicalPipelineRootRowId}
                 isLoading={pipelineExecutions.isLoading}
                 emptyMessage="파이프라인 실행이 없습니다."
                 manualSorting={false}

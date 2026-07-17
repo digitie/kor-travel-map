@@ -388,8 +388,29 @@ async function routeDedup(page: Page, handler: (route: Route) => Promise<void>) 
   });
 }
 
+async function mockHomeHappyPath(page: Page) {
+  await routeHealth(page, (route) => fulfillJson(route, makeHealth()));
+  await routeVersion(page, (route) => fulfillJson(route, makeVersion()));
+  await routeMetrics(page, (route) => fulfillJson(route, makeMetrics()));
+  await routePipeline(page, (route) =>
+    fulfillJson(route, makePipelineOverview()),
+  );
+  await routePipelineExecutions(page, (route) =>
+    fulfillJson(
+      route,
+      makeImportExecutionsList([
+        makeUpdateRequestExecution(),
+        makeImportExecution(),
+      ]),
+    ),
+  );
+  await routeDedup(page, (route) =>
+    fulfillJson(route, makeDedupList([makeDedupReview()])),
+  );
+}
+
 // admin-shell.tsx NAV_GROUPS와 정확히 1:1로 거울처럼 박는다 (그룹 순서 그대로 평탄화).
-// nav item이 추가/삭제되면 이 표와 toHaveCount(21)가 함께 깨져 테스트가 drift를 잡는다.
+// nav item이 추가/삭제되면 이 표와 toHaveCount(18)가 함께 깨져 테스트가 drift를 잡는다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
   // [Feature 관리]
@@ -424,6 +445,79 @@ const NAV_GROUP_HEADERS = [
 ] as const;
 
 test.describe("home page (/) — nav + metric/status depth", () => {
+  for (const viewport of [
+    { name: "desktop", width: 1280, height: 800, columns: 4 },
+    { name: "tablet", width: 768, height: 1024, columns: 2 },
+    { name: "mobile", width: 390, height: 844, columns: 1 },
+  ] as const) {
+    test(`${viewport.name}: admin shell/nav와 홈 metric 밀도를 유지`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({
+        width: viewport.width,
+        height: viewport.height,
+      });
+      await mockHomeHappyPath(page);
+      await page.goto("/");
+
+      await expect(
+        page.getByRole("heading", { level: 1, name: "운영 홈" }),
+      ).toBeVisible();
+      const navigation = page.getByRole("navigation");
+      await expect(navigation.getByRole("link")).toHaveCount(18);
+      await expect(
+        navigation.getByRole("link", { name: "파이프라인", exact: true }),
+      ).toBeVisible();
+      await expect(
+        navigation.getByRole("link", { name: "데이터셋", exact: true }),
+      ).toBeVisible();
+
+      const navDirection = await navigation.evaluate(
+        (element) => window.getComputedStyle(element).flexDirection,
+      );
+      expect(navDirection).toBe(viewport.columns === 4 ? "column" : "row");
+      const sidebarToggle = page.getByRole("button", {
+        name: "좌측 메뉴 접기",
+      });
+      if (viewport.columns === 4) {
+        await expect(sidebarToggle).toBeVisible();
+      } else {
+        await expect(sidebarToggle).toBeHidden();
+      }
+
+      const metricCards = [
+        "Feature",
+        "파이프라인 작업",
+        "중복 검수",
+        "이슈",
+      ].map((title) =>
+        page.locator('[data-slot="card"]').filter({
+          has: page.getByRole("heading", { name: title, exact: true }),
+        }),
+      );
+      const boxes = await Promise.all(
+        metricCards.map((card) => card.boundingBox()),
+      );
+      const positions = boxes.filter(
+        (box): box is NonNullable<typeof box> => box !== null,
+      );
+      expect(positions).toHaveLength(4);
+      const rowCounts = Array.from(
+        new Set(positions.map((box) => Math.round(box.y))),
+        (rowY) =>
+          positions.filter((box) => Math.round(box.y) === rowY).length,
+      );
+      expect(rowCounts).toEqual(
+        Array.from({ length: 4 / viewport.columns }, () => viewport.columns),
+      );
+
+      const documentWidth = await page.evaluate(
+        () => document.documentElement.scrollWidth,
+      );
+      expect(documentWidth).toBeLessThanOrEqual(viewport.width);
+    });
+  }
+
   test("admin shell: 18개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
