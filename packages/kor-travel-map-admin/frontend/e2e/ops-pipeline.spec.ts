@@ -1952,7 +1952,9 @@ test.describe("/ops/pipeline", () => {
   test("history filter 변경은 이전 cursor와 신규 배지 baseline을 폐기한다", async ({
     page,
   }) => {
-    const counters = await installPipelineMocks(page);
+    const counters = await installPipelineMocks(page, {
+      nextCursor: "cursor-page-2",
+    });
     await page.goto("/ops/pipeline");
     await page
       .getByRole("button", { name: "실행 타임라인 다음 페이지" })
