@@ -65,9 +65,24 @@ async def _assert_request_waits_for_row_lock(
     task: asyncio.Task[Any],
     engine: AsyncEngine,
     *,
+    holder_pid: int,
     statement_fragment: str,
 ) -> None:
-    for _ in range(100):
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while asyncio.get_running_loop().time() < deadline:
+        if task.done():
+            try:
+                result = task.result()
+            except BaseException as exc:  # noqa: BLE001 - 실패 증거에 원 예외 포함
+                pytest.fail(
+                    "waiter가 row lock 관측 전에 예외로 종료됨: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            pytest.fail(
+                "waiter가 row lock 관측 전에 응답함: "
+                f"status={getattr(result, 'status_code', None)}, "
+                f"body={getattr(result, 'text', result)!r}"
+            )
         async with engine.connect() as connection:
             waiting = (
                 await connection.execute(
@@ -80,17 +95,24 @@ async def _assert_request_waits_for_row_lock(
                             AND pid <> pg_backend_pid()
                             AND wait_event_type = 'Lock'
                             AND query LIKE :query_pattern
+                            AND :holder_pid = ANY(pg_blocking_pids(pid))
                         )
                         """
                     ),
-                    {"query_pattern": f"%{statement_fragment}%"},
+                    {
+                        "holder_pid": holder_pid,
+                        "query_pattern": f"%{statement_fragment}%",
+                    },
                 )
             ).scalar_one()
         if waiting:
             assert not task.done()
             return
         await asyncio.sleep(0.01)
-    pytest.fail("독립 ASGI request가 예상한 PostgreSQL row lock에서 대기하지 않음")
+    pytest.fail(
+        "독립 ASGI request가 지정 holder의 PostgreSQL row lock에서 "
+        f"5초 안에 대기하지 않음(holder_pid={holder_pid})"
+    )
 
 
 def _policy_body(
@@ -417,6 +439,9 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 migrated_engine, expire_on_commit=False
             ) as client_a:
                 transaction = await client_a.begin()
+                holder_pid = (
+                    await client_a.execute(text("SELECT pg_backend_pid()"))
+                ).scalar_one()
                 created = await upsert_provider_refresh_policy(
                     client_a,
                     provider=provider,
@@ -439,6 +464,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 await _assert_request_waits_for_row_lock(
                     create_loser,
                     migrated_engine,
+                    holder_pid=holder_pid,
                     statement_fragment="INSERT INTO ops.provider_refresh_policies",
                 )
                 await transaction.commit()
@@ -461,6 +487,9 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 migrated_engine, expire_on_commit=False
             ) as client_a:
                 transaction = await client_a.begin()
+                holder_pid = (
+                    await client_a.execute(text("SELECT pg_backend_pid()"))
+                ).scalar_one()
                 winner = await upsert_provider_refresh_policy(
                     client_a,
                     provider=provider,
@@ -485,6 +514,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 await _assert_request_waits_for_row_lock(
                     stale_loser,
                     migrated_engine,
+                    holder_pid=holder_pid,
                     statement_fragment="UPDATE ops.provider_refresh_policies AS policy",
                 )
                 await transaction.commit()
@@ -507,6 +537,9 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 migrated_engine, expire_on_commit=False
             ) as client_a:
                 transaction = await client_a.begin()
+                holder_pid = (
+                    await client_a.execute(text("SELECT pg_backend_pid()"))
+                ).scalar_one()
                 rolled_back = await upsert_provider_refresh_policy(
                     client_a,
                     provider=provider,
@@ -531,6 +564,7 @@ async def test_real_row_lock_competition_returns_http_conflict_and_rollback_winn
                 await _assert_request_waits_for_row_lock(
                     rollback_winner,
                     migrated_engine,
+                    holder_pid=holder_pid,
                     statement_fragment="UPDATE ops.provider_refresh_policies AS policy",
                 )
                 await transaction.rollback()
