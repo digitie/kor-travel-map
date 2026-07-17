@@ -41,7 +41,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   전에 반드시 머지한다.
 - [ ] `T-ADM-C6a` — **존치 화면 링크 재배선** (선착, 의존 C4·C5): entity-link kind
   재매핑(1급)+직접 href 9파일+live.ts topic 매핑+HATEOAS `_job_links`+
-  scenario catalog. 구 페이지 제거 **전** 독립 PR.
+  scenario catalog. 구 페이지 제거 **전** 독립 PR. 구현 branch에서는 엔티티 링크를
+  `/ops/pipeline`·`/ops/datasets`로 원자 전환하고 canonical query-key/HATEOAS/시나리오
+  계약까지 갱신했다. 외부 적대 리뷰 2인과 테스트 gate 전이므로 완료 처리하지 않는다.
 - [ ] `T-ADM-C6b` — **구 표면 삭제** (선착, 의존 C6a): 라우트 6종·라우터
   ~30 endpoint·구 훅·mock spec 19파일 삭제 + nav/홈 정리 + OpenAPI 재생성(삭제분).
   C3a/#687에서 Dagster application service/schema와 feature update service/schema의

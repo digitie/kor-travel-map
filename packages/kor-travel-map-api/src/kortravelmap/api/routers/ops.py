@@ -297,7 +297,7 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         started_at=row.started_at,
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
-        status_url=f"/v1/ops/import-jobs/{row.job_id}",
+        status_url=f"/v1/ops/pipeline/executions/import_job/{row.job_id}",
         links=_job_links(row),
     )
 
@@ -313,12 +313,12 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
     links = [
         OpsImportJobLink(
             rel="self",
-            href=f"/v1/ops/import-jobs/{row.job_id}",
-            label="import job",
+            href=f"/v1/ops/pipeline/executions/import_job/{row.job_id}",
+            label="pipeline execution",
         ),
         OpsImportJobLink(
             rel="events",
-            href=f"/v1/ops/import-jobs/{row.job_id}/events",
+            href=f"/v1/ops/pipeline/events?job_id={row.job_id}",
             label="event timeline",
         ),
     ]
@@ -326,24 +326,30 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
         links.append(
             OpsImportJobLink(
                 rel="cancel",
-                href=f"/v1/ops/import-jobs/{row.job_id}/cancel",
-                label="cancel import job",
+                href=f"/v1/ops/pipeline/executions/import_job/{row.job_id}/cancel",
+                label="cancel pipeline execution",
             )
         )
     if row.parent_job_id:
         links.append(
             OpsImportJobLink(
                 rel="parent_job",
-                href=f"/v1/ops/import-jobs/{row.parent_job_id}",
-                label="parent import job",
+                href=(
+                    "/v1/ops/pipeline/executions/import_job/"
+                    f"{row.parent_job_id}"
+                ),
+                label="parent pipeline execution",
             )
         )
     if row.load_batch_id:
         links.append(
             OpsImportJobLink(
                 rel="load_batch",
-                href=f"/v1/ops/import-jobs?load_batch_id={row.load_batch_id}",
-                label="load batch jobs",
+                href=(
+                    "/ops/pipeline?kind=import_job&load_batch_id="
+                    f"{row.load_batch_id}"
+                ),
+                label="load batch executions",
             )
         )
     if row.update_request_id:
@@ -371,7 +377,7 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
         links.append(
             OpsImportJobLink(
                 rel="dagster_run",
-                href=f"/v1/ops/dagster/runs/{dagster_run_id}",
+                href=f"/v1/ops/pipeline/dagster-runs/{dagster_run_id}",
                 label="Dagster run",
             )
         )

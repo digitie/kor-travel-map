@@ -56,7 +56,7 @@ export function FeatureUpdateRequestDetailClient({
         <>
           <Link
             className={buttonVariants({ variant: "outline" })}
-            href="/admin/features/update-requests"
+            href="/ops/pipeline?kind=update_request"
           >
             <ArrowLeftIcon data-icon="inline-start" />
             목록
@@ -77,7 +77,7 @@ export function FeatureUpdateRequestDetailClient({
       }
       breadcrumbs={[
         { label: "수집 파이프라인" },
-        { label: "갱신 요청", href: "/admin/features/update-requests" },
+        { label: "갱신 요청", href: "/ops/pipeline?kind=update_request" },
         { label: shortId(requestId, 18) },
       ]}
       description="갱신 요청의 스코프·매칭 스코프·작업·Dagster 실행 상태를 확인합니다."
@@ -129,7 +129,9 @@ export function FeatureUpdateRequestDetailClient({
                 : "기존 요청의 즉시 dispatch를 요청했습니다."}{" "}
               <Link
                 className="break-all font-mono underline underline-offset-2"
-                href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
+                href={`/ops/pipeline?execution=update_request:${encodeURIComponent(
+                  runNow.data.data.request_id,
+                )}`}
               >
                 {runNow.data.data.request_id}
               </Link>
@@ -195,7 +197,9 @@ export function FeatureUpdateRequestDetailClient({
                   <dd className="font-mono">
                     <Link
                       className="underline underline-offset-2"
-                      href={`/ops/import-jobs/${data.job_id}`}
+                      href={`/ops/pipeline?execution=import_job:${encodeURIComponent(
+                        data.job_id,
+                      )}`}
                     >
                       {shortId(data.job_id)}
                     </Link>

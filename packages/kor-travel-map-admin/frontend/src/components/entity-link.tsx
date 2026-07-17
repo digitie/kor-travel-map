@@ -17,6 +17,7 @@ type EntityKind =
   | "issue"
   | "dagsterRun"
   | "loadBatch"
+  | "schedule"
   | "changeRequest";
 
 type EntityParams = Record<string, string | null | undefined>;
@@ -46,16 +47,33 @@ function hrefFor(
     case "feature":
       return `/features/${encodeURIComponent(id)}`;
     case "importJob":
-      return `/ops/import-jobs/${encodeURIComponent(id)}`;
+      return `/ops/pipeline?execution=import_job:${encodeURIComponent(id)}`;
     case "updateRequest":
-      return `/admin/features/update-requests/${encodeURIComponent(id)}`;
-    case "provider":
-      // id = provider명; dataset_key 등은 params로.
-      return withQuery("/ops/providers", { provider: id, ...params });
+      return `/ops/pipeline?execution=update_request:${encodeURIComponent(id)}`;
+    case "provider": {
+      // 기존 호출부의 dataset_key를 datasets 페이지 URL 계약의 dataset으로 번역한다.
+      const { dataset_key: dataset, sync_scope, ...rest } = params ?? {};
+      return withQuery("/ops/datasets", {
+        provider: id,
+        dataset,
+        sync_scope,
+        ...rest,
+      });
+    }
     case "issue":
       return withQuery("/admin/issues", { ...params });
     case "loadBatch":
-      return withQuery("/ops/import-jobs", { load_batch_id: id, ...params });
+      return withQuery("/ops/pipeline", {
+        kind: "import_job",
+        load_batch_id: id,
+        ...params,
+      });
+    case "schedule":
+      return withQuery("/ops/pipeline", {
+        tab: "schedules",
+        schedule: id,
+        ...params,
+      });
     case "changeRequest":
       return withQuery("/admin/features/change-requests", {
         request_id: id,

@@ -393,7 +393,30 @@ def test_import_jobs_list_passes_filters(
     assert body["data"]["items"][0]["load_batch_id"] == _job().load_batch_id
     assert body["data"]["items"][0]["parent_job_id"] == _job().parent_job_id
     assert body["data"]["items"][0]["status"] == "running"
+    assert body["data"]["items"][0]["status_url"] == (
+        "/v1/ops/pipeline/executions/import_job/"
+        "11111111-1111-1111-1111-111111111111"
+    )
     assert body["data"]["items"][0]["links"][0]["rel"] == "self"
+    links_by_rel = {
+        link["rel"]: link["href"] for link in body["data"]["items"][0]["links"]
+    }
+    assert links_by_rel["self"] == body["data"]["items"][0]["status_url"]
+    assert links_by_rel["events"] == (
+        "/v1/ops/pipeline/events?job_id="
+        "11111111-1111-1111-1111-111111111111"
+    )
+    assert links_by_rel["cancel"] == (
+        "/v1/ops/pipeline/executions/import_job/"
+        "11111111-1111-1111-1111-111111111111/cancel"
+    )
+    assert links_by_rel["parent_job"].endswith(
+        "/executions/import_job/44444444-4444-4444-4444-444444444444"
+    )
+    assert links_by_rel["load_batch"] == (
+        "/ops/pipeline?kind=import_job&load_batch_id="
+        "33333333-3333-3333-3333-333333333333"
+    )
     assert any(
         link["rel"] == "feature_update_request"
         for link in body["data"]["items"][0]["links"]
@@ -409,6 +432,17 @@ def test_import_jobs_list_passes_filters(
         "next_cursor": "cursor-2",
         "total": None,
     }
+
+
+@pytest.mark.unit
+def test_import_job_links_use_canonical_dagster_run_api() -> None:
+    from kortravelmap.api.routers import ops as router_mod
+
+    links = router_mod._job_links(_job(payload={"dagster_run_id": "run-1"}))
+
+    assert next(link.href for link in links if link.rel == "dagster_run") == (
+        "/v1/ops/pipeline/dagster-runs/run-1"
+    )
 
 
 @pytest.mark.unit

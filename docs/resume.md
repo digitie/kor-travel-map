@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (agent B) — T-ADM-C6a 구현 완료·외부 리뷰 대기
+
+- C5 exact base 위 독립 branch에서 import job/update request/load batch/provider 엔티티 링크와
+  홈·Feature·큐레이션·로그·구 갱신 요청 전환 링크를 `/ops/pipeline`·`/ops/datasets`로
+  재배선했다. provider URL은 호출부의 `dataset_key`를 `dataset`으로 번역하면서
+  `sync_scope`를 보존한다.
+- ops-live 무효화, legacy import-job HATEOAS, live scenario catalog도 canonical
+  pipeline/datasets 계약으로 맞췄다. 변경 전 codegraph 영향은 C5 worktree의 최신 인덱스로
+  확인했으며 새 worktree에서는 인덱스를 임의 초기화하지 않았다.
+- **다음 한 작업**: 구현 commit을 외부 적대 리뷰어 2명에게 전달해 지적을 반영한 뒤에만
+  unit/lint/build와 C6a mocked E2E gate를 실행한다. 현재 단계에서는 테스트를 실행하지 않았다.
+
 ## 2026-07-17 (codex) — admin 감사 후속 5-PR 병렬 wave 문서화
 
 - C5 최신 commit을 기준으로 열린 감사 후속을 PR 다섯 개로 분리했다. C7B-720은 issue

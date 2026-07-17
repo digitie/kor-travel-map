@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### admin ops 통합 링크 정본화 (2026-07-17, ADR-064 T-ADM-C6a)
+
+- **CHANGED**: import job·갱신 요청·load batch·provider/dataset 딥링크와 홈·Feature·큐레이션·
+  운영 로그의 작업 링크를 `/ops/pipeline`과 `/ops/datasets` 두 운영 화면으로 통합했다.
+  provider 링크는 `dataset`과 `sync_scope` 선택을 보존한다.
+- **CHANGED**: ops-live가 pipeline execution/event/overview와 dataset grid/detail query를
+  직접 무효화하도록 바꿨다. import job 응답의 관련 링크와 Dagster run API도 canonical
+  pipeline endpoint를 가리킨다.
+- **TEST**: live E2E 시나리오 카탈로그에 두 통합 화면의 read/write API와 cross-surface
+  반영 계약을 추가했다. 실제 실행형 gate는 외부 적대 리뷰 뒤 진행한다.
+
 ### pipeline 운영 화면·조작 원장 통합 (2026-07-17, ADR-064 T-ADM-C5)
 
 - **ADDED**: `/ops/pipeline`에 canonical 작업 상태, root 타임라인, Dagster run, 전역 event,

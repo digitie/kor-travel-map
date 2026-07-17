@@ -330,7 +330,7 @@ export function HomePageClient() {
               <CardAction>
                 <Link
                   className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                  href="/ops/import-jobs"
+                  href="/ops/pipeline?kind=import_job"
                 >
                   전체
                 </Link>
@@ -409,7 +409,7 @@ export function HomePageClient() {
                   </div>
                   <Link
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                    href="/admin/dagster"
+                    href="/ops/pipeline?tab=schedules"
                   >
                     <WorkflowIcon data-icon="inline-start" />
                     작업 자동화

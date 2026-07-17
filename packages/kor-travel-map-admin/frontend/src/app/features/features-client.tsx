@@ -410,14 +410,14 @@ export function FeaturesClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/import-jobs"
+            href="/ops/pipeline?kind=import_job"
           >
             <ListChecksIcon data-icon="inline-start" />
             Jobs
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/update-requests"
+            href="/ops/pipeline?kind=update_request"
           >
             <RefreshCwIcon data-icon="inline-start" />
             Update
@@ -438,7 +438,7 @@ export function FeaturesClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/dagster"
+            href="/ops/pipeline?tab=schedules"
           >
             <WorkflowIcon data-icon="inline-start" />
             작업 자동화

@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (agent B) — C6a 통합 화면 링크 재배선 구현
+
+- `EntityLink`의 import job·update request·load batch를 `/ops/pipeline`으로, provider를
+  `/ops/datasets`의 `provider/dataset/sync_scope` URL 계약으로 전환하고 단위 계약을 추가했다.
+  홈·Feature 지도·큐레이션·운영 로그·구 갱신 요청 전환 화면의 직접 링크도 같은 두 화면만
+  가리키게 해 구 상세 페이지 제거 전에 진입점을 먼저 끊었다.
+- ops-live topic은 legacy import-job/provider cache 대신 pipeline overview/execution/event와
+  dataset grid/detail을 무효화한다. import job 응답의 `status_url`과 self/events/cancel/parent,
+  Dagster run HATEOAS도 canonical pipeline API로 바꿨고 load batch는 통합 UI filter로 연결했다.
+- live E2E 시나리오 카탈로그에 `/ops/pipeline`과 `/ops/datasets`의 read/write 계약을 추가하고
+  존치 화면의 반영 표면을 통합 경로로 재배선했다. 이 단계는 사용자 지시대로 외부 적대 리뷰
+  전 구현 commit만 만들며 테스트·lint·build는 아직 실행하지 않는다.
+
 ## 2026-07-17 (codex) — admin 감사 후속 PR·migration single-head 계획
 
 - issue #720, #718, #686, #712, #719의 잔여를 C7B-720, AUD-718, AUD-686,
