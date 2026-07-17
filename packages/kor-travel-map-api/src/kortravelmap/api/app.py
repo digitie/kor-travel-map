@@ -126,10 +126,27 @@ def _build_problem_components() -> dict[str, Any]:
 _PROBLEM_COMPONENTS: dict[str, Any] = _build_problem_components()
 
 
-def _problem_content() -> dict[str, Any]:
+def _problem_content(response: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    schema: object = {"$ref": "#/components/schemas/ProblemDetail"}
+    content = response.get("content") if response is not None else None
+    if isinstance(content, Mapping):
+        for media_type in ("application/problem+json", "application/json"):
+            media = content.get(media_type)
+            if not isinstance(media, Mapping):
+                continue
+            candidate = media.get("schema")
+            if not isinstance(candidate, Mapping):
+                continue
+            ref = candidate.get("$ref")
+            if ref not in {
+                "#/components/schemas/HTTPValidationError",
+                "#/components/schemas/ValidationError",
+            }:
+                schema = dict(candidate)
+                break
     return {
         "application/problem+json": {
-            "schema": {"$ref": "#/components/schemas/ProblemDetail"},
+            "schema": schema,
         }
     }
 
@@ -138,8 +155,10 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
     """생성된 OpenAPI에 RFC7807 problem+json 에러 응답을 주입한다 (T-452).
 
     중앙 핸들러가 모든 오류를 problem+json으로 통일하므로, 각 operation의 4xx/5xx와
-    ``default`` 응답 본문을 ``ProblemDetail``로 선언한다. FastAPI 자동 422
-    (``HTTPValidationError``)도 problem+json으로 대체하고, orphan이 되는 검증 schema는
+    ``default``와 model을 지정하지 않은 오류 응답 본문을 ``ProblemDetail``로 선언한다.
+    라우터가 typed problem model을 명시한 경우 그 schema는 보존하고 media type만
+    ``application/problem+json``으로 통일한다. FastAPI 자동 422
+    (``HTTPValidationError``)는 problem+json으로 대체하고, orphan이 되는 검증 schema는
     제거한다. 기존 응답의 ``description``은 보존한다.
     """
     components: dict[str, Any] = schema.setdefault("components", {}).setdefault(
@@ -161,7 +180,7 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
                         continue
                     if code == "default" or (code.isdigit() and int(code) >= 400):
                         response.setdefault("description", _PROBLEM_DEFAULT_DESCRIPTION)
-                        response["content"] = _problem_content()
+                        response["content"] = _problem_content(response)
                 responses.setdefault(
                     "default",
                     {

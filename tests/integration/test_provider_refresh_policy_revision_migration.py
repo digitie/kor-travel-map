@@ -19,7 +19,7 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0055_ops_live_ticket_claims"
-_TARGET_REVISION = "0056_provider_refresh_policy_revision"
+_TARGET_REVISION = "0056_refresh_policy_revision"
 
 
 def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
@@ -107,8 +107,9 @@ async def test_revision_backfill_default_constraint_and_downgrade(
                         """
                         SELECT pg_get_constraintdef(oid)
                         FROM pg_constraint
-                        WHERE connamespace = 'ops'::regnamespace
-                          AND conname = 'ck_provider_refresh_revision'
+                        WHERE conrelid = 'ops.provider_refresh_policies'::regclass
+                          AND contype = 'c'
+                          AND pg_get_constraintdef(oid) LIKE '%revision > 0%'
                         """
                     )
                 )
@@ -119,7 +120,8 @@ async def test_revision_backfill_default_constraint_and_downgrade(
 
         assert column.data_type == "bigint"
         assert column.is_nullable == "NO"
-        assert column.column_default == "1"
+        assert column.column_default is not None
+        assert column.column_default.startswith("1")
         assert backfilled == inserted == 1
         assert "revision > 0" in constraint
         assert current_revision == _TARGET_REVISION

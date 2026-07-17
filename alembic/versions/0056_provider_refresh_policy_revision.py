@@ -1,6 +1,6 @@
 """provider refresh policy에 단조 revision CAS를 추가한다.
 
-Revision ID: 0056_provider_refresh_policy_revision
+Revision ID: 0056_refresh_policy_revision
 Revises: 0055_ops_live_ticket_claims
 Create Date: 2026-07-17
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0056_provider_refresh_policy_revision"
+revision: str = "0056_refresh_policy_revision"
 down_revision: str | Sequence[str] | None = "0055_ops_live_ticket_claims"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

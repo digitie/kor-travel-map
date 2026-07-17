@@ -151,13 +151,18 @@ async def put_dataset_refresh_policy(
                 "code": "ORPHAN_MUTATION_DISABLED",
                 "message": "orphan dataset refresh policy mutation is disabled",
                 "details": {
+                    "expected_revision": body.expected_revision,
+                    "current_revision": None,
+                    "current_record": None,
                     "mutation_disabled_reason": exc.mutation_disabled_reason,
                 },
             },
         ) from exc
     except ProviderRefreshPolicyRevisionConflict as exc:
         current_record = (
-            provider_refresh_policy_record(exc.current) if exc.current is not None else None
+            provider_refresh_policy_record(exc.current)
+            if exc.current is not None
+            else None
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

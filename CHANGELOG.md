@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 갱신 정책 revision CAS (2026-07-17, ADR-064 T-ADM-AUD-718)
+
+- **ADDED**: `ops.provider_refresh_policies`에 단조 증가 BIGINT `revision`을 추가했다. 생성은
+  `expected_revision=null`, 갱신은 현재 revision 일치가 필수이며 성공 시 원자적으로 1 증가한다.
+- **CHANGED**: HTTP에서는 revision을 정규화된 10진 문자열로 전달하고, CAS 불일치는 현재
+  record/revision을 포함한 typed RFC7807 `409`로 반환한다.
+- **FIXED**: admin 정책 편집 중 background refetch나 다른 운영자의 저장이 발생해도 로컬 초안을
+  덮어쓰지 않는다. 작성 기준과 최신 서버 revision을 분리하고 명시적 3-way 조정 후 다시 저장한다.
+
 ### ops-live dataset projection·복구 경계 보강 (2026-07-17, ADR-064 T-ADM-C7A)
 
 - **ADDED**: data integrity issue와 POI cache target 변경을 원본 transaction과 함께 증가시키는

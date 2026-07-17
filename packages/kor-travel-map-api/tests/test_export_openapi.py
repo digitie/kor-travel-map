@@ -136,7 +136,7 @@ def test_user_operations_are_present_in_full_openapi() -> None:
 
 @pytest.mark.unit
 def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
-    """T-452 — 모든 operation의 4xx/5xx·default 오류는 problem+json ProblemDetail."""
+    """T-452 — 오류 media type 통일과 명시적 typed problem schema 보존."""
     module = _load_script_module()
     spec = create_app(ApiSettings()).openapi()
     schemas = spec["components"]["schemas"]
@@ -161,6 +161,15 @@ def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
             for code, response in responses.items():
                 if code.isdigit() and int(code) >= 400:
                     schema = response["content"]["application/problem+json"]["schema"]
-                    assert schema == problem_ref
+                    ref = schema.get("$ref") if isinstance(schema, dict) else None
+                    assert ref is not None
+                    assert ref.rsplit("/", 1)[-1] in schemas
                     error_responses_seen += 1
     assert error_responses_seen > 0
+
+    policy_conflict = spec["paths"]["/v1/ops/datasets/refresh-policy"]["put"][
+        "responses"
+    ]["409"]["content"]["application/problem+json"]["schema"]
+    assert policy_conflict == {
+        "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
+    }

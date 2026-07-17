@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent A) — T-ADM-AUD-718 구현·리뷰 대기
+
+- C7A 병합 정본과 Alembic 0055 위에 0056 `provider_refresh_policies.revision` 양수 BIGINT를
+  추가했다. create-only는 `expected_revision=null`, update-only는 조회한 revision 일치 시에만
+  원자적 `+1`하고, 불일치는 현재 record/revision을 담은 typed `409`로 반환한다.
+- HTTP의 BIGINT revision은 JavaScript 정밀도 손실을 피하도록 정규화된 10진 문자열로 고정했다.
+  admin UI는 초안 기준 revision과 최신 관측 revision을 분리해 background refetch/충돌에도 입력을
+  보존하며, 명시적 3-way 조정 뒤 최신 revision으로 재저장한다.
+- migration·저장소 경합·router/OpenAPI·mock UI 충돌 회귀를 작성하고 계약 문서와 생성물을
+  갱신했다. **다음 한 작업**: 독립 적대 리뷰어 2인의 테스트 전 검토를 반영한 뒤 전체 gate와
+  n150 결선 대상 live E2E를 진행한다. 리뷰 전 테스트·lint·build는 아직 실행하지 않았다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 
 - same-origin ticket BFF, HMAC subprotocol ticket, DB nonce 단일 소비와 60초 lease를 완결했다.

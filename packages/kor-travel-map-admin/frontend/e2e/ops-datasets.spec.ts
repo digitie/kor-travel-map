@@ -1282,6 +1282,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => mocks.policyPuts.length).toBe(2);
     expect(mocks.policyPuts[1].body.expected_revision).toBe("2");
     expect(mocks.policyPuts[1].body.targeted_policy).toBe("allow_targeted");
+    expect(mocks.policyPuts[1].body.enabled).toBe(false);
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
   });
 

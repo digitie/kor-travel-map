@@ -125,10 +125,10 @@ class ProviderRefreshPolicyConflictDetails(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    expected_revision: str | None = None
-    current_revision: str | None = None
-    current_record: ProviderRefreshPolicyRecord | None = None
-    mutation_disabled_reason: str | None = None
+    expected_revision: str | None
+    current_revision: str | None
+    current_record: ProviderRefreshPolicyRecord | None
+    mutation_disabled_reason: str | None
 
 
 class ProviderRefreshPolicyConflictProblem(ProblemDetail):

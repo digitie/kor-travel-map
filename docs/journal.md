@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent A) — AUD-718 revision CAS 구현 스냅샷
+
+- Alembic 0056으로 `ops.provider_refresh_policies.revision` 양수 BIGINT 정본을 추가하고,
+  신규 생성은 `expected_revision=null`, 기존 갱신은 동일 revision을 조건으로 원자적 `+1`하는
+  create-only/update-only 저장 계약으로 바꿨다. 불일치는 현재 record/revision을 포함한 typed
+  RFC7807 `409`로 반환한다.
+- admin 정책 편집기는 작성 시작 revision과 최신 관측 revision을 분리한다. background refetch나
+  `409`가 와도 로컬 초안을 보존하고, 운영자가 명시적으로 선택할 때 3-way 조정하거나 서버 값으로
+  되돌린다. BIGINT revision은 OpenAPI/TypeScript 경계에서 정규화된 10진 문자열로 표현한다.
+- migration backfill/default/check/downgrade, 두 세션 stale write, typed `409`, UI 충돌·조정
+  회귀를 추가했다. 적대 리뷰 2인에게 넘기기 위한 구현 스냅샷이며 지시에 따라 리뷰 전 테스트·lint·
+  build는 아직 실행하지 않았다.
+
 ## 2026-07-17 (codex, agent B) — C7A 적대 리뷰·전체 로컬 gate 완료
 
 - backend/DB/security 리뷰어와 frontend 상태 모델 리뷰어가 테스트 전에 same-origin ticket,

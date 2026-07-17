@@ -488,6 +488,11 @@ function PolicyEditor({
       return;
     }
     observedPropRevision.current = incomingRevision;
+    // 409 본문의 current record를 이미 반영한 뒤 query refetch가 같은 revision을
+    // 전달하면 새 서버 변경으로 오인하지 않는다.
+    if (incomingRevision === latestObservedRevision) {
+      return;
+    }
     setLatestObservedPolicy(policy ?? null);
     setLatestObservedRevision(incomingRevision);
     if (draftDirty.current) {
@@ -495,7 +500,7 @@ function PolicyEditor({
       return;
     }
     applyServerPolicy(policy);
-  }, [applyServerPolicy, policy]);
+  }, [applyServerPolicy, latestObservedRevision, policy]);
 
   const rebaseLocalDraftOnLatest = useCallback(() => {
     const reconciled = reconcilePolicyDraft(
