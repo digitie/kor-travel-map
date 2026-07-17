@@ -8,7 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Final, Literal
+from typing import Final, Literal, Protocol, cast
 from uuid import UUID
 
 import httpx
@@ -714,8 +714,18 @@ async def _claim_schedule_command(
     return _schedule_command_response(data, started_at=perf_counter())
 
 
+class _ClaimResolutionRow(Protocol):
+    resolution_id: object
+    command_id: object
+    schedule_name: object
+    resolution: object
+    actor: object
+    reason: object
+    created_at: datetime
+
+
 def _claim_resolution_from_row(
-    row: object,
+    row: _ClaimResolutionRow,
     *,
     schedule_name: str,
     resolution: Literal["confirmed_applied", "confirmed_not_applied"],
@@ -749,7 +759,7 @@ async def _existing_claim_resolution(
     session: AsyncSession,
     *,
     command_id: UUID,
-) -> object | None:
+) -> _ClaimResolutionRow | None:
     result = await session.execute(
         text(
             """
@@ -761,7 +771,7 @@ async def _existing_claim_resolution(
         ),
         {"command_id": str(command_id)},
     )
-    return result.one_or_none()
+    return cast(_ClaimResolutionRow | None, result.one_or_none())
 
 
 async def _mark_schedule_claim_operation_finished(
