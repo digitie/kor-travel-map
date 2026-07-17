@@ -18,9 +18,10 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.providers.kma import (
+    KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+    KMA_WEATHER_ALERT_DATASET_KEY,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, DATASET_KEY_DETAIL
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
@@ -669,8 +670,8 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
         json={
             **base,
             "dataset_keys": [
-                KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-                KMA_SHORT_FORECAST_DATASET_KEY,
+                KMA_WEATHER_ALERT_DATASET_KEY,
+                KMA_MID_FORECAST_DATASET_KEY,
             ],
             "scope": {
                 "type": "feature_ids",
@@ -684,8 +685,8 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
         json={
             **base,
             "dataset_keys": [
-                KMA_SHORT_FORECAST_DATASET_KEY,
-                KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+                KMA_MID_FORECAST_DATASET_KEY,
+                KMA_WEATHER_ALERT_DATASET_KEY,
             ],
             "scope": {
                 "type": "feature_ids",
@@ -711,8 +712,8 @@ def test_distinct_keys_enqueue_the_same_canonical_set_plan(
         == tuple(
             sorted(
                 (
-                    KMA_SHORT_FORECAST_DATASET_KEY,
-                    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+                    KMA_MID_FORECAST_DATASET_KEY,
+                    KMA_WEATHER_ALERT_DATASET_KEY,
                 )
             )
         )
