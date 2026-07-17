@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex) — admin 감사 후속 PR·migration single-head 계획
+
+- issue #720, #718, #686, #712, #719의 잔여를 C7B-720, AUD-718, AUD-686,
+  C7B-API, C7B-UI 다섯 PR로 나눴다. frontend-only 필터 보강, 갱신 정책 revision
+  CAS, KMA zero-target fail-closed, active/exact-scope API, UI 소비가 서로 다른 리뷰·병합
+  경계를 갖도록 해 완료 조건을 섞지 않는다.
+- C6a 뒤 C6b·C7A·C7B-720, C7A 뒤 AUD-718·AUD-686을 병렬 wave로 두고 API→UI→C7
+  n150 순으로 결선한다. Alembic은 C7A 0055, AUD-718 0056, C7B-API 0057만 순차
+  소유해 병렬 migration head를 만들지 않는다. 각 wave는 시작·PR 직전·병합 직후 rebase한다.
+- 문서 branch는 C5 최신 `2a3e12bc`에서 만들었다. C5 병합 전에는 push/PR을 금지하고,
+  병합 뒤 문서-only PR로 올려 별도 적대 재리뷰 없이 먼저 병합한다.
+
 ## 2026-07-17 (codex) — C5 pipeline 통합·append-only 조작 원장
 
 - 기존 PR #691을 C3e/C45X/C4 정본 위에서 재작성해 `/ops/pipeline`의 상태·타임라인·Dagster
