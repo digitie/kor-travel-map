@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-17 (agent B) — T-ADM-C6a 구현 완료·외부 리뷰 대기
+## 2026-07-17 (codex, agent B) — T-ADM-C6a 리뷰·로컬 gate 완료
 
 - C5 exact base 위 독립 branch에서 import job/update request/load batch/provider 엔티티 링크와
   홈·Feature·큐레이션·로그·구 갱신 요청 전환 링크를 `/ops/pipeline`·`/ops/datasets`로
@@ -9,8 +9,13 @@
 - ops-live 무효화, legacy import-job HATEOAS, live scenario catalog도 canonical
   pipeline/datasets 계약으로 맞췄다. 변경 전 codegraph 영향은 C5 worktree의 최신 인덱스로
   확인했으며 새 worktree에서는 인덱스를 임의 초기화하지 않았다.
-- **다음 한 작업**: 구현 commit을 외부 적대 리뷰어 2명에게 전달해 지적을 반영한 뒤에만
-  unit/lint/build와 C6a mocked E2E gate를 실행한다. 현재 단계에서는 테스트를 실행하지 않았다.
+- load batch·parent UUID 조회는 partial index에서 member를 먼저 선택한 뒤 component를
+  확장한다. 두 적대 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했고 root unit 18건,
+  API 140건, 실제 Postgres 통합 22건, frontend unit 27건과 정적·production build gate가
+  통과했다.
+- **다음 한 작업**: C6a task를 완료 이력으로 옮긴 문서 commit을 만들고 보안 감사 뒤 PR을
+  올려 CI green·승인 후 병합한다. 병합 직후 C6b UI를 최신 C6a에 rebase하고 C6b·C7A·
+  C7B-720 병렬 wave를 진행한다.
 
 ## 2026-07-17 (codex) — admin 감사 후속 5-PR 병렬 wave 문서화
 

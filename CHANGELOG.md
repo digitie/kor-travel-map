@@ -13,8 +13,8 @@
 - **CHANGED**: ops-live가 pipeline execution/event/overview와 dataset grid/detail query를
   직접 무효화하도록 바꿨다. import job 응답의 관련 링크와 Dagster run API도 canonical
   pipeline endpoint를 가리킨다.
-- **TEST**: live E2E 시나리오 카탈로그에 두 통합 화면의 read/write API와 cross-surface
-  반영 계약을 추가했다. 실제 실행형 gate는 외부 적대 리뷰 뒤 진행한다.
+- **TEST**: load batch·parent UUID deep link의 partial-index access path와 두 통합 화면의
+  read/write·cross-surface 반영 시나리오를 회귀 계약으로 고정했다.
 
 ### pipeline 운영 화면·조작 원장 통합 (2026-07-17, ADR-064 T-ADM-C5)
 
