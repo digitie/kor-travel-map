@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
   - [ ] `T-ADM-AUD-718` — 갱신 정책 BIGINT revision CAS (issue #718, migration 0056, PR 1개)
   - [ ] `T-ADM-AUD-686` — KMA 유효 대상 0건 fail-closed (issue #686, PR 1개)
   - [ ] `T-ADM-C7B-API` — active projection·exact-scope 이력 API (issues #712/#719, migration 0057, PR 1개)
@@ -32,19 +31,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C7A` — **ops-live same-origin 인증 + query invalidation** (agent
-  **B**, issue **#685**, **migration 0055**, **PR 1개**, 의존 C4·C5·C6b): 로그인
-  session을 확인하는 Origin+Fetch Metadata fail-closed ticket BFF, signed subprotocol
-  ticket 검증, DB nonce 단일 소비와 60초 연결 lease를 구현한다. 없음/변조 ticket은
-  browser-observable `4401`, handshake 전 만료는 data frame 없이 `4408`로 닫는다.
-  reconnect/backoff/polling 상태 모델과 topic→domain event adapter를 두고,
-  `/ops/pipeline`·`/ops/datasets`의 canonical query-key helper에 연결한다.
-  `provider_sync`와 transaction-coupled `dataset_projection` 전역 topic으로 다른
-  tab/process의 integrity issue·POI cache target 변경도 grid/detail에 반영한다. malformed·
-  비단조 frame은 오염 socket을 즉시 폐기하고 새 ticket/socket에서 exact `replace`를
-  다시 보낸다. root `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`는 launcher/container에서 앞뒤
-  공백 없이 32자 이상을 기동 전에 강제한다. migration은 `0055`, `down_revision=0054`인
-  단일 head로 확정하고 C7 live gate 전에 반드시 머지한다.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔
@@ -84,10 +70,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720은 최종
   live 증거를 첨부한 뒤 닫는다.
 
-병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7B-720은 완료했고 C7A/0055를
-최종 결선 중이다. **Wave 2**는 C7A/0055 뒤 AUD-718/0056과 AUD-686을 병렬 진행한다.
+병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720은 완료했다.
+**Wave 2**는 AUD-718/0056과 AUD-686을 병렬 진행한다.
 **Wave 3**은 AUD-718/0056 뒤 C7B-API/0057, **Wave 4**는 C7B-API와 C7A 뒤
-C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7B-720은 완료 이력으로
+C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720은 완료 이력으로
 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은

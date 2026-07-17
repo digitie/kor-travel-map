@@ -3,6 +3,26 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin ops-live 인증·무효화 완결 (2026-07-17, `T-ADM-C7A`)
+
+- [x] **T-ADM-C7A — same-origin 실시간 갱신 경계를 완결.** 로그인 session과
+  `Origin`·Fetch Metadata를 모두 검사하는 ticket BFF, HMAC 서명 subprotocol ticket, DB nonce
+  단일 소비와 60초 연결 lease를 구현했다. 없음·변조 ticket은 `4401`, handshake 전 만료는
+  data frame 없이 `4408`로 닫으며 공유 secret은 local launcher와 API container에서 앞뒤
+  공백 없이 32자 이상이어야 기동한다.
+- [x] **transaction-coupled invalidation과 복구 상태 모델 고정.** Alembic 0055로
+  `ops.ops_live_ticket_claims`와 `ops.ops_live_topic_revisions`를 추가했다. provider 상태·정책,
+  schedule override·audit·claim resolution, integrity issue·POI cache target 변경을 원본
+  transaction과 함께 topic revision에 반영하고 pipeline/datasets canonical query key를
+  무효화한다. malformed·비단조 frame은 오염 socket을 폐기하고 새 ticket/socket에서 exact
+  `replace`를 다시 보낸다. 연속 두 번 실패는 standby, 세 번째부터 polling fallback으로 전환한다.
+- [x] **적대 리뷰와 로컬 gate 완료.** backend/DB/security와 frontend 상태 모델 리뷰어가 제품
+  변경을 테스트 전에 승인했다. 정확한 최종 제품 SHA에서 root unit 1,411건, API 484건,
+  실제 PostGIS migration/schema 14건과 C7A 집중 9건, frontend unit 185건, Ruff, strict mypy
+  115+52파일, import 계약 4/4, OpenAPI/admin/user type drift, base·host Compose rendering과
+  production build를 통과했다. 실제 browser의 close code·재연결은 최종 `T-ADM-C7` n150
+  파괴적 live E2E에서 검증한다.
+
 ## Admin legacy surface clean-cut (2026-07-17, `T-ADM-C6b`)
 
 - [x] **T-ADM-C6b — 운영 표면을 pipeline/datasets 두 화면으로 clean-cut.** legacy REST

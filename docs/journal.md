@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent B) — C7A 적대 리뷰·전체 로컬 gate 완료
+
+- backend/DB/security 리뷰어와 frontend 상태 모델 리뷰어가 테스트 전에 same-origin ticket,
+  nonce claim/lease, topic revision, reconnect·standby·polling 계약을 검토했다. Compose env 중복,
+  유효한 공개 secret 예시, 긴 WebSocket close reason, pipeline projection 구독 누락, polling 의미와
+  문서·runtime test drift를 반영하고 제품 변경 S1/S2/S3 0건 승인을 받았다.
+- 정확한 제품 SHA `c49829f0`에서 root unit 1,411건, API 484건, 실제 PostGIS 전체
+  migration/schema 14건과 C7A 집중 9건, frontend Vitest 185건을 통과했다. Ruff, strict mypy
+  115+52파일, import 계약 4/4, OpenAPI/admin/user generated type drift, base·host Compose rendering,
+  frontend type-check·lint와 Next.js production build도 green이다.
+- `tasks.md`의 완료 항목을 아카이브했다. 실제 Chrome close code·재연결은 local에서 실행하지
+  않고 모든 후속 C7 변경을 병합한 뒤 n150 prod 파괴적 live E2E로 종결한다.
+
 ## 2026-07-17 (codex, agent B) — C7A 선행 적대 리뷰 보강
 
 - dataset grid/detail 합성값 중 기존 `provider_sync` clock이 포괄하지 못한 integrity issue와

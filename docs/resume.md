@@ -1,17 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-17 (codex, agent B) — T-ADM-C7A C6B 정본 결선 중
+## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 
-- integrity issue와 POI cache target의 cross-tab/process 변경을 transaction-coupled
-  `dataset_projection` topic으로 승격하고 datasets grid/detail adapter에 연결했다. DB rollback,
-  원본별 1회 증가, topic row-lock late commit, snapshot revision을 통합 테스트로 고정했다.
-- malformed/비단조 frame은 현재 socket을 즉시 폐기하고 backoff 뒤 새 socket에서 exact
-  `replace`를 보내도록 바꿨다. datasets 인증 만료는 `로그인 필요`로 표시하며 root
-  `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` 32자 하한을 local launcher/API entrypoint에서 강제한다.
-- PR #723(C7B-720)과 #724(C6B)가 병합된 최신 main에 C7A를 결선하고 있다.
-- **다음 한 작업**: migration을 `0055`/`down_revision=0054` 단일 head로 확정하고 C6B의
-  canonical pipeline/datasets query key와 same-origin live 계약을 최종 대조한 뒤, 독립
-  적대 리뷰어 2인의 지적을 반영하고 전체 gate를 수행한다.
+- same-origin ticket BFF, HMAC subprotocol ticket, DB nonce 단일 소비와 60초 lease를 완결했다.
+  없음·변조·만료 경계는 각각 `4401`/`4408`로 닫고, malformed·비단조 frame은 오염 socket을
+  폐기한 뒤 새 ticket/socket에서 exact 구독을 복원한다.
+- Alembic 0055를 `down_revision=0054` 단일 head로 확정했다. provider 상태·정책, schedule
+  override·audit·claim resolution, integrity issue·POI cache target의 transaction-coupled revision을
+  pipeline/datasets canonical query invalidation에 연결했다.
+- backend/DB/security와 frontend 적대 리뷰어 2인이 테스트 전 승인했다. 정확한 제품 SHA
+  `c49829f0`에서 root unit 1,411건, API 484건, 실제 PostGIS migration/schema 14건과 C7A 9건,
+  frontend unit 185건 및 Ruff, strict mypy, import 계약, OpenAPI/type drift, Compose rendering,
+  production build가 모두 통과했다. local Playwright는 실행하지 않았고 최종 n150 gate에 남겼다.
+- **다음 한 작업**: 완료 문서를 포함해 보안 감사·최신 main rebase 후 C7A PR을 CI green과
+  승인으로 병합한다. 병합 직후 Wave 2의 `T-ADM-AUD-718`/0056과 `T-ADM-AUD-686`을 병렬
+  착수한다.
 
 ## 2026-07-17 (codex, agent A) — T-ADM-C6b clean-cut 최종 gate·PR #724 병합 완료
 
