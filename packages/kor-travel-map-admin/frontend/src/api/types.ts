@@ -6514,7 +6514,7 @@ export interface components {
         };
         /**
          * FeatureUpdateRequestCreateResponse
-         * @description 새 요청 또는 동일한 활성 canonical 요청 재사용 응답.
+         * @description 새 요청, 활성 canonical 요청 재사용 또는 terminal 결과 재생 응답.
          */
         FeatureUpdateRequestCreateResponse: {
             data: components["schemas"]["FeatureUpdateRequestCreatedRecord"];
@@ -12885,7 +12885,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 같은 계획의 활성 canonical request 재사용 */
+            /** @description 같은 계획의 활성 canonical request 재사용 또는 같은 Idempotency-Key의 terminal 결과 재생 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18021,7 +18021,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 같은 계획의 활성 canonical request 재사용 */
+            /** @description 같은 계획의 활성 canonical request 재사용 또는 같은 Idempotency-Key의 terminal 결과 재생 */
             200: {
                 headers: {
                     [name: string]: unknown;
