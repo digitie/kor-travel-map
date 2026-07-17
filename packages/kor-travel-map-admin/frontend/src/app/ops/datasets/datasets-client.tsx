@@ -405,7 +405,14 @@ function PolicyEditor({
   );
   const incomingPropRevision = policy?.revision ?? null;
   const upsertPolicy = useUpsertOpsDatasetRefreshPolicyMutation();
+  const queryClient = useQueryClient();
   const resetPolicyMutation = upsertPolicy.reset;
+  const needsAuthoritativePolicyRefetch =
+    editorState.needsAuthoritativePolicyRefetch;
+  useEffect(() => {
+    if (!needsAuthoritativePolicyRefetch) return;
+    void queryClient.invalidateQueries({ queryKey: ["ops-dataset"] });
+  }, [needsAuthoritativePolicyRefetch, queryClient]);
   // React가 이 render 결과를 commit하기 전에 prop revision과 편집 상태를 한 번에
   // 맞춘다. dirty 초안은 유지하며, effect의 한 frame 늦은 저장 가능 구간을 만들지 않는다.
   if (incomingPropRevision !== editorState.acknowledgedPropRevision) {

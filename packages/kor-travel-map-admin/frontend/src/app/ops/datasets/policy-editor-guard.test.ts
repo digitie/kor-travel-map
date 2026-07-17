@@ -227,9 +227,18 @@ describe("policy editor server state transition", () => {
     });
   });
 
-  it("null→numeric과 numeric→null prop snapshot은 각각 epoch를 올려 적용한다", () => {
+  it("명시적 null remount 뒤 numeric prop은 생성 정본으로 적용한다", () => {
     const absent = initialPolicyEditorState(null);
     const createdPolicy = makePolicy("1");
+
+    expect(absent).toMatchObject({
+      draftBasePolicy: null,
+      latestObservedPolicy: null,
+      latestObservedRevision: null,
+      needsAuthoritativePolicyRefetch: false,
+      serverSnapshotEpoch: 0,
+    });
+
     const created = observePolicyProp(absent, createdPolicy);
 
     expect(created).toMatchObject({
@@ -237,17 +246,81 @@ describe("policy editor server state transition", () => {
       draftBaseRevision: "1",
       latestObservedPolicy: createdPolicy,
       latestObservedRevision: "1",
+      needsAuthoritativePolicyRefetch: false,
       serverSnapshotEpoch: 1,
     });
+  });
 
-    const deleted = observePolicyProp(created, null);
-    expect(deleted).toMatchObject({
+  it("clean 상태의 pre-create cached null은 ack-only 뒤 authoritative refetch로 해제한다", () => {
+    const policy = makePolicy("3");
+    const current = initialPolicyEditorState(policy);
+    const cachedNull = observePolicyProp(current, null);
+
+    expect(cachedNull).toEqual({
+      ...current,
       acknowledgedPropRevision: null,
-      draftBasePolicy: null,
-      draftBaseRevision: null,
+      needsAuthoritativePolicyRefetch: true,
+    });
+    expect(observePolicyProp(cachedNull, policy)).toEqual({
+      ...current,
+      acknowledgedPropRevision: "3",
+    });
+  });
+
+  it("dirty 상태의 pre-create cached null도 draft/base/deferred/epoch를 보존한다", () => {
+    const current = initialPolicyEditorState(makePolicy("3"));
+    const dirty: PolicyEditorState = {
+      ...current,
+      dirty: true,
+      draft: { ...current.draft, targeted_policy: "allow_targeted" },
+    };
+
+    expect(observePolicyProp(dirty, null)).toEqual({
+      ...dirty,
+      acknowledgedPropRevision: null,
+      needsAuthoritativePolicyRefetch: true,
+    });
+  });
+
+  it("pending 중 pre-create cached null은 epoch를 유지해 mutation response를 막지 않는다", () => {
+    const pending = initialPolicyEditorState(makePolicy("3"));
+    const startEpoch = pending.serverSnapshotEpoch;
+    const cachedNull = observePolicyProp(pending, null);
+
+    expect(cachedNull).toEqual({
+      ...pending,
+      acknowledgedPropRevision: null,
+      needsAuthoritativePolicyRefetch: true,
+    });
+    expect(
+      applyPolicyMutationSuccess(cachedNull, makePolicy("4"), startEpoch),
+    ).toMatchObject({
+      latestObservedRevision: "4",
+      needsAuthoritativePolicyRefetch: false,
+      serverSnapshotEpoch: startEpoch + 1,
+    });
+  });
+
+  it("typed 409 current null만 기존 numeric 정책의 삭제 정본으로 적용한다", () => {
+    const current = initialPolicyEditorState(makePolicy("3"));
+    const absentConflict: PolicyRevisionConflict = {
+      currentPolicy: null,
+      currentRevision: null,
+      terminal: false,
+    };
+
+    const deleted = applyPolicyMutationConflict(
+      current,
+      absentConflict,
+      current.serverSnapshotEpoch,
+    );
+    expect(deleted).toMatchObject({
+      hasDeferredServerPolicy: true,
       latestObservedPolicy: null,
       latestObservedRevision: null,
-      serverSnapshotEpoch: 2,
+      needsAuthoritativePolicyRefetch: false,
+      revisionConflict: absentConflict,
+      serverSnapshotEpoch: 1,
     });
   });
 
@@ -255,7 +328,15 @@ describe("policy editor server state transition", () => {
     const originalPolicy = makePolicy("3");
     const original = initialPolicyEditorState(originalPolicy);
     const startEpoch = original.serverSnapshotEpoch;
-    const deleted = observePolicyProp(original, null);
+    const deleted = applyPolicyMutationConflict(
+      original,
+      {
+        currentPolicy: null,
+        currentRevision: null,
+        terminal: false,
+      },
+      startEpoch,
+    );
     const recreatedPolicy = makePolicy("1", { source_kind: "manual" });
     const recreated = observePolicyProp(deleted, recreatedPolicy);
     const oldConflict: PolicyRevisionConflict = {
@@ -278,9 +359,15 @@ describe("policy editor server state transition", () => {
   });
 
   it("삭제 generation에서 시작한 mutation은 재생성 뒤 rev1/null 응답도 무시한다", () => {
-    const deleted = observePolicyProp(
-      initialPolicyEditorState(makePolicy("3")),
-      null,
+    const original = initialPolicyEditorState(makePolicy("3"));
+    const deleted = applyPolicyMutationConflict(
+      original,
+      {
+        currentPolicy: null,
+        currentRevision: null,
+        terminal: false,
+      },
+      original.serverSnapshotEpoch,
     );
     const startEpoch = deleted.serverSnapshotEpoch;
     const recreated = observePolicyProp(deleted, makePolicy("1"));

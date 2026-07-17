@@ -48,6 +48,7 @@ export type PolicyEditorState = {
   lastSavedAt: string | null;
   latestObservedPolicy: ProviderRefreshPolicyRecord | null;
   latestObservedRevision: string | null;
+  needsAuthoritativePolicyRefetch: boolean;
   reconcileMessage: string | null;
   revisionConflict: PolicyRevisionConflict | null;
   serverSnapshotEpoch: number;
@@ -122,6 +123,7 @@ export function initialPolicyEditorState(
     lastSavedAt: null,
     latestObservedPolicy: canonicalPolicy,
     latestObservedRevision: revision,
+    needsAuthoritativePolicyRefetch: false,
     reconcileMessage: null,
     revisionConflict: null,
     serverSnapshotEpoch: 0,
@@ -145,6 +147,7 @@ export function applyServerPolicyState(
     hasDeferredServerPolicy: false,
     latestObservedPolicy: canonicalPolicy,
     latestObservedRevision: revision,
+    needsAuthoritativePolicyRefetch: false,
     reconcileMessage: null,
     revisionConflict: null,
   };
@@ -192,7 +195,18 @@ export function observePolicyProp(
   // mutation/409 transition이 이미 같은 snapshot을 적용하며 epoch를 올렸다.
   // 뒤따르는 own-refetch는 ack만 따라잡고 같은 snapshot의 epoch를 또 올리지 않는다.
   if (incomingRevision === state.latestObservedRevision) {
-    return acknowledgedState;
+    return {
+      ...acknowledgedState,
+      needsAuthoritativePolicyRefetch: false,
+    };
+  }
+  // 정책 delete API가 없는 현재 계약에서 numeric→null prop은 삭제 증거가 아니다.
+  // 생성 전 scope cache일 수 있으므로 정본은 보존하고 detail을 한 번 재검증한다.
+  if (incomingRevision === null && state.latestObservedRevision !== null) {
+    return {
+      ...acknowledgedState,
+      needsAuthoritativePolicyRefetch: true,
+    };
   }
   // global policy mutation/409보다 늦게 온 scope-specific detail cache는
   // authoritative snapshot을 되돌리지 않는다. prop 자체는 acknowledge해
@@ -214,6 +228,7 @@ export function observePolicyProp(
     hasDeferredServerPolicy: true,
     latestObservedPolicy: policy ?? null,
     latestObservedRevision: incomingRevision,
+    needsAuthoritativePolicyRefetch: false,
   };
 }
 
@@ -264,6 +279,7 @@ export function applyPolicyMutationConflict(
     hasDeferredServerPolicy: true,
     latestObservedPolicy: conflict.currentPolicy,
     latestObservedRevision: conflict.currentRevision,
+    needsAuthoritativePolicyRefetch: false,
     revisionConflict: conflict,
     serverSnapshotEpoch: state.serverSnapshotEpoch + 1,
   };
