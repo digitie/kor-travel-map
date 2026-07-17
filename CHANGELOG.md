@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
+
+- **FIXED**: `/ops/datasets`의 `이슈 있음` 필터와 정렬이 dataset issue만 보던 경로를
+  제거하고 dataset 또는 provider open issue가 있는 행을 모두 선택한다.
+- **CHANGED**: 행 badge와 전체 이슈 요약도 같은 합계 의미를 사용하고, scope 반복 행은
+  dataset/provider 귀속 단위로 한 번만 집계한다.
+
 ### admin ops 통합 링크 정본화 (2026-07-17, ADR-064 T-ADM-C6a)
 
 - **CHANGED**: import job·갱신 요청·load batch·provider/dataset 딥링크와 홈·Feature·큐레이션·

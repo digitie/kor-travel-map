@@ -3,6 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin datasets 이슈 의미 통일 (2026-07-17, `T-ADM-C7B-720`)
+
+- [x] **T-ADM-C7B-720 — dataset/provider open issue를 단일 행 의미로 통합.** `이슈 있음`
+  필터·정렬·행 badge는 dataset 또는 provider open issue가 하나라도 있으면 선택한다. 요약은
+  dataset을 `(provider,dataset)`, provider를 provider 단위로 중복 제거해 scope 반복 행을
+  한 번만 집계한다.
+- [x] **네 소유 조합과 frontend-only 경계를 고정.** provider-only, dataset-only, both,
+  neither를 unit과 mocked E2E 계약에 추가했고 API·OpenAPI·DB는 변경하지 않았다. 두 독립
+  리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했으며 unit 5건, type-check, lint와 production
+  build를 통과했다. Playwright 실행 증거는 `T-ADM-C7` n150 live wave에서 함께 남긴다.
+
 ## Admin 통합 화면 링크 정본화 (2026-07-17, `T-ADM-C6a`)
 
 - [x] **T-ADM-C6a — 존치 화면과 API 링크를 두 운영 화면으로 재배선.** import job,

@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
+
+- `/ops/datasets`의 `이슈 있음` 필터·정렬·행 badge를 dataset/provider open issue 합계로
+  통일했다. 요약은 dataset과 provider 귀속 단위를 별도 중복 제거해 같은 dataset의 scope
+  반복 행이 집계를 부풀리지 않는다.
+- provider-only, dataset-only, both, neither를 unit과 mocked E2E 계약으로 고정했다. 두
+  적대 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했고 unit 5건, type-check, lint와 production
+  build를 통과했다.
+- **다음 한 작업**: 완료 task를 아카이브한 문서 commit을 만들고 보안 감사 뒤 issue #720
+  연결 PR을 올린다. mocked/live Playwright 실행과 #720 종결은 최종 C7 n150 증거 뒤 수행한다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C6a 리뷰·로컬 gate 완료
 
 - C5 exact base 위 독립 branch에서 import job/update request/load batch/provider 엔티티 링크와
