@@ -2917,6 +2917,10 @@ class ProviderRefreshPolicyRow(Base):
             name="ck_provider_refresh_stale_after",
         ),
         CheckConstraint(
+            "revision > 0",
+            name="ck_provider_refresh_revision",
+        ),
+        CheckConstraint(
             "max_requests_per_minute IS NULL OR max_requests_per_minute > 0",
             name="ck_provider_refresh_rpm",
         ),
@@ -2977,6 +2981,11 @@ class ProviderRefreshPolicyRow(Base):
         Boolean,
         nullable=False,
         server_default=text("true"),
+    )
+    revision: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

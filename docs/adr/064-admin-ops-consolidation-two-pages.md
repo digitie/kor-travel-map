@@ -68,6 +68,12 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
     `docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`가 정본이다. 형식 위반 socket은
     같은 연결에서 복구하지 않고 즉시 폐기·재연결한다. dataset grid가 합성하는 issue/POI
     변경은 transaction-coupled `dataset_projection` topic으로 별도 추적한다.
+11. **갱신 정책 write는 BIGINT revision CAS**: `ops.provider_refresh_policies`는 양수
+    단조 revision을 가지며 신규 생성만 `expected_revision=null`, 기존 갱신은 조회한
+    revision 일치와 원자적 `revision + 1`을 요구한다. stale/create-update 종류 불일치는
+    write 없이 현재 record/revision을 포함한 typed 409로 닫는다. HTTP는 BIGINT를 양수
+    10진 문자열로 표현하고 UI는 draft base와 최신 관측 revision을 분리해 local draft를
+    보존한 3-way 조정을 제공한다.
 
 ## 근거
 

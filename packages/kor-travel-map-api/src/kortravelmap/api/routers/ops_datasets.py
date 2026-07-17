@@ -30,12 +30,14 @@ from kortravelmap.api.ops_dataset_schema import (
 from kortravelmap.api.ops_dataset_service import (
     DatasetNotFoundError,
     OrphanMutationDisabledError,
+    ProviderRefreshPolicyRevisionConflict,
     load_dataset_detail,
     load_datasets_grid,
     upsert_dataset_refresh_policy,
 )
 from kortravelmap.api.provider_catalog import find_catalog_entry
 from kortravelmap.api.provider_refresh_schema import (
+    ProviderRefreshPolicyConflictProblem,
     ProviderRefreshPolicyUpsertRequest,
     provider_refresh_policy_record,
 )
@@ -118,8 +120,10 @@ async def get_dataset_detail(
     responses={
         404: {"description": "dataset 없음"},
         409: {
+            "model": ProviderRefreshPolicyConflictProblem,
             "description": (
-                "카탈로그에서 제거된 orphan row. mutation_disabled_reason 포함."
+                "revision CAS 불일치 또는 카탈로그에서 제거된 orphan row. "
+                "현재 record/revision 또는 mutation_disabled_reason 포함."
             )
         },
     },
@@ -148,6 +152,33 @@ async def put_dataset_refresh_policy(
                 "message": "orphan dataset refresh policy mutation is disabled",
                 "details": {
                     "mutation_disabled_reason": exc.mutation_disabled_reason,
+                },
+            },
+        ) from exc
+    except ProviderRefreshPolicyRevisionConflict as exc:
+        current_record = (
+            provider_refresh_policy_record(exc.current) if exc.current is not None else None
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT",
+                "message": "provider refresh policy revision conflict",
+                "details": {
+                    "expected_revision": (
+                        str(exc.expected_revision)
+                        if exc.expected_revision is not None
+                        else None
+                    ),
+                    "current_revision": (
+                        current_record.revision if current_record is not None else None
+                    ),
+                    "current_record": (
+                        current_record.model_dump(mode="json")
+                        if current_record is not None
+                        else None
+                    ),
+                    "mutation_disabled_reason": None,
                 },
             },
         ) from exc

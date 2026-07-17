@@ -794,9 +794,22 @@ feature update request는 운영자가 쓰기 쉬운 높은 수준 API다.
   함께 반환한다.
 - `GET /ops/datasets/detail`: cursor, 최근 실행·event, 정책과 이슈를 exact scope로
   조회한다.
-- `PUT /ops/datasets/refresh-policy`: provider/dataset 정책 full upsert.
+- `PUT /ops/datasets/refresh-policy`: provider/dataset 정책 full upsert. body의
+  `expected_revision`은 필수 nullable 필드다. 행이 없을 때만 `null`로 생성하며,
+  기존 행은 응답에서 받은 양수 10진 문자열 revision을 그대로 보내야 한다.
+  갱신 성공은 revision을 원자적으로 1 증가시킨다. 기존 행에 `null`, 없는 행에
+  정수 문자열, stale revision은 `409 PROVIDER_REFRESH_POLICY_REVISION_CONFLICT`이고
+  `details.current_record`, `details.current_revision`, `details.expected_revision`을
+  반환한다. conflict는 정책 필드와 revision을 전혀 변경하지 않는다.
   `system_interval_seconds`/`optimal_interval_seconds`는 `min_interval_seconds`와
   선언된 request/min/hour/day floor보다 짧을 수 없다.
+
+`ProviderRefreshPolicyRecord.revision`과 요청 `expected_revision`은 JSON number가 아니라
+양수 10진 문자열이다. 브라우저는 작성 시작 시점의 `draftBaseRevision`과 background
+refetch/409에서 본 `latestObservedRevision`을 분리한다. 서버 변경을 감지해도 local draft를
+덮지 않으며, 저장 conflict에서는 base/local/latest를 필드별 3-way 비교한다. 운영자가
+서버 값을 다시 불러오거나 최신 revision 위에 local 변경을 명시적으로 다시 적용한 뒤에만
+다음 저장을 수행한다.
 
 실행 목록·상세·event filter는 `/ops/pipeline`이 canonical operation root와 exact
 provider/dataset identity를 기준으로 처리한다.

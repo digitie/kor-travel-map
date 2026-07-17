@@ -243,6 +243,7 @@ CREATE TABLE ops.provider_refresh_policies (
   rate_limit_source JSONB NOT NULL DEFAULT '{}'::jsonb,
   config_source TEXT NOT NULL DEFAULT 'db',
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  revision BIGINT NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (provider, dataset_key),
@@ -251,9 +252,14 @@ CREATE TABLE ops.provider_refresh_policies (
   ),
   CONSTRAINT ck_provider_refresh_targeted_policy CHECK (
     targeted_policy IN ('follow_system','allow_targeted','disabled')
-  )
+  ),
+  CONSTRAINT ck_provider_refresh_revision CHECK (revision > 0)
 );
 ```
+
+정책 write는 `expected_revision` CAS를 사용한다. 신규 행만 `null`로 revision 1을
+생성하고, 기존 행은 일치하는 revision에서만 원자적으로 `revision + 1`한다. HTTP 경계는
+BIGINT를 양수 10진 문자열로 표현하며 conflict는 현재 record/revision을 반환한다.
 
 `rate_limit_source`에는 다음을 저장한다.
 

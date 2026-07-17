@@ -627,6 +627,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 provider=policy_provider,
                 dataset_key=policy_dataset_key,
                 source_kind="manual",
+                expected_revision=None,
                 rate_limit_source={"proof": "server-provider-contract"},
             )
 
@@ -695,6 +696,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                         "dataset_key": policy_dataset_key,
                     },
                     json={
+                        "expected_revision": None,
                         "source_kind": "manual",
                         "targeted_policy": "allow_targeted",
                         "stale_after_minutes": 137,

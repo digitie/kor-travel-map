@@ -33,6 +33,7 @@ from kortravelmap.api.ops_dataset_schema import (
 )
 from kortravelmap.api.ops_dataset_service import (
     OrphanMutationDisabledError,
+    ProviderRefreshPolicyRevisionConflict,
     load_dataset_detail,
     load_datasets_grid,
 )
@@ -91,12 +92,14 @@ def _policy(
     dataset_key: str = "mois_license_features_bulk",
     stale_after_minutes: int | None = 60,
     enabled: bool = True,
+    targeted_policy: str = "allow_targeted",
+    revision: int = 1,
 ) -> ProviderRefreshPolicy:
     return ProviderRefreshPolicy(
         provider=provider,
         dataset_key=dataset_key,
         source_kind="openapi",
-        targeted_policy="allow_targeted",
+        targeted_policy=targeted_policy,
         system_interval_seconds=3600,
         optimal_interval_seconds=None,
         min_interval_seconds=60,
@@ -108,6 +111,7 @@ def _policy(
         rate_limit_source={},
         config_source="db",
         enabled=enabled,
+        revision=revision,
         created_at=_NOW,
         updated_at=_NOW,
         stale_after_minutes=stale_after_minutes,
@@ -404,7 +408,11 @@ def test_orphan_policy_mutation_is_409_with_reason(
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
         params={"provider": "legacy", "dataset_key": "removed"},
-        json={"source_kind": "openapi", "stale_after_minutes": 60},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
     )
     assert response.status_code == 409
     assert response.json()["code"] == "ORPHAN_MUTATION_DISABLED"
@@ -438,10 +446,45 @@ def test_policy_mutation_accepts_explicit_stale_sla(
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
         params={"provider": provider, "dataset_key": dataset_key},
-        json={"source_kind": "openapi", "stale_after_minutes": 90},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 90,
+        },
     )
     assert response.status_code == 200
     assert response.json()["data"]["stale_after_minutes"] == 90
+    assert response.json()["data"]["revision"] == "1"
+
+
+@pytest.mark.unit
+def test_policy_revision_conflict_is_typed_and_returns_current_record(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    current = _policy(targeted_policy="disabled", revision=2)
+
+    async def _upsert(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise ProviderRefreshPolicyRevisionConflict(
+            expected_revision=1,
+            current=current,
+        )
+
+    monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        json={"expected_revision": "1", "source_kind": "openapi"},
+    )
+
+    assert response.status_code == 409
+    problem = response.json()
+    assert problem["code"] == "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
+    assert problem["details"]["expected_revision"] == "1"
+    assert problem["details"]["current_revision"] == "2"
+    assert problem["details"]["current_record"]["revision"] == "2"
+    assert problem["details"]["current_record"]["targeted_policy"] == "disabled"
 
 
 @pytest.mark.unit
@@ -455,6 +498,7 @@ def test_policy_mutation_rejects_server_owned_rate_limit_provenance(
             "dataset_key": "mois_license_features_bulk",
         },
         json={
+            "expected_revision": None,
             "source_kind": "openapi",
             "rate_limit_source": {"forged": "operator-body"},
         },

@@ -32,22 +32,34 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 
-def _policy_body() -> Any:
+def _policy_body(
+    *,
+    expected_revision: str | None = None,
+    targeted_policy: str = "allow_targeted",
+    enabled: bool = False,
+) -> Any:
     from kortravelmap.api.provider_refresh_schema import (
         ProviderRefreshPolicyUpsertRequest,
     )
 
     return ProviderRefreshPolicyUpsertRequest(
+        expected_revision=expected_revision,
         source_kind="manual",
-        targeted_policy="allow_targeted",
+        targeted_policy=targeted_policy,
         max_concurrent=2,
-        enabled=False,
+        enabled=enabled,
         stale_after_minutes=90,
     )
 
 
 async def _put_refresh_policy(
-    engine: AsyncEngine, *, provider: str, dataset_key: str
+    engine: AsyncEngine,
+    *,
+    provider: str,
+    dataset_key: str,
+    expected_revision: str | None = None,
+    targeted_policy: str = "allow_targeted",
+    enabled: bool = False,
 ) -> Any:
     """프로덕션 ``get_session``과 동일한 fresh 세션으로 service를 호출한다."""
     from kortravelmap.api.ops_dataset_service import upsert_dataset_refresh_policy
@@ -57,7 +69,11 @@ async def _put_refresh_policy(
             session,
             provider=provider,
             dataset_key=dataset_key,
-            body=_policy_body(),
+            body=_policy_body(
+                expected_revision=expected_revision,
+                targeted_policy=targeted_policy,
+                enabled=enabled,
+            ),
         )
 
 
@@ -116,6 +132,7 @@ async def test_put_policy_only_combo_is_orphan_and_forbidden(
                 provider=provider,
                 dataset_key=dataset_key,
                 source_kind="manual",
+                expected_revision=None,
                 enabled=True,
             )
 
@@ -178,5 +195,142 @@ async def test_put_catalog_combo_succeeds_on_fresh_session(
         assert saved is not None
         assert saved.targeted_policy == "allow_targeted"
         assert saved.stale_after_minutes == 90
+    finally:
+        await _cleanup(migrated_engine, provider)
+
+
+async def test_same_revision_competition_is_cas_and_preserves_winner(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """같은 revision을 읽은 두 client 중 하나만 갱신하고 loser는 현재 row를 본다."""
+    from kortravelmap.infra.provider_refresh_policy_repo import (
+        ProviderRefreshPolicyRevisionConflict,
+    )
+
+    provider = "python-mois-api"
+    dataset_key = "mois_license_features_bulk"
+    try:
+        created = await _put_refresh_policy(
+            migrated_engine,
+            provider=provider,
+            dataset_key=dataset_key,
+            expected_revision=None,
+            targeted_policy="follow_system",
+            enabled=True,
+        )
+        assert created.revision == 1
+
+        async with (
+            AsyncSession(migrated_engine) as client_a,
+            AsyncSession(migrated_engine) as client_b,
+        ):
+            observed_a = await get_provider_refresh_policy(
+                client_a, provider=provider, dataset_key=dataset_key
+            )
+            observed_b = await get_provider_refresh_policy(
+                client_b, provider=provider, dataset_key=dataset_key
+            )
+        assert observed_a is not None
+        assert observed_b is not None
+        assert observed_a.revision == observed_b.revision == 1
+
+        winner = await _put_refresh_policy(
+            migrated_engine,
+            provider=provider,
+            dataset_key=dataset_key,
+            expected_revision="1",
+            targeted_policy="disabled",
+            enabled=False,
+        )
+        assert winner.revision == 2
+
+        with pytest.raises(ProviderRefreshPolicyRevisionConflict) as excinfo:
+            await _put_refresh_policy(
+                migrated_engine,
+                provider=provider,
+                dataset_key=dataset_key,
+                expected_revision="1",
+                targeted_policy="allow_targeted",
+                enabled=True,
+            )
+        assert excinfo.value.current is not None
+        assert excinfo.value.current.revision == 2
+        assert excinfo.value.current.targeted_policy == "disabled"
+
+        async with AsyncSession(migrated_engine) as verify:
+            current = await get_provider_refresh_policy(
+                verify, provider=provider, dataset_key=dataset_key
+            )
+        assert current is not None
+        assert current.revision == 2
+        assert current.enabled is False
+        assert current.targeted_policy == "disabled"
+    finally:
+        await _cleanup(migrated_engine, provider)
+
+
+async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """create/update 종류 불일치와 caller rollback은 값·revision을 보존한다."""
+    from kortravelmap.infra.provider_refresh_policy_repo import (
+        ProviderRefreshPolicyRevisionConflict,
+    )
+
+    provider = "python-mois-api"
+    dataset_key = "mois_license_features_bulk"
+    try:
+        with pytest.raises(ProviderRefreshPolicyRevisionConflict) as missing:
+            await _put_refresh_policy(
+                migrated_engine,
+                provider=provider,
+                dataset_key=dataset_key,
+                expected_revision="1",
+            )
+        assert missing.value.current is None
+
+        created = await _put_refresh_policy(
+            migrated_engine,
+            provider=provider,
+            dataset_key=dataset_key,
+            expected_revision=None,
+            targeted_policy="follow_system",
+            enabled=True,
+        )
+        with pytest.raises(ProviderRefreshPolicyRevisionConflict) as existing:
+            await _put_refresh_policy(
+                migrated_engine,
+                provider=provider,
+                dataset_key=dataset_key,
+                expected_revision=None,
+            )
+        assert existing.value.current is not None
+        assert existing.value.current.revision == created.revision == 1
+
+        class IntentionalRollback(RuntimeError):
+            pass
+
+        with pytest.raises(IntentionalRollback):
+            async with AsyncSession(migrated_engine) as session, session.begin():
+                changed = await upsert_provider_refresh_policy(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_kind="manual",
+                    expected_revision=created.revision,
+                    targeted_policy="disabled",
+                    enabled=False,
+                )
+                assert changed.revision == 2
+                raise IntentionalRollback
+
+        async with AsyncSession(migrated_engine) as verify:
+            current = await get_provider_refresh_policy(
+                verify, provider=provider, dataset_key=dataset_key
+            )
+        assert current is not None
+        assert current.revision == 1
+        assert current.targeted_policy == "follow_system"
+        assert current.enabled is True
     finally:
         await _cleanup(migrated_engine, provider)

@@ -36,7 +36,7 @@ class _OneResult:
     def __init__(self, row: SimpleNamespace) -> None:
         self._row = row
 
-    def one(self) -> SimpleNamespace:
+    def one_or_none(self) -> SimpleNamespace:
         return self._row
 
 
@@ -72,6 +72,7 @@ def _row(index: int) -> SimpleNamespace:
         rate_limit_source={},
         config_source="db",
         enabled=True,
+        revision=index + 1,
         created_at=now,
         updated_at=now,
     )
@@ -97,18 +98,23 @@ async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
         provider="provider-000",
         dataset_key="dataset-000",
         source_kind="openapi",
+        expected_revision=None,
     )
     await upsert_provider_refresh_policy(
         cast(Any, session),
         provider="provider-000",
         dataset_key="dataset-000",
         source_kind="openapi",
+        expected_revision=1,
         rate_limit_source={},
     )
 
-    sql, omitted_params = session.calls[0]
-    _, explicit_params = session.calls[1]
-    assert "ELSE ops.provider_refresh_policies.rate_limit_source" in sql
+    insert_sql, omitted_params = session.calls[0]
+    update_sql, explicit_params = session.calls[1]
+    assert "ON CONFLICT (provider, dataset_key) DO NOTHING" in insert_sql
+    assert "policy.revision = CAST(:expected_revision AS bigint)" in update_sql
+    assert "revision = policy.revision + 1" in update_sql
+    assert "ELSE policy.rate_limit_source" in update_sql
     assert omitted_params["rate_limit_source"] == "{}"
     assert omitted_params["rate_limit_source_provided"] is False
     assert explicit_params["rate_limit_source"] == "{}"
