@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex) — admin 감사 후속 5-PR 병렬 wave 문서화
+
+- C5 최신 commit을 기준으로 열린 감사 후속을 PR 다섯 개로 분리했다. C7B-720은 issue
+  #720의 dataset/provider 이슈 filter 의미를 맞추는 frontend-only 작업이고, AUD-718은
+  #718의 갱신 정책 BIGINT revision CAS, AUD-686은 #686의 KMA 유효 target 0건
+  fail-closed, C7B-API/UI는 #712/#719의 active projection·exact-scope 이력 계약과 UI
+  소비를 각각 소유한다.
+- 병렬 순서는 C6a 뒤 `C6b + C7A/0055 + C7B-720`, C7A 뒤
+  `AUD-718/0056 + AUD-686`, 이어 C7B-API/0057, C7B-UI, C7 n150이다. migration은
+  `0055 → 0056 → 0057` 단일 head만 허용하며, 각 소유 branch는 직전 migration이 main에
+  병합된 뒤 시작한다. migration 없는 병렬 task도 wave 시작·PR 직전·병합 직후 최신 main에
+  rebase한다.
+- **다음 한 작업**: C5 PR이 main에 병합될 때까지 이 문서 branch를 push하지 않는다. C5
+  병합 뒤 최신 main에 rebase해 문서-only PR을 올리고 별도 적대 재리뷰 없이 병합한 다음,
+  C6a 병합 여부를 확인해 Wave 1의 C6b·C7A·C7B-720을 agent A/B에 병렬 배정한다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C5 pipeline 통합·조작 폐루프 완료
 
 - `/ops/pipeline`에 canonical 작업 상태, root 단위 타임라인, Dagster run, 전역 event,
