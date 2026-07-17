@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex) — C5 pipeline 통합·append-only 조작 원장
+
+- 기존 PR #691을 C3e/C45X/C4 정본 위에서 재작성해 `/ops/pipeline`의 상태·타임라인·Dagster
+  run·event·schedule·feature update 조작을 완결했다. root와 descendant job, 요청 상태와
+  projected job을 분리하고 provider/dataset pair·URL·자동 갱신·degraded 의미를 통일했다.
+- 0054 migration에 feature request idempotency와 schedule audit/claim/resolution ledger를
+  append-only로 추가했다. DB clock lease, advisory lock, 120초 timeout과 mutation guard로
+  동시 명령·응답 유실·불확실 결과를 fail-closed하며, UI는 frozen command/request를 session에
+  보존해 reload 후 같은 identity로 복구한다.
+- 적대 리뷰에서 sensor fail-open, target/priority/dry-run 상태 drift, active claim 재실행,
+  결과 불확실성 및 React session 복원 문제를 보강했다. 의미 있는 최종 변경은 두 리뷰어 모두
+  S1/S2/S3 0건으로 승인했다. #693·#716의 재현 조건도 회귀 테스트에 포함했다.
+
 ## 2026-07-17 (codex) — C4R datasets 통합·scope UI 폐루프
 
 - Claude Code PR #698의 `/ops/datasets` 구현을 C45X typed scope 정본에 맞춰 재작성했다.
