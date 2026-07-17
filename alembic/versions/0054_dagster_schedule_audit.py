@@ -1,4 +1,4 @@
-"""Dagster schedule 조작 append-only 감사 이벤트를 추가한다.
+"""Feature request 멱등 ledger와 Dagster schedule append-only 감사를 추가한다.
 
 Revision ID: 0054_dagster_schedule_audit
 Revises: 0053_update_scope_dispatch
@@ -21,6 +21,115 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.create_table(
+        "feature_update_request_idempotency",
+        sa.Column("actor", sa.Text(), nullable=False),
+        sa.Column("idempotency_key", postgresql.UUID(as_uuid=False), nullable=False),
+        sa.Column(
+            "fingerprint_version",
+            sa.Integer(),
+            server_default=sa.text("1"),
+            nullable=False,
+        ),
+        sa.Column("request_fingerprint", sa.Text(), nullable=False),
+        sa.Column("request_id", postgresql.UUID(as_uuid=False), nullable=False),
+        sa.Column("reused_active_request", sa.Boolean(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "fingerprint_version = 1",
+            name=op.f("ck_feature_update_request_idempotency_fingerprint_version"),
+        ),
+        sa.CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_feature_update_request_idempotency_fingerprint"),
+        ),
+        sa.CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=op.f("ck_feature_update_request_idempotency_actor"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["request_id"],
+            ["ops.feature_update_requests.request_id"],
+            name=op.f("fk_feature_update_request_idempotency_request_id_feature_update_requests"),
+            ondelete="RESTRICT",
+        ),
+        sa.PrimaryKeyConstraint(
+            "actor",
+            "idempotency_key",
+            name=op.f("pk_feature_update_request_idempotency"),
+        ),
+        schema="ops",
+    )
+    op.create_index(
+        "idx_feature_update_request_idempotency_request",
+        "feature_update_request_idempotency",
+        ["request_id"],
+        unique=False,
+        schema="ops",
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.validate_feature_update_request_idempotency_insert()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM ops.feature_update_requests AS request
+            WHERE request.request_id = NEW.request_id
+              AND request.operator IS NOT DISTINCT FROM NEW.actor
+          ) THEN
+            RAISE EXCEPTION 'idempotency actor must match feature update request operator'
+              USING ERRCODE = '23514';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_feature_update_request_idempotency_insert_valid
+        BEFORE INSERT ON ops.feature_update_request_idempotency
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.validate_feature_update_request_idempotency_insert()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.reject_feature_update_request_idempotency_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          RAISE EXCEPTION 'feature update request idempotency ledger is append-only'
+            USING ERRCODE = '55000';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_feature_update_request_idempotency_append_only
+        BEFORE UPDATE OR DELETE ON ops.feature_update_request_idempotency
+        FOR EACH ROW
+        EXECUTE FUNCTION ops.reject_feature_update_request_idempotency_mutation()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_feature_update_request_idempotency_no_truncate
+        BEFORE TRUNCATE ON ops.feature_update_request_idempotency
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION ops.reject_feature_update_request_idempotency_mutation()
+        """
+    )
     op.create_table(
         "dagster_schedule_audit_events",
         sa.Column(
@@ -433,6 +542,26 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER trg_feature_update_request_idempotency_insert_valid "
+        "ON ops.feature_update_request_idempotency"
+    )
+    op.execute("DROP FUNCTION ops.validate_feature_update_request_idempotency_insert()")
+    op.execute(
+        "DROP TRIGGER trg_feature_update_request_idempotency_no_truncate "
+        "ON ops.feature_update_request_idempotency"
+    )
+    op.execute(
+        "DROP TRIGGER trg_feature_update_request_idempotency_append_only "
+        "ON ops.feature_update_request_idempotency"
+    )
+    op.execute("DROP FUNCTION ops.reject_feature_update_request_idempotency_mutation()")
+    op.drop_index(
+        "idx_feature_update_request_idempotency_request",
+        table_name="feature_update_request_idempotency",
+        schema="ops",
+    )
+    op.drop_table("feature_update_request_idempotency", schema="ops")
     op.execute(
         "DROP TRIGGER trg_dagster_schedule_active_claim_insert_valid "
         "ON ops.dagster_schedule_active_claims"

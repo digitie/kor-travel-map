@@ -20,6 +20,7 @@ import {
   ApiClientError,
   clearIdempotencyKeys,
   getJson,
+  idempotencyOperationKey,
   patchJson,
   pathWithQuery,
   postJson,
@@ -400,10 +401,15 @@ export function useCreateUpdateRequestMutation() {
     Error,
     FeatureUpdateRequestCreateRequest
   >({
-    mutationFn: (body) =>
-      postJson<FeatureUpdateRequestCreateResponse>(
-        "/v1/ops/pipeline/requests",
-        body,
+    mutationFn: async (body) =>
+      withIdempotencyKey(
+        await idempotencyOperationKey("pipeline:update-request:create", body),
+        (idempotencyKey) =>
+          postJson<FeatureUpdateRequestCreateResponse>(
+            "/v1/ops/pipeline/requests",
+            body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSettled: () => {
       void queryClient.invalidateQueries({

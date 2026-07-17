@@ -4,7 +4,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { ApiClientError, getJson, pathWithQuery, postJson } from "./client";
+import {
+  ApiClientError,
+  getJson,
+  idempotencyOperationKey,
+  pathWithQuery,
+  postJson,
+  withIdempotencyKey,
+} from "./client";
 import { pipelineCancellationQueryKeys } from "./pipelineCancellationInvalidation";
 import { invalidateOpsProviderQueries } from "./providers";
 import type { components, paths } from "./types";
@@ -27,17 +34,15 @@ export type FeatureUpdateRunMode =
 export type FeatureUpdateScopeMode =
   FeatureUpdateSchemas["CacheTargetKeysScope"]["scope_mode"];
 export type FeatureUpdatePoint = FeatureUpdateSchemas["FeatureUpdatePoint"];
-export type FeatureUpdateScope = GeneratedFeatureUpdateRequestCreateRequest["scope"];
+export type FeatureUpdateScope =
+  GeneratedFeatureUpdateRequestCreateRequest["scope"];
 export type FeatureUpdatePolicy = FeatureUpdateSchemas["FeatureUpdatePolicy"];
 export type FeatureUpdateRequestCreateRequest = Omit<
   GeneratedFeatureUpdateRequestCreateRequest,
   "priority" | "run_mode"
 > &
   Partial<
-    Pick<
-      GeneratedFeatureUpdateRequestCreateRequest,
-      "priority" | "run_mode"
-    >
+    Pick<GeneratedFeatureUpdateRequestCreateRequest, "priority" | "run_mode">
   >;
 export type FeatureUpdateRequestPreviewRequest = Omit<
   GeneratedFeatureUpdateRequestPreviewRequest,
@@ -72,7 +77,9 @@ export type PipelineCancellationResponse =
 export type FeatureUpdateRequestRunNowRequest =
   FeatureUpdateSchemas["FeatureUpdateRequestRunNowRequest"];
 
-function invalidateFeatureSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
+function invalidateFeatureSurfaces(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   void queryClient.invalidateQueries({ queryKey: ["features"] });
   void queryClient.invalidateQueries({ queryKey: ["feature"] });
   void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
@@ -110,9 +117,15 @@ function fetchFeatureUpdateRequest(
 function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
-  return postJson<FeatureUpdateRequestCreateResponse>(
-    "/v1/admin/features/update-requests",
-    body,
+  return idempotencyOperationKey("admin:update-request:create", body).then(
+    (operationKey) =>
+      withIdempotencyKey(operationKey, (idempotencyKey) =>
+        postJson<FeatureUpdateRequestCreateResponse>(
+          "/v1/admin/features/update-requests",
+          body,
+          { headers: { "Idempotency-Key": idempotencyKey } },
+        ),
+      ),
   );
 }
 

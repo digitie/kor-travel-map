@@ -11,9 +11,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiClientError,
   getJson,
+  idempotencyOperationKey,
   pathWithQuery,
   postJson,
   putJson,
+  withIdempotencyKey,
 } from "./client";
 import type { components, paths } from "./types";
 
@@ -212,12 +214,20 @@ export function buildDatasetRefreshNowRequest({
   };
 }
 
-export function createDatasetRefreshNow(
+export async function createDatasetRefreshNow(
   input: DatasetRefreshNowInput,
 ): Promise<DatasetRefreshRequestCreateResponse> {
-  return postJson<DatasetRefreshRequestCreateResponse>(
-    DATASET_REFRESH_REQUESTS_PATH,
-    buildDatasetRefreshNowRequest(input),
+  const body = buildDatasetRefreshNowRequest(input);
+  const operationKey = await idempotencyOperationKey(
+    "datasets:update-request:create",
+    body,
+  );
+  return withIdempotencyKey(operationKey, (idempotencyKey) =>
+    postJson<DatasetRefreshRequestCreateResponse>(
+      DATASET_REFRESH_REQUESTS_PATH,
+      body,
+      { headers: { "Idempotency-Key": idempotencyKey } },
+    ),
   );
 }
 

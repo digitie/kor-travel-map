@@ -577,6 +577,7 @@ async function mockPipelineRequests(
             : {},
         ),
         meta: makeMeta("e2e-refresh-now"),
+        idempotent_replay: false,
         reused_active_request: options.reusedActiveRequest ?? false,
       };
       await fulfillJson(route, response, options.reusedActiveRequest ? 200 : 201);

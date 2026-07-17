@@ -39,7 +39,10 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { useConfirm } from "@/components/confirm-dialog";
 
+import { shouldRetainClaimResolutionSubmission } from "./claim-resolution-retry";
 import { describeCron } from "./pipeline-shared";
+
+const MAX_CLAIM_RESOLUTION_REASON_LENGTH = 500;
 
 const COMMAND_LABELS: Record<PipelineScheduleCommand, string> = {
   run: "즉시 실행",
@@ -399,7 +402,10 @@ export function SchedulePanel({
           reason: claimResolutionReason.trim(),
         },
       };
-    if (!submission.body.reason) {
+    if (
+      !submission.body.reason ||
+      submission.body.reason.length > MAX_CLAIM_RESOLUTION_REASON_LENGTH
+    ) {
       return;
     }
     const confirmed = await confirm({
@@ -426,6 +432,11 @@ export function SchedulePanel({
           setLastResult(null);
           setClaimResolutionReason("");
           setClaimResolutionSubmission(null);
+        },
+        onError: (error) => {
+          if (!shouldRetainClaimResolutionSubmission(error)) {
+            setClaimResolutionSubmission(null);
+          }
         },
       },
     );
@@ -511,6 +522,7 @@ export function SchedulePanel({
                   resolveClaim.isPending || frozenClaimResolution !== null
                 }
                 label="확인 근거·해제 사유 (필수)"
+                maxLength={MAX_CLAIM_RESOLUTION_REASON_LENGTH}
                 placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
                 value={claimResolutionReason}
                 onChange={(event) =>
@@ -523,7 +535,11 @@ export function SchedulePanel({
                   !(
                     frozenClaimResolution?.body.reason ??
                     claimResolutionReason.trim()
-                  )
+                  ) ||
+                  (
+                    frozenClaimResolution?.body.reason ??
+                    claimResolutionReason.trim()
+                  ).length > MAX_CLAIM_RESOLUTION_REASON_LENGTH
                 }
                 type="button"
                 variant="destructive"

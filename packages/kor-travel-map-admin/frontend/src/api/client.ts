@@ -84,6 +84,36 @@ export function clearIdempotencyKeys(operationPrefix: string): void {
   }
 }
 
+function canonicalIdempotencyValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalIdempotencyValue);
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalIdempotencyValue(item)]),
+  );
+}
+
+/** 민감한 request body를 storage key에 노출하지 않는 deterministic SHA-256 key. */
+export async function idempotencyOperationKey(
+  namespace: string,
+  body: unknown,
+): Promise<string> {
+  const canonical = JSON.stringify(canonicalIdempotencyValue(body));
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonical),
+  );
+  const hex = Array.from(new Uint8Array(digest), (value) =>
+    value.toString(16).padStart(2, "0"),
+  ).join("");
+  return `${namespace}:${hex}`;
+}
+
 export async function withIdempotencyKey<T>(
   operationKey: string,
   operation: (idempotencyKey: string) => Promise<T>,

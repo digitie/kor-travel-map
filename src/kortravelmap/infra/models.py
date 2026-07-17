@@ -108,6 +108,7 @@ __all__ = [
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
+    "FeatureUpdateRequestIdempotencyRow",
     "PipelineCancellationRow",
     "PipelineCancellationRunRow",
     "PipelineCancellationMemberRow",
@@ -2304,6 +2305,51 @@ class FeatureUpdateRequestRow(Base):
         BigInteger,
         nullable=False,
         server_default=text("1"),
+    )
+
+
+class FeatureUpdateRequestIdempotencyRow(Base):
+    """Actor-scoped append-only feature update request idempotency ledger."""
+
+    __tablename__ = "feature_update_request_idempotency"
+    __table_args__ = (
+        CheckConstraint(
+            "fingerprint_version = 1",
+            name=conv("ck_feature_update_request_idempotency_fingerprint_version"),
+        ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_feature_update_request_idempotency_fingerprint"),
+        ),
+        CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=conv("ck_feature_update_request_idempotency_actor"),
+        ),
+        Index(
+            "idx_feature_update_request_idempotency_request",
+            "request_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    actor: Mapped[str] = mapped_column(Text, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    fingerprint_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    request_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.feature_update_requests.request_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    reused_active_request: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
 

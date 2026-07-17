@@ -6,10 +6,13 @@ application exception으로 노출하며 HTTP status 매핑은 각 라우터가 
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from time import perf_counter
 from typing import Any, NoReturn
+from uuid import UUID
 
 import httpx
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
@@ -24,8 +27,11 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
     FeatureUpdateRequestPreview,
+    create_feature_update_request_idempotency,
     enqueue_feature_update_request,
+    get_feature_update_request_idempotency,
     get_update_request,
+    lock_feature_update_request_idempotency,
 )
 from kortravelmap.infra.feature_update_repo import (
     preview_feature_update_request as preview_feature_update_request_repo,
@@ -60,6 +66,7 @@ __all__ = [
     "FeatureUpdateEnqueueError",
     "FeatureUpdateActiveScopeConflict",
     "FeatureUpdateDispatchStateConflict",
+    "FeatureUpdateIdempotencyConflict",
     "FeatureUpdateLockConflict",
     "FeatureUpdateRequestNotFound",
     "FeatureUpdateResolverError",
@@ -118,14 +125,10 @@ class FeatureUpdateActiveScopeConflict(RuntimeError, FeatureUpdateServiceError):
     code = "ACTIVE_SCOPE_CONFLICT"
 
     def __init__(self, request: FeatureUpdateRequest) -> None:
-        super().__init__(
-            "같은 provider/dataset/sync_scope에 다른 활성 요청이 이미 있습니다."
-        )
+        super().__init__("같은 provider/dataset/sync_scope에 다른 활성 요청이 이미 있습니다.")
         self.request_id = request.request_id
         self.status = (
-            "cancellation_requested"
-            if request.cancellation_id is not None
-            else request.status
+            "cancellation_requested" if request.cancellation_id is not None else request.status
         )
 
 
@@ -138,6 +141,17 @@ class FeatureUpdateDispatchStateConflict(RuntimeError, FeatureUpdateServiceError
         super().__init__(f"{current_status} 상태인 request는 dispatch할 수 없습니다.")
         self.request_id = request_id
         self.current_status = current_status
+
+
+class FeatureUpdateIdempotencyConflict(RuntimeError, FeatureUpdateServiceError):
+    """Global key가 다른 canonical body 또는 actor에 이미 사용됐다."""
+
+    code = "FEATURE_UPDATE_IDEMPOTENCY_CONFLICT"
+
+    def __init__(self, *, idempotency_key: str, request_id: str) -> None:
+        super().__init__("같은 Idempotency-Key를 다른 갱신 요청에 재사용할 수 없습니다.")
+        self.idempotency_key = idempotency_key
+        self.request_id = request_id
 
 
 class FeatureUpdateRequestNotFound(LookupError, FeatureUpdateServiceError):
@@ -160,6 +174,36 @@ def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
     return dict(policy)
 
 
+def _canonical_feature_update_request_body(
+    body: FeatureUpdateRequestCreateRequest,
+) -> dict[str, Any]:
+    """Fingerprint와 실행 plan이 함께 쓰는 validated canonical body."""
+    canonical_body = body.model_dump(mode="json", exclude_none=False)
+    canonical_body["providers"] = sorted(canonical_body["providers"])
+    canonical_body["dataset_keys"] = sorted(canonical_body["dataset_keys"])
+    scope = canonical_body["scope"]
+    if scope["type"] == "feature_ids":
+        scope["feature_ids"] = sorted(scope["feature_ids"])
+    elif scope["type"] == "cache_target_keys":
+        scope["target_keys"] = sorted(scope["target_keys"])
+    return canonical_body
+
+
+def _feature_update_request_fingerprint(
+    canonical_body: Mapping[str, Any],
+    *,
+    operator: str,
+) -> str:
+    """Canonical validated body+actor SHA-256."""
+    serialized = json.dumps(
+        {"actor": operator, "body": canonical_body},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def record_from_request(
     row: FeatureUpdateRequest,
     *,
@@ -169,8 +213,7 @@ def record_from_request(
 
     requested_sync_scope = (
         row.scope.get("sync_scope")
-        if row.scope_type == "provider_dataset"
-        and isinstance(row.scope.get("sync_scope"), str)
+        if row.scope_type == "provider_dataset" and isinstance(row.scope.get("sync_scope"), str)
         else None
     )
 
@@ -221,6 +264,7 @@ def created_response(
     data: FeatureUpdateRequest,
     *,
     started_at: float,
+    idempotent_replay: bool = False,
     reused_active_request: bool = False,
     status_url_prefix: str = DEFAULT_STATUS_URL_PREFIX,
 ) -> FeatureUpdateRequestCreateResponse:
@@ -232,6 +276,7 @@ def created_response(
             result_kind="request",
             **persisted.model_dump(),
         ),
+        idempotent_replay=idempotent_replay,
         reused_active_request=reused_active_request,
         meta=make_meta(started_at=started_at),
     )
@@ -296,9 +341,7 @@ def _resolved_refreshable_pairs(
         )
     if providers and dataset_keys:
         return frozenset(
-            (provider, dataset_key)
-            for provider in providers
-            for dataset_key in dataset_keys
+            (provider, dataset_key) for provider in providers for dataset_key in dataset_keys
         )
     if providers:
         return frozenset(pair for pair in refreshable_pairs if pair[0] in providers)
@@ -360,32 +403,26 @@ async def _validate_refreshable_request(
             raise FeatureUpdateValidationError(
                 f"{provider}/{dataset_key}는 target 기반 sync_scope만 지원합니다."
             )
-        if canonical.external_system is not None and not await (
-            has_active_poi_cache_targets_for_external_system(
+        if (
+            canonical.external_system is not None
+            and not await has_active_poi_cache_targets_for_external_system(
                 session,
                 external_system=canonical.external_system,
             )
         ):
             raise FeatureUpdateValidationError(
-                "활성 POI cache target이 없는 external_system입니다: "
-                f"{canonical.external_system}"
+                f"활성 POI cache target이 없는 external_system입니다: {canonical.external_system}"
             )
         return canonical.value
 
     if providers and dataset_keys:
         selected_pairs = {
-            (provider, dataset_key)
-            for provider in providers
-            for dataset_key in dataset_keys
+            (provider, dataset_key) for provider in providers for dataset_key in dataset_keys
         }
     elif providers:
-        selected_pairs = {
-            pair for pair in refreshable_pairs if pair[0] in providers
-        }
+        selected_pairs = {pair for pair in refreshable_pairs if pair[0] in providers}
     elif dataset_keys:
-        selected_pairs = {
-            pair for pair in refreshable_pairs if pair[1] in dataset_keys
-        }
+        selected_pairs = {pair for pair in refreshable_pairs if pair[1] in dataset_keys}
     else:
         raise FeatureUpdateValidationError(
             "non-direct feature update request는 provider 또는 dataset_key "
@@ -394,12 +431,10 @@ async def _validate_refreshable_request(
     unsupported_target_pairs = sorted(selected_pairs & target_scope_pairs)
     if unsupported_target_pairs:
         subjects = ", ".join(
-            f"{provider}/{dataset_key}"
-            for provider, dataset_key in unsupported_target_pairs
+            f"{provider}/{dataset_key}" for provider, dataset_key in unsupported_target_pairs
         )
         raise FeatureUpdateValidationError(
-            "target 선택형 dataset은 provider_dataset scope로만 요청할 수 있습니다: "
-            f"{subjects}"
+            f"target 선택형 dataset은 provider_dataset scope로만 요청할 수 있습니다: {subjects}"
         )
 
     if providers and dataset_keys:
@@ -697,84 +732,138 @@ async def create_feature_update_request(
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
     *,
+    idempotency_key: UUID,
     operator: str,
     status_url_prefix: str,
     settings: KorTravelMapSettings,
     resolved_plan_guard: ResolvedPlanGuard,
 ) -> FeatureUpdateRequestCreateResponse:
-    """새 canonical 요청을 만들거나 같은 계획의 활성 요청을 멱등 재사용한다."""
+    """Durable key로 생성 결과를 재생하거나 canonical 요청을 생성/reuse한다."""
 
     started_at = perf_counter()
-    scope = _scope_payload(body.scope)
-    update_policy = _update_policy_payload(body.update_policy)
+    canonical_body = _canonical_feature_update_request_body(body)
+    scope = dict(canonical_body["scope"])
+    providers = tuple(canonical_body["providers"])
+    dataset_keys = tuple(canonical_body["dataset_keys"])
+    update_policy = dict(canonical_body["update_policy"])
+    normalized_key = str(idempotency_key)
+    request_fingerprint = _feature_update_request_fingerprint(
+        canonical_body,
+        operator=operator,
+    )
+    result: FeatureUpdateRequest | None = None
+    reused = False
+    replayed = False
     async with session.begin():
-        effective_sync_scope = await _validate_refreshable_request(
+        # 같은 actor/key의 느린 precheck도 하나만 수행하도록 lock을 transaction
+        # 전체(검증→enqueue/reuse→ledger insert) 동안 의도적으로 유지한다.
+        await lock_feature_update_request_idempotency(
             session,
-            scope=scope,
-            providers=body.providers,
-            dataset_keys=body.dataset_keys,
+            normalized_key,
+            actor=operator,
         )
-        await resolved_plan_guard(
-            _resolved_refreshable_pairs(
+        mapping = await get_feature_update_request_idempotency(
+            session,
+            normalized_key,
+            actor=operator,
+        )
+        if mapping is not None:
+            if (
+                mapping.fingerprint_version != 1
+                or mapping.actor != operator
+                or mapping.request_fingerprint != request_fingerprint
+            ):
+                raise FeatureUpdateIdempotencyConflict(
+                    idempotency_key=normalized_key,
+                    request_id=mapping.request_id,
+                )
+            result = await get_update_request(session, mapping.request_id)
+            if result is None:
+                raise FeatureUpdateEnqueueError(
+                    "idempotency ledger가 존재하지 않는 request를 참조합니다."
+                )
+            replayed = True
+            reused = mapping.reused_active_request
+        else:
+            effective_sync_scope = await _validate_refreshable_request(
+                session,
                 scope=scope,
-                providers=body.providers,
-                dataset_keys=body.dataset_keys,
+                providers=providers,
+                dataset_keys=dataset_keys,
             )
-        )
-        result = await _find_reusable_provider_dataset_request(
-            session,
-            scope=scope,
-            effective_sync_scope=effective_sync_scope,
-            providers=body.providers,
-            dataset_keys=body.dataset_keys,
-            update_policy=update_policy,
-            run_mode=body.run_mode,
-            priority=body.priority,
-            operator=operator,
-            reason=body.reason,
-        )
-        reused = result is not None
-        for attempt in range(3):
-            if result is not None:
-                break
-            try:
-                async with session.begin_nested():
-                    result = await _enqueue_validated_update_request(
+            await resolved_plan_guard(
+                _resolved_refreshable_pairs(
+                    scope=scope,
+                    providers=providers,
+                    dataset_keys=dataset_keys,
+                )
+            )
+            result = await _find_reusable_provider_dataset_request(
+                session,
+                scope=scope,
+                effective_sync_scope=effective_sync_scope,
+                providers=providers,
+                dataset_keys=dataset_keys,
+                update_policy=update_policy,
+                run_mode=body.run_mode,
+                priority=body.priority,
+                operator=operator,
+                reason=body.reason,
+            )
+            reused = result is not None
+            for attempt in range(3):
+                if result is not None:
+                    break
+                try:
+                    async with session.begin_nested():
+                        result = await _enqueue_validated_update_request(
+                            session,
+                            scope=scope,
+                            effective_sync_scope=effective_sync_scope,
+                            providers=providers,
+                            dataset_keys=dataset_keys,
+                            update_policy=update_policy,
+                            run_mode=body.run_mode,
+                            priority=body.priority,
+                            operator=operator,
+                            reason=body.reason,
+                            settings=settings,
+                        )
+                except IntegrityError as exc:
+                    if not is_active_provider_dataset_unique_violation(exc):
+                        raise FeatureUpdateEnqueueError(
+                            "feature update request enqueue failed"
+                        ) from exc
+                    result = await _find_reusable_provider_dataset_request(
                         session,
                         scope=scope,
                         effective_sync_scope=effective_sync_scope,
-                        providers=body.providers,
-                        dataset_keys=body.dataset_keys,
+                        providers=providers,
+                        dataset_keys=dataset_keys,
                         update_policy=update_policy,
                         run_mode=body.run_mode,
                         priority=body.priority,
                         operator=operator,
                         reason=body.reason,
-                        settings=settings,
                     )
-            except IntegrityError as exc:
-                if not is_active_provider_dataset_unique_violation(exc):
+                    if result is not None:
+                        reused = True
+                if result is None and attempt == 2:
                     raise FeatureUpdateEnqueueError(
-                        "feature update request enqueue failed"
-                    ) from exc
-                result = await _find_reusable_provider_dataset_request(
-                    session,
-                    scope=scope,
-                    effective_sync_scope=effective_sync_scope,
-                    providers=body.providers,
-                    dataset_keys=body.dataset_keys,
-                    update_policy=update_policy,
-                    run_mode=body.run_mode,
-                    priority=body.priority,
-                    operator=operator,
-                    reason=body.reason,
-                )
-                if result is not None:
-                    reused = True
-            if result is None and attempt == 2:
+                        "활성 scope lifecycle 경합이 반복되어 요청을 생성하지 못했습니다."
+                    )
+            if result is None:  # pragma: no cover - 마지막 attempt가 위에서 거절한다.
                 raise FeatureUpdateEnqueueError(
                     "활성 scope lifecycle 경합이 반복되어 요청을 생성하지 못했습니다."
                 )
+            await create_feature_update_request_idempotency(
+                session,
+                idempotency_key=normalized_key,
+                request_fingerprint=request_fingerprint,
+                request_id=result.request_id,
+                actor=operator,
+                reused_active_request=reused,
+            )
     if result is None:  # pragma: no cover - loop의 마지막 attempt가 위에서 거절한다.
         raise FeatureUpdateEnqueueError(
             "활성 scope lifecycle 경합이 반복되어 요청을 생성하지 못했습니다."
@@ -782,6 +871,7 @@ async def create_feature_update_request(
     return created_response(
         result,
         started_at=started_at,
+        idempotent_replay=replayed,
         reused_active_request=reused,
         status_url_prefix=status_url_prefix,
     )
@@ -796,9 +886,7 @@ async def run_feature_update_request_now(
 
     existing = await get_update_request(session, request_id)
     if existing is None:
-        raise FeatureUpdateRequestNotFound(
-            f"feature update request 없음: {request_id!r}"
-        )
+        raise FeatureUpdateRequestNotFound(f"feature update request 없음: {request_id!r}")
     if existing.cancellation_id is not None:
         raise FeatureUpdateDispatchStateConflict(
             request_id=existing.request_id,

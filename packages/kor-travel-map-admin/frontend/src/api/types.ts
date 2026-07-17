@@ -6518,6 +6518,8 @@ export interface components {
          */
         FeatureUpdateRequestCreateResponse: {
             data: components["schemas"]["FeatureUpdateRequestCreatedRecord"];
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
             meta: components["schemas"]["Meta"];
             /** Reused Active Request */
             reused_active_request: boolean;
@@ -12871,7 +12873,9 @@ export interface operations {
     create_feature_update_request_v1_admin_features_update_requests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -13156,7 +13160,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
+            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18005,7 +18009,9 @@ export interface operations {
     create_pipeline_update_request_v1_ops_pipeline_requests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -18155,7 +18161,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
+            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
                     [name: string]: unknown;

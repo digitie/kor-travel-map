@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPage,
     get_update_request,
@@ -89,6 +89,7 @@ async def _create_request_response(
     body: FeatureUpdateRequestCreateRequest,
     session: AsyncSession,
     *,
+    idempotency_key: UUID,
     operator: str,
 ) -> FeatureUpdateRequestCreateResponse:
     api_settings = settings_from_request(request)
@@ -107,6 +108,7 @@ async def _create_request_response(
         return await feature_update_service.create_feature_update_request(
             body,
             session,
+            idempotency_key=idempotency_key,
             operator=operator,
             status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
             settings=KorTravelMapSettings(),
@@ -153,6 +155,7 @@ async def create_feature_update_request(
     request: Request,
     body: FeatureUpdateRequestCreateRequest,
     response: Response,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
@@ -160,9 +163,10 @@ async def create_feature_update_request(
         request,
         body,
         session,
+        idempotency_key=idempotency_key,
         operator=context.actor,
     )
-    if result.reused_active_request:
+    if result.idempotent_replay or result.reused_active_request:
         response.status_code = status.HTTP_200_OK
     return result
 

@@ -1865,6 +1865,7 @@ async def create_pipeline_update_request(
     request: Request,
     body: FeatureUpdateRequestCreateRequest,
     response: Response,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> FeatureUpdateRequestCreateResponse:
@@ -1884,6 +1885,7 @@ async def create_pipeline_update_request(
         result = await feature_update_service.create_feature_update_request(
             body,
             session,
+            idempotency_key=idempotency_key,
             operator=context.actor,
             status_url_prefix=_UPDATE_REQUEST_STATUS_URL_PREFIX,
             settings=KorTravelMapSettings(),
@@ -1896,7 +1898,7 @@ async def create_pipeline_update_request(
         raise mois_source_precheck.to_http_exception(exc) from exc
     except feature_update_service.FeatureUpdateServiceError as exc:
         raise to_http_exception(exc) from exc
-    if result.reused_active_request:
+    if result.idempotent_replay or result.reused_active_request:
         response.status_code = status.HTTP_200_OK
     return result
 

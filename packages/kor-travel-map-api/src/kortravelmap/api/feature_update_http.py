@@ -13,7 +13,8 @@ __all__ = ["FEATURE_UPDATE_CONFLICT_RESPONSES", "to_http_exception"]
 FEATURE_UPDATE_CONFLICT_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
     409: {
         "description": (
-            "동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 "
+            "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, "
+            "dispatch 불가 상태 또는 "
             "LOCK_BUSY(이 경우에만 Retry-After header 포함)"
         ),
     },
@@ -35,6 +36,18 @@ def to_http_exception(
             },
             headers={"Retry-After": str(exc.retry_after_seconds)},
         )
+    if isinstance(exc, feature_update_service.FeatureUpdateIdempotencyConflict):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "details": {
+                    "idempotency_key": exc.idempotency_key,
+                    "request_id": exc.request_id,
+                },
+            },
+        )
     if isinstance(exc, feature_update_service.FeatureUpdateActiveScopeConflict):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -44,10 +57,7 @@ def to_http_exception(
                 "details": {
                     "request_id": exc.request_id,
                     "status": exc.status,
-                    "detail_url": (
-                        "/v1/ops/pipeline/executions/update_request/"
-                        f"{exc.request_id}"
-                    ),
+                    "detail_url": (f"/v1/ops/pipeline/executions/update_request/{exc.request_id}"),
                 },
             },
         )
@@ -60,10 +70,7 @@ def to_http_exception(
                 "details": {
                     "request_id": exc.request_id,
                     "status": exc.current_status,
-                    "detail_url": (
-                        "/v1/ops/pipeline/executions/update_request/"
-                        f"{exc.request_id}"
-                    ),
+                    "detail_url": (f"/v1/ops/pipeline/executions/update_request/{exc.request_id}"),
                 },
             },
         )

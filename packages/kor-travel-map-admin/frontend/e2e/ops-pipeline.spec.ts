@@ -626,6 +626,7 @@ interface MockOptions {
   scheduleResponseDelayMs?: number;
   claimResolutionResponseLossOnce?: boolean;
   claimResolutionResponseDelayMs?: number;
+  claimResolutionErrorOnce?: { status: number; body: unknown };
   previewResponseDelaysMs?: number[];
   previewFeatureCounts?: number[];
   schedulesResponse?: PipelineSchedulesResponse;
@@ -636,6 +637,7 @@ interface MockOptions {
     body?: unknown;
   };
   requestCreateDelayMs?: number;
+  requestCreateResponseLossOnce?: boolean;
   detailFactory?: (
     executionId: string,
     query: URLSearchParams,
@@ -658,6 +660,12 @@ interface MockCounters {
   scheduleKeys: string[];
   claimResolutionBodies: unknown[];
   requestBodies: unknown[];
+  requestKeys: string[];
+  requestRows: Array<{
+    idempotencyKey: string;
+    body: unknown;
+    requestId: string;
+  }>;
   previewBodies: unknown[];
   runNowBodies: Array<string | null>;
   detailQueries: Array<{ executionId: string; query: URLSearchParams }>;
@@ -678,6 +686,8 @@ async function installPipelineMocks(
     scheduleKeys: [],
     claimResolutionBodies: [],
     requestBodies: [],
+    requestKeys: [],
+    requestRows: [],
     previewBodies: [],
     runNowBodies: [],
     detailQueries: [],
@@ -892,6 +902,17 @@ async function installPipelineMocks(
         await route.abort("connectionreset");
         return;
       }
+      if (
+        options.claimResolutionErrorOnce &&
+        counters.claimResolutionBodies.length === 1
+      ) {
+        await fulfillJson(
+          route,
+          options.claimResolutionErrorOnce.body,
+          options.claimResolutionErrorOnce.status,
+        );
+        return;
+      }
       const parts = pathname.split("/");
       await fulfillJson(route, {
         data: {
@@ -1092,7 +1113,10 @@ async function installPipelineMocks(
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/requests")) {
-      counters.requestBodies.push(request.postDataJSON());
+      const requestBody = request.postDataJSON();
+      const idempotencyKey = request.headers()["idempotency-key"] ?? "";
+      counters.requestBodies.push(requestBody);
+      counters.requestKeys.push(idempotencyKey);
       if (options.requestCreateDelayMs) {
         await new Promise((resolve) =>
           setTimeout(resolve, options.requestCreateDelayMs),
@@ -1117,6 +1141,43 @@ async function installPipelineMocks(
         );
         return;
       }
+      const existingRow = counters.requestRows.find(
+        (row) => row.idempotencyKey === idempotencyKey,
+      );
+      if (
+        existingRow &&
+        JSON.stringify(existingRow.body) !== JSON.stringify(requestBody)
+      ) {
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/feature-update-idempotency-conflict",
+            title: "Idempotency-Key conflict",
+            status: 409,
+            detail: "같은 키를 다른 body에 사용할 수 없습니다.",
+            code: "FEATURE_UPDATE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e",
+            errors: [],
+          },
+          409,
+        );
+        return;
+      }
+      if (!existingRow) {
+        counters.requestRows.push({
+          idempotencyKey,
+          body: requestBody,
+          requestId: REQUEST_ID,
+        });
+      }
+      if (
+        options.requestCreateResponseLossOnce &&
+        counters.requestBodies.length === 1
+      ) {
+        await route.abort("connectionreset");
+        return;
+      }
+      const idempotentReplay = existingRow !== undefined;
       const created: FeatureUpdateRequestCreateResponse = {
         data: {
           result_kind: "request",
@@ -1149,10 +1210,15 @@ async function installPipelineMocks(
           generation: 1,
           status_url: `/v1/ops/pipeline/executions/update_request/${REQUEST_ID}`,
         },
+        idempotent_replay: idempotentReplay,
         reused_active_request: options.reusedActiveRequest ?? false,
         meta: META,
       };
-      await fulfillJson(route, created, 201);
+      await fulfillJson(
+        route,
+        created,
+        idempotentReplay || options.reusedActiveRequest ? 200 : 201,
+      );
       return;
     }
     await route.continue();
@@ -2215,6 +2281,61 @@ test.describe("/ops/pipeline", () => {
     );
   });
 
+  test("claim 해제 422는 frozen body를 해제해 사유를 수정할 수 있다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleAuditStatus: "terminal_record_failed",
+      claimResolutionErrorOnce: {
+        status: 422,
+        body: {
+          type: "https://kor-travel-map/errors/validation-error",
+          title: "Validation Error",
+          status: 422,
+          detail: "확인 사유를 수정하세요.",
+          code: "VALIDATION_ERROR",
+          request_id: "e2e",
+          errors: [],
+        },
+      },
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
+      .click();
+    await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
+
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    const reason = recovery.getByLabel("확인 근거·해제 사유 (필수)");
+    await reason.fill("수정 전 사유");
+    await recovery.getByRole("button", { name: "claim 해제" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "확인 결과 기록 후 해제" })
+      .click();
+
+    await expect(page.getByText("claim 해제 실패")).toBeVisible();
+    await expect(reason).toBeEnabled();
+    await expect(
+      recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
+    ).toBeEnabled();
+    await reason.fill("수정한 확인 사유");
+    await recovery.getByRole("button", { name: "claim 해제" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "확인 결과 기록 후 해제" })
+      .click();
+
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toBeVisible();
+    expect(counters.claimResolutionBodies).toEqual([
+      { resolution: "confirmed_not_applied", reason: "수정 전 사유" },
+      { resolution: "confirmed_not_applied", reason: "수정한 확인 사유" },
+    ]);
+  });
+
   test("요청 dialog — scope 전환·MOIS 경고·별도 preview", async ({ page }) => {
     const counters = await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
@@ -2351,16 +2472,62 @@ test.describe("/ops/pipeline", () => {
     await expect(
       dialog.getByRole("button", { name: "요청 생성", exact: true }),
     ).toBeDisabled();
+    await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
+    await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
+    await expect(
+      dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
+    ).toBeDisabled();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeVisible();
     await page.mouse.click(4, 4);
     await expect(dialog).toBeVisible();
 
     await expect(dialog.getByTestId("request-create-result")).toBeVisible();
+    await expect(dialog.getByLabel("데이터셋 키 필터")).toHaveValue(
+      "kma_short_forecast",
+    );
     await expect(closeButton).toBeEnabled();
     await closeButton.click();
     await expect(dialog).toBeHidden();
     expect(counters.requestBodies).toHaveLength(1);
+  });
+
+  test("요청 dialog — 응답 유실 재시도는 같은 key로 한 request만 생성", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      requestCreateResponseLossOnce: true,
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog.getByLabel("scope 유형").selectOption("bbox");
+    await dialog.getByLabel("데이터셋 키 필터").fill("kma_short_forecast");
+    await dialog
+      .getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)")
+      .uncheck();
+    const submit = dialog.getByRole("button", {
+      name: "요청 생성",
+      exact: true,
+    });
+    await submit.click();
+    await expect(page.getByText("요청 생성 실패")).toBeVisible();
+    await submit.click();
+
+    await expect(dialog.getByTestId("request-create-result")).toContainText(
+      "동일 요청 결과 재생",
+    );
+    expect(counters.requestBodies).toHaveLength(2);
+    expect(counters.requestBodies[1]).toEqual(counters.requestBodies[0]);
+    expect(counters.requestKeys).toHaveLength(2);
+    expect(counters.requestKeys[1]).toBe(counters.requestKeys[0]);
+    expect(counters.requestRows).toEqual([
+      {
+        idempotencyKey: counters.requestKeys[0],
+        body: counters.requestBodies[0],
+        requestId: REQUEST_ID,
+      },
+    ]);
   });
 
   test("요청 dialog — priority 소수는 전송 없이 명시적으로 거부", async ({

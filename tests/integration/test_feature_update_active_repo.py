@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from alembic.config import Config
@@ -14,7 +14,10 @@ from kortravelmap.api.feature_update_schema import (
     FeatureUpdateRequestCreateRequest,
     FeatureUpdateRequestCreateResponse,
 )
-from kortravelmap.api.feature_update_service import create_feature_update_request
+from kortravelmap.api.feature_update_service import (
+    FeatureUpdateIdempotencyConflict,
+    create_feature_update_request,
+)
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
@@ -152,10 +155,7 @@ async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
         sync_scope="target_grids",
     )
     assert cancellation_marked is not None
-    assert (
-        cancellation_marked.cancellation_id
-        == "68000000-0000-4000-8000-000000000001"
-    )
+    assert cancellation_marked.cancellation_id == "68000000-0000-4000-8000-000000000001"
 
     other = await enqueue_feature_update_request(
         migrated_session,
@@ -201,9 +201,7 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                 if initial_lookup_count == 2:
                     initial_lookup_barrier.notify_all()
                 else:
-                    await initial_lookup_barrier.wait_for(
-                        lambda: initial_lookup_count >= 2
-                    )
+                    await initial_lookup_barrier.wait_for(lambda: initial_lookup_count >= 2)
             return None
 
         monkeypatch.setattr(
@@ -212,7 +210,7 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
             _find_active_after_barrier,
         )
 
-        async def _create() -> FeatureUpdateRequestCreateResponse:
+        async def _create(idempotency_key: UUID) -> FeatureUpdateRequestCreateResponse:
             async def _allow_plan(_pairs: frozenset[tuple[str, str]]) -> None:
                 return None
 
@@ -220,14 +218,17 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                 return await create_feature_update_request(
                     body,
                     session,
+                    idempotency_key=idempotency_key,
                     operator="integration-c45x-race",
                     status_url_prefix="/v1/admin/features/update-requests",
                     settings=settings,
                     resolved_plan_guard=_allow_plan,
                 )
 
+        first_key = uuid4()
+        second_key = uuid4()
         first, second = await asyncio.wait_for(
-            asyncio.gather(_create(), _create()),
+            asyncio.gather(_create(first_key), _create(second_key)),
             timeout=15,
         )
         assert first.data.request_id == second.data.request_id
@@ -237,6 +238,50 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
             False,
             True,
         ]
+        first_replay, second_replay = await asyncio.gather(
+            _create(first_key),
+            _create(second_key),
+        )
+        assert first_replay.idempotent_replay is True
+        assert second_replay.idempotent_replay is True
+        assert first_replay.reused_active_request is first.reused_active_request
+        assert second_replay.reused_active_request is second.reused_active_request
+        async with isolated_engine.connect() as connection:
+            mapping_counts = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*) AS ledger_rows,
+                               count(DISTINCT request_id) AS mapped_requests
+                        FROM ops.feature_update_request_idempotency
+                        WHERE actor = 'integration-c45x-race'
+                          AND idempotency_key IN (
+                            CAST(:first_key AS uuid), CAST(:second_key AS uuid)
+                          )
+                        """
+                    ),
+                    {"first_key": str(first_key), "second_key": str(second_key)},
+                )
+            ).one()
+        assert (mapping_counts.ledger_rows, mapping_counts.mapped_requests) == (2, 1)
+        reused_key = first_key if first.reused_active_request else second_key
+        async with isolated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE ops.import_jobs AS job
+                    SET status = 'done', finished_at = now()
+                    FROM ops.feature_update_requests AS request
+                    WHERE request.request_id = CAST(:request_id AS uuid)
+                      AND job.job_id = request.job_id
+                    """
+                ),
+                {"request_id": str(first.data.request_id)},
+            )
+        terminal_replay = await _create(reused_key)
+        assert terminal_replay.idempotent_replay is True
+        assert terminal_replay.reused_active_request is True
+        assert terminal_replay.data.status == "done"
 
         async with isolated_engine.connect() as connection:
             counts = (
@@ -244,6 +289,7 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                     text(
                         """
                         SELECT
+                          count(*) AS total_jobs,
                           count(*) FILTER (WHERE job.status IN ('queued', 'running'))
                             AS active_jobs,
                           count(*) FILTER (
@@ -263,8 +309,233 @@ async def test_concurrent_service_create_reuses_one_canonical_active_request(
                     {"provider": _PROVIDER, "dataset_key": _DATASET},
                 )
             ).one()
-        assert counts.active_jobs == 1
+        assert counts.total_jobs == 1
+        assert counts.active_jobs == 0
         assert counts.unlinked_jobs == 0
+    finally:
+        await isolated_engine.dispose()
+        await _drop_isolated_database(pg_container, dsn)
+
+
+async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
+    pg_container: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dsn, isolated_engine = await _create_isolated_migrated_engine(pg_container)
+    try:
+        body = FeatureUpdateRequestCreateRequest.model_validate(
+            {
+                "scope": {
+                    "type": "provider_dataset",
+                    "provider": _PROVIDER,
+                    "dataset_key": _DATASET,
+                },
+                "run_mode": "queued",
+                "reason": "durable-idempotency",
+            }
+        )
+        settings = KorTravelMapSettings(
+            _env_file=None,
+            kor_travel_geo_base_url=None,
+        )
+        idempotency_key = uuid4()
+
+        async def _create(
+            request_body: FeatureUpdateRequestCreateRequest,
+            *,
+            actor: str = "integration-idempotency",
+        ) -> FeatureUpdateRequestCreateResponse:
+            async def _allow_plan(_pairs: frozenset[tuple[str, str]]) -> None:
+                return None
+
+            async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
+                return await create_feature_update_request(
+                    request_body,
+                    session,
+                    idempotency_key=idempotency_key,
+                    operator=actor,
+                    status_url_prefix="/v1/ops/pipeline/requests",
+                    settings=settings,
+                    resolved_plan_guard=_allow_plan,
+                )
+
+        first, replay = await asyncio.wait_for(
+            asyncio.gather(_create(body), _create(body)),
+            timeout=15,
+        )
+        assert first.data.request_id == replay.data.request_id
+        assert sorted((first.idempotent_replay, replay.idempotent_replay)) == [
+            False,
+            True,
+        ]
+
+        async with isolated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE ops.import_jobs AS job
+                    SET status = 'done', finished_at = now()
+                    FROM ops.feature_update_requests AS request
+                    WHERE request.request_id = CAST(:request_id AS uuid)
+                      AND job.job_id = request.job_id
+                    """
+                ),
+                {"request_id": str(first.data.request_id)},
+            )
+        terminal_replay, other_actor = await asyncio.gather(
+            _create(body),
+            _create(body, actor="integration-other-actor"),
+        )
+        assert terminal_replay.idempotent_replay is True
+        assert terminal_replay.data.status == "done"
+        assert other_actor.idempotent_replay is False
+        assert other_actor.data.request_id != first.data.request_id
+
+        mismatch = body.model_copy(update={"reason": "different-body"})
+        with pytest.raises(FeatureUpdateIdempotencyConflict):
+            await _create(mismatch)
+
+        rollback_key = uuid4()
+
+        async def _reject_plan(_pairs: frozenset[tuple[str, str]]) -> None:
+            raise RuntimeError("precheck rejected before mapping")
+
+        async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
+            with pytest.raises(RuntimeError, match="precheck rejected"):
+                await create_feature_update_request(
+                    body,
+                    session,
+                    idempotency_key=rollback_key,
+                    operator="integration-other-actor",
+                    status_url_prefix="/v1/ops/pipeline/requests",
+                    settings=settings,
+                    resolved_plan_guard=_reject_plan,
+                )
+        async with isolated_engine.connect() as connection:
+            rolled_back_count = await connection.scalar(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM ops.feature_update_request_idempotency
+                    WHERE actor = 'integration-other-actor'
+                      AND idempotency_key = CAST(:idempotency_key AS uuid)
+                    """
+                ),
+                {"idempotency_key": str(rollback_key)},
+            )
+        assert rolled_back_count == 0
+
+        async def _allow_plan(_pairs: frozenset[tuple[str, str]]) -> None:
+            return None
+
+        async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
+            rollback_retry = await create_feature_update_request(
+                body,
+                session,
+                idempotency_key=rollback_key,
+                operator="integration-other-actor",
+                status_url_prefix="/v1/ops/pipeline/requests",
+                settings=settings,
+                resolved_plan_guard=_allow_plan,
+            )
+        assert rollback_retry.reused_active_request is True
+        assert rollback_retry.idempotent_replay is False
+
+        async with isolated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE ops.import_jobs AS job
+                    SET status = 'done', finished_at = now()
+                    FROM ops.feature_update_requests AS request
+                    WHERE request.request_id = CAST(:request_id AS uuid)
+                      AND job.job_id = request.job_id
+                    """
+                ),
+                {"request_id": str(other_actor.data.request_id)},
+            )
+
+        async def _row_counts() -> tuple[int, int, int]:
+            async with isolated_engine.connect() as connection:
+                row = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT
+                              (SELECT count(*) FROM ops.feature_update_requests)
+                                AS request_count,
+                              (SELECT count(*) FROM ops.import_jobs
+                               WHERE kind = 'feature_update_request') AS job_count,
+                              (SELECT count(*)
+                               FROM ops.feature_update_request_idempotency)
+                                AS ledger_count
+                            """
+                        )
+                    )
+                ).one()
+            return (row.request_count, row.job_count, row.ledger_count)
+
+        before_atomic_failure = await _row_counts()
+        atomic_key = uuid4()
+        original_create_mapping = service_mod.create_feature_update_request_idempotency
+
+        async def _fail_after_enqueue(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("mapping insert failed after enqueue")
+
+        monkeypatch.setattr(
+            service_mod,
+            "create_feature_update_request_idempotency",
+            _fail_after_enqueue,
+        )
+        async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
+            with pytest.raises(RuntimeError, match="mapping insert failed"):
+                await create_feature_update_request(
+                    body,
+                    session,
+                    idempotency_key=atomic_key,
+                    operator="integration-atomic-rollback",
+                    status_url_prefix="/v1/ops/pipeline/requests",
+                    settings=settings,
+                    resolved_plan_guard=_allow_plan,
+                )
+        assert await _row_counts() == before_atomic_failure
+
+        monkeypatch.setattr(
+            service_mod,
+            "create_feature_update_request_idempotency",
+            original_create_mapping,
+        )
+        async with AsyncSession(isolated_engine, expire_on_commit=False) as session:
+            atomic_retry = await create_feature_update_request(
+                body,
+                session,
+                idempotency_key=atomic_key,
+                operator="integration-atomic-rollback",
+                status_url_prefix="/v1/ops/pipeline/requests",
+                settings=settings,
+                resolved_plan_guard=_allow_plan,
+            )
+        assert atomic_retry.idempotent_replay is False
+        assert atomic_retry.reused_active_request is False
+        after_atomic_retry = await _row_counts()
+        assert after_atomic_retry == tuple(value + 1 for value in before_atomic_failure)
+
+        async with isolated_engine.connect() as connection:
+            counts = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                          count(*) AS ledger_rows,
+                          count(DISTINCT request_id) AS mapped_requests
+                        FROM ops.feature_update_request_idempotency
+                        WHERE idempotency_key = CAST(:idempotency_key AS uuid)
+                        """
+                    ),
+                    {"idempotency_key": str(idempotency_key)},
+                )
+            ).one()
+        assert (counts.ledger_rows, counts.mapped_requests) == (2, 2)
     finally:
         await isolated_engine.dispose()
         await _drop_isolated_database(pg_container, dsn)

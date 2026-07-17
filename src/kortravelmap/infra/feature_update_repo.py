@@ -33,7 +33,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationKey,
 )
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
-from kortravelmap.infra.advisory_lock import try_advisory_lock
+from kortravelmap.infra.advisory_lock import advisory_lock_key, try_advisory_lock
 from kortravelmap.infra.jobs_repo import (
     enqueue_feature_update_request_job,
     record_import_job_event,
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 __all__ = [
     "FEATURE_UPDATE_JOB_KIND",
     "FeatureUpdateRequest",
+    "FeatureUpdateRequestIdempotency",
     "FeatureUpdateRequestPreview",
     "FeatureUpdateRequestPage",
     "FeatureUpdateLockBusy",
@@ -68,6 +69,9 @@ __all__ = [
     "heartbeat_feature_update_request_job",
     "set_update_request_matched_scope",
     "get_update_request",
+    "create_feature_update_request_idempotency",
+    "get_feature_update_request_idempotency",
+    "lock_feature_update_request_idempotency",
     "lock_feature_update_execution_guard",
     "requeue_update_request_after_lock_contention",
     "list_update_requests",
@@ -137,6 +141,19 @@ class FeatureUpdateRequest:
     cancellation_reason: str | None = None
     effective_sync_scope: str | None = None
     dispatch_requested_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class FeatureUpdateRequestIdempotency:
+    """Append-only feature update request idempotency ledger row."""
+
+    idempotency_key: str
+    fingerprint_version: int
+    request_fingerprint: str
+    request_id: str
+    actor: str
+    reused_active_request: bool
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -330,9 +347,7 @@ def canonicalize_feature_update_policy(
     mode = update_policy.get("mode")
     if mode is not None:
         if mode != _FEATURE_UPDATE_POLICY_MODE:
-            raise ValueError(
-                f"update_policy.mode must be {_FEATURE_UPDATE_POLICY_MODE!r}"
-            )
+            raise ValueError(f"update_policy.mode must be {_FEATURE_UPDATE_POLICY_MODE!r}")
         canonical["mode"] = mode
 
     for key in _FEATURE_UPDATE_POLICY_BOOLEAN_KEYS:
@@ -391,9 +406,7 @@ def feature_update_scope_advisory_key(
         max_items=MAX_FEATURE_UPDATE_DATASET_KEYS,
     )
     if scope_type == "provider_dataset" and (provider_values or dataset_values):
-        raise ValueError(
-            "provider_dataset scope must not repeat providers or dataset_keys filters"
-        )
+        raise ValueError("provider_dataset scope must not repeat providers or dataset_keys filters")
     payload = {
         "scope_type": scope_type,
         "scope": _canonical_jsonable(canonical_scope),
@@ -461,6 +474,26 @@ SELECT {_REQUEST_RETURN_COLUMNS}
 FROM ops.feature_update_requests AS request
 JOIN ops.import_jobs AS job ON job.job_id = request.job_id
 WHERE request.request_id = CAST(:request_id AS uuid)
+"""
+
+_GET_IDEMPOTENCY_SQL: Final[str] = """
+SELECT idempotency_key, fingerprint_version, request_fingerprint, request_id,
+       actor, reused_active_request, created_at
+FROM ops.feature_update_request_idempotency
+WHERE actor = :actor
+  AND idempotency_key = CAST(:idempotency_key AS uuid)
+"""
+
+_INSERT_IDEMPOTENCY_SQL: Final[str] = """
+INSERT INTO ops.feature_update_request_idempotency (
+    idempotency_key, fingerprint_version, request_fingerprint, request_id,
+    actor, reused_active_request
+) VALUES (
+    CAST(:idempotency_key AS uuid), 1, :request_fingerprint,
+    CAST(:request_id AS uuid), :actor, :reused_active_request
+)
+RETURNING idempotency_key, fingerprint_version, request_fingerprint, request_id,
+          actor, reused_active_request, created_at
 """
 
 _LOCK_EXECUTION_REQUEST_SQL: Final[str] = f"""
@@ -683,9 +716,7 @@ FROM request
 JOIN ops.import_jobs AS job ON job.job_id = request.job_id
 """
 
-_ADVANCE_PRE_START_FAILURE_GENERATION_SQL: Final[str] = (
-    _TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL
-)
+_ADVANCE_PRE_START_FAILURE_GENERATION_SQL: Final[str] = _TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL
 
 _LIST_REQUEST_FILTERS_SQL: Final[str] = """
 WHERE (CAST(:status AS text) IS NULL OR job.status = CAST(:status AS text))
@@ -716,8 +747,7 @@ LIMIT :limit_plus_one
 def _list_requests_sql(*, candidate_sql: str | None = None) -> str:
     candidate_cte = f"WITH candidate_request_ids AS ({candidate_sql})" if candidate_sql else ""
     candidate_join = (
-        "JOIN candidate_request_ids AS candidate "
-        "ON candidate.request_id = request.request_id"
+        "JOIN candidate_request_ids AS candidate ON candidate.request_id = request.request_id"
         if candidate_sql
         else ""
     )
@@ -830,9 +860,7 @@ async def _resolve_feature_update_plan(
         max_items=MAX_FEATURE_UPDATE_DATASET_KEYS,
     )
     if scope_type == "provider_dataset" and (provider_values or dataset_values):
-        raise ValueError(
-            "provider_dataset scope must not repeat providers or dataset_keys filters"
-        )
+        raise ValueError("provider_dataset scope must not repeat providers or dataset_keys filters")
     if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 1000:
         raise ValueError("priority must be an integer between 0 and 1000")
     policy = canonicalize_feature_update_policy(update_policy)
@@ -1089,6 +1117,79 @@ async def get_update_request(
     """request id로 단건 조회."""
     row = (await session.execute(text(_GET_REQUEST_SQL), {"request_id": request_id})).one_or_none()
     return _row_to_request(row) if row is not None else None
+
+
+async def lock_feature_update_request_idempotency(
+    session: AsyncSession,
+    idempotency_key: str,
+    *,
+    actor: str,
+) -> None:
+    """Actor-scoped UUID key를 transaction advisory lock으로 직렬화한다."""
+    lock_id = advisory_lock_key(f"feature-update-idempotency:{actor}:{idempotency_key}")
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
+        {"lock_id": lock_id},
+    )
+
+
+async def get_feature_update_request_idempotency(
+    session: AsyncSession,
+    idempotency_key: str,
+    *,
+    actor: str,
+) -> FeatureUpdateRequestIdempotency | None:
+    """Actor-scoped UUID key의 durable request mapping을 조회한다."""
+    row = (
+        await session.execute(
+            text(_GET_IDEMPOTENCY_SQL),
+            {"idempotency_key": idempotency_key, "actor": actor},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return FeatureUpdateRequestIdempotency(
+        idempotency_key=str(row.idempotency_key),
+        fingerprint_version=int(row.fingerprint_version),
+        request_fingerprint=str(row.request_fingerprint),
+        request_id=str(row.request_id),
+        actor=str(row.actor),
+        reused_active_request=bool(row.reused_active_request),
+        created_at=row.created_at,
+    )
+
+
+async def create_feature_update_request_idempotency(
+    session: AsyncSession,
+    *,
+    idempotency_key: str,
+    request_fingerprint: str,
+    request_id: str,
+    actor: str,
+    reused_active_request: bool,
+) -> FeatureUpdateRequestIdempotency:
+    """현재 transaction이 만든/reuse한 request에 durable key를 매핑한다."""
+    row = (
+        await session.execute(
+            text(_INSERT_IDEMPOTENCY_SQL),
+            {
+                "idempotency_key": idempotency_key,
+                "request_fingerprint": request_fingerprint,
+                "request_id": request_id,
+                "actor": actor,
+                "reused_active_request": reused_active_request,
+            },
+        )
+    ).one()
+    return FeatureUpdateRequestIdempotency(
+        idempotency_key=str(row.idempotency_key),
+        fingerprint_version=int(row.fingerprint_version),
+        request_fingerprint=str(row.request_fingerprint),
+        request_id=str(row.request_id),
+        actor=str(row.actor),
+        reused_active_request=bool(row.reused_active_request),
+        created_at=row.created_at,
+    )
 
 
 async def lock_feature_update_execution_guard(

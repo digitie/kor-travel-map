@@ -102,9 +102,10 @@ function createResponse(
 ): FeatureUpdateRequestCreateResponse {
   return {
     data: { ...record, result_kind: "request" },
+    idempotent_replay: false,
     reused_active_request: false,
     meta: { duration_ms: 1, request_id: "e2e-feature-update-create" },
-  } as FeatureUpdateRequestCreateResponse & { reused_active_request: boolean };
+  } as FeatureUpdateRequestCreateResponse;
 }
 
 function previewResponse(
@@ -535,7 +536,9 @@ test.describe("admin/features/update-requests list + create depth", () => {
     const runningSuccessAlert = page
       .getByRole("status")
       .filter({ hasText: "즉시 실행 요청 완료" });
-    await expect(runningSuccessAlert).toContainText("요청이 이미 실행 중입니다.");
+    await expect(runningSuccessAlert).toContainText(
+      "요청이 이미 실행 중입니다.",
+    );
 
     await page.getByLabel("요청 상태 필터").selectOption("queued");
     const queuedRow = page.getByRole("row", {
@@ -663,7 +666,9 @@ test.describe("admin/features/update-requests list + create depth", () => {
     expect(mocks.create).toBe(0);
   });
 
-  test("provider와 dataset filter가 모두 비면 제출을 차단한다", async ({ page }) => {
+  test("provider와 dataset filter가 모두 비면 제출을 차단한다", async ({
+    page,
+  }) => {
     const mocks = await mockFeatureUpdateRequests(page);
 
     await page.goto("/admin/features/update-requests");

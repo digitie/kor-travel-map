@@ -15,6 +15,7 @@ from kortravelmap.infra.feature_update_active_repo import FeatureUpdateDispatchC
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
+    FeatureUpdateRequestIdempotency,
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.infra.ops_repo import (
@@ -154,6 +155,26 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _no_active_request(*_args: Any, **_kwargs: Any) -> None:
         return None
 
+    async def _lock_idempotency(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _no_idempotency(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _record_idempotency(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> FeatureUpdateRequestIdempotency:
+        return FeatureUpdateRequestIdempotency(
+            idempotency_key=kwargs["idempotency_key"],
+            fingerprint_version=1,
+            request_fingerprint=kwargs["request_fingerprint"],
+            request_id=kwargs["request_id"],
+            actor=kwargs["actor"],
+            reused_active_request=kwargs["reused_active_request"],
+            created_at=_NOW,
+        )
+
     async def _empty_schedule_overrides(_session: Any) -> dict[str, str]:
         return {}
 
@@ -208,6 +229,21 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         fur_mod,
         "find_active_provider_dataset_request",
         _no_active_request,
+    )
+    monkeypatch.setattr(
+        fur_mod,
+        "lock_feature_update_request_idempotency",
+        _lock_idempotency,
+    )
+    monkeypatch.setattr(
+        fur_mod,
+        "get_feature_update_request_idempotency",
+        _no_idempotency,
+    )
+    monkeypatch.setattr(
+        fur_mod,
+        "create_feature_update_request_idempotency",
+        _record_idempotency,
     )
     monkeypatch.setattr(pipeline_mod, "get_pipeline_execution", _canonical_root)
     monkeypatch.setattr(
@@ -668,6 +704,18 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         "content"
     ]["application/json"]["schema"]
     assert reused_response["$ref"].endswith("/FeatureUpdateRequestCreateResponse")
+    create_operation = spec["paths"]["/v1/ops/pipeline/requests"]["post"]
+    idempotency_header = next(
+        parameter
+        for parameter in create_operation["parameters"]
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True
+    assert idempotency_header["schema"]["format"] == "uuid"
+    assert (
+        "idempotent_replay"
+        in spec["components"]["schemas"]["FeatureUpdateRequestCreateResponse"]["required"]
+    )
     create_responses = spec["paths"]["/v1/ops/pipeline/requests"]["post"]["responses"]
     for code in ("409", "502", "503"):
         schema = create_responses[code]["content"]["application/problem+json"]["schema"]

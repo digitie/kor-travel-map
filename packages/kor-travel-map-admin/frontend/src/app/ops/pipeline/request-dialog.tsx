@@ -609,7 +609,10 @@ export function RequestCreateDialog({
               6종 scope 전부 선택 가능 — dry-run으로 대상 수를 먼저 확인하세요.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex max-h-[65vh] flex-col gap-3 overflow-y-auto pr-1">
+          <fieldset
+            className="m-0 flex min-w-0 max-h-[65vh] flex-col gap-3 overflow-y-auto border-0 p-0 pr-1"
+            disabled={createRequest.isPending || submittingPrecheck}
+          >
             <FormSelect
               label="scope 유형"
               value={scopeType}
@@ -912,9 +915,11 @@ export function RequestCreateDialog({
             {created ? (
               <Alert data-testid="request-create-result">
                 <AlertTitle>
-                  {createRequest.data?.reused_active_request
-                    ? "기존 활성 요청 재사용"
-                    : "요청 생성됨"}
+                  {createRequest.data?.idempotent_replay
+                    ? "동일 요청 결과 재생"
+                    : createRequest.data?.reused_active_request
+                      ? "기존 활성 요청 재사용"
+                      : "요청 생성됨"}
                 </AlertTitle>
                 <AlertDescription className="space-y-1">
                   <p>
@@ -942,7 +947,7 @@ export function RequestCreateDialog({
                 </AlertDescription>
               </Alert>
             ) : null}
-          </div>
+          </fieldset>
           <DialogFooter>
             <Button
               disabled={createRequest.isPending}

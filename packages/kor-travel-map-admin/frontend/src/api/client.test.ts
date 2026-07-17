@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiClientError,
   getJson,
+  idempotencyOperationKey,
   postJson,
   withIdempotencyKey,
 } from "./client";
@@ -72,6 +73,26 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     await postJson("/v1/x", { a: 1 }, { signal: controller.signal });
 
     expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+  });
+
+  it("idempotency operation key는 canonical body digest만 노출한다", async () => {
+    const first = await idempotencyOperationKey("request:create", {
+      reason: "민감한 운영 사유",
+      scope: { type: "feature_ids", feature_ids: ["feature-1"] },
+    });
+    const reordered = await idempotencyOperationKey("request:create", {
+      scope: { feature_ids: ["feature-1"], type: "feature_ids" },
+      reason: "민감한 운영 사유",
+    });
+    const changed = await idempotencyOperationKey("request:create", {
+      reason: "다른 사유",
+      scope: { type: "feature_ids", feature_ids: ["feature-1"] },
+    });
+
+    expect(first).toBe(reordered);
+    expect(first).toMatch(/^request:create:[0-9a-f]{64}$/);
+    expect(first).not.toContain("민감한 운영 사유");
+    expect(changed).not.toBe(first);
   });
 
   it("signal 미지정 시에도 동작한다(undefined)", async () => {
