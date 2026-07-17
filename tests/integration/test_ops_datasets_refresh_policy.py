@@ -393,7 +393,7 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
         class IntentionalRollback(RuntimeError):
             pass
 
-        with pytest.raises(IntentionalRollback):
+        async def update_then_rollback() -> None:
             async with AsyncSession(migrated_engine) as session, session.begin():
                 changed = await upsert_provider_refresh_policy(
                     session,
@@ -406,6 +406,9 @@ async def test_create_update_kind_mismatch_and_rollback_do_not_advance_revision(
                 )
                 assert changed.revision == 2
                 raise IntentionalRollback
+
+        with pytest.raises(IntentionalRollback):
+            await update_then_rollback()
 
         async with AsyncSession(migrated_engine) as verify:
             current = await get_provider_refresh_policy(
