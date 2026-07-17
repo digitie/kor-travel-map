@@ -10,7 +10,6 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
   - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
-  - [ ] `T-ADM-C7B-720` — datasets 이슈 필터 의미 통일 (issue #720, frontend-only, PR 1개)
   - [ ] `T-ADM-AUD-718` — 갱신 정책 BIGINT revision CAS (issue #718, migration 0056, PR 1개)
   - [ ] `T-ADM-AUD-686` — KMA 유효 대상 0건 fail-closed (issue #686, PR 1개)
   - [ ] `T-ADM-C7B-API` — active projection·exact-scope 이력 API (issues #712/#719, migration 0057, PR 1개)
@@ -46,12 +45,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   problem+json으로 승격할지만 이 시점에 검토한다.
   ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
   이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
-- [ ] `T-ADM-C7B-720` — **datasets 이슈 필터 의미 통일** (issue **#720**,
-  **frontend-only**, **PR 1개**, 의존 C6a): `이슈 있음`을 dataset 또는 provider
-  open issue가 하나라도 있는 행으로 정의하고 badge·filter 의미를 일치시킨다.
-  provider-only, dataset-only, 양쪽 모두, 양쪽 모두 없음 네 경우를 unit/mock E2E로
-  고정한다. C6a 뒤 시작하며 C6b·C7A와 병렬로 진행하고, API·OpenAPI·DB schema는
-  변경하지 않는다.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔

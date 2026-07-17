@@ -63,6 +63,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { integerString, ordered, validateForm } from "@/lib/form-validation";
 
+import {
+  datasetGridOpenIssueCount,
+  datasetRowHasOpenIssue,
+  datasetRowOpenIssueCount,
+} from "./dataset-issues";
+
 const PANELS = ["history", "policy", "preview"] as const;
 type DrawerPanel = (typeof PANELS)[number];
 
@@ -1749,7 +1755,7 @@ export function DatasetsClient({
       if (statusFilter === "failing") return row.consecutive_failures > 0;
       if (statusFilter === "stale") return row.freshness.state === "overdue";
       if (statusFilter === "never_run") return isNeverRun(row);
-      if (statusFilter === "issues") return row.dataset_issues.open_count > 0;
+      if (statusFilter === "issues") return datasetRowHasOpenIssue(row);
       return true;
     });
   }, [items, q, statusFilter]);
@@ -1761,19 +1767,7 @@ export function DatasetsClient({
       (row) => row.freshness.state === "overdue",
     ).length;
     const neverRun = items.filter((row) => isNeverRun(row)).length;
-    // 이슈 카운트는 같은 (provider, dataset)의 scope 행마다 반복되므로 dataset
-    // 단위로 dedupe해서 합산한다(데이터셋 귀속 이슈만 — 제공자 이슈는 별도).
-    const issueByDataset = new Map<string, number>();
-    for (const row of items) {
-      issueByDataset.set(
-        `${row.provider}/${row.dataset_key}`,
-        row.dataset_issues.open_count,
-      );
-    }
-    const issues = [...issueByDataset.values()].reduce(
-      (total, count) => total + count,
-      0,
-    );
+    const issues = datasetGridOpenIssueCount(items);
     return { providers: providers.size, failing, stale, neverRun, issues };
   }, [items]);
 
@@ -1905,7 +1899,7 @@ export function DatasetsClient({
       {
         id: "issues",
         header: "이슈",
-        accessorFn: (row) => row.dataset_issues.open_count,
+        accessorFn: (row) => datasetRowOpenIssueCount(row),
         enableSorting: true,
         cell: ({ row }) => (
           <span className="flex flex-wrap items-center gap-1">
@@ -1916,9 +1910,7 @@ export function DatasetsClient({
               >
                 {formatCount(row.original.dataset_issues.open_count)}
               </Badge>
-            ) : (
-              <span className="text-text-secondary">-</span>
-            )}
+            ) : null}
             {row.original.provider_issues.open_count > 0 ? (
               <Badge
                 title={`제공자 이슈${severitySummary(row.original.provider_issues.severity_counts)}`}
@@ -1926,6 +1918,9 @@ export function DatasetsClient({
               >
                 P{formatCount(row.original.provider_issues.open_count)}
               </Badge>
+            ) : null}
+            {!datasetRowHasOpenIssue(row.original) ? (
+              <span className="text-text-secondary">-</span>
             ) : null}
           </span>
         ),

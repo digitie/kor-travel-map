@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
+
+- dataset/provider issue count를 합산하는 순수 projection을 두고 필터·정렬·행 badge가 같은
+  의미를 사용하게 했다. grid 요약은 dataset을 `(provider,dataset)`, provider를 provider별로
+  한 번만 세어 scope 반복 행과 문자열 delimiter 충돌을 피한다.
+- provider-only, dataset-only, both, neither와 scope 중복을 unit/mock E2E 계약에 추가했다.
+  두 독립 적대 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했고 unit 5건, type-check, lint,
+  production build를 통과했다. Playwright 실제 실행은 C7 n150 live wave에 합친다.
+
 ## 2026-07-17 (codex, agent B) — C6a 통합 화면 링크 재배선 완료
 
 - `EntityLink`의 import job·update request·load batch를 `/ops/pipeline`으로, provider를
