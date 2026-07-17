@@ -806,7 +806,11 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
     ) -> dict[str, object]:
         raise AssertionError("invalid GraphQL URL must not be requested")
 
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("invalid GraphQL URL must not create an HTTP client")
+
     monkeypatch.setattr(dagster_mod, "post_graphql", _unexpected_post_graphql)
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
 
     with TestClient(app) as test_client:
         response = test_client.post("/v1/ops/dagster/nux-seen")
@@ -815,8 +819,51 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
     body = response.json()
     data = body["data"]
     assert data["status"] == "error"
+    assert data["dagster_url"] == ""
+    assert data["graphql_url"] == ""
     assert data["seen"] is False
     assert data["errors"] == ["dagster_graphql_url path must end with /graphql"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/v1/ops/dagster/runs/run-secret"),
+        ("post", "/v1/ops/dagster/nux-seen"),
+    ],
+)
+def test_dagster_sibling_routes_do_not_reflect_invalid_url_secrets_or_create_client(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            dagster_url="http://dagster.example:12302",
+            dagster_graphql_url=(
+                "http://user:super-secret@dagster.example:12302/graphql?token=secret"
+            ),
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+
+    def _unexpected_http_client(_request: object, _settings: object) -> httpx.AsyncClient:
+        raise AssertionError("invalid GraphQL URL must not create an HTTP client")
+
+    monkeypatch.setattr(dagster_router, "http_client_from_request", _unexpected_http_client)
+
+    with TestClient(app) as test_client:
+        response = test_client.request(method, path)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "error"
+    assert data["dagster_url"] == ""
+    assert data["graphql_url"] == ""
+    assert data["errors"] == ["dagster_graphql_url must not include userinfo"]
+    assert "super-secret" not in response.text
+    assert "token=secret" not in response.text
 
 
 @pytest.mark.unit

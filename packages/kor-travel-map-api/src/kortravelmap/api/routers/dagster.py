@@ -131,7 +131,11 @@ async def get_dagster_run_detail(
         ),
     ),
 ) -> DagsterRunDetailResponse:
-    settings, client = dagster_http_dependencies(request)
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_run_detail_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
     return await dagster_query_service.get_run_detail(
         settings=settings,
         client=client,
@@ -152,7 +156,11 @@ async def get_dagster_run_detail(
     ),
 )
 async def mark_dagster_nux_seen(request: Request) -> DagsterNuxSeenResponse:
-    settings, client = dagster_http_dependencies(request)
+    settings = settings_from_request(request)
+    configuration_error = dagster_query_service.get_nux_seen_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+    client = http_client_from_request(request, settings)
     return await dagster_query_service.mark_nux_seen(settings=settings, client=client)
 
 

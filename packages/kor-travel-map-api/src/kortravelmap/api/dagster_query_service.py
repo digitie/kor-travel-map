@@ -20,7 +20,9 @@ from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
+    "get_nux_seen_configuration_error",
     "get_run_detail",
+    "get_run_detail_configuration_error",
     "get_summary",
     "get_summary_configuration_error",
     "mark_nux_seen",
@@ -206,6 +208,49 @@ def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResp
     return None
 
 
+def get_run_detail_configuration_error(
+    settings: ApiSettings,
+) -> DagsterRunDetailResponse | None:
+    """잘못된 Dagster URL을 run detail 외부 자원 접근 전에 차단한다."""
+
+    started_at = perf_counter()
+    try:
+        dagster_graphql.dagster_urls(settings)
+    except dagster_graphql.DagsterUrlConfigurationError as exc:
+        return _run_detail_response(
+            DagsterRunDetailData(
+                status="error",
+                dagster_url="",
+                graphql_url="",
+                checked_at=datetime.now(UTC),
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
+        )
+    return None
+
+
+def get_nux_seen_configuration_error(settings: ApiSettings) -> DagsterNuxSeenResponse | None:
+    """잘못된 Dagster URL을 NUX mutation 외부 자원 접근 전에 차단한다."""
+
+    started_at = perf_counter()
+    try:
+        dagster_graphql.dagster_urls(settings)
+    except dagster_graphql.DagsterUrlConfigurationError as exc:
+        return _nux_seen_response(
+            DagsterNuxSeenData(
+                status="error",
+                dagster_url="",
+                graphql_url="",
+                checked_at=datetime.now(UTC),
+                seen=False,
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
+        )
+    return None
+
+
 async def get_summary(
     *,
     settings: ApiSettings,
@@ -307,22 +352,13 @@ async def get_run_detail(
 ) -> DagsterRunDetailResponse:
     """Dagster run event page를 조회한다."""
 
+    configuration_error = get_run_detail_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
-    try:
-        urls = dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError as exc:
-        return _run_detail_response(
-            DagsterRunDetailData(
-                status="error",
-                dagster_url=settings.dagster_url,
-                graphql_url=raw_graphql_url,
-                checked_at=checked_at,
-                errors=[str(exc)],
-            ),
-            started_at=started_at,
-        )
+    urls = dagster_graphql.dagster_urls(settings)
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,
@@ -385,23 +421,13 @@ async def mark_nux_seen(
 ) -> DagsterNuxSeenResponse:
     """Dagster NUX 상태를 명시적 mutation으로 변경한다."""
 
+    configuration_error = get_nux_seen_configuration_error(settings)
+    if configuration_error is not None:
+        return configuration_error
+
     started_at = perf_counter()
     checked_at = datetime.now(UTC)
-    raw_graphql_url = dagster_graphql.candidate_graphql_url(settings)
-    try:
-        urls = dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError as exc:
-        return _nux_seen_response(
-            DagsterNuxSeenData(
-                status="error",
-                dagster_url=settings.dagster_url,
-                graphql_url=raw_graphql_url,
-                checked_at=checked_at,
-                seen=False,
-                errors=[str(exc)],
-            ),
-            started_at=started_at,
-        )
+    urls = dagster_graphql.dagster_urls(settings)
     try:
         payload = await dagster_graphql.post_graphql(
             client=client,
