@@ -20,7 +20,12 @@
 - 적대 리뷰 1차는 production S1/S2 결함 0건으로 판정했다. S3로 확인된 CORS preflight,
   canonical feature-update idempotency/strict DTO matrix, public provider empty-list 회귀를
   canonical 테스트에 복원했다. 현행 architecture/runbook 문서의 legacy path도 두 그룹으로
-  정리했다. 2차 적대 리뷰와 테스트는 아직 진행 전이다.
+  정리했다.
+- 적대 리뷰 2차는 API container가 root `.env`와 main provider secret을 받는 S2 경계를
+  발견했다. API를 package-scoped `.env`로 격리하고 data.go/OpiNet/KREX/MOIS 설정은 Dagster
+  service에만 남겼다. 사용되지 않는 Dagster NUX mutation/schema를 삭제하고 canonical
+  request의 필수 UUID `Idempotency-Key`, 재생/active 재사용 분리, 충돌 계약을 문서에
+  명시했다. 반영 snapshot 재리뷰와 테스트는 아직 진행 전이다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

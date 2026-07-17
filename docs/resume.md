@@ -13,8 +13,11 @@
   실제 branch에서 재생성한다.
 - 적대 리뷰 1차는 production S1/S2 결함 0건, 테스트 회귀 S3 3건으로 판정했다. CORS,
   feature-update idempotency/strict DTO, public provider empty-list 회귀를 복원했다.
-- **다음 한 작업**: 반영 snapshot을 2차 적대 리뷰어에게 전달한다. 그 전에는 사용자 지시대로
-  테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
+- 적대 리뷰 2차의 S2 provider secret 경계를 반영해 API container를 package-scoped `.env`로
+  격리했다. dead Dagster NUX 표면을 제거하고 canonical request의 필수 UUID idempotency
+  계약을 현행 문서에 완결했다.
+- **다음 한 작업**: 반영 snapshot을 2차 적대 리뷰어에게 재검증받는다. 그 전에는 사용자
+  지시대로 테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 

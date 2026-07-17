@@ -79,8 +79,8 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
   모두 `/v1/...`이다.** admin write/read 경로(`/admin/*`)는 admin 전체 spec에만 남긴다.
 - `/tripmate/*` 경로는 이미 제거됐다. feature update request의 정본 경로는
   `/ops/pipeline/requests*`이며 PinVi/user subset에는 존재하지 않는다. C6B 이전
-  `/admin/features/update-requests*`·`/ops/import-jobs*`·`/ops/dagster*`를 설명하는
-  하단 절은 명시된 이전 계약 이력일 뿐 현행 OpenAPI 계약이 아니다.
+  `/ops/import-jobs*`·`/ops/dagster*`를 설명하는 하단 절은 명시된 이전 계약 이력일 뿐
+  현행 OpenAPI 계약이 아니다.
 - 모든 응답은 debug/admin backend의 HTTP 응답 셰입을 쓴다.
 
 성공:
@@ -302,9 +302,8 @@ PinVi/user subset에는 포함하지 않는다. API는 standalone Docker app의 
 
 ## 5. Feature update request application service
 
-> C6B 이후 REST 정본은 생성·preview·run-now가 `/ops/pipeline/requests*`, 목록·상세·
-> 취소가 `/ops/pipeline/executions*`다. 아래 `/admin/features/update-requests*`
-> 경로 예시는 동일 application service의 이전 REST 이력이다.
+REST 정본은 생성·preview·run-now가 `/ops/pipeline/requests*`, 목록·상세·취소가
+`/ops/pipeline/executions*`다. 이 표면은 admin 전체 spec에만 포함한다.
 
 Feature update request는 OpenAPI로 Dagster feature update job을 제어하는 표준
 엔드포인트다. 운영자는 admin UI나 내부 운영 automation에서 호출한다. PinVi
@@ -318,7 +317,12 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
 
 ### 5.1 생성
 
-#### `POST /admin/features/update-requests`
+#### `POST /ops/pipeline/requests`
+
+UUID 형식 `Idempotency-Key` header가 필수다. 최초 요청은 `201`과
+`idempotent_replay=false`를 반환한다. 같은 key와 동일한 정규화 body·인증 actor를 다시
+보내면 최초 결과를 `200`으로 재생하고 `idempotent_replay=true`를 반환한다. body 또는
+actor가 다르면 `409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`다.
 
 요청:
 
@@ -385,18 +389,21 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
     "started_at": null,
     "finished_at": null,
     "generation": 1,
-    "status_url": "/v1/admin/features/update-requests/uuid"
+    "status_url": "/v1/ops/pipeline/executions/update_request/uuid"
   },
+  "idempotent_replay": false,
   "reused_active_request": false,
   "meta": {"duration_ms": 34}
 }
 ```
 
-`POST /admin/features/update-requests`는 새 영속 요청이면 `201`, 같은 direct effective
-scope의 활성 요청과 전체 계획이 같아 재사용하면 `200`을 반환한다. 두 경우 모두
-`data.result_kind="request"`이며 `reused_active_request`로 구분한다. 비영속 계산은 같은 실행 계획 본문에서
-`reason`을 제외해 `POST /admin/features/update-requests/preview`로 보내며,
-`200`과 `data.result_kind="preview"`를 반환한다. preview에는 저장 identity와 lifecycle이 없으므로
+`POST /ops/pipeline/requests`는 새 영속 요청이면 `201`, 같은 direct effective scope의
+활성 요청과 전체 계획이 같아 재사용하면 `200`을 반환한다. 두 경우 모두
+`data.result_kind="request"`다. `idempotent_replay`는 동일 key의 최초 결과 재생 여부,
+`reused_active_request`는 새 key의 계획이 기존 active canonical 요청을 재사용했는지 여부라
+서로 대체하지 않는다. 비영속 계산은 같은 실행 계획 본문에서 `reason`을 제외해
+`POST /ops/pipeline/requests/preview`로 보내며 `200`과
+`data.result_kind="preview"`를 반환한다. preview에는 저장 identity와 lifecycle이 없으므로
 `request_id`, `job_id`, `status`,
 `dagster_run_id`, `status_url`, DB timestamp 필드가 존재하지 않는다.
 
@@ -573,7 +580,7 @@ feature를 업데이트한다.
 | `queued` | queue에 넣고 Dagster worker/sensor가 순서대로 실행 |
 | `now` | 높은 우선순위/즉시 실행 의도를 가진 request. Dagster sensor가 같은 queue에서 감지해 worker run을 생성 |
 
-`POST /admin/features/update-requests/preview`는 대상 수와 provider/dataset group을
+`POST /ops/pipeline/requests/preview`는 대상 수와 provider/dataset group을
 preview 전용 응답으로 반환하고 request/import job/run을 만들지 않는다. 영속 생성 본문에
 `dry_run` 필드는 없고 `ops.feature_update_requests`에도 해당 컬럼이 없다. 생성과 미리보기
 응답은 각각 문자열 `result_kind=request|preview`로 판별한다. 저장 응답은 `request_id`, `job_id`,
@@ -587,7 +594,7 @@ read-only preview 해석을 제공한다. T-206d에서 `cache_target_keys`도 ac
 
 ### 5.4 조회
 
-#### `GET /admin/features/update-requests`
+#### `GET /ops/pipeline/executions?kind=update_request`
 
 Query:
 
@@ -600,7 +607,7 @@ Query:
 - `page_size`
 - `cursor`
 
-#### `GET /admin/features/update-requests/{request_id}`
+#### `GET /ops/pipeline/executions/update_request/{request_id}`
 
 응답은 `FeatureUpdateRequestRecord` 한 건을 반환한다. `request_id`, scope와 필터,
 `update_policy`, `run_mode`, `priority`, `status`, `matched_scope`, 연결 `job_id`, nullable
@@ -610,7 +617,7 @@ import job 객체나 recent events 배열은 이 응답에 포함하지 않는�
 
 ### 5.5 취소와 재실행
 
-#### `POST /admin/features/update-requests/{request_id}/cancel`
+#### `POST /ops/pipeline/executions/update_request/{request_id}/cancel`
 
 request를 canonical `update_request` pipeline root로 해석하고, 연결된 request/job/run 계층을
 공유 C3d coordinator의 frozen scope로 취소한다. body는 nullable `reason`만 허용하며, 응답은
@@ -618,7 +625,7 @@ request를 canonical `update_request` pipeline root로 해석하고, 연결된 r
 결과를 담은 `PipelineCancellationResponse`다. 상세 상태·멱등·재시도·오류 계약은
 `docs/architecture/rest-api.md` §2.6을 따른다.
 
-#### `POST /admin/features/update-requests/{request_id}/run-now`
+#### `POST /ops/pipeline/requests/{request_id}/run-now`
 
 선택 요청 body는 빈 strict object다.
 

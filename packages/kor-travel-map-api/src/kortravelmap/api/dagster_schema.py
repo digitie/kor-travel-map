@@ -19,8 +19,6 @@ __all__ = [
     "DagsterGraphqlError",
     "DagsterInstigationTick",
     "DagsterJob",
-    "DagsterNuxSeenData",
-    "DagsterNuxSeenResponse",
     "DagsterRepository",
     "DagsterRunSummary",
     "DagsterRunDetailData",
@@ -264,28 +262,6 @@ class DagsterRunDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterRunDetailData
-    meta: Meta
-
-
-class DagsterNuxSeenData(BaseModel):
-    """라우터와 분리된 Dagster NUX mutation application-service data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal["ok", "unavailable", "error"]
-    dagster_url: str
-    graphql_url: str
-    checked_at: datetime
-    seen: bool
-    errors: list[str] = Field(default_factory=list)
-
-
-class DagsterNuxSeenResponse(BaseModel):
-    """Dagster NUX mutation application-service envelope."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: DagsterNuxSeenData
     meta: Meta
 
 

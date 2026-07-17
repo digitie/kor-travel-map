@@ -31,16 +31,20 @@ wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:up"
 
 ## 1. 환경변수
 
-실제 키는 루트 `.env`에 둔다. `.env`는 git에 커밋하지 않는다.
+provider 실행 키는 루트 `.env`, API auth/route/backup 설정은 API 전용 `.env`에
+분리한다. 두 파일 모두 git에 커밋하지 않는다.
 
 ```bash
 cp .env.example .env
 chmod 600 .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+chmod 600 packages/kor-travel-map-api/.env
 ```
 
 `scripts/load-env.sh`와 `docker-compose.yml`은 기존 provider repo에서 쓰던 키 이름을
 Dagster/provider 실행용 환경변수로 매핑한다. REST API backend는 provider credential을
-받지 않으며 dataset preview는 fixture-only다.
+받지 않으며 dataset preview는 fixture-only다. Compose의 API service도 root `.env`를
+`env_file`로 읽지 않아 provider secret을 process environment에 보유하지 않는다.
 
 | 입력 키 예 | 실행 시 export |
 |------------|----------------|

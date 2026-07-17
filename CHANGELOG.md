@@ -13,8 +13,11 @@
 - **CHANGED**: admin 실행·event·Dagster·schedule은 `/ops/pipeline/*`, dataset 상태·정책·
   fixture preview는 `/ops/datasets/*`만 사용한다. public provider read 2종은 운영 결합이
   없는 소형 router로 분리해 유지한다.
-- **REMOVED**: raw HTTP live ETL loader와 REST API 전용 provider credential settings·runtime
-  주입을 삭제했다. dataset preview는 fixture-only이며 외부 호출 budget은 0이다.
+- **REMOVED**: raw HTTP live ETL loader, REST API 전용 provider credential settings·runtime
+  주입, 사용되지 않는 Dagster NUX mutation/schema를 삭제했다. dataset preview는
+  fixture-only이며 외부 호출 budget은 0이다.
+- **CHANGED**: API container는 package-scoped `.env`만 읽고 root provider credential
+  `.env`를 주입받지 않는다. provider 비밀은 Dagster webserver/daemon 경계에만 둔다.
 
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 

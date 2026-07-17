@@ -170,20 +170,3 @@ async def test_run_detail_service_fails_closed_on_malformed_pagination(
     assert response.data.run is None
     assert response.data.events == []
     assert response.data.errors
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_nux_service_contract_remains_unit_covered(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _post(**kwargs: object) -> dict[str, object]:
-        assert kwargs["query"] == service._DAGSTER_SET_NUX_SEEN_MUTATION
-        return {"data": {"setNuxSeen": True}}
-
-    monkeypatch.setattr(dagster_graphql, "post_graphql", _post)
-    async with httpx.AsyncClient() as client:
-        response = await service.mark_nux_seen(settings=_SETTINGS, client=client)
-
-    assert response.data.status == "ok"
-    assert response.data.seen is True

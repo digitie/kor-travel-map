@@ -13,9 +13,9 @@ __all__ = ["ApiSettings"]
 class ApiSettings(BaseSettings):
     """디버그/관리 API 백엔드 설정 (`KOR_TRAVEL_MAP_API_*` env prefix).
 
-    ADR-005 + ADR-035: 인증 키 자체는 본 패키지에 없음 — 네트워크 계층 책임.
-    `host`는 ``127.0.0.1`` 기본 + ``0.0.0.0`` 바인드 시 호출자(uvicorn) 측에서
-    경고 로그 권고.
+    public read는 API key/service token, admin mutation은 trusted frontend proxy
+    actor/secret을 사용한다. 네트워크 계층 SSO/IP allowlist도 함께 적용한다.
+    `host`는 ``127.0.0.1`` 기본이다.
     """
 
     model_config = SettingsConfigDict(

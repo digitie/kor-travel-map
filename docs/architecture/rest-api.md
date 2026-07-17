@@ -113,8 +113,14 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - `meta.page.total`은 `?include_total=true` opt-in(기본 `null`; 현재 `search`는 항상 COUNT).
 
 ### 1.7 idempotency · rate limit (T-214g)
-- 변경 호출(admin mutation 등) POST: `Idempotency-Key` 허용. rate limit `429`+`RateLimit-*`+
-  `Retry-After`, lock 경합 `409 LOCK_BUSY`+`Retry-After: 15`.
+- 일반 변경 POST는 endpoint 계약에 따라 `Idempotency-Key`를 사용할 수 있다. canonical
+  feature update 생성 `POST /v1/ops/pipeline/requests`는 UUID 형식
+  `Idempotency-Key`가 **필수**다. 같은 key와 동일한 정규화 body·인증 actor는 최초 결과를
+  `200`으로 재생하고 `idempotent_replay=true`, 최초 생성은 `201`과
+  `idempotent_replay=false`를 반환한다. 같은 key를 다른 body 또는 actor에 재사용하면
+  `409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`다.
+- rate limit은 `429`+`RateLimit-*`+`Retry-After`, lock 경합은
+  `409 LOCK_BUSY`+`Retry-After: 15`를 사용한다.
 
 ### 1.8 좌표 · datetime
 - WGS84 lon,lat. bbox=`min_lon,min_lat,max_lon,max_lat`. 목록 좌표는 평면 `lon`/`lat`.
@@ -385,7 +391,7 @@ GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
                                                       # root 상세 + current member/run 결과
 POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
-POST /v1/ops/pipeline/requests                        # 영속 생성(201) 또는 같은 활성 계획 재사용(200)
+POST /v1/ops/pipeline/requests                        # 필수 UUID Idempotency-Key; 생성(201)/재생·활성 재사용(200)
 POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)
 POST /v1/ops/pipeline/requests/{request_id}/run-now   # 동일 canonical job 우선 dispatch(200)
 WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
@@ -395,6 +401,13 @@ Dagster 실행·스케줄 조작, import job/event, 갱신 요청, provider 상�
 canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/import-jobs*`,
 `/ops/import-job-events`, `/ops/providers*`, `/admin/features/update-requests*`,
 `/admin/provider-refresh-policies*`는 존재하지 않는다.
+
+`POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.
+`idempotent_replay`는 동일 `Idempotency-Key` 요청 재생 여부이고,
+`reused_active_request`는 새 key로 제출한 계획이 이미 실행 중인 같은 canonical 계획을
+재사용했는지 여부다. 따라서 두 필드는 서로 대체하지 않는다. 같은 key의 body 또는 인증
+actor가 최초 요청과 다르면 기존 결과를 반환하지 않고
+`409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`로 거절한다.
 
 - **Canonical provider operation(T-ADM-C3e, #679)**: schedule/manual/sensor/backfill
   feature-load는 Dagster run당 `import_job` root 한 건과 exact provider/dataset pair child로
@@ -607,7 +620,7 @@ GET /v1/debug/mois-license/{license_id}
 |------|------|------|------|
 | `X-Request-ID` | 응답(전체) | 요청 상관추적. `meta.request_id`/problem+json `request_id`와 동일 | **구현됨** |
 | `Retry-After` | 응답(429/409/502/503) | rate limit·lock 경합·pipeline 취소 재시도 지연(초). LOCK_BUSY=15 | **부분 구현**(LOCK_BUSY, pipeline은 T-ADM-C3d) |
-| `Idempotency-Key` | 요청(변경 POST) | 동일 key 재시도 = 동일 결과 | 규약(구현 T-216) |
+| `Idempotency-Key` | 요청(변경 POST) | endpoint별 멱등 key. `/ops/pipeline/requests`는 UUID 필수이며 동일 body·actor만 재생 | **구현됨** |
 | `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` | 응답(429) | rate limit 상태 | 규약(구현 T-216) |
 | `Deprecation`/`Sunset` | 응답 | GA 후 `/v1`→`/v2` 전환 예고(ADR-048 #13). pre-1.0 clean cut에선 미사용 | 규약(GA 후) |
 
