@@ -42,20 +42,31 @@ const PAGE_SIZE = 50;
 
 export function PipelineEventsPanel({
   onSelectExecution,
+  initialProvider = "",
+  initialDatasetKey = "",
+  initialSyncScope = "",
 }: {
   onSelectExecution: (kind: ExecutionKind, id: string) => void;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialSyncScope?: string;
 }) {
   const [level, setLevel] = useState<JobEventLevel | "all">("all");
-  const [provider, setProvider] = useState("");
-  const [datasetKey, setDatasetKey] = useState("");
+  const [provider, setProvider] = useState(initialProvider);
+  const [datasetKey, setDatasetKey] = useState(initialDatasetKey);
+  const [syncScope, setSyncScope] = useState(initialSyncScope);
   const [jobId, setJobId] = useState("");
   const [cursorStack, setCursorStack] = useState<string[]>([]);
 
   const cursor = cursorStack.at(-1) ?? null;
+  const providerFilter = provider.trim() || undefined;
+  const datasetFilter = datasetKey.trim() || undefined;
+  const syncScopeFilter = syncScope.trim() || undefined;
   const events = usePipelineEvents({
     level: level === "all" ? undefined : level,
-    provider: provider.trim() || undefined,
-    dataset_key: datasetKey.trim() || undefined,
+    provider: providerFilter,
+    dataset_key: datasetFilter,
+    sync_scope: providerFilter && datasetFilter ? syncScopeFilter : undefined,
     job_id: jobId.trim() || undefined,
     page_size: PAGE_SIZE,
     cursor,
@@ -95,6 +106,15 @@ export function PipelineEventsPanel({
         cell: ({ row }) => (
           <span className="font-mono text-xs">
             {row.original.dataset_key ?? "-"}
+          </span>
+        ),
+      },
+      {
+        id: "sync_scope",
+        header: "scope",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.sync_scope ?? "-"}
           </span>
         ),
       },
@@ -175,6 +195,16 @@ export function PipelineEventsPanel({
               value={datasetKey}
               onChange={(event) => {
                 setDatasetKey(event.target.value);
+                resetPage();
+              }}
+            />
+          </FilterField>
+          <FilterField label="sync scope">
+            <Input
+              aria-label="이벤트 sync scope 필터"
+              value={syncScope}
+              onChange={(event) => {
+                setSyncScope(event.target.value);
                 resetPage();
               }}
             />

@@ -1651,7 +1651,7 @@ export interface paths {
         };
         /**
          * 전역 job 이벤트 스트림
-         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/job 필터.
+         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. sync_scope는 provider와 dataset_key를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.
          */
         get: operations["list_pipeline_events_v1_ops_pipeline_events_get"];
         put?: never;
@@ -6778,6 +6778,8 @@ export interface components {
             dataset_issues: components["schemas"]["OpsIssueSummary"];
             /** Dataset Key */
             dataset_key: string;
+            /** Event History Url */
+            event_history_url: string;
             /** Mutable */
             mutable: boolean;
             /** Orphan Reason */
@@ -6789,6 +6791,8 @@ export interface components {
             provider_issues: components["schemas"]["OpsIssueSummary"];
             /** Recent Events */
             recent_events: components["schemas"]["OpsDatasetEventRecord"][];
+            /** Recent Events Next Cursor */
+            recent_events_next_cursor: string | null;
             /** Recent Runs */
             recent_runs: components["schemas"]["OpsDatasetLatestExecution"][];
             /**
@@ -6842,6 +6846,8 @@ export interface components {
             occurred_at: string;
             /** Stage */
             stage: string | null;
+            /** Sync Scope */
+            sync_scope: string;
         };
         /**
          * OpsDatasetFreshness
@@ -8009,6 +8015,8 @@ export interface components {
             provider: string | null;
             /** Stage */
             stage: string | null;
+            /** Sync Scope */
+            sync_scope: string | null;
         };
         /**
          * PipelineJobPrecheckData
@@ -15043,6 +15051,7 @@ export interface operations {
                 level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
+                sync_scope?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };

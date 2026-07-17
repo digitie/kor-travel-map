@@ -443,10 +443,28 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   `/v1/ops/datasets`의 `catalog.scope_refresh`가 selector/effect/default/allowed scopes/reason을
   서버 정본으로 제공한다. KMA runner는 선택 scope의 active target만
   조회하고 target/grid membership fingerprint와 base cursor가 둘 다 같을 때만
-  skip한다. 격자 상한을 넘으면 provider I/O 전 전체 실패하여 partial cursor
+  skip한다. `target_grids`와 `external_system:*` 모두 target 해석·격자 dedupe·상한 적용 뒤
+  유효 격자가 0개면 `KmaWeatherTargetScopeEmptyError`로 operation을 실패시킨다. 이
+  preflight 실패는 provider 호출·적재와 `provider_sync_state` 생성/수정 없이 canonical
+  operation의 terminal failure만 남긴다. credential 확인·provider module import·public client
+  생성은 target read → grid mapping/dedupe → cap → empty 판정 및 cursor skip 뒤에만 수행한다.
+  terminal 전이와 같은 transaction에 구조화 event code `kma.target_scope_empty`를 정확히 1건
+  기록하고, `/v1/ops/pipeline/executions/update_request/{request_id}`의 `events[].code`와
+  `/v1/ops/datasets/detail`의 `recent_events[].code`에 그대로 노출한다. terminal 재실행은 기존
+  operation/event를 재사용한다. 격자 상한을 넘으면 provider I/O 전 전체 실패하여 partial cursor
   전진을 금지하고, 실패 카운터는 provider transaction rollback 후 별도
   transaction으로 영속한다. 일반 provider 실패는 성공 writer와 같은 `default` state
   namespace에 기록하고, KMA grid 3종만 선택된 effective scope를 state namespace로 사용한다.
+  정규 schedule asset도 `kma_weather_client_factory`를 받아 target mapping/dedupe/cap/empty와
+  cursor skip 뒤에 동기 생성하며, close 실패가 기존 typed failure나 cancellation을 덮지 않는다.
+- **Dataset exact-scope event 이력(AUD-686 보강, C7B-API 선행 계약)**:
+  `/v1/ops/datasets/detail`은 `recent_events[].sync_scope`,
+  `recent_events_next_cursor`, exact `event_history_url`을 반환한다.
+  `GET /v1/ops/pipeline/events`는 `provider`·`dataset_key`와 함께 nullable `sync_scope` filter를
+  받고 각 event에 nullable effective scope를 반환한다. scope 조건은 ORDER/LIMIT 전에 적용한다.
+  0057 전에는 `ops.import_job_events`에 scope를 복제하지 않고 canonical job/request JOIN의
+  `ops.import_jobs.sync_scope`에서 파생한다. 따라서 이 보강은 C7B-API의 migration 0057을 만들거나
+  그 후속 열 계약을 선점하지 않는다.
 - **Pipeline 계층 취소(T-ADM-C3d, #680)**: body는 최대 500자의 nullable `reason`만 허용한다.
   `operator`/`actor`를 포함한 알 수 없는 필드는 422이며, actor는 admin 인증의
   `AdminProxyContext.actor`에서만 파생한다. `import_job`이 request branch 안에 있으면

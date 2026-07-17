@@ -84,6 +84,7 @@ class OpsImportJobEvent:
     job_id: str
     provider: str | None
     dataset_key: str | None
+    sync_scope: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -249,9 +250,11 @@ WHERE job.job_id = CAST(:job_id AS uuid)
 """
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
-    "event_id, job_id, provider, dataset_key, feature_id, stage, level, code, "
-    "message, payload, occurred_at"
+    "event.event_id, event.job_id, event.provider, event.dataset_key, "
+    "job.sync_scope, event.feature_id, event.stage, event.level, event.code, "
+    "event.message, event.payload, event.occurred_at"
 )
+
 
 def _list_import_job_events_sql(
     *,
@@ -259,40 +262,71 @@ def _list_import_job_events_sql(
     level: str | None,
     provider: str | None,
     dataset_key: str | None,
+    sync_scope: str | None,
     cursor_occurred_at: datetime | None,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
-    clauses: list[str] = ["quarantined_at IS NULL"]
+    clauses: list[str] = ["event.quarantined_at IS NULL"]
     if job_id is not None:
-        clauses.append("job_id = CAST(:job_id AS uuid)")
+        clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:
-        clauses.append("level = CAST(:level AS text)")
+        clauses.append("event.level = CAST(:level AS text)")
     if provider is not None:
         clauses.extend(
             (
-                "provider IS NOT NULL",
-                "provider = CAST(:provider AS text)",
+                "event.provider IS NOT NULL",
+                "event.provider = CAST(:provider AS text)",
             )
         )
     if dataset_key is not None:
         clauses.extend(
             (
-                "dataset_key IS NOT NULL",
-                "dataset_key = CAST(:dataset_key AS text)",
+                "event.dataset_key IS NOT NULL",
+                "event.dataset_key = CAST(:dataset_key AS text)",
+            )
+        )
+    if sync_scope is None:
+        job_join = """
+JOIN LATERAL (
+    SELECT candidate.sync_scope
+    FROM ops.import_jobs AS candidate
+    WHERE candidate.job_id = event.job_id
+      AND candidate.quarantined_at IS NULL
+    LIMIT 1
+) AS job ON true
+"""
+    else:
+        job_join = "JOIN ops.import_jobs AS job ON job.job_id = event.job_id"
+        clauses.append("job.quarantined_at IS NULL")
+    request_join = ""
+    if sync_scope is not None:
+        request_join = (
+            "JOIN ops.feature_update_requests AS request "
+            "ON request.job_id = job.job_id"
+        )
+        clauses.extend(
+            (
+                "request.scope_type = 'provider_dataset'",
+                "job.kind = 'feature_update_request'",
+                "job.provider = CAST(:provider AS text)",
+                "job.dataset_key = CAST(:dataset_key AS text)",
+                "job.sync_scope = CAST(:sync_scope AS text)",
             )
         )
     if cursor_occurred_at is not None:
         clauses.append(
-            "(occurred_at, event_id) < "
+            "(event.occurred_at, event.event_id) < "
             "(CAST(:cursor_occurred_at AS timestamptz), "
             "CAST(:cursor_event_id AS uuid))"
         )
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
-FROM ops.import_job_events
+FROM ops.import_job_events AS event
+{job_join}
+{request_join}
 {where_sql}
-ORDER BY occurred_at DESC, event_id DESC
+ORDER BY event.occurred_at DESC, event.event_id DESC
 LIMIT :limit
 """
 
@@ -442,6 +476,7 @@ def _row_to_import_job_event(row: Any) -> OpsImportJobEvent:
         job_id=str(row.job_id),
         provider=row.provider,
         dataset_key=row.dataset_key,
+        sync_scope=row.sync_scope,
         feature_id=row.feature_id,
         stage=row.stage,
         level=str(row.level),
@@ -535,10 +570,17 @@ async def list_ops_import_job_events(
     level: str | None = None,
     provider: str | None = None,
     dataset_key: str | None = None,
+    sync_scope: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsImportJobEventPage:
-    """``ops.import_job_events``를 ``occurred_at DESC, event_id DESC``로 조회한다."""
+    """event를 시간 역순으로 조회한다.
+
+    ``sync_scope``는 provider/dataset과 함께 준 경우에만 허용하며 canonical
+    feature-update job/request join에서 effective scope를 LIMIT 전에 제한한다.
+    """
+    if sync_scope is not None and (provider is None or dataset_key is None):
+        raise ValueError("sync_scope event filter requires provider and dataset_key")
     page_size = _limit(limit)
     cursor_occurred_at, cursor_event_id = _decode_cursor(
         cursor, kind="import_job_events"
@@ -548,6 +590,7 @@ async def list_ops_import_job_events(
         level=level,
         provider=provider,
         dataset_key=dataset_key,
+        sync_scope=sync_scope,
         cursor_occurred_at=cursor_occurred_at,
     )
     rows = (
@@ -558,6 +601,7 @@ async def list_ops_import_job_events(
                 "level": level,
                 "provider": provider,
                 "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
                 "cursor_occurred_at": cursor_occurred_at,
                 "cursor_event_id": cursor_event_id,
                 "limit": page_size + 1,

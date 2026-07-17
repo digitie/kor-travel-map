@@ -33,6 +33,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
     touch_queued_update_request_for_lock_retry,
 )
+from kortravelmap.infra.jobs_repo import record_import_job_event
 from kortravelmap.infra.poi_cache_target_repo import (
     deactivate_poi_cache_target_feature_links,
     mark_poi_cache_targets_refresh_failed,
@@ -142,6 +143,12 @@ class ProviderDatasetRefreshResult:
 
 class ProviderDatasetRefreshFailure(RuntimeError):
     """provider refresh 실패와 durable sync-state identity를 함께 전달한다."""
+
+    record_sync_failure: bool = True
+    """provider 시도가 있었다면 별도 transaction에 sync failure를 기록한다."""
+
+    event_code: str | None = None
+    """문자열 파싱 없이 노출할 좁은 canonical terminal event code."""
 
     def __init__(
         self,
@@ -667,6 +674,7 @@ async def _finish_failed_execution(
     results: Sequence[ProviderDatasetRefreshResult],
     error_message: str,
     owner_dagster_run_id: str,
+    event_code: str | None = None,
 ) -> FeatureUpdateExecutionResult:
     target_ids = [target.target_id for target in plan.resolution.cache_targets]
     try:
@@ -688,6 +696,19 @@ async def _finish_failed_execution(
             )
             if failed is None:
                 raise _FeatureUpdateExecutionStopped
+            if event_code is not None:
+                event = await record_import_job_event(
+                    session,
+                    failed.job_id,
+                    level="error",
+                    code=event_code,
+                    message=error_message,
+                    payload={"status": "failed", "failure_code": event_code},
+                )
+                if event is None:
+                    raise RuntimeError(
+                        "canonical feature update terminal event insert failed"
+                    )
     except _FeatureUpdateExecutionStopped:
         return await _reload_stopped_result(
             session,
@@ -1038,7 +1059,7 @@ async def _execute_feature_update_request_locked(
         error_message = f"{exc.__class__.__name__}: {exc}"
         if plan is None:
             plan = _unresolved_execution_plan(started)
-        if isinstance(exc, ProviderDatasetRefreshFailure):
+        if isinstance(exc, ProviderDatasetRefreshFailure) and exc.record_sync_failure:
             # runner의 bound transaction은 ``session.begin`` context가 이미
             # rollback했다. sync failure를 별도 transaction으로 먼저 commit해
             # 이후 request terminalize 실패에도 provider 실패 신호를 보존한다.
@@ -1050,6 +1071,11 @@ async def _execute_feature_update_request_locked(
             results=results,
             error_message=error_message,
             owner_dagster_run_id=dagster_run_id,
+            event_code=(
+                exc.event_code
+                if isinstance(exc, ProviderDatasetRefreshFailure)
+                else None
+            ),
         )
 
 

@@ -164,6 +164,7 @@ export interface PipelineEventsParams {
   level?: JobEventLevel;
   provider?: string;
   dataset_key?: string;
+  sync_scope?: string;
   page_size?: number;
   cursor?: string | null;
 }
@@ -235,6 +236,7 @@ function fetchEvents(
       level: params.level,
       provider: params.provider,
       dataset_key: params.dataset_key,
+      sync_scope: params.sync_scope,
       page_size: params.page_size,
       cursor: params.cursor,
     }),

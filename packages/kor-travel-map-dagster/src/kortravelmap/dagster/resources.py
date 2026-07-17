@@ -78,7 +78,7 @@ __all__ = [
     "datagokr_file_data_dataset_key_resource",
     "feature_operation_guard_resource",
     "kma_datagokr_client_resource",
-    "kma_weather_client_resource",
+    "kma_weather_client_factory_resource",
     "kor_travel_map_client_resource",
     "offline_upload_store_resource",
     "reverse_geocoder_resource",
@@ -1025,40 +1025,44 @@ def _dispose_async_engine(engine: Any) -> None:
 @resource(
     required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
     description=(
-        "kma_weather_client provider live client (python-kma-api, "
+        "kma_weather_client_factory lazy public client factory (python-kma-api, "
         "kma_ultra_short_nowcast/kma_ultra_short_forecast/kma_short_forecast)."
     )
 )
-def kma_weather_client_resource(context: InitResourceContext) -> Iterator[Any]:
-    """``python-kma-api`` ``KmaClient`` live 인스턴스 (T-219b).
+def kma_weather_client_factory_resource(
+    context: InitResourceContext,
+) -> Callable[[], Any]:
+    """``python-kma-api`` public ``KmaClient``의 지연 생성 factory (T-219b).
 
     KMA weather asset은 대상 격자가 DB(``ops.poi_cache_targets``)에서 나와
     record-stream resource 패턴이 맞지 않는다 — client 자체를 resource로
-    노출하고 asset이 격자별로 직접 호출한다(ADR-006 wrapper 없음, 계획 정본
-    §2.3). credential이 없으면 guard와 동일한 helpful message로 실패한다.
+    선생성하지 않고 asset이 empty/cursor preflight를 통과한 뒤 public client를
+    직접 생성한다(ADR-006 wrapper 없음, 계획 정본 §2.3). resource 초기화는
+    credential을 검증하거나 provider module을 import하지 않는다.
     """
     ensure_feature_operation_guard_for_provider(
         context,
-        boundary="kma_weather_client",
+        boundary="kma_weather_client_factory",
     )
     settings = KorTravelMapSettings()
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise RuntimeError(
-            "Dagster resource 'kma_weather_client'는 기본 실행 비활성 상태: "
-            "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
-            "dataset=kma_ultra_short_nowcast/kma_ultra_short_forecast/"
-            "kma_short_forecast. kor-travel-map env: KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY; "
-            "source env: DATA_GO_KR_SERVICE_KEY."
-        )
-    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-    # 아니므로(부재 가능) 호출 시점에 lazy import한다.
-    kma = cast(Any, importlib.import_module("kma"))
-    client = kma.KmaClient(service_key=secret.get_secret_value())
-    try:
-        yield client
-    finally:
-        client.close()
+
+    def _new_client() -> Any:
+        secret = settings.data_go_kr_service_key
+        if secret is None:
+            raise RuntimeError(
+                "Dagster resource 'kma_weather_client_factory'는 provider 호출 불가: "
+                "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
+                "dataset=kma_ultra_short_nowcast/kma_ultra_short_forecast/"
+                "kma_short_forecast. kor-travel-map env: "
+                "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY; source env: "
+                "DATA_GO_KR_SERVICE_KEY."
+            )
+        # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+        # 아니므로 실제 grid 호출 직전에만 import한다.
+        kma = cast(Any, importlib.import_module("kma"))
+        return kma.KmaClient(service_key=secret.get_secret_value())
+
+    return _new_client
 
 
 @resource(

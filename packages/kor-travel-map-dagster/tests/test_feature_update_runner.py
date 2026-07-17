@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -36,6 +37,7 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_DATASET_KEY,
 )
 from kortravelmap.settings import KorTravelMapSettings
+from pydantic import SecretStr
 
 from kortravelmap.dagster import feature_update_runner as runner_mod
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS
@@ -44,7 +46,10 @@ from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateRunnerSpec,
     RunnerResources,
 )
-from kortravelmap.dagster.kma_weather import KMA_WEATHER_ASSETS
+from kortravelmap.dagster.kma_weather import (
+    KMA_WEATHER_ASSETS,
+    KmaWeatherTargetScopeEmptyError,
+)
 from kortravelmap.dagster.mcst_features import MCST_FEATURE_ASSETS
 from kortravelmap.dagster.provider_fetchers import ProviderCredentialMissing
 
@@ -598,18 +603,17 @@ def test_default_runner_accepts_only_mois_bulk_dataset() -> None:
     ],
 )
 def test_kma_grid_resources_propagate_canonical_effective_scope(
-    monkeypatch: pytest.MonkeyPatch,
     requested_scope: str | None,
     effective_scope: str,
 ) -> None:
-    monkeypatch.setattr(
-        runner_mod,
-        "_kma_weather_resources",
-        lambda _settings, _scope: RunnerResources({"kma_weather_client": object()}),
+    settings = KorTravelMapSettings.model_construct(
+        data_go_kr_service_key=None,
+        kma_weather_extra_points=None,
+        kma_weather_max_grids_per_run=17,
     )
 
     resources = runner_mod._kma_grid_resources(  # noqa: SLF001 - scope 경계 회귀
-        cast(KorTravelMapSettings, object()),
+        settings,
         _scope(
             provider="python-kma-api",
             dataset_key="kma_short_forecast",
@@ -620,6 +624,76 @@ def test_kma_grid_resources_propagate_canonical_effective_scope(
     assert resources.values["feature_update_dataset_key"] == "kma_short_forecast"
     assert resources.values["kma_weather_sync_scope"] == effective_scope
     assert resources.values["kma_weather_sync_failure_managed_by_executor"] is True
+    assert "kma_weather_client" not in resources.values
+    assert callable(resources.values["kma_weather_client_factory"])
+    assert resources.values["kma_weather_extra_points"] is None
+    assert resources.values["kma_weather_max_grids_per_run"] == 17
+
+
+@pytest.mark.parametrize(
+    "service_key",
+    [None, SecretStr("configured-service-key")],
+    ids=["credential-missing", "constructor-sentinel"],
+)
+async def test_default_kma_runner_empty_target_precedes_lazy_credential_and_client(
+    monkeypatch: pytest.MonkeyPatch,
+    service_key: SecretStr | None,
+) -> None:
+    constructor_calls: list[str] = []
+
+    class _ForbiddenKmaClient:
+        def __init__(self, *, service_key: str) -> None:
+            constructor_calls.append(service_key)
+            raise AssertionError("empty target 뒤 KmaClient를 만들면 안 된다")
+
+    module = SimpleNamespace(KmaClient=_ForbiddenKmaClient)
+    import_calls: list[str] = []
+
+    def _import_module(name: str) -> object:
+        import_calls.append(name)
+        return module
+
+    class _EmptyTargetClient:
+        def __init__(self) -> None:
+            self.target_calls: list[str | None] = []
+
+        async def list_poi_cache_target_coords(
+            self,
+            *,
+            external_system: str | None = None,
+        ) -> list[tuple[float, float]]:
+            self.target_calls.append(external_system)
+            return []
+
+    monkeypatch.setattr(runner_mod.importlib, "import_module", _import_module)
+    target_client = _EmptyTargetClient()
+    runner = FeatureUpdateAssetRunner(
+        common_resources={
+            "kor_travel_map_client": target_client,
+            "reverse_geocoder": None,
+        },
+        log=_Log(),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(
+            data_go_kr_service_key=service_key,
+            kma_weather_extra_points=None,
+            kma_weather_max_grids_per_run=50,
+        ),
+    )
+
+    with pytest.raises(KmaWeatherTargetScopeEmptyError) as exc_info:
+        await runner(
+            cast(Any, object()),
+            _scope(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
+                sync_scope="target_grids",
+            ),
+        )
+
+    assert exc_info.value.event_code == "kma.target_scope_empty"
+    assert target_client.target_calls == [None]
+    assert import_calls == []
+    assert constructor_calls == []
 
 
 def test_kma_grid_resources_reject_missing_typed_effective_scope(

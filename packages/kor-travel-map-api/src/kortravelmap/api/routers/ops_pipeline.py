@@ -317,6 +317,7 @@ class PipelineJobEventRecord(BaseModel):
     job_id: UUID
     provider: str | None
     dataset_key: str | None
+    sync_scope: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -877,6 +878,7 @@ def _event_record(event: OpsImportJobEvent) -> PipelineJobEventRecord:
         job_id=event.job_id,
         provider=event.provider,
         dataset_key=event.dataset_key,
+        sync_scope=event.sync_scope,
         feature_id=event.feature_id,
         stage=event.stage,
         level=event.level,
@@ -1329,7 +1331,9 @@ async def cancel_execution(
     summary="전역 job 이벤트 스트림",
     description=(
         "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 "
-        "`ops.import_job_events` 스트림 — level/provider/dataset/job 필터."
+        "`ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. "
+        "sync_scope는 provider와 dataset_key를 함께 요구하며 canonical "
+        "feature-update job/request의 effective scope를 조회한다."
     ),
 )
 async def list_pipeline_events(
@@ -1338,6 +1342,7 @@ async def list_pipeline_events(
     level: Annotated[JobEventLevel | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
+    sync_scope: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PipelineEventsListResponse:
@@ -1349,6 +1354,7 @@ async def list_pipeline_events(
             level=level,
             provider=provider,
             dataset_key=dataset_key,
+            sync_scope=sync_scope,
             limit=page_size,
             cursor=cursor,
         )

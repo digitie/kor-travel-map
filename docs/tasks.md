@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-AUD-686` — KMA 유효 대상 0건 fail-closed (issue #686, PR 1개)
   - [ ] `T-ADM-C7B-API` — active projection·exact-scope 이력 API (issues #712/#719, migration 0057, PR 1개)
   - [ ] `T-ADM-C7B-UI` — exact-scope 조작·이력 UI 소비 (issues #712/#719, PR 1개)
   - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (선착)
@@ -30,26 +29,23 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-AUD-686` — **KMA 유효 대상 0건 fail-closed** (issue **#686**,
-  **PR 1개**, migration 없음, `T-ADM-AUD-718`과 병렬): C45X가 완성한 typed
-  scope·active request 멱등성 위에서 KMA target 해석 결과가 0건이면 dispatch/provider
-  I/O/sync-state write 전에 거절한다. 요청 target과 active membership의 교집합이
-  비는 경우를 typed 오류와 durable operation 증거로 노출하고, operation 중복·provider
-  호출·cursor/timestamp 변경이 없음을 통합 테스트로 고정한다.
 - [ ] `T-ADM-C7B-API` — **active projection + exact-scope event/history API**
   (issues **#712/#719**, **migration 0057**, **PR 1개**, 의존
   `T-ADM-AUD-718`/0056): canonical root/member와 effective `sync_scope`를 기준으로
   active operation projection과 event/history 조회 경계를 typed DB 열·제약·실제
   access path로 고정한다. exact-scope 조건을 cursor/LIMIT 전에 적용하고 run/event
-  continuation과 canonical history URL을 모두 반환한다. 두 scope 혼합과 page limit 초과,
-  stale/terminal/active 조합을 실제 DB/API 통합 테스트로 증명한다.
+  continuation과 canonical history URL을 모두 반환한다. cursor에는 job/level/provider/
+  dataset/scope filter fingerprint를 묶어 다른 filter에서 재사용하면 typed 422로 닫고,
+  canonical `sync_scope` parser가 거부하는 값도 typed 422로 닫는다. 두 scope 혼합과 page
+  limit 초과, stale/terminal/active 조합을 실제 DB/API 통합 테스트로 증명한다.
 - [ ] `T-ADM-C7B-UI` — **exact-scope 조작·이력 UI 소비** (issues **#712/#719**,
   **PR 1개**, 의존 C7B-API·C7A): 잘못된 dataset/scope deep link는 다른 행으로
   폴백하지 않고 fail-closed하며, provider-only URL은 실제 선택 tuple로 canonicalize한
   뒤에만 조작을 허용한다. scope capability·active operation 링크를 선제 소비하고
   run/event continuation을 `더 보기` 또는 canonical pipeline history로 끝까지 탐색한다.
-  local draft와 back/forward/focus 의미를 보존하고 mock/live UI E2E로 POST tuple과 URL,
-  requested/effective scope를 대조한다.
+  provider/dataset tuple이 불완전해지는 즉시 stale scope와 cursor를 함께 비우고, URL
+  변경·back/forward를 controlled filter state에 반영한다. local draft와 focus 의미를
+  보존하고 mock/live UI E2E로 POST tuple과 URL, requested/effective scope를 대조한다.
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존
   C6b·C7A·C7B-720·AUD-686·C7B-UI): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
@@ -62,10 +58,11 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   live 증거를 첨부한 뒤 닫는다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720과
-**Wave 2**의 AUD-718/0056은 완료했다. Wave 2의 AUD-686은 병행 중이다.
+**Wave 2**의 AUD-686·AUD-718/0056은 완료했다.
 **Wave 3**은 AUD-718/0056 뒤 C7B-API/0057, **Wave 4**는 C7B-API와 C7A 뒤
-C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-718은
-완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
+C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·
+AUD-718은 완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주
+rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은
 **C7A `0055` → AUD-718 `0056` → C7B-API `0057`** 단일 chain이며, 후속 migration

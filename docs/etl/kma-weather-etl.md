@@ -207,7 +207,10 @@ async def kma_short_forecast_etl(client, async_session):
 
 `kortravelmap.dagster.kma_weather` — 대상 좌표가 DB에서 나오므로 표준
 record-resource 패턴이 아니라 **asset 직접 구현**(resource는
-`kma_weather_client` = `KmaClient` live 인스턴스 + settings 값 2종). 발표
+`kma_weather_client_factory` = preflight 뒤 public `KmaClient`를 동기 생성하는 지연
+factory + settings 값 2종). resource 초기화는 credential 검증·`kma` import·client 생성을
+하지 않으며, target mapping/dedupe/cap/empty와 동일 cursor skip을 통과한 asset만 client를
+소유하고 닫는다. close 실패는 이미 발생한 typed failure/cancellation을 덮지 않는다. 발표
 운영 schedule은 시간당 1회로 맞춘다. 원천 발표 주기보다 자주 실행되는 dataset은
 같은 base 재실행을 cursor가 skip한다.
 

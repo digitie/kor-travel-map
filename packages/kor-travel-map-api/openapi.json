@@ -13782,6 +13782,10 @@
             "title": "Dataset Key",
             "type": "string"
           },
+          "event_history_url": {
+            "title": "Event History Url",
+            "type": "string"
+          },
           "mutable": {
             "title": "Mutable",
             "type": "boolean"
@@ -13814,6 +13818,17 @@
             },
             "title": "Recent Events",
             "type": "array"
+          },
+          "recent_events_next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Events Next Cursor"
           },
           "recent_runs": {
             "items": {
@@ -13893,6 +13908,8 @@
           "recent_runs_next_cursor",
           "pipeline_history_url",
           "recent_events",
+          "recent_events_next_cursor",
+          "event_history_url",
           "dataset_issues",
           "provider_issues"
         ],
@@ -13963,11 +13980,16 @@
               }
             ],
             "title": "Stage"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
           }
         },
         "required": [
           "event_id",
           "job_id",
+          "sync_scope",
           "stage",
           "level",
           "code",
@@ -17215,6 +17237,17 @@
               }
             ],
             "title": "Stage"
+          },
+          "sync_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
           }
         },
         "required": [
@@ -17222,6 +17255,7 @@
           "job_id",
           "provider",
           "dataset_key",
+          "sync_scope",
           "feature_id",
           "stage",
           "level",
@@ -32894,7 +32928,7 @@
     },
     "/v1/ops/pipeline/events": {
       "get": {
-        "description": "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/job 필터.",
+        "description": "어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. sync_scope는 provider와 dataset_key를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.",
         "operationId": "list_pipeline_events_v1_ops_pipeline_events_get",
         "parameters": [
           {
@@ -32967,6 +33001,22 @@
                 }
               ],
               "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sync_scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sync Scope"
             }
           },
           {

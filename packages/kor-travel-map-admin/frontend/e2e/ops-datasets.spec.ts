@@ -262,6 +262,10 @@ function makeDetail(
     recent_runs_coverage: "db_recorded_canonical_operations",
     recent_runs_next_cursor: null,
     recent_events: [],
+    recent_events_next_cursor: null,
+    event_history_url:
+      `/v1/ops/pipeline/events?provider=${KMA_PROVIDER}` +
+      `&dataset_key=${KMA_DATASET}&sync_scope=${encodeURIComponent(KMA_SCOPE)}`,
     schedule: makeScheduleSummary(),
     schedule_source_status: "ok",
     schedule_source_errors: [],
@@ -898,6 +902,7 @@ function defaultGrid(): {
           {
             event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             job_id: JOB_ID,
+            sync_scope: KMA_SCOPE,
             stage: "loading",
             level: "error",
             code: "provider.timeout",
@@ -1144,6 +1149,19 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     // 최근 이벤트 + Feature 보기 링크.
     await expect(page.getByText("provider timeout")).toBeVisible();
+    const eventHistoryLink = page.getByRole("link", {
+      name: "선택 범위 이벤트 전체 보기",
+    });
+    await expect(eventHistoryLink).toHaveAttribute(
+      "href",
+      `/ops/pipeline?tab=events&provider=${KMA_PROVIDER}` +
+        `&dataset_key=${KMA_DATASET}&sync_scope=${KMA_SCOPE}`,
+    );
+    await expect(eventHistoryLink).toHaveAttribute(
+      "data-api-history-url",
+      `/v1/ops/pipeline/events?provider=${KMA_PROVIDER}` +
+        `&dataset_key=${KMA_DATASET}&sync_scope=${KMA_SCOPE}`,
+    );
     await expect(
       page.getByRole("link", { name: "생성된 Feature 보기" }),
     ).toHaveAttribute(

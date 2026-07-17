@@ -248,6 +248,7 @@ class OpsDatasetEventRecord(BaseModel):
 
     event_id: UUID
     job_id: UUID
+    sync_scope: str
     stage: str | None
     level: str
     code: str | None
@@ -277,6 +278,8 @@ class OpsDatasetDetailData(BaseModel):
     recent_runs_next_cursor: str | None
     pipeline_history_url: str
     recent_events: list[OpsDatasetEventRecord]
+    recent_events_next_cursor: str | None
+    event_history_url: str
     dataset_issues: OpsIssueSummary
     provider_issues: OpsIssueSummary
 

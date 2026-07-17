@@ -24,8 +24,9 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
 import hashlib
 import importlib
+import inspect
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, NoReturn, cast
@@ -78,6 +79,7 @@ if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
 
 __all__ = [
+    "KMA_TARGET_SCOPE_EMPTY_EVENT_CODE",
     "KMA_WEATHER_ASSETS",
     "KmaAlertRegionRow",
     "KmaAlertRow",
@@ -109,11 +111,12 @@ __all__ = [
 ]
 
 _KST: Final = timezone(timedelta(hours=9))
+KMA_TARGET_SCOPE_EMPTY_EVENT_CODE: Final = "kma.target_scope_empty"
 
 _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
     "feature_operation_guard",
     "kor_travel_map_client",
-    "kma_weather_client",
+    "kma_weather_client_factory",
     "kma_weather_extra_points",
     "kma_weather_max_grids_per_run",
     "reverse_geocoder",
@@ -364,7 +367,10 @@ class KmaWeatherLoadResult:
 
 
 class KmaWeatherTargetScopeEmptyError(ProviderDatasetRefreshFailure):
-    """external-system scope에 실행 가능한 active target이 없다."""
+    """KMA scope를 격자로 해석한 결과 실행 가능한 target이 없다."""
+
+    record_sync_failure = False
+    event_code = KMA_TARGET_SCOPE_EMPTY_EVENT_CODE
 
 
 class KmaWeatherGridLimitExceeded(ProviderDatasetRefreshFailure):
@@ -383,7 +389,7 @@ async def _raise_kma_refresh_failure(
         "kma_weather_sync_failure_managed_by_executor",
         default=False,
     )
-    if managed_by_executor is not True:
+    if managed_by_executor is not True and failure.record_sync_failure:
         await client.record_sync_failure(
             provider=failure.provider,
             dataset_key=failure.dataset_key,
@@ -392,6 +398,15 @@ async def _raise_kma_refresh_failure(
     if cause is not None:
         raise failure from cause
     raise failure
+
+
+async def _close_owned_kma_weather_client(client: object) -> None:
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await cast("Awaitable[object]", result)
 
 
 async def _run_kma_weather_asset(
@@ -429,21 +444,6 @@ async def _run_kma_weather_asset(
     target_coords = await kor_travel_map_client.list_poi_cache_target_coords(
         external_system=sync_scope.external_system,
     )
-    if sync_scope.kind == "external_system" and not target_coords:
-        await _raise_kma_refresh_failure(
-            context,
-            kor_travel_map_client,
-            KmaWeatherTargetScopeEmptyError(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=dataset_key,
-                sync_scope=sync_scope.value,
-                message=(
-                    "KMA external-system scope has no active POI cache targets: "
-                    f"{sync_scope.external_system!r}"
-                ),
-            ),
-        )
-
     extra_points: Sequence[tuple[float, float]] = ()
     if sync_scope.kind == "target_grids":
         extra_raw = await _resource_value(
@@ -477,6 +477,25 @@ async def _run_kma_weather_asset(
                     "KMA target grid count exceeds max_grids; partial execution is forbidden: "
                     f"total={len(targets.grids) + targets.grids_dropped}, "
                     f"max_grids={max_grids}"
+                ),
+            ),
+        )
+    if not targets.grids:
+        scope_detail = (
+            f"external_system={sync_scope.external_system!r}"
+            if sync_scope.kind == "external_system"
+            else "target_grids (active targets + configured extra points)"
+        )
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            KmaWeatherTargetScopeEmptyError(
+                provider=KMA_PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope.value,
+                message=(
+                    "KMA target scope has no active POI cache targets or effective "
+                    f"grids after grid resolution and cap: {scope_detail}"
                 ),
             ),
         )
@@ -519,20 +538,24 @@ async def _run_kma_weather_asset(
         _add_output_metadata(context, result.as_metadata())
         return result
 
-    if not targets.grids:
-        context.log.warning(
-            "KMA %s 대상 격자 없음 — poi_cache_targets/KMA_WEATHER_EXTRA_POINTS가 "
-            "비어 있다. cursor는 전진하지 않는다.",
-            dataset_key,
-        )
-
-    kma_client = _resource_object(context, "kma_weather_client")
-    reverse_geocoder = _reverse_geocoder(context)
-    fetched_at = kst_now()
     grids_fetched = 0
     values_loaded = 0
     matched_features: set[str] = set()
+    owned_kma_client: object | None = None
+    primary_error: BaseException | None = None
     try:
+        client_factory = _resource_object(
+            context,
+            "kma_weather_client_factory",
+        )
+        if not callable(client_factory):
+            raise TypeError("kma_weather_client_factory must be callable")
+        # KmaClient constructor는 outbound I/O를 하지 않는다. preflight 뒤 이
+        # task에서 동기 생성해 client 소유권을 즉시 확정한다.
+        owned_kma_client = client_factory()
+        kma_client = owned_kma_client
+        reverse_geocoder = _reverse_geocoder(context)
+        fetched_at = kst_now()
         for nx, ny in targets.grids:
             rows = fetch_rows(kma_client, nx, ny)
             grids_fetched += 1
@@ -560,31 +583,60 @@ async def _run_kma_weather_asset(
             grid_values: list[WeatherValue] = list(to_values(rows, anchor))
             values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
             matched_features.add(anchor)
-    except ProviderDatasetRefreshFailure:
-        raise
-    except Exception as exc:
-        await _raise_kma_refresh_failure(
-            context,
-            kor_travel_map_client,
-            ProviderDatasetRefreshFailure(
+        if grids_fetched:
+            await kor_travel_map_client.record_sync_success(
                 provider=KMA_PROVIDER_NAME,
                 dataset_key=dataset_key,
                 sync_scope=sync_scope.value,
-                message=f"KMA provider refresh failed: {exc}",
-            ),
-            cause=exc,
-        )
-
-    if grids_fetched:
-        await kor_travel_map_client.record_sync_success(
+                cursor={
+                    "base_datetime": base_key,
+                    "membership_fingerprint": membership_fingerprint,
+                },
+            )
+    except ProviderDatasetRefreshFailure as exc:
+        primary_error = exc
+        raise
+    except Exception as exc:
+        failure = ProviderDatasetRefreshFailure(
             provider=KMA_PROVIDER_NAME,
             dataset_key=dataset_key,
             sync_scope=sync_scope.value,
-            cursor={
-                "base_datetime": base_key,
-                "membership_fingerprint": membership_fingerprint,
-            },
+            message=f"KMA provider refresh failed: {exc}",
         )
+        primary_error = failure
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            failure,
+            cause=exc,
+        )
+    except BaseException as exc:
+        # CancelledError 등 cooperative cancellation은 provider failure로
+        # 재분류하지 않는다. cleanup 실패보다 원래 cancellation을 우선한다.
+        primary_error = exc
+        raise
+    finally:
+        if owned_kma_client is not None:
+            try:
+                await _close_owned_kma_weather_client(owned_kma_client)
+            except BaseException:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(
+                    "KMA client close도 실패했지만 primary error identity를 보존함."
+                )
+                log_error = getattr(context.log, "error", None)
+                if callable(log_error):
+                    try:
+                        log_error(
+                            "KMA primary failure/cancellation 뒤 client close도 실패했지만 "
+                            "원래 error identity를 보존한다.",
+                            exc_info=True,
+                        )
+                    except BaseException:
+                        # 보조 진단 logger도 cooperative cancellation/primary
+                        # failure를 덮을 수 없다.
+                        primary_error.add_note("KMA client close 실패 진단 logger도 실패함.")
 
     result = KmaWeatherLoadResult(
         provider=KMA_PROVIDER_NAME,

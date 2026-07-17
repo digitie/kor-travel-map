@@ -20,6 +20,26 @@
   frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin type drift와 31-route production
   build도 통과했다. 실제 browser 검증과 issue #718 종결은 최종 `T-ADM-C7` n150 live E2E에 남긴다.
 
+## KMA 빈 target fail-closed·exact-scope event (2026-07-18, `T-ADM-AUD-686`)
+
+- [x] **T-ADM-AUD-686 — 유효 target 0건을 provider I/O 전에 종결.** 직접 runner와 정규
+  Dagster KMA grid asset 3종은 target mapping·dedupe·cap·cursor preflight를 통과한 뒤에만
+  credential·provider import·public client를 사용한다. 유효 target이 없으면 feature/weather와
+  provider sync state를 변경하지 않고 canonical operation을 실패시키며, 같은 transaction에
+  `kma.target_scope_empty` event를 정확히 한 번 기록한다.
+- [x] **원자성·이력 경계를 회귀 계약으로 고정.** active duplicate loser와 terminal replay는
+  operation/event를 늘리지 않고, event 기록 실패는 request/job/event 전체를 rollback한다.
+  dataset event는 canonical event→job→request JOIN에서 effective `sync_scope`를
+  cursor·`ORDER BY`·`LIMIT` 전에 제한하며 다음 cursor와 canonical history URL을 반환한다.
+  migration은 추가하지 않았고 이 join-derived 경계는 후속 C7B-API/0057이 승계한다.
+- [x] **적대 리뷰와 로컬 gate 완료.** 두 독립 리뷰어가 제품 SHA `c07259fb`를 S1/S2/S3
+  0건으로 승인했다. 테스트 격리·generated type 동기화를 반영한 최종 SHA에서 root unit
+  1,413건, API 485건, Dagster 475건(1 skip), 실제 PostGIS 집중 6건, frontend Vitest
+  185건을 통과했다. Ruff, strict mypy 115+52+23파일, import 계약 4/4,
+  OpenAPI admin/user·generated type drift, frontend type-check·lint(오류 0, 기존 경고 6),
+  31-route production build도 통과했다. 이슈 #686은 닫지 않고 최종 `T-ADM-C7` n150 live
+  증거와 함께 종결한다.
+
 ## Admin ops-live 인증·무효화 완결 (2026-07-17, `T-ADM-C7A`)
 
 - [x] **T-ADM-C7A — same-origin 실시간 갱신 경계를 완결.** 로그인 session과

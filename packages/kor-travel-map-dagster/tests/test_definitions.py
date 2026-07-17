@@ -220,7 +220,7 @@ def test_feature_load_provider_guard_resources_registered() -> None:
         else:
             assert "provider record guard" in resource_def.description
 
-    for resource_key in ("kma_weather_client", "kma_datagokr_client"):
+    for resource_key in ("kma_weather_client_factory", "kma_datagokr_client"):
         assert {
             "feature_operation_guard",
             "kor_travel_map_client",

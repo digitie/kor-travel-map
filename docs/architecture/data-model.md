@@ -1275,6 +1275,30 @@ operation의 `dataset_wide`는 요청 중복 실행을 막는 조작 identity이
 갈리는 KMA grid 3종만 operation effective scope(`target_grids` 또는
 `external_system:<name>`)를 provider state namespace로 그대로 사용한다.
 
+KMA grid operation은 선택 scope의 active target과 설정 extra point를 격자로 해석하고 cap을
+적용한 결과가 0개면 typed preflight failure로 종료한다. 이때 canonical request/job의 failure는
+영속하지만 provider 호출·feature/weather 적재와 `provider_sync_state` row/cursor/성공·실패
+timestamp는 만들거나 바꾸지 않는다. active membership과 요청 scope의 교집합이 사라진 경우도
+같은 의미다. KMA credential 확인, `kma` module import, public `KmaClient` 생성은 이 preflight와
+동일 cursor skip 판정을 모두 통과한 뒤에만 수행하고, 생성한 client만 해당 실행이 닫는다.
+preflight failure의 canonical code `kma.target_scope_empty`는 request/job `failed` 전이와 같은
+transaction에서 `ops.import_job_events`에 정확히 1건 기록한다. terminal request replay는 새
+operation/event/state write 없이 기존 결과를 반환한다.
+
+정규 schedule asset도 선생성 live client가 아니라 `kma_weather_client_factory` resource를
+받는다. factory는 resource 초기화 중 credential 검증·provider import·client 생성을 하지 않으며,
+세 KMA grid asset 각각이 위 preflight를 통과한 뒤 같은 task에서 동기 생성한다. asset이 소유한
+client의 close가 실패해도 이미 발생한 typed provider failure나 `CancelledError` 같은
+`BaseException`을 close 오류로 바꾸지 않는다. primary 오류가 없을 때만 close 오류를 전파한다.
+
+0057 전까지 dataset 상세의 exact-scope event 이력은 event payload를 해석하거나 event table에
+scope를 복제하지 않는다. `ops.import_job_events → ops.import_jobs →
+ops.feature_update_requests` canonical pair를 JOIN하고 typed `import_jobs.sync_scope`를
+cursor/ORDER/LIMIT 전에 제한해 effective scope를 파생한다. event DTO의 `sync_scope`, 다음 cursor,
+canonical event history URL도 이 join-derived 결과다. 후속 C7B-API 0057이 event scope access
+path를 별도 열·제약으로 고정하기 전의 명시적 임시 경계이며, 본 변경은 0057 migration을 선점하지
+않는다.
+
 queued/running direct job에는 `(provider, dataset_key, sync_scope)` partial unique index
 `uq_import_jobs_active_feature_update_scope`를 적용한다. 같은 identity의 계획이 scope/filter/policy/
 priority/operator/reason까지 같으면 API는 기존 request를 재사용하고, 다르면 조용히 덮지 않고

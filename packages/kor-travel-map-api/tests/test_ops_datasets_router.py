@@ -217,6 +217,11 @@ def _empty_detail() -> OpsDatasetDetailData:
             "dataset_key=mois_license_features_bulk"
         ),
         recent_events=[],
+        recent_events_next_cursor=None,
+        event_history_url=(
+            "/v1/ops/pipeline/events?provider=python-mois-api&"
+            "dataset_key=mois_license_features_bulk&sync_scope=dataset_wide"
+        ),
         dataset_issues=OpsIssueSummary(open_count=0, severity_counts={}),
         provider_issues=OpsIssueSummary(open_count=0, severity_counts={}),
     )
@@ -329,16 +334,24 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
     assert projected["properties"]["id"]["format"] == "uuid"
     assert set(projected["properties"]["status"]["enum"]) == operation_states
     detail = spec["components"]["schemas"]["OpsDatasetDetailData"]
-    assert {"recent_runs_next_cursor", "pipeline_history_url"} <= set(
-        detail["properties"]
-    )
+    assert {
+        "recent_runs_next_cursor",
+        "pipeline_history_url",
+        "recent_events_next_cursor",
+        "event_history_url",
+    } <= set(detail["properties"])
     assert "detail_url" not in detail["properties"]
     assert "recent_runs_next_cursor" in detail["required"]
+    assert "recent_events_next_cursor" in detail["required"]
+    assert "event_history_url" in detail["required"]
     cursor_schema = detail["properties"]["recent_runs_next_cursor"]
     assert {item["type"] for item in cursor_schema["anyOf"]} == {
         "string",
         "null",
     }
+    event_schema = spec["components"]["schemas"]["OpsDatasetEventRecord"]
+    assert event_schema["properties"]["sync_scope"]["type"] == "string"
+    assert "sync_scope" in event_schema["required"]
 
 
 @pytest.mark.unit
@@ -1008,7 +1021,11 @@ async def test_detail_materializes_all_catalog_target_scopes(
             assert kwargs["dataset_sync_scopes"] == (
                 "external_system:concierge",
             )
-        return SimpleNamespace(items=(), next_cursor=None)
+            return SimpleNamespace(items=(), next_cursor="runs-next")
+        if "sync_scope" in kwargs:
+            assert kwargs["sync_scope"] == "external_system:concierge"
+            return SimpleNamespace(items=(), next_cursor="events-next")
+        raise AssertionError(f"unexpected detail page query: {kwargs!r}")
 
     async def _empty(_session: object, **_kwargs: object) -> tuple[object, ...]:
         return ()
@@ -1049,6 +1066,13 @@ async def test_detail_materializes_all_catalog_target_scopes(
     assert scopes["target_grids"].status == "never_run"
     assert scopes["external_system:concierge"].status == "active"
     assert scopes["external_system:geo"].status == "never_run"
+    assert detail.recent_runs_next_cursor == "runs-next"
+    assert detail.recent_events_next_cursor == "events-next"
+    assert detail.event_history_url == (
+        "/v1/ops/pipeline/events?provider=python-kma-api&"
+        "dataset_key=kma_short_forecast&"
+        "sync_scope=external_system%3Aconcierge"
+    )
 
 
 @pytest.mark.unit

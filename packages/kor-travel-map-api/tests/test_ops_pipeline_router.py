@@ -501,6 +501,7 @@ def _event(
         job_id="11111111-1111-1111-1111-111111111111",
         provider=MOIS_PROVIDER_NAME,
         dataset_key=DATASET_KEY_BULK,
+        sync_scope="dataset_wide",
         feature_id=None,
         stage="loading",
         level="error",
@@ -698,6 +699,10 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     ]
     kind_param = next(p for p in detail_params if p["name"] == "kind")
     assert kind_param["schema"]["enum"] == ["import_job", "update_request"]
+    event_params = spec["paths"]["/v1/ops/pipeline/events"]["get"]["parameters"]
+    assert "sync_scope" in {parameter["name"] for parameter in event_params}
+    event_record = spec["components"]["schemas"]["PipelineJobEventRecord"]
+    assert "sync_scope" in event_record["required"]
     # 갱신 요청 생성은 기존 6-type scope union 계약을 그대로 공유한다.
     request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert len(request_schema["properties"]["scope"]["oneOf"]) == 6
@@ -1627,6 +1632,7 @@ def test_events_global_list_passes_filters(
             "level": "error",
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "dataset_wide",
             "page_size": 10,
         },
     )
@@ -1636,10 +1642,12 @@ def test_events_global_list_passes_filters(
     assert captured["level"] == "error"
     assert captured["provider"] == MOIS_PROVIDER_NAME
     assert captured["dataset_key"] == DATASET_KEY_BULK
+    assert captured["sync_scope"] == "dataset_wide"
     assert captured["limit"] == 10
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "ev-next"
     assert body["data"]["items"][0]["code"] == "provider.timeout"
+    assert body["data"]["items"][0]["sync_scope"] == "dataset_wide"
 
 
 @pytest.mark.unit
@@ -1647,6 +1655,19 @@ def test_events_non_uuid_job_id_is_422(client: TestClient) -> None:
     response = client.get("/v1/ops/pipeline/events", params={"job_id": "not-a-uuid"})
 
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_events_sync_scope_without_provider_dataset_pair_is_422(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/v1/ops/pipeline/events",
+        params={"sync_scope": "target_grids"},
+    )
+
+    assert response.status_code == 422
+    assert "requires provider and dataset_key" in response.text
 
 
 @pytest.mark.unit

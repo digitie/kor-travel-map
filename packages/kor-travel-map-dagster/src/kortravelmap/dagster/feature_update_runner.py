@@ -641,25 +641,33 @@ def _close_method(value: object) -> Teardown:
     return _teardown
 
 
+def _new_kma_weather_client(
+    settings: KorTravelMapSettings,
+    scope: ProviderDatasetRefreshScope,
+) -> object:
+    """target preflight를 통과한 direct run용 public KMA client를 만든다."""
+    service_key = _kma_service_key(
+        settings,
+        resource_key="kma_weather_client_factory",
+        dataset=scope.dataset_key,
+    )
+    kma = cast(Any, importlib.import_module("kma"))
+    return kma.KmaClient(service_key=service_key)
+
+
 def _kma_weather_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
-    kma = cast(Any, importlib.import_module("kma"))
-    client = kma.KmaClient(
-        service_key=_kma_service_key(
-            settings,
-            resource_key="kma_weather_client",
-            dataset=scope.dataset_key,
-        )
-    )
+    def _client_factory() -> object:
+        return _new_kma_weather_client(settings, scope)
+
     return RunnerResources(
         {
-            "kma_weather_client": client,
+            "kma_weather_client_factory": _client_factory,
             "kma_weather_extra_points": settings.kma_weather_extra_points,
             "kma_weather_max_grids_per_run": settings.kma_weather_max_grids_per_run,
-        },
-        teardowns=(_close_method(client),),
+        }
     )
 
 

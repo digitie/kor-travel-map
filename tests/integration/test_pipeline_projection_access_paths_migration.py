@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from kortravelmap.infra.ops_repo import list_ops_import_job_events
 
 pytestmark = pytest.mark.integration
 
@@ -1469,26 +1468,38 @@ async def test_pipeline_projection_access_paths_upgrade_and_downgrade(
             assert component_ids.isdisjoint(visible_job_ids)
 
             async with AsyncSession(target_engine) as session:
-                global_event_ids: set[str] = set()
-                event_cursor: str | None = None
-                while True:
-                    event_page = await list_ops_import_job_events(
-                        session,
-                        limit=100,
-                        cursor=event_cursor,
+                # 이 테스트는 0052 단독 schema를 검증한다. 최신 repository의
+                # 0053 typed sync_scope 계약을 과거 revision에 역이식하지 않고,
+                # 0052가 소유한 quarantine visibility만 직접 확인한다.
+                visible_event_ids = {
+                    str(row.event_id)
+                    for row in await session.execute(
+                        text(
+                            """
+                            SELECT event.event_id
+                            FROM ops.import_job_events AS event
+                            JOIN ops.import_jobs AS job ON job.job_id = event.job_id
+                            WHERE event.quarantined_at IS NULL
+                              AND job.quarantined_at IS NULL
+                            """
+                        )
                     )
-                    global_event_ids.update(item.event_id for item in event_page.items)
-                    if event_page.next_cursor is None:
-                        break
-                    event_cursor = event_page.next_cursor
-                assert _QUARANTINE_EVENT_ID not in global_event_ids
-
-                quarantined_job_events = await list_ops_import_job_events(
-                    session,
-                    _VALID_ORPHAN_JOB,
-                    limit=100,
+                }
+                assert _QUARANTINE_EVENT_ID not in visible_event_ids
+                quarantined_job_event_count = await session.scalar(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM ops.import_job_events AS event
+                        JOIN ops.import_jobs AS job ON job.job_id = event.job_id
+                        WHERE event.job_id = CAST(:job_id AS uuid)
+                          AND event.quarantined_at IS NULL
+                          AND job.quarantined_at IS NULL
+                        """
+                    ),
+                    {"job_id": _VALID_ORPHAN_JOB},
                 )
-                assert quarantined_job_events.items == ()
+                assert quarantined_job_event_count == 0
                 live_snapshot = await _import_jobs_snapshot(session)
                 assert live_snapshot["event_clock_revision"] == 0
                 assert live_snapshot["latest_event_id"] != _QUARANTINE_EVENT_ID

@@ -17,6 +17,22 @@
   조정 전 저장을 차단하고 탭 Back/Forward에도 초안을 유지하며 browser Back으로 drawer를
   닫으면 원래 행으로 focus를 복귀한다.
 
+### KMA 빈 target fail-closed·exact event 증거 (2026-07-17, T-ADM-AUD-686)
+
+- **FIXED**: KMA grid 3종은 target mapping·dedupe·cap 결과가 0건이면 provider client,
+  feature/weather 적재, provider sync state를 건드리지 않고 canonical operation을 실패시킨다.
+  terminal event `kma.target_scope_empty`는 같은 transaction에 한 번만 기록한다.
+- **CHANGED**: 직접 실행과 정규 Dagster schedule 모두 credential 확인·provider import·public
+  client 생성을 empty/cursor preflight 뒤로 지연한다. 소유 client close 실패는 먼저 발생한 typed
+  failure나 cancellation을 덮지 않는다.
+- **ADDED**: dataset 상세 event에 effective `sync_scope`, 다음 cursor, canonical history URL을
+  추가하고 pipeline 전역 events에 exact scope filter를 제공한다. 0057 전에는 canonical
+  job/request JOIN의 typed job scope에서 파생한다.
+- **VERIFIED**: 두 적대 리뷰어의 S1/S2/S3 0건 승인 뒤 root unit 1,413건, API 485건,
+  Dagster 475건(1 skip), 실제 PostGIS 집중 6건, frontend unit 185건과 전체 정적·OpenAPI·
+  generated type·production build gate를 통과했다. #686 종결은 최종 C7 n150 live 증거까지
+  보류한다.
+
 ### ops-live dataset projection·복구 경계 보강 (2026-07-17, ADR-064 T-ADM-C7A)
 
 - **ADDED**: data integrity issue와 POI cache target 변경을 원본 transaction과 함께 증가시키는

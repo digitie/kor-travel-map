@@ -470,6 +470,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
           job_id: TWIN_JOB_ID,
           provider: "python-kma-api",
           dataset_key: "kma_short_forecast",
+          sync_scope: "target_grids",
           feature_id: null,
           stage: "loading",
           level: "error",
@@ -682,6 +683,7 @@ interface MockOptions {
 interface MockCounters {
   observedApiContracts: string[];
   executionQueries: URLSearchParams[];
+  eventQueries: URLSearchParams[];
   patchBodies: unknown[];
   commandBodies: unknown[];
   scheduleKeys: string[];
@@ -715,6 +717,7 @@ async function installPipelineMocks(
   const counters: MockCounters = {
     observedApiContracts: [],
     executionQueries: [],
+    eventQueries: [],
     patchBodies: [],
     commandBodies: [],
     scheduleKeys: [],
@@ -910,6 +913,7 @@ async function installPipelineMocks(
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/events")) {
+      counters.eventQueries.push(url.searchParams);
       const body: PipelineEventsListResponse = {
         data: { items: makeDetail().data.events ?? [] },
         meta: {
@@ -1548,6 +1552,37 @@ test.describe("/ops/pipeline", () => {
         ].join("|");
       })
       .toBe("running|python-kma-api|kma_short_forecast|target_grids");
+  });
+
+  test("dataset event history 딥링크가 exact scope 필터를 복원한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto(
+      "/ops/pipeline?tab=events&provider=python-kma-api&" +
+        "dataset_key=kma_short_forecast&sync_scope=target_grids",
+    );
+
+    await expect(page.getByLabel("이벤트 provider 필터")).toHaveValue(
+      "python-kma-api",
+    );
+    await expect(page.getByLabel("이벤트 데이터셋 필터")).toHaveValue(
+      "kma_short_forecast",
+    );
+    await expect(page.getByLabel("이벤트 sync scope 필터")).toHaveValue(
+      "target_grids",
+    );
+    await expect
+      .poll(() => {
+        const last = counters.eventQueries.at(-1);
+        return [
+          last?.get("provider"),
+          last?.get("dataset_key"),
+          last?.get("sync_scope"),
+        ].join("|");
+      })
+      .toBe("python-kma-api|kma_short_forecast|target_grids");
+    await expect(page.getByText("target_grids", { exact: true })).toBeVisible();
   });
 
   test("텍스트 필터는 여러 글자를 입력해도 focus와 URL 상태를 유지한다", async ({

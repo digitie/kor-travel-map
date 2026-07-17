@@ -281,6 +281,110 @@ async def test_ops_import_jobs_list_detail_and_cursor(
     ]
 
 
+async def test_dataset_events_filter_effective_scope_before_limit_and_cursor(
+    migrated_session: AsyncSession,
+) -> None:
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    scope_a = "target_grids"
+    scope_b = "external_system:other"
+    request_a = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": scope_a,
+        },
+        effective_sync_scope=scope_a,
+    )
+    request_b = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": scope_b,
+        },
+        effective_sync_scope=scope_b,
+    )
+    event_a1 = await record_import_job_event(
+        migrated_session,
+        request_a.job_id,
+        level="error",
+        code="scope-a.older",
+        message="scope A older",
+    )
+    event_a2 = await record_import_job_event(
+        migrated_session,
+        request_a.job_id,
+        level="error",
+        code="scope-a.newer",
+        message="scope A newer",
+    )
+    assert event_a1 is not None
+    assert event_a2 is not None
+    for index in range(22):
+        event_b = await record_import_job_event(
+            migrated_session,
+            request_b.job_id,
+            level="error",
+            code=f"scope-b.{index:02d}",
+            message=f"scope B {index:02d}",
+        )
+        assert event_b is not None
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE ops.import_job_events
+            SET occurred_at = CASE event_id
+              WHEN CAST(:older_id AS uuid) THEN TIMESTAMPTZ '2026-07-01 01:00:00+00'
+              WHEN CAST(:newer_id AS uuid) THEN TIMESTAMPTZ '2026-07-01 02:00:00+00'
+            END
+            WHERE event_id IN (CAST(:older_id AS uuid), CAST(:newer_id AS uuid))
+            """
+        ),
+        {"older_id": event_a1.event_id, "newer_id": event_a2.event_id},
+    )
+
+    page_a1 = await list_ops_import_job_events(
+        migrated_session,
+        level="error",
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=scope_a,
+        limit=1,
+    )
+    assert [item.code for item in page_a1.items] == ["scope-a.newer"]
+    assert [item.sync_scope for item in page_a1.items] == [scope_a]
+    assert page_a1.next_cursor is not None
+
+    page_a2 = await list_ops_import_job_events(
+        migrated_session,
+        level="error",
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=scope_a,
+        limit=1,
+        cursor=page_a1.next_cursor,
+    )
+    assert [item.code for item in page_a2.items] == ["scope-a.older"]
+    assert [item.sync_scope for item in page_a2.items] == [scope_a]
+    assert page_a2.next_cursor is None
+
+    page_b = await list_ops_import_job_events(
+        migrated_session,
+        level="error",
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scope=scope_b,
+        limit=20,
+    )
+    assert len(page_b.items) == 20
+    assert {item.sync_scope for item in page_b.items} == {scope_b}
+    assert page_b.next_cursor is not None
+
+
 async def test_event_audit_filters_use_bounded_natural_plans(
     migrated_session: AsyncSession,
 ) -> None:
@@ -374,6 +478,7 @@ async def test_event_audit_filters_use_bounded_natural_plans(
                 level=level,
                 provider=provider,
                 dataset_key=dataset_key,
+                sync_scope=None,
                 cursor_occurred_at=cursor_at,
             )
             plan = (
@@ -384,6 +489,7 @@ async def test_event_audit_filters_use_bounded_natural_plans(
                         "level": level,
                         "provider": provider,
                         "dataset_key": dataset_key,
+                        "sync_scope": None,
                         "cursor_occurred_at": cursor_at,
                         "cursor_event_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
                         "limit": 51,
