@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### admin ops legacy REST clean-cut (2026-07-17, ADR-064 T-ADM-C6b)
+
+- **REMOVED**: `/ops/dagster*`, `/ops/providers*`, `/ops/import-jobs*`,
+  `/ops/import-job-events`, `/admin/provider-refresh-policies*`,
+  `/admin/features/update-requests*`, `/debug/etl*`의 legacy operation 28개를 삭제했다.
+- **CHANGED**: admin 실행·event·Dagster·schedule은 `/ops/pipeline/*`, dataset 상태·정책·
+  fixture preview는 `/ops/datasets/*`만 사용한다. public provider read 2종은 운영 결합이
+  없는 소형 router로 분리해 유지한다.
+- **REMOVED**: raw HTTP live ETL loader와 REST API 전용 provider credential settings·runtime
+  주입을 삭제했다. dataset preview는 fixture-only이며 외부 호출 budget은 0이다.
+
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 
 - **FIXED**: `/ops/datasets`의 `이슈 있음` 필터와 정렬이 dataset issue만 보던 경로를

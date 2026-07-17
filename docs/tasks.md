@@ -45,6 +45,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   problem+json으로 승격할지만 이 시점에 검토한다.
   ops_live dagster 스냅샷의 payload COALESCE 폴백 제거(순수 실컬럼 전환)도 구
   이미지 소진+0048 백필 SQL 재실행 확인 후 이 시점에 재검토.
+  backend/API clean-cut branch에서는 legacy OpenAPI operation 28개와 전용 라우터,
+  raw live ETL loader·API credential 주입을 제거하고 public provider read 2종을
+  소형 라우터로 분리했다. 최종 통합 rebase·OpenAPI 재생성·적대 리뷰 2인과 테스트
+  gate 전이므로 완료 처리하지 않는다.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔

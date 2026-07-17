@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-17 (codex, agent A) — T-ADM-C6b backend/API clean-cut 구현·리뷰 대기
+
+- C6A exact commit 위 독립 branch에서 legacy REST operation 28개를 제거했다. 삭제 범위는
+  Dagster 9, provider 운영 2, refresh policy 3, import job/event 5, feature update request 6,
+  debug ETL 3개다. `/ops/datasets/*`, `/ops/pipeline/*`, `/ops/live`, 관측 read와 public
+  provider read 2종은 유지한다.
+- public provider read를 운영 결합 로직이 없는 `public_providers.py`로 옮기고 기존 응답 schema
+  이름과 cursor 비노출 계약을 보존했다. `etl_live.py`, live adapter tests, API 전용 provider
+  credential settings·compose/load-env 주입을 제거했으며 preview catalog는 fixture/none만 가진다.
+- migration은 추가하지 않았다. OpenAPI/admin types는 C5/C6A rebase와 외부 적대 리뷰 반영 직전에
+  실제 branch에서 재생성한다.
+- **다음 한 작업**: 구현 snapshot을 적대 리뷰어 2명에게 전달해 지적을 반영한다. 그 전에는 사용자
+  지시대로 테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
+
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 
 - `/ops/datasets`의 `이슈 있음` 필터·정렬·행 badge를 dataset/provider open issue 합계로

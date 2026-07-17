@@ -78,8 +78,9 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
   `/ops/*`, `/debug/*` 등)는 가독성을 위해 `/v1` prefix를 생략한 약기이며 실제 경로는
   모두 `/v1/...`이다.** admin write/read 경로(`/admin/*`)는 admin 전체 spec에만 남긴다.
 - `/tripmate/*` 경로는 이미 제거됐다. feature update request의 정본 경로는
-  `/admin/features/update-requests*`이며(본 문서 §6 등 하단 설명과 일치),
-  PinVi/user subset에는 존재하지 않는다.
+  `/ops/pipeline/requests*`이며 PinVi/user subset에는 존재하지 않는다. C6B 이전
+  `/admin/features/update-requests*`·`/ops/import-jobs*`·`/ops/dagster*`를 설명하는
+  하단 절은 명시된 이전 계약 이력일 뿐 현행 OpenAPI 계약이 아니다.
 - 모든 응답은 debug/admin backend의 HTTP 응답 셰입을 쓴다.
 
 성공:
@@ -145,20 +146,19 @@ list 성공 예:
 |-----|--------|------|
 | `features` | `/features` | 지도/상세 공통 read |
 | `admin-features` | `/admin/features` | feature 검색/비활성화/override, place/event 사용자 요청 추가·수정·soft delete와 검토 queue |
-| `admin-providers` | `/admin/providers` | **미구현** — T-207b 취소. provider 강제 실행은 `/admin/features/update-requests`의 `provider_dataset` scope로 대체(§ 아래) |
-| `admin-update-requests` | `/admin/features/update-requests` | 지리 범위 기반 feature 업데이트 요청 |
 | `admin-poi-cache-targets` | `/admin/poi-cache-targets` | 외부 POI/cache target 등록, 삭제, 주변 조회 |
 | `admin-dedup` | `/admin/features/dedup-reviews` | 중복 검토 |
 | `admin-issues` | `/admin/issues` | 주소/정합성 이슈 운영 처리(목록/단건/PATCH 7 action). T-DA-13 구현 완료. admin UI는 T-212b 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `admin-backups` | `/admin/backups`, `/admin/restore` | standalone backup artifact 조회, backup/restore command plan, manual-required hot-swap 경계 |
-| `ops` | `/ops` | import job 조회, metrics, consistency, `GET /ops/health-deep`(DB/PostGIS readiness; public `/health` liveness와 분리), `GET /ops/system-logs`·`GET /ops/api-call-logs`·`GET /ops/import-job-events`(운영 로그 조회, keyset cursor). api-call-log 적재는 `KOR_TRAVEL_MAP_API_API_CALL_LOG_ENABLED` opt-in middleware(기본 off, best-effort) |
-| `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
-| `debug` | `/debug` | ETL preview. `/debug/explain`·`/debug/fixtures` REST/UI는 T-221e에서 제외 결정 |
+| `ops-datasets` | `/ops/datasets` | provider×dataset 상태·정책·fixture preview 통합 |
+| `ops-pipeline` | `/ops/pipeline` | 실행·event·Dagster·schedule 조회와 조작 통합 |
+| `ops` | `/ops` | metrics, consistency, health-deep, system/API log 관측 read |
+| `debug` | `/debug` | MOIS 적재 raw detail read. ETL preview는 ops-datasets로 이동 |
 
 라우터 노출은 `ApiSettings` flag로 제어한다. `/debug/*`는
 `debug_routes_enabled`, `/features/*`는 `features_routes_enabled`,
-`/admin/*`는 `admin_routes_enabled`, `/ops/*`와 `/ops/dagster/*`는
+`/admin/*`는 `admin_routes_enabled`, `/ops/*`는
 `ops_routes_enabled`가 담당한다. `admin_routes_enabled`와
 `ops_routes_enabled`가 `None`이면 `features_routes_enabled` 값을 따른다. 따라서 DB 없는
 부팅 검증에서는 `features_routes_enabled=False`만으로 features/admin/ops surface가 함께
@@ -300,7 +300,11 @@ PinVi/user subset에는 포함하지 않는다. API는 standalone Docker app의 
 수동으로 운영 DSN/volume switch를 승인해야 함을 알리는 `manual_required` 상태만
 반환한다.
 
-## 5. Feature update request
+## 5. Feature update request application service
+
+> C6B 이후 REST 정본은 생성·preview·run-now가 `/ops/pipeline/requests*`, 목록·상세·
+> 취소가 `/ops/pipeline/executions*`다. 아래 `/admin/features/update-requests*`
+> 경로 예시는 동일 application service의 이전 REST 이력이다.
 
 Feature update request는 OpenAPI로 Dagster feature update job을 제어하는 표준
 엔드포인트다. 운영자는 admin UI나 내부 운영 automation에서 호출한다. PinVi
@@ -766,9 +770,9 @@ request 실행을 Dagster에 연결했다.
 
 ## 7. Provider 실행 API와의 관계
 
-`POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는 T-207b 후보였지만
-사용자 결정에 따라 별도 구현하지 않는다. provider/dataset 직접 실행이 필요하면
-운영자는 `POST /admin/features/update-requests`의 `provider_dataset` scope를 사용한다.
+`POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는 두지 않는다.
+provider/dataset 직접 실행은 `POST /ops/pipeline/requests`의
+`provider_dataset` scope를 사용한다.
 PinVi 사용자/서비스 표면에는 feature update request를 노출하지 않는다.
 
 feature update request는 운영자가 쓰기 쉬운 높은 수준 API다.
@@ -776,24 +780,18 @@ feature update request는 운영자가 쓰기 쉬운 높은 수준 API다.
 
 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
 
-T-221d 구현 상태:
+현행 구현 상태:
 
-- `GET /ops/providers`: provider×dataset×scope sync state와
-  `ops.provider_refresh_policies` 요약을 함께 반환한다. 사용자 표면 `GET /providers`와
-  달리 ops 전용 next_run/policy link를 포함하되 cursor는 목록에서 숨긴다.
-- `GET /ops/providers/{provider}`: provider별 dataset 상세. 이 endpoint는 ops 전용이라
-  `sync_states[].cursor`, refresh policy, 최근 `provider_dataset` update request summary,
-  관련 link를 포함한다.
-- `GET /admin/provider-refresh-policies`: query `provider`, `enabled`, `limit`으로 policy
-  목록을 반환한다.
-- `GET /admin/provider-refresh-policies/{provider}/{dataset_key}`: policy 단건 조회.
-- `PUT /admin/provider-refresh-policies/{provider}/{dataset_key}`: policy full upsert.
+- `GET /ops/datasets`: provider×dataset×scope sync state와 정책·스케줄·최신 실행을
+  함께 반환한다.
+- `GET /ops/datasets/detail`: cursor, 최근 실행·event, 정책과 이슈를 exact scope로
+  조회한다.
+- `PUT /ops/datasets/refresh-policy`: provider/dataset 정책 full upsert.
   `system_interval_seconds`/`optimal_interval_seconds`는 `min_interval_seconds`와
   선언된 request/min/hour/day floor보다 짧을 수 없다.
 
-`GET /admin/features/update-requests`의 `provider`/`dataset_key` filter는
-`providers`/`dataset_keys` JSON array뿐 아니라 `scope.type='provider_dataset'`의
-`scope.provider`/`scope.dataset_key`도 매칭한다.
+실행 목록·상세·event filter는 `/ops/pipeline`이 canonical operation root와 exact
+provider/dataset identity를 기준으로 처리한다.
 
 ## 7.1 통합 datasets 운영 계약 (ADR-064, T-ADM-C2R)
 
@@ -847,13 +845,13 @@ HTTP preview는 ADR-044 provider public client/typed model 경계를 만족하�
 
 ## 7.2 Ops 조회 API
 
-T-207d 구현 상태: `kor-travel-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을
-`/ops/*`로 제공한다. import job 조회 정본은 `/ops/import-jobs`이며, active job
-취소는 `POST /ops/import-jobs/{job_id}/cancel`로 제공한다.
+`kor-travel-map-admin`은 DB 기반 summary·목록을 `/ops/*`로 제공한다. 실행 root 조회와
+event·취소 정본은 `/ops/pipeline/*`다.
 
 실시간 signal 채널 `WS /ops/live`는 WebSocket이므로 `openapi.json` `paths`에는
 포함되지 않는다. REST DTO source of truth는 계속 아래 endpoint이며, live frame은
-admin frontend의 query invalidation signal로만 사용한다.
+admin frontend의 query invalidation signal로만 사용한다. 현행 REST DTO 정본은
+`/ops/pipeline/*`와 `/ops/datasets/*`다.
 
 ### `GET /v1/ops/pipeline/executions`
 
@@ -987,7 +985,12 @@ pair가 영향받는다는 경계를 표시한다.
 `import_jobs_by_status`는 `ops.import_jobs` physical row 진단값이며 canonical operation 수가 아니다.
 홈과 pipeline 작업 상태 위젯은 `/v1/ops/pipeline/overview.operations_by_status`를 사용한다.
 
-### `GET /ops/import-jobs`
+### 삭제된 import job REST 이력
+
+> C6B에서 아래 `/ops/import-jobs*`·`/ops/import-job-events`를 삭제했다. 현행
+> 목록·상세·event·취소는 `/ops/pipeline` 계약을 사용한다.
+
+#### `GET /ops/import-jobs`
 
 `ops.import_jobs` 목록을 `created_at DESC, job_id DESC` keyset cursor로 반환한다.
 
@@ -1006,11 +1009,11 @@ Query:
 `parent_job`, `load_batch`, `feature_update_request`, `offline_upload`, `dagster_run`
 같은 관련 API/운영 링크를 best-effort로 제공한다.
 
-### `GET /ops/import-jobs/{job_id}`
+#### `GET /ops/import-jobs/{job_id}`
 
 `ops.import_jobs` 단건을 반환한다. 없으면 `404`.
 
-### `GET /ops/import-job-events`
+#### `GET /ops/import-job-events`
 
 `ops.import_job_events` 전역 event stream을 `occurred_at DESC, event_id DESC` keyset
 cursor로 반환한다. `/ops/logs`의 Job events 탭은 이 표면을 사용해 provider 실패를
@@ -1028,7 +1031,7 @@ Query:
 각 item은 `event_id`, `job_id`, `provider`, `dataset_key`, `feature_id`, `stage`,
 `level`, `code`, `message`, `payload`, `occurred_at`을 포함한다.
 
-### `GET /ops/import-jobs/{job_id}/events`
+#### `GET /ops/import-jobs/{job_id}/events`
 
 `ops.import_job_events` event timeline을 `occurred_at DESC, event_id DESC` keyset
 cursor로 반환한다. job이 없으면 `404`.
@@ -1042,7 +1045,7 @@ Query:
 각 item은 `event_id`, `job_id`, `provider`, `dataset_key`, `feature_id`, `stage`,
 `level`, `code`, `message`, `payload`, `occurred_at`을 포함한다.
 
-### `POST /ops/import-jobs/{job_id}/cancel`
+#### `POST /ops/import-jobs/{job_id}/cancel`
 
 queued/running job을 best-effort로 `cancelled` 전이한다. 이미 `done` / `failed` /
 `cancelled`인 job은 `409`, 없는 job은 `404`를 반환한다. 실행 중인 외부 프로세스를
@@ -1159,10 +1162,13 @@ shape가 잘못됐으면 응답 해석 오류다. `hasMore=true`이면 다음 �
 각 problem의 `details`는 최소 `run_id`와 service의 `errors`를 포함한다. FastAPI path/query
 검증 실패는 공통 `422 VALIDATION_ERROR`다.
 
-새 UI는 Dagster iframe을 embed하지 않으므로 `/ops/pipeline/nux-seen` endpoint를 만들지
-않는다. 구 `/ops/dagster/nux-seen`과 그 service/schema는 구 화면 제거 전까지 유지한다.
+새 UI는 Dagster iframe을 embed하지 않으므로 NUX mutation endpoint를 제공하지 않는다.
 
-## 7.2.3 구 Dagster 운영 요약 API
+## 7.2.3 삭제된 Dagster 운영 요약 API 이력
+
+> C6B clean-cut에서 `/ops/dagster/*` 전체를 삭제했다. 아래 내용은 이전 계약의
+> 변경 이력이며 현행 REST/OpenAPI 계약이 아니다. 현재 조회·조작은 §7.2.1과
+> `/ops/pipeline/*`만 사용한다.
 
 Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
 같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
@@ -1389,7 +1395,7 @@ T-207e 구현 상태: PinVi에는 다음 public/read API를 제공한다. 기존
 | `GET /features/nearby/by-target` | 외부 POI key 기준 주변 feature summary 조회 |
 
 Feature update request는 더 이상 PinVi/public 표면에 포함하지 않는다.
-정본 운영 경로는 `/admin/features/update-requests*`다. PinVi 사용자 제안 큐는
+정본 운영 경로는 `/ops/pipeline/requests*`다. PinVi 사용자 제안 큐는
 PinVi app DB가 소유하고, 운영자 승인 후 admin API로 refresh scope를 실행한다.
 
 PinVi 사용자-facing 응답에는 raw payload, provider key 상태, provider/dataset 내부

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent A) — C6b backend/API legacy clean-cut 구현
+
+- Dagster 9, provider ops 2, refresh policy 3, import job/event 5, feature update request 6,
+  debug ETL 3개 등 legacy OpenAPI operation 28개와 전용 router를 삭제했다. canonical
+  `/ops/pipeline/*`·`/ops/datasets/*`, 관측 read, `/ops/live` WS와 public provider read는
+  유지했다.
+- public provider 계약은 운영 정책·request 결합이 없는 소형 router로 옮겼다. raw HTTP live
+  ETL loader와 adapter tests를 제거하고 catalog preview를 fixture/none으로 닫았으며 REST API
+  settings·Docker·load-env에서 provider credential 복제 경로도 제거했다.
+- legacy 부재 28개와 canonical/public 존치를 기계적으로 고정하는 테스트를 추가하고 public
+  provider parser/필터/cursor 비노출 회귀를 보존했다. migration은 만들지 않았다. 외부 적대
+  리뷰 2인 전이므로 테스트·push·PR은 실행하지 않았고 C5/C6A merge 뒤 rebase가 필요하다.
+- 기존 Codex codegraph index로 제거 대표 route의 영향도를 확인했다. legacy import-job route는
+  route 자체 외 caller가 없었고 public last-sync는 route 단독 영향이라 소형 router로 동일 계약을
+  옮겼다. canonical service caller는 별도 pipeline/datasets router에 남는다.
+
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 
 - dataset/provider issue count를 합산하는 순수 projection을 두고 필터·정렬·행 badge가 같은

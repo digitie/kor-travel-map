@@ -79,20 +79,18 @@ packages/kor-travel-map-api/
 │   │   ├── public_views.py        — 공개 read view
 │   │   ├── public_status.py       — 공개 status
 │   │   ├── categories.py
-│   │   ├── providers.py           — sync-state
-│   │   ├── provider_refresh_policies.py
+│   │   ├── public_providers.py    — 공개 sync-state read 2종
 │   │   ├── poi_cache_targets.py
 │   │   ├── dedup_review.py
 │   │   ├── enrichment_review.py
 │   │   ├── admin_features.py      — feature change API (#317)
 │   │   ├── admin_issues.py        — /admin/issues/{issue_id}
 │   │   ├── admin_backups.py
-│   │   ├── feature_update_requests.py
 │   │   ├── offline_uploads.py
 │   │   ├── mois_detail.py
-│   │   ├── etl.py                 — /debug/etl
-│   │   ├── dagster.py             — /ops/dagster/*
-│   │   ├── ops.py / ops_live.py
+│   │   ├── ops_datasets.py        — /ops/datasets/*
+│   │   ├── ops_pipeline.py        — /ops/pipeline/*
+│   │   ├── ops.py / ops_live.py   — 관측 read / WS invalidation
 │   │   └── ops_logs.py            — /ops/system-logs, /ops/api-call-logs
 │   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
 ├── scripts/export_openapi.py
@@ -161,16 +159,13 @@ class ApiSettings(BaseSettings):
     debug_routes_enabled: bool = True         # /debug/* 활성
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
     admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
-    ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
+    ops_routes_enabled: bool | None = None    # /ops/* 활성. None이면 features flag 추종
     prometheus_metrics_enabled: bool = True   # HTTP/DB metrics pull scrape endpoint
     prometheus_metrics_path: str = "/metrics"
     cors_allow_origins: list[str] = [         # frontend(12705) cross-origin
         "http://localhost:12705", "http://127.0.0.1:12705",
     ]
-    # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
-    #   kma_service_key / kma_apihub_key / opinet_service_key /
-    #   datagokr_service_key / visitkorea_service_key / krex_service_key /
-    #   knps_service_key / airkorea_service_key / krforest_service_key
+    # provider credential은 Dagster/provider runtime만 소유한다.
 ```
 
 각 provider key의 출처(.env 이름)는 `settings.py` 필드 docstring 참조.
@@ -201,21 +196,19 @@ uvicorn kortravelmap.api.app:app
 
 ## 6. 엔드포인트
 
-모두 인증 없음. `OpenAPI` 자동 노출 — `/docs` (Swagger UI), `/openapi.json`.
+공개 read와 admin/ops gate를 구분한다. `OpenAPI` 자동 노출 — `/docs`, `/openapi.json`.
 
-> **구현 현황 (2026-05-29 기준)**: 아래 표는 **전체 계획**이다. 실제 구현·노출
-> 중인 엔드포인트는 다음과 같다 (`openapi.json`이 single source of truth):
+> **구현 현황 (2026-07-17 기준)**: 실제 구현·노출 endpoint의 기계 정본은
+> `openapi.json`이다.
 >
 > | Path | 메서드 | 비고 |
 > |------|--------|------|
-> | `/debug/health` | GET | liveness (PR#35) |
-> | `/debug/version` | GET | 패키지 version (PR#35) |
-> | `/debug/etl/providers`, `/debug/etl/{provider}/datasets`, `/debug/etl/{provider}/{dataset}/preview` | GET/POST | ETL preview (PR#44~47) |
-> | `/features` | GET | **bbox 목록** (`min_lon/min_lat/max_lon/max_lat`, `kind[]`, `limit`) — PR#73 |
-> | `/features/{feature_id}` | GET | 단건 상세 (PR#73) |
+> | `/health`, `/version` | GET | public liveness/version |
+> | `/ops/datasets/*` | GET/PUT/POST | 상태·정책·fixture preview 통합 |
+> | `/ops/pipeline/*` | GET/POST/PATCH | 실행·event·Dagster·schedule 통합 |
+> | `/providers`, `/providers/{provider}/last-sync` | GET | public bounded read |
 >
-> 나머지 행(`/features/nearby`, `/{id}/weather`, `/sources`, `/import-jobs`,
-> `/dedup-review` 등)은 **Sprint 3~5 예정**. 활성 라우터는
+> 활성 라우터는
 > `settings.debug_routes_enabled` / `settings.features_routes_enabled` /
 > `settings.admin_routes_enabled` / `settings.ops_routes_enabled` flag로 제어.
 > `admin_routes_enabled`와 `ops_routes_enabled`가 `None`이면
@@ -233,13 +226,12 @@ uvicorn kortravelmap.api.app:app
 | `/features/{feature_id}/weather` | GET | `WeatherCard` |
 | `/features/{feature_id}/sources` | GET | source_links |
 | `/features/{feature_id}/files` | GET | feature_files |
-| `/providers/{name}/sync-state` | GET | `ProviderSyncState` |
-| `/import-jobs` | GET, POST | 작업 큐 조회/등록 |
-| `/import-jobs/{job_id}` | GET, PATCH | 상태 변경 |
+| `/providers`, `/providers/{provider}/last-sync` | GET | 공개 provider 신선도 |
+| `/ops/datasets/*` | GET, PUT, POST | provider×dataset 상태·정책·fixture preview |
+| `/ops/pipeline/*` | GET, POST, PATCH | 실행·event·Dagster·schedule 조작 |
 | `/dedup-review` | GET | pending 큐 |
 | `/dedup-review/{review_id}` | PATCH | accept/reject/merged |
 | `/integrity-violations` | GET | `data_integrity_violations` |
-| `/debug/etl` | GET, POST | provider fixture/live 변환 preview. DB write 없음 |
 
 Admin 운영 콘솔에서 새로 도입할 권장 경로는 `debug-ui-admin-workflows.md`가 더
 구체적이다. 특히 기존 `GET /features`는 bbox 지도 조회로 유지하고, 전역 feature
@@ -456,8 +448,8 @@ npm run dev                  # http://127.0.0.1:12705
 | `<MarkerClusterer>` | viewport culling + KDBush | 10만+ feature 동시 표시 (MOIS 인허가 등) |
 | `<FeatureMakiMarker>` (custom) | maki + 카테고리 color (P-01~P-16) | category code → maki + 색상 dispatch |
 | `<DetailPanel>` | feature 클릭 시 상세 | `GET /features/{id}` |
-| `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{name}/sync-state` |
-| `<DebugEtlPreview>` | provider fixture/live 변환 preview | `GET/POST /debug/etl/*` |
+| `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{provider}/last-sync` |
+| `<DatasetPreview>` | fixture-only 변환 preview | `POST /ops/datasets/preview` |
 
 ### 14.5 카테고리 → maki icon 매핑
 

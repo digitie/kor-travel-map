@@ -1,14 +1,4 @@
-"""``kortravelmap.api.settings`` — 디버그/관리 API runtime 설정.
-
-``Pydantic Settings`` 기반. ``KOR_TRAVEL_MAP_API_*`` 환경변수 prefix.
-
-PR#47 (2026-05-28) — provider raw API 키 8 종 추가. ETL preview의
-`?source=live` 분기에서 사용. 각 provider repo의 ``.env``에서 같은 이름으로
-박혀 있을 것을 가정 — `python-kma-api`의 `.env`는 ``KMA_SERVICE_KEY``를 쓰니
-본 lib도 ``KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY``로 박는다 (Pydantic Settings
-의 prefix). 즉 사용자는 각 provider repo의 .env에서 키 값을 복사해 본 lib
-.env에 prefix만 붙여 옮긴다.
-"""
+"""``kortravelmap.api.settings`` — REST/admin API runtime 설정."""
 
 from __future__ import annotations
 
@@ -80,9 +70,9 @@ class ApiSettings(BaseSettings):
     ops_routes_enabled: bool | None = Field(
         default=None,
         description=(
-            "``/ops/...``와 Dagster summary 라우터 활성 여부. None이면 "
+            "``/ops/...`` 운영 라우터 활성 여부. None이면 "
             "``features_routes_enabled`` 값을 따른다. DB 없는 부팅 검증에서는 "
-            "ops/dagster 조회도 함께 닫는다."
+            "관측·pipeline·dataset API를 함께 닫는다."
         ),
     )
     api_call_log_enabled: bool = Field(
@@ -190,17 +180,6 @@ class ApiSettings(BaseSettings):
             "delete) 허용 여부 kill-switch(defense-in-depth). False면 해당 엔드포인트는 "
             "403. 읽기/관측 전용 배포에서 내려 둔다. env "
             "``KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED``."
-        ),
-    )
-    etl_live_preview_enabled: bool = Field(
-        default=False,
-        description=(
-            "``POST /v1/ops/datasets/preview?provider=...&dataset_key=...``의 "
-            "``source=live``"
-            "(실 provider 호출) 분기 허용 여부(ADR-064 T-ADM-C2). 기본 False — "
-            "무심코 실 provider 쿼터(OpiNet 일일 한도 등)를 소모하지 않게 opt-in "
-            "으로만 연다. False면 live preview는 403. fixture preview는 flag와 "
-            "무관하게 항상 동작. env ``KOR_TRAVEL_MAP_API_ETL_LIVE_PREVIEW_ENABLED``."
         ),
     )
     dagster_url: str = Field(
@@ -338,80 +317,4 @@ class ApiSettings(BaseSettings):
         default="kor-travel-map-rustfs-restore",
         min_length=1,
         description="Default staging RustFS Docker volume for restore command plans.",
-    )
-
-    # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
-    #
-    # 각 provider repo의 `.env`에 박힌 이름과 동일 (prefix `KOR_TRAVEL_MAP_API_`
-    # 만 추가). 예: `python-kma-api`의 `.env`가 ``KMA_SERVICE_KEY=...``라면 본
-    # lib는 ``KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY=...``로 박는다. 미설정 시
-    # ``None`` — `?source=live` 라우터는 503 응답.
-    #
-    # ADR-005 + ADR-035: 운영 시 Cloudflare Tunnel / SSO 뒤. 코드 외부 보호.
-    # 키는 SecretStr — 로그/JSON 직렬화에 plaintext 노출 방지.
-
-    kma_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "기상청 공공데이터포털(apis.data.go.kr) service key. **source: "
-            "`python-kma-api/.env` 의 ``DATA_GO_KR_SERVICE_KEY``** (data.go.kr "
-            "게이트웨이 공통키 — datagokr/krex/visitkorea와 동일 값일 수 있음). "
-            "동네예보(단기/초단기) + weather_alerts fallback(getWthrWrnList)에서 사용."
-        ),
-    )
-    kma_apihub_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "기상청 API 허브(apihub.kma.go.kr) ``authKey``. data.go.kr "
-            "``serviceKey``와 **다른 키** — `python-kma-api/.env` 의 "
-            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``). **KMA 소스 정책: "
-            "data.go.kr이 primary, apihub는 fallback** (data.go.kr 소스 존재 시). "
-            "특보현황(`kma_weather_alerts`)은 data.go.kr `getWthrWrnList`가 primary, "
-            "이 apihub `wrn_now_data`(구조화 특보구역 REG_ID)는 data.go.kr 실패 시 "
-            "fallback. **apihub는 API별 '활용신청' 필요**(미신청 시 HTTP 403)."
-        ),
-    )
-    opinet_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "OpiNet API key. **source: `python-opinet-api/.env` 의 "
-            "``OPINET_API_KEY``** (opinet.co.kr `certkey`)."
-        ),
-    )
-    datagokr_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "data.go.kr 표준데이터 service key. **source: "
-            "`python-datagokr-api/.env` 의 ``DATA_GO_KR_SERVICE_KEY``** "
-            "(게이트웨이 공통키 — kma_service_key와 동일 값일 수 있음)."
-        ),
-    )
-    visitkorea_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "VisitKorea TourAPI key. **source: `python-visitkorea-api/.env` 의 "
-            "``KTO_DATA_GO_KR_SERVICE_KEY``** (또는 공통 ``DATA_GO_KR_SERVICE_KEY``)."
-        ),
-    )
-    krex_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "한국도로공사 EX OpenAPI key. **source: `python-krex-api/.env` 의 "
-            "``KEX_GO_API_KEY``** (data.ex.co.kr `key` — data.go.kr serviceKey와 다름)."
-        ),
-    )
-    knps_service_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "`python-knps-api`는 키 없는 file dataset 기반(ADR-028 amendment) "
-            "이라 보통 불필요. 일부 보조 endpoint에는 사용 가능."
-        ),
-    )
-    airkorea_service_key: SecretStr | None = Field(
-        default=None,
-        description="`python-airkorea-api/.env` 의 ``AIRKOREA_SERVICE_KEY``.",
-    )
-    krforest_service_key: SecretStr | None = Field(
-        default=None,
-        description="`python-krforest-api/.env` 의 ``KRFOREST_SERVICE_KEY``.",
     )

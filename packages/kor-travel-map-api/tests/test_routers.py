@@ -4,7 +4,7 @@
 - ``/v1/debug/health``·``/v1/debug/version`` **제거** 검증(T-214h/ADR-048 clean cut) — 공용
   liveness는 ``/health``·``/version``(public_status, `test_public_status_router`) +
   ``/v1/ops/health-deep``으로 수렴.
-- ``debug_routes_enabled=False`` 시 ``/v1/debug/*``(etl) unregister.
+- ``debug_routes_enabled=False`` 시 잔여 debug read surface unregister.
 - ``features_routes_enabled=False`` 시 DB 의존 features/admin/ops unregister.
 - ``app.openapi()`` info.title/version 정합.
 """
@@ -40,8 +40,8 @@ def test_debug_health_version_removed(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_debug_routes_disabled_unmounts_etl() -> None:
-    """``debug_routes_enabled=False``면 ``/v1/debug/*``(etl) unmounted → 404."""
+def test_debug_routes_disabled_unmounts_debug_surface() -> None:
+    """``debug_routes_enabled=False``면 잔여 ``/v1/debug/*``가 없다."""
     app = create_app(ApiSettings(debug_routes_enabled=False))
     client = TestClient(app)
     spec = client.get("/openapi.json").json()
@@ -58,10 +58,10 @@ def test_db_dependent_routes_follow_features_gate_by_default() -> None:
     assert "/v1/features" not in spec["paths"]
     assert "/v1/admin/features" not in spec["paths"]
     assert "/v1/admin/offline-uploads" not in spec["paths"]
-    assert "/v1/ops/import-jobs" not in spec["paths"]
-    assert "/v1/ops/dagster/summary" not in spec["paths"]
+    assert "/v1/ops/pipeline/executions" not in spec["paths"]
+    assert "/v1/ops/datasets" not in spec["paths"]
     assert client.get("/v1/admin/offline-uploads").status_code == 404
-    assert client.get("/v1/ops/import-jobs").status_code == 404
+    assert client.get("/v1/ops/pipeline/executions").status_code == 404
 
 
 @pytest.mark.unit
@@ -79,8 +79,8 @@ def test_admin_ops_route_gates_can_be_enabled_explicitly() -> None:
     assert "/v1/features" not in spec["paths"]
     assert "/v1/admin/features" in spec["paths"]
     assert "/v1/admin/offline-uploads" in spec["paths"]
-    assert "/v1/ops/import-jobs" in spec["paths"]
-    assert "/v1/ops/dagster/summary" in spec["paths"]
+    assert "/v1/ops/pipeline/executions" in spec["paths"]
+    assert "/v1/ops/datasets" in spec["paths"]
 
 
 @pytest.mark.unit

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -830,7 +831,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     detail_operation = spec["paths"]["/v1/ops/pipeline/dagster-runs/{run_id}"]["get"]
     assert {"200", "404", "422", "502", "503", "default"} <= set(detail_operation["responses"])
     assert "/v1/ops/pipeline/nux-seen" not in spec["paths"]
-    assert "/v1/ops/dagster/nux-seen" in spec["paths"]
+    assert "/v1/ops/dagster/nux-seen" not in spec["paths"]
     detail_schema = spec["components"]["schemas"]["DagsterRunDetailData"]
     assert "현재 event page" in detail_schema["properties"]["failure_reason"]["description"]
     assert "현재 event page" in detail_schema["properties"]["failure_events"]["description"]
@@ -1807,10 +1808,7 @@ def test_dagster_run_detail_round_trips_encoded_opaque_path(
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
-    from kortravelmap.api.routers import ops as ops_router_mod
-
-    links = ops_router_mod._job_links(_job(dagster_run_id="typed/run id"))
-    href = next(link.href for link in links if link.rel == "dagster_run")
+    href = f"/v1/ops/pipeline/dagster-runs/{quote('typed/run id', safe='')}"
     assert href == "/v1/ops/pipeline/dagster-runs/typed%2Frun%20id"
 
     response = client.get(href)

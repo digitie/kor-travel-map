@@ -5,6 +5,13 @@
 기준이고, 본 문서는 실제 화면, API, 진행 상태, 검토 흐름을 AI agent가 바로
 구현할 수 있도록 풀어 쓴 작업 지시서다.
 
+> **2026-07-17 ADR-064 clean-cut**: Dagster job·provider 운영의 현행 정본은
+> `/ops/pipeline`과 `/ops/datasets` 두 화면 및 같은 이름의 REST 그룹이다.
+> 이 문서 아래에 남은 `/admin/dagster`, `/ops/providers`, `/ops/import-jobs`,
+> `/admin/features/update-requests`, `/admin/provider-refresh-policies`, `/debug/etl`
+> 설명은 이전 구현 이력이며 신규 구현 계약이 아니다. public provider read 두 종은
+> `/v1/providers`와 `/v1/providers/{provider}/last-sync`로 존치한다.
+
 > **2026-06-11 재점검**: T-218 이후 실제 프론트엔드 17개 경로와 백엔드/OpenAPI를 다시
 > 대조한 최신 간극/실시간 판단은
 > [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를

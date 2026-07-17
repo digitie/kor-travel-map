@@ -39,13 +39,14 @@ chmod 600 .env
 ```
 
 `scripts/load-env.sh`와 `docker-compose.yml`은 기존 provider repo에서 쓰던 키 이름을
-실행용 환경변수로 매핑한다.
+Dagster/provider 실행용 환경변수로 매핑한다. REST API backend는 provider credential을
+받지 않으며 dataset preview는 fixture-only다.
 
 | 입력 키 예 | 실행 시 export |
 |------------|----------------|
-| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY` | `KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY`, `KOR_TRAVEL_MAP_API_DATAGOKR_SERVICE_KEY` |
-| `OPINET_API_KEY` | `KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY` |
-| `KEX_GO_API_KEY`, `KREX_API_KEY` | `KOR_TRAVEL_MAP_API_KREX_SERVICE_KEY` |
+| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` |
+| `OPINET_API_KEY` | `KOR_TRAVEL_MAP_OPINET_API_KEY` |
+| `KEX_GO_API_KEY`, `KREX_API_KEY` | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY` |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`, `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` |
 
 객체 저장소는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
