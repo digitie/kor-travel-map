@@ -205,8 +205,12 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         audit_session.schedule_audit_events.append(
             {**base, "phase": "requested", "details": request_details}
         )
+
+        async def _mutation_guard() -> None:
+            return None
+
         try:
-            response = await operation()
+            response = await operation(_mutation_guard)
         except Exception:
             audit_session.schedule_audit_events.append({**base, "phase": "failed"})
             raise
