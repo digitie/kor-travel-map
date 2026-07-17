@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api import dagster_query_service, dagster_schedule_service
+from kortravelmap.api import dagster_graphql, dagster_query_service, dagster_schedule_service
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.dagster_http import (
     SCHEDULE_WRITE_ERROR_RESPONSES,
@@ -91,6 +91,15 @@ async def get_dagster_summary(
     page_size: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
     settings, client = dagster_http_dependencies(request)
+    try:
+        dagster_graphql.dagster_urls(settings)
+    except dagster_graphql.DagsterUrlConfigurationError:
+        return await dagster_query_service.get_summary(
+            settings=settings,
+            client=client,
+            overrides={},
+            page_size=page_size,
+        )
     try:
         overrides = await dagster_schedule_service.schedule_overrides(session)
     except dagster_schedule_service.DagsterScheduleStorageUnavailable as exc:
