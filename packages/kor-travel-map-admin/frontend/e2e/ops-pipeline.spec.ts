@@ -641,6 +641,7 @@ interface MockOptions {
   scheduleActionStatuses?: Array<"ok" | "error">;
   scheduleActionConflict?: boolean;
   scheduleActionConflictActiveCommandId?: string | null;
+  scheduleActionResponseLossOnce?: boolean;
   scheduleUncertainOutcome?: boolean;
   scheduleAuditStatus?: "recorded" | "terminal_record_failed";
   scheduleResponseDelayMs?: number;
@@ -1047,6 +1048,37 @@ async function installPipelineMocks(
       counters.commandBodies.push(request.postDataJSON());
       counters.scheduleKeys.push(request.headers()["idempotency-key"] ?? "");
       const body = request.postDataJSON() as { command: string };
+      if (
+        options.scheduleActionResponseLossOnce &&
+        counters.commandBodies.length === 1
+      ) {
+        await route.abort("connectionreset");
+        return;
+      }
+      if (
+        options.scheduleActionResponseLossOnce &&
+        counters.commandBodies.length === 2
+      ) {
+        const activeCommandId = counters.scheduleKeys[0];
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+            title: "이전 명령 결과 확인 필요",
+            status: 409,
+            detail: "이 schedule 명령은 실행 중이거나 결과 확인이 필요합니다.",
+            code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: {
+              command_id: activeCommandId,
+              active_command_id: activeCommandId,
+            },
+          },
+          409,
+        );
+        return;
+      }
       const actionStatuses = options.scheduleActionStatuses;
       const actionStatus =
         (actionStatuses && actionStatuses.length > 0
@@ -2174,6 +2206,46 @@ test.describe("/ops/pipeline", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
     await expect(recovery).toContainText(SCHEDULE_NAME);
+  });
+
+  test("스케줄 응답 유실 재시도는 같은 key의 active claim을 해제한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleActionResponseLossOnce: true,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await page
+        .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+        .click();
+      if (attempt === 0) {
+        await expect(page.getByText("스케줄 명령 호출 실패")).toBeVisible();
+      }
+    }
+
+    expect(counters.scheduleKeys).toHaveLength(2);
+    expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toContainText(counters.scheduleKeys[0]);
+    await recovery
+      .getByLabel("확인 근거·해제 사유 (필수)")
+      .fill("응답 유실 뒤 Dagster에서 미반영 확인");
+    await recovery.getByRole("button", { name: "claim 해제" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "확인 결과 기록 후 해제" })
+      .click();
+
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toContainText("Dagster 미반영 확인");
+    expect(counters.claimResolutionRows).toHaveLength(1);
+    expect(counters.claimResolutionRows[0]).toMatchObject({
+      scheduleName: SCHEDULE_NAME,
+      commandId: counters.scheduleKeys[0],
+    });
   });
 
   test("스케줄 409에 active command ID가 없으면 recovery를 노출하지 않는다", async ({

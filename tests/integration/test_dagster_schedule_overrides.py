@@ -369,7 +369,7 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
             command_id=command_id,
             operation=_operation,
         )
-        with pytest.raises(DagsterScheduleIdempotencyConflict):
+        with pytest.raises(DagsterScheduleIdempotencyConflict) as conflict:
             await execute_audited_schedule_command(
                 session,
                 schedule_name=schedule_name,
@@ -380,6 +380,7 @@ async def test_terminal_audit_failure_never_retries_remote_mutation(
                 command_id=command_id,
                 operation=_operation,
             )
+        assert conflict.value.active_command_id == command_id
 
         monkeypatch.setattr(
             dagster_schedule_service,

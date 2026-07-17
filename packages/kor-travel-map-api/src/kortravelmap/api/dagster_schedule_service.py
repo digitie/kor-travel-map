@@ -563,6 +563,21 @@ async def _claim_schedule_command(
             {"command_id": str(command_id)},
         )
         rows = list(existing)
+        active = await session.execute(
+            text(
+                """
+                SELECT command_id
+                FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND schedule_name = :schedule_name
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        active_command_id = active.scalar_one_or_none()
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
@@ -595,6 +610,9 @@ async def _claim_schedule_command(
         raise DagsterScheduleIdempotencyConflict(
             "이 schedule 명령은 실행 중이거나 결과 확인이 필요합니다. 새 키로 재실행하지 마세요.",
             command_id=command_id,
+            active_command_id=(
+                UUID(str(active_command_id)) if active_command_id is not None else None
+            ),
         )
     if (
         str(terminal.schedule_name) != str(requested.schedule_name)
