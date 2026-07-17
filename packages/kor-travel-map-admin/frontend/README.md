@@ -49,7 +49,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 base URL (`http://127.0.0.1:12701` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:12702` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-geo v2 `key` query 값. 현재 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 |
-| `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | REST BFF header와 ops-live 60초 ticket 서명에 함께 쓰는 server-only secret(32자 이상, API의 `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET`과 동일 값) |
+| `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | root `.env` 한 곳에서 API와 frontend가 함께 읽는 REST BFF/ops-live ticket server-only secret(32자 이상) |
 | `KOR_TRAVEL_MAP_UI_SESSION_SECRET` | admin session HMAC secret(32자 이상, browser 미노출) |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
@@ -70,7 +70,8 @@ same-origin `POST /api/auth/live-ticket`을 호출해 60초 ticket을 받고, ti
 healthy snapshot/update 또는 일치하는 topic heartbeat를 받은 연결의 `4408`에서만 새
 ticket으로 즉시 rotation한다. healthy 전 `4408`은 일반 backoff에 포함한다. ticket fetch,
 handshake, heartbeat에는 각각 timeout/watchdog가 있어 close event가 유실된 silent network
-failure도 socket을 분리하고 REST polling을 유지한 채 재연결한다. `subscribed`와 heartbeat의
+failure도 socket을 분리하고 active 실행 polling을 유지한 채 재연결한다. 3회 연속 실패부터
+inactive grid/detail도 REST polling fallback으로 전환한다. `subscribed`와 heartbeat의
 topic은 wire 표시 순서가 아니라 문자열 타입·중복 없음·동일 원소인 exact set으로 요청과
 비교한다. snapshot/update는 v1 envelope, 단조 증가 safe-integer sequence, 요청 topic,
 비어 있지 않은 revision, object data를 모두 만족해야 live로 전이하며, 형식 오류는 즉시

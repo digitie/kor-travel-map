@@ -558,8 +558,9 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   구독 ack 뒤 v1·단조 sequence·요청 topic·revision·object data 검증을 통과한 frame을 받은
   healthy 연결의 `4408`만 즉시 lease rotation으로 처리한다. wire topic 배열 순서는 의미가
   없으며 형식 오류는 watchdog을 갱신하지 않고 REST polling으로 전환한다. ticket fetch,
-  handshake, heartbeat watchdog이 silent network failure에서도 REST polling과 background
-  reconnect를 유지한다. BFF는 `Origin`과
+  handshake, heartbeat watchdog이 silent network failure에서도 active 실행 polling과
+  background reconnect를 유지하고, 3회 연속 실패부터 inactive grid/detail도 REST polling
+  fallback으로 전환한다. BFF는 `Origin`과
   `Sec-Fetch-Site: same-origin`을 모두 요구한다. secret·ticket은 query string에 두지 않는다.
   초기 topic은 빈 집합이며 query `topics`는 받지 않고 client command JSON
   (`subscribe`/`unsubscribe`/`replace`)으로 구독하고, topic별 snapshot revision 변화만

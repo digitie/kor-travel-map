@@ -18,7 +18,7 @@ C7A는 다음 경계를 정본으로 만든다.
    서명·payload가 잘못된 ticket과 replay는 browser가 `4401`을 식별하도록
    data 없는 최소 handshake 직후 닫는다. 서명은 유효하지만 handshake 전 이미
    만료한 ticket은 data 0건 + `4408`로 구분한다.
-3. transport와 도메인 무효화 라우팅을 분리하고, C4/C5 페이지는 adapter 계약으로 결선한다.
+3. transport와 도메인 무효화 라우팅을 분리하고, C4/C5 canonical query key로 결선한다.
 4. live 장애 중에도 화면별 TanStack Query polling이 계속 동작함을 명시적으로 표시한다.
 
 ## 2. 인증 handshake
@@ -82,11 +82,11 @@ browser                 Next.js BFF                     FastAPI
 
 | 상태 | 의미 | 화면 동작 |
 |---|---|---|
-| `connecting` | 첫 ticket/handshake 진행 | 기존 query 데이터 유지 + REST polling |
+| `connecting` | 첫 ticket/handshake 진행 | 기존 query 데이터 유지, active 실행 polling만 유지 |
 | `live` | snapshot/update 또는 heartbeat 수신 | event 기반 무효화 |
-| `reconnecting` | 일시 장애 후 1~2번째 backoff | polling 유지 |
+| `reconnecting` | 일시 장애 후 1~2번째 backoff | active 실행 polling만 유지 |
 | `polling` | 3회 이상 연속 실패, background 재연결 계속 | polling fallback임을 표시 |
-| `unauthorized` | ticket BFF가 401/403 또는 WebSocket이 `4401` | live·polling 재시도 중단, 로그인 필요 표시 |
+| `unauthorized` | ticket BFF가 401 또는 WebSocket이 `4401` | live·polling 재시도 중단, 로그인 필요 표시 |
 | `unavailable` | browser WebSocket 미지원 | polling 전용 |
 | `disabled` | topic 없음 또는 kill-switch | 기존 polling 정책 유지 |
 
@@ -102,7 +102,7 @@ ticket fetch, pre-healthy handshake, healthy frame inactivity watchdog은 close 
 replace가 발생한 socket은 handler를 분리한 뒤 즉시 폐기한다. 새 ticket/socket이 exact
 `replace`를 다시 보내고 유효 snapshot 또는 heartbeat를 받아야 `live`로 복귀한다.
 
-C4 데이터셋 화면은 `polling` mode에서 active 여부와 관계없이 grid와 선택
+C4 데이터셋 화면은 3회 실패 뒤 `polling` mode에서 active 여부와 관계없이 grid와 선택
 상세 REST를 5초 주기로 재조회하고, 실행 중 항목은 기존 2초 주기를 유지한다.
 화면 badge는 `실시간 갱신` / `REST 폴링 갱신` / `로그인 필요`를 실제 transport 상태와
 같이 표시한다.
@@ -112,10 +112,10 @@ C4 데이터셋 화면은 `polling` mode에서 active 여부와 관계없이 gri
 live frame payload는 화면 데이터 정본이 아니라 event signal이다. 공용 router는 topic을
 아래 event로 정규화하고 callback adapter를 호출한다.
 
-| event | 입력 topic | C4/C5 adapter 대상 |
+| event | 입력 topic | C4/C5 canonical 무효화 대상 |
 |---|---|---|
 | `operation` | `import_jobs`, `import_job:*`, `feature_update_requests`, `feature_update_request:*`, `offline_uploads`, `offline_upload:*` | pipeline overview/executions/detail/events, 관련 dataset grid/detail |
-| `provider_dataset` | `provider_sync`, `dataset_projection`, update request topic | dataset grid/detail, pipeline overview/executions |
+| `provider_dataset` | `provider_sync`, `dataset_projection`, update request topic | dataset grid/detail, Pipeline 요청 작성기 catalog |
 | `dagster_run` | `dagster_runs`, `dagster_run:*` | pipeline overview/runs/detail/executions |
 | `schedule` | `dagster_schedules` | pipeline schedules/overview, dataset schedule projection |
 
@@ -133,11 +133,12 @@ materialize, override reset처럼 override row가 바뀌지 않는 schedule comm
 snapshot으로 읽는다. C7A는 C5 migration이 먼저 적용된 strict schema를 전제하며,
 `to_regclass`로 누락 table을 숨기지 않는다. 배포 순서는 C5 머지·migration 적용 후 C7A다.
 
-`OpsLiveInvalidationAdapter` callback이 live transport와 화면 query key를 분리한다.
-C4 `/ops/datasets`는 `provider_sync`와 `dataset_projection`을 전역 구독하고 dataset grid/detail helper에
-연결했다. C5 `/ops/pipeline`의 operation/provider/Dagster run/schedule query helper 연결은
-C5 merge 후 C7A rebase에서 반드시 완료한다. 이 분리는 live transport가 화면 모듈에
-역의존하는 것을 막는다.
+공용 live router가 canonical datasets/pipeline query key를 직접 무효화하고, 화면 비종속
+확장점에는 `OpsLiveInvalidationAdapter` callback을 제공한다. C4 `/ops/datasets`와 C5
+`/ops/pipeline`은 `provider_sync`·`dataset_projection`을 포함한 projection topic을 구독한다.
+따라서 데이터셋 grid/detail과 Pipeline 요청 작성기의 같은 `ops-datasets` catalog가 다른
+tab/process의 정책·target 변경에도 함께 갱신된다. 한 query target은 공용 router 한 경로만
+소유해 adapter와의 중복 invalidation을 만들지 않는다.
 
 ## 5. 검증 경계
 
@@ -159,7 +160,7 @@ C7A 단위/통합 테스트는 다음을 고정한다.
   비 BMP 순서 차이를 포함한 exact topic set ack, malformed/비단조 frame 거절,
   rejected replace의 socket 폐기·새 socket exact replace, replace payload, topic 변경,
   active/pending logout, unmount socket/timer cleanup
-- comma opaque run ID canonical 배열 보존, event별 adapter 호출과 C4 결선/C5 결선 대상
+- comma opaque run ID canonical 배열 보존, event별 adapter 호출과 C4/C5 canonical 결선
   누락 방지
 - 실제 PostgreSQL에서 source별 statement trigger mapping·rollback 불변·topic row lock wait·
   late commit 2회 증가와 `collect_live_topic_snapshots` clock 반영. integrity issue와 POI target의

@@ -22,7 +22,7 @@ export type OpsLiveConnectionState =
   | "unauthorized"
   | "unavailable";
 
-export type OpsLiveMode = "disabled" | "live" | "polling";
+export type OpsLiveMode = "disabled" | "standby" | "live" | "polling";
 
 const OPS_LIVE_STATE_LABELS: Record<OpsLiveConnectionState, string> = {
   disabled: "자동 갱신 꺼짐",
@@ -654,7 +654,10 @@ export function useOpsLiveInvalidation({
         connectedSocket.onerror = null;
         connectedSocket.onclose = null;
         try {
-          connectedSocket.close(CLIENT_STALE_CLOSE_CODE, message);
+          connectedSocket.close(
+            CLIENT_STALE_CLOSE_CODE,
+            "ops live protocol violation",
+          );
         } catch {
           // protocol-failed socket close는 best effort이며 reconnect는 계속한다.
         }
@@ -811,7 +814,9 @@ export function useOpsLiveInvalidation({
       ? "disabled"
       : effectiveState === "live"
         ? "live"
-        : "polling";
+        : effectiveState === "polling" || effectiveState === "unavailable"
+          ? "polling"
+          : "standby";
 
   return {
     state: effectiveState,

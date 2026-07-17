@@ -40,7 +40,6 @@ import {
   filterDatasetRecentRuns,
   invalidateOpsDatasetQueries,
   opsDatasetLiveBadgeLabel,
-  opsDatasetLiveInvalidationAdapter,
   resolveDatasetRefreshScope,
   useDatasetRefreshRequestStatus,
   useOpsDataset,
@@ -1513,7 +1512,6 @@ export function DatasetsClient({
 }) {
   const live = useOpsLiveInvalidation({
     topics: OPS_DATASET_LIVE_TOPICS,
-    invalidationAdapter: opsDatasetLiveInvalidationAdapter,
   });
   const pollingFallback = live.mode === "polling";
   const datasets = useOpsDatasets({ pollingFallback });
@@ -1991,7 +1989,9 @@ export function DatasetsClient({
                 ? "outline"
                 : live.mode === "polling"
                   ? "warning"
-                  : "destructive"
+                  : live.mode === "standby"
+                    ? "secondary"
+                    : "destructive"
             }
           >
             {opsDatasetLiveBadgeLabel(live)}

@@ -22,7 +22,6 @@ import {
 } from "./feature-update-idempotency";
 import type {
   OpsLiveConnectionState,
-  OpsLiveInvalidationAdapter,
   OpsLiveMode,
   OpsLiveTopic,
 } from "./live";
@@ -146,7 +145,13 @@ export function opsDatasetLiveBadgeLabel(live: {
   if (live.mode === "polling") {
     return "REST 폴링 갱신";
   }
-  return "자동 갱신 꺼짐";
+  return live.state === "disabled"
+    ? "자동 갱신 꺼짐"
+    : live.state === "unavailable"
+      ? "WebSocket 미지원"
+      : live.state === "reconnecting"
+        ? "재연결 중"
+        : "연결 중";
 }
 
 function datasetQueryPath(
@@ -440,18 +445,6 @@ export function invalidateOpsDatasetQueries(
   void queryClient.invalidateQueries({ queryKey: ["ops-datasets"] });
   void queryClient.invalidateQueries({ queryKey: ["ops-dataset"] });
 }
-
-const invalidateDatasetLiveProjection: NonNullable<
-  OpsLiveInvalidationAdapter["invalidateOperation"]
-> = (queryClient) => {
-  invalidateOpsDatasetQueries(queryClient);
-};
-
-export const opsDatasetLiveInvalidationAdapter: OpsLiveInvalidationAdapter = {
-  invalidateOperation: invalidateDatasetLiveProjection,
-  invalidateProviderDataset: invalidateDatasetLiveProjection,
-  invalidateSchedule: invalidateDatasetLiveProjection,
-};
 
 export function useUpsertOpsDatasetRefreshPolicyMutation() {
   const queryClient = useQueryClient();

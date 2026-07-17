@@ -323,7 +323,7 @@ describe("ops live transport", () => {
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
 
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
-    expect(screen.getByTestId("mode").textContent).toBe("polling");
+    expect(screen.getByTestId("mode").textContent).toBe("standby");
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -367,13 +367,13 @@ describe("ops live transport", () => {
       "ops live heartbeat가 중단되었습니다.",
     );
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
-    expect(screen.getByTestId("mode").textContent).toBe("polling");
+    expect(screen.getByTestId("mode").textContent).toBe("standby");
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await flushMicrotasks();
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("거절된 replace는 오염된 socket을 즉시 폐기하고 재연결한다", async () => {
+  it("긴 server error도 짧은 close reason으로 오염 socket을 폐기한다", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ticketResponse()));
     renderHarness();
     await flushMicrotasks();
@@ -383,14 +383,17 @@ describe("ops live transport", () => {
       socket.serverMessage(
         serverFrame(1, {
           type: "error",
-          message: "unsupported live topic",
+          message: "x".repeat(200),
         }),
       ),
     );
 
-    expect(socket.close).toHaveBeenCalledWith(4000, "unsupported live topic");
+    expect(socket.close).toHaveBeenCalledWith(
+      4000,
+      "ops live protocol violation",
+    );
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
-    expect(screen.getByTestId("mode").textContent).toBe("polling");
+    expect(screen.getByTestId("mode").textContent).toBe("standby");
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await flushMicrotasks();
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -419,13 +422,13 @@ describe("ops live transport", () => {
     );
 
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
-    expect(screen.getByTestId("mode").textContent).toBe("polling");
+    expect(screen.getByTestId("mode").textContent).toBe("standby");
     expect(screen.getByTestId("error").textContent).toContain(
       "data frame 형식",
     );
     expect(socket.close).toHaveBeenCalledWith(
       4000,
-      "ops live data frame 형식이 올바르지 않습니다.",
+      "ops live protocol violation",
     );
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await flushMicrotasks();
@@ -455,10 +458,10 @@ describe("ops live transport", () => {
     );
     expect(failedSocket.close).toHaveBeenCalledWith(
       4000,
-      "ops live frame envelope가 올바르지 않습니다.",
+      "ops live protocol violation",
     );
     expect(screen.getByTestId("state").textContent).toBe("reconnecting");
-    expect(screen.getByTestId("mode").textContent).toBe("polling");
+    expect(screen.getByTestId("mode").textContent).toBe("standby");
 
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await flushMicrotasks();

@@ -271,6 +271,8 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       "feature_update_requests",
       "dagster_runs",
       "dagster_schedules",
+      "provider_sync",
+      "dataset_projection",
     ],
   });
   // NUX 없음 — 새 UI는 Dagster iframe을 쓰지 않아 `/ops/pipeline/nux-seen`이
