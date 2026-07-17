@@ -780,23 +780,7 @@ async def test_confirmed_terminal_wins_concurrent_claim_resolution(
             command="reset",
         )
 
-    loop = asyncio.get_running_loop()
-    terminal_pid: asyncio.Future[int] = loop.create_future()
-    resolution_pid: asyncio.Future[int] = loop.create_future()
-
-    async def _append_terminal() -> None:
-        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-            terminal_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
-            await append_schedule_audit_event(
-                session,
-                command_id=command_id,
-                schedule_name=schedule_name,
-                command="reset",
-                phase="succeeded",
-                actor="admin@example.test",
-                reason="운영 확인",
-                details={"outcome_certainty": "confirmed"},
-            )
+    resolution_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
     async def _resolve_claim() -> DagsterScheduleClaimResolution:
         async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
@@ -810,8 +794,8 @@ async def test_confirmed_terminal_wins_concurrent_claim_resolution(
                 reason="Dagster에서 미반영 확인",
             )
 
-    async with AsyncSession(migrated_engine, expire_on_commit=False) as blocker:
-        await blocker.execute(
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as winner:
+        await winner.execute(
             text(
                 """
                 SELECT command_id
@@ -822,25 +806,46 @@ async def test_confirmed_terminal_wins_concurrent_claim_resolution(
             ),
             {"command_id": str(command_id)},
         )
-        terminal_task = asyncio.create_task(_append_terminal())
-        await _wait_for_lock_waiter(
-            migrated_engine,
-            backend_pid=await terminal_pid,
+        await winner.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_audit_events (
+                  command_id, schedule_name, command, phase, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name, 'reset', 'succeeded',
+                  'admin@example.test', '운영 확인',
+                  '{"outcome_certainty":"confirmed"}'::jsonb
+                )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        await winner.execute(
+            text(
+                """
+                DELETE FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
         )
         resolution_task = asyncio.create_task(_resolve_claim())
         await _wait_for_lock_waiter(
             migrated_engine,
             backend_pid=await resolution_pid,
         )
-        await blocker.commit()
+        await winner.commit()
 
-    terminal_result, resolution_result = await asyncio.gather(
-        terminal_task,
+    resolution_result = await asyncio.gather(
         resolution_task,
         return_exceptions=True,
     )
-    assert terminal_result is None
-    assert isinstance(resolution_result, DagsterScheduleClaimResolutionConflict)
+    assert len(resolution_result) == 1
+    resolution_error = resolution_result[0]
+    assert isinstance(resolution_error, DagsterScheduleClaimResolutionConflict)
 
     async with AsyncSession(migrated_engine) as session:
         terminal_count = await session.scalar(
@@ -865,6 +870,102 @@ async def test_confirmed_terminal_wins_concurrent_claim_resolution(
             {"command_id": str(command_id)},
         )
     assert (terminal_count, resolution_count) == (1, 0)
+
+
+async def test_uncertain_terminal_commit_is_visible_to_waiting_resolution(
+    migrated_engine: AsyncEngine,
+) -> None:
+    command_id = uuid4()
+    schedule_name = f"{_NAME}_uncertain_terminal_then_resolution"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed:
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=command_id,
+            schedule_name=schedule_name,
+            command="reset",
+        )
+
+    resolution_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def _resolve_claim() -> DagsterScheduleClaimResolution:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            resolution_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            return await resolve_schedule_active_claim(
+                session,
+                schedule_name=schedule_name,
+                command_id=command_id,
+                resolution="confirmed_not_applied",
+                actor="admin@example.test",
+                reason="Dagster에서 미반영 확인",
+            )
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as winner:
+        await winner.execute(
+            text(
+                """
+                SELECT command_id
+                FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                FOR UPDATE
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+        await winner.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_audit_events (
+                  command_id, schedule_name, command, phase, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name, 'reset', 'failed',
+                  'admin@example.test', '운영 확인',
+                  '{"outcome_certainty":"uncertain"}'::jsonb
+                )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        resolution_task = asyncio.create_task(_resolve_claim())
+        await _wait_for_lock_waiter(
+            migrated_engine,
+            backend_pid=await resolution_pid,
+        )
+        await winner.commit()
+
+    resolution = await resolution_task
+    assert resolution.replayed is False
+    async with AsyncSession(migrated_engine) as session:
+        stored = (
+            await session.execute(
+                text(
+                    """
+                    SELECT details
+                    FROM ops.dagster_schedule_claim_resolutions
+                    WHERE command_id = CAST(:command_id AS uuid)
+                    """
+                ),
+                {"command_id": str(command_id)},
+            )
+        ).one()
+        terminal_count = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.dagster_schedule_audit_events
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND phase IN ('succeeded','failed')
+                """
+            ),
+            {"command_id": str(command_id)},
+        )
+    assert stored.details == {
+        "terminal_recorded": True,
+        "terminal_outcome_certainty": "uncertain",
+    }
+    assert terminal_count == 1
 
 
 async def test_concurrent_identical_claim_resolution_replays_single_row(
@@ -927,9 +1028,7 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
             command="reset",
         )
 
-    loop = asyncio.get_running_loop()
-    terminal_pid: asyncio.Future[int] = loop.create_future()
-    resolution_pid: asyncio.Future[int] = loop.create_future()
+    terminal_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
     async def _append_terminal() -> None:
         async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
@@ -945,20 +1044,8 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
                 details={"outcome_certainty": "confirmed"},
             )
 
-    async def _resolve_claim() -> DagsterScheduleClaimResolution:
-        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
-            resolution_pid.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
-            return await resolve_schedule_active_claim(
-                session,
-                schedule_name=schedule_name,
-                command_id=command_id,
-                resolution="confirmed_not_applied",
-                actor="admin@example.test",
-                reason="Dagster에서 미반영 확인",
-            )
-
-    async with AsyncSession(migrated_engine, expire_on_commit=False) as blocker:
-        await blocker.execute(
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as winner:
+        await winner.execute(
             text(
                 """
                 SELECT command_id
@@ -969,25 +1056,46 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
             ),
             {"command_id": str(command_id)},
         )
-        resolution_task = asyncio.create_task(_resolve_claim())
-        await _wait_for_lock_waiter(
-            migrated_engine,
-            backend_pid=await resolution_pid,
+        await winner.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_claim_resolutions (
+                  command_id, schedule_name, resolution, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name,
+                  'confirmed_not_applied', 'admin@example.test',
+                  'Dagster에서 미반영 확인',
+                  '{"terminal_recorded":false,"terminal_outcome_certainty":null}'::jsonb
+                )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        await winner.execute(
+            text(
+                """
+                DELETE FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                """
+            ),
+            {"command_id": str(command_id)},
         )
         terminal_task = asyncio.create_task(_append_terminal())
         await _wait_for_lock_waiter(
             migrated_engine,
             backend_pid=await terminal_pid,
         )
-        await blocker.commit()
+        await winner.commit()
 
-    resolution_result, terminal_result = await asyncio.gather(
-        resolution_task,
+    terminal_results = await asyncio.gather(
         terminal_task,
         return_exceptions=True,
     )
-    assert isinstance(resolution_result, DagsterScheduleClaimResolution)
-    assert resolution_result.replayed is False
+    assert len(terminal_results) == 1
+    terminal_result = terminal_results[0]
     assert isinstance(terminal_result, DagsterScheduleStorageUnavailable)
 
     async with AsyncSession(migrated_engine) as session:
@@ -1013,3 +1121,141 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
             {"command_id": str(command_id)},
         )
     assert (terminal_count, resolution_count) == (0, 1)
+
+
+async def test_schedule_claim_triggers_enforce_terminal_resolution_xor_raw_sql(
+    migrated_engine: AsyncEngine,
+) -> None:
+    resolution_first_id = uuid4()
+    resolution_first_name = f"{_NAME}_raw_resolution_first"
+    terminal_first_id = uuid4()
+    terminal_first_name = f"{_NAME}_raw_terminal_first"
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as seed:
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=resolution_first_id,
+            schedule_name=resolution_first_name,
+            command="reset",
+        )
+        await _seed_active_schedule_claim(
+            seed,
+            command_id=terminal_first_id,
+            schedule_name=terminal_first_name,
+            command="reset",
+        )
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_claim_resolutions (
+                  command_id, schedule_name, resolution, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name,
+                  'confirmed_not_applied', 'admin@example.test',
+                  'Dagster에서 미반영 확인', '{}'::jsonb
+                )
+                """
+            ),
+            {
+                "command_id": str(resolution_first_id),
+                "schedule_name": resolution_first_name,
+            },
+        )
+        await session.commit()
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        with pytest.raises(DBAPIError):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.dagster_schedule_audit_events (
+                      command_id, schedule_name, command, phase, actor, reason, details
+                    ) VALUES (
+                      CAST(:command_id AS uuid), :schedule_name, 'reset', 'succeeded',
+                      'admin@example.test', '운영 확인',
+                      '{"outcome_certainty":"confirmed"}'::jsonb
+                    )
+                    """
+                ),
+                {
+                    "command_id": str(resolution_first_id),
+                    "schedule_name": resolution_first_name,
+                },
+            )
+        await session.rollback()
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO ops.dagster_schedule_audit_events (
+                  command_id, schedule_name, command, phase, actor, reason, details
+                ) VALUES (
+                  CAST(:command_id AS uuid), :schedule_name, 'reset', 'succeeded',
+                  'admin@example.test', '운영 확인',
+                  '{"outcome_certainty":"confirmed"}'::jsonb
+                )
+                """
+            ),
+            {
+                "command_id": str(terminal_first_id),
+                "schedule_name": terminal_first_name,
+            },
+        )
+        await session.commit()
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+        with pytest.raises(DBAPIError):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.dagster_schedule_claim_resolutions (
+                      command_id, schedule_name, resolution, actor, reason, details
+                    ) VALUES (
+                      CAST(:command_id AS uuid), :schedule_name,
+                      'confirmed_not_applied', 'admin@example.test',
+                      'Dagster에서 미반영 확인', '{}'::jsonb
+                    )
+                    """
+                ),
+                {
+                    "command_id": str(terminal_first_id),
+                    "schedule_name": terminal_first_name,
+                },
+            )
+        await session.rollback()
+
+    async with AsyncSession(migrated_engine) as session:
+        counts = (
+            await session.execute(
+                text(
+                    """
+                    SELECT requested.command_id::text,
+                           count(terminal.event_id) AS terminal_count,
+                           count(resolution.resolution_id) AS resolution_count
+                    FROM ops.dagster_schedule_audit_events AS requested
+                    LEFT JOIN ops.dagster_schedule_audit_events AS terminal
+                      ON terminal.command_id = requested.command_id
+                     AND terminal.phase IN ('succeeded','failed')
+                    LEFT JOIN ops.dagster_schedule_claim_resolutions AS resolution
+                      ON resolution.command_id = requested.command_id
+                    WHERE requested.command_id IN (
+                      CAST(:resolution_first_id AS uuid),
+                      CAST(:terminal_first_id AS uuid)
+                    )
+                      AND requested.phase = 'requested'
+                    GROUP BY requested.command_id
+                    """
+                ),
+                {
+                    "resolution_first_id": str(resolution_first_id),
+                    "terminal_first_id": str(terminal_first_id),
+                },
+            )
+        ).all()
+    by_command = {row.command_id: (row.terminal_count, row.resolution_count) for row in counts}
+    assert by_command == {
+        str(resolution_first_id): (0, 1),
+        str(terminal_first_id): (1, 0),
+    }

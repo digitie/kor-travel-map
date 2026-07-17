@@ -157,6 +157,7 @@ export function RequestCreateDialog({
 }) {
   const [open, setOpen] = useState(false);
   const dialogSessionRef = useRef(0);
+  const createPendingRef = useRef(false);
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
   // provider_dataset scope
   const [scopeProvider, setScopeProvider] = useState("");
@@ -258,6 +259,9 @@ export function RequestCreateDialog({
   };
 
   const closeDialog = () => {
+    if (createPendingRef.current) {
+      return;
+    }
     dialogSessionRef.current += 1;
     resetDialogResult();
     setOpen(false);
@@ -556,10 +560,13 @@ export function RequestCreateDialog({
         ...plan,
         reason: reason.trim() || null,
       };
+      createPendingRef.current = true;
       try {
         await createRequest.mutateAsync(body);
       } catch {
         // mutation error state는 현재 dialog session에서 alert로 표시한다.
+      } finally {
+        createPendingRef.current = false;
       }
       if (isCurrentDialogSession()) {
         setCreateInputKey(formInputKey);
@@ -937,7 +944,12 @@ export function RequestCreateDialog({
             ) : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeDialog}>
+            <Button
+              disabled={createRequest.isPending}
+              type="button"
+              variant="outline"
+              onClick={closeDialog}
+            >
               닫기
             </Button>
             <Button

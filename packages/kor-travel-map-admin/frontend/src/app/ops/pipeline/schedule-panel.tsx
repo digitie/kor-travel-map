@@ -157,6 +157,10 @@ interface ScheduleClaimRecovery {
   commandId: string;
 }
 
+interface ScheduleClaimResolutionSubmission extends ScheduleClaimRecovery {
+  body: PipelineScheduleClaimResolutionRequest;
+}
+
 function claimRecoveryFromResult(
   result: PipelineScheduleCommandResponse["data"] | null,
 ): ScheduleClaimRecovery | null {
@@ -225,6 +229,8 @@ export function SchedulePanel({
     PipelineScheduleClaimResolutionRequest["resolution"]
   >("confirmed_not_applied");
   const [claimResolutionReason, setClaimResolutionReason] = useState("");
+  const [claimResolutionSubmission, setClaimResolutionSubmission] =
+    useState<ScheduleClaimResolutionSubmission | null>(null);
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   const data = schedules.data?.data;
@@ -248,6 +254,12 @@ export function SchedulePanel({
       commandSchedule.error,
       commandSchedule.variables?.scheduleName,
     );
+  const frozenClaimResolution =
+    recoveryClaim &&
+    claimResolutionSubmission?.scheduleName === recoveryClaim.scheduleName &&
+    claimResolutionSubmission.commandId === recoveryClaim.commandId
+      ? claimResolutionSubmission
+      : null;
 
   useEffect(() => {
     if (highlightSchedule && highlightRef.current) {
@@ -276,6 +288,7 @@ export function SchedulePanel({
     patchSchedule.reset();
     commandSchedule.reset();
     resolveClaim.reset();
+    setClaimResolutionSubmission(null);
     setLastResult(null);
     commandSchedule.mutate(
       {
@@ -318,6 +331,7 @@ export function SchedulePanel({
     patchSchedule.reset();
     commandSchedule.reset();
     resolveClaim.reset();
+    setClaimResolutionSubmission(null);
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -348,6 +362,7 @@ export function SchedulePanel({
     patchSchedule.reset();
     commandSchedule.reset();
     resolveClaim.reset();
+    setClaimResolutionSubmission(null);
     setLastResult(null);
     patchSchedule.mutate(
       {
@@ -372,11 +387,23 @@ export function SchedulePanel({
   };
 
   const submitClaimResolution = async () => {
-    if (!recoveryClaim || !claimResolutionReason.trim()) {
+    if (!recoveryClaim) {
+      return;
+    }
+    const submission: ScheduleClaimResolutionSubmission =
+      frozenClaimResolution ?? {
+        scheduleName: recoveryClaim.scheduleName,
+        commandId: recoveryClaim.commandId,
+        body: {
+          resolution: claimResolution,
+          reason: claimResolutionReason.trim(),
+        },
+      };
+    if (!submission.body.reason) {
       return;
     }
     const confirmed = await confirm({
-      title: `${recoveryClaim.scheduleName} 결과 불명 claim 해제`,
+      title: `${submission.scheduleName} 결과 불명 claim 해제`,
       description:
         "Dagster 실행·스케줄 상태를 직접 확인한 경우에만 진행하세요. 해제 후 같은 조작은 새 명령으로 실행됩니다.",
       confirmLabel: "확인 결과 기록 후 해제",
@@ -385,14 +412,12 @@ export function SchedulePanel({
     if (!confirmed) {
       return;
     }
+    setClaimResolutionSubmission(submission);
     resolveClaim.mutate(
       {
-        scheduleName: recoveryClaim.scheduleName,
-        commandId: recoveryClaim.commandId,
-        body: {
-          resolution: claimResolution,
-          reason: claimResolutionReason.trim(),
-        },
+        scheduleName: submission.scheduleName,
+        commandId: submission.commandId,
+        body: submission.body,
       },
       {
         onSuccess: () => {
@@ -400,6 +425,7 @@ export function SchedulePanel({
           commandSchedule.reset();
           setLastResult(null);
           setClaimResolutionReason("");
+          setClaimResolutionSubmission(null);
         },
       },
     );
@@ -461,6 +487,9 @@ export function SchedulePanel({
                 실제 반영 확인 결과
                 <NativeSelect
                   aria-label="schedule claim 실제 반영 확인 결과"
+                  disabled={
+                    resolveClaim.isPending || frozenClaimResolution !== null
+                  }
                   value={claimResolution}
                   onChange={(event) =>
                     setClaimResolution(
@@ -478,6 +507,9 @@ export function SchedulePanel({
                 </NativeSelect>
               </label>
               <FormField
+                disabled={
+                  resolveClaim.isPending || frozenClaimResolution !== null
+                }
                 label="확인 근거·해제 사유 (필수)"
                 placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
                 value={claimResolutionReason}
@@ -487,7 +519,11 @@ export function SchedulePanel({
               />
               <Button
                 disabled={
-                  resolveClaim.isPending || !claimResolutionReason.trim()
+                  resolveClaim.isPending ||
+                  !(
+                    frozenClaimResolution?.body.reason ??
+                    claimResolutionReason.trim()
+                  )
                 }
                 type="button"
                 variant="destructive"

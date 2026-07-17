@@ -625,6 +625,7 @@ interface MockOptions {
   scheduleAuditStatus?: "recorded" | "terminal_record_failed";
   scheduleResponseDelayMs?: number;
   claimResolutionResponseLossOnce?: boolean;
+  claimResolutionResponseDelayMs?: number;
   previewResponseDelaysMs?: number[];
   previewFeatureCounts?: number[];
   schedulesResponse?: PipelineSchedulesResponse;
@@ -634,6 +635,7 @@ interface MockOptions {
     headers?: Record<string, string>;
     body?: unknown;
   };
+  requestCreateDelayMs?: number;
   detailFactory?: (
     executionId: string,
     query: URLSearchParams,
@@ -878,6 +880,11 @@ async function installPipelineMocks(
       )
     ) {
       counters.claimResolutionBodies.push(request.postDataJSON());
+      if (options.claimResolutionResponseDelayMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.claimResolutionResponseDelayMs),
+        );
+      }
       if (
         options.claimResolutionResponseLossOnce &&
         counters.claimResolutionBodies.length === 1
@@ -1086,6 +1093,11 @@ async function installPipelineMocks(
     }
     if (pathname.endsWith("/v1/ops/pipeline/requests")) {
       counters.requestBodies.push(request.postDataJSON());
+      if (options.requestCreateDelayMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.requestCreateDelayMs),
+        );
+      }
       const custom = options.requestCreate;
       if (custom && custom.status && custom.status >= 400) {
         await fulfillJson(
@@ -2157,6 +2169,7 @@ test.describe("/ops/pipeline", () => {
     const counters = await installPipelineMocks(page, {
       scheduleAuditStatus: "terminal_record_failed",
       claimResolutionResponseLossOnce: true,
+      claimResolutionResponseDelayMs: 400,
     });
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
 
@@ -2176,7 +2189,20 @@ test.describe("/ops/pipeline", () => {
         .getByRole("button", { name: "확인 결과 기록 후 해제" })
         .click();
       if (attempt === 0) {
+        await expect.poll(() => counters.claimResolutionBodies.length).toBe(1);
+        await expect(
+          recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
+        ).toBeDisabled();
+        await expect(
+          recovery.getByLabel("확인 근거·해제 사유 (필수)"),
+        ).toBeDisabled();
         await expect(page.getByText("claim 해제 실패")).toBeVisible();
+        await expect(
+          recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
+        ).toBeDisabled();
+        await expect(
+          recovery.getByLabel("확인 근거·해제 사유 (필수)"),
+        ).toBeDisabled();
       }
     }
 
@@ -2299,6 +2325,42 @@ test.describe("/ops/pipeline", () => {
     await expect(result).toContainText('"feature_count":22');
     await expect(result).not.toContainText('"feature_count":11');
     expect(counters.previewBodies).toHaveLength(2);
+  });
+
+  test("요청 dialog — non-provider create pending 중 닫기와 중복 POST를 차단", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      requestCreateDelayMs: 700,
+    });
+    await page.goto("/ops/pipeline");
+    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+    await dialog.getByLabel("scope 유형").selectOption("bbox");
+    await dialog.getByLabel("데이터셋 키 필터").fill("kma_short_forecast");
+    await dialog
+      .getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)")
+      .uncheck();
+    await dialog
+      .getByRole("button", { name: "요청 생성", exact: true })
+      .click();
+    await expect.poll(() => counters.requestBodies.length).toBe(1);
+
+    const closeButton = dialog.getByRole("button", { name: "닫기" });
+    await expect(closeButton).toBeDisabled();
+    await expect(
+      dialog.getByRole("button", { name: "요청 생성", exact: true }),
+    ).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+    await page.mouse.click(4, 4);
+    await expect(dialog).toBeVisible();
+
+    await expect(dialog.getByTestId("request-create-result")).toBeVisible();
+    await expect(closeButton).toBeEnabled();
+    await closeButton.click();
+    await expect(dialog).toBeHidden();
+    expect(counters.requestBodies).toHaveLength(1);
   });
 
   test("요청 dialog — priority 소수는 전송 없이 명시적으로 거부", async ({

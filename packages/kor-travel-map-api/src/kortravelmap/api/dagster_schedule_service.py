@@ -709,22 +709,11 @@ async def resolve_schedule_active_claim(
         claim_result = await session.execute(
             text(
                 """
-                SELECT terminal.event_id AS terminal_event_id, terminal.details
-                FROM ops.dagster_schedule_active_claims AS claim
-                JOIN ops.dagster_schedule_audit_events AS requested
-                  ON requested.command_id = claim.command_id
-                 AND requested.phase = 'requested'
-                LEFT JOIN ops.dagster_schedule_audit_events AS terminal
-                  ON terminal.command_id = claim.command_id
-                 AND terminal.phase IN ('succeeded','failed')
-                WHERE claim.command_id = CAST(:command_id AS uuid)
-                  AND claim.schedule_name = :schedule_name
-                  AND requested.schedule_name = :schedule_name
-                  AND (
-                    terminal.command_id IS NULL
-                    OR terminal.schedule_name = :schedule_name
-                  )
-                FOR UPDATE OF claim
+                SELECT command_id
+                FROM ops.dagster_schedule_active_claims
+                WHERE command_id = CAST(:command_id AS uuid)
+                  AND schedule_name = :schedule_name
+                FOR UPDATE
                 """
             ),
             {
@@ -776,9 +765,38 @@ async def resolve_schedule_active_claim(
                     "이 schedule claim은 이미 해제됐거나 활성 상태가 아닙니다."
                 )
             raise DagsterScheduleClaimNotFound("지정한 schedule claim을 찾을 수 없습니다.")
-        details = dict(claim_row.details) if claim_row.details is not None else {}
+
+        audit_result = await session.execute(
+            text(
+                """
+                SELECT terminal.event_id AS terminal_event_id, terminal.details
+                FROM ops.dagster_schedule_audit_events AS requested
+                LEFT JOIN ops.dagster_schedule_audit_events AS terminal
+                  ON terminal.command_id = requested.command_id
+                 AND terminal.phase IN ('succeeded','failed')
+                WHERE requested.command_id = CAST(:command_id AS uuid)
+                  AND requested.phase = 'requested'
+                  AND requested.schedule_name = :schedule_name
+                  AND (
+                    terminal.command_id IS NULL
+                    OR terminal.schedule_name = :schedule_name
+                  )
+                """
+            ),
+            {
+                "command_id": str(command_id),
+                "schedule_name": schedule_name,
+            },
+        )
+        audit_row = audit_result.one_or_none()
+        if audit_row is None:
+            await session.rollback()
+            raise DagsterScheduleClaimResolutionConflict(
+                "활성 schedule claim의 requested 감사 이벤트를 찾을 수 없습니다."
+            )
+        details = dict(audit_row.details) if audit_row.details is not None else {}
         if (
-            claim_row.terminal_event_id is not None
+            audit_row.terminal_event_id is not None
             and details.get("outcome_certainty") != "uncertain"
         ):
             await session.rollback()
@@ -805,7 +823,7 @@ async def resolve_schedule_active_claim(
                 "reason": normalized_reason,
                 "details": json.dumps(
                     {
-                        "terminal_recorded": claim_row.terminal_event_id is not None,
+                        "terminal_recorded": audit_row.terminal_event_id is not None,
                         "terminal_outcome_certainty": details.get("outcome_certainty"),
                     },
                     ensure_ascii=False,
