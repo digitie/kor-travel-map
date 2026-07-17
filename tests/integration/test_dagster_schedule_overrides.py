@@ -109,15 +109,17 @@ async def _seed_active_schedule_claim(
               CAST(:command_id AS uuid), :schedule_name,
               CASE
                 WHEN :stale THEN clock_timestamp() - interval '10 minutes'
-                WHEN :resolvable_in_seconds IS NOT NULL
+                WHEN CAST(:resolvable_in_seconds AS double precision) IS NOT NULL
                   THEN clock_timestamp() - interval '5 minutes'
                 ELSE clock_timestamp()
               END,
               CASE
                 WHEN :stale THEN clock_timestamp() - interval '5 minutes'
-                WHEN :resolvable_in_seconds IS NOT NULL
+                WHEN CAST(:resolvable_in_seconds AS double precision) IS NOT NULL
                   THEN clock_timestamp()
-                       + make_interval(secs => :resolvable_in_seconds)
+                       + make_interval(
+                           secs => CAST(:resolvable_in_seconds AS double precision)
+                         )
                 ELSE clock_timestamp() + interval '5 minutes'
               END
             )
@@ -361,6 +363,7 @@ async def test_schedule_command_idempotency_replays_terminal_result_without_remo
     migrated_engine: AsyncEngine,
 ) -> None:
     command_id = uuid4()
+    schedule_name = f"{_NAME}_idempotency_replay_{uuid4().hex}"
     remote_calls = 0
 
     async def _operation(
@@ -374,7 +377,7 @@ async def test_schedule_command_idempotency_replays_terminal_result_without_remo
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
         first = await execute_audited_schedule_command(
             session,
-            schedule_name=_NAME,
+            schedule_name=schedule_name,
             command="start",
             actor="admin@example.test",
             reason="재개",
@@ -384,7 +387,7 @@ async def test_schedule_command_idempotency_replays_terminal_result_without_remo
         )
         replay = await execute_audited_schedule_command(
             session,
-            schedule_name=_NAME,
+            schedule_name=schedule_name,
             command="start",
             actor="admin@example.test",
             reason="재개",
@@ -733,6 +736,7 @@ async def test_schedule_claim_lease_clock_starts_after_advisory_lock_wait(
 async def test_schedule_active_claim_blocks_new_key_until_terminal(
     migrated_engine: AsyncEngine,
 ) -> None:
+    schedule_name = f"{_NAME}_active_claim_{uuid4().hex}"
     first_command_id = uuid4()
     second_command_id = uuid4()
     third_command_id = uuid4()
@@ -759,7 +763,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
         async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
             return await execute_audited_schedule_command(
                 session,
-                schedule_name=_NAME,
+                schedule_name=schedule_name,
                 command="start",
                 actor="admin@example.test",
                 reason="재개",
@@ -775,7 +779,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
             with pytest.raises(DagsterScheduleIdempotencyConflict) as new_key_conflict:
                 await execute_audited_schedule_command(
                     session,
-                    schedule_name=_NAME,
+                    schedule_name=schedule_name,
                     command="stop",
                     actor="admin@example.test",
                     reason="다른 key",
@@ -787,7 +791,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
             with pytest.raises(DagsterScheduleIdempotencyConflict) as same_key_conflict:
                 await execute_audited_schedule_command(
                     session,
-                    schedule_name=_NAME,
+                    schedule_name=schedule_name,
                     command="start",
                     actor="admin@example.test",
                     reason="재개",
@@ -799,7 +803,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
             with pytest.raises(DagsterScheduleClaimResolutionConflict):
                 await resolve_schedule_active_claim(
                     session,
-                    schedule_name=_NAME,
+                    schedule_name=schedule_name,
                     command_id=first_command_id,
                     resolution="confirmed_not_applied",
                     actor="admin@example.test",
@@ -812,7 +816,7 @@ async def test_schedule_active_claim_blocks_new_key_until_terminal(
     async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
         await execute_audited_schedule_command(
             session,
-            schedule_name=_NAME,
+            schedule_name=schedule_name,
             command="stop",
             actor="admin@example.test",
             reason="terminal 후",
@@ -855,6 +859,7 @@ async def test_pre_mutation_storage_failure_replays_confirmed_without_remote_cal
     migrated_engine: AsyncEngine,
 ) -> None:
     command_id = uuid4()
+    schedule_name = f"{_NAME}_pre_mutation_storage_{uuid4().hex}"
     remote_calls = 0
 
     async def _operation(
@@ -871,7 +876,7 @@ async def test_pre_mutation_storage_failure_replays_confirmed_without_remote_cal
         ):
             await execute_audited_schedule_command(
                 session,
-                schedule_name=_NAME,
+                schedule_name=schedule_name,
                 command="start",
                 actor="admin@example.test",
                 reason="재개",
@@ -885,7 +890,7 @@ async def test_pre_mutation_storage_failure_replays_confirmed_without_remote_cal
         ):
             await execute_audited_schedule_command(
                 session,
-                schedule_name=_NAME,
+                schedule_name=schedule_name,
                 command="start",
                 actor="admin@example.test",
                 reason="재개",
@@ -966,6 +971,7 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
     migrated_engine: AsyncEngine,
 ) -> None:
     command_id = uuid4()
+    schedule_name = f"{_NAME}_unexpected_terminal_{uuid4().hex}"
     remote_calls = 0
 
     async def _operation(
@@ -983,7 +989,7 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
         ):
             await execute_audited_schedule_command(
                 session,
-                schedule_name=_NAME,
+                schedule_name=schedule_name,
                 command="start",
                 actor="admin@example.test",
                 reason="재개",
@@ -997,7 +1003,7 @@ async def test_unexpected_terminal_replays_as_structured_failure_without_remote_
         ):
             await execute_audited_schedule_command(
                 session,
-                schedule_name=_NAME,
+                schedule_name=schedule_name,
                 command="start",
                 actor="admin@example.test",
                 reason="재개",
@@ -1546,7 +1552,7 @@ async def test_claim_resolution_wins_concurrent_late_terminal(
                   CAST(:command_id AS uuid), :schedule_name,
                   'confirmed_not_applied', 'admin@example.test',
                   'Dagster에서 미반영 확인',
-                  '{"terminal_recorded":false,"terminal_outcome_certainty":null}'::jsonb
+                  '{}'::jsonb
                 )
                 """
             ),
