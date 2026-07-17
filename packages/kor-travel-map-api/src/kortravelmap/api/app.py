@@ -124,12 +124,36 @@ def _build_problem_components() -> dict[str, Any]:
 
 
 _PROBLEM_COMPONENTS: dict[str, Any] = _build_problem_components()
+_PROBLEM_REQUIRED_FIELDS = frozenset(
+    {"type", "title", "status", "detail", "code", "request_id"}
+)
 
 
-def _problem_content(response: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def _declares_problem_schema(
+    candidate: Mapping[str, Any],
+    components: Mapping[str, Any],
+) -> bool:
+    """명시 schema가 실제 RFC7807 확장 계약일 때만 보존한다."""
+    resolved: Mapping[str, Any] = candidate
+    ref = candidate.get("$ref")
+    prefix = "#/components/schemas/"
+    if isinstance(ref, str) and ref.startswith(prefix):
+        component = components.get(ref.removeprefix(prefix))
+        if not isinstance(component, Mapping):
+            return False
+        resolved = component
+    required = resolved.get("required")
+    return isinstance(required, list) and _PROBLEM_REQUIRED_FIELDS.issubset(required)
+
+
+def _problem_content(
+    response: Mapping[str, Any] | None = None,
+    *,
+    components: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     schema: object = {"$ref": "#/components/schemas/ProblemDetail"}
     content = response.get("content") if response is not None else None
-    if isinstance(content, Mapping):
+    if isinstance(content, Mapping) and components is not None:
         for media_type in ("application/problem+json", "application/json"):
             media = content.get(media_type)
             if not isinstance(media, Mapping):
@@ -137,11 +161,7 @@ def _problem_content(response: Mapping[str, Any] | None = None) -> dict[str, Any
             candidate = media.get("schema")
             if not isinstance(candidate, Mapping):
                 continue
-            ref = candidate.get("$ref")
-            if ref not in {
-                "#/components/schemas/HTTPValidationError",
-                "#/components/schemas/ValidationError",
-            }:
+            if _declares_problem_schema(candidate, components):
                 schema = dict(candidate)
                 break
     return {
@@ -180,7 +200,10 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
                         continue
                     if code == "default" or (code.isdigit() and int(code) >= 400):
                         response.setdefault("description", _PROBLEM_DEFAULT_DESCRIPTION)
-                        response["content"] = _problem_content(response)
+                        response["content"] = _problem_content(
+                            response,
+                            components=components,
+                        )
                 responses.setdefault(
                     "default",
                     {

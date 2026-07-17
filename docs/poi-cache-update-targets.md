@@ -253,13 +253,16 @@ CREATE TABLE ops.provider_refresh_policies (
   CONSTRAINT ck_provider_refresh_targeted_policy CHECK (
     targeted_policy IN ('follow_system','allow_targeted','disabled')
   ),
-  CONSTRAINT ck_provider_refresh_revision CHECK (revision > 0)
+  CONSTRAINT ck_provider_refresh_revision
+    CHECK (revision >= 1 AND revision <= 9223372036854775807)
 );
 ```
 
 정책 write는 `expected_revision` CAS를 사용한다. 신규 행만 `null`로 revision 1을
 생성하고, 기존 행은 일치하는 revision에서만 원자적으로 `revision + 1`한다. HTTP 경계는
 BIGINT를 양수 10진 문자열로 표현하며 conflict는 현재 record/revision을 반환한다.
+기존 행의 `source_kind`는 불변이고, revision 최댓값에서는 `+1`을 평가하지 않고 typed
+소진 conflict를 반환한다.
 
 `rate_limit_source`에는 다음을 저장한다.
 

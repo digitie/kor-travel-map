@@ -2156,7 +2156,8 @@ rate limit, 최적 기본값, 출처 문서와 명시적 freshness SLA
 alembic 0056은 다음 단조 revision을 추가한다.
 
 ```sql
-revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
+revision BIGINT NOT NULL DEFAULT 1
+  CHECK (revision >= 1 AND revision <= 9223372036854775807)
 ```
 
 핵심 규칙:
@@ -2176,6 +2177,11 @@ revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)
   양수 10진 문자열로 직렬화한다. DB/repository 내부에서만 정수로 비교한다.
 - 같은 revision을 읽은 두 transaction 중 정확히 하나만 성공한다. 실패 transaction과
   성공 뒤 rollback한 transaction은 정책 값과 revision을 모두 바꾸지 않는다.
+- 기존 행의 `source_kind`는 생성 뒤 불변이다. update SQL은 요청 값과 현재 값이 같을
+  때만 실행하고, 다르면 현재 record를 포함한 명시적 conflict로 거절한다.
+- revision `9223372036854775806`은 한 번 갱신해 BIGINT 최댓값까지 갈 수 있다. 최댓값
+  행은 `+1` 식을 평가하지 않으며 현재 record/revision을 포함한
+  `PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED`로 닫아 overflow 500을 만들지 않는다.
 
 repository는 `infra.provider_refresh_policy_repo`가 제공한다. T-206d request 실행
 본체는 `enabled`/`source_kind`/`targeted_policy`를 실행 계획에 적용하고, rate-limit

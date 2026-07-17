@@ -452,6 +452,7 @@ async function mockOpsDatasets(
         data: makeRefreshPolicy({
           provider,
           dataset_key: dataset,
+          source_kind: body.source_kind,
           targeted_policy: body.targeted_policy ?? "follow_system",
           enabled: body.enabled ?? true,
           revision:
@@ -1233,10 +1234,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
     await expect(page.getByText("서버 정책이 변경됨")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await expect(saveButton).toBeDisabled();
+    await saveButton.evaluate((button) => (button as HTMLButtonElement).click());
+    await expect.poll(() => mocks.policyPuts.length).toBe(0);
 
     await page.getByRole("button", { name: "서버 값 다시 불러오기" }).click();
     await expect(targetedPolicy).toHaveValue("disabled");
     await expect(page.getByText("서버 정책이 변경됨")).toHaveCount(0);
+    await expect(saveButton).toBeEnabled();
   });
 
   test("정책 편집 — CAS 409는 draft를 보존하고 3-way 조정 뒤 최신 revision으로 저장한다", async ({
@@ -1245,12 +1251,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const { items } = defaultGrid();
     const initialPolicy = makeRefreshPolicy({
       targeted_policy: "follow_system",
-      revision: "1",
+      revision: "9007199254740993",
     });
     const currentPolicy = makeRefreshPolicy({
       targeted_policy: "disabled",
       enabled: false,
-      revision: "2",
+      revision: "9007199254740994",
     });
     const mocks = await mockOpsDatasets(page, {
       items,
@@ -1270,20 +1276,78 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await expect(page.getByText("정책 저장 충돌")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
-    expect(mocks.policyPuts[0].body.expected_revision).toBe("1");
+    expect(mocks.policyPuts[0].body.expected_revision).toBe("9007199254740993");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await expect(saveButton).toBeDisabled();
+    await saveButton.evaluate((button) => (button as HTMLButtonElement).click());
+    await expect.poll(() => mocks.policyPuts.length).toBe(1);
+
+    // keepMounted policy panel은 URL tab history와 Back/Forward 사이에서도
+    // draft/base/conflict를 보존한다.
+    await page.getByRole("tab", { name: "상태·이력" }).click();
+    await expect(page).toHaveURL(/panel=history/);
+    await page.goBack();
+    await expect(page).toHaveURL(/panel=policy/);
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await page.goForward();
+    await expect(page).toHaveURL(/panel=history/);
+    await page.getByRole("tab", { name: "갱신 정책" }).click();
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
 
     await page
       .getByRole("button", { name: "서버 기준으로 초안 조정" })
       .click();
     await expect(page.getByText("초안 조정 완료")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
-    await page.getByRole("button", { name: "저장" }).click();
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
 
     await expect.poll(() => mocks.policyPuts.length).toBe(2);
-    expect(mocks.policyPuts[1].body.expected_revision).toBe("2");
+    expect(mocks.policyPuts[1].body.expected_revision).toBe("9007199254740994");
     expect(mocks.policyPuts[1].body.targeted_policy).toBe("allow_targeted");
     expect(mocks.policyPuts[1].body.enabled).toBe(false);
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
+  });
+
+  test("정책 편집 — concurrent create loser는 서버 source_kind를 강제한다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const currentPolicy = makeRefreshPolicy({
+      source_kind: "manual",
+      targeted_policy: "disabled",
+      revision: "1",
+    });
+    const mocks = await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: null,
+        }),
+      },
+      policyConflictOnce: currentPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const sourceKind = page.getByLabel("소스 종류", { exact: true });
+    await sourceKind.selectOption("openapi");
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(sourceKind).toHaveValue("manual");
+    expect(mocks.policyPuts[0].body.expected_revision).toBeNull();
+    expect(mocks.policyPuts[0].body.source_kind).toBe("openapi");
+    await page
+      .getByRole("button", { name: "서버 기준으로 초안 조정" })
+      .click();
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect.poll(() => mocks.policyPuts.length).toBe(2);
+    expect(mocks.policyPuts[1].body.expected_revision).toBe("1");
+    expect(mocks.policyPuts[1].body.source_kind).toBe("manual");
   });
 
   test("정책 편집 — orphan 행은 저장 UI를 열지 않는다", async ({
@@ -2038,6 +2102,27 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(
       page.getByText("선택된 데이터셋 행이 없습니다."),
     ).toBeVisible();
+  });
+
+  test("browser Back으로 drawer를 닫아도 선택 행으로 focus가 복귀한다", async ({
+    page,
+  }) => {
+    const { items, details } = defaultGrid();
+    await mockOpsDatasets(page, { items, details });
+    await mockPipelineRequests(page);
+
+    await page.goto("/ops/datasets");
+    const rowButton = page.getByRole("button", {
+      name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
+    });
+    await rowButton.click();
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
+
+    await page.goBack();
+
+    await expect(page).not.toHaveURL(/provider=/);
+    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(rowButton).toBeFocused();
   });
 
   test("provider-only 링크는 첫 canonical 3원 행으로 URL을 완성한다", async ({

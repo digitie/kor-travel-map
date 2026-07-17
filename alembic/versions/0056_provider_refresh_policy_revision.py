@@ -33,7 +33,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_provider_refresh_revision",
         "provider_refresh_policies",
-        "revision > 0",
+        "revision >= 1 AND revision <= 9223372036854775807",
         schema="ops",
     )
 

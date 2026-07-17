@@ -114,6 +114,9 @@ async def test_upsert_distinguishes_omitted_and_explicit_provenance() -> None:
     assert "ON CONFLICT (provider, dataset_key) DO NOTHING" in insert_sql
     assert "policy.revision = CAST(:expected_revision AS bigint)" in update_sql
     assert "revision = policy.revision + 1" in update_sql
+    assert "policy.revision < 9223372036854775807" in update_sql
+    assert "policy.source_kind = :source_kind" in update_sql
+    assert "SET source_kind" not in update_sql
     assert "ELSE policy.rate_limit_source" in update_sql
     assert omitted_params["rate_limit_source"] == "{}"
     assert omitted_params["rate_limit_source_provided"] is False

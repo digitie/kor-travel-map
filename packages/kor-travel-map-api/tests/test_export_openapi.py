@@ -173,3 +173,46 @@ def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
     assert policy_conflict == {
         "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
     }
+
+
+@pytest.mark.unit
+def test_problem_augmenter_does_not_preserve_non_problem_error_ref() -> None:
+    """오류 response의 임의 DTO ref를 typed problem으로 오인하지 않는다."""
+    from kortravelmap.api.app import _augment_problem_responses
+
+    spec = {
+        "components": {
+            "schemas": {
+                "NotAProblem": {
+                    "type": "object",
+                    "required": ["data", "meta"],
+                    "properties": {},
+                }
+            }
+        },
+        "paths": {
+            "/regression": {
+                "get": {
+                    "responses": {
+                        "409": {
+                            "description": "잘못 지정된 성공 DTO",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/NotAProblem"
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    _augment_problem_responses(spec)
+
+    schema = spec["paths"]["/regression"]["get"]["responses"]["409"]["content"][
+        "application/problem+json"
+    ]["schema"]
+    assert schema == {"$ref": "#/components/schemas/ProblemDetail"}

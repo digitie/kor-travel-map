@@ -31,6 +31,8 @@ from kortravelmap.api.ops_dataset_service import (
     DatasetNotFoundError,
     OrphanMutationDisabledError,
     ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     load_dataset_detail,
     load_datasets_grid,
     upsert_dataset_refresh_policy,
@@ -122,8 +124,9 @@ async def get_dataset_detail(
         409: {
             "model": ProviderRefreshPolicyConflictProblem,
             "description": (
-                "revision CAS 불일치 또는 카탈로그에서 제거된 orphan row. "
-                "현재 record/revision 또는 mutation_disabled_reason 포함."
+                "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 "
+                "제거된 orphan row. 현재 record/revision 또는 "
+                "mutation_disabled_reason 포함."
             )
         },
     },
@@ -183,6 +186,36 @@ async def put_dataset_refresh_policy(
                         if current_record is not None
                         else None
                     ),
+                    "mutation_disabled_reason": None,
+                },
+            },
+        ) from exc
+    except ProviderRefreshPolicyRevisionExhausted as exc:
+        current_record = provider_refresh_policy_record(exc.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+                "message": "provider refresh policy revision exhausted",
+                "details": {
+                    "expected_revision": body.expected_revision,
+                    "current_revision": current_record.revision,
+                    "current_record": current_record.model_dump(mode="json"),
+                    "mutation_disabled_reason": None,
+                },
+            },
+        ) from exc
+    except ProviderRefreshPolicySourceKindImmutable as exc:
+        current_record = provider_refresh_policy_record(exc.current)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PROVIDER_REFRESH_POLICY_SOURCE_KIND_IMMUTABLE",
+                "message": "provider refresh policy source_kind is immutable",
+                "details": {
+                    "expected_revision": body.expected_revision,
+                    "current_revision": current_record.revision,
+                    "current_record": current_record.model_dump(mode="json"),
                     "mutation_disabled_reason": None,
                 },
             },

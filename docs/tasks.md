@@ -36,9 +36,10 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔
   단조 revision을 추가하고, 전체 정책 write를 `expected_revision` 조건부 갱신과
   원자적 `revision + 1`로 바꾼다. 불일치는 write 없이 현재 서버 record/revision을
-  포함한 typed 409로 반환하고 UI draft를 보존한다.
-  두 독립 transaction의 동일 revision 경쟁, create/update 구분, rollback과 OpenAPI/UI
-  충돌 복구를 검증한다.
+  포함한 typed 409로 반환하고 UI draft를 보존한다. `source_kind`는 생성 뒤 불변이며
+  BIGINT 최댓값에서는 증가식을 평가하지 않고 typed 소진 conflict로 닫는다.
+  두 독립 transaction의 실제 row-lock 경쟁, create/update 구분, rollback, 2^53 초과
+  문자열 왕복과 OpenAPI/UI 충돌 복구를 검증한다.
 - [ ] `T-ADM-AUD-686` — **KMA 유효 대상 0건 fail-closed** (issue **#686**,
   **PR 1개**, migration 없음, `T-ADM-AUD-718`과 병렬): C45X가 완성한 typed
   scope·active request 멱등성 위에서 KMA target 해석 결과가 0건이면 dispatch/provider

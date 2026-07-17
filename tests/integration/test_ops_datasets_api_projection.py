@@ -696,7 +696,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                         "dataset_key": policy_dataset_key,
                     },
                     json={
-                        "expected_revision": None,
+                        "expected_revision": "1",
                         "source_kind": "manual",
                         "targeted_policy": "allow_targeted",
                         "stale_after_minutes": 137,
@@ -764,6 +764,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                 }
                 assert policy_data["config_source"] == "c3e-c-integration"
                 assert policy_data["enabled"] is False
+                assert policy_data["revision"] == "2"
 
                 async with AsyncSession(migrated_engine) as verify_session:
                     saved_policy = (
@@ -773,7 +774,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                                 SELECT provider, dataset_key, source_kind,
                                        targeted_policy, stale_after_minutes,
                                        max_concurrent, rate_limit_source,
-                                       config_source, enabled
+                                       config_source, enabled, revision
                                 FROM ops.provider_refresh_policies
                                 WHERE provider = :provider
                                   AND dataset_key = :dataset_key
@@ -795,6 +796,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     "rate_limit_source": {"proof": "server-provider-contract"},
                     "config_source": "c3e-c-integration",
                     "enabled": False,
+                    "revision": 2,
                 }
 
                 grid = grid_response.json()["data"]

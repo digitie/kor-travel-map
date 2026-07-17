@@ -2917,7 +2917,7 @@ class ProviderRefreshPolicyRow(Base):
             name="ck_provider_refresh_stale_after",
         ),
         CheckConstraint(
-            "revision > 0",
+            "revision >= 1 AND revision <= 9223372036854775807",
             name="ck_provider_refresh_revision",
         ),
         CheckConstraint(

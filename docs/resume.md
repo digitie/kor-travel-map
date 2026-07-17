@@ -9,8 +9,10 @@
   admin UI는 초안 기준 revision과 최신 관측 revision을 분리해 background refetch/충돌에도 입력을
   보존하며, 명시적 3-way 조정 뒤 최신 revision으로 재저장한다.
 - migration·저장소 경합·router/OpenAPI·mock UI 충돌 회귀를 작성하고 계약 문서와 생성물을
-  갱신했다. **다음 한 작업**: 독립 적대 리뷰어 2인의 테스트 전 검토를 반영한 뒤 전체 gate와
-  n150 결선 대상 live E2E를 진행한다. 리뷰 전 테스트·lint·build는 아직 실행하지 않았다.
+  갱신했다. 1차 적대 리뷰의 실제 row-lock 경합, BIGINT 소진, `source_kind` 불변,
+  non-problem OpenAPI ref 오인, 탭 상태 수명·저장 guard·popstate focus 지적을 반영했다.
+  **다음 한 작업**: 같은 리뷰어 2인의 재검토를 받은 뒤 전체 gate와 n150 결선 대상 live E2E를
+  진행한다. 재리뷰 전 테스트·lint·typecheck·build는 아직 실행하지 않았다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 

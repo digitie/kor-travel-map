@@ -253,6 +253,8 @@ from kortravelmap.infra.poi_cache_target_repo import (
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
     ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     get_provider_refresh_policy,
     list_provider_refresh_policies,
     upsert_provider_refresh_policy,
@@ -477,6 +479,8 @@ __all__ = [
     "mark_poi_cache_targets_refresh_failed",
     "ProviderRefreshPolicy",
     "ProviderRefreshPolicyRevisionConflict",
+    "ProviderRefreshPolicyRevisionExhausted",
+    "ProviderRefreshPolicySourceKindImmutable",
     "upsert_provider_refresh_policy",
     "get_provider_refresh_policy",
     "list_provider_refresh_policies",

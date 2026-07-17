@@ -372,6 +372,12 @@ const POLICY_DRAFT_FIELDS = [
   "enabled",
 ] as const satisfies readonly (keyof PolicyDraft)[];
 
+const POLICY_REPLAY_FIELDS = [
+  "targeted_policy",
+  ...POLICY_INT_FIELDS,
+  "enabled",
+] as const satisfies readonly (keyof PolicyDraft)[];
+
 type PolicyRevisionConflict = {
   currentPolicy: ProviderRefreshPolicyRecord | null;
   currentRevision: string | null;
@@ -390,7 +396,12 @@ function reconcilePolicyDraft(
   const latestDraft = policyToDraft(latestPolicy);
   const draft = { ...latestDraft };
   const conflicts: (keyof PolicyDraft)[] = [];
-  for (const field of POLICY_DRAFT_FIELDS) {
+  // source_kind는 row 생성 뒤 서버 불변 identity다. concurrent create loser의
+  // 로컬 선택을 새 row 위에 재적용하지 않는다. 서버 row가 삭제된 경우에는
+  // 다음 create에 필요하므로 local source_kind를 보존한다.
+  const replayFields =
+    latestPolicy === null ? POLICY_DRAFT_FIELDS : POLICY_REPLAY_FIELDS;
+  for (const field of replayFields) {
     const localChanged = localDraft[field] !== baseDraft[field];
     if (!localChanged) continue;
     const serverChanged = latestDraft[field] !== baseDraft[field];
@@ -405,7 +416,10 @@ function reconcilePolicyDraft(
 function policyRevisionConflict(error: Error): PolicyRevisionConflict | null {
   if (
     !(error instanceof ApiClientError) ||
-    error.problem?.code !== "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
+    ![
+      "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT",
+      "PROVIDER_REFRESH_POLICY_SOURCE_KIND_IMMUTABLE",
+    ].includes(error.problem?.code ?? "")
   ) {
     return null;
   }
@@ -454,6 +468,7 @@ function PolicyEditor({
   const draftDirty = useRef(false);
   const observedPropRevision = useRef<string | null>(policy?.revision ?? null);
   const upsertPolicy = useUpsertOpsDatasetRefreshPolicyMutation();
+  const saveBlocked = hasDeferredServerPolicy || revisionConflict !== null;
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
     draftDirty.current = true;
@@ -524,6 +539,9 @@ function PolicyEditor({
   }, [draft, draftBasePolicy, latestObservedPolicy, latestObservedRevision]);
 
   const submit = () => {
+    if (saveBlocked) {
+      return;
+    }
     setError(null);
     setRevisionConflict(null);
     setReconcileMessage(null);
@@ -581,6 +599,12 @@ function PolicyEditor({
           if (conflict === null) return;
           setLatestObservedPolicy(conflict.currentPolicy);
           setLatestObservedRevision(conflict.currentRevision);
+          if (conflict.currentPolicy !== null) {
+            setDraft((current) => ({
+              ...current,
+              source_kind: sourceKindValue(conflict.currentPolicy?.source_kind),
+            }));
+          }
           setHasDeferredServerPolicy(true);
           setRevisionConflict(conflict);
         },
@@ -831,7 +855,11 @@ function PolicyEditor({
         </Alert>
       ) : null}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button disabled={upsertPolicy.isPending} type="button" onClick={submit}>
+        <Button
+          disabled={upsertPolicy.isPending || saveBlocked}
+          type="button"
+          onClick={submit}
+        >
           <SaveIcon data-icon="inline-start" />
           저장
         </Button>
@@ -1648,7 +1676,7 @@ function DatasetDrawer({
               selection={selection}
             />
           </TabsContent>
-          <TabsContent value="policy">
+          <TabsContent keepMounted value="policy">
             {policyMutationBlockedReason ? (
               <Alert data-testid="policy-readonly-alert" variant="destructive">
                 <AlertTitle>정책 변경 불가</AlertTitle>
@@ -1802,6 +1830,7 @@ export function DatasetsClient({
   // 조작 대상으로 승격한다. canonicalize effect 전에는 drawer와 mutation hook을
   // 열지 않아 화면 대상과 URL 정본이 잠시 어긋나는 경쟁을 제거한다.
   const activeSelection = selectionCanonicalizing ? null : resolvedSelection;
+  const previousSelectionRef = useRef<DatasetSelection | null>(activeSelection);
 
   useEffect(() => {
     if (!resolvedSelection || !selectionResolution.canonicalize) {
@@ -1873,6 +1902,20 @@ export function DatasetsClient({
     }
     applySelection(null);
   }, [activeSelection, applySelection]);
+
+  // X/Escape뿐 아니라 browser Back(popstate)로 drawer가 닫혀도 직전 행을
+  // focus 복귀 대상으로 기록한다.
+  useEffect(() => {
+    const previous = previousSelectionRef.current;
+    if (previous && !activeSelection && focusReturnIdRef.current === null) {
+      focusReturnIdRef.current = `dataset-detail-toggle-${rowKey({
+        provider: previous.provider,
+        dataset_key: previous.datasetKey,
+        sync_scope: previous.syncScope,
+      } as OpsDatasetGridRow)}`;
+    }
+    previousSelectionRef.current = activeSelection;
+  }, [activeSelection]);
 
   // router.push 직후에는 구 drawer DOM이 남아 있어 즉시 focus하면 URL 전환
   // 재렌더에서 초점이 다시 사라진다. 선택이 실제로 닫힌 렌더에서 복귀시킨다.

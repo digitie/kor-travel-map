@@ -4,6 +4,13 @@
 
 ## 2026-07-17 (codex, agent A) — AUD-718 revision CAS 구현 스냅샷
 
+- 1차 적대 리뷰에서 단순 순차 stale 테스트, BIGINT overflow, `source_kind` 재적용,
+  non-problem OpenAPI ref 보존, tab unmount·popstate focus·충돌 중 반복 저장 경계를 지적했다.
+  실제 PostgreSQL row lock에서 ASGI 요청이 대기하는 commit/rollback/create 경쟁, max-1→max와
+  typed 소진, 생성 뒤 source 불변, RFC required-field schema gate로 보강했다.
+- UI는 policy panel을 keep-mounted하고 충돌/지연 서버값을 명시 조정하기 전 저장을 이중 차단한다.
+  concurrent create의 서버 `source_kind`, 2^53 초과 revision 문자열, browser Back focus 복귀를
+  mock live 계약에 추가했다. 같은 2인 재리뷰 전이므로 테스트·lint·typecheck·build는 미실행이다.
 - Alembic 0056으로 `ops.provider_refresh_policies.revision` 양수 BIGINT 정본을 추가하고,
   신규 생성은 `expected_revision=null`, 기존 갱신은 동일 revision을 조건으로 원자적 `+1`하는
   create-only/update-only 저장 계약으로 바꿨다. 불일치는 현재 record/revision을 포함한 typed

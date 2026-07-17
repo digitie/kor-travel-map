@@ -34,6 +34,8 @@ from kortravelmap.api.ops_dataset_schema import (
 from kortravelmap.api.ops_dataset_service import (
     OrphanMutationDisabledError,
     ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     load_dataset_detail,
     load_datasets_grid,
 )
@@ -485,6 +487,97 @@ def test_policy_revision_conflict_is_typed_and_returns_current_record(
     assert problem["details"]["current_revision"] == "2"
     assert problem["details"]["current_record"]["revision"] == "2"
     assert problem["details"]["current_record"]["targeted_policy"] == "disabled"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            ProviderRefreshPolicyRevisionExhausted(
+                current=_policy(revision=9_223_372_036_854_775_807)
+            ),
+            "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+        ),
+        (
+            ProviderRefreshPolicySourceKindImmutable(
+                requested_source_kind="manual",
+                current=_policy(revision=7),
+            ),
+            "PROVIDER_REFRESH_POLICY_SOURCE_KIND_IMMUTABLE",
+        ),
+    ],
+)
+def test_policy_terminal_conflicts_are_typed_with_current_record(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: RuntimeError,
+    code: str,
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _upsert(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise error
+
+    monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
+    current = cast(Any, error).current
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        json={"expected_revision": str(current.revision), "source_kind": "openapi"},
+    )
+
+    assert response.status_code == 409
+    problem = response.json()
+    assert problem["code"] == code
+    assert problem["details"]["expected_revision"] == str(current.revision)
+    assert problem["details"]["current_revision"] == str(current.revision)
+    assert problem["details"]["current_record"]["revision"] == str(
+        current.revision
+    )
+
+
+@pytest.mark.unit
+def test_revision_decimal_contract_preserves_values_above_javascript_safe_integer(
+) -> None:
+    from pydantic import ValidationError
+
+    from kortravelmap.api.provider_refresh_schema import (
+        ProviderRefreshPolicyConflictDetails,
+        ProviderRefreshPolicyUpsertRequest,
+        provider_refresh_policy_record,
+    )
+
+    large = "9007199254740993"
+    request = ProviderRefreshPolicyUpsertRequest(
+        expected_revision=large,
+        source_kind="openapi",
+    )
+    details = ProviderRefreshPolicyConflictDetails(
+        expected_revision=large,
+        current_revision=large,
+        current_record=None,
+        mutation_disabled_reason=None,
+    )
+    assert request.expected_revision == large
+    assert details.model_dump()["current_revision"] == large
+    assert provider_refresh_policy_record(
+        _policy(revision=int(large))
+    ).revision == large
+
+    with pytest.raises(ValidationError) as excinfo:
+        ProviderRefreshPolicyConflictDetails(
+            expected_revision="9223372036854775808",
+            current_revision="0",
+            current_record=None,
+            mutation_disabled_reason=None,
+        )
+    assert {error["loc"] for error in excinfo.value.errors()} == {
+        ("expected_revision",),
+        ("current_revision",),
+    }
+    with pytest.raises(ValidationError):
+        provider_refresh_policy_record(_policy(revision=9_223_372_036_854_775_808))
 
 
 @pytest.mark.unit

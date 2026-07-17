@@ -14838,7 +14838,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description revision CAS 불일치 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함. */
+            /** @description revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함. */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -109,7 +109,7 @@ async def test_revision_backfill_default_constraint_and_downgrade(
                         FROM pg_constraint
                         WHERE conrelid = 'ops.provider_refresh_policies'::regclass
                           AND contype = 'c'
-                          AND pg_get_constraintdef(oid) LIKE '%revision > 0%'
+                          AND pg_get_constraintdef(oid) LIKE '%revision >= 1%'
                         """
                     )
                 )
@@ -123,7 +123,8 @@ async def test_revision_backfill_default_constraint_and_downgrade(
         assert column.column_default is not None
         assert column.column_default.startswith("1")
         assert backfilled == inserted == 1
-        assert "revision > 0" in constraint
+        assert "revision >= 1" in constraint
+        assert "revision <= 9223372036854775807" in constraint
         assert current_revision == _TARGET_REVISION
 
         async with target_engine.begin() as connection:

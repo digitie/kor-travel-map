@@ -29,6 +29,8 @@ from kortravelmap.infra.poi_cache_target_repo import (
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
     ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     get_provider_refresh_policy,
     list_all_provider_refresh_policies,
     upsert_provider_refresh_policy,
@@ -79,6 +81,8 @@ __all__ = [
     "DatasetNotFoundError",
     "OrphanMutationDisabledError",
     "ProviderRefreshPolicyRevisionConflict",
+    "ProviderRefreshPolicyRevisionExhausted",
+    "ProviderRefreshPolicySourceKindImmutable",
     "load_dataset_detail",
     "load_datasets_grid",
     "upsert_dataset_refresh_policy",

@@ -73,7 +73,9 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
     revision 일치와 원자적 `revision + 1`을 요구한다. stale/create-update 종류 불일치는
     write 없이 현재 record/revision을 포함한 typed 409로 닫는다. HTTP는 BIGINT를 양수
     10진 문자열로 표현하고 UI는 draft base와 최신 관측 revision을 분리해 local draft를
-    보존한 3-way 조정을 제공한다.
+    보존한 3-way 조정을 제공한다. 생성 뒤 `source_kind`는 불변이며 BIGINT 최댓값에서는
+    증가식을 평가하지 않고 typed 소진 conflict를 반환한다. 조정 전 저장은 UI·submit에서
+    모두 차단하고 tab Back/Forward에도 policy editor 상태를 유지한다.
 
 ## 근거
 

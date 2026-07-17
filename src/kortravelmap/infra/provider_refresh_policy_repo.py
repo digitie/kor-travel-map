@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ProviderRefreshPolicy",
     "ProviderRefreshPolicyRevisionConflict",
+    "ProviderRefreshPolicyRevisionExhausted",
+    "ProviderRefreshPolicySourceKindImmutable",
     "get_provider_refresh_policy",
     "list_all_provider_refresh_policies",
     "list_provider_refresh_policies",
@@ -82,6 +84,28 @@ class ProviderRefreshPolicyRevisionConflict(RuntimeError):
     ) -> None:
         super().__init__("provider refresh policy revision conflict")
         self.expected_revision = expected_revision
+        self.current = current
+
+
+class ProviderRefreshPolicyRevisionExhausted(RuntimeError):
+    """정책 revision이 BIGINT 최댓값이라 더 증가시킬 수 없음."""
+
+    def __init__(self, *, current: ProviderRefreshPolicy) -> None:
+        super().__init__("provider refresh policy revision exhausted")
+        self.current = current
+
+
+class ProviderRefreshPolicySourceKindImmutable(RuntimeError):
+    """기존 정책의 source_kind 변경 요청을 거절한다."""
+
+    def __init__(
+        self,
+        *,
+        requested_source_kind: str,
+        current: ProviderRefreshPolicy,
+    ) -> None:
+        super().__init__("provider refresh policy source_kind is immutable")
+        self.requested_source_kind = requested_source_kind
         self.current = current
 
 
@@ -161,8 +185,7 @@ RETURNING {_RETURN_COLUMNS}
 
 _UPDATE_SQL: Final[str] = f"""
 UPDATE ops.provider_refresh_policies AS policy
-SET source_kind = :source_kind,
-    targeted_policy = :targeted_policy,
+SET targeted_policy = :targeted_policy,
     system_interval_seconds = :system_interval_seconds,
     optimal_interval_seconds = :optimal_interval_seconds,
     min_interval_seconds = :min_interval_seconds,
@@ -184,6 +207,8 @@ SET source_kind = :source_kind,
 WHERE policy.provider = :provider
   AND policy.dataset_key = :dataset_key
   AND policy.revision = CAST(:expected_revision AS bigint)
+  AND policy.revision < {_BIGINT_MAX}
+  AND policy.source_kind = :source_kind
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -238,7 +263,8 @@ async def upsert_provider_refresh_policy(
 
     ``expected_revision=None``은 create-only, 양수 정수는 update-only다. 종류가
     다르거나 stale이면 write 없이 ``ProviderRefreshPolicyRevisionConflict``를
-    발생시키며 현재 row를 함께 제공한다.
+    발생시키며 현재 row를 함께 제공한다. 생성 뒤 ``source_kind``는 불변이고,
+    BIGINT 최댓값 revision은 증가를 시도하지 않고 각각 명시적 오류로 닫는다.
     """
     _validate_policy(
         provider=provider,
@@ -282,6 +308,20 @@ async def upsert_provider_refresh_policy(
             provider=provider,
             dataset_key=dataset_key,
         )
+        if (
+            current is not None
+            and expected_revision == current.revision
+            and source_kind != current.source_kind
+        ):
+            raise ProviderRefreshPolicySourceKindImmutable(
+                requested_source_kind=source_kind,
+                current=current,
+            )
+        if (
+            current is not None
+            and expected_revision == current.revision == _BIGINT_MAX
+        ):
+            raise ProviderRefreshPolicyRevisionExhausted(current=current)
         raise ProviderRefreshPolicyRevisionConflict(
             expected_revision=expected_revision,
             current=current,
