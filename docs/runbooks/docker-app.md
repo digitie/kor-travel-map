@@ -276,6 +276,13 @@ Dagster webserver, Dagster daemon을 백그라운드로 시작한다. 로컬 `DA
 `$DAGSTER_HOME` 아래 SQLite로 폴백하면 회귀다. 로그는 기본 `.codex_tmp/admin-stack/`에
 남는다.
 
+`admin:stack`도 API 전용 `packages/kor-travel-map-api/.env`를 필수로 읽는다. API는
+package 디렉터리를 cwd로 사용하고 scoped API 설정+DB/object-store 공유 설정만 받으며,
+frontend는 `NEXT_PUBLIC_*`와 UI/BFF 설정만 받는다. 두 process는 빈 환경에서 allowlist를
+채우므로 root `.env`의 provider loader credential을 상속하지 않는다. Dagster
+webserver/daemon만 main `KOR_TRAVEL_MAP_*` provider 설정을 받는다. API와 frontend의
+admin proxy secret이 비어 있거나 서로 다르면 process를 시작하기 전에 실패한다.
+
 ## 6. 스모크
 
 ```bash

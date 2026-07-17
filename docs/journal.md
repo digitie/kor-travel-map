@@ -31,7 +31,8 @@
   정정하고 API env를 Compose 필수 입력으로 바꿨다. root 예시의 중복 API runtime 설정도
   제거하고 provider secret 격리 회귀 테스트를 추가했다. 후속 재검토의 운영 CORS 문서와
   오래된 전역 key/provider 주입 주석도 정정하고, root/Compose/load-env의 허용 API 설정을
-  allowlist로 고정했다. 재리뷰와 테스트는 아직 진행 전이다.
+  allowlist로 고정했다. 추가 재검토에서 발견한 local `admin:stack` 우회도 process별
+  `env -i` allowlist와 필수 scoped API env로 닫았다. 재리뷰와 테스트는 아직 진행 전이다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

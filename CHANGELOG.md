@@ -19,6 +19,8 @@
 - **CHANGED**: API container는 package-scoped `.env`만 읽고 root provider credential
   `.env`를 주입받지 않는다. 이 파일은 Compose 필수 입력이며 provider 비밀은 Dagster
   webserver/daemon 경계에만 둔다.
+- **CHANGED**: 로컬 `admin:stack`도 process별 `env -i` allowlist를 사용한다. API/frontend는
+  provider loader credential을 상속하지 않고 Dagster process만 이를 받는다.
 
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 

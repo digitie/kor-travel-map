@@ -225,6 +225,18 @@ def test_dagster_image_config_serializes_provider_pools() -> None:
 def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
     script = _script("scripts/run-admin-stack.sh")
 
+    assert 'API_ENV_FILE="$ROOT_DIR/packages/kor-travel-map-api/.env"' in script
+    assert "required API env file is missing" in script
+    assert "API/frontend admin proxy secrets do not match" in script
+    assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
+    assert "start_bg api env -i" in script
+    assert "start_bg web env -i" in script
+    assert "start_bg dagster env -i" in script
+    assert "start_bg dagster-daemon env -i" in script
+    assert '"${API_SHARED_ENV[@]}"' in script
+    assert '"${API_SCOPED_ENV[@]}"' in script
+    assert '"${FRONTEND_PROCESS_ENV[@]}"' in script
+    assert '"${DAGSTER_PROCESS_ENV[@]}"' in script
     assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
     assert "CREATE DATABASE" in script
     assert "dagster-webserver" in script
