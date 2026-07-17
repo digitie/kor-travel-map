@@ -36,6 +36,8 @@ type PipelineEventsListResponse = Schemas["PipelineEventsListResponse"];
 type PipelineSchedulesResponse = Schemas["PipelineSchedulesResponse"];
 type PipelineScheduleCommandResponse =
   Schemas["PipelineScheduleCommandResponse"];
+type PipelineScheduleClaimResolutionResponse =
+  Schemas["PipelineScheduleClaimResolutionResponse"];
 type FeatureUpdateRequestCreateResponse =
   Schemas["FeatureUpdateRequestCreateResponse"];
 type FeatureUpdateRequestMutationResponse =
@@ -677,6 +679,13 @@ interface MockCounters {
   commandBodies: unknown[];
   scheduleKeys: string[];
   claimResolutionBodies: unknown[];
+  claimResolutionPaths: string[];
+  claimResolutionRows: Array<{
+    scheduleName: string;
+    commandId: string;
+    body: unknown;
+    response: PipelineScheduleClaimResolutionResponse;
+  }>;
   requestBodies: unknown[];
   requestKeys: string[];
   requestRows: Array<{
@@ -703,6 +712,8 @@ async function installPipelineMocks(
     commandBodies: [],
     scheduleKeys: [],
     claimResolutionBodies: [],
+    claimResolutionPaths: [],
+    claimResolutionRows: [],
     requestBodies: [],
     requestKeys: [],
     requestRows: [],
@@ -714,6 +725,10 @@ async function installPipelineMocks(
     catalogCalls: 0,
     moisPrecheckCalls: 0,
   };
+  const claimResolutionLedger = new Map<
+    string,
+    MockCounters["claimResolutionRows"][number]
+  >();
   const executions = options.executions ?? makeRoots();
   let firstPageQueries = 0;
 
@@ -907,17 +922,32 @@ async function installPipelineMocks(
         pathname,
       )
     ) {
-      counters.claimResolutionBodies.push(request.postDataJSON());
-      if (options.claimResolutionResponseDelayMs) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, options.claimResolutionResponseDelayMs),
-        );
-      }
+      const body = request.postDataJSON();
+      const parts = pathname.split("/");
+      const commandId = decodeURIComponent(parts.at(-2) ?? "");
+      const scheduleName = decodeURIComponent(parts.at(-4) ?? "");
+      const ledgerKey = JSON.stringify([scheduleName, commandId]);
+      const existingRow = claimResolutionLedger.get(ledgerKey);
+      counters.claimResolutionBodies.push(body);
+      counters.claimResolutionPaths.push(pathname);
       if (
-        options.claimResolutionResponseLossOnce &&
-        counters.claimResolutionBodies.length === 1
+        existingRow &&
+        JSON.stringify(existingRow.body) !== JSON.stringify(body)
       ) {
-        await route.abort("connectionreset");
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+            title: "Idempotency conflict",
+            status: 409,
+            detail: "같은 schedule claim에 다른 확인 결과를 기록할 수 없습니다.",
+            code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: { active_command_id: commandId },
+          },
+          409,
+        );
         return;
       }
       if (
@@ -931,20 +961,43 @@ async function installPipelineMocks(
         );
         return;
       }
-      const parts = pathname.split("/");
-      await fulfillJson(route, {
-        data: {
-          resolution_id: 42,
-          command_id: decodeURIComponent(parts.at(-2) ?? ""),
-          schedule_name: decodeURIComponent(parts.at(-4) ?? ""),
-          resolution: request.postDataJSON().resolution,
-          actor: "admin:e2e",
-          reason: request.postDataJSON().reason,
-          resolved_at: "2026-07-14T10:06:00.000Z",
-          replayed: counters.claimResolutionBodies.length > 1,
-        },
-        meta: META,
-      });
+      const response: PipelineScheduleClaimResolutionResponse =
+        existingRow?.response ?? {
+          data: {
+            resolution_id: 42,
+            command_id: commandId,
+            schedule_name: scheduleName,
+            resolution: body.resolution,
+            actor: "admin:e2e",
+            reason: body.reason,
+            resolved_at: "2026-07-14T10:06:00.000Z",
+            replayed: false,
+          },
+          meta: META,
+        };
+      if (!existingRow) {
+        const row = { scheduleName, commandId, body, response };
+        claimResolutionLedger.set(ledgerKey, row);
+        counters.claimResolutionRows.push(row);
+      }
+      if (options.claimResolutionResponseDelayMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.claimResolutionResponseDelayMs),
+        );
+      }
+      if (
+        options.claimResolutionResponseLossOnce &&
+        counters.claimResolutionBodies.length === 1
+      ) {
+        await route.abort("connectionreset");
+        return;
+      }
+      await fulfillJson(
+        route,
+        existingRow
+          ? { ...response, data: { ...response.data, replayed: true } }
+          : response,
+      );
       return;
     }
     if (/\/v1\/ops\/pipeline\/schedules\/[^/]+$/.test(pathname)) {
@@ -2110,6 +2163,31 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toBeVisible();
   });
 
+  test("같은 render의 terminal schedule 명령 double click은 첫 결과를 보존", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      scheduleAuditStatus: "terminal_record_failed",
+      scheduleResponseDelayMs: 400,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` })
+      .evaluate((button) => {
+        button.click();
+        button.click();
+      });
+
+    await expect.poll(() => counters.commandBodies.length).toBe(1);
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toContainText(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    await expectScheduleControlsDisabled(page);
+    expect(counters.scheduleKeys).toHaveLength(1);
+  });
+
   test("스케줄 명령의 terminal 감사 성공은 사유를 비운다", async ({ page }) => {
     await installPipelineMocks(page);
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
@@ -2241,6 +2319,9 @@ test.describe("/ops/pipeline", () => {
       .click();
     await expect.poll(() => counters.scheduleKeys.length).toBe(2);
     expect(counters.scheduleKeys[1]).not.toBe(counters.scheduleKeys[0]);
+    await expect(
+      page.getByTestId("schedule-claim-resolution-result"),
+    ).toHaveCount(0);
   });
 
   test("claim 해제 응답 유실은 같은 body로 안전하게 replay", async ({
@@ -2277,12 +2358,6 @@ test.describe("/ops/pipeline", () => {
           recovery.getByLabel("확인 근거·해제 사유 (필수)"),
         ).toBeDisabled();
         await expect(page.getByText("claim 해제 실패")).toBeVisible();
-        await expect(
-          recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
-        ).toBeDisabled();
-        await expect(
-          recovery.getByLabel("확인 근거·해제 사유 (필수)"),
-        ).toBeDisabled();
         await expectScheduleControlsDisabled(page);
       }
     }
@@ -2294,6 +2369,15 @@ test.describe("/ops/pipeline", () => {
     expect(counters.claimResolutionBodies[1]).toEqual(
       counters.claimResolutionBodies[0],
     );
+    expect(counters.claimResolutionPaths[1]).toBe(
+      counters.claimResolutionPaths[0],
+    );
+    expect(counters.claimResolutionRows).toHaveLength(1);
+    expect(counters.claimResolutionRows[0]).toMatchObject({
+      scheduleName: SCHEDULE_NAME,
+      commandId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      body: counters.claimResolutionBodies[0],
+    });
   });
 
   test("claim 해제 503은 frozen body와 schedule 잠금을 유지해 replay한다", async ({

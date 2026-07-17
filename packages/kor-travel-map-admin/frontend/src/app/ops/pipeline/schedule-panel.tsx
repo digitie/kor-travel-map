@@ -303,7 +303,9 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
+    scheduleControlsGuardRef.current = true;
     commandSchedule.mutate(
       {
         scheduleName: schedule.name,
@@ -347,7 +349,9 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
+    scheduleControlsGuardRef.current = true;
     patchSchedule.mutate(
       {
         scheduleName: editing.name,
@@ -376,7 +380,9 @@ export function SchedulePanel({
     }
     patchSchedule.reset();
     commandSchedule.reset();
+    resolveClaim.reset();
     setLastResult(null);
+    scheduleControlsGuardRef.current = true;
     patchSchedule.mutate(
       {
         scheduleName: editing.name,

@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alembic import command
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.feature_update_active_repo import (
     FeatureUpdateDispatchConflict,
@@ -381,63 +382,89 @@ async def test_service_idempotency_serializes_replay_and_rejects_mismatch(
         loop = asyncio.get_running_loop()
         first_pid_future: asyncio.Future[int] = loop.create_future()
         second_pid_future: asyncio.Future[int] = loop.create_future()
-        first_task = asyncio.create_task(
-            _create(
-                body,
-                hold_resolved_plan_guard=True,
-                backend_pid_future=first_pid_future,
+        first_task: asyncio.Task[FeatureUpdateRequestCreateResponse] | None = None
+        second_task: asyncio.Task[FeatureUpdateRequestCreateResponse] | None = None
+        try:
+            first_task = asyncio.create_task(
+                _create(
+                    body,
+                    hold_resolved_plan_guard=True,
+                    backend_pid_future=first_pid_future,
+                )
             )
-        )
-        await asyncio.wait_for(first_guard_entered.wait(), timeout=10)
-        first_pid = await asyncio.wait_for(first_pid_future, timeout=10)
-        second_task = asyncio.create_task(
-            _create(body, backend_pid_future=second_pid_future)
-        )
-        second_pid = await asyncio.wait_for(second_pid_future, timeout=10)
+            await asyncio.wait_for(first_guard_entered.wait(), timeout=10)
+            first_pid = await asyncio.wait_for(first_pid_future, timeout=10)
+            second_task = asyncio.create_task(
+                _create(body, backend_pid_future=second_pid_future)
+            )
+            second_pid = await asyncio.wait_for(second_pid_future, timeout=10)
 
-        second_waiting_on_advisory_lock = False
-        first_holds_advisory_lock = False
-        async with isolated_engine.connect() as observer:
-            for _ in range(200):
-                lock_state = (
-                    await observer.execute(
-                        text(
-                            """
-                            SELECT
-                              EXISTS (
-                                SELECT 1 FROM pg_locks
-                                WHERE pid = :first_pid
-                                  AND locktype = 'advisory'
-                                  AND granted
-                              ) AS first_holds,
-                              EXISTS (
-                                SELECT 1 FROM pg_locks
-                                WHERE pid = :second_pid
-                                  AND locktype = 'advisory'
-                                  AND NOT granted
-                              ) AS second_waits
-                            """
-                        ),
-                        {"first_pid": first_pid, "second_pid": second_pid},
-                    )
-                ).one()
-                first_holds_advisory_lock = bool(lock_state.first_holds)
-                second_waiting_on_advisory_lock = bool(lock_state.second_waits)
-                if first_holds_advisory_lock and second_waiting_on_advisory_lock:
-                    break
-                await asyncio.sleep(0.01)
-        second_was_blocked = not second_task.done()
-        release_first_guard.set()
-        first, replay = await asyncio.wait_for(
-            asyncio.gather(first_task, second_task),
-            timeout=15,
-        )
-        assert first_holds_advisory_lock is True
-        assert second_waiting_on_advisory_lock is True
-        assert second_was_blocked is True
-        assert first.data.request_id == replay.data.request_id
-        assert first.idempotent_replay is False
-        assert replay.idempotent_replay is True
+            lock_id = advisory_lock_key(
+                f"feature-update-idempotency:integration-idempotency:{idempotency_key}"
+            )
+            unsigned_lock_id = lock_id % (2**64)
+            lock_classid = unsigned_lock_id >> 32
+            lock_objid = unsigned_lock_id & 0xFFFFFFFF
+            second_waiting_on_advisory_lock = False
+            first_holds_advisory_lock = False
+            async with isolated_engine.connect() as observer:
+                for _ in range(200):
+                    lock_state = (
+                        await observer.execute(
+                            text(
+                                """
+                                SELECT
+                                  EXISTS (
+                                    SELECT 1 FROM pg_locks
+                                    WHERE pid = :first_pid
+                                      AND locktype = 'advisory'
+                                      AND classid::bigint = :lock_classid
+                                      AND objid::bigint = :lock_objid
+                                      AND objsubid = 1
+                                      AND granted
+                                  ) AS first_holds,
+                                  EXISTS (
+                                    SELECT 1 FROM pg_locks
+                                    WHERE pid = :second_pid
+                                      AND locktype = 'advisory'
+                                      AND classid::bigint = :lock_classid
+                                      AND objid::bigint = :lock_objid
+                                      AND objsubid = 1
+                                      AND NOT granted
+                                  ) AS second_waits
+                                """
+                            ),
+                            {
+                                "first_pid": first_pid,
+                                "second_pid": second_pid,
+                                "lock_classid": lock_classid,
+                                "lock_objid": lock_objid,
+                            },
+                        )
+                    ).one()
+                    first_holds_advisory_lock = bool(lock_state.first_holds)
+                    second_waiting_on_advisory_lock = bool(lock_state.second_waits)
+                    if first_holds_advisory_lock and second_waiting_on_advisory_lock:
+                        break
+                    await asyncio.sleep(0.01)
+            assert not second_task.done()
+            release_first_guard.set()
+            first, replay = await asyncio.wait_for(
+                asyncio.gather(first_task, second_task),
+                timeout=15,
+            )
+            assert first_holds_advisory_lock is True
+            assert second_waiting_on_advisory_lock is True
+            assert first.data.request_id == replay.data.request_id
+            assert first.idempotent_replay is False
+            assert replay.idempotent_replay is True
+        finally:
+            release_first_guard.set()
+            tasks = [task for task in (first_task, second_task) if task is not None]
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         async with isolated_engine.begin() as connection:
             await connection.execute(
