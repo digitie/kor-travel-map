@@ -82,17 +82,53 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
 
 
 @pytest.mark.unit
-def test_docker_compose_maps_opinet_scope_to_runtime_services() -> None:
+def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     services = _compose()["services"]
-    expected_keys = {
+    shared_provider_keys = {
+        "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
+        "KOR_TRAVEL_MAP_OPINET_API_KEY",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
+        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
+        "KOR_TRAVEL_MAP_KREX_GO_API_KEY",
     }
+    all_provider_keys = shared_provider_keys | {"KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH"}
 
-    for service_name in ("api", "dagster", "dagster-daemon"):
+    api = services["api"]
+    assert api["env_file"] == [
+        {
+            "path": "packages/kor-travel-map-api/.env",
+            "required": True,
+            "format": "raw",
+        }
+    ]
+    assert all_provider_keys.isdisjoint(api["environment"])
+    assert "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS" not in api["environment"]
+
+    root_env = _script(".env.example")
+    root_env_keys = {
+        line.split("=", maxsplit=1)[0]
+        for line in root_env.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+    api_env = _script("packages/kor-travel-map-api/.env.example")
+    for api_runtime_key in (
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
+        "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
+        "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
+    ):
+        assert api_runtime_key not in root_env_keys
+        assert api_runtime_key in api_env
+
+    for service_name in ("dagster", "dagster-daemon"):
         environment = services[service_name]["environment"]
-        assert expected_keys <= set(environment), service_name
+        assert shared_provider_keys <= set(environment), service_name
+        assert services[service_name]["env_file"] == [
+            {"path": ".env", "required": False, "format": "raw"}
+        ]
+
+    assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in services["dagster-daemon"]["environment"]
 
 
 @pytest.mark.unit

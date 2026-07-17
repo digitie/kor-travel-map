@@ -32,7 +32,8 @@ wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:up"
 ## 1. 환경변수
 
 provider 실행 키는 루트 `.env`, API auth/route/backup 설정은 API 전용 `.env`에
-분리한다. 두 파일 모두 git에 커밋하지 않는다.
+분리한다. 두 파일 모두 git에 커밋하지 않는다. API 전용 파일은 Compose 기동의 필수
+입력이라 없으면 API를 인증 기본값으로 시작하지 않고 즉시 실패한다.
 
 ```bash
 cp .env.example .env
@@ -45,6 +46,9 @@ chmod 600 packages/kor-travel-map-api/.env
 Dagster/provider 실행용 환경변수로 매핑한다. REST API backend는 provider credential을
 받지 않으며 dataset preview는 fixture-only다. Compose의 API service도 root `.env`를
 `env_file`로 읽지 않아 provider secret을 process environment에 보유하지 않는다.
+기존 설치를 갱신할 때는 root `.env`의 `KOR_TRAVEL_MAP_API_*` auth/route/backup 값을 API
+전용 파일로 옮긴 다음 기동한다. CORS/metrics도 API 전용 파일이 정본이며 root
+`.env.example`과 `scripts/load-env.sh`는 이 runtime 설정을 더 이상 주입하지 않는다.
 
 | 입력 키 예 | 실행 시 export |
 |------------|----------------|

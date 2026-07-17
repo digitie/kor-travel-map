@@ -319,10 +319,11 @@ POI 반경이 겹칠 때 교집합 feature/provider scope는 한 번만 업데�
 
 #### `POST /ops/pipeline/requests`
 
-UUID 형식 `Idempotency-Key` header가 필수다. 최초 요청은 `201`과
-`idempotent_replay=false`를 반환한다. 같은 key와 동일한 정규화 body·인증 actor를 다시
-보내면 최초 결과를 `200`으로 재생하고 `idempotent_replay=true`를 반환한다. body 또는
-actor가 다르면 `409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`다.
+UUID 형식 `Idempotency-Key` header가 필수다. key namespace는 인증 actor별로 격리한다.
+최초 요청은 `201`과 `idempotent_replay=false`를 반환한다. 같은 actor가 같은 key와 동일한
+정규화 body를 다시 보내면 최초 결과를 `200`으로 재생하고 `idempotent_replay=true`를
+반환한다. 같은 actor가 body를 바꾸면 `409 FEATURE_UPDATE_IDEMPOTENCY_CONFLICT`다. 다른
+actor의 동일 key는 별도 요청이며 서로의 결과를 조회·재생·충돌시키지 않는다.
 
 요청:
 

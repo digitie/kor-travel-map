@@ -182,6 +182,8 @@ uv pip install "gdal==$(gdal-config --version)"
 # .env
 cp .env.example .env
 $EDITOR .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+$EDITOR packages/kor-travel-map-api/.env
 
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data

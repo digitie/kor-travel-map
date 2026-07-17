@@ -16,7 +16,9 @@
 - 적대 리뷰 2차의 S2 provider secret 경계를 반영해 API container를 package-scoped `.env`로
   격리했다. dead Dagster NUX 표면을 제거하고 canonical request의 필수 UUID idempotency
   계약을 현행 문서에 완결했다.
-- **다음 한 작업**: 반영 snapshot을 2차 적대 리뷰어에게 재검증받는다. 그 전에는 사용자
+- 재검증 S2에 따라 idempotency 문서를 actor-scoped ledger와 일치시키고 API 전용 env를
+  Compose 필수 입력으로 전환했다. root 예시의 중복 API runtime 설정도 제거했다.
+- **다음 한 작업**: 새 반영 snapshot을 적대 리뷰어에게 재검증받는다. 그 전에는 사용자
   지시대로 테스트·lint·push·PR을 실행하지 않는다. C5/C6A merge 후 최종 rebase가 필요하다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료

@@ -107,16 +107,13 @@ services:
       # Provider credential이 있는 root .env를 API container에 통째로 넘기지 않는다.
       # API auth/route/backup 설정만 packages/kor-travel-map-api/.env에 둔다.
       - path: packages/kor-travel-map-api/.env
-        required: false
+        required: true
         format: raw
     environment:
       KOR_TRAVEL_MAP_API_HOST: 0.0.0.0
       KOR_TRAVEL_MAP_API_PORT: ${KOR_TRAVEL_MAP_API_PORT:-12701}
-      KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS: '${KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS:-["http://localhost:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}","http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}"]}'
       KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS: '${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS:-["dagster","127.0.0.1","localhost","::1"]}'
-      KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED: ${KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED:-true}
-      KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH: ${KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH:-/metrics}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}

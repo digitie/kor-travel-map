@@ -39,6 +39,8 @@ Dagster만 올리고, 컨테이너는 `host.docker.internal:5432` /
 ```bash
 cp .env.example .env
 chmod 600 .env
+cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
+chmod 600 packages/kor-travel-map-api/.env
 npm run docker:build
 npm run docker:up
 ```
@@ -101,10 +103,12 @@ restore 기본 대상은 `kor_travel_map_restore`, `kor_travel_map_dagster_resto
 
 ## 환경변수
 
-`.env`는 배포 환경의 secret store, systemd `EnvironmentFile`, 또는 Docker secret로
-관리한다. git에는 `.env.example`만 둔다. provider key는 기존 provider repo 이름을
-그대로 둘 수 있고, `scripts/load-env.sh`/`docker-compose.yml`이 실행용
-`KOR_TRAVEL_MAP_API_*` 이름으로 매핑한다.
+루트 `.env`와 API 전용 `packages/kor-travel-map-api/.env`는 배포 환경의 secret store,
+systemd `EnvironmentFile`, 또는 Docker secret로 관리한다. git에는 각 `.env.example`만
+둔다. provider key는 루트 파일에 기존 provider repo 이름을 그대로 둘 수 있고,
+`scripts/load-env.sh`/`docker-compose.yml`이 Dagster 실행용 이름으로 매핑한다. API auth,
+route, backup, CORS, metrics 설정은 API 전용 파일에만 둔다. 이 파일이 없으면 Compose는
+인증 기본값으로 기동하지 않고 실패한다.
 PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 공유 PostgreSQL/PostGIS 서버 인스턴스다. `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
 `scripts/load-env.sh`가 `127.0.0.1:5432/kor_travel_map` DSN을 채운다.

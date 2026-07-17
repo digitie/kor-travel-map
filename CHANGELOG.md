@@ -17,7 +17,8 @@
   주입, 사용되지 않는 Dagster NUX mutation/schema를 삭제했다. dataset preview는
   fixture-only이며 외부 호출 budget은 0이다.
 - **CHANGED**: API container는 package-scoped `.env`만 읽고 root provider credential
-  `.env`를 주입받지 않는다. provider 비밀은 Dagster webserver/daemon 경계에만 둔다.
+  `.env`를 주입받지 않는다. 이 파일은 Compose 필수 입력이며 provider 비밀은 Dagster
+  webserver/daemon 경계에만 둔다.
 
 ### datasets 이슈 필터 의미 통일 (2026-07-17, T-ADM-C7B-720)
 

@@ -25,7 +25,11 @@
   발견했다. API를 package-scoped `.env`로 격리하고 data.go/OpiNet/KREX/MOIS 설정은 Dagster
   service에만 남겼다. 사용되지 않는 Dagster NUX mutation/schema를 삭제하고 canonical
   request의 필수 UUID `Idempotency-Key`, 재생/active 재사용 분리, 충돌 계약을 문서에
-  명시했다. 반영 snapshot 재리뷰와 테스트는 아직 진행 전이다.
+  명시했다.
+- 반영 snapshot 재리뷰는 actor-scoped ledger를 전역 key처럼 설명한 문서 오류와 API 전용
+  env 부재 시 인증 기본값 기동 가능성을 S2로 확인했다. 문서는 actor별 독립 namespace로
+  정정하고 API env를 Compose 필수 입력으로 바꿨다. root 예시의 중복 API runtime 설정도
+  제거하고 provider secret 격리 회귀 테스트를 추가했다. 재리뷰와 테스트는 아직 진행 전이다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 
