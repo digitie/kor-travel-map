@@ -11,12 +11,12 @@ from typing import Any, cast
 import pytest
 from dagster import build_asset_context, materialize
 from kortravelmap.dto import ForecastStyle, WeatherDomain
-from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFailure
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
 )
+from kortravelmap.infra.feature_update_executor import ProviderDatasetRefreshFailure
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -975,7 +975,11 @@ def test_kma_weather_client_factory_resource_defers_credential_import_and_client
         import_calls.append(name)
         return module
 
-    monkeypatch.setattr(resources.importlib, "import_module", _import_module)
+    monkeypatch.setattr(
+        resources,
+        "importlib",
+        SimpleNamespace(import_module=_import_module),
+    )
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",
@@ -1095,7 +1099,11 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
         import_calls.append(name)
         return module
 
-    monkeypatch.setattr(resources.importlib, "import_module", _import_module)
+    monkeypatch.setattr(
+        resources,
+        "importlib",
+        SimpleNamespace(import_module=_import_module),
+    )
     monkeypatch.setattr(
         resources,
         "KorTravelMapSettings",

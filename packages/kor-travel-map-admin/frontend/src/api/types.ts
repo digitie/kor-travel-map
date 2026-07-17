@@ -1651,7 +1651,7 @@ export interface paths {
         };
         /**
          * 전역 job 이벤트 스트림
-         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/job 필터.
+         * @description 어느 job인지 모르는 상태에서 최근 error를 훑는 전역 `ops.import_job_events` 스트림 — level/provider/dataset/scope/job 필터. sync_scope는 provider와 dataset_key를 함께 요구하며 canonical feature-update job/request의 effective scope를 조회한다.
          */
         get: operations["list_pipeline_events_v1_ops_pipeline_events_get"];
         put?: never;
