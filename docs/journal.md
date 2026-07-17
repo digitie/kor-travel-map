@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex, agent A) — AUD-718 적대 리뷰·전체 로컬 gate 완료
+
+- DB/API와 frontend 적대 리뷰어가 실제 row-lock 경쟁, BIGINT 최댓값 소진, source 불변과
+  RFC7807 schema, 탭 수명·browser Back focus·지연 응답 세대·scope cache 경합을 재검토했다.
+  최종 제품 SHA `b7b600447368d8ed79bc1a8b56772af881104bf3`의 판정은 S1/S2/S3 0건이다.
+- root unit 1,411건, API 489건, 실제 PostGIS migration/schema 14건·CAS 저장소/API 23건·집중
+  10건과 독립 row-lock 경쟁 3회를 통과했다. Ruff, strict mypy 115+52파일, import 계약 4/4도
+  green이다.
+- 같은 제품 SHA에서 frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin 생성 타입
+  drift와 31-route production build가 통과했다. local Playwright는 실행하지 않았으며 issue #718은
+  최종 C7 n150 live 증거 뒤 닫는다.
+
+## 2026-07-17 (codex, agent A) — AUD-718 revision CAS 구현 스냅샷
+
+- 1차 적대 리뷰에서 단순 순차 stale 테스트, BIGINT overflow, `source_kind` 재적용,
+  non-problem OpenAPI ref 보존, tab unmount·popstate focus·충돌 중 반복 저장 경계를 지적했다.
+  실제 PostgreSQL row lock에서 ASGI 요청이 대기하는 commit/rollback/create 경쟁, max-1→max와
+  typed 소진, 생성 뒤 source 불변, RFC required-field schema gate로 보강했다.
+- UI는 policy panel을 keep-mounted하고 충돌/지연 서버값을 명시 조정하기 전 저장을 이중 차단한다.
+  concurrent create의 서버 `source_kind`, 2^53 초과 revision 문자열, browser Back focus 복귀를
+  mock live 계약에 추가했다. 같은 2인 재리뷰 전이므로 테스트·lint·typecheck·build는 미실행이다.
+- Alembic 0056으로 `ops.provider_refresh_policies.revision` 양수 BIGINT 정본을 추가하고,
+  신규 생성은 `expected_revision=null`, 기존 갱신은 동일 revision을 조건으로 원자적 `+1`하는
+  create-only/update-only 저장 계약으로 바꿨다. 불일치는 현재 record/revision을 포함한 typed
+  RFC7807 `409`로 반환한다.
+- admin 정책 편집기는 작성 시작 revision과 최신 관측 revision을 분리한다. background refetch나
+  `409`가 와도 로컬 초안을 보존하고, 운영자가 명시적으로 선택할 때 3-way 조정하거나 서버 값으로
+  되돌린다. BIGINT revision은 OpenAPI/TypeScript 경계에서 정규화된 10진 문자열로 표현한다.
+- migration backfill/default/check/downgrade, 두 세션 stale write, typed `409`, UI 충돌·조정
+  회귀를 추가했다. 적대 리뷰 2인에게 넘기기 위한 구현 스냅샷이며 지시에 따라 리뷰 전 테스트·lint·
+  build는 아직 실행하지 않았다.
+
 ## 2026-07-17 (codex, agent B) — C7A 적대 리뷰·전체 로컬 gate 완료
 
 - backend/DB/security 리뷰어와 frontend 상태 모델 리뷰어가 테스트 전에 same-origin ticket,

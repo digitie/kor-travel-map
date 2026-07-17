@@ -121,6 +121,7 @@ def _policy(
         rate_limit_source={"doc": "unit"},
         config_source="unit",
         enabled=enabled,
+        revision=1,
         created_at=now,
         updated_at=now,
     )

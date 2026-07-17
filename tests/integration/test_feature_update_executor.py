@@ -239,6 +239,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
         source_kind="openapi",
+        expected_revision=None,
         targeted_policy="allow_targeted",
         max_requests_per_minute=60,
     )
@@ -411,6 +412,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
         source_kind="openapi",
+        expected_revision=None,
         targeted_policy="follow_system",
     )
     target = await upsert_poi_cache_target(
@@ -480,6 +482,7 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
         source_kind="openapi",
+        expected_revision=None,
         targeted_policy="allow_targeted",
     )
     target = await upsert_poi_cache_target(
@@ -548,6 +551,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
         provider=seed.source_record.provider,
         dataset_key=seed.source_record.dataset_key,
         source_kind="openapi",
+        expected_revision=None,
         targeted_policy="allow_targeted",
     )
     target = await upsert_poi_cache_target(

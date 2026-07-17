@@ -2147,11 +2147,18 @@ repository는 `infra.poi_cache_target_repo`가 제공한다. `infra.scope_repo`�
 `resolve_cache_target_keys`와 `infra.feature_update_executor`는 active target 주변
 feature를 계산하고 `ops.poi_cache_target_feature_links`를 재계산한다.
 
-### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009)
+### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 
 provider/dataset별 update 주기, targeted update 허용 여부, filedata/openapi 구분,
 rate limit, 최적 기본값, 출처 문서와 명시적 freshness SLA
 `stale_after_minutes`(alembic 0049)를 저장한다.
+
+alembic 0056은 다음 단조 revision을 추가한다.
+
+```sql
+revision BIGINT NOT NULL DEFAULT 1
+  CHECK (revision >= 1 AND revision <= 9223372036854775807)
+```
 
 핵심 규칙:
 
@@ -2161,6 +2168,20 @@ rate limit, 최적 기본값, 출처 문서와 명시적 freshness SLA
   서버는 다른 interval에서 추론하지 않고 freshness를 `unknown`으로 계산한다.
 - rate limit과 최적값은 provider API 프로젝트의 문서/코드(로컬 `F:\dev\python-*-api`
   우선, ADR-044)를 근거로 저장한다.
+- `updated_at`은 표시·진단용이고 동시성 정본이 아니다. 모든 정책 write는
+  `expected_revision`을 명시한다. 신규 생성만 `null`을 허용하며 revision 1로 시작한다.
+  기존 행 갱신은 현재 양수 revision과 일치할 때만 한 SQL에서 필드를 바꾸고
+  `revision = revision + 1`을 수행한다. 기존 행에 `null`, 없는 행에 정수를 보낸 요청,
+  stale revision은 모두 write 없이 현재 record/revision을 반환하는 conflict다.
+- API에서는 JavaScript 안전 정수 한계를 피하기 위해 DB BIGINT revision을 정규화된
+  양수 10진 문자열로 직렬화한다. DB/repository 내부에서만 정수로 비교한다.
+- 같은 revision을 읽은 두 transaction 중 정확히 하나만 성공한다. 실패 transaction과
+  성공 뒤 rollback한 transaction은 정책 값과 revision을 모두 바꾸지 않는다.
+- 기존 행의 `source_kind`는 생성 뒤 불변이다. update SQL은 요청 값과 현재 값이 같을
+  때만 실행하고, 다르면 현재 record를 포함한 명시적 conflict로 거절한다.
+- revision `9223372036854775806`은 한 번 갱신해 BIGINT 최댓값까지 갈 수 있다. 최댓값
+  행은 `+1` 식을 평가하지 않으며 현재 record/revision을 포함한
+  `PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED`로 닫아 overflow 500을 만들지 않는다.
 
 repository는 `infra.provider_refresh_policy_repo`가 제공한다. T-206d request 실행
 본체는 `enabled`/`source_kind`/`targeted_policy`를 실행 계획에 적용하고, rate-limit

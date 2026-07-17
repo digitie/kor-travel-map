@@ -8653,6 +8653,63 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * ProviderRefreshPolicyConflictDetails
+         * @description orphan 또는 revision conflict의 typed 세부 정보.
+         */
+        ProviderRefreshPolicyConflictDetails: {
+            current_record: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            /** Current Revision */
+            current_revision: string | null;
+            /** Expected Revision */
+            expected_revision: string | null;
+            /** Mutation Disabled Reason */
+            mutation_disabled_reason: string | null;
+        };
+        /**
+         * ProviderRefreshPolicyConflictProblem
+         * @description refresh-policy PUT의 typed RFC7807 409 응답.
+         */
+        ProviderRefreshPolicyConflictProblem: {
+            /**
+             * Code
+             * @description 기계 판독용 오류 코드(§4 enum 확장). 예: NOT_FOUND.
+             */
+            code: string;
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            details: components["schemas"]["ProviderRefreshPolicyConflictDetails"];
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @description HTTP 상태 코드.
+             */
+            status: number;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ProviderRefreshPolicyRecord
          * @description ``ops.provider_refresh_policies`` HTTP 표현.
          */
@@ -8688,6 +8745,11 @@ export interface components {
             rate_limit_source: {
                 [key: string]: unknown;
             };
+            /**
+             * Revision
+             * @description DB BIGINT revision의 정규화된 양수 10진 문자열.
+             */
+            revision: string;
             /** Source Kind */
             source_kind: string;
             /** Stale After Minutes */
@@ -8719,6 +8781,11 @@ export interface components {
              * @default true
              */
             enabled: boolean;
+            /**
+             * Expected Revision
+             * @description 신규 생성은 null, 기존 갱신은 조회한 양수 BIGINT revision의 정규화된 10진 문자열. 필드 생략은 허용하지 않는다.
+             */
+            expected_revision: string | null;
             /**
              * Max Concurrent
              * @default 1
@@ -14771,13 +14838,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 카탈로그에서 제거된 orphan row. mutation_disabled_reason 포함. */
+            /** @description revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProviderRefreshPolicyConflictProblem"];
                 };
             };
             /** @description Validation Error */

@@ -33,6 +33,9 @@ from kortravelmap.api.ops_dataset_schema import (
 )
 from kortravelmap.api.ops_dataset_service import (
     OrphanMutationDisabledError,
+    ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     load_dataset_detail,
     load_datasets_grid,
 )
@@ -91,12 +94,14 @@ def _policy(
     dataset_key: str = "mois_license_features_bulk",
     stale_after_minutes: int | None = 60,
     enabled: bool = True,
+    targeted_policy: str = "allow_targeted",
+    revision: int = 1,
 ) -> ProviderRefreshPolicy:
     return ProviderRefreshPolicy(
         provider=provider,
         dataset_key=dataset_key,
         source_kind="openapi",
-        targeted_policy="allow_targeted",
+        targeted_policy=targeted_policy,
         system_interval_seconds=3600,
         optimal_interval_seconds=None,
         min_interval_seconds=60,
@@ -108,6 +113,7 @@ def _policy(
         rate_limit_source={},
         config_source="db",
         enabled=enabled,
+        revision=revision,
         created_at=_NOW,
         updated_at=_NOW,
         stale_after_minutes=stale_after_minutes,
@@ -404,7 +410,11 @@ def test_orphan_policy_mutation_is_409_with_reason(
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
         params={"provider": "legacy", "dataset_key": "removed"},
-        json={"source_kind": "openapi", "stale_after_minutes": 60},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 60,
+        },
     )
     assert response.status_code == 409
     assert response.json()["code"] == "ORPHAN_MUTATION_DISABLED"
@@ -438,10 +448,136 @@ def test_policy_mutation_accepts_explicit_stale_sla(
     response = client.put(
         "/v1/ops/datasets/refresh-policy",
         params={"provider": provider, "dataset_key": dataset_key},
-        json={"source_kind": "openapi", "stale_after_minutes": 90},
+        json={
+            "expected_revision": "1",
+            "source_kind": "openapi",
+            "stale_after_minutes": 90,
+        },
     )
     assert response.status_code == 200
     assert response.json()["data"]["stale_after_minutes"] == 90
+    assert response.json()["data"]["revision"] == "1"
+
+
+@pytest.mark.unit
+def test_policy_revision_conflict_is_typed_and_returns_current_record(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    current = _policy(targeted_policy="disabled", revision=2)
+
+    async def _upsert(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise ProviderRefreshPolicyRevisionConflict(
+            expected_revision=1,
+            current=current,
+        )
+
+    monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        json={"expected_revision": "1", "source_kind": "openapi"},
+    )
+
+    assert response.status_code == 409
+    problem = response.json()
+    assert problem["code"] == "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
+    assert problem["details"]["expected_revision"] == "1"
+    assert problem["details"]["current_revision"] == "2"
+    assert problem["details"]["current_record"]["revision"] == "2"
+    assert problem["details"]["current_record"]["targeted_policy"] == "disabled"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            ProviderRefreshPolicyRevisionExhausted(
+                current=_policy(revision=9_223_372_036_854_775_807)
+            ),
+            "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+        ),
+        (
+            ProviderRefreshPolicySourceKindImmutable(
+                requested_source_kind="manual",
+                current=_policy(revision=7),
+            ),
+            "PROVIDER_REFRESH_POLICY_SOURCE_KIND_IMMUTABLE",
+        ),
+    ],
+)
+def test_policy_terminal_conflicts_are_typed_with_current_record(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: RuntimeError,
+    code: str,
+) -> None:
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _upsert(*_args: object, **_kwargs: object) -> ProviderRefreshPolicy:
+        raise error
+
+    monkeypatch.setattr(router_module, "upsert_dataset_refresh_policy", _upsert)
+    current = cast(Any, error).current
+    response = client.put(
+        "/v1/ops/datasets/refresh-policy",
+        params={"provider": current.provider, "dataset_key": current.dataset_key},
+        json={"expected_revision": str(current.revision), "source_kind": "openapi"},
+    )
+
+    assert response.status_code == 409
+    problem = response.json()
+    assert problem["code"] == code
+    assert problem["details"]["expected_revision"] == str(current.revision)
+    assert problem["details"]["current_revision"] == str(current.revision)
+    assert problem["details"]["current_record"]["revision"] == str(
+        current.revision
+    )
+
+
+@pytest.mark.unit
+def test_revision_decimal_contract_preserves_values_above_javascript_safe_integer(
+) -> None:
+    from pydantic import ValidationError
+
+    from kortravelmap.api.provider_refresh_schema import (
+        ProviderRefreshPolicyConflictDetails,
+        ProviderRefreshPolicyUpsertRequest,
+        provider_refresh_policy_record,
+    )
+
+    large = "9007199254740993"
+    request = ProviderRefreshPolicyUpsertRequest(
+        expected_revision=large,
+        source_kind="openapi",
+    )
+    details = ProviderRefreshPolicyConflictDetails(
+        expected_revision=large,
+        current_revision=large,
+        current_record=None,
+        mutation_disabled_reason=None,
+    )
+    assert request.expected_revision == large
+    assert details.model_dump()["current_revision"] == large
+    assert provider_refresh_policy_record(
+        _policy(revision=int(large))
+    ).revision == large
+
+    with pytest.raises(ValidationError) as excinfo:
+        ProviderRefreshPolicyConflictDetails(
+            expected_revision="9223372036854775808",
+            current_revision="0",
+            current_record=None,
+            mutation_disabled_reason=None,
+        )
+    assert {error["loc"] for error in excinfo.value.errors()} == {
+        ("expected_revision",),
+        ("current_revision",),
+    }
+    with pytest.raises(ValidationError):
+        provider_refresh_policy_record(_policy(revision=9_223_372_036_854_775_808))
 
 
 @pytest.mark.unit
@@ -455,6 +591,7 @@ def test_policy_mutation_rejects_server_owned_rate_limit_provenance(
             "dataset_key": "mois_license_features_bulk",
         },
         json={
+            "expected_revision": None,
             "source_kind": "openapi",
             "rate_limit_source": {"forged": "operator-body"},
         },

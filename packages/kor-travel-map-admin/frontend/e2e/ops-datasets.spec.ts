@@ -176,6 +176,7 @@ function makeRefreshPolicy(
     burst_size: null,
     stale_after_minutes: 2880,
     rate_limit_source: {},
+    revision: "1",
     created_at: MOCK_OLD,
     updated_at: "2026-06-08T00:30:00.000Z",
     ...overrides,
@@ -387,6 +388,10 @@ async function mockOpsDatasets(
       OpsDatasetDetailData | ((detailCount: number) => OpsDatasetDetailData)
     >;
     previewStatus?: number;
+    policyConflictCode?:
+      | "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT"
+      | "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED";
+    policyConflictOnce?: ProviderRefreshPolicyRecord;
     scheduleSourceStatus?: "ok" | "unavailable" | "error";
     scheduleSourceErrors?: string[];
   },
@@ -423,12 +428,47 @@ async function mockOpsDatasets(
       policyPuts.push({ path: pathname + url.search, body });
       const provider = url.searchParams.get("provider") ?? "";
       const dataset = url.searchParams.get("dataset_key") ?? "";
+      if (options.policyConflictOnce && policyPuts.length === 1) {
+        const current = options.policyConflictOnce;
+        const code =
+          options.policyConflictCode ??
+          "PROVIDER_REFRESH_POLICY_REVISION_CONFLICT";
+        const message =
+          code === "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED"
+            ? "provider refresh policy revision exhausted"
+            : "provider refresh policy revision conflict";
+        await fulfillJson(
+          route,
+          {
+            type: `https://kor-travel-map/errors/${code.toLowerCase().replaceAll("_", "-")}`,
+            title: message,
+            status: 409,
+            detail: message,
+            code,
+            request_id: "e2e-policy-conflict",
+            errors: [],
+            details: {
+              expected_revision: body.expected_revision,
+              current_revision: current.revision,
+              current_record: current,
+              mutation_disabled_reason: null,
+            },
+          },
+          409,
+        );
+        return;
+      }
       const response: OpsDatasetRefreshPolicyResponse = {
         data: makeRefreshPolicy({
           provider,
           dataset_key: dataset,
+          source_kind: body.source_kind,
           targeted_policy: body.targeted_policy ?? "follow_system",
           enabled: body.enabled ?? true,
+          revision:
+            body.expected_revision === null
+              ? "1"
+              : String(BigInt(body.expected_revision) + 1n),
         }),
         meta: makeMeta("e2e-policy-upsert"),
       };
@@ -1126,7 +1166,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("갱신 정책", { exact: true }).first()).toBeVisible();
 
     await page.getByLabel("타깃 갱신 정책", { exact: true }).selectOption("allow_targeted");
-    await page.getByRole("button", { name: "저장" }).click();
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await saveButton.click();
 
     await expect.poll(() => mocks.policyPuts.length).toBe(1);
     expect(mocks.policyPuts[0].path).toBe(
@@ -1134,6 +1175,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         `&dataset_key=${KMA_DATASET}`,
     );
     expect(mocks.policyPuts[0].body).toMatchObject({
+      expected_revision: "1",
       source_kind: "openapi",
       targeted_policy: "allow_targeted",
       max_concurrent: 1,
@@ -1152,6 +1194,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       (mocks.policyPuts[0].body as Record<string, unknown>).rate_limit_source,
     ).toBeUndefined();
     await expect(page.getByText(/^저장됨 /)).toBeVisible();
+    await expect(saveButton).toBeEnabled();
   });
 
   test("정책 편집 — 양의 정수 검증 실패는 PUT을 막는다", async ({ page }) => {
@@ -1175,10 +1218,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const { items } = defaultGrid();
     const initialPolicy = makeRefreshPolicy({
       targeted_policy: "follow_system",
+      revision: "1",
       updated_at: "2026-07-14T00:00:00.000Z",
     });
     const changedPolicy = makeRefreshPolicy({
       targeted_policy: "disabled",
+      revision: "2",
       updated_at: "2026-07-15T00:00:00.000Z",
     });
     const mocks = await mockOpsDatasets(page, {
@@ -1201,10 +1246,195 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
     await expect(page.getByText("서버 정책이 변경됨")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await expect(saveButton).toBeDisabled();
+    await expect.poll(() => mocks.policyPuts.length).toBe(0);
 
     await page.getByRole("button", { name: "서버 값 다시 불러오기" }).click();
     await expect(targetedPolicy).toHaveValue("disabled");
     await expect(page.getByText("서버 정책이 변경됨")).toHaveCount(0);
+    await expect(saveButton).toBeEnabled();
+  });
+
+  test("정책 편집 — CAS 409는 draft를 보존하고 3-way 조정 뒤 최신 revision으로 저장한다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const initialPolicy = makeRefreshPolicy({
+      targeted_policy: "follow_system",
+      revision: "9007199254740993",
+    });
+    const currentPolicy = makeRefreshPolicy({
+      targeted_policy: "disabled",
+      enabled: false,
+      revision: "9007199254740994",
+    });
+    const mocks = await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: initialPolicy,
+        }),
+      },
+      policyConflictOnce: currentPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
+    await targetedPolicy.selectOption("allow_targeted");
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    expect(mocks.policyPuts[0].body.expected_revision).toBe("9007199254740993");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await expect(saveButton).toBeDisabled();
+    await expect.poll(() => mocks.policyPuts.length).toBe(1);
+
+    // keepMounted policy panel은 URL tab history와 Back/Forward 사이에서도
+    // draft/base/conflict를 보존한다.
+    await page.getByRole("tab", { name: "상태·이력" }).click();
+    await expect(page).toHaveURL(/panel=history/);
+    await page.goBack();
+    await expect(page).toHaveURL(/panel=policy/);
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await page.goForward();
+    await expect(page).toHaveURL(/panel=history/);
+    await page.getByRole("tab", { name: "갱신 정책" }).click();
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+
+    await page
+      .getByRole("button", { name: "서버 기준으로 초안 조정" })
+      .click();
+    await expect(page.getByText("초안 조정 완료")).toBeVisible();
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+
+    await expect.poll(() => mocks.policyPuts.length).toBe(2);
+    expect(mocks.policyPuts[1].body.expected_revision).toBe("9007199254740994");
+    expect(mocks.policyPuts[1].body.targeted_policy).toBe("allow_targeted");
+    expect(mocks.policyPuts[1].body.enabled).toBe(false);
+    await expect(page.getByText(/^저장됨 /)).toBeVisible();
+  });
+
+  test("정책 편집 — BIGINT max revision 소진은 terminal 상태로 재시도를 막는다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const maxPolicy = makeRefreshPolicy({
+      targeted_policy: "follow_system",
+      revision: "9223372036854775807",
+    });
+    const mocks = await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: maxPolicy,
+        }),
+      },
+      policyConflictCode: "PROVIDER_REFRESH_POLICY_REVISION_EXHAUSTED",
+      policyConflictOnce: maxPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page
+      .getByLabel("타깃 갱신 정책", { exact: true })
+      .selectOption("allow_targeted");
+    const saveButton = page.getByRole("button", { name: "저장" });
+    await saveButton.click();
+
+    await expect(page.getByText("정책 revision 소진")).toBeVisible();
+    await expect(page.getByText(/9223372036854775807/)).toBeVisible();
+    await expect(saveButton).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "서버 기준으로 초안 조정" }),
+    ).toHaveCount(0);
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
+    await expect.poll(() => mocks.policyPuts.length).toBe(1);
+    expect(mocks.policyPuts[0].body.expected_revision).toBe(
+      "9223372036854775807",
+    );
+  });
+
+  test("정책 편집 — concurrent create loser는 서버 source_kind를 강제한다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const currentPolicy = makeRefreshPolicy({
+      source_kind: "manual",
+      targeted_policy: "disabled",
+      revision: "1",
+    });
+    const mocks = await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: null,
+        }),
+      },
+      policyConflictOnce: currentPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const sourceKind = page.getByLabel("소스 종류", { exact: true });
+    await sourceKind.selectOption("openapi");
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+    await expect(sourceKind).toHaveValue("manual");
+    expect(mocks.policyPuts[0].body.expected_revision).toBeNull();
+    expect(mocks.policyPuts[0].body.source_kind).toBe("openapi");
+    await page
+      .getByRole("button", { name: "서버 기준으로 초안 조정" })
+      .click();
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect.poll(() => mocks.policyPuts.length).toBe(2);
+    expect(mocks.policyPuts[1].body.expected_revision).toBe("1");
+    expect(mocks.policyPuts[1].body.source_kind).toBe("manual");
+  });
+
+  test("정책 편집 — CAS 409 뒤 서버값 reload는 stale mutation error를 지운다", async ({
+    page,
+  }) => {
+    const { items } = defaultGrid();
+    const currentPolicy = makeRefreshPolicy({
+      targeted_policy: "disabled",
+      revision: "2",
+    });
+    await mockOpsDatasets(page, {
+      items,
+      details: {
+        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          refresh_policy: makeRefreshPolicy({
+            targeted_policy: "follow_system",
+            revision: "1",
+          }),
+        }),
+      },
+      policyConflictOnce: currentPolicy,
+    });
+    await mockPipelineRequests(page);
+
+    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
+    await targetedPolicy.selectOption("allow_targeted");
+    await page.getByRole("button", { name: "저장" }).click();
+    await expect(page.getByText("정책 저장 충돌")).toBeVisible();
+
+    await page.getByRole("button", { name: "서버 값 다시 불러오기" }).click();
+
+    await expect(page.getByText("정책 저장 충돌")).toHaveCount(0);
+    await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
+    await expect(targetedPolicy).toHaveValue("disabled");
+    await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
   });
 
   test("정책 편집 — orphan 행은 저장 UI를 열지 않는다", async ({
@@ -1959,6 +2189,27 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(
       page.getByText("선택된 데이터셋 행이 없습니다."),
     ).toBeVisible();
+  });
+
+  test("browser Back으로 drawer를 닫아도 선택 행으로 focus가 복귀한다", async ({
+    page,
+  }) => {
+    const { items, details } = defaultGrid();
+    await mockOpsDatasets(page, { items, details });
+    await mockPipelineRequests(page);
+
+    await page.goto("/ops/datasets");
+    const rowButton = page.getByRole("button", {
+      name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
+    });
+    await rowButton.click();
+    await expect(page.getByText("데이터셋 상세")).toBeVisible();
+
+    await page.goBack();
+
+    await expect(page).not.toHaveURL(/provider=/);
+    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(rowButton).toBeFocused();
   });
 
   test("provider-only 링크는 첫 canonical 3원 행으로 URL을 완성한다", async ({

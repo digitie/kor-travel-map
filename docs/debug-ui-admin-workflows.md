@@ -664,6 +664,19 @@ provider/dataset별 policy 목록. query `provider`, `enabled`, `limit`을 지�
 full upsert. `system_interval_seconds`/`optimal_interval_seconds`는
 `min_interval_seconds`와 선언된 request/min/hour/day rate-limit floor보다 짧을 수 없다.
 
+통합 화면의 canonical `PUT /ops/datasets/refresh-policy`는 body에 필수 nullable
+`expected_revision`을 받는다. 정책이 없을 때만 `null`로 생성하고, 기존 정책은 조회 응답의
+양수 10진 문자열 `revision`과 일치할 때만 갱신해 DB BIGINT revision을 원자적으로 1 올린다.
+stale/create-update 종류 불일치는 write 없이 `409
+PROVIDER_REFRESH_POLICY_REVISION_CONFLICT`와 현재 record/revision을 반환한다. UI는
+`draftBaseRevision`과 `latestObservedRevision`을 분리하고 base/local/latest 3-way 비교 뒤
+서버 값 폐기 또는 local 변경 재적용을 운영자가 명시적으로 선택하게 한다.
+조정 전에는 저장 UI와 submit을 모두 막고, policy/history 탭 및 browser Back/Forward에서도
+policy panel을 mount한 채 초안·base·conflict를 유지한다. concurrent create로 서버 행이
+먼저 생겼다면 `source_kind`는 서버 불변값을 사용하고 local 선택을 replay하지 않는다.
+revision/source_kind conflict와 BIGINT revision 소진은 모두 현재 record/revision이 있는
+typed `409`이며 `9007199254740993` 이상의 revision도 10진 문자열로 손실 없이 처리한다.
+
 ### 11.3 Provider dataset 갱신 요청
 
 중복 실행 endpoint인 `POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는

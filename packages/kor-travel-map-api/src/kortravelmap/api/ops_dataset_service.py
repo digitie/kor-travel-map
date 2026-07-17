@@ -28,6 +28,9 @@ from kortravelmap.infra.poi_cache_target_repo import (
 )
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
+    ProviderRefreshPolicyRevisionConflict,
+    ProviderRefreshPolicyRevisionExhausted,
+    ProviderRefreshPolicySourceKindImmutable,
     get_provider_refresh_policy,
     list_all_provider_refresh_policies,
     upsert_provider_refresh_policy,
@@ -77,6 +80,9 @@ from kortravelmap.api.settings import ApiSettings
 __all__ = [
     "DatasetNotFoundError",
     "OrphanMutationDisabledError",
+    "ProviderRefreshPolicyRevisionConflict",
+    "ProviderRefreshPolicyRevisionExhausted",
+    "ProviderRefreshPolicySourceKindImmutable",
     "load_dataset_detail",
     "load_datasets_grid",
     "upsert_dataset_refresh_policy",
@@ -780,6 +786,11 @@ async def upsert_dataset_refresh_policy(
             provider=provider,
             dataset_key=dataset_key,
             source_kind=body.source_kind,
+            expected_revision=(
+                int(body.expected_revision)
+                if body.expected_revision is not None
+                else None
+            ),
             targeted_policy=body.targeted_policy,
             system_interval_seconds=body.system_interval_seconds,
             optimal_interval_seconds=body.optimal_interval_seconds,

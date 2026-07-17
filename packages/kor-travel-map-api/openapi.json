@@ -18915,6 +18915,123 @@
         "title": "ProviderLastSyncResponse",
         "type": "object"
       },
+      "ProviderRefreshPolicyConflictDetails": {
+        "additionalProperties": false,
+        "description": "orphan 또는 revision conflict의 typed 세부 정보.",
+        "properties": {
+          "current_record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "mutation_disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation Disabled Reason"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "current_revision",
+          "current_record",
+          "mutation_disabled_reason"
+        ],
+        "title": "ProviderRefreshPolicyConflictDetails",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyConflictProblem": {
+        "additionalProperties": true,
+        "description": "refresh-policy PUT의 typed RFC7807 409 응답.",
+        "properties": {
+          "code": {
+            "description": "기계 판독용 오류 코드(§4 enum 확장). 예: NOT_FOUND.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/ProviderRefreshPolicyConflictDetails"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP 상태 코드.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "details"
+        ],
+        "title": "ProviderRefreshPolicyConflictProblem",
+        "type": "object"
+      },
       "ProviderRefreshPolicyRecord": {
         "additionalProperties": false,
         "description": "``ops.provider_refresh_policies`` HTTP 표현.",
@@ -19015,6 +19132,12 @@
             "title": "Rate Limit Source",
             "type": "object"
           },
+          "revision": {
+            "description": "DB BIGINT revision의 정규화된 양수 10진 문자열.",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Revision",
+            "type": "string"
+          },
           "source_kind": {
             "title": "Source Kind",
             "type": "string"
@@ -19060,6 +19183,7 @@
           "rate_limit_source",
           "config_source",
           "enabled",
+          "revision",
           "created_at",
           "updated_at"
         ],
@@ -19093,6 +19217,19 @@
             "default": true,
             "title": "Enabled",
             "type": "boolean"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "신규 생성은 null, 기존 갱신은 조회한 양수 BIGINT revision의 정규화된 10진 문자열. 필드 생략은 허용하지 않는다.",
+            "title": "Expected Revision"
           },
           "max_concurrent": {
             "default": 1,
@@ -19207,6 +19344,7 @@
           }
         },
         "required": [
+          "expected_revision",
           "source_kind"
         ],
         "title": "ProviderRefreshPolicyUpsertRequest",
@@ -32484,11 +32622,11 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
+                  "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
                 }
               }
             },
-            "description": "카탈로그에서 제거된 orphan row. mutation_disabled_reason 포함."
+            "description": "revision CAS 불일치·소진, source_kind 변경 또는 카탈로그에서 제거된 orphan row. 현재 record/revision 또는 mutation_disabled_reason 포함."
           },
           "422": {
             "content": {

@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin 갱신 정책 동시성 완결 (2026-07-18, `T-ADM-AUD-718`)
+
+- [x] **T-ADM-AUD-718 — BIGINT revision CAS를 DB부터 UI까지 완결.** Alembic 0056으로
+  `ops.provider_refresh_policies.revision`을 양수 BIGINT로 추가했다. 신규 생성은
+  `expected_revision=null`, 기존 갱신은 정확한 revision 일치가 필수이며 성공할 때만 원자적으로
+  1 증가한다. `source_kind`는 생성 뒤 불변이고 최댓값은 overflow 전에 typed 소진 `409`로 닫는다.
+- [x] **충돌 복구와 JavaScript 정밀도 경계를 고정.** HTTP revision은 정규화된 10진 문자열이며
+  불일치 응답은 현재 정책과 revision을 포함한다. UI는 작성 기준·최신 관측값·지연 응답 세대를
+  분리해 background refetch와 다른 scope cache가 초안을 덮지 못하게 하고, 명시적 3-way 조정 뒤
+  최신 revision으로만 다시 저장한다.
+- [x] **적대 리뷰와 로컬 gate 완료.** DB/API와 frontend 리뷰어가 최종 제품 SHA
+  `b7b600447368d8ed79bc1a8b56772af881104bf3`을 S1/S2/S3 0건으로 승인했다. root unit
+  1,411건, API 489건, 실제 PostGIS migration/schema 14건·CAS 저장소/API 23건·집중 10건과
+  독립 row-lock 경쟁 3회, Ruff, strict mypy 115+52파일, import 계약 4/4를 통과했다. 같은 SHA의
+  frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin type drift와 31-route production
+  build도 통과했다. 실제 browser 검증과 issue #718 종결은 최종 `T-ADM-C7` n150 live E2E에 남긴다.
+
 ## Admin ops-live 인증·무효화 완결 (2026-07-17, `T-ADM-C7A`)
 
 - [x] **T-ADM-C7A — same-origin 실시간 갱신 경계를 완결.** 로그인 session과

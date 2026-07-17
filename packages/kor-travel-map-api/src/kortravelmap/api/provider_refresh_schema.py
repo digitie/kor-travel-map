@@ -4,19 +4,37 @@ from __future__ import annotations
 
 from datetime import datetime
 from math import ceil
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from kortravelmap.infra.provider_refresh_policy_repo import ProviderRefreshPolicy
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+from kortravelmap.api.response import ProblemDetail
 
 __all__ = [
     "ProviderRefreshPolicyRecord",
+    "ProviderRefreshPolicyConflictDetails",
+    "ProviderRefreshPolicyConflictProblem",
     "ProviderRefreshPolicyUpsertRequest",
     "provider_refresh_policy_record",
 ]
 
 SourceKind = Literal["openapi", "filedata", "manual", "system"]
 TargetedPolicy = Literal["follow_system", "allow_targeted", "disabled"]
+_BIGINT_MAX = 9_223_372_036_854_775_807
+
+
+def _positive_bigint_decimal(value: str) -> str:
+    if int(value) > _BIGINT_MAX:
+        raise ValueError("revision must fit signed BIGINT")
+    return value
+
+
+PositiveBigintDecimal = Annotated[
+    str,
+    Field(pattern=r"^[1-9][0-9]*$"),
+    AfterValidator(_positive_bigint_decimal),
+]
 
 
 class ProviderRefreshPolicyUpsertRequest(BaseModel):
@@ -24,6 +42,12 @@ class ProviderRefreshPolicyUpsertRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    expected_revision: PositiveBigintDecimal | None = Field(
+        description=(
+            "신규 생성은 null, 기존 갱신은 조회한 양수 BIGINT revision의 "
+            "정규화된 10진 문자열. 필드 생략은 허용하지 않는다."
+        ),
+    )
     source_kind: SourceKind
     targeted_policy: TargetedPolicy = "follow_system"
     system_interval_seconds: int | None = Field(default=None, gt=0)
@@ -93,8 +117,28 @@ class ProviderRefreshPolicyRecord(BaseModel):
     rate_limit_source: dict[str, Any]
     config_source: str
     enabled: bool
+    revision: PositiveBigintDecimal = Field(
+        description="DB BIGINT revision의 정규화된 양수 10진 문자열.",
+    )
     created_at: datetime
     updated_at: datetime
+
+
+class ProviderRefreshPolicyConflictDetails(BaseModel):
+    """orphan 또는 revision conflict의 typed 세부 정보."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: PositiveBigintDecimal | None
+    current_revision: PositiveBigintDecimal | None
+    current_record: ProviderRefreshPolicyRecord | None
+    mutation_disabled_reason: str | None
+
+
+class ProviderRefreshPolicyConflictProblem(ProblemDetail):
+    """refresh-policy PUT의 typed RFC7807 409 응답."""
+
+    details: ProviderRefreshPolicyConflictDetails
 
 
 def provider_refresh_policy_record(
@@ -118,6 +162,7 @@ def provider_refresh_policy_record(
         rate_limit_source=policy.rate_limit_source,
         config_source=policy.config_source,
         enabled=policy.enabled,
+        revision=str(policy.revision),
         created_at=policy.created_at,
         updated_at=policy.updated_at,
     )
