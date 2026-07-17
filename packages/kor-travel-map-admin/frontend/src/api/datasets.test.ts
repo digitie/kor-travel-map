@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientError } from "./client";
 import {
+  OPS_DATASET_LIVE_TOPICS,
   buildDatasetRefreshNowRequest,
   createDatasetRefreshNow,
   datasetRefreshExecutionQueryKey,
@@ -13,8 +14,10 @@ import {
   hasActiveDatasetDetailExecution,
   hasActiveDatasetExecution,
   opsDatasetCatalogOptions,
+  opsDatasetLiveBadgeLabel,
   previewOpsDataset,
   resolveDatasetRefreshScope,
+  resolveOpsDatasetRefetchInterval,
   upsertOpsDatasetRefreshPolicy,
   type OpsDatasetLatestExecution,
   type OpsDatasetGridRow,
@@ -391,6 +394,51 @@ describe("ops datasets active polling gate", () => {
       hasActiveDatasetDetailExecution(detailWithStatuses("done", "done")),
     ).toBe(false);
     expect(hasActiveDatasetDetailExecution(undefined)).toBe(false);
+  });
+
+  it("live fallback에서는 비활성 grid·상세도 REST polling한다", () => {
+    expect(resolveOpsDatasetRefetchInterval(true, false)).toBe(2_000);
+    expect(resolveOpsDatasetRefetchInterval(true, true)).toBe(2_000);
+    expect(resolveOpsDatasetRefetchInterval(false, true)).toBe(5_000);
+    expect(resolveOpsDatasetRefetchInterval(false, false)).toBe(false);
+  });
+});
+
+describe("ops datasets live invalidation adapter", () => {
+  it("인증 거절은 일반 disabled와 구분해 로그인 필요로 표시한다", () => {
+    expect(
+      opsDatasetLiveBadgeLabel({
+        state: "unauthorized",
+        mode: "disabled",
+      }),
+    ).toBe("로그인 필요");
+    expect(
+      opsDatasetLiveBadgeLabel({ state: "disabled", mode: "disabled" }),
+    ).toBe("자동 갱신 꺼짐");
+  });
+
+  it("projection을 바꾸는 global topic을 active cache 유무와 무관하게 구독한다", () => {
+    expect(OPS_DATASET_LIVE_TOPICS).toEqual([
+      "provider_sync",
+      "dataset_projection",
+      "import_jobs",
+      "feature_update_requests",
+      "dagster_runs",
+      "dagster_schedules",
+    ]);
+    expect(resolveOpsDatasetRefetchInterval(false, false)).toBe(false);
+  });
+
+  it("연결 준비와 첫 재연결은 fallback badge를 성급하게 표시하지 않는다", () => {
+    expect(
+      opsDatasetLiveBadgeLabel({ state: "connecting", mode: "standby" }),
+    ).toBe("연결 중");
+    expect(
+      opsDatasetLiveBadgeLabel({ state: "reconnecting", mode: "standby" }),
+    ).toBe("재연결 중");
+    expect(
+      opsDatasetLiveBadgeLabel({ state: "polling", mode: "polling" }),
+    ).toBe("REST 폴링 갱신");
   });
 });
 

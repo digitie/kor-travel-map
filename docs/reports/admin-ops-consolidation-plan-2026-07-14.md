@@ -86,9 +86,11 @@ dagster run↔import job 관계는 외부 Dagster UI 링크로만 연결. 상세
 + `include_router(..., dependencies=[Depends(require_admin_frontend)])`로 마운트 — 조작(POST/
 PATCH/PUT)이 포함되므로 기존 무인증 ops 패턴을 쓰면 **현행 admin 게이트(갱신요청·정책) 대비
 다운그레이드**가 된다. admin frontend는 전 호출을 BFF 프록시로 보내므로 프론트 추가 작업 없음.
-예외 명문화: `/ops/health-deep`(readiness probe)·`/metrics`는 게이트 밖 존치, `/v1/ops/live`
-WS는 브라우저 직결(BFF는 WS 프록시 불가)이라 무게이트 유지 — **읽기전용 스냅샷 한정** 계약을
-문서에 적시.
+예외 명문화: `/ops/health-deep`(readiness probe)·`/metrics`는 게이트 밖 존치한다.
+`/v1/ops/live`는 C7A에서 same-origin ticket BFF가 로그인 session을 확인한 뒤 발급한
+60초 signed WebSocket subprotocol ticket을 FastAPI가 accept 전에 검증한다. 구 무게이트
+직결 결정은 이 보강 결정으로 폐기한다. 상세 정본은
+`docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`다.
 
 ### pipeline 그룹 (`/v1/ops/pipeline/*`)
 

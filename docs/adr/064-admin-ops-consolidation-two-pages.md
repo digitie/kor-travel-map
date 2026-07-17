@@ -31,8 +31,14 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
 3. **신규 REST 2그룹 + 단일 게이트**: `/v1/ops/pipeline/*`·`/v1/ops/datasets/*`를
    `ops_routes_enabled` + `require_admin_frontend` 의존성으로 마운트(조작 포함 —
    기존 무인증 ops 패턴 승계는 현행 admin 게이트 대비 다운그레이드라 배제).
-   `/ops/health-deep`·`/metrics`는 게이트 밖, `/v1/ops/live` WS는 BFF 프록시 불가로
-   무게이트 유지하되 읽기전용 스냅샷 한정.
+   `/ops/health-deep`·`/metrics`는 게이트 밖이다. `/v1/ops/live` WS는 C7A에서
+   로그인 session을 검증하는 same-origin ticket BFF와 60초 signed subprotocol ticket을
+   도입해 REST와 같은 server-owned admin actor 경계로 올린다. ticket nonce는 DB에서
+   한 번만 원자 소비하고 60초 lease를 조회·전송마다 강제한다. ticket·proxy secret은
+   query string이나 browser bundle에 두지 않는다. 인증 실패는 browser가 식별 가능한
+   data 없는 최소 handshake 뒤 `4401`로 종료하고, signed-expired ticket과 lease
+   만료는 data 0건 + `4408`로 구분한다. topic 선택은 query가 아닌 연결 후 JSON
+   배열 command로 단일화한다.
 4. **공용 계약 보존**: `GET /v1/providers`·`/v1/providers/{p}/last-sync`는 PinVi
    read 표면(openapi.user.json + integration-map)이므로 존치(소형 public 라우터로
    분리). "호환성 무시"는 admin 표면 한정이다.
@@ -56,6 +62,12 @@ ops / public-key features / admin frontend / debug)에 분산되어 있다. 같�
    연결 실패, query 오류를 각각 `404`/`503`/`502` RFC7807로 반환한다. event/failure는
    Dagster opaque cursor의 현재 page 범위이며 DB timeline cursor와 합치지 않는다.
    새 UI는 iframe을 쓰지 않으므로 pipeline NUX mutation을 제공하지 않는다.
+10. **live transport와 화면 결선 분리**: WebSocket reconnect/backoff/polling 상태 머신과
+    topic→domain event 정규화는 공용 client가 소유한다. datasets/pipeline query key는
+    callback adapter로 연결해 live transport가 페이지 모듈에 역의존하지 않는다. 상세는
+    `docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`가 정본이다. 형식 위반 socket은
+    같은 연결에서 복구하지 않고 즉시 폐기·재연결한다. dataset grid가 합성하는 issue/POI
+    변경은 transaction-coupled `dataset_projection` topic으로 별도 추적한다.
 
 ## 근거
 

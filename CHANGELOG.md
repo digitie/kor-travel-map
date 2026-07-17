@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### ops-live dataset projection·복구 경계 보강 (2026-07-17, ADR-064 T-ADM-C7A)
+
+- **ADDED**: data integrity issue와 POI cache target 변경을 원본 transaction과 함께 증가시키는
+  `dataset_projection` live revision/topic을 추가해 다른 tab/process 변경도 inactive dataset
+  grid/detail에 반영한다.
+- **FIXED**: malformed/비단조 frame을 받은 socket은 즉시 폐기하고 새 ticket/socket에서 exact
+  `replace`를 다시 보내도록 했다. datasets의 인증 만료 badge는 `로그인 필요`로 구분한다.
+- **SECURITY**: root `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`가 앞뒤 공백 없이 32자 이상인지 local
+  launcher와 API container entrypoint에서 기동 전에 검사한다.
+
 ### admin ops legacy REST clean-cut (2026-07-17, ADR-064 T-ADM-C6b)
 
 - **REMOVED**: `/ops/dagster*`, `/ops/providers*`, `/ops/import-jobs*`,

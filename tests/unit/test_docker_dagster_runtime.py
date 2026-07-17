@@ -301,7 +301,10 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert "required API env file is missing" in script
     assert "inline comments are not allowed in API env values" in script
     assert "shared admin proxy secret must be configured only in root env" in script
-    assert "frontend admin proxy secret must not have surrounding whitespace" in script
+    assert (
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters "
+        "without surrounding whitespace"
+    ) in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
     assert "start_bg api env -i" in script
     assert "start_bg web env -i" in script
@@ -332,7 +335,10 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
 def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Path) -> None:
     root_env = tmp_path / "root.env"
     api_env = tmp_path / "api.env"
-    root_env.write_text("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret\n", encoding="utf-8")
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
 
     process_env = {
         "PATH": os.environ["PATH"],
@@ -406,7 +412,7 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
         text=True,
     )
     assert frontend_whitespace.returncode != 0
-    assert "frontend admin proxy secret must not have surrounding whitespace" in (
+    assert "must be at least 32 characters without surrounding whitespace" in (
         frontend_whitespace.stderr
     )
 
@@ -468,7 +474,9 @@ def test_api_container_requires_unambiguous_proxy_secret(
         text=True,
     )
     assert result.returncode != 0
-    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required" in result.stderr
+    assert "must be at least 32 characters without surrounding whitespace" in (
+        result.stderr
+    )
 
 
 @pytest.mark.unit
@@ -487,6 +495,20 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
     )
     assert result.returncode != 0
     assert "legacy API-specific admin proxy secret" in result.stderr
+
+
+@pytest.mark.unit
+def test_admin_proxy_secret_minimum_is_enforced_at_runtime_boundaries() -> None:
+    api_entrypoint = _script("docker/api-entrypoint.sh")
+    admin_launcher = _script("scripts/run-admin-stack.sh")
+
+    for script, length_expression in (
+        (api_entrypoint, "${#api_proxy_secret}"),
+        (admin_launcher, "${#frontend_proxy_secret}"),
+    ):
+        assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in script
+        assert "at least 32 characters" in script
+        assert length_expression in script
 
 
 @pytest.mark.unit

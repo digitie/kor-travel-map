@@ -2167,6 +2167,53 @@ repository는 `infra.provider_refresh_policy_repo`가 제공한다. T-206d reque
 값을 runner scope metadata로 전달한다. provider 호출 단위의 hard enforcement는
 Dagster resource/provider runner가 수행한다.
 
+### 9.12 `ops.ops_live_ticket_claims` (ADR-064 T-ADM-C7A)
+
+admin ops WebSocket의 60초 signed ticket을 한 번만 소비하기 위한 임시 보안 상태다.
+로그인 성공/실패를 뜻하지 않으므로 `ops.admin_auth_events`와 분리한다.
+
+```sql
+CREATE TABLE ops.ops_live_ticket_claims (
+  nonce_hash BYTEA PRIMARY KEY CHECK (octet_length(nonce_hash) = 32),
+  actor      TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 80),
+  expires_at TIMESTAMPTZ NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX ix_ops_live_ticket_claims_expires_at
+  ON ops.ops_live_ticket_claims (expires_at);
+```
+
+원 nonce는 저장하지 않고 SHA-256 hash만 PK insert한다. `ON CONFLICT DO NOTHING`이
+동시·순차 replay 중 최초 한 건만 성공시킨다. 각 claim은 `expires_at` index로 찾은
+`만료 시각 + 60초 grace` 이전 row를 `FOR UPDATE SKIP LOCKED`로 최대 1,000건 정리한다.
+grace는 issuer·verifier·DB clock skew 이상에서도 아직 유효한 claim을 먼저 지우지 않기
+위한 하한이다. 이 테이블은 감사 이력이 아니며 정리 대상 row를 장기 보존하지 않는다.
+
+### 9.13 `ops.ops_live_topic_revisions` (ADR-064 T-ADM-C7A)
+
+여러 원본 테이블을 합쳐 만드는 `provider_sync`·`dataset_projection`·`dagster_schedules`
+live snapshot의 transaction-coupled 변경 clock이다. timestamp나 독립 identity의 `MAX`만으로는
+같은 시각 변경과 늦은 commit 순서를 놓칠 수 있으므로 topic별 단일 `BIGINT` row를 둔다.
+
+```sql
+CREATE TABLE ops.ops_live_topic_revisions (
+  topic      TEXT PRIMARY KEY CHECK (btrim(topic) <> '' AND char_length(topic) <= 100),
+  revision   BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+```
+
+statement trigger는 원본 write와 같은 transaction에서 `revision = revision + 1` upsert를
+수행한다. 따라서 원본 rollback은 revision도 되돌리고, 같은 topic의 동시 writer는 PK row lock을
+기다린 뒤 각각 한 번씩 증가한다. `provider_sync.provider_sync_state`와
+`ops.provider_refresh_policies`의 INSERT/UPDATE/DELETE/TRUNCATE는 `provider_sync`,
+`ops.data_integrity_violations`와 `ops.poi_cache_targets`의 같은 네 event는
+`dataset_projection`,
+`ops.dagster_schedule_overrides`의 같은 네 event와 C5의
+`ops.dagster_schedule_audit_events`·`ops.dagster_schedule_claim_resolutions` INSERT는
+`dagster_schedules`를 올린다. live snapshot은 원본 projection과 해당 clock을 한 SQL snapshot으로
+읽으며 frame data는 여전히 REST query invalidation signal일 뿐 화면 상태 정본이 아니다.
+
 ## 10. 보관 정책 (ADR-017) → purge 작업
 
 ```sql

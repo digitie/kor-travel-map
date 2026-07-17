@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { type CellContext, type ColumnDef } from "@tanstack/react-table";
 import {
   ExternalLinkIcon,
@@ -21,7 +22,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiClientError } from "@/api/client";
 import {
@@ -35,9 +35,11 @@ import {
   type OpsDatasetScopeState,
   type ProviderRefreshPolicyRecord,
   type ProviderRefreshPolicyUpsertRequest,
+  OPS_DATASET_LIVE_TOPICS,
   datasetRefreshConflict,
   filterDatasetRecentRuns,
   invalidateOpsDatasetQueries,
+  opsDatasetLiveBadgeLabel,
   resolveDatasetRefreshScope,
   useDatasetRefreshRequestStatus,
   useOpsDataset,
@@ -1508,7 +1510,11 @@ export function DatasetsClient({
   initialProvider?: string | null;
   initialSyncScope?: string | null;
 }) {
-  const datasets = useOpsDatasets();
+  const live = useOpsLiveInvalidation({
+    topics: OPS_DATASET_LIVE_TOPICS,
+  });
+  const pollingFallback = live.mode === "polling";
+  const datasets = useOpsDatasets({ pollingFallback });
   const items = useMemo(() => datasets.data?.data.items ?? [], [datasets.data]);
 
   // 행 선택·panel은 URL query가 정본이다(#684) — 뒤로/앞으로 가기로 복원된다.
@@ -1741,6 +1747,7 @@ export function DatasetsClient({
           syncScope: activeSelection.syncScope,
         }
       : null,
+    { pollingFallback },
   );
 
   const filteredItems = useMemo(() => {
@@ -1974,6 +1981,21 @@ export function DatasetsClient({
         ) : null}
 
         <section className="flex flex-wrap gap-2">
+          <Badge
+            data-testid="datasets-live-mode"
+            title={live.lastError ?? `ops live: ${live.state}`}
+            variant={
+              live.mode === "live"
+                ? "outline"
+                : live.mode === "polling"
+                  ? "warning"
+                  : live.mode === "standby"
+                    ? "secondary"
+                    : "destructive"
+            }
+          >
+            {opsDatasetLiveBadgeLabel(live)}
+          </Badge>
           <Badge variant="outline">제공자 {formatCount(summary.providers)}</Badge>
           <Badge variant="outline">행 {formatCount(items.length)}</Badge>
           <Badge variant={summary.failing > 0 ? "destructive" : "outline"}>

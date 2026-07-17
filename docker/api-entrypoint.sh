@@ -28,8 +28,8 @@ fi
 
 api_proxy_secret="${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:-}"
 trimmed_api_proxy_secret="$(printf '%s' "$api_proxy_secret" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-if [ -z "$api_proxy_secret" ] || [ "$api_proxy_secret" != "$trimmed_api_proxy_secret" ]; then
-  echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required without surrounding whitespace" >&2
+if [ "$api_proxy_secret" != "$trimmed_api_proxy_secret" ] || [ "${#api_proxy_secret}" -lt 32 ]; then
+  echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters without surrounding whitespace" >&2
   exit 1
 fi
 

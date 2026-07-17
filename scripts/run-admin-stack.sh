@@ -106,12 +106,8 @@ done <"$API_ENV_FILE"
 frontend_proxy_secret="${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:-}"
 trimmed_frontend_proxy_secret="${frontend_proxy_secret#"${frontend_proxy_secret%%[![:space:]]*}"}"
 trimmed_frontend_proxy_secret="${trimmed_frontend_proxy_secret%"${trimmed_frontend_proxy_secret##*[![:space:]]}"}"
-if [[ "$frontend_proxy_secret" != "$trimmed_frontend_proxy_secret" ]]; then
-  echo "frontend admin proxy secret must not have surrounding whitespace" >&2
-  exit 1
-fi
-if [[ -z "$frontend_proxy_secret" ]]; then
-  echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be configured in root env" >&2
+if [[ "$frontend_proxy_secret" != "$trimmed_frontend_proxy_secret" || ${#frontend_proxy_secret} -lt 32 ]]; then
+  echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters without surrounding whitespace" >&2
   exit 1
 fi
 

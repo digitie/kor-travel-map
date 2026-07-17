@@ -102,6 +102,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | `KOR_TRAVEL_MAP_API_RESTORE_SCRIPT_PATH` | `scripts/docker-restore.sh` | restore command plan이 호출하는 script path |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | `false` | `POST /admin/backups`, `POST /admin/restore/{backup_id}`의 host command 실행 허용 여부. false면 plan-only |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_TIMEOUT_SECONDS` | `1800` | opt-in host command 실행 timeout |
+| `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | (운영 필수, root `.env`) | API와 frontend가 함께 읽는 admin REST BFF 검증·ops-live 60초 ticket HMAC server-only secret(32자 이상). API package `.env`에는 두지 않음 |
 | `KOR_TRAVEL_MAP_API_RESTORE_APP_DB` | `kor_travel_map_restore` | staging restore app DB 기본값 |
 | `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` | `kor_travel_map_dagster_restore` | staging restore Dagster DB 기본값 |
 | `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | `kor-travel-map-rustfs-restore` | staging restore RustFS volume 기본값 |

@@ -549,12 +549,37 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   없다.
 
 - **`WS /v1/ops/live`(ops_live.py)**: admin frontend의 TanStack Query invalidation signal
-  전용 WebSocket. query `topics`(comma-separated)·client command JSON(`subscribe`/`unsubscribe`/
-  `replace`/`ping`)로 구독하고, topic별 snapshot revision 변화만 push한다(기본 topic =
-  `import_jobs`/`feature_update_requests`/`offline_uploads`/`dagster_runs`, `import_job_events:{job_id}`
-  등 prefix topic 지원). WebSocket이라 생성 `openapi.json` `paths`에는 **포함되지 않으며**
+  전용 WebSocket. 로그인 session을 검증한 same-origin `POST /api/auth/live-ticket`이
+  60초 signed ticket을 발급하고, browser는 이를 `Sec-WebSocket-Protocol`로 보내며 FastAPI는
+  운영 data 전송 전에 HMAC 검증과 DB nonce 원자 소비를 끝낸다. 서명/인증 실패는
+  data 없는 최소 handshake 뒤 `4401`, handshake 전 signed-expired ticket은 data 0건 +
+  `4408`로 닫는다. 이미 frame을 보낸 연결의 lease 만료도 `4408`이지만 data 0건 계약은
+  적용되지 않는다. frontend는 healthy 전 `4408`을 backoff 실패로, 중복 없는 exact topic set
+  구독 ack 뒤 v1·단조 sequence·요청 topic·revision·object data 검증을 통과한 frame을 받은
+  healthy 연결의 `4408`만 즉시 lease rotation으로 처리한다. wire topic 배열 순서는 의미가
+  없으며 형식 오류는 watchdog을 갱신하지 않고 socket 폐기 + `standby` 재연결로 전환한다.
+  ticket fetch,
+  handshake, heartbeat watchdog이 silent network failure에서도 active 실행 polling과
+  background reconnect를 유지하고, 3회 연속 실패부터 inactive grid/detail도 REST polling
+  fallback으로 전환한다. BFF는 `Origin`과
+  `Sec-Fetch-Site: same-origin`을 모두 요구한다. secret·ticket은 query string에 두지 않는다.
+  초기 topic은 빈 집합이며 query `topics`는 받지 않고 client command JSON
+  (`subscribe`/`unsubscribe`/`replace`)으로 구독하고, topic별 snapshot revision 변화만
+  push한다(연결 직후 topic은 빈 집합이며 `replace`로 구독. base topic =
+  `import_jobs`/`feature_update_requests`/`offline_uploads`/`dagster_runs`/`provider_sync`/
+  `dataset_projection`/`dagster_schedules`, `import_job_events:{job_id}` 등 prefix topic 지원).
+  DB resource id는
+  canonical UUID, `dagster_run:{run_id}`는 trim한 비어 있지 않은 255자 이하 opaque id다.
+  topic은 JSON 문자열 배열이므로 comma가 든 run ID도 그대로 보존한다.
+  Dagster id는 ASCII로 제한하지 않고 C0 control만 거절한다. WebSocket이라
+  `provider_sync`/`dataset_projection`/`dagster_schedules` 변경 감지는 source transaction과
+  함께 증가하는 `ops.ops_live_topic_revisions` statement-trigger clock을 snapshot에 포함해
+  timestamp/MAX tail 동률과 늦은 commit을 놓치지 않는다. `dataset_projection`은
+  `ops.data_integrity_violations`와 `ops.poi_cache_targets` 변경을 포괄한다.
+  생성 `openapi.json` `paths`에는 **포함되지 않으며**
   (REST DTO 정본은 위 `/v1/ops/*` endpoint), 본 §2.6와 `docs/architecture/openapi-admin-contract.md`
-  §`WS /ops/live`가 산문 계약 정본이다.
+  §`WS /ops/live`가 산문 계약 정본이다. 인증·상태·무효화 adapter 상세는
+  `docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`를 따른다.
 
 ### 2.7 `/v1/debug/*`
 ```

@@ -49,6 +49,8 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 base URL (`http://127.0.0.1:12701` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:12702` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-geo v2 `key` query 값. 현재 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 |
+| `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | root `.env` 한 곳에서 API와 frontend가 함께 읽는 REST BFF/ops-live ticket server-only secret(32자 이상) |
+| `KOR_TRAVEL_MAP_UI_SESSION_SECRET` | admin session HMAC secret(32자 이상, browser 미노출) |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
 > `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일하다.
@@ -59,6 +61,23 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 >
 > Next.js env 규약상 `NEXT_PUBLIC_*` 만 브라우저로 노출된다. 다른 키
 > (server-only)는 prefix 없이 박는다.
+
+`WS /v1/ops/live`는 browser가 backend secret을 직접 갖지 않는다. 로그인 session으로
+same-origin `POST /api/auth/live-ticket`을 호출해 60초 ticket을 받고, ticket은 URL/query가
+아닌 WebSocket subprotocol로만 전달한다. ticket 발급 또는 연결 실패가 3회 이어지면 UI는
+`polling` fallback을 표시하면서 background reconnect를 계속한다. ticket BFF는 browser의
+`Origin`과 `Sec-Fetch-Site: same-origin`을 모두 확인하며, `4401`에서는 재시도를 중단하고
+healthy snapshot/update 또는 일치하는 topic heartbeat를 받은 연결의 `4408`에서만 새
+ticket으로 즉시 rotation한다. healthy 전 `4408`은 일반 backoff에 포함한다. ticket fetch,
+handshake, heartbeat에는 각각 timeout/watchdog가 있어 close event가 유실된 silent network
+failure도 socket을 분리하고 active 실행 polling을 유지한 채 재연결한다. 3회 연속 실패부터
+inactive grid/detail도 REST polling fallback으로 전환한다. `subscribed`와 heartbeat의
+topic은 wire 표시 순서가 아니라 문자열 타입·중복 없음·동일 원소인 exact set으로 요청과
+비교한다. snapshot/update는 v1 envelope, 단조 증가 safe-integer sequence, 요청 topic,
+비어 있지 않은 revision, object data를 모두 만족해야 live로 전이하며, 형식 오류는 즉시
+socket을 폐기하고 `standby` 재연결로 내리되 기존 watchdog을 갱신하지 않는다. 3회 연속
+실패부터 inactive REST polling fallback을 켠다. protocol 위반 뒤에는 heartbeat만으로
+복귀하지 않고 exact 재구독 뒤 유효 snapshot을 받아야 같은 socket을 다시 신뢰한다.
 
 ## 개발
 

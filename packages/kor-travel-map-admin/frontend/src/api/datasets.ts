@@ -20,6 +20,11 @@ import {
   canonicalFeatureUpdateIdempotencyBody,
   featureUpdateIdempotencyOperationKey,
 } from "./feature-update-idempotency";
+import type {
+  OpsLiveConnectionState,
+  OpsLiveMode,
+  OpsLiveTopic,
+} from "./live";
 import type { components, paths } from "./types";
 
 type DatasetSchemas = components["schemas"];
@@ -110,6 +115,44 @@ export function opsDatasetCatalogOptions(
 
 /** "지금 갱신" 요청 생성 endpoint — pipeline 그룹(T-ADM-C3) 소유. */
 export const DATASET_REFRESH_REQUESTS_PATH = "/v1/ops/pipeline/requests";
+
+/**
+ * 데이터셋 projection을 바꾸는 global live topic.
+ *
+ * active cache 유무와 무관하게 외부에서 생성·진행된 canonical operation,
+ * provider sync state, 이슈/POI projection, Dagster schedule 변화를 grid/detail에
+ * 반영한다.
+ */
+export const OPS_DATASET_LIVE_TOPICS = [
+  "provider_sync",
+  "dataset_projection",
+  "import_jobs",
+  "feature_update_requests",
+  "dagster_runs",
+  "dagster_schedules",
+] as const satisfies readonly OpsLiveTopic[];
+
+export function opsDatasetLiveBadgeLabel(live: {
+  state: OpsLiveConnectionState;
+  mode: OpsLiveMode;
+}): string {
+  if (live.state === "unauthorized") {
+    return "로그인 필요";
+  }
+  if (live.mode === "live") {
+    return "실시간 갱신";
+  }
+  if (live.mode === "polling") {
+    return "REST 폴링 갱신";
+  }
+  return live.state === "disabled"
+    ? "자동 갱신 꺼짐"
+    : live.state === "unavailable"
+      ? "WebSocket 미지원"
+      : live.state === "reconnecting"
+        ? "재연결 중"
+        : "연결 중";
+}
 
 function datasetQueryPath(
   path:
@@ -319,14 +362,32 @@ export function hasActiveDatasetDetailExecution(
   ) ?? false;
 }
 
-export function useOpsDatasets() {
+export function resolveOpsDatasetRefetchInterval(
+  activeExecution: boolean,
+  pollingFallback: boolean,
+): number | false {
+  if (activeExecution) {
+    return 2_000;
+  }
+  return pollingFallback ? 5_000 : false;
+}
+
+export function useOpsDatasets({
+  pollingFallback = false,
+}: {
+  pollingFallback?: boolean;
+} = {}) {
   return useQuery<OpsDatasetsGridResponse, Error>({
     queryKey: ["ops-datasets"],
     queryFn: ({ signal }) => fetchOpsDatasets(signal),
     // C7A의 global live invalidation 이전에도 진입 전부터 존재한 active 작업이
     // terminal로 바뀌면 버튼 차단이 자동 해제되어야 한다.
     refetchInterval: (query) =>
-      hasActiveDatasetExecution(query.state.data) ? 2_000 : false,
+      resolveOpsDatasetRefetchInterval(
+        hasActiveDatasetExecution(query.state.data),
+        pollingFallback,
+      ),
+    refetchIntervalInBackground: pollingFallback,
     staleTime: 15_000,
   });
 }
@@ -346,6 +407,11 @@ export function useOpsDataset(
     datasetKey: string;
     syncScope: string;
   } | null,
+  {
+    pollingFallback = false,
+  }: {
+    pollingFallback?: boolean;
+  } = {},
 ) {
   return useQuery<OpsDatasetDetailResponse, Error>({
     queryKey: [
@@ -363,7 +429,11 @@ export function useOpsDataset(
       ),
     enabled: Boolean(selection),
     refetchInterval: (query) =>
-      hasActiveDatasetDetailExecution(query.state.data) ? 2_000 : false,
+      resolveOpsDatasetRefetchInterval(
+        hasActiveDatasetDetailExecution(query.state.data),
+        pollingFallback,
+      ),
+    refetchIntervalInBackground: pollingFallback,
     staleTime: 10_000,
   });
 }

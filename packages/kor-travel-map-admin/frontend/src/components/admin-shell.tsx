@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { HelpTip } from "@/components/help-tip";
+import { publishAdminLogout } from "@/lib/admin-auth-events";
 import { cn } from "@/lib/utils";
 
 /**
@@ -368,6 +369,7 @@ function ButtonLogout({ collapsed }: { collapsed: boolean }) {
 }
 
 async function logout() {
+  publishAdminLogout();
   try {
     await fetch("/api/auth/logout", { method: "POST" });
   } finally {

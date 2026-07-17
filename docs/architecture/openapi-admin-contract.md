@@ -859,7 +859,21 @@ event·취소 정본은 `/ops/pipeline/*`다.
 실시간 signal 채널 `WS /ops/live`는 WebSocket이므로 `openapi.json` `paths`에는
 포함되지 않는다. REST DTO source of truth는 계속 아래 endpoint이며, live frame은
 admin frontend의 query invalidation signal로만 사용한다. 현행 REST DTO 정본은
-`/ops/pipeline/*`와 `/ops/datasets/*`다.
+`/ops/pipeline/*`와 `/ops/datasets/*`다. 연결 전 same-origin
+`POST /api/auth/live-ticket`이 admin session을 검증해 60초 signed WebSocket subprotocol
+ticket을 발급한다. BFF는 `Origin`과 `Sec-Fetch-Site: same-origin`을 모두 요구하고,
+FastAPI는 운영 data 전송 전에 HMAC 검증과 nonce 원자 소비를 끝낸다. 서명/인증 실패는
+data 없는 최소 handshake 뒤 `4401`, 서명은 유효하지만 handshake 전 만료한 ticket은
+data 0건 + `4408`로 닫는다. 이미 frame을 보낸 healthy 연결도 60초 lease가 끝나면
+`4408`로 닫지만 이 경우 data 0건 계약은 적용되지 않는다. claim/snapshot의 내부
+`TimeoutError`와 기타 DB
+장애는 outer lease 만료와 구분해 bounded rollback 후 `1013`으로 닫는다. frame
+transport의 독립 `TimeoutError`·`OSError`·`RuntimeError`도 bounded rollback 후
+`1013`이다. 정상 disconnect는 close를 중복 전송하지 않는다. invalid,
+replay, claim 장애의 accept/close와 rollback은 공통 bounded 경계를 통한다. ticket과
+server-only proxy secret은 URL/query/browser bundle에 두지 않는다. transport 상태와
+topic→datasets/pipeline query adapter 계약은
+`docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`가 정본이다.
 
 ### `GET /v1/ops/pipeline/executions`
 
@@ -1068,8 +1082,9 @@ queued/running job을 best-effort로 `cancelled` 전이한다. 이미 `done` / `
 
 ### `WS /ops/live` (OpenAPI 제외)
 
-Admin UI 내부망 전용 WebSocket signal 채널이다. query `topics`는 comma-separated이며,
-client command는 JSON object `{ "type": "subscribe" | "unsubscribe" | "replace" | "ping",
+Admin UI 내부망 전용 WebSocket signal 채널이다. 초기 topic은 빈 집합이고 query
+`topics`는 받지 않는다. client command는 JSON object
+`{ "type": "subscribe" | "unsubscribe" | "replace",
 "topics": [...] }`다. `poll_interval_ms`는 `1000..30000` 범위로 clamp된다.
 
 지원 topic:
@@ -1083,6 +1098,23 @@ client command는 JSON object `{ "type": "subscribe" | "unsubscribe" | "replace"
 - `offline_upload:{upload_id}`
 - `dagster_runs`
 - `dagster_run:{run_id}`
+- `provider_sync`
+- `dataset_projection`
+- `dagster_schedules`
+
+prefix topic의 DB resource `{job_id}`·`{request_id}`·`{upload_id}`는 canonical UUID여야
+한다. Dagster의 `{run_id}`는 UUID나 ASCII whitelist로 가정하지 않는다. 앞뒤 공백을
+제거한 뒤 비어 있지 않은 255자 이하 opaque id를 보존하며 C0 control만 거절한다.
+topic은 JSON 문자열 배열에서만 전달하므로 comma가 든 run ID도 분할하지 않는다.
+`provider_sync`, `dataset_projection`, `dagster_schedules`는 source transaction과 같은
+transaction에서 증가하는 `ops.ops_live_topic_revisions` clock을 snapshot에 포함한다.
+provider state/policy, data integrity issue/POI cache target, schedule override는 statement 단위
+INSERT/UPDATE/DELETE/TRUNCATE, C5 schedule audit/claim resolution은 INSERT마다 clock을 올린다.
+rollback은 clock도 함께 되돌리고, 동시 writer는 topic PK row lock으로 직렬화되어 늦은 commit도
+유실되지 않는다. `dagster_schedules` snapshot은 clock과 함께 C5
+schedule audit `event_id`, claim resolution `resolution_id` tail도 한 SQL에서 읽는다. C7A는 C5
+migration이 먼저 적용된 strict schema를 전제하므로 `to_regclass` degrade를 두지
+않는다. 배포 순서는 C5 후 C7A다.
 
 서버 frame:
 
@@ -1090,10 +1122,25 @@ client command는 JSON object `{ "type": "subscribe" | "unsubscribe" | "replace"
 - `snapshot`: 최초 또는 topic 변경 직후 전체 topic snapshot.
 - `update`: revision이 바뀐 topic만 전송.
 - `heartbeat`: 변경이 없어도 연결 생존을 알림.
-- `error`: live snapshot 조회/command 오류.
+- `error`: client command 검증 오류. snapshot 조회 장애는 frame 대신 `1013`으로 닫는다.
 
 frontend는 frame `data`를 화면 상태로 직접 저장하지 않고, topic에 해당하는 TanStack
-Query key를 invalidate한다. WebSocket이 막힌 환경에서는 기존 REST polling이 fallback이다.
+Query key를 invalidate한다. `hello`와 `subscribed` ack만으로는 healthy 연결이 아니다.
+요청과 문자열 타입·중복 없음·동일 원소인 exact topic set ack를 받은 뒤 유효한
+snapshot/update 또는 같은 topic set heartbeat를 받아야 실패 횟수를 초기화한다. wire의
+canonical 배열 순서는 표시용이며 JS/Python 정렬 순서에 의미를 부여하지 않는다.
+snapshot/update는 `version=1`, 단조 증가하는 safe-integer `sequence`, 요청 `topic`, 비어 있지
+않은 `revision`, JSON object `data`를 모두 만족해야 한다. 형식 오류와 거절된 replace는 구독
+준비 상태와 현재 protocol 신뢰를 폐기하고 handler를 분리한 뒤 socket을 즉시 닫는다. 새
+ticket/socket에서 exact `replace`를 다시 보내고 유효 snapshot 또는 heartbeat를 받아야
+healthy에 복귀한다.
+ticket fetch, pre-healthy handshake, healthy frame inactivity는
+각각 watchdog으로 제한해 close frame이 유실돼도 REST polling + background reconnect로
+복구한다. healthy 전
+`4408`과 hello 직후 `1013`은 일반 backoff에 포함하고, healthy 후 `4408`만 정상
+lease rotation으로 즉시 재연결한다. 3회 연속 실패하면 datasets grid·선택
+상세는 active 여부와 관계없이 5초 REST polling을 실행하고 UI badge에 fallback을
+표시한다. active 실행은 기존 2초 주기를 유지한다.
 
 ### `GET /ops/consistency/reports`
 
