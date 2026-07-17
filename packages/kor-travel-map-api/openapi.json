@@ -38080,7 +38080,7 @@
     },
     "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve": {
       "post": {
-        "description": "transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다. 응답 유실 뒤 같은 command_id·resolution·정규화된 사유로 재요청하면 기존 결과를 replayed=true로 재생하고, resolution 또는 사유가 다르면 409로 거부한다.",
+        "description": "transport 장애 등으로 Dagster 반영 여부를 자동 확정할 수 없는 명령은 같은 schedule의 후속 조작을 막는다. 운영자가 Dagster 실제 상태를 별도로 확인한 뒤 반영 여부와 필수 사유를 기록하면 append-only 감사 이력을 남기고 claim을 해제한다. 외부 호출 종료가 기록되지 않은 requested-only claim은 5분 안전 lease가 만료되기 전까지 active command ID를 노출하지 않고 해제도 거부한다. 응답 유실 뒤 같은 command_id·resolution·정규화된 사유로 재요청하면 기존 결과를 replayed=true로 재생하고, resolution 또는 사유가 다르면 409로 거부한다.",
         "operationId": "resolve_pipeline_schedule_claim_v1_ops_pipeline_schedules__schedule_name__claims__command_id__resolve_post",
         "parameters": [
           {
