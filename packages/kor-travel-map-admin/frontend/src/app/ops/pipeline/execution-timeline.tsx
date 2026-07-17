@@ -138,12 +138,15 @@ export function ExecutionTimeline({
   ]);
   const [paginationSignature, setPaginationSignature] =
     useState(filterSignature);
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
-  const [baselineTop, setBaselineTop] = useState<{
+  const [storedCursorStack, setCursorStack] = useState<string[]>([]);
+  const [storedBaselineTop, setBaselineTop] = useState<{
     createdAt: string;
     kind: ExecutionKind;
     id: string;
   } | null>(null);
+  const paginationIsCurrent = paginationSignature === filterSignature;
+  const cursorStack = paginationIsCurrent ? storedCursorStack : [];
+  const baselineTop = paginationIsCurrent ? storedBaselineTop : null;
   if (paginationSignature !== filterSignature) {
     setPaginationSignature(filterSignature);
     setCursorStack([]);
