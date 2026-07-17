@@ -30,14 +30,13 @@ import {
   type OpsDatasetEventRecord,
   type OpsDatasetFreshness,
   type OpsDatasetGridRow,
-  type OpsDatasetLatestExecution,
+  type OpsDatasetExecution,
   type OpsDatasetPreviewData,
   type OpsDatasetScopeState,
   type ProviderRefreshPolicyRecord,
   type ProviderRefreshPolicyUpsertRequest,
   OPS_DATASET_LIVE_TOPICS,
   datasetRefreshConflict,
-  filterDatasetRecentRuns,
   invalidateOpsDatasetQueries,
   opsDatasetLiveBadgeLabel,
   resolveDatasetRefreshScope,
@@ -165,7 +164,7 @@ function isCanonicalRepresentativeRow(row: OpsDatasetGridRow): boolean {
   return (
     row.catalog_state === "canonical" &&
     row.catalog !== null &&
-    row.sync_scope === row.catalog.provider_state_default_scope
+    row.sync_scope === row.catalog.scope_refresh.default_sync_scope
   );
 }
 
@@ -395,10 +394,12 @@ function PolicyEditor({
   provider,
   datasetKey,
   policy,
+  mutationBlockedReason,
 }: {
   provider: string;
   datasetKey: string;
   policy: ProviderRefreshPolicyRecord | null | undefined;
+  mutationBlockedReason: string | null;
 }) {
   const [editorState, setEditorState] = useState<PolicyEditorState>(() =>
     initialPolicyEditorState(policy),
@@ -421,7 +422,6 @@ function PolicyEditor({
   const {
     acknowledgedPropRevision,
     draft,
-    draftBasePolicy,
     draftBaseRevision,
     error,
     fieldErrors,
@@ -439,7 +439,8 @@ function PolicyEditor({
     hasRevisionConflict: revisionConflict !== null,
     incomingPropRevision,
   };
-  const saveBlocked = isPolicySaveBlocked(saveGuard);
+  const saveBlocked =
+    mutationBlockedReason !== null || isPolicySaveBlocked(saveGuard);
 
   const setField = (field: keyof PolicyDraft, value: string | boolean) => {
     setEditorState((current) => ({
@@ -587,6 +588,9 @@ function PolicyEditor({
   };
 
   const submit = () => {
+    if (mutationBlockedReason !== null) {
+      return;
+    }
     submitPolicyIfAllowed(saveGuard, submitAllowedPolicy);
   };
 
@@ -835,6 +839,12 @@ function PolicyEditor({
           </AlertDescription>
         </Alert>
       ) : null}
+      {mutationBlockedReason ? (
+        <Alert className="mt-3" data-testid="policy-readonly-alert" variant="destructive">
+          <AlertTitle>정책 저장 불가</AlertTitle>
+          <AlertDescription>{mutationBlockedReason}</AlertDescription>
+        </Alert>
+      ) : null}
       {reconcileMessage ? (
         <Alert className="mt-3">
           <AlertTitle>초안 조정 완료</AlertTitle>
@@ -958,18 +968,15 @@ function PreviewPanel({
 // 백엔드 terminal 어휘 정본 = infra/feature_update_repo._TERMINAL_STATES
 // ({"done","failed","cancelled"}) — "succeeded"는 존재하지 않는 상태다(리뷰 검출).
 const TERMINAL_REQUEST_STATUSES = ["done", "failed", "cancelled"];
-const ACTIVE_EXECUTION_STATUSES = ["queued", "running"];
 
 function RefreshNowSection({
   selection,
   detail,
-  latestExecution,
   detailLoading,
   detailError,
 }: {
   selection: DatasetSelection;
   detail: OpsDatasetDetailData | null;
-  latestExecution: OpsDatasetLatestExecution | null;
   detailLoading: boolean;
   detailError: boolean;
 }) {
@@ -998,14 +1005,8 @@ function RefreshNowSection({
   const scopeDecision = resolveDatasetRefreshScope(
     scopeRefresh,
     selection.syncScope,
-    catalog?.provider_state_default_scope,
   );
-  const activeLatestExecution =
-    latestExecution &&
-    (ACTIVE_EXECUTION_STATUSES.includes(latestExecution.status) ||
-      ACTIVE_EXECUTION_STATUSES.includes(latestExecution.pair_status))
-      ? latestExecution
-      : null;
+  const activeExecution = detail?.active_execution ?? null;
 
   // 완료(terminal) 전이 시 그리드/상세 신선도를 즉시 refetch — 인라인 폐루프.
   const notifiedStatus = useRef<string | null>(null);
@@ -1052,7 +1053,7 @@ function RefreshNowSection({
                 : !scopeDecision.allowed
                   ? scopeRefresh?.effect === "dataset_wide" &&
                       selection.syncScope !==
-                        catalog.provider_state_default_scope
+                        scopeRefresh.default_sync_scope
                     ? "dataset 전체 갱신은 provider의 기본 state scope 행에서만 실행할 수 있습니다. 이 행은 잔존 비기본 scope입니다."
                     : selection.syncScope.startsWith("external_system:")
                     ? "현재 활성 POI target에 없는 잔존 external scope라 갱신할 수 없습니다."
@@ -1084,25 +1085,25 @@ function RefreshNowSection({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {activeLatestExecution ? (
+        {activeExecution ? (
           <span
             className="flex flex-wrap items-center gap-2 text-xs"
-            data-testid="active-latest-execution"
+            data-testid="active-execution"
           >
             <span>이미 진행 중인 canonical 실행</span>
-            <StatusBadge status={activeLatestExecution.status} />
+            <StatusBadge status={activeExecution.status} />
             <Badge variant="outline">
-              pair {activeLatestExecution.pair_status}
+              pair {activeExecution.pair_status}
             </Badge>
             <Link
               className="text-primary underline-offset-2 hover:underline"
-              data-api-detail-url={activeLatestExecution.detail_url}
+              data-api-detail-url={activeExecution.detail_url}
               href={pipelineExecutionHref(
-                activeLatestExecution.kind,
-                activeLatestExecution.id,
+                activeExecution.kind,
+                activeExecution.id,
               )}
             >
-              실행 {shortId(activeLatestExecution.id)} 보기
+              실행 {shortId(activeExecution.id)} 보기
             </Link>
           </span>
         ) : localRequestActive && requestId ? (
@@ -1319,7 +1320,7 @@ const scopeColumns: ColumnDef<OpsDatasetScopeState, unknown>[] = [
   },
 ];
 
-const recentRunColumns: ColumnDef<OpsDatasetLatestExecution, unknown>[] = [
+const recentRunColumns: ColumnDef<OpsDatasetExecution, unknown>[] = [
   {
     id: "execution",
     header: "실행",
@@ -1400,27 +1401,25 @@ function pipelineEventHistoryHref(apiHistoryUrl: string): string {
   return `/ops/pipeline?tab=events${query ? `&${query}` : ""}`;
 }
 
+function pipelineExecutionHistoryHref(apiHistoryUrl: string): string {
+  const query = apiHistoryUrl.split("?", 2)[1] ?? "";
+  return `/ops/pipeline?tab=executions${query ? `&${query}` : ""}`;
+}
+
 function HistoryPanel({
   selection,
   detail,
-  latestExecution,
 }: {
   selection: DatasetSelection;
   detail: OpsDatasetDetailData | null;
-  latestExecution: OpsDatasetLatestExecution | null;
 }) {
   const selectedScope =
     detail?.scopes.find((scope) => scope.sync_scope === selection.syncScope) ?? null;
-  const recentRuns = useMemo(
-    () =>
-      filterDatasetRecentRuns(
-        detail?.recent_runs ?? [],
-        selection.syncScope,
-        detail?.catalog?.scope_refresh,
-        detail?.catalog?.provider_state_default_scope,
-      ),
-    [detail, selection],
-  );
+  // C7B 서버가 exact tuple을 cursor/LIMIT 전에 적용한다. 이 페이지에서 다시
+  // scope를 거르면 page가 비거나 다음 cursor 의미가 깨지므로 응답을 그대로 쓴다.
+  const activeExecution = detail?.active_execution ?? null;
+  const latestExecution = detail?.latest_execution ?? null;
+  const recentRuns = detail?.run_history.items ?? [];
   return (
     <div className="flex flex-col gap-3">
       <DataTable
@@ -1453,7 +1452,36 @@ function HistoryPanel({
         </pre>
       </div>
       <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">선택 범위 최신 실행</div>
+        <div className="mb-2 font-medium">선택 범위 진행 중 실행</div>
+        {activeExecution ? (
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <StatusBadge status={activeExecution.status} />
+            <Badge variant="outline">pair {activeExecution.pair_status}</Badge>
+            <span className="font-mono text-xs">
+              {activeExecution.kind}:{shortId(activeExecution.id)}
+            </span>
+            <span className="text-text-secondary">
+              {formatDateTime(activeExecution.created_at)}
+            </span>
+            <Link
+              className="text-primary underline-offset-2 hover:underline"
+              data-api-detail-url={activeExecution.detail_url}
+              href={pipelineExecutionHref(
+                activeExecution.kind,
+                activeExecution.id,
+              )}
+            >
+              실행 상세
+            </Link>
+          </div>
+        ) : (
+          <p className="text-[13px] text-text-secondary">
+            이 범위에 진행 중인 canonical 실행이 없습니다.
+          </p>
+        )}
+      </div>
+      <div className="rounded-xl bg-surface-subtle p-4">
+        <div className="mb-2 font-medium">선택 범위 최근 종료 실행</div>
         {latestExecution ? (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             <StatusBadge status={latestExecution.status} />
@@ -1477,15 +1505,29 @@ function HistoryPanel({
           </div>
         ) : (
           <p className="text-[13px] text-text-secondary">
-            이 범위에 정확히 대응하는 canonical 실행이 없습니다.
+            이 범위에서 종료된 canonical 실행이 없습니다.
           </p>
         )}
       </div>
       <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">최근 실행</div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium">최근 실행</span>
+          {detail ? (
+            <Link
+              className="text-xs text-primary underline-offset-2 hover:underline"
+              data-api-history-url={detail.run_history.canonical_url}
+              href={pipelineExecutionHistoryHref(
+                detail.run_history.canonical_url,
+              )}
+            >
+              선택 범위 실행 전체 보기
+            </Link>
+          ) : null}
+        </div>
         <p className="mb-2 text-xs text-text-tertiary">
-          DB에 영속된 canonical operation 중 선택한 scope에 대응하는 실행만
-          표시합니다. 다른 external scope 이력은 섞지 않습니다.
+          서버가 cursor와 page limit 전에 선택한 exact scope를 적용한 canonical
+          operation만 표시합니다.
+          {detail?.run_history.next_cursor ? " 더 오래된 실행이 있습니다." : ""}
         </p>
         <DataTable
           ariaLabel="최근 실행"
@@ -1503,8 +1545,10 @@ function HistoryPanel({
           {detail ? (
             <Link
               className="text-xs text-primary underline-offset-2 hover:underline"
-              data-api-history-url={detail.event_history_url}
-              href={pipelineEventHistoryHref(detail.event_history_url)}
+              data-api-history-url={detail.event_history.canonical_url}
+              href={pipelineEventHistoryHref(
+                detail.event_history.canonical_url,
+              )}
             >
               선택 범위 이벤트 전체 보기
             </Link>
@@ -1513,13 +1557,13 @@ function HistoryPanel({
         <p className="mb-2 text-xs text-text-tertiary">
           canonical job/request의 effective sync scope가 선택 범위와 정확히 같은
           이벤트만 표시합니다.
-          {detail?.recent_events_next_cursor
+          {detail?.event_history.next_cursor
             ? " 더 오래된 이벤트가 있습니다."
             : ""}
         </p>
-        {detail && detail.recent_events.length > 0 ? (
+        {detail && detail.event_history.items.length > 0 ? (
           <ul>
-            {detail.recent_events.map((event) => (
+            {detail.event_history.items.map((event) => (
               <EventRow event={event} key={event.event_id} />
             ))}
           </ul>
@@ -1545,7 +1589,6 @@ function severitySummary(counts: Record<string, number>): string {
 function DatasetDrawer({
   selection,
   detail,
-  latestExecution,
   isLoading,
   isError,
   activePanel,
@@ -1554,23 +1597,42 @@ function DatasetDrawer({
 }: {
   selection: DatasetSelection;
   detail: OpsDatasetDetailData | null;
-  latestExecution: OpsDatasetLatestExecution | null;
   isLoading: boolean;
   isError: boolean;
   activePanel: DrawerPanel;
   onPanelChange: (panel: DrawerPanel) => void;
   onClose: () => void;
 }) {
-  const catalog = detail?.catalog ?? null;
-  const policyMutationBlockedReason = detail
-    ? detail.catalog_state !== "canonical"
+  const detailMatchesSelection = Boolean(
+    detail &&
+      detail.provider === selection.provider &&
+      detail.dataset_key === selection.datasetKey,
+  );
+  const verifiedDetail = detailMatchesSelection ? detail : null;
+  const [policyDetail, setPolicyDetail] = useState<OpsDatasetDetailData | null>(
+    verifiedDetail,
+  );
+  if (verifiedDetail && verifiedDetail !== policyDetail) {
+    setPolicyDetail(verifiedDetail);
+  }
+  const effectivePolicyDetail = verifiedDetail ?? policyDetail;
+  const catalog = effectivePolicyDetail?.catalog ?? null;
+  const policyMutationBlockedReason = isLoading
+    ? "선택 scope 상세를 확인하는 동안 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
+    : isError
+      ? "선택 scope 상세 조회에 실패해 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
+      : detail && !detailMatchesSelection
+        ? "상세 응답의 provider/dataset이 선택 행과 달라 정책 저장을 차단했습니다."
+      : !verifiedDetail
+        ? "상세 계약을 확인할 수 없어 정책 저장을 차단했습니다."
+        : verifiedDetail.catalog_state !== "canonical"
       ? `카탈로그 정본이 아닌 잔존 행이라 정책을 변경할 수 없습니다${
-          detail.orphan_reason ? ` (${detail.orphan_reason})` : ""
+          verifiedDetail.orphan_reason ? ` (${verifiedDetail.orphan_reason})` : ""
         }.`
-      : !detail.mutable
+      : !verifiedDetail.mutable
         ? "서버가 mutable=false로 표시한 행이라 정책 변경을 차단했습니다."
-        : null
-    : "상세 계약을 확인할 수 없어 정책 변경을 차단했습니다.";
+        : null;
+  const canRenderPanels = effectivePolicyDetail !== null;
   return (
     <div
       aria-label={`${selection.provider}/${selection.datasetKey} 상세`}
@@ -1645,15 +1707,15 @@ function DatasetDrawer({
           <XIcon />
         </Button>
       </div>
-      {detail && detail.schedule_source_status !== "ok" ? (
+      {verifiedDetail && verifiedDetail.schedule_source_status !== "ok" ? (
         <Alert
           className="mb-3"
           variant="destructive"
         >
           <AlertTitle>Dagster 스케줄 소스 이상</AlertTitle>
           <AlertDescription>
-            {(detail.schedule_source_errors ?? []).length > 0
-              ? (detail.schedule_source_errors ?? []).join(" / ")
+            {(verifiedDetail.schedule_source_errors ?? []).length > 0
+              ? (verifiedDetail.schedule_source_errors ?? []).join(" / ")
               : "스케줄 상태를 확인할 수 없습니다(degrade)."}
           </AlertDescription>
         </Alert>
@@ -1663,14 +1725,15 @@ function DatasetDrawer({
           detail={detail}
           detailError={isError}
           detailLoading={isLoading}
-          latestExecution={latestExecution}
+          key={`${selection.provider}/${selection.datasetKey}/${selection.syncScope}`}
           selection={selection}
         />
       </div>
       {isLoading ? <Skeleton className="h-64" /> : null}
-      {/* 상세가 로드된 뒤에만 패널을 mount한다 — PolicyEditor draft가 정책
-          prefill 없이 초기화되는 mount-before-data 경쟁 방지. */}
-      {detail ? (
+      {/* 정책은 provider/dataset 리소스다. 같은 pair의 exact scope 전환 동안
+          마지막 authoritative snapshot으로 editor mount만 유지하되, history와
+          action에는 이전 scope 상세를 절대 재사용하지 않는다. */}
+      {canRenderPanels ? (
         <Tabs
           value={activePanel}
           onValueChange={(value) => onPanelChange(panelValue(String(value)))}
@@ -1681,29 +1744,41 @@ function DatasetDrawer({
             <TabsTrigger value="preview">ETL 미리보기</TabsTrigger>
           </TabsList>
           <TabsContent value="history">
-            <HistoryPanel
-              detail={detail}
-              latestExecution={latestExecution}
-              selection={selection}
-            />
+            {verifiedDetail ? (
+              <HistoryPanel
+                detail={verifiedDetail}
+                key={`${selection.provider}/${selection.datasetKey}/${selection.syncScope}`}
+                selection={selection}
+              />
+            ) : (
+              <p className="text-[13px] text-text-secondary">
+                선택 scope의 상태·이력을 불러오는 중입니다.
+              </p>
+            )}
           </TabsContent>
           <TabsContent keepMounted value="policy">
-            {policyMutationBlockedReason ? (
-              <Alert data-testid="policy-readonly-alert" variant="destructive">
-                <AlertTitle>정책 변경 불가</AlertTitle>
-                <AlertDescription>{policyMutationBlockedReason}</AlertDescription>
-              </Alert>
-            ) : (
+            {effectivePolicyDetail ? (
               <PolicyEditor
                 datasetKey={selection.datasetKey}
                 key={`${selection.provider}/${selection.datasetKey}`}
-                policy={detail.refresh_policy ?? null}
+                mutationBlockedReason={policyMutationBlockedReason}
+                policy={effectivePolicyDetail.refresh_policy ?? null}
                 provider={selection.provider}
               />
-            )}
+            ) : null}
           </TabsContent>
           <TabsContent value="preview">
-            <PreviewPanel catalog={catalog} selection={selection} />
+            {verifiedDetail ? (
+              <PreviewPanel
+                catalog={catalog}
+                key={`${selection.provider}/${selection.datasetKey}/${selection.syncScope}`}
+                selection={selection}
+              />
+            ) : (
+              <p className="text-[13px] text-text-secondary">
+                선택 scope의 미리보기 capability를 확인하는 중입니다.
+              </p>
+            )}
           </TabsContent>
         </Tabs>
       ) : null}
@@ -1749,6 +1824,21 @@ export function DatasetsClient({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const focusReturnIdRef = useRef<string | null>(null);
   const focusReturnFrameRef = useRef<number | null>(null);
+
+  // provider/dataset이 완성되지 않은 URL의 scope는 어느 dataset 소유인지
+  // 증명할 수 없다. provider-only canonicalization보다 먼저 stale scope를
+  // 제거해 실제 catalog tuple을 확정한 뒤에만 상세와 mutation을 연다.
+  useEffect(() => {
+    if (!urlSyncScope || (urlProvider && urlDataset)) {
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("sync_scope");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  }, [pathname, router, searchParams, urlDataset, urlProvider, urlSyncScope]);
 
   // 마운트 1회: URL에 선택이 없고 initial* 딥링크 prop이 있으면 URL에 seed한다
   // (replace — history 추가 없이). 이후 선택 상태는 오직 URL query가 정본.
@@ -1859,14 +1949,6 @@ export function DatasetsClient({
     searchParams,
     selectionResolution.canonicalize,
   ]);
-
-  const activeRow = useMemo(
-    () =>
-      activeSelection
-        ? (items.find((row) => sameRow(row, activeSelection)) ?? null)
-        : null,
-    [activeSelection, items],
-  );
 
   const applySelection = useCallback(
     (next: DatasetSelection | null, panel?: DrawerPanel) => {
@@ -2321,8 +2403,7 @@ export function DatasetsClient({
                   detail={detail.data?.data ?? null}
                   isError={detail.isError}
                   isLoading={detail.isLoading}
-                  key={`${activeSelection.provider}/${activeSelection.datasetKey}/${activeSelection.syncScope}`}
-                  latestExecution={activeRow?.latest_execution ?? null}
+                  key={`${activeSelection.provider}/${activeSelection.datasetKey}`}
                   onClose={closeDetail}
                   onPanelChange={(panel) => applySelection(activeSelection, panel)}
                   selection={activeSelection}

@@ -935,6 +935,7 @@ CREATE TABLE ops.import_job_events (
   job_id      UUID NOT NULL REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE,
   provider    TEXT,
   dataset_key TEXT,
+  sync_scope  TEXT,
   feature_id  TEXT,
   stage       TEXT,
   level       TEXT NOT NULL, -- debug, info, warning, error, critical
@@ -944,7 +945,21 @@ CREATE TABLE ops.import_job_events (
   quarantined_at TIMESTAMPTZ,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ck_import_job_events_level
-    CHECK (level IN ('debug','info','warning','error','critical'))
+    CHECK (level IN ('debug','info','warning','error','critical')),
+  CONSTRAINT ck_import_job_events_provider_dataset_pair CHECK (
+    quarantined_at IS NOT NULL OR
+    ((provider IS NULL AND dataset_key IS NULL) OR
+     (provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' AND
+      dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) AND dataset_key <> ''))
+  ),
+  CONSTRAINT ck_import_job_events_sync_scope CHECK (
+    sync_scope IS NULL OR (
+      provider IS NOT NULL AND dataset_key IS NOT NULL AND
+      (sync_scope IN ('dataset_wide','target_grids') OR
+       (left(sync_scope, 16) = 'external_system:' AND
+        char_length(sync_scope) BETWEEN 17 AND 128))
+    )
+  )
 );
 
 CREATE INDEX idx_import_job_events_job_time
@@ -956,6 +971,12 @@ CREATE INDEX idx_import_job_events_provider_time
 CREATE INDEX idx_import_job_events_level_time
   ON ops.import_job_events (level, occurred_at DESC, event_id DESC)
   WHERE quarantined_at IS NULL;
+CREATE INDEX idx_import_job_events_provider_dataset_scope_time
+  ON ops.import_job_events (
+    provider, dataset_key, sync_scope, occurred_at DESC, event_id DESC
+  )
+  WHERE provider IS NOT NULL AND dataset_key IS NOT NULL
+    AND sync_scope IS NOT NULL AND quarantined_at IS NULL;
 
 CREATE TABLE ops.import_job_event_clock (
   clock_id  BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
@@ -969,6 +990,24 @@ CREATE TABLE ops.import_job_event_clock (
 migration이 격리한 component의 기존 event는 보존하되 같은 시각을 `quarantined_at`에 기록한다.
 이 marker는 migration 전용 불변값이며, 운영 조회와 모든 시간순 인덱스는
 `quarantined_at IS NULL`인 event만 대상으로 한다.
+
+0057부터 `sync_scope`는 모든 event에 억지 기본값을 붙이는 열이 아니다. 일반 import,
+schedule, orchestration event는 `NULL`을 유지한다. canonical direct
+`feature_update_request`의 provider/dataset event만 연결 job의 non-null typed
+`sync_scope`를 저장한다. BEFORE INSERT trigger가 owning job을 `FOR KEY SHARE`로 읽어
+provider/dataset/scope를 한 번에 복사하고 명시값이 다르면 거절한다. event의
+`job_id`/provider/dataset/scope identity는 INSERT 뒤 불변이다. 따라서 exact-scope 감사
+조회는 request/job을 다시 JOIN하거나 payload를 해석하지 않고 위 partial B-tree에서
+조건→keyset→LIMIT 순서로 읽는다. 0057 backfill도 visible canonical request/job pair의
+event scope만 채운다. 0052 relink writer가 남긴 visible event의 NULL provider/dataset pair는
+immutable owning job pair로 먼저 복구하고, partial pair나 서로 다른 pair는 추측하지 않고
+migration을 중단한다. 일반 event의 `sync_scope`와 격리 event는 `NULL`로 보존한다.
+0052가 이미 격리한 event는 당시의 비정규 pair를 감사 증거로 그대로 보존해야 하므로 pair
+constraint의 유일한 예외다. 신규 격리 marker는 migration 밖에서 만들 수 없고, 모든 visible
+INSERT는 trigger와 constraint를 함께 통과한다.
+`external_system:` 뒤 이름은 API strict parser와 같은 Unicode canonical whitespace 집합으로
+앞뒤 공백이 없는지 검사한다. 위 축약 DDL의 길이 조건만 만족하는 공백 이름도 실제 constraint는
+거부한다.
 
 `ops.import_job_event_clock`은 event INSERT/UPDATE/DELETE 성공 statement의 AFTER trigger가
 singleton `revision`을 한 번 올리는 live invalidation projection이다. 같은 row update가 동시 event
@@ -1291,13 +1330,11 @@ operation/event/state write 없이 기존 결과를 반환한다.
 client의 close가 실패해도 이미 발생한 typed provider failure나 `CancelledError` 같은
 `BaseException`을 close 오류로 바꾸지 않는다. primary 오류가 없을 때만 close 오류를 전파한다.
 
-0057 전까지 dataset 상세의 exact-scope event 이력은 event payload를 해석하거나 event table에
-scope를 복제하지 않는다. `ops.import_job_events → ops.import_jobs →
-ops.feature_update_requests` canonical pair를 JOIN하고 typed `import_jobs.sync_scope`를
-cursor/ORDER/LIMIT 전에 제한해 effective scope를 파생한다. event DTO의 `sync_scope`, 다음 cursor,
-canonical event history URL도 이 join-derived 결과다. 후속 C7B-API 0057이 event scope access
-path를 별도 열·제약으로 고정하기 전의 명시적 임시 경계이며, 본 변경은 0057 migration을 선점하지
-않는다.
+0057부터 dataset 상세의 exact-scope event 이력은
+`ops.import_job_events.sync_scope` partial B-tree를 직접 읽는다. 이 열은 canonical direct
+request event에만 non-null이므로 일반 job과 격리 event를 섞지 않는다. event cursor는
+job/level/provider/dataset/scope filter fingerprint를 포함하고, 다른 filter에서 재사용하면
+DB 조회 전에 거부한다.
 
 queued/running direct job에는 `(provider, dataset_key, sync_scope)` partial unique index
 `uq_import_jobs_active_feature_update_scope`를 적용한다. 같은 identity의 계획이 scope/filter/policy/
@@ -1753,6 +1790,16 @@ branch 또는 standalone partition의 canonical root를 한 번만 세며, MCST 
 `projected_job`은 UUID 순서로 고른 임의 pair child가 아니라 root 자체로 고정하고 pair별 상태는
 `provider_datasets[]`에서만 읽는다.
 
+0057의 datasets grid/detail은 이 공용 root projection을 한 SQL snapshot으로 읽고 exact
+`(provider, dataset_key, sync_scope)`별 `pair.status`를 `queued|running` 활성 그룹과
+`done|failed|cancelled` 종료 그룹으로 나눈다. 각 그룹에서
+`(created_at DESC, id DESC, kind DESC)` 첫 행을 선택하므로, 더 최근 종료 실행 때문에 아직
+살아 있는 실행이 가려지거나 반대로 활성 실행 때문에 마지막 완료 결과가 사라지지 않는다.
+논리 `dataset_wide`만 같은 snapshot의 typed `dataset_wide`와 과거 nullable pair를 각각 비교해
+더 최신 값을 고른다. 실행 이력 cursor v3는 kind/status/provider/dataset/scope 집합,
+load batch/parent job, created 시간 범위의 fingerprint를 포함한다. 페이지 사이에 어느 filter라도
+바뀌면 SQL을 실행하기 전에 typed mismatch로 거부한다.
+
 0051은 다음 nullable 실컬럼과 제약을 추가한다.
 
 ```sql
@@ -1935,15 +1982,16 @@ CREATE INDEX idx_import_jobs_provider_created
 provider/dataset `TEXT[]`에 GIN seed access path를 추가한다. exact/direct pair는 별도
 expression index 없이 위 0051 typed job index만 쓴다. seed job에서 `parent_job_id` PK/FK index를 양방향으로 따라
 connected component를 만든 뒤 그 component의 request만 공용 canonical projection에 공급한다.
-event는 projection에서 읽지 않는다. event의 migration-owned `quarantined_at` marker와 여섯
+event는 projection에서 읽지 않는다. event의 migration-owned `quarantined_at` marker와
 visible-only partial index는 각각 무필터→`idx_import_job_events_time`, job→
-`idx_import_job_events_job_time`, provider→`idx_import_job_events_provider_time`, dataset→
-`idx_import_job_events_dataset_time`, provider+dataset exact pair→
+`idx_import_job_events_job_time`, provider→`idx_import_job_events_provider_time`, provider+dataset exact pair→
 `idx_import_job_events_provider_dataset_time`, level→`idx_import_job_events_level_time` 감사
 타임라인을 담당하며 identity seed가 아니다. 모든 조합은 `quarantined_at IS NULL`을 event에
 직접 적용한다. Parent 상태를 page-time에 join하지 않으므로 최신 격리 event 수와 무관하게
 page 크기만큼 bounded scan을 유지한다. 감사 조회는 filter가 실제로 있을 때만 해당 고정
 predicate를 SQL에 넣어 prepared/generic plan에서도 partial index를 쓸 수 있게 한다.
+0057부터 provider namespace 밖에서 의미가 없는 dataset-only event 조회를 repository와 REST가
+거부하고 `idx_import_job_events_dataset_time`도 제거해 append 쓰기 증폭을 줄인다.
 
 또한 `feature_update_requests.job_id`를 `NOT NULL ON DELETE RESTRICT`로 바꾸고 direct scope와
 provider/dataset filter shape CHECK, request/canonical job kind·pair 교차검증 trigger, 전역

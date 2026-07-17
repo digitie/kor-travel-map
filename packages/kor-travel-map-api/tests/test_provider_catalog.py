@@ -75,8 +75,8 @@ def test_dataset_history_scope_aliases_are_canonical_and_fail_closed() -> None:
     assert resolve_dataset_history_sync_scopes(
         "python-mois-api",
         "mois_license_features_bulk",
-        "default",
-    ) == ("default", "dataset_wide", None)
+        "dataset_wide",
+    ) == ("dataset_wide", None)
     assert resolve_dataset_history_sync_scopes(
         "python-kma-api",
         "kma_short_forecast",
@@ -85,13 +85,15 @@ def test_dataset_history_scope_aliases_are_canonical_and_fail_closed() -> None:
     assert resolve_dataset_history_sync_scopes(
         "removed-provider",
         "removed-dataset",
-        "default",
-    ) == ("default", "dataset_wide", None)
-    assert resolve_dataset_history_sync_scopes(
-        "removed-provider",
-        "removed-dataset",
-        "legacy-scope",
-    ) == ("legacy-scope",)
+        "dataset_wide",
+    ) == ("dataset_wide", None)
+    for invalid_scope in ("default", "legacy-scope", " external_system:x"):
+        with pytest.raises(ValueError, match="sync_scope|external_system"):
+            resolve_dataset_history_sync_scopes(
+                "removed-provider",
+                "removed-dataset",
+                invalid_scope,
+            )
 
 
 @pytest.mark.unit

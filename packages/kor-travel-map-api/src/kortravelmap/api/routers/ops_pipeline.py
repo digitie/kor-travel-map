@@ -21,10 +21,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     get_update_request,
@@ -270,6 +272,9 @@ class PipelineExecutionsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[PipelineExecutionRootRecord]
+    canonical_url: str = Field(
+        description="cursor를 제외한 현재 실행 filter의 첫 page canonical URL."
+    )
 
 
 class PipelineExecutionsListResponse(BaseModel):
@@ -366,6 +371,9 @@ class PipelineEventsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[PipelineJobEventRecord]
+    canonical_url: str = Field(
+        description="cursor를 제외한 현재 event filter의 첫 page canonical URL."
+    )
 
 
 class PipelineEventsListResponse(BaseModel):
@@ -714,6 +722,40 @@ query KorTravelMapPipelineSchedules {
 
 def _execution_detail_url(kind: str, execution_id: str) -> str:
     return f"{_EXECUTIONS_URL_PREFIX}/{kind}/{execution_id}"
+
+
+def _canonical_list_url(
+    path: str,
+    parameters: tuple[tuple[str, object | None], ...],
+) -> str:
+    query = urlencode(
+        [
+            (
+                name,
+                value.isoformat() if isinstance(value, datetime) else str(value),
+            )
+            for name, value in parameters
+            if value is not None
+        ],
+        quote_via=quote,
+    )
+    return f"{path}?{query}" if query else path
+
+
+def _canonical_dataset_filter(
+    *,
+    provider: str | None,
+    dataset_key: str | None,
+    sync_scope: str | None,
+) -> str | None:
+    """provider-only는 허용하고 불완전한 dataset/scope tuple은 거부한다."""
+    if dataset_key is not None and provider is None:
+        raise ValueError("dataset_key requires provider")
+    if sync_scope is None:
+        return None
+    if provider is None or dataset_key is None:
+        raise ValueError("sync_scope requires both provider and dataset_key")
+    return parse_canonical_sync_scope(sync_scope).value
 
 
 def _projected_job_record(row: PipelineProjectedJob) -> PipelineProjectedJobRecord:
@@ -1114,8 +1156,8 @@ async def list_executions(
     session: Annotated[AsyncSession, Depends(get_session)],
     kind: Annotated[ExecutionKind | None, Query()] = None,
     status_filter: Annotated[ExecutionState | None, Query(alias="status")] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
+    provider: Annotated[str | None, Query(min_length=1)] = None,
+    dataset_key: Annotated[str | None, Query(min_length=1)] = None,
     sync_scope: Annotated[
         str | None,
         Query(
@@ -1135,14 +1177,19 @@ async def list_executions(
 ) -> PipelineExecutionsListResponse:
     started_at = perf_counter()
     try:
+        canonical_sync_scope = _canonical_dataset_filter(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+        )
         dataset_sync_scopes = None
-        if sync_scope is not None:
-            if provider is None or dataset_key is None:
-                raise ValueError("sync_scope requires both provider and dataset_key")
+        if canonical_sync_scope is not None:
+            assert provider is not None
+            assert dataset_key is not None
             dataset_sync_scopes = resolve_dataset_history_sync_scopes(
                 provider,
                 dataset_key,
-                sync_scope,
+                canonical_sync_scope,
             )
         page = await list_pipeline_executions(
             session,
@@ -1159,10 +1206,27 @@ async def list_executions(
             cursor=cursor,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     return PipelineExecutionsListResponse(
         data=PipelineExecutionsData(
             items=[_record_from_execution(item) for item in page.items],
+            canonical_url=_canonical_list_url(
+                "/v1/ops/pipeline/executions",
+                (
+                    ("kind", kind),
+                    ("status", status_filter),
+                    ("provider", provider),
+                    ("dataset_key", dataset_key),
+                    ("sync_scope", canonical_sync_scope),
+                    ("load_batch_id", load_batch_id),
+                    ("parent_job_id", parent_job_id),
+                    ("created_from", created_from),
+                    ("created_to", created_to),
+                ),
+            ),
         ),
         meta=make_meta(
             started_at=started_at,
@@ -1340,28 +1404,48 @@ async def list_pipeline_events(
     session: Annotated[AsyncSession, Depends(get_session)],
     job_id: Annotated[UUID | None, Query()] = None,
     level: Annotated[JobEventLevel | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
-    sync_scope: Annotated[str | None, Query()] = None,
+    provider: Annotated[str | None, Query(min_length=1)] = None,
+    dataset_key: Annotated[str | None, Query(min_length=1)] = None,
+    sync_scope: Annotated[str | None, Query(min_length=1)] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PipelineEventsListResponse:
     started_at = perf_counter()
     try:
+        canonical_sync_scope = _canonical_dataset_filter(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+        )
         page = await list_ops_import_job_events(
             session,
             str(job_id) if job_id is not None else None,
             level=level,
             provider=provider,
             dataset_key=dataset_key,
-            sync_scope=sync_scope,
+            sync_scope=canonical_sync_scope,
             limit=page_size,
             cursor=cursor,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     return PipelineEventsListResponse(
-        data=PipelineEventsData(items=[_event_record(item) for item in page.items]),
+        data=PipelineEventsData(
+            items=[_event_record(item) for item in page.items],
+            canonical_url=_canonical_list_url(
+                "/v1/ops/pipeline/events",
+                (
+                    ("job_id", job_id),
+                    ("level", level),
+                    ("provider", provider),
+                    ("dataset_key", dataset_key),
+                    ("sync_scope", canonical_sync_scope),
+                ),
+            ),
+        ),
         meta=make_meta(
             started_at=started_at,
             page_size=page_size,

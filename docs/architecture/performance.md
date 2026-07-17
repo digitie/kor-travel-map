@@ -702,12 +702,14 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_import_job_events_job_time(job_id, occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_provider_time(provider, occurred_at DESC, event_id DESC)`
     partial `provider IS NOT NULL AND quarantined_at IS NULL`
-  - `idx_import_job_events_dataset_time(dataset_key, occurred_at DESC, event_id DESC)`
-    partial `dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_provider_dataset_time(provider, dataset_key, occurred_at DESC,
     event_id DESC)` partial
     `provider IS NOT NULL AND dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_level_time(level, occurred_at DESC, event_id DESC)`
+  - `idx_import_job_events_provider_dataset_scope_time(provider, dataset_key,
+    sync_scope, occurred_at DESC, event_id DESC)` partial
+    `provider IS NOT NULL AND dataset_key IS NOT NULL AND sync_scope IS NOT NULL
+    AND quarantined_at IS NULL`
 
   모든 event 시간순 인덱스는 `quarantined_at IS NULL` partial predicate를 가진다. 0052에서
   격리한 기존 event는 보존하되 marker를 비정규화하므로, 조회 시 parent job을 join하거나 최신
@@ -771,10 +773,19 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   event의 provider/dataset은 감사 API filter 메타데이터다. 감사 목록 SQL은 nullable-OR 한 문장을
   쓰지 않고 실제 입력 filter의 고정 clause만 bind와 함께 조합한다. 대표 REST filter와 인덱스는
   무필터→`idx_import_job_events_time`, job→`idx_import_job_events_job_time`, provider→
-  `idx_import_job_events_provider_time`, dataset→`idx_import_job_events_dataset_time`,
+  `idx_import_job_events_provider_time`,
   provider+dataset exact pair→`idx_import_job_events_provider_dataset_time`, level→
-  `idx_import_job_events_level_time`이다. 모든 조합은 event의 `quarantined_at IS NULL`을 직접
-  포함한다. projection seed용 event index는 두지 않는다.
+  `idx_import_job_events_level_time`, canonical exact scope→
+  `idx_import_job_events_provider_dataset_scope_time`이다. 모든 조합은 event의
+  `quarantined_at IS NULL`을 직접 포함한다. 0057의 scope 조회는 nullable-OR나
+  request/job JOIN을 쓰지 않고 `provider/dataset/sync_scope IS NOT NULL` partial predicate를
+  그대로 넣은 뒤 `(occurred_at,event_id)` keyset과 LIMIT를 적용한다. job 단건처럼 후보가
+  64건 이하인 작은 결과에서는 planner가 같은
+  자연키 index의 bounded bitmap scan + bounded sort를 고를 수 있으며 이를 회귀로
+  허용한다. exact-scope hot path는 sort 없는 ordered index scan을 유지한다.
+  dataset key는 provider namespace에 속하므로 dataset-only event filter는 `422`/`ValueError`로
+  거부한다. 0057은 더 이상 읽기 경로가 없는 `idx_import_job_events_dataset_time`을 제거한다.
+  projection seed용 event index는 두지 않는다.
 
 ### 14.3 회귀 테스트
 
@@ -805,14 +816,21 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
   `UNION ALL` 후보 집합으로 구성한다. 각 전용 index를 EXPLAIN하고, 1,000개
   이상의 root와 multi-pair child에서도 grid latest 누락 0, overview count의 child fan-out 0,
   pipeline/detail cursor 누락·중복 0을 검증한다.
+- datasets grid/detail의 실행 상태는 scope마다 별도 쿼리를 보내지 않는다. 공용 root CTE를
+  한 번 실행한 snapshot 안에서 exact pair의 활성/종료 boolean partition별 `row_number=1`만
+  반환한다. 회귀 테스트는 동일 scope의 종료 root와 더 최신 활성 root가 동시에 보존되고,
+  repository 호출이 SQL 한 번으로 끝나는지 검증한다. 실행 이력 후속 cursor는 전체 filter
+  fingerprint가 같을 때만 DB에 도달한다.
 - feature update queue는 request 테이블에 lifecycle 상태를 복제하지 않는다. partial
   `idx_import_jobs_feature_update_queue`로 queued canonical job만 seed한 뒤 unique `job_id`로 request를
   JOIN하고 priority를 정렬한다. 완료 이력이 늘어나도 request history 전체를 순회하지 않는지 natural
   planner EXPLAIN으로 검증한다.
 - event 감사 조회는 same-dataset/different-provider 4,000행과
-  same-provider/different-dataset 4,000행을 둔 natural planner에서 무필터·dataset-only·exact pair의
+  same-provider/different-dataset 4,000행을 둔 natural planner에서 무필터·provider-only·exact pair의
   첫/후속 page가 각 시간순 index를 사용하고 Seq Scan·Sort·64행 초과 residual을 만들지 않는지
-  검증한다.
+  검증한다. 0057 exact-scope 회귀는 같은 provider/dataset의 서로 다른 canonical scope를
+  각각 4,000행 넣고 첫/후속 page가 scope partial index를 사용하며 Seq Scan·Sort 없이
+  64행 이내에서 멈추는지도 별도로 검증한다.
 
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,

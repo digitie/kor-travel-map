@@ -105,7 +105,7 @@ _RETURN_COLUMNS: Final[str] = (
 )
 
 _EVENT_RETURN_COLUMNS: Final[str] = (
-    "event_id, job_id, provider, dataset_key, feature_id, stage, level, code, "
+    "event_id, job_id, provider, dataset_key, sync_scope, feature_id, stage, level, code, "
     "message, payload, occurred_at"
 )
 
@@ -152,6 +152,7 @@ class ImportJobEvent:
     job_id: str
     provider: str | None
     dataset_key: str | None
+    sync_scope: str | None
     feature_id: str | None
     stage: str | None
     level: str
@@ -212,6 +213,7 @@ def _row_to_event(row: Any) -> ImportJobEvent:
         job_id=str(row.job_id),
         provider=row.provider,
         dataset_key=row.dataset_key,
+        sync_scope=row.sync_scope,
         feature_id=row.feature_id,
         stage=row.stage,
         level=str(row.level),

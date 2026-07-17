@@ -20,6 +20,7 @@ from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.infra.ops_repo import (
+    OpsCursorFilterMismatch,
     OpsImportJob,
     OpsImportJobEvent,
     OpsImportJobEventPage,
@@ -32,6 +33,7 @@ from kortravelmap.infra.pipeline_cancellation_types import (
     PipelineCancellationSummary,
 )
 from kortravelmap.infra.pipeline_repo import (
+    PipelineCursorFilterMismatch,
     PipelineExecution,
     PipelineExecutionPage,
     PipelineProjectedJob,
@@ -375,7 +377,7 @@ def _update_request(
             "type": "provider_dataset",
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
-            "sync_scope": "default",
+            "sync_scope": "dataset_wide",
         },
         providers=(),
         dataset_keys=(),
@@ -530,7 +532,7 @@ def _execution(
             PipelineProviderDatasetIdentity(
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
-                sync_scope="default",
+                sync_scope="dataset_wide",
                 operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
@@ -703,6 +705,12 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "sync_scope" in {parameter["name"] for parameter in event_params}
     event_record = spec["components"]["schemas"]["PipelineJobEventRecord"]
     assert "sync_scope" in event_record["required"]
+    assert "canonical_url" in spec["components"]["schemas"][
+        "PipelineExecutionsData"
+    ]["required"]
+    assert "canonical_url" in spec["components"]["schemas"][
+        "PipelineEventsData"
+    ]["required"]
     # 갱신 요청 생성은 기존 6-type scope union 계약을 그대로 공유한다.
     request_schema = spec["components"]["schemas"]["FeatureUpdateRequestCreateRequest"]
     assert len(request_schema["properties"]["scope"]["oneOf"]) == 6
@@ -1115,7 +1123,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "status": "running",
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
-            "sync_scope": "default",
+            "sync_scope": "dataset_wide",
             "load_batch_id": "33333333-3333-3333-3333-333333333333",
             "parent_job_id": "44444444-4444-4444-4444-444444444444",
             "created_from": "2026-07-01T00:00:00Z",
@@ -1129,7 +1137,6 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert captured["provider"] == MOIS_PROVIDER_NAME
     assert captured["dataset_key"] == DATASET_KEY_BULK
     assert captured["dataset_sync_scopes"] == (
-        "default",
         "dataset_wide",
         None,
     )
@@ -1138,6 +1145,14 @@ def test_executions_list_passes_filters_and_maps_rows(
     assert captured["limit"] == 2
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "cursor-next"
+    assert body["data"]["canonical_url"] == (
+        "/v1/ops/pipeline/executions?kind=import_job&status=running&"
+        f"provider={MOIS_PROVIDER_NAME}&dataset_key={DATASET_KEY_BULK}&"
+        "sync_scope=dataset_wide&"
+        "load_batch_id=33333333-3333-3333-3333-333333333333&"
+        "parent_job_id=44444444-4444-4444-4444-444444444444&"
+        "created_from=2026-07-01T00%3A00%3A00%2B00%3A00"
+    )
     items = body["data"]["items"]
     assert [item["kind"] for item in items] == ["import_job", "update_request"]
     assert items[0]["detail_url"] == (
@@ -1156,7 +1171,7 @@ def test_executions_list_passes_filters_and_maps_rows(
         {
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
-            "sync_scope": "default",
+            "sync_scope": "dataset_wide",
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -1170,24 +1185,72 @@ def test_executions_list_invalid_cursor_maps_to_422(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _fake_list(_session: Any, **_kwargs: Any) -> PipelineExecutionPage:
-        raise ValueError("invalid pipeline_executions cursor")
+        raise PipelineCursorFilterMismatch("pipeline cursor filter mismatch")
 
     monkeypatch.setattr(pipeline_mod, "list_pipeline_executions", _fake_list)
 
     response = client.get("/v1/ops/pipeline/executions?cursor=broken")
 
     assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit
 def test_executions_list_scope_requires_provider_and_dataset(client: TestClient) -> None:
     response = client.get(
         "/v1/ops/pipeline/executions",
-        params={"provider": MOIS_PROVIDER_NAME, "sync_scope": "default"},
+        params={"provider": MOIS_PROVIDER_NAME, "sync_scope": "dataset_wide"},
     )
 
     assert response.status_code == 422
     assert "sync_scope requires both provider and dataset_key" in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"dataset_key": DATASET_KEY_BULK},
+        {
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "default",
+        },
+        {
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": " external_system:x",
+        },
+    ],
+)
+def test_executions_list_rejects_incomplete_or_noncanonical_tuple(
+    client: TestClient,
+    params: dict[str, str],
+) -> None:
+    response = client.get("/v1/ops/pipeline/executions", params=params)
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+@pytest.mark.unit
+def test_executions_provider_only_returns_canonical_url(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _empty(_session: Any, **_kwargs: Any) -> PipelineExecutionPage:
+        return PipelineExecutionPage(items=(), next_cursor=None)
+
+    monkeypatch.setattr(pipeline_mod, "list_pipeline_executions", _empty)
+    response = client.get(
+        "/v1/ops/pipeline/executions",
+        params={"provider": "provider/with slash"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["canonical_url"] == (
+        "/v1/ops/pipeline/executions?provider=provider%2Fwith%20slash"
+    )
 
 
 @pytest.mark.unit
@@ -1646,6 +1709,11 @@ def test_events_global_list_passes_filters(
     assert captured["limit"] == 10
     body = response.json()
     assert body["meta"]["page"]["next_cursor"] == "ev-next"
+    assert body["data"]["canonical_url"] == (
+        "/v1/ops/pipeline/events?level=error&"
+        f"provider={MOIS_PROVIDER_NAME}&dataset_key={DATASET_KEY_BULK}&"
+        "sync_scope=dataset_wide"
+    )
     assert body["data"]["items"][0]["code"] == "provider.timeout"
     assert body["data"]["items"][0]["sync_scope"] == "dataset_wide"
 
@@ -1667,7 +1735,53 @@ def test_events_sync_scope_without_provider_dataset_pair_is_422(
     )
 
     assert response.status_code == 422
-    assert "requires provider and dataset_key" in response.text
+    assert "requires both provider and dataset_key" in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"dataset_key": DATASET_KEY_BULK},
+        {
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "default",
+        },
+        {
+            "provider": MOIS_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_BULK,
+            "sync_scope": "external_system:",
+        },
+    ],
+)
+def test_events_reject_incomplete_or_noncanonical_tuple(
+    client: TestClient,
+    params: dict[str, str],
+) -> None:
+    response = client.get("/v1/ops/pipeline/events", params=params)
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+@pytest.mark.unit
+def test_events_filter_bound_cursor_mismatch_is_typed_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _events(*_args: Any, **_kwargs: Any) -> OpsImportJobEventPage:
+        raise OpsCursorFilterMismatch("import_job_events cursor filter mismatch")
+
+    monkeypatch.setattr(pipeline_mod, "list_ops_import_job_events", _events)
+    response = client.get(
+        "/v1/ops/pipeline/events",
+        params={"provider": MOIS_PROVIDER_NAME, "cursor": "different-filter"},
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit

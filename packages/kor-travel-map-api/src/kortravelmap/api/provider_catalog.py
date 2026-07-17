@@ -36,6 +36,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from kortravelmap.core.sync_scope import (
+    DATASET_WIDE_SYNC_SCOPE,
+    parse_canonical_sync_scope,
+)
 from kortravelmap.enrichment import ENRICHMENT_DATASET_KEY
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -602,18 +606,16 @@ def resolve_dataset_history_sync_scopes(
     dataset_key: str,
     sync_scope: str,
 ) -> tuple[str | None, ...]:
-    """UI의 논리 state scope를 canonical operation pair scope로 변환한다.
+    """API의 canonical logical scope를 operation pair scope로 변환한다.
 
     선택형 target scope는 exact 값 하나만 허용한다. selector가 없는 일반 dataset의
-    기본 provider-state scope는 현재 typed ``dataset_wide``와 과거 NULL pair를 같은
-    논리 이력으로 묶는다. 카탈로그에서 제거된 기본 scope도 상태 가시성을 위해 같은
-    세 값을 조회하되, 다른 orphan scope에는 unscoped 이력을 추측하지 않는다.
+    ``dataset_wide``는 typed pair와 NULL pair를 같은 논리 이력으로 묶는다. 내부
+    provider-state namespace인 ``default``는 API identity나 URL로 노출하지 않는다.
     """
+    canonical_scope = parse_canonical_sync_scope(sync_scope).value
     entry = find_catalog_entry(provider, dataset_key)
-    if (
-        entry is not None
-        and entry.scope_refresh_selector == "none"
-        and sync_scope == entry.sync_scope
-    ) or (entry is None and sync_scope == "default"):
-        return (sync_scope, "dataset_wide", None)
-    return (sync_scope,)
+    if canonical_scope == DATASET_WIDE_SYNC_SCOPE and (
+        entry is None or entry.scope_refresh_selector == "none"
+    ):
+        return (DATASET_WIDE_SYNC_SCOPE, None)
+    return (canonical_scope,)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from kortravelmap.core.pipeline_cancellation_states import PipelineCancellationStatus
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.pipeline_cancellation_repo import PipelineCancellationSummary
 from kortravelmap.infra.pipeline_lineage import (
     PIPELINE_LINEAGE_BODY_SQL,
@@ -34,12 +36,15 @@ __all__ = [
     "PipelineExecution",
     "PipelineExecutionPage",
     "PipelineDatasetLatestExecution",
+    "PipelineDatasetExecutionSnapshot",
+    "PipelineCursorFilterMismatch",
     "PipelineProviderDatasetIdentity",
     "PipelineProjectedJob",
     "PipelineStatusCounts",
     "get_pipeline_status_counts",
     "get_pipeline_execution",
     "list_latest_dataset_pipeline_executions",
+    "list_dataset_pipeline_execution_snapshots",
     "list_pipeline_executions",
 ]
 
@@ -141,6 +146,55 @@ class PipelineDatasetLatestExecution:
     pair_status: str
 
 
+@dataclass(frozen=True)
+class PipelineDatasetExecutionSnapshot:
+    """동일 DB snapshot에서 읽은 exact scope의 종료/활성 실행."""
+
+    provider: str
+    dataset_key: str
+    sync_scope: str | None
+    latest_terminal: PipelineDatasetLatestExecution | None
+    active: PipelineDatasetLatestExecution | None
+
+
+class PipelineCursorFilterMismatch(ValueError):
+    """다른 filter 집합에서 발급한 실행 cursor를 재사용했다."""
+
+
+def _filter_fingerprint(
+    *,
+    kind: str | None = None,
+    status: str | None = None,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+    sync_scopes: tuple[str, ...] = (),
+    include_unscoped_scope: bool = False,
+    filter_sync_scopes: bool = False,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+) -> str:
+    payload = {
+        "kind": kind,
+        "status": status,
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "sync_scopes": sorted(sync_scopes),
+        "include_unscoped_scope": include_unscoped_scope,
+        "filter_sync_scopes": filter_sync_scopes,
+        "load_batch_id": load_batch_id,
+        "parent_job_id": parent_job_id,
+        "created_from": created_from.isoformat() if created_from is not None else None,
+        "created_to": created_to.isoformat() if created_to is not None else None,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+_EMPTY_FILTER_FINGERPRINT: Final[str] = _filter_fingerprint()
+
+
 def _limit(value: int) -> int:
     if value <= 0:
         raise ValueError("limit must be greater than 0")
@@ -159,7 +213,13 @@ def _json_list(value: Any) -> list[Any]:
     return list(value) if value else []
 
 
-def _encode_cursor(*, at: datetime, key: str, item_kind: str) -> str:
+def _encode_cursor(
+    *,
+    at: datetime,
+    key: str,
+    item_kind: str,
+    filter_fingerprint: str = _EMPTY_FILTER_FINGERPRINT,
+) -> str:
     if item_kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
     try:
@@ -168,8 +228,9 @@ def _encode_cursor(*, at: datetime, key: str, item_kind: str) -> str:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
     raw = json.dumps(
         {
-            "v": 2,
+            "v": 3,
             "cursor": _CURSOR_KIND,
+            "filters": filter_fingerprint,
             "at": at.isoformat(),
             "id": cursor_id,
             "item_kind": item_kind,
@@ -181,6 +242,8 @@ def _encode_cursor(*, at: datetime, key: str, item_kind: str) -> str:
 
 def _decode_cursor(
     cursor: str | None,
+    *,
+    filter_fingerprint: str = _EMPTY_FILTER_FINGERPRINT,
 ) -> tuple[datetime | None, str | None, str | None]:
     if cursor is None:
         return None, None, None
@@ -191,8 +254,12 @@ def _decode_cursor(
         raise ValueError(f"invalid {_CURSOR_KIND} cursor") from exc
     if not isinstance(payload, dict):
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
-    if payload.get("v") != 2 or payload.get("cursor") != _CURSOR_KIND:
+    if payload.get("v") != 3 or payload.get("cursor") != _CURSOR_KIND:
         raise ValueError(f"invalid {_CURSOR_KIND} cursor")
+    if payload.get("filters") != filter_fingerprint:
+        raise PipelineCursorFilterMismatch(
+            f"{_CURSOR_KIND} cursor does not match the current filters"
+        )
     try:
         at = datetime.fromisoformat(str(payload["at"]))
         if at.utcoffset() is None:
@@ -1016,26 +1083,7 @@ FROM status_counts
 """
 )
 
-_LIST_LATEST_DATASET_EXECUTIONS_SQL: Final[str] = (
-    "WITH RECURSIVE\n"
-    + _PIPELINE_ROOT_CTES_SQL
-    + """,
-ranked_dataset_roots AS (
-    SELECT
-        root.*,
-        pair.provider AS selected_provider,
-        pair.dataset_key AS selected_dataset_key,
-        pair.sync_scope AS selected_sync_scope,
-        pair.operation_member_id AS selected_operation_member_id,
-        pair.status AS selected_pair_status,
-        ROW_NUMBER() OVER (
-            PARTITION BY pair.provider, pair.dataset_key, pair.sync_scope
-            ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
-        ) AS dataset_rank
-    FROM roots_with_identity AS root
-    JOIN canonical_provider_datasets AS pair
-      ON pair.root_kind = root.kind AND pair.root_id = root.id
-)
+_DATASET_EXECUTION_RESULT_SQL: Final[str] = """
 SELECT
     page.kind, page.id, page.status, page.created_at,
     page.effective_providers AS providers,
@@ -1057,6 +1105,7 @@ SELECT
     page.projected_depth,
     page.selected_provider, page.selected_dataset_key, page.selected_sync_scope,
     page.selected_operation_member_id, page.selected_pair_status,
+    page.selected_is_active,
     cancellation.cancellation_id,
     cancellation.cancellation_status,
     cancellation.cancellation_requested_at,
@@ -1088,8 +1137,65 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) AS cancellation ON true
 WHERE page.dataset_rank = 1
-ORDER BY page.selected_provider, page.selected_dataset_key
+ORDER BY
+    page.selected_provider,
+    page.selected_dataset_key,
+    page.selected_sync_scope NULLS FIRST,
+    page.selected_is_active
 """
+
+_LIST_LATEST_DATASET_EXECUTIONS_SQL: Final[str] = (
+    "WITH RECURSIVE\n"
+    + _PIPELINE_ROOT_CTES_SQL
+    + """,
+ranked_dataset_roots AS (
+    SELECT
+        root.*,
+        pair.provider AS selected_provider,
+        pair.dataset_key AS selected_dataset_key,
+        pair.sync_scope AS selected_sync_scope,
+        pair.operation_member_id AS selected_operation_member_id,
+        pair.status AS selected_pair_status,
+        pair.status IN ('queued', 'running') AS selected_is_active,
+        ROW_NUMBER() OVER (
+            PARTITION BY pair.provider, pair.dataset_key, pair.sync_scope
+            ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
+        ) AS dataset_rank
+    FROM roots_with_identity AS root
+    JOIN canonical_provider_datasets AS pair
+      ON pair.root_kind = root.kind AND pair.root_id = root.id
+)
+"""
+    + _DATASET_EXECUTION_RESULT_SQL
+)
+
+_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL: Final[str] = (
+    "WITH RECURSIVE\n"
+    + _PIPELINE_ROOT_CTES_SQL
+    + """,
+ranked_dataset_roots AS (
+    SELECT
+        root.*,
+        pair.provider AS selected_provider,
+        pair.dataset_key AS selected_dataset_key,
+        pair.sync_scope AS selected_sync_scope,
+        pair.operation_member_id AS selected_operation_member_id,
+        pair.status AS selected_pair_status,
+        pair.status IN ('queued', 'running') AS selected_is_active,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                pair.provider,
+                pair.dataset_key,
+                pair.sync_scope,
+                (pair.status IN ('queued', 'running'))
+            ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
+        ) AS dataset_rank
+    FROM roots_with_identity AS root
+    JOIN canonical_provider_datasets AS pair
+      ON pair.root_kind = root.kind AND pair.root_id = root.id
+)
+"""
+    + _DATASET_EXECUTION_RESULT_SQL
 )
 
 _GET_EXECUTION_SQL: Final[str] = (
@@ -1304,12 +1410,34 @@ async def list_pipeline_executions(
     except (TypeError, ValueError) as exc:
         raise ValueError("parent_job_id must be a UUID") from exc
     sync_scopes = tuple(
-        dict.fromkeys(scope for scope in (dataset_sync_scopes or ()) if scope is not None)
+        dict.fromkeys(
+            parse_canonical_sync_scope(scope).value
+            for scope in (dataset_sync_scopes or ())
+            if scope is not None
+        )
     )
-    include_unscoped_scope = bool(dataset_sync_scopes is not None and None in dataset_sync_scopes)
+    include_unscoped_scope = bool(
+        dataset_sync_scopes is not None and None in dataset_sync_scopes
+    )
     filter_sync_scopes = dataset_sync_scopes is not None
     page_size = _limit(limit)
-    cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(cursor)
+    filter_fingerprint = _filter_fingerprint(
+        kind=kind,
+        status=status,
+        provider=provider,
+        dataset_key=dataset_key,
+        sync_scopes=sync_scopes,
+        include_unscoped_scope=include_unscoped_scope,
+        filter_sync_scopes=filter_sync_scopes,
+        load_batch_id=normalized_load_batch_id,
+        parent_job_id=normalized_parent_job_id,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    cursor_created_at, cursor_id, cursor_item_kind = _decode_cursor(
+        cursor,
+        filter_fingerprint=filter_fingerprint,
+    )
     if normalized_load_batch_id is not None or normalized_parent_job_id is not None:
         query = _LIST_MEMBERSHIP_EXECUTIONS_SQL
     elif provider is None and dataset_key is None:
@@ -1344,6 +1472,7 @@ async def list_pipeline_executions(
             at=items[-1].created_at,
             key=items[-1].id,
             item_kind=items[-1].kind,
+            filter_fingerprint=filter_fingerprint,
         )
         if len(rows) > page_size and items
         else None
@@ -1368,16 +1497,45 @@ async def list_latest_dataset_pipeline_executions(
 ) -> tuple[PipelineDatasetLatestExecution, ...]:
     """모든 exact pair의 최신 canonical root를 단일 batch query로 반환한다."""
     rows = (await session.execute(text(_LIST_LATEST_DATASET_EXECUTIONS_SQL))).all()
+    return tuple(_row_to_dataset_execution(row) for row in rows)
+
+
+def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
+    return PipelineDatasetLatestExecution(
+        provider=str(row.selected_provider),
+        dataset_key=str(row.selected_dataset_key),
+        sync_scope=(
+            str(row.selected_sync_scope) if row.selected_sync_scope is not None else None
+        ),
+        execution=_row_to_execution(row),
+        operation_member_id=str(row.selected_operation_member_id),
+        pair_status=str(row.selected_pair_status),
+    )
+
+
+async def list_dataset_pipeline_execution_snapshots(
+    session: AsyncSession,
+) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
+    """exact scope별 최신 종료 실행과 활성 실행을 동일 SQL snapshot으로 반환한다."""
+    rows = (await session.execute(text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL))).all()
+    grouped: dict[
+        tuple[str, str, str | None],
+        dict[bool, PipelineDatasetLatestExecution],
+    ] = {}
+    for row in rows:
+        item = _row_to_dataset_execution(row)
+        key = (item.provider, item.dataset_key, item.sync_scope)
+        is_active = bool(row.selected_is_active)
+        if is_active in grouped.setdefault(key, {}):
+            raise RuntimeError("dataset execution snapshot returned duplicate status groups")
+        grouped[key][is_active] = item
     return tuple(
-        PipelineDatasetLatestExecution(
-            provider=str(row.selected_provider),
-            dataset_key=str(row.selected_dataset_key),
-            sync_scope=(
-                str(row.selected_sync_scope) if row.selected_sync_scope is not None else None
-            ),
-            execution=_row_to_execution(row),
-            operation_member_id=str(row.selected_operation_member_id),
-            pair_status=str(row.selected_pair_status),
+        PipelineDatasetExecutionSnapshot(
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+            latest_terminal=items.get(False),
+            active=items.get(True),
         )
-        for row in rows
+        for (provider, dataset_key, sync_scope), items in grouped.items()
     )

@@ -141,8 +141,8 @@ class OpsDatasetProviderDataset(BaseModel):
     status: OperationState
 
 
-class OpsDatasetLatestExecution(BaseModel):
-    """그리드 N+1 없이 붙이는 최신 canonical operation."""
+class OpsDatasetExecution(BaseModel):
+    """dataset exact scope에 귀속된 canonical operation projection."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -197,7 +197,13 @@ class OpsDatasetGridRow(BaseModel):
     )
     freshness: OpsDatasetFreshness
     schedule: OpsDatasetScheduleSummary
-    latest_execution: OpsDatasetLatestExecution | None
+    latest_execution: OpsDatasetExecution | None
+    active_execution: OpsDatasetExecution | None = Field(
+        description=(
+            "같은 provider/dataset/sync_scope의 queued/running canonical operation. "
+            "더 최신 terminal 실행과 독립적으로 조회한다."
+        )
+    )
     catalog_state: CatalogState
     orphan_reason: str | None
     mutable: bool
@@ -213,8 +219,7 @@ class OpsDatasetsGridData(BaseModel):
     items: list[OpsDatasetGridRow]
     schedule_source_status: ScheduleSourceStatus
     schedule_source_errors: list[str]
-    latest_execution_coverage: Literal["db_recorded_canonical_operations"] = Field(
-        default="db_recorded_canonical_operations",
+    execution_coverage: Literal["db_recorded_canonical_operations"] = Field(
         description=(
             "DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다."
         ),
@@ -256,6 +261,30 @@ class OpsDatasetEventRecord(BaseModel):
     occurred_at: datetime
 
 
+class OpsDatasetRunHistory(BaseModel):
+    """선택한 exact logical scope의 canonical 실행 이력 첫 page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[OpsDatasetExecution]
+    next_cursor: str | None
+    canonical_url: str = Field(
+        description="cursor를 제외한 exact-scope pipeline 실행 이력 URL."
+    )
+
+
+class OpsDatasetEventHistory(BaseModel):
+    """선택한 exact effective scope의 event 이력 첫 page."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[OpsDatasetEventRecord]
+    next_cursor: str | None
+    canonical_url: str = Field(
+        description="cursor를 제외한 exact-scope pipeline event 이력 URL."
+    )
+
+
 class OpsDatasetDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -270,16 +299,17 @@ class OpsDatasetDetailData(BaseModel):
     schedule_source_status: ScheduleSourceStatus
     schedule_source_errors: list[str]
     refresh_policy: ProviderRefreshPolicyRecord | None
-    recent_runs: list[OpsDatasetLatestExecution]
-    recent_runs_coverage: Literal["db_recorded_canonical_operations"] = Field(
-        default="db_recorded_canonical_operations",
+    latest_execution: OpsDatasetExecution | None = Field(
+        description="선택 scope에서 가장 최근에 끝난 canonical operation."
+    )
+    active_execution: OpsDatasetExecution | None = Field(
+        description="선택 scope에서 현재 queued/running인 canonical operation."
+    )
+    execution_coverage: Literal["db_recorded_canonical_operations"] = Field(
         description="DB에 영속된 exact pair canonical operation 이력.",
     )
-    recent_runs_next_cursor: str | None
-    pipeline_history_url: str
-    recent_events: list[OpsDatasetEventRecord]
-    recent_events_next_cursor: str | None
-    event_history_url: str
+    run_history: OpsDatasetRunHistory
+    event_history: OpsDatasetEventHistory
     dataset_issues: OpsIssueSummary
     provider_issues: OpsIssueSummary
 

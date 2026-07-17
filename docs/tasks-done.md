@@ -3,6 +3,33 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin active projection·exact-scope 이력 API (2026-07-18, `T-ADM-C7B-API`)
+
+- [x] **T-ADM-C7B-API — 활성 실행과 마지막 종료 실행을 독립 projection으로 완결.**
+  datasets grid/detail은 같은 DB statement snapshot에서 exact
+  `(provider,dataset_key,sync_scope)`별 queued/running `active_execution`과 최근 terminal
+  `latest_execution`을 각각 선택한다. 논리 `dataset_wide`는 typed scope와 과거 NULL scope를
+  같은 total order로 비교하고, `target_grids`·`external_system:*`에는 unscoped 실행을 추측하지
+  않는다.
+- [x] **Alembic 0057로 event identity와 exact-scope access path를 고정.** visible event의
+  provider/dataset을 immutable owning job에서 복구하고 canonical direct update event에만 typed
+  `sync_scope`를 backfill한다. INSERT trigger와 check constraint가 owner pair/scope를
+  복사·불변화하며, `(provider,dataset_key,sync_scope,occurred_at DESC,event_id DESC)` partial
+  index가 scope 조건을 cursor·`ORDER BY`·`LIMIT` 전에 적용한다. provider namespace 밖에서 의미가
+  없는 dataset-only event filter는 REST/repository에서 `422`/`ValueError`로 거부하고, 읽기 경로가
+  사라진 `idx_import_job_events_dataset_time`은 제거했다.
+- [x] **실행·event continuation 계약을 typed cursor로 완결.** dataset detail은 `run_history`와
+  `event_history`를 각각 `{items,next_cursor,canonical_url}`로 반환하고 pipeline 목록·event stream도
+  같은 canonical URL을 사용한다. run/event cursor는 전체 filter fingerprint에 묶어 다른
+  job/level/provider/dataset/scope에서 재사용하면 DB 조회 전에 typed `422`로 닫고, strict parser가
+  거부하는 scope와 불완전한 provider/dataset tuple도 fail-closed한다.
+- [x] **적대 리뷰와 로컬 gate 완료.** DB/API 적대 리뷰어 2인이 테스트 전에 최종 변경을 검토해
+  P0/P1/P2/P3 잔여 0건으로 승인했다. migration 0057·수정 EXPLAIN·pipeline/jobs/dataset
+  projection·feature executor·ORM metadata/repository의 실제 PostgreSQL 순차 gate 81건,
+  root unit/lint 1,430건, API 504건과 frontend unit 210건을 모두 통과했다. Ruff, strict
+  mypy 167개 소스, frontend type-check·lint, admin/user OpenAPI·생성 타입 drift도 green이다.
+  issue #712/#719는 최종 `T-ADM-C7` n150 live 증거 뒤 종결한다.
+
 ## Admin 갱신 정책 동시성 완결 (2026-07-18, `T-ADM-AUD-718`)
 
 - [x] **T-ADM-AUD-718 — BIGINT revision CAS를 DB부터 UI까지 완결.** Alembic 0056으로

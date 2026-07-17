@@ -138,8 +138,9 @@ def test_import_job_reads_exclude_quarantined_rows() -> None:
         cursor_occurred_at=None,
     )
     assert "event.quarantined_at IS NULL" in events_sql
-    assert "candidate.quarantined_at IS NULL" in events_sql
-    assert "JOIN LATERAL" in events_sql
+    assert "event.sync_scope" in events_sql
+    assert "JOIN LATERAL" not in events_sql
+    assert "ops.import_jobs" not in events_sql
     assert "ops.feature_update_requests" not in events_sql
 
 
@@ -241,6 +242,7 @@ async def test_import_job_events_list_and_cursor() -> None:
     page2 = await list_ops_import_job_events(
         db,
         "11111111-1111-1111-1111-111111111111",
+        level="error",
         limit=1,
         cursor=page.next_cursor,
     )
@@ -274,7 +276,7 @@ async def test_import_job_events_global_filters() -> None:
 
 
 @pytest.mark.unit
-async def test_import_job_events_scope_filter_uses_canonical_request_join() -> None:
+async def test_import_job_events_scope_filter_uses_typed_event_identity() -> None:
     at = datetime(2026, 6, 3, tzinfo=UTC)
     session = _Session(
         _Result([_event_row("11111111-1111-1111-1111-111111111111", at=at)])
@@ -290,12 +292,11 @@ async def test_import_job_events_scope_filter_uses_canonical_request_join() -> N
 
     assert len(page.items) == 1
     sql = session.statements[0]
-    assert "JOIN ops.import_jobs AS job" in sql
-    assert "JOIN ops.feature_update_requests AS request" in sql
-    assert "request.scope_type = 'provider_dataset'" in sql
-    assert "job.sync_scope = CAST(:sync_scope AS text)" in sql
+    assert "JOIN ops.import_jobs AS job" not in sql
+    assert "ops.feature_update_requests" not in sql
+    assert "event.sync_scope = CAST(:sync_scope AS text)" in sql
     assert (
-        sql.index("job.sync_scope = CAST(:sync_scope AS text)")
+        sql.index("event.sync_scope = CAST(:sync_scope AS text)")
         < sql.index("ORDER BY")
         < sql.index("LIMIT")
     )
@@ -305,6 +306,12 @@ async def test_import_job_events_scope_filter_uses_canonical_request_join() -> N
 @pytest.mark.unit
 async def test_import_job_events_scope_filter_requires_typed_pair() -> None:
     session = _Session()
+
+    with pytest.raises(ValueError, match="dataset_key event filter requires provider"):
+        await list_ops_import_job_events(
+            cast(Any, session),
+            dataset_key="mois_license_features_bulk",
+        )
 
     with pytest.raises(ValueError, match="requires provider and dataset_key"):
         await list_ops_import_job_events(

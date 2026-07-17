@@ -12,8 +12,10 @@ import pytest
 from kortravelmap.infra import pipeline_repo
 from kortravelmap.infra.pipeline_repo import (
     PIPELINE_EXECUTION_KINDS,
+    PipelineCursorFilterMismatch,
     PipelineExecution,
     get_pipeline_status_counts,
+    list_dataset_pipeline_execution_snapshots,
     list_latest_dataset_pipeline_executions,
     list_pipeline_executions,
 )
@@ -237,7 +239,16 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     assert item.projected_job.job_kind == "provider_load"
     assert item.projected_job.load_batch_id == ("33333333-3333-3333-3333-333333333333")
     assert page.next_cursor is not None
-    decoded = pipeline_repo._decode_cursor(page.next_cursor)
+    decoded = pipeline_repo._decode_cursor(
+        page.next_cursor,
+        filter_fingerprint=pipeline_repo._filter_fingerprint(
+            kind="import_job",
+            status="running",
+            provider="python-kma-api",
+            load_batch_id="33333333-3333-3333-3333-333333333333",
+            parent_job_id="11111111-1111-1111-1111-111111111111",
+        ),
+    )
     assert decoded == (
         at,
         "11111111-1111-1111-1111-111111111111",
@@ -303,6 +314,56 @@ async def test_latest_dataset_batch_maps_common_root_and_selected_pair() -> None
     assert items[0].execution.id == "11111111-1111-1111-1111-111111111111"
     assert items[0].operation_member_id == items[0].execution.id
     assert items[0].pair_status == "running"
+
+
+async def test_dataset_execution_snapshot_maps_terminal_and_active_in_one_query() -> None:
+    terminal_at = datetime(2026, 7, 15, 8, 0, tzinfo=UTC)
+    active_at = datetime(2026, 7, 15, 9, 0, tzinfo=UTC)
+    terminal = _job_row("11111111-1111-1111-1111-111111111111", at=terminal_at)
+    terminal.status = "done"
+    terminal.projected_status = "done"
+    terminal.selected_pair_status = "done"
+    terminal.selected_is_active = False
+    active = _job_row("22222222-2222-2222-2222-222222222222", at=active_at)
+    active.selected_is_active = True
+    session = _Session(_Result([terminal, active]))
+
+    snapshots = await list_dataset_pipeline_execution_snapshots(cast(Any, session))
+
+    assert len(session.params) == 1
+    assert len(snapshots) == 1
+    assert snapshots[0].latest_terminal is not None
+    assert snapshots[0].latest_terminal.execution.id == terminal.id
+    assert snapshots[0].active is not None
+    assert snapshots[0].active.execution.id == active.id
+
+
+async def test_list_rejects_cursor_from_different_filter_set_before_query() -> None:
+    cursor = pipeline_repo._encode_cursor(
+        at=datetime(2026, 7, 15, tzinfo=UTC),
+        key="11111111-1111-1111-1111-111111111111",
+        item_kind="import_job",
+        filter_fingerprint=pipeline_repo._filter_fingerprint(
+            provider="provider-a",
+        ),
+    )
+
+    with pytest.raises(PipelineCursorFilterMismatch, match="current filters"):
+        await list_pipeline_executions(
+            _NoQuerySession(),  # type: ignore[arg-type]
+            provider="provider-b",
+            cursor=cursor,
+        )
+
+
+async def test_list_rejects_noncanonical_dataset_scope_before_query() -> None:
+    with pytest.raises(ValueError, match="unsupported sync_scope"):
+        await list_pipeline_executions(
+            _NoQuerySession(),  # type: ignore[arg-type]
+            provider="python-kma-api",
+            dataset_key="kma_short_forecast",
+            dataset_sync_scopes=("default",),
+        )
 
 
 async def test_list_rejects_unknown_kind() -> None:

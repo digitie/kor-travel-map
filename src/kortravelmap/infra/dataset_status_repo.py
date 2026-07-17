@@ -22,17 +22,22 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 from kortravelmap.infra.pipeline_repo import (
-    PipelineExecution,
+    PipelineDatasetLatestExecution,
+    list_dataset_pipeline_execution_snapshots,
     list_latest_dataset_pipeline_executions,
 )
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from kortravelmap.infra.pipeline_repo import PipelineExecution
+
 __all__ = [
     "DatasetIntegrityIssueCount",
+    "DatasetExecutionSnapshot",
     "DatasetLatestExecution",
     "count_open_integrity_issues_by_dataset",
+    "list_dataset_execution_snapshots",
     "list_latest_dataset_executions",
 ]
 
@@ -61,6 +66,17 @@ class DatasetLatestExecution:
     execution: PipelineExecution
     operation_member_id: str
     pair_status: str
+
+
+@dataclass(frozen=True)
+class DatasetExecutionSnapshot:
+    """provider×dataset×scope의 최신 종료 실행과 현재 활성 실행."""
+
+    provider: str
+    dataset_key: str
+    sync_scope: str | None
+    latest_terminal: DatasetLatestExecution | None
+    active: DatasetLatestExecution | None
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -145,6 +161,38 @@ async def list_latest_dataset_executions(
             execution=row.execution,
             operation_member_id=row.operation_member_id,
             pair_status=row.pair_status,
+        )
+        for row in rows
+    )
+
+
+def _dataset_execution(
+    row: PipelineDatasetLatestExecution | None,
+) -> DatasetLatestExecution | None:
+    if row is None:
+        return None
+    return DatasetLatestExecution(
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        sync_scope=row.sync_scope,
+        execution=row.execution,
+        operation_member_id=row.operation_member_id,
+        pair_status=row.pair_status,
+    )
+
+
+async def list_dataset_execution_snapshots(
+    session: AsyncSession,
+) -> tuple[DatasetExecutionSnapshot, ...]:
+    """공용 pipeline projection의 종료/활성 실행을 한 DB snapshot으로 반환한다."""
+    rows = await list_dataset_pipeline_execution_snapshots(session)
+    return tuple(
+        DatasetExecutionSnapshot(
+            provider=row.provider,
+            dataset_key=row.dataset_key,
+            sync_scope=row.sync_scope,
+            latest_terminal=_dataset_execution(row.latest_terminal),
+            active=_dataset_execution(row.active),
         )
         for row in rows
     )

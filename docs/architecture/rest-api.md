@@ -423,9 +423,10 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   freshness, `trigger_kind`는 별도 필드다. `provider_datasets[]`는 exact pair와 nullable selected
   `sync_scope`, non-null selected member id와 status를 보존한다. feature-load run의
   `projected_job`은 root 자체로 고정하고 pair별 상태는 이 배열에서만 읽는다. datasets coverage는
-  `db_recorded_canonical_operations`이며 detail은 pipeline과
-  같은 total order의 `recent_runs_next_cursor`와 논리 scope-filtered
-  `pipeline_history_url`을 준다. 이 URL은 `provider`·`dataset_key`·`sync_scope`를 함께 전달하며,
+  `db_recorded_canonical_operations`다. grid/detail은 같은 DB snapshot에서 가장 최근 terminal
+  `latest_execution`과 queued/running 우선 `active_execution`을 따로 계산한다. 따라서 더 최신
+  terminal root가 있어도 기존 active root를 가리지 않는다. detail의 `run_history`는
+  `{items,next_cursor,canonical_url}`이고 URL은 `provider`·`dataset_key`·`sync_scope`를 함께 전달하며,
   일반 dataset과 orphan 기본 state는 선택 scope·typed `dataset_wide`·NULL pair를 같은 이력으로
   이어 간다. `sync_scope`만 단독으로 pipeline 목록에 전달하는 요청은 422다.
   상세 계약은 `docs/architecture/openapi-admin-contract.md` §7.2.1이다.
@@ -450,21 +451,24 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   생성은 target read → grid mapping/dedupe → cap → empty 판정 및 cursor skip 뒤에만 수행한다.
   terminal 전이와 같은 transaction에 구조화 event code `kma.target_scope_empty`를 정확히 1건
   기록하고, `/v1/ops/pipeline/executions/update_request/{request_id}`의 `events[].code`와
-  `/v1/ops/datasets/detail`의 `recent_events[].code`에 그대로 노출한다. terminal 재실행은 기존
+  `/v1/ops/datasets/detail`의 `event_history.items[].code`에 그대로 노출한다. terminal 재실행은 기존
   operation/event를 재사용한다. 격자 상한을 넘으면 provider I/O 전 전체 실패하여 partial cursor
   전진을 금지하고, 실패 카운터는 provider transaction rollback 후 별도
   transaction으로 영속한다. 일반 provider 실패는 성공 writer와 같은 `default` state
   namespace에 기록하고, KMA grid 3종만 선택된 effective scope를 state namespace로 사용한다.
   정규 schedule asset도 `kma_weather_client_factory`를 받아 target mapping/dedupe/cap/empty와
   cursor skip 뒤에 동기 생성하며, close 실패가 기존 typed failure나 cancellation을 덮지 않는다.
-- **Dataset exact-scope event 이력(AUD-686 보강, C7B-API 선행 계약)**:
-  `/v1/ops/datasets/detail`은 `recent_events[].sync_scope`,
-  `recent_events_next_cursor`, exact `event_history_url`을 반환한다.
+- **Dataset exact-scope event 이력(AUD-686/C7B-API)**:
+  `/v1/ops/datasets/detail`의 `event_history`는
+  `{items,next_cursor,canonical_url}`을 반환하고 각 item은 non-null `sync_scope`를 가진다.
   `GET /v1/ops/pipeline/events`는 `provider`·`dataset_key`와 함께 nullable `sync_scope` filter를
   받고 각 event에 nullable effective scope를 반환한다. scope 조건은 ORDER/LIMIT 전에 적용한다.
-  0057 전에는 `ops.import_job_events`에 scope를 복제하지 않고 canonical job/request JOIN의
-  `ops.import_jobs.sync_scope`에서 파생한다. 따라서 이 보강은 C7B-API의 migration 0057을 만들거나
-  그 후속 열 계약을 선점하지 않는다.
+  migration 0057부터 event의 canonical effective scope는 typed `ops.import_job_events.sync_scope`
+  열과 partial access index가 정본이다. run/event cursor에는 모든 filter fingerprint를 묶어 다른
+  job/level/provider/dataset/scope에서 재사용하면 422로 거절한다. API scope는
+  `dataset_wide|target_grids|external_system:<exact-name>`만 허용하며 내부 state namespace
+  `default`는 URL에 노출하지 않는다. `dataset_key`는 provider namespace 안의 값이므로
+  provider 없는 dataset-only event filter도 422로 거절한다.
 - **Pipeline 계층 취소(T-ADM-C3d, #680)**: body는 최대 500자의 nullable `reason`만 허용한다.
   `operator`/`actor`를 포함한 알 수 없는 필드는 422이며, actor는 admin 인증의
   `AdminProxyContext.actor`에서만 파생한다. `import_job`이 request branch 안에 있으면

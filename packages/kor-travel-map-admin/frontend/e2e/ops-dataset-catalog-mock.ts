@@ -9,7 +9,7 @@ type OpsDatasetsGridResponse =
 const EMPTY_CATALOG: OpsDatasetsGridResponse = {
   data: {
     items: [],
-    latest_execution_coverage: "db_recorded_canonical_operations",
+    execution_coverage: "db_recorded_canonical_operations",
     schedule_source_errors: [],
     schedule_source_status: "ok",
   },

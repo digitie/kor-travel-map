@@ -837,17 +837,18 @@ provider/dataset identity를 기준으로 처리한다.
 - `freshness`: 정책의 명시적 `stale_after_minutes`와 마지막 성공으로 서버가 계산한다.
   SLA가 없으면 `unknown`, 성공 이력이 없으면 `never_run`, 정책 비활성이면
   `disabled`다. `system_interval_seconds`나 rate-limit 값에서 SLA를 추론하지 않는다.
-- `latest_execution`: typed `import_jobs.provider/dataset_key`가 있는 canonical root
-  projection이다. 연결 request/job 쌍은 FK와 lineage로 request 한 행에 접고 payload나
+- `latest_execution`과 `active_execution`: typed `import_jobs.provider/dataset_key`가 있는
+  canonical root projection이다. 둘은 같은 DB statement snapshot에서 각각 가장 최근 terminal
+  root와 queued/running root를 고른다. 더 최신 terminal root 때문에 이전 active root가 가려지지
+  않는다. 연결 request/job 쌍은 FK와 lineage로 request 한 행에 접고 payload나
   event를 identity/계보 근거로 읽지 않는다. 선택된 pair member 상태와 root/대표 job
   상태·진척은 별도 속성으로 보존한다. direct request는
   `(provider, dataset_key, sync_scope)`별로 최신 root를 계산해 KMA external-system
   행 사이에 active/상세 링크가 섞이지 않게 하고, scope가 없는 일반
   scheduled/import 실행은 해당 dataset 행의 fallback으로만 사용한다. 이 fallback은
-  exact scope 실행과 NULL-scope 실행을 같은 total order로 비교하며, `target_grids`와
-  `external_system:*` 및 카탈로그가 없어 의미를 증명할 수 없는 state/policy-only orphan
-  scope에는 적용하지 않는다.
-  `latest_execution_coverage=db_recorded_canonical_operations`를 함께 준다.
+  API의 논리 `dataset_wide`와 NULL-scope 실행을 같은 total order로 비교한다.
+  `target_grids`와 `external_system:*`에는 unscoped 실행을 추측하지 않는다.
+  `execution_coverage=db_recorded_canonical_operations`를 함께 준다.
 - `catalog.provider_state_default_scope`는 provider cursor/state namespace의 기본값이고,
   직접 갱신 조작이 제출할 기본 effective scope는
   `catalog.scope_refresh.default_sync_scope`만이 정본이다. 일반 provider의 init/bind/run/
@@ -855,6 +856,9 @@ provider/dataset identity를 기준으로 처리한다.
   effective scope를 실패 namespace로 사용한다. target selector는 catalog 기본 scope와
   활성 `external_system:*` scope를 DB state 유무와 관계없이 grid/detail에 `never_run`으로
   구체화하고, 삭제된 system의 잔존 state도 감사 목적으로 유지한다.
+  내부 `default` state는 API에서 `dataset_wide`로 투영한다. strict parser가 거부하는 legacy
+  scope는 조작 URL로 노출하지 않으며, 그런 state만 남은 orphan provider/dataset은 비가변
+  `dataset_wide` placeholder로 남겨 provider/dataset 자체의 존재는 숨기지 않는다.
 - KMA grid 3종은 `target_grids`와 `external_system:*`의 active target을 격자로 해석하고
   cap을 적용한 뒤 유효 격자가 0개면 typed `KmaWeatherTargetScopeEmptyError`로 canonical
   operation을 `failed` 처리한다. provider를 시도하지 않은 preflight 실패이므로 provider
@@ -863,15 +867,13 @@ provider/dataset identity를 기준으로 처리한다.
   cap → empty 판정과 cursor skip 뒤로 지연한다. canonical terminal 전이와 같은 transaction에
   `ops.import_job_events.code=kma.target_scope_empty`를 정확히 1건 기록하며, terminal replay는
   중복 event를 만들지 않는다. UI는 오류 문자열을 파싱하지 않고 pipeline 상세 `events[].code`와
-  dataset 상세 `recent_events[].code`에서 같은 code를 읽는다.
-- dataset 상세의 `recent_events[]`는 선택한 논리 scope의 canonical effective scope를
-  event 쿼리의 ORDER/LIMIT 전에 제한한 결과다. 각 event는 non-null `sync_scope`를 포함하고,
-  `recent_events_next_cursor`와 `event_history_url`은 같은 exact scope를 끝까지 이어 간다.
+  dataset 상세 `event_history.items[].code`에서 같은 code를 읽는다.
+- dataset 상세의 `event_history.items`는 선택한 논리 scope의 canonical effective scope를
+  event 쿼리의 ORDER/LIMIT 전에 제한한 결과다. 각 event는 non-null `sync_scope`를 포함한다.
+  `event_history={items,next_cursor,canonical_url}`은 같은 exact scope를 끝까지 이어 간다.
   전역 `GET /v1/ops/pipeline/events`도 `provider`·`dataset_key`와 함께 `sync_scope`를 받으며
-  응답 event에 nullable `sync_scope`를 싣는다. 0057 전에는 이 값을 event payload나 복제 열이
-  아니라 canonical `import_job_events → import_jobs → feature_update_requests` JOIN의 typed
-  job scope에서 파생한다. C7B-API 0057이 별도 열·제약·access path를 도입하기 전까지 이
-  join-derived 계약이 정본이고, 본 단계는 0057 migration을 만들지 않는다.
+  응답 event에 nullable `sync_scope`를 싣는다. 0057부터 이 값은 event payload나 runtime JOIN이
+  아니라 `ops.import_job_events.sync_scope` typed 열과 partial index로 조회한다.
 - integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
 - 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
@@ -920,14 +922,16 @@ DB에 기록된 update request와 import job hierarchy를 root 실행 목록으�
 정확히 하나에 귀속한다. batch root·미소유 sibling은 최상위 import job 한 행이고,
 각 request branch는 request 한 행이다. descendant job을 별도 root로 반환하지 않는다.
 
-정렬과 cursor 비교는 모두 `(created_at DESC, id DESC, kind DESC)`다. cursor v2는
-`created_at`·UUID `id`·`kind(update_request|import_job)`를 담고, 형식이나 kind가
-잘못되면 DB 조회 전에 `422`다. query는 `kind`, root `status`, `provider`,
+정렬과 cursor 비교는 모두 `(created_at DESC, id DESC, kind DESC)`다. cursor v3는
+`created_at`·UUID `id`·`kind(update_request|import_job)`와 전체 filter fingerprint를 담는다.
+형식·kind가 잘못됐거나 발급 당시 filter와 현재 filter가 다르면 DB 조회 전에 `422`다.
+query는 `kind`, root `status`, `provider`,
 `dataset_key`, `sync_scope`, `created_from`, `created_to`, `page_size`, `cursor`를 지원한다.
 `sync_scope`는 `provider`·`dataset_key`와 함께 써야 하며 단독 사용은 `422`다. 일반 dataset과
 orphan 기본 state에서는 선택 scope·typed `dataset_wide`·NULL pair를 같은 논리 이력으로 본다.
-provider-only/dataset-only filter는 request 저장 배열 membership과 canonical exact pair를
-함께 본다. provider와 dataset을 모두 주면 배열을 교차 조합하지 않고 같은 canonical
+provider-only filter는 request 저장 배열 membership과 canonical exact pair를 함께 본다.
+`dataset_key`는 provider namespace 안의 식별자라 provider 없이 주면 `422`다. provider와
+dataset을 모두 주면 배열을 교차 조합하지 않고 같은 canonical
 `provider_datasets[]` member가 정확히 일치할 때만 반환한다. import 실행 identity의 유일한
 정본은 typed `import_jobs.provider`/`dataset_key`다. `import_job_events`의 같은 이름 필드는
 감사 메타데이터일 뿐 projection·filter·latest의 identity를 만들거나 바꾸지 않는다.
@@ -1009,24 +1013,31 @@ projected status/progress/stage를 바꾸지 않으며 pair별 결과는 `provid
 feature-load root는 identity 진단용 nullable `operation_registry_version`도 반환한다. 다른
 legacy/update root에서는 NULL이며 이 값은 cursor나 correlation key가 아니다.
 
-`GET /v1/ops/datasets`의 `latest_execution_coverage`와
+`GET /v1/ops/datasets`의 `execution_coverage`와
 `GET /v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`의
-`recent_runs_coverage`는 모두
+`execution_coverage`는 모두
 `db_recorded_canonical_operations`다. 이는 0051 이후 DB 기록 범위이며 과거
 GraphQL-only run이나 #686의 requested/effective sync scope를 포함한다고 주장하지 않는다.
-detail의 `recent_runs`는 요청한 논리 scope를 DB에서 먼저 제한한 뒤 pipeline과 같은
+detail의 `run_history.items`는 요청한 논리 scope를 DB에서 먼저 제한한 뒤 pipeline과 같은
 total order로 자른 첫 page다. 일반 dataset의 provider-state 기본 scope는 typed
 `dataset_wide`/NULL pair와 같은 논리 범위로 취급한다. 따라서 다른 scope의 최신 실행이
 page를 채워도 stale external/orphan exact-scope 이력이 pagination 뒤에서 사라지지 않는다.
-`recent_runs_next_cursor`와 같은 논리 scope 별칭을 적용한
-`pipeline_history_url`을 함께 반환한다. 다음 cursor는 그 URL에서 다른 scope를 섞지 않고
+`run_history={items,next_cursor,canonical_url}`은 같은 논리 scope 별칭을 적용한다. 다음 cursor는
+그 URL에서 다른 scope를 섞지 않고
 누락·중복 없이 이어져야 한다.
 
-같은 상세의 `recent_events`는 `recent_runs`의 다중 scope 별칭을 그대로 합치지 않는다.
+같은 상세의 `event_history.items`는 run history의 다중 scope 별칭을 그대로 합치지 않는다.
 target 선택형 dataset은 선택한 exact scope, 일반 dataset의 기본 논리 scope는 canonical
-`dataset_wide` effective scope 하나를 사용한다. `recent_events_next_cursor`와
-`event_history_url`은 그 effective scope를 명시하며, 전역 events 화면은 URL의
+`dataset_wide` effective scope 하나를 사용한다. `event_history.next_cursor`와
+`event_history.canonical_url`은 그 effective scope를 명시하며, 전역 events 화면은 URL의
 provider/dataset/scope filter를 그대로 초기화한다.
+
+`GET /v1/ops/pipeline/executions`와 `/events`의 `data.canonical_url`은 cursor를 제거한
+첫 page URL이다. provider-only filter는 그 provider만 담은 URL로 정규화한다. 반면 dataset만
+있거나 scope에 provider/dataset이 모두 없는 불완전 tuple은 422다. `sync_scope`는 strict canonical
+parser를 통과해야 한다. run cursor는 kind/status/provider/dataset/scope/batch/parent/time filter,
+event cursor는 job/level/provider/dataset/scope fingerprint에 묶이며 다른 filter에서 재사용하면
+`422 VALIDATION_ERROR`다.
 
 Dagster feature-load operation은 run root 하나와 exact pair child들이다. timeline에는 root 한
 행만 보이고 datasets는 같은 `(kind,id)` root와 해당 pair child status를 노출한다. 같은 run의
@@ -1090,7 +1101,7 @@ Query:
 - `job_id`: UUID. 특정 job으로 좁힐 때 사용.
 - `level`: `debug` / `info` / `warning` / `error` / `critical`
 - `provider`
-- `dataset_key`
+- `dataset_key` (`provider` 필수)
 - `page_size` (`1..200`, 기본 `50`)
 - `cursor`
 

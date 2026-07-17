@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
+from uuid import UUID
 
 from sqlalchemy import text
+
+from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +33,7 @@ __all__ = [
     "OpsIntegrityIssue",
     "OpsIntegrityIssuePage",
     "OpsIntegrityIssueCounts",
+    "OpsCursorFilterMismatch",
     "get_ops_import_job",
     "list_ops_import_job_events",
     "list_ops_import_jobs",
@@ -39,6 +44,10 @@ __all__ = [
 ]
 
 _MAX_PAGE_SIZE: Final[int] = 200
+
+
+class OpsCursorFilterMismatch(ValueError):
+    """Cursor가 발급된 filter와 현재 요청 filter가 다르다."""
 
 
 @dataclass(frozen=True)
@@ -200,7 +209,69 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
         raise ValueError(f"invalid {kind} cursor")
     try:
         at = datetime.fromisoformat(str(payload["at"]))
-        key = str(payload["key"])
+        if at.utcoffset() is None:
+            raise ValueError("cursor datetime must include a timezone")
+        key = str(UUID(str(payload["key"])))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    return at, key
+
+
+def _filter_fingerprint(filters: dict[str, str | None]) -> str:
+    canonical = json.dumps(
+        filters,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _encode_bound_cursor(
+    kind: str,
+    *,
+    at: datetime,
+    key: str,
+    filters: dict[str, str | None],
+) -> str:
+    raw = json.dumps(
+        {
+            "v": 2,
+            "kind": kind,
+            "at": at.isoformat(),
+            "key": key,
+            "filter": _filter_fingerprint(filters),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_bound_cursor(
+    cursor: str | None,
+    *,
+    kind: str,
+    filters: dict[str, str | None],
+) -> tuple[datetime | None, str | None]:
+    if cursor is None:
+        return None, None
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        payload = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid {kind} cursor")
+    if payload.get("v") != 2 or payload.get("kind") != kind:
+        raise ValueError(f"invalid {kind} cursor")
+    if payload.get("filter") != _filter_fingerprint(filters):
+        raise OpsCursorFilterMismatch(f"{kind} cursor filter mismatch")
+    try:
+        at = datetime.fromisoformat(str(payload["at"]))
+        if at.utcoffset() is None:
+            raise ValueError("cursor datetime must include a timezone")
+        key = str(UUID(str(payload["key"])))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid {kind} cursor") from exc
     return at, key
@@ -251,7 +322,7 @@ WHERE job.job_id = CAST(:job_id AS uuid)
 
 _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
     "event.event_id, event.job_id, event.provider, event.dataset_key, "
-    "job.sync_scope, event.feature_id, event.stage, event.level, event.code, "
+    "event.sync_scope, event.feature_id, event.stage, event.level, event.code, "
     "event.message, event.payload, event.occurred_at"
 )
 
@@ -285,32 +356,11 @@ def _list_import_job_events_sql(
                 "event.dataset_key = CAST(:dataset_key AS text)",
             )
         )
-    if sync_scope is None:
-        job_join = """
-JOIN LATERAL (
-    SELECT candidate.sync_scope
-    FROM ops.import_jobs AS candidate
-    WHERE candidate.job_id = event.job_id
-      AND candidate.quarantined_at IS NULL
-    LIMIT 1
-) AS job ON true
-"""
-    else:
-        job_join = "JOIN ops.import_jobs AS job ON job.job_id = event.job_id"
-        clauses.append("job.quarantined_at IS NULL")
-    request_join = ""
     if sync_scope is not None:
-        request_join = (
-            "JOIN ops.feature_update_requests AS request "
-            "ON request.job_id = job.job_id"
-        )
         clauses.extend(
             (
-                "request.scope_type = 'provider_dataset'",
-                "job.kind = 'feature_update_request'",
-                "job.provider = CAST(:provider AS text)",
-                "job.dataset_key = CAST(:dataset_key AS text)",
-                "job.sync_scope = CAST(:sync_scope AS text)",
+                "event.sync_scope IS NOT NULL",
+                "event.sync_scope = CAST(:sync_scope AS text)",
             )
         )
     if cursor_occurred_at is not None:
@@ -323,8 +373,6 @@ JOIN LATERAL (
     return f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
 FROM ops.import_job_events AS event
-{job_join}
-{request_join}
 {where_sql}
 ORDER BY event.occurred_at DESC, event.event_id DESC
 LIMIT :limit
@@ -576,14 +624,27 @@ async def list_ops_import_job_events(
 ) -> OpsImportJobEventPage:
     """event를 시간 역순으로 조회한다.
 
-    ``sync_scope``는 provider/dataset과 함께 준 경우에만 허용하며 canonical
-    feature-update job/request join에서 effective scope를 LIMIT 전에 제한한다.
+    ``sync_scope``는 provider/dataset과 함께 준 경우에만 허용한다. 0057의 typed
+    event identity와 exact-scope partial index에서 cursor/LIMIT 전에 제한한다.
     """
+    if dataset_key is not None and provider is None:
+        raise ValueError("dataset_key event filter requires provider")
     if sync_scope is not None and (provider is None or dataset_key is None):
         raise ValueError("sync_scope event filter requires provider and dataset_key")
+    if sync_scope is not None:
+        parse_canonical_sync_scope(sync_scope)
     page_size = _limit(limit)
-    cursor_occurred_at, cursor_event_id = _decode_cursor(
-        cursor, kind="import_job_events"
+    cursor_filters = {
+        "job_id": job_id,
+        "level": level,
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "sync_scope": sync_scope,
+    }
+    cursor_occurred_at, cursor_event_id = _decode_bound_cursor(
+        cursor,
+        kind="import_job_events",
+        filters=cursor_filters,
     )
     sql = _list_import_job_events_sql(
         job_id=job_id,
@@ -610,10 +671,11 @@ async def list_ops_import_job_events(
     ).all()
     items = tuple(_row_to_import_job_event(row) for row in rows[:page_size])
     next_cursor = (
-        _encode_cursor(
+        _encode_bound_cursor(
             "import_job_events",
             at=items[-1].occurred_at,
             key=items[-1].event_id,
+            filters=cursor_filters,
         )
         if len(rows) > page_size and items
         else None

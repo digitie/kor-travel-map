@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex, agent A) — T-ADM-C7B-API 로컬 종결·PR 준비
+
+- Alembic 0057로 `ops.import_job_events.sync_scope`를 추가하고 visible legacy event pair를
+  immutable owning job identity로 복구했다. canonical direct update event만 scope를
+  backfill하며 trigger·check constraint가 이후 owner pair/scope drift를 막는다.
+- exact-scope event는 `(provider,dataset_key,sync_scope,occurred_at DESC,event_id DESC)` partial
+  B-tree에서 cursor/LIMIT 전에 제한한다. dataset key는 provider namespace에 속하므로 provider 없는
+  dataset-only event filter를 REST와 repository에서 거부하고 dead
+  `idx_import_job_events_dataset_time`을 제거했다. downgrade는 0052의 columns/order/partial
+  predicate로 단독 index를 정확히 복원한다.
+- datasets grid/detail은 같은 snapshot에서 scope별 `active_execution`과 마지막 terminal
+  `latest_execution`을 독립 보존한다. run/event history는 `{items,next_cursor,canonical_url}`이고,
+  cursor는 전체 filter fingerprint에 묶여 다른 filter 재사용과 non-canonical scope를 DB 전에
+  typed `422`로 닫는다.
+- DB/API 적대 리뷰어 2인이 최종 변경을 P0/P1/P2/P3 잔여 0건으로 승인했다. 실제 PostgreSQL
+  migration/schema·EXPLAIN·repository 순차 gate 81건, root unit/lint 1,430건, API 504건과
+  frontend unit 210건을 통과했다. Ruff, strict mypy 167개 소스, frontend type-check·lint,
+  admin/user OpenAPI·생성 타입 drift도 모두 green이다.
+- **다음 한 작업**: 보안 감사·최신 main rebase 뒤 C7B-API PR을 CI green과 승인으로 병합한다.
+  직후 C7B-UI를 최신 main에 rebase해 exact-scope 조작·이력 소비를 완결하며 #712/#719는 최종
+  C7 n150 live 증거 뒤 닫는다.
+
 ## 2026-07-18 (codex, agent A) — T-ADM-AUD-686 로컬 종결·PR 준비 완료
 
 - direct runner뿐 아니라 정규 Dagster KMA grid asset 3종도 target mapping/dedupe/cap/empty와
@@ -357,8 +379,9 @@
   pipeline pair 필드 optional 약화, 문서 drift를 발견했다. indexed identity에서 connected
   component/request를 먼저 좁히고 production-like natural-planner EXPLAIN으로 base relation
   `Seq Scan`·과도한 actual row를 차단한다. selective plan은 `import_job_events` relation 접근도
-  금지한다. projection seed event index는 제거하고 무필터·dataset-only·exact pair event 감사
-  조회용 시간순 index와 고정-clause query로 책임을 분리했다. `provider_datasets`와 nullable pair
+  금지한다. projection seed event index는 제거하고 무필터·provider-only·exact pair event 감사
+  조회용 시간순 index와 고정-clause query로 책임을 분리했다. 0057부터 provider 없는
+  dataset-only event filter와 단독 인덱스는 제거한다. `provider_datasets`와 nullable pair
   필드는 required로 통일한다. 최종 DB 리뷰의 이중 정본 지적에 따라 0052는 request의 canonical
   job FK를 `NOT NULL/RESTRICT`로 강화하고 jobless·불일치·reserved Dagster kind request를 새
   canonical job으로 재연결한다. direct scope/filter shape와 linked `feature_update_request`

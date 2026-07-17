@@ -210,9 +210,9 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_import_job_events_time` | (occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | 무필터 감사 polling (0052) |
 | `idx_import_job_events_job_time` | (job_id, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | job 감사 타임라인과 bounded live snapshot (0052에서 partial 전환) |
 | `idx_import_job_events_provider_time` | (provider, occurred_at DESC, event_id DESC) WHERE provider non-NULL AND `quarantined_at IS NULL` | provider-only 감사 타임라인 (0052에서 partial 전환) |
-| `idx_import_job_events_dataset_time` | (dataset_key, occurred_at DESC, event_id DESC) WHERE dataset non-NULL AND `quarantined_at IS NULL` | dataset-only 감사 타임라인 (0052, identity projection에는 사용 금지) |
 | `idx_import_job_events_provider_dataset_time` | (provider, dataset_key, occurred_at DESC, event_id DESC) WHERE pair non-NULL AND `quarantined_at IS NULL` | exact pair 감사 타임라인 (0052, identity projection에는 사용 금지) |
 | `idx_import_job_events_level_time` | (level, occurred_at DESC, event_id DESC) WHERE `quarantined_at IS NULL` | level 감사 타임라인 (0052에서 partial 전환) |
+| `idx_import_job_events_provider_dataset_scope_time` | (provider, dataset_key, sync_scope, occurred_at DESC, event_id DESC) WHERE pair/scope non-NULL AND `quarantined_at IS NULL` | canonical exact-scope 감사 타임라인 (0057; dataset-only 인덱스 대체) |
 | `idx_feature_update_providers_gin` | GIN(providers) | request provider `TEXT[]` membership selective seed (0052) |
 | `idx_feature_update_dataset_keys_gin` | GIN(dataset_keys) | request dataset `TEXT[]` membership selective seed (0052) |
 | `uq_feature_update_requests_job_id` | UNIQUE (job_id) | request→job 유일성과 역추적 B-tree; deferred 양방향 trigger와 함께 canonical 1:1 보장 (0052) |

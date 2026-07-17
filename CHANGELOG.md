@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### exact-scope 실행·이벤트 projection (2026-07-18, ADR-064 T-ADM-C7B-API)
+
+- **ADDED**: migration 0057에서 canonical update event의 owner
+  `provider`/`dataset_key`/`sync_scope`를 typed 열·불변 trigger·check constraint로 고정하고,
+  exact-scope 시간순 partial index를 추가했다.
+- **CHANGED**: dataset 상세는 같은 scope의 `active_execution`과 최근 종료
+  `latest_execution`을 독립 반환하며, 실행·이벤트 첫 페이지를
+  `{items,next_cursor,canonical_url}`로 제공한다. cursor는 전체 filter fingerprint에 묶인다.
+- **REMOVED**: provider namespace 밖에서 의미가 없는 dataset-only event 조회를 REST와
+  repository에서 거부하고, 읽기 경로가 사라진 `idx_import_job_events_dataset_time`을 제거했다.
+
 ### 갱신 정책 revision CAS (2026-07-18, ADR-064 T-ADM-AUD-718)
 
 - **ADDED**: `ops.provider_refresh_policies`에 단조 증가 BIGINT `revision`을 추가했다. 생성은

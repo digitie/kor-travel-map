@@ -13757,6 +13757,17 @@
       "OpsDatasetDetailData": {
         "additionalProperties": false,
         "properties": {
+          "active_execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetExecution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "선택 scope에서 현재 queued/running인 canonical operation."
+          },
           "catalog": {
             "anyOf": [
               {
@@ -13782,9 +13793,25 @@
             "title": "Dataset Key",
             "type": "string"
           },
-          "event_history_url": {
-            "title": "Event History Url",
+          "event_history": {
+            "$ref": "#/components/schemas/OpsDatasetEventHistory"
+          },
+          "execution_coverage": {
+            "const": "db_recorded_canonical_operations",
+            "description": "DB에 영속된 exact pair canonical operation 이력.",
+            "title": "Execution Coverage",
             "type": "string"
+          },
+          "latest_execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetExecution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "선택 scope에서 가장 최근에 끝난 canonical operation."
           },
           "mutable": {
             "title": "Mutable",
@@ -13801,59 +13828,12 @@
             ],
             "title": "Orphan Reason"
           },
-          "pipeline_history_url": {
-            "title": "Pipeline History Url",
-            "type": "string"
-          },
           "provider": {
             "title": "Provider",
             "type": "string"
           },
           "provider_issues": {
             "$ref": "#/components/schemas/OpsIssueSummary"
-          },
-          "recent_events": {
-            "items": {
-              "$ref": "#/components/schemas/OpsDatasetEventRecord"
-            },
-            "title": "Recent Events",
-            "type": "array"
-          },
-          "recent_events_next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recent Events Next Cursor"
-          },
-          "recent_runs": {
-            "items": {
-              "$ref": "#/components/schemas/OpsDatasetLatestExecution"
-            },
-            "title": "Recent Runs",
-            "type": "array"
-          },
-          "recent_runs_coverage": {
-            "const": "db_recorded_canonical_operations",
-            "default": "db_recorded_canonical_operations",
-            "description": "DB에 영속된 exact pair canonical operation 이력.",
-            "title": "Recent Runs Coverage",
-            "type": "string"
-          },
-          "recent_runs_next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recent Runs Next Cursor"
           },
           "refresh_policy": {
             "anyOf": [
@@ -13864,6 +13844,9 @@
                 "type": "null"
               }
             ]
+          },
+          "run_history": {
+            "$ref": "#/components/schemas/OpsDatasetRunHistory"
           },
           "schedule": {
             "$ref": "#/components/schemas/OpsDatasetScheduleSummary"
@@ -13904,12 +13887,11 @@
           "schedule_source_status",
           "schedule_source_errors",
           "refresh_policy",
-          "recent_runs",
-          "recent_runs_next_cursor",
-          "pipeline_history_url",
-          "recent_events",
-          "recent_events_next_cursor",
-          "event_history_url",
+          "latest_execution",
+          "active_execution",
+          "execution_coverage",
+          "run_history",
+          "event_history",
           "dataset_issues",
           "provider_issues"
         ],
@@ -13931,6 +13913,42 @@
           "meta"
         ],
         "title": "OpsDatasetDetailResponse",
+        "type": "object"
+      },
+      "OpsDatasetEventHistory": {
+        "additionalProperties": false,
+        "description": "선택한 exact effective scope의 event 이력 첫 page.",
+        "properties": {
+          "canonical_url": {
+            "description": "cursor를 제외한 exact-scope pipeline event 이력 URL.",
+            "title": "Canonical Url",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetEventRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "canonical_url"
+        ],
+        "title": "OpsDatasetEventHistory",
         "type": "object"
       },
       "OpsDatasetEventRecord": {
@@ -13999,231 +14017,9 @@
         "title": "OpsDatasetEventRecord",
         "type": "object"
       },
-      "OpsDatasetFreshness": {
+      "OpsDatasetExecution": {
         "additionalProperties": false,
-        "description": "정책 SLA와 마지막 성공으로 서버가 계산한 freshness.",
-        "properties": {
-          "basis": {
-            "enum": [
-              "policy_stale_after",
-              "unknown",
-              "disabled"
-            ],
-            "title": "Basis",
-            "type": "string"
-          },
-          "due_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Due At"
-          },
-          "is_overdue": {
-            "title": "Is Overdue",
-            "type": "boolean"
-          },
-          "overdue_by_seconds": {
-            "title": "Overdue By Seconds",
-            "type": "integer"
-          },
-          "sla_seconds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sla Seconds"
-          },
-          "state": {
-            "enum": [
-              "never_run",
-              "fresh",
-              "overdue",
-              "disabled",
-              "unknown"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "basis",
-          "sla_seconds",
-          "due_at",
-          "is_overdue",
-          "overdue_by_seconds"
-        ],
-        "title": "OpsDatasetFreshness",
-        "type": "object"
-      },
-      "OpsDatasetGridRow": {
-        "additionalProperties": false,
-        "description": "provider×dataset×sync_scope 그리드 1행.",
-        "properties": {
-          "catalog": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OpsDatasetCatalogInfo"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "catalog_state": {
-            "enum": [
-              "canonical",
-              "orphan"
-            ],
-            "title": "Catalog State",
-            "type": "string"
-          },
-          "consecutive_failures": {
-            "title": "Consecutive Failures",
-            "type": "integer"
-          },
-          "dataset_issues": {
-            "$ref": "#/components/schemas/OpsIssueSummary"
-          },
-          "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
-          },
-          "detail_url": {
-            "title": "Detail Url",
-            "type": "string"
-          },
-          "eligible_after": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "provider rate-limit/backoff상 다시 호출 가능한 시각. schedule 시각이 아님.",
-            "title": "Eligible After"
-          },
-          "freshness": {
-            "$ref": "#/components/schemas/OpsDatasetFreshness"
-          },
-          "last_failure_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Failure At"
-          },
-          "last_success_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success At"
-          },
-          "latest_execution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OpsDatasetLatestExecution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "mutable": {
-            "title": "Mutable",
-            "type": "boolean"
-          },
-          "orphan_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orphan Reason"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_issues": {
-            "$ref": "#/components/schemas/OpsIssueSummary"
-          },
-          "refresh_policy": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "schedule": {
-            "$ref": "#/components/schemas/OpsDatasetScheduleSummary"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "sync_scope": {
-            "title": "Sync Scope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "provider",
-          "dataset_key",
-          "detail_url",
-          "sync_scope",
-          "status",
-          "last_success_at",
-          "last_failure_at",
-          "consecutive_failures",
-          "eligible_after",
-          "freshness",
-          "schedule",
-          "latest_execution",
-          "catalog_state",
-          "orphan_reason",
-          "mutable",
-          "catalog",
-          "refresh_policy",
-          "dataset_issues",
-          "provider_issues"
-        ],
-        "title": "OpsDatasetGridRow",
-        "type": "object"
-      },
-      "OpsDatasetLatestExecution": {
-        "additionalProperties": false,
-        "description": "그리드 N+1 없이 붙이는 최신 canonical operation.",
+        "description": "dataset exact scope에 귀속된 canonical operation projection.",
         "properties": {
           "cancellation": {
             "anyOf": [
@@ -14421,7 +14217,241 @@
           "projected_job",
           "cancellation"
         ],
-        "title": "OpsDatasetLatestExecution",
+        "title": "OpsDatasetExecution",
+        "type": "object"
+      },
+      "OpsDatasetFreshness": {
+        "additionalProperties": false,
+        "description": "정책 SLA와 마지막 성공으로 서버가 계산한 freshness.",
+        "properties": {
+          "basis": {
+            "enum": [
+              "policy_stale_after",
+              "unknown",
+              "disabled"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "is_overdue": {
+            "title": "Is Overdue",
+            "type": "boolean"
+          },
+          "overdue_by_seconds": {
+            "title": "Overdue By Seconds",
+            "type": "integer"
+          },
+          "sla_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Seconds"
+          },
+          "state": {
+            "enum": [
+              "never_run",
+              "fresh",
+              "overdue",
+              "disabled",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "basis",
+          "sla_seconds",
+          "due_at",
+          "is_overdue",
+          "overdue_by_seconds"
+        ],
+        "title": "OpsDatasetFreshness",
+        "type": "object"
+      },
+      "OpsDatasetGridRow": {
+        "additionalProperties": false,
+        "description": "provider×dataset×sync_scope 그리드 1행.",
+        "properties": {
+          "active_execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetExecution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "같은 provider/dataset/sync_scope의 queued/running canonical operation. 더 최신 terminal 실행과 독립적으로 조회한다."
+          },
+          "catalog": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetCatalogInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "catalog_state": {
+            "enum": [
+              "canonical",
+              "orphan"
+            ],
+            "title": "Catalog State",
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "dataset_issues": {
+            "$ref": "#/components/schemas/OpsIssueSummary"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "detail_url": {
+            "title": "Detail Url",
+            "type": "string"
+          },
+          "eligible_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "provider rate-limit/backoff상 다시 호출 가능한 시각. schedule 시각이 아님.",
+            "title": "Eligible After"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/OpsDatasetFreshness"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "latest_execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsDatasetExecution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mutable": {
+            "title": "Mutable",
+            "type": "boolean"
+          },
+          "orphan_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Reason"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_issues": {
+            "$ref": "#/components/schemas/OpsIssueSummary"
+          },
+          "refresh_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/OpsDatasetScheduleSummary"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "detail_url",
+          "sync_scope",
+          "status",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "eligible_after",
+          "freshness",
+          "schedule",
+          "latest_execution",
+          "active_execution",
+          "catalog_state",
+          "orphan_reason",
+          "mutable",
+          "catalog",
+          "refresh_policy",
+          "dataset_issues",
+          "provider_issues"
+        ],
+        "title": "OpsDatasetGridRow",
         "type": "object"
       },
       "OpsDatasetPreviewBudget": {
@@ -14819,6 +14849,42 @@
         "title": "OpsDatasetRefreshPolicyResponse",
         "type": "object"
       },
+      "OpsDatasetRunHistory": {
+        "additionalProperties": false,
+        "description": "선택한 exact logical scope의 canonical 실행 이력 첫 page.",
+        "properties": {
+          "canonical_url": {
+            "description": "cursor를 제외한 exact-scope pipeline 실행 이력 URL.",
+            "title": "Canonical Url",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsDatasetExecution"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "canonical_url"
+        ],
+        "title": "OpsDatasetRunHistory",
+        "type": "object"
+      },
       "OpsDatasetScheduleSummary": {
         "additionalProperties": false,
         "description": "Dagster GraphQL 실제 schedule 정의/상태 기반 다음 tick.",
@@ -15021,19 +15087,18 @@
       "OpsDatasetsGridData": {
         "additionalProperties": false,
         "properties": {
+          "execution_coverage": {
+            "const": "db_recorded_canonical_operations",
+            "description": "DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다.",
+            "title": "Execution Coverage",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/OpsDatasetGridRow"
             },
             "title": "Items",
             "type": "array"
-          },
-          "latest_execution_coverage": {
-            "const": "db_recorded_canonical_operations",
-            "default": "db_recorded_canonical_operations",
-            "description": "DB에 영속된 canonical root와 exact provider/dataset operation을 포함한다.",
-            "title": "Latest Execution Coverage",
-            "type": "string"
           },
           "schedule_source_errors": {
             "items": {
@@ -15055,7 +15120,8 @@
         "required": [
           "items",
           "schedule_source_status",
-          "schedule_source_errors"
+          "schedule_source_errors",
+          "execution_coverage"
         ],
         "title": "OpsDatasetsGridData",
         "type": "object"
@@ -16202,6 +16268,11 @@
         "additionalProperties": false,
         "description": "전역 job 이벤트 목록 data.",
         "properties": {
+          "canonical_url": {
+            "description": "cursor를 제외한 현재 event filter의 첫 page canonical URL.",
+            "title": "Canonical Url",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PipelineJobEventRecord"
@@ -16211,7 +16282,8 @@
           }
         },
         "required": [
-          "items"
+          "items",
+          "canonical_url"
         ],
         "title": "PipelineEventsData",
         "type": "object"
@@ -16896,6 +16968,11 @@
         "additionalProperties": false,
         "description": "실행 타임라인 목록 data.",
         "properties": {
+          "canonical_url": {
+            "description": "cursor를 제외한 현재 실행 filter의 첫 page canonical URL.",
+            "title": "Canonical Url",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PipelineExecutionRootRecord"
@@ -16905,7 +16982,8 @@
           }
         },
         "required": [
-          "items"
+          "items",
+          "canonical_url"
         ],
         "title": "PipelineExecutionsData",
         "type": "object"
@@ -32463,7 +32541,7 @@
                 }
               }
             },
-            "description": "카탈로그·sync state·policy 모두 없음"
+            "description": "카탈로그·sync state·policy 또는 exact scope 없음"
           },
           "422": {
             "content": {
@@ -32473,7 +32551,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "canonical sync_scope 검증 실패"
           },
           "default": {
             "content": {
@@ -32978,6 +33056,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "minLength": 1,
                   "type": "string"
                 },
                 {
@@ -32994,6 +33073,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "minLength": 1,
                   "type": "string"
                 },
                 {
@@ -33010,6 +33090,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "minLength": 1,
                   "type": "string"
                 },
                 {
@@ -33141,6 +33222,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "minLength": 1,
                   "type": "string"
                 },
                 {
@@ -33157,6 +33239,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "minLength": 1,
                   "type": "string"
                 },
                 {

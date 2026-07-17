@@ -71,15 +71,29 @@ def _plan_nodes(plan: Any) -> list[dict[str, Any]]:
     return nodes
 
 
-def _assert_bounded_event_audit_plan(plan: Any, *, expected_index: str) -> None:
+def _assert_bounded_event_audit_plan(
+    plan: Any,
+    *,
+    expected_index: str,
+    allow_bounded_sort: bool = False,
+) -> None:
     nodes = _plan_nodes(plan)
     event_nodes = [
         node for node in nodes if node.get("Relation Name") == "import_job_events"
     ]
     assert event_nodes
     assert all(node.get("Node Type") != "Seq Scan" for node in event_nodes)
-    assert not any("Sort" in str(node.get("Node Type")) for node in nodes)
-    assert any(node.get("Index Name") == expected_index for node in event_nodes)
+    sort_nodes = [
+        node for node in nodes if "Sort" in str(node.get("Node Type"))
+    ]
+    if allow_bounded_sort:
+        assert sum(
+            float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+            for node in sort_nodes
+        ) <= 64
+    else:
+        assert not sort_nodes
+    assert any(node.get("Index Name") == expected_index for node in nodes)
     touches = sum(
         float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
         for node in event_nodes
@@ -324,6 +338,8 @@ async def test_dataset_events_filter_effective_scope_before_limit_and_cursor(
     )
     assert event_a1 is not None
     assert event_a2 is not None
+    assert event_a1.sync_scope == scope_a
+    assert event_a2.sync_scope == scope_a
     for index in range(22):
         event_b = await record_import_job_event(
             migrated_session,
@@ -385,16 +401,133 @@ async def test_dataset_events_filter_effective_scope_before_limit_and_cursor(
     assert page_b.next_cursor is not None
 
 
+async def test_exact_scope_event_history_uses_bounded_partial_index(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_jobs (
+              job_id, kind, payload, status, provider, dataset_key,
+              sync_scope, trigger_kind
+            ) VALUES
+            ('84000000-0000-4000-8000-000000000001',
+             'feature_update_request', '{}'::jsonb, 'done',
+             'scope-provider', 'scope-dataset', 'target_grids',
+             'update_request'),
+            ('84000000-0000-4000-8000-000000000002',
+             'feature_update_request', '{}'::jsonb, 'done',
+             'scope-provider', 'scope-dataset', 'external_system:other',
+             'update_request')
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.feature_update_requests (
+              request_id, scope_type, scope, run_mode, job_id
+            ) VALUES
+            ('84000000-0000-4000-8000-000000000011',
+             'provider_dataset',
+             '{"type":"provider_dataset","provider":"scope-provider",'
+             '"dataset_key":"scope-dataset",'
+             '"sync_scope":"target_grids"}'::jsonb,
+             'queued', '84000000-0000-4000-8000-000000000001'),
+            ('84000000-0000-4000-8000-000000000012',
+             'provider_dataset',
+             '{"type":"provider_dataset","provider":"scope-provider",'
+             '"dataset_key":"scope-dataset",'
+             '"sync_scope":"external_system:other"}'::jsonb,
+             'queued', '84000000-0000-4000-8000-000000000002')
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.import_job_events (
+              event_id, job_id, level, message, occurred_at
+            )
+            SELECT
+              ('85000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              '84000000-0000-4000-8000-000000000001'::uuid,
+              'info', 'target scope',
+              TIMESTAMPTZ '2026-07-01 00:00:00+00'
+                + seed.n * INTERVAL '1 second'
+            FROM generate_series(1, 4000) AS seed(n)
+
+            UNION ALL
+
+            SELECT
+              ('86000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
+              '84000000-0000-4000-8000-000000000002'::uuid,
+              'info', 'other scope',
+              TIMESTAMPTZ '2026-07-02 00:00:00+00'
+                + seed.n * INTERVAL '1 second'
+            FROM generate_series(1, 4000) AS seed(n)
+            """
+        )
+    )
+    await migrated_session.execute(text("ANALYZE ops.import_job_events"))
+    await migrated_session.execute(text("SET LOCAL plan_cache_mode = force_generic_plan"))
+
+    for cursor_at in (None, datetime(2026, 7, 1, 9, 30, tzinfo=_KST)):
+        sql = ops_repo._list_import_job_events_sql(
+            job_id=None,
+            level=None,
+            provider="scope-provider",
+            dataset_key="scope-dataset",
+            sync_scope="target_grids",
+            cursor_occurred_at=cursor_at,
+        )
+        plan = (
+            await migrated_session.execute(
+                text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}"),
+                {
+                    "job_id": None,
+                    "level": None,
+                    "provider": "scope-provider",
+                    "dataset_key": "scope-dataset",
+                    "sync_scope": "target_grids",
+                    "cursor_occurred_at": cursor_at,
+                    "cursor_event_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                    "limit": 51,
+                },
+            )
+        ).scalar_one()
+        _assert_bounded_event_audit_plan(
+            plan,
+            expected_index="idx_import_job_events_provider_dataset_scope_time",
+        )
+
+
 async def test_event_audit_filters_use_bounded_natural_plans(
     migrated_session: AsyncSession,
 ) -> None:
-    target_job = await start_unpaired_import_job(
+    target_job = await start_provider_dataset_import_job(
         migrated_session,
         kind="event_audit_target_plan_fixture",
+        provider_dataset=ProviderDatasetOperationKey(
+            "target-provider",
+            "target-dataset",
+        ),
     )
-    noise_job = await start_unpaired_import_job(
+    dataset_noise_job = await start_provider_dataset_import_job(
         migrated_session,
-        kind="event_audit_noise_plan_fixture",
+        kind="event_audit_dataset_noise_plan_fixture",
+        provider_dataset=ProviderDatasetOperationKey(
+            "other-provider",
+            "target-dataset",
+        ),
+    )
+    provider_noise_job = await start_provider_dataset_import_job(
+        migrated_session,
+        kind="event_audit_provider_noise_plan_fixture",
+        provider_dataset=ProviderDatasetOperationKey(
+            "target-provider",
+            "other-dataset",
+        ),
     )
     await migrated_session.execute(
         text(
@@ -413,7 +546,7 @@ async def test_event_audit_filters_use_bounded_natural_plans(
 
             SELECT
               ('82000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              CAST(:noise_job_id AS uuid), 'other-provider-' || seed.n::text,
+              CAST(:dataset_noise_job_id AS uuid), 'other-provider',
               'target-dataset', 'warning', 'dataset-noise',
               CAST(:occurred_at AS timestamptz) + INTERVAL '1 day'
                 + seed.n * INTERVAL '1 second'
@@ -423,8 +556,8 @@ async def test_event_audit_filters_use_bounded_natural_plans(
 
             SELECT
               ('83000000-0000-4000-8000-' || lpad(seed.n::text, 12, '0'))::uuid,
-              CAST(:noise_job_id AS uuid), 'target-provider',
-              'other-dataset-' || seed.n::text, 'warning', 'provider-noise',
+              CAST(:provider_noise_job_id AS uuid), 'target-provider',
+              'other-dataset', 'warning', 'provider-noise',
               CAST(:occurred_at AS timestamptz) + INTERVAL '2 days'
                 + seed.n * INTERVAL '1 second'
             FROM generate_series(1, 4000) AS seed(n)
@@ -432,7 +565,8 @@ async def test_event_audit_filters_use_bounded_natural_plans(
         ),
         {
             "target_job_id": target_job.job_id,
-            "noise_job_id": noise_job.job_id,
+            "dataset_noise_job_id": dataset_noise_job.job_id,
+            "provider_noise_job_id": provider_noise_job.job_id,
             "occurred_at": datetime(2026, 7, 1, tzinfo=_KST),
         },
     )
@@ -455,13 +589,6 @@ async def test_event_audit_filters_use_bounded_natural_plans(
             "target-provider",
             None,
             "idx_import_job_events_provider_time",
-        ),
-        (
-            None,
-            None,
-            None,
-            "target-dataset",
-            "idx_import_job_events_dataset_time",
         ),
         (
             None,
@@ -496,7 +623,13 @@ async def test_event_audit_filters_use_bounded_natural_plans(
                     },
                 )
             ).scalar_one()
-            _assert_bounded_event_audit_plan(plan, expected_index=expected_index)
+            _assert_bounded_event_audit_plan(
+                plan,
+                expected_index=expected_index,
+                allow_bounded_sort=(
+                    expected_index == "idx_import_job_events_job_time"
+                ),
+            )
 
     live_cases = (
         (_IMPORT_JOBS_LIVE_SQL, {}, "idx_import_job_events_time"),

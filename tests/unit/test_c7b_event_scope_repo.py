@@ -1,0 +1,230 @@
+"""0057 typed event scope/cursor repository 단위 테스트."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+from sqlalchemy import CheckConstraint
+
+from kortravelmap.infra import ops_repo
+from kortravelmap.infra.models import ImportJobEventRow, ImportJobRow
+from kortravelmap.infra.ops_repo import (
+    OpsCursorFilterMismatch,
+    list_ops_import_job_events,
+)
+
+
+class _Result:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _Session:
+    def __init__(self, *rows: list[Any]) -> None:
+        self._rows = list(rows)
+        self.statements: list[str] = []
+
+    async def execute(self, statement: Any, _params: dict[str, Any]) -> _Result:
+        self.statements.append(str(statement))
+        return _Result(self._rows.pop(0))
+
+
+def _event(event_id: str, *, at: datetime) -> SimpleNamespace:
+    return SimpleNamespace(
+        event_id=event_id,
+        job_id="57000000-0000-4000-8000-000000000001",
+        provider="provider-a",
+        dataset_key="dataset-a",
+        sync_scope="dataset_wide",
+        feature_id=None,
+        stage="loading",
+        level="info",
+        code="load.progress",
+        message="progress",
+        payload={},
+        occurred_at=at,
+    )
+
+
+@pytest.mark.unit
+async def test_exact_scope_uses_typed_event_column_before_cursor_and_limit() -> None:
+    at = datetime(2026, 7, 18, tzinfo=UTC)
+    session = _Session(
+        [
+            _event("57000000-0000-4000-8000-000000000001", at=at),
+            _event("57000000-0000-4000-8000-000000000002", at=at),
+        ]
+    )
+    page = await list_ops_import_job_events(
+        cast(Any, session),
+        provider="provider-a",
+        dataset_key="dataset-a",
+        sync_scope="dataset_wide",
+        limit=1,
+    )
+    assert page.next_cursor is not None
+    sql = session.statements[0]
+    assert "event.sync_scope = CAST(:sync_scope AS text)" in sql
+    assert "ops.feature_update_requests" not in sql
+    assert "JOIN ops.import_jobs" not in sql
+    assert (
+        sql.index("event.sync_scope = CAST(:sync_scope AS text)")
+        < sql.index("ORDER BY")
+        < sql.index("LIMIT")
+    )
+
+
+@pytest.mark.unit
+async def test_event_cursor_is_bound_to_all_filters() -> None:
+    at = datetime(2026, 7, 18, tzinfo=UTC)
+    first = _Session(
+        [
+            _event("57000000-0000-4000-8000-000000000001", at=at),
+            _event("57000000-0000-4000-8000-000000000002", at=at),
+        ]
+    )
+    page = await list_ops_import_job_events(
+        cast(Any, first),
+        level="info",
+        provider="provider-a",
+        dataset_key="dataset-a",
+        sync_scope="dataset_wide",
+        limit=1,
+    )
+    assert page.next_cursor is not None
+
+    mismatch = _Session()
+    with pytest.raises(OpsCursorFilterMismatch, match="filter mismatch"):
+        await list_ops_import_job_events(
+            cast(Any, mismatch),
+            level="error",
+            provider="provider-a",
+            dataset_key="dataset-a",
+            sync_scope="dataset_wide",
+            limit=1,
+            cursor=page.next_cursor,
+        )
+    assert mismatch.statements == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("at", "key"),
+    [
+        (datetime(2026, 7, 18, tzinfo=UTC), "not-a-uuid"),
+        (datetime(2026, 7, 18), "57000000-0000-4000-8000-000000000001"),
+    ],
+)
+async def test_event_cursor_rejects_invalid_keyset_before_query(
+    at: datetime,
+    key: str,
+) -> None:
+    filters = {
+        "job_id": None,
+        "level": None,
+        "provider": "provider-a",
+        "dataset_key": "dataset-a",
+        "sync_scope": "dataset_wide",
+    }
+    cursor = ops_repo._encode_bound_cursor(
+        "import_job_events",
+        at=at,
+        key=key,
+        filters=filters,
+    )
+    session = _Session()
+
+    with pytest.raises(ValueError, match="invalid import_job_events cursor"):
+        await list_ops_import_job_events(
+            cast(Any, session),
+            provider="provider-a",
+            dataset_key="dataset-a",
+            sync_scope="dataset_wide",
+            cursor=cursor,
+        )
+    assert session.statements == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("sync_scope", ["default", " external_system:x", "other"])
+async def test_event_scope_rejects_noncanonical_value(sync_scope: str) -> None:
+    session = _Session()
+    with pytest.raises(ValueError, match="sync_scope|external_system"):
+        await list_ops_import_job_events(
+            cast(Any, session),
+            provider="provider-a",
+            dataset_key="dataset-a",
+            sync_scope=sync_scope,
+        )
+    assert session.statements == []
+
+
+@pytest.mark.unit
+def test_exact_scope_index_predicate_matches_repository_query() -> None:
+    sql = ops_repo._list_import_job_events_sql(
+        job_id=None,
+        level=None,
+        provider="provider-a",
+        dataset_key="dataset-a",
+        sync_scope="dataset_wide",
+        cursor_occurred_at=None,
+    )
+    for predicate in (
+        "event.provider IS NOT NULL",
+        "event.dataset_key IS NOT NULL",
+        "event.sync_scope IS NOT NULL",
+        "event.quarantined_at IS NULL",
+    ):
+        assert predicate in sql
+
+
+@pytest.mark.unit
+def test_metadata_matches_0057_event_identity_and_index_contract() -> None:
+    def constraint_sql(table: Any, name: str) -> str:
+        constraints = table.constraints
+        constraint = next(
+            item
+            for item in constraints
+            if isinstance(item, CheckConstraint) and item.name == name
+        )
+        return str(constraint.sqltext)
+
+    job_pair = constraint_sql(
+        ImportJobRow.__table__,
+        "ck_import_jobs_provider_dataset_pair",
+    )
+    event_pair = constraint_sql(
+        ImportJobEventRow.__table__,
+        "ck_import_job_events_provider_dataset_pair",
+    )
+    event_scope = constraint_sql(
+        ImportJobEventRow.__table__,
+        "ck_import_job_events_sync_scope",
+    )
+    indexes = {index.name: index for index in ImportJobEventRow.__table__.indexes}
+    scope_index = indexes["idx_import_job_events_provider_dataset_scope_time"]
+    scope_index_columns = tuple(str(expression) for expression in scope_index.expressions)
+    scope_index_predicate = str(scope_index.dialect_options["postgresql"]["where"])
+
+    assert "quarantined_at" not in job_pair
+    assert "quarantined_at IS NOT NULL OR" in event_pair
+    assert "sync_scope IS NULL OR" in event_scope
+    assert "external_system:" in event_scope
+    assert scope_index_columns == (
+        "import_job_events.provider",
+        "import_job_events.dataset_key",
+        "import_job_events.sync_scope",
+        "occurred_at DESC",
+        "event_id DESC",
+    )
+    assert "provider IS NOT NULL" in scope_index_predicate
+    assert "dataset_key IS NOT NULL" in scope_index_predicate
+    assert "sync_scope IS NOT NULL" in scope_index_predicate
+    assert "quarantined_at IS NULL" in scope_index_predicate
+    assert "idx_import_job_events_dataset_time" not in indexes

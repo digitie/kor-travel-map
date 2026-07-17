@@ -19,6 +19,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.pipeline_repo import (
     get_pipeline_execution,
     get_pipeline_status_counts,
+    list_dataset_pipeline_execution_snapshots,
     list_latest_dataset_pipeline_executions,
     list_pipeline_executions,
 )
@@ -68,10 +69,9 @@ _INSERT_REQUEST_SQL = text(
 _INSERT_EVENT_SQL = text(
     """
     INSERT INTO ops.import_job_events (
-        event_id, job_id, provider, dataset_key, level, message, occurred_at
+        event_id, job_id, level, message, occurred_at
     ) VALUES (
-        CAST(:event_id AS uuid), CAST(:job_id AS uuid), :provider, :dataset_key,
-        'info', 'seed', :occurred_at
+        CAST(:event_id AS uuid), CAST(:job_id AS uuid), 'info', 'seed', :occurred_at
     )
     """
 )
@@ -172,16 +172,12 @@ async def _event(
     event_id: str,
     *,
     job_id: str,
-    provider: str | None,
-    dataset_key: str | None,
 ) -> None:
     await session.execute(
         _INSERT_EVENT_SQL,
         {
             "event_id": event_id,
             "job_id": job_id,
-            "provider": provider,
-            "dataset_key": dataset_key,
             "occurred_at": _T0,
         },
     )
@@ -324,29 +320,21 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
         migrated_session,
         "61111111-1111-4111-8111-111111111111",
         job_id=_JOB_ROOT,
-        provider="provider-z",
-        dataset_key="dataset-z",
     )
     await _event(
         migrated_session,
         "62222222-2222-4222-8222-222222222222",
         job_id=_JOB_CHILD,
-        provider="provider-a",
-        dataset_key="dataset-a",
     )
     await _event(
         migrated_session,
         "63333333-3333-4333-8333-333333333333",
         job_id=_JOB_GRANDCHILD,
-        provider="provider-a",
-        dataset_key="",
     )
     await _event(
         migrated_session,
         "64444444-4444-4444-8444-444444444444",
         job_id=_JOB_GRANDCHILD,
-        provider=None,
-        dataset_key=None,
     )
 
     page = await list_pipeline_executions(migrated_session)
@@ -498,7 +486,7 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
     assert member_detail.projected_job == root.projected_job
 
 
-async def test_typed_pair_is_canonical_when_audit_event_has_conflicting_pair(
+async def test_typed_pair_is_canonical_when_audit_event_inherits_owner_pair(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(
@@ -511,8 +499,6 @@ async def test_typed_pair_is_canonical_when_audit_event_has_conflicting_pair(
         migrated_session,
         "b3333333-3333-4333-8333-333333333333",
         job_id=_JOB_ROOT,
-        provider="event-provider",
-        dataset_key="event-dataset",
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
@@ -564,15 +550,11 @@ async def test_event_only_sibling_does_not_create_canonical_pair(
         migrated_session,
         "b4444444-4444-4444-8444-444444444444",
         job_id=_JOB_CHILD,
-        provider="provider-conflict",
-        dataset_key="dataset-conflict",
     )
     await _event(
         migrated_session,
         "b5555555-5555-4555-8555-555555555555",
         job_id=_JOB_GRANDCHILD,
-        provider="provider-legacy",
-        dataset_key="dataset-legacy",
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
@@ -636,8 +618,6 @@ async def test_audit_events_never_create_provider_dataset_identity(
         migrated_session,
         "b6000000-0000-4000-8000-000000000001",
         job_id=_JOB_CHILD,
-        provider="provider-valid",
-        dataset_key="dataset-valid",
     )
     malformed_pairs = (
         (" provider-leading", "dataset-leading-provider"),
@@ -645,13 +625,11 @@ async def test_audit_events_never_create_provider_dataset_identity(
         ("   ", "dataset-blank-provider"),
         ("provider-blank-dataset", "   "),
     )
-    for index, (provider, dataset_key) in enumerate(malformed_pairs, start=2):
+    for index, _ in enumerate(malformed_pairs, start=2):
         await _event(
             migrated_session,
             f"b6000000-0000-4000-8000-{index:012d}",
             job_id=_JOB_GRANDCHILD,
-            provider=provider,
-            dataset_key=dataset_key,
         )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
@@ -680,7 +658,7 @@ async def test_audit_events_never_create_provider_dataset_identity(
     assert await list_latest_dataset_pipeline_executions(migrated_session) == ()
 
 
-async def test_direct_request_pair_ignores_audit_event_pair(
+async def test_direct_request_pair_is_unchanged_by_inherited_audit_identity(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(
@@ -707,8 +685,6 @@ async def test_direct_request_pair_ignores_audit_event_pair(
         migrated_session,
         "b6666666-6666-4666-8666-666666666666",
         job_id=_JOB_ROOT,
-        provider="provider-legacy",
-        dataset_key="dataset-legacy",
     )
 
     root = (await list_pipeline_executions(migrated_session)).items[0]
@@ -797,15 +773,11 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
         migrated_session,
         "e1111111-1111-4111-8111-111111111111",
         job_id=branch_a_child,
-        provider="owned-provider",
-        dataset_key="owned-dataset",
     )
     await _event(
         migrated_session,
         "e2222222-2222-4222-8222-222222222222",
         job_id=unowned_descendant,
-        provider="standalone-provider",
-        dataset_key="standalone-dataset",
     )
 
     page = await list_pipeline_executions(migrated_session)
@@ -1081,6 +1053,66 @@ async def test_latest_dataset_execution_keeps_direct_scopes_separate(
     assert by_scope["external_system:concierge"].execution.id == requests[1][0]
 
 
+async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
+    migrated_session: AsyncSession,
+) -> None:
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    sync_scope = "target_grids"
+    terminal_request_id = "a5555555-5555-4555-8555-555555555555"
+    active_request_id = "a6666666-6666-4666-8666-666666666666"
+    scope = {
+        "type": "provider_dataset",
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "sync_scope": sync_scope,
+    }
+    await _request(
+        migrated_session,
+        terminal_request_id,
+        job_id=None,
+        created_at=_T0,
+        scope=scope,
+    )
+    started = await start_update_request(
+        migrated_session,
+        terminal_request_id,
+        dagster_run_id="terminal-snapshot-run",
+        expected_generation=1,
+    )
+    assert started is not None
+    finished = await finish_update_request(
+        migrated_session,
+        terminal_request_id,
+        status="done",
+        owner_dagster_run_id="terminal-snapshot-run",
+        expected_generation=1,
+    )
+    assert finished is not None
+    await _request(
+        migrated_session,
+        active_request_id,
+        job_id=None,
+        created_at=_T0 + timedelta(minutes=1),
+        scope=scope,
+    )
+
+    snapshots = await list_dataset_pipeline_execution_snapshots(migrated_session)
+    snapshot = next(
+        item
+        for item in snapshots
+        if (item.provider, item.dataset_key, item.sync_scope)
+        == (provider, dataset_key, sync_scope)
+    )
+
+    assert snapshot.latest_terminal is not None
+    assert snapshot.latest_terminal.execution.id == terminal_request_id
+    assert snapshot.latest_terminal.pair_status == "done"
+    assert snapshot.active is not None
+    assert snapshot.active.execution.id == active_request_id
+    assert snapshot.active.pair_status == "queued"
+
+
 async def test_dataset_scope_filter_is_applied_before_page_limit(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1302,8 +1334,6 @@ async def _seed_selective_projection_cardinality(
         session,
         "75555555-5555-4555-8555-555555555555",
         job_id=event_only_job_id,
-        provider="legacy-provider",
-        dataset_key="legacy-dataset",
     )
     await _request(
         session,
@@ -1400,8 +1430,7 @@ async def _seed_selective_projection_cardinality(
         text(
             """
             INSERT INTO ops.import_job_events (
-                event_id, job_id, provider, dataset_key,
-                level, message, occurred_at
+                event_id, job_id, level, message, occurred_at
             )
             SELECT
                 (
@@ -1412,15 +1441,6 @@ async def _seed_selective_projection_cardinality(
                   '31000000-0000-4000-8000-'
                   || lpad(seed.n::text, 12, '0')
                 )::uuid,
-                CASE
-                  WHEN seed.n <= 2000 THEN 'legacy-provider'
-                  ELSE 'legacy-other-provider-' || seed.n::text
-                END,
-                CASE
-                  WHEN seed.n <= 2000
-                    THEN 'legacy-other-dataset-' || seed.n::text
-                  ELSE 'legacy-dataset'
-                END,
                 'info', 'noise', CAST(:created_at AS timestamptz)
             FROM generate_series(1, 4000) AS seed(n)
             """

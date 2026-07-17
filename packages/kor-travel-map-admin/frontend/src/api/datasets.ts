@@ -35,8 +35,7 @@ export type OpsDatasetsGridResponse = DatasetSchemas["OpsDatasetsGridResponse"];
 export type OpsDatasetDetailData = DatasetSchemas["OpsDatasetDetailData"];
 export type OpsDatasetDetailResponse = DatasetSchemas["OpsDatasetDetailResponse"];
 export type OpsDatasetScopeState = DatasetSchemas["OpsDatasetScopeState"];
-export type OpsDatasetLatestExecution =
-  DatasetSchemas["OpsDatasetLatestExecution"];
+export type OpsDatasetExecution = DatasetSchemas["OpsDatasetExecution"];
 export type OpsDatasetScopeRefreshCapability =
   DatasetSchemas["OpsDatasetScopeRefreshCapability"];
 export type OpsDatasetEventRecord = DatasetSchemas["OpsDatasetEventRecord"];
@@ -198,7 +197,6 @@ export function fetchOpsDataset(
 export function resolveDatasetRefreshScope(
   capability: OpsDatasetScopeRefreshCapability | null | undefined,
   selectedSyncScope: string,
-  providerStateDefaultScope: string | null | undefined,
 ): DatasetRefreshScopeDecision {
   if (!capability) {
     return { allowed: false, reason: "갱신 scope capability가 없습니다." };
@@ -209,8 +207,7 @@ export function resolveDatasetRefreshScope(
       capability.supported ||
       capability.default_sync_scope !== "dataset_wide" ||
       capability.allowed_sync_scopes.length > 0 ||
-      !providerStateDefaultScope ||
-      selectedSyncScope !== providerStateDefaultScope
+      selectedSyncScope !== capability.default_sync_scope
     ) {
       return { allowed: false, reason: "dataset-wide scope 계약이 모순됩니다." };
     }
@@ -231,35 +228,6 @@ export function resolveDatasetRefreshScope(
     };
   }
   return { allowed: true, syncScope: selectedSyncScope };
-}
-
-/**
- * 선택 행과 다른 scope의 canonical operation이 drawer에 섞이지 않게 한다.
- *
- * 이력 조회는 mutation capability의 현재 allow-list와 독립적이다. target이 삭제되어
- * 더는 갱신할 수 없는 stale external scope와 catalog에서 사라진 orphan scope도 과거
- * 실행을 확인할 수 있어야 한다. 서버가 dataset-wide라고 명시한 canonical 기본
- * state만 저장 전환기의 ``NULL``/``dataset_wide``를 함께 취급한다.
- */
-export function filterDatasetRecentRuns(
-  runs: readonly OpsDatasetLatestExecution[],
-  selectedSyncScope: string,
-  capability: OpsDatasetScopeRefreshCapability | null | undefined,
-  providerStateDefaultScope: string | null | undefined,
-): OpsDatasetLatestExecution[] {
-  const isCanonicalDatasetWideState =
-    capability?.effect === "dataset_wide" &&
-    selectedSyncScope === providerStateDefaultScope;
-  const isOrphanDefaultState = !capability && selectedSyncScope === "default";
-  if (isCanonicalDatasetWideState || isOrphanDefaultState) {
-    return runs.filter(
-      (run) =>
-        run.sync_scope === selectedSyncScope ||
-        run.sync_scope === null ||
-        run.sync_scope === "dataset_wide",
-    );
-  }
-  return runs.filter((run) => run.sync_scope === selectedSyncScope);
 }
 
 export function buildDatasetRefreshNowRequest({
@@ -339,27 +307,13 @@ export function datasetRefreshConflict(
 export function hasActiveDatasetExecution(
   response: OpsDatasetsGridResponse | undefined,
 ): boolean {
-  return Boolean(
-    response?.data.items.some((row) => {
-      const execution = row.latest_execution;
-      return (
-        execution !== null &&
-        ([execution.status, execution.pair_status] as const).some((status) =>
-          ["queued", "running"].includes(status),
-        )
-      );
-    }),
-  );
+  return Boolean(response?.data.items.some((row) => row.active_execution));
 }
 
 export function hasActiveDatasetDetailExecution(
   response: OpsDatasetDetailResponse | undefined,
 ): boolean {
-  return response?.data.recent_runs.some((execution) =>
-    [execution.status, execution.pair_status].some((status) =>
-      ["queued", "running"].includes(status),
-    ),
-  ) ?? false;
+  return Boolean(response?.data.active_execution);
 }
 
 export function resolveOpsDatasetRefetchInterval(

@@ -170,6 +170,9 @@ class ApiSettings(BaseSettings):
 
 provider loader credential은 API settings에 존재하지 않으며 Dagster/provider runtime만
 소유한다. API는 fixture preview와 canonical pipeline/datasets application service만 제공한다.
+datasets application service는 같은 DB snapshot에서 terminal 최신 실행과 active 실행을 분리하고,
+exact-scope run/event 이력을 `{items,next_cursor,canonical_url}`로 제공한다. pipeline 목록 cursor는
+전체 filter fingerprint에 묶이며 다른 filter로 재사용할 수 없다.
 
 메인 라이브러리 settings는 별도 `KorTravelMapSettings`를 그대로 import해서 사용한다.
 `pg_dsn`, `object_store_*` 같은 항목은 본 패키지에서 재정의하지 않는다.

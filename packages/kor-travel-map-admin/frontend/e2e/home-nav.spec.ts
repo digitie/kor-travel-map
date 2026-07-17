@@ -215,7 +215,7 @@ function makeImportExecutionsList(
   items: PipelineExecutionRootRecord[],
 ): PipelineExecutionsListResponse {
   return {
-    data: { items },
+    data: { canonical_url: "/v1/ops/pipeline/executions", items },
     meta: cursorListMeta(8, "e2e-home-pipeline-executions"),
   };
 }

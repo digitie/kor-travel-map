@@ -1719,7 +1719,7 @@ class ImportJobRow(Base):
             "(provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' "
             "AND dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) "
             "AND dataset_key <> '')",
-            name="ck_import_jobs_provider_dataset_pair",
+            name=conv("ck_import_jobs_provider_dataset_pair"),
         ),
         CheckConstraint(
             "trigger_kind IS NULL OR trigger_kind IN "
@@ -1971,6 +1971,23 @@ class ImportJobEventRow(Base):
             "level IN ('debug','info','warning','error','critical')",
             name="ck_import_job_events_level",
         ),
+        CheckConstraint(
+            "quarantined_at IS NOT NULL OR "
+            "((provider IS NULL AND dataset_key IS NULL) OR "
+            "(provider IS NOT NULL AND provider = btrim(provider) AND provider <> '' "
+            "AND dataset_key IS NOT NULL AND dataset_key = btrim(dataset_key) "
+            "AND dataset_key <> ''))",
+            name=conv("ck_import_job_events_provider_dataset_pair"),
+        ),
+        CheckConstraint(
+            "sync_scope IS NULL OR (provider IS NOT NULL AND dataset_key IS NOT NULL "
+            "AND (sync_scope IN ('dataset_wide','target_grids') OR "
+            "(left(sync_scope, 16) = 'external_system:' "
+            "AND char_length(sync_scope) <= 128 AND char_length(sync_scope) > 16 "
+            "AND substring(sync_scope FROM 17) = "
+            f"btrim(substring(sync_scope FROM 17), {_CANONICAL_WHITESPACE_SQL}))))",
+            name=conv("ck_import_job_events_sync_scope"),
+        ),
         Index(
             "idx_import_job_events_time",
             text("occurred_at DESC"),
@@ -1992,13 +2009,6 @@ class ImportJobEventRow(Base):
             postgresql_where=text("provider IS NOT NULL AND quarantined_at IS NULL"),
         ),
         Index(
-            "idx_import_job_events_dataset_time",
-            "dataset_key",
-            text("occurred_at DESC"),
-            text("event_id DESC"),
-            postgresql_where=text("dataset_key IS NOT NULL AND quarantined_at IS NULL"),
-        ),
-        Index(
             "idx_import_job_events_provider_dataset_time",
             "provider",
             "dataset_key",
@@ -2015,6 +2025,18 @@ class ImportJobEventRow(Base):
             text("event_id DESC"),
             postgresql_where=text("quarantined_at IS NULL"),
         ),
+        Index(
+            "idx_import_job_events_provider_dataset_scope_time",
+            "provider",
+            "dataset_key",
+            "sync_scope",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+            postgresql_where=text(
+                "provider IS NOT NULL AND dataset_key IS NOT NULL "
+                "AND sync_scope IS NOT NULL AND quarantined_at IS NULL"
+            ),
+        ),
         {"schema": "ops"},
     )
 
@@ -2030,6 +2052,7 @@ class ImportJobEventRow(Base):
     )
     provider: Mapped[str | None] = mapped_column(Text)
     dataset_key: Mapped[str | None] = mapped_column(Text)
+    sync_scope: Mapped[str | None] = mapped_column(Text)
     feature_id: Mapped[str | None] = mapped_column(Text)
     stage: Mapped[str | None] = mapped_column(Text)
     level: Mapped[str] = mapped_column(Text, nullable=False)
