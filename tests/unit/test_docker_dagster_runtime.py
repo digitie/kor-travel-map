@@ -490,6 +490,17 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
 
 
 @pytest.mark.unit
+def test_admin_proxy_secret_minimum_is_enforced_at_runtime_boundaries() -> None:
+    api_entrypoint = _script("docker/api-entrypoint.sh")
+    admin_launcher = _script("scripts/run-admin-stack.sh")
+
+    for script in (api_entrypoint, admin_launcher):
+        assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in script
+        assert "at least 32 characters" in script
+        assert "#admin_proxy_secret" in script
+
+
+@pytest.mark.unit
 def test_dagster_package_installs_postgres_storage_plugin() -> None:
     pyproject = tomllib.loads(
         (ROOT / "packages" / "kor-travel-map-dagster" / "pyproject.toml").read_text(

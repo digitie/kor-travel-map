@@ -5,7 +5,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { useOpsLiveInvalidation } from "@/api/live";
+import {
+  opsLiveConnectionLabel,
+  useOpsLiveInvalidation,
+} from "@/api/live";
 import {
   type ExecutionKind,
   type PipelineOverviewResponse,
@@ -263,7 +266,12 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
         : "executions";
 
   const live = useOpsLiveInvalidation({
-    topics: ["import_jobs", "feature_update_requests", "dagster_runs"],
+    topics: [
+      "import_jobs",
+      "feature_update_requests",
+      "dagster_runs",
+      "dagster_schedules",
+    ],
   });
   // NUX 없음 — 새 UI는 Dagster iframe을 쓰지 않아 `/ops/pipeline/nux-seen`이
   // 계약에서 제거됐다(플랜 §2 개정, C3a/#687).
@@ -361,7 +369,7 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={live.state === "live" ? "default" : "outline"}>
-            {live.state === "live" ? "실시간" : live.state}
+            {opsLiveConnectionLabel(live.state)}
           </Badge>
           <Button
             disabled={overview.isFetching}

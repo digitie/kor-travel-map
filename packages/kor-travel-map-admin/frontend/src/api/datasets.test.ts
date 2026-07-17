@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientError } from "./client";
 import {
+  OPS_DATASET_LIVE_TOPICS,
   buildDatasetRefreshNowRequest,
   createDatasetRefreshNow,
   datasetRefreshExecutionQueryKey,
@@ -13,8 +14,11 @@ import {
   hasActiveDatasetDetailExecution,
   hasActiveDatasetExecution,
   opsDatasetCatalogOptions,
+  opsDatasetLiveInvalidationAdapter,
+  opsDatasetLiveBadgeLabel,
   previewOpsDataset,
   resolveDatasetRefreshScope,
+  resolveOpsDatasetRefetchInterval,
   upsertOpsDatasetRefreshPolicy,
   type OpsDatasetLatestExecution,
   type OpsDatasetGridRow,
@@ -391,6 +395,98 @@ describe("ops datasets active polling gate", () => {
       hasActiveDatasetDetailExecution(detailWithStatuses("done", "done")),
     ).toBe(false);
     expect(hasActiveDatasetDetailExecution(undefined)).toBe(false);
+  });
+
+  it("live fallback에서는 비활성 grid·상세도 REST polling한다", () => {
+    expect(resolveOpsDatasetRefetchInterval(true, false)).toBe(2_000);
+    expect(resolveOpsDatasetRefetchInterval(true, true)).toBe(2_000);
+    expect(resolveOpsDatasetRefetchInterval(false, true)).toBe(5_000);
+    expect(resolveOpsDatasetRefetchInterval(false, false)).toBe(false);
+  });
+});
+
+describe("ops datasets live invalidation adapter", () => {
+  it("인증 거절은 일반 disabled와 구분해 로그인 필요로 표시한다", () => {
+    expect(
+      opsDatasetLiveBadgeLabel({
+        state: "unauthorized",
+        mode: "disabled",
+      }),
+    ).toBe("로그인 필요");
+    expect(
+      opsDatasetLiveBadgeLabel({ state: "disabled", mode: "disabled" }),
+    ).toBe("자동 갱신 꺼짐");
+  });
+
+  it("projection을 바꾸는 global topic을 active cache 유무와 무관하게 구독한다", () => {
+    expect(OPS_DATASET_LIVE_TOPICS).toEqual([
+      "provider_sync",
+      "dataset_projection",
+      "import_jobs",
+      "feature_update_requests",
+      "dagster_runs",
+      "dagster_schedules",
+    ]);
+    expect(resolveOpsDatasetRefetchInterval(false, false)).toBe(false);
+  });
+
+  it.each([
+    ["provider_dataset", "provider_sync", "invalidateProviderDataset"],
+    [
+      "provider_dataset",
+      "dataset_projection",
+      "invalidateProviderDataset",
+    ],
+    ["operation", "import_jobs", "invalidateOperation"],
+    ["operation", "feature_update_requests", "invalidateOperation"],
+    ["operation", "dagster_runs", "invalidateOperation"],
+    ["schedule", "dagster_schedules", "invalidateSchedule"],
+  ] as const)(
+    "%s event %s가 inactive grid와 선택 상세를 함께 무효화한다",
+    (kind, topic, adapterMethod) => {
+      const queryClient = new QueryClient();
+      const gridKey = ["ops-datasets"];
+      const detailKey = [
+        "ops-dataset",
+        "python-kma-api",
+        "forecast",
+        "target_grids",
+      ];
+      queryClient.setQueryData(gridKey, { active: false });
+      queryClient.setQueryData(detailKey, { active: false });
+
+      opsDatasetLiveInvalidationAdapter[adapterMethod]?.(queryClient, {
+        kind,
+        topic,
+      });
+
+      expect(queryClient.getQueryState(gridKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    },
+  );
+
+  it("live mode의 외부 request/job 생성·진행은 polling 없이 operation event로 반영한다", () => {
+    expect(resolveOpsDatasetRefetchInterval(false, false)).toBe(false);
+    for (const topic of ["feature_update_requests", "import_jobs"] as const) {
+      const queryClient = new QueryClient();
+      const gridKey = ["ops-datasets"];
+      const detailKey = [
+        "ops-dataset",
+        "python-kma-api",
+        "forecast",
+        "target_grids",
+      ];
+      queryClient.setQueryData(gridKey, { latest_execution: null });
+      queryClient.setQueryData(detailKey, { recent_runs: [] });
+
+      opsDatasetLiveInvalidationAdapter.invalidateOperation?.(queryClient, {
+        kind: "operation",
+        topic,
+      });
+
+      expect(queryClient.getQueryState(gridKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    }
   });
 });
 

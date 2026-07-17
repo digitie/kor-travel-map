@@ -1,6 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-17 (codex, agent A) — T-ADM-C6b clean-cut 최종 gate 완료
+## 2026-07-17 (codex, agent B) — T-ADM-C7A C6B 정본 결선 중
+
+- integrity issue와 POI cache target의 cross-tab/process 변경을 transaction-coupled
+  `dataset_projection` topic으로 승격하고 datasets grid/detail adapter에 연결했다. DB rollback,
+  원본별 1회 증가, topic row-lock late commit, snapshot revision을 통합 테스트로 고정했다.
+- malformed/비단조 frame은 현재 socket을 즉시 폐기하고 backoff 뒤 새 socket에서 exact
+  `replace`를 보내도록 바꿨다. datasets 인증 만료는 `로그인 필요`로 표시하며 root
+  `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` 32자 하한을 local launcher/API entrypoint에서 강제한다.
+- PR #723(C7B-720)과 #724(C6B)가 병합된 최신 main에 C7A를 결선하고 있다.
+- **다음 한 작업**: migration을 `0055`/`down_revision=0054` 단일 head로 확정하고 C6B의
+  canonical pipeline/datasets query key와 same-origin live 계약을 최종 대조한 뒤, 독립
+  적대 리뷰어 2인의 지적을 반영하고 전체 gate를 수행한다.
+
+## 2026-07-17 (codex, agent A) — T-ADM-C6b clean-cut 최종 gate·PR #724 병합 완료
 
 - C6A exact commit 위 독립 branch에서 legacy REST operation 28개를 제거했다. 삭제 범위는
   Dagster 9, provider 운영 2, refresh policy 3, import job/event 5, feature update request 6,
@@ -18,8 +31,7 @@
   API 450, Dagster 457(1 skip), 실제 PostGIS 92, frontend 142건과 Ruff, strict mypy
   115+51파일, import 4/4, OpenAPI/admin/user type drift, Compose base·host rendering,
   production build를 통과했다. local Playwright는 실행하지 않고 최종 n150 C7 gate에 남겼다.
-- **다음 한 작업**: 완료 task를 아카이브한 문서 commit을 만든 뒤 보안 감사·PR·CI green으로
-  C6b를 병합한다. 이어 C7A를 최신 main에 rebase하고 migration을 0055/down 0054로 확정한다.
+- 완료 task를 아카이브하고 보안 감사·전체 CI green 뒤 PR #724를 squash merge했다.
 ## 2026-07-17 (agent B) — T-ADM-C6b UI clean-cut 리뷰 반영 완료
 
 - 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,
@@ -32,7 +44,7 @@
 - **다음 한 작업**: backend/API branch와 결합해 OpenAPI/admin type을 재생성하고 최종 통합
   SHA를 적대 리뷰어 2명에게 전달한다. 승인 전에는 테스트를 실행하지 않는다.
 
-## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
+## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·gate·PR #723 병합 완료
 
 - `/ops/datasets`의 `이슈 있음` 필터·정렬·행 badge를 dataset/provider open issue 합계로
   통일했다. 요약은 dataset과 provider 귀속 단위를 별도 중복 제거해 같은 dataset의 scope
@@ -40,8 +52,8 @@
 - provider-only, dataset-only, both, neither를 unit과 mocked E2E 계약으로 고정했다. 두
   적대 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했고 unit 5건, type-check, lint와 production
   build를 통과했다.
-- **다음 한 작업**: 완료 task를 아카이브한 문서 commit을 만들고 보안 감사 뒤 issue #720
-  연결 PR을 올린다. mocked/live Playwright 실행과 #720 종결은 최종 C7 n150 증거 뒤 수행한다.
+- 보안 감사와 전체 CI green 뒤 PR #723을 squash merge했다. mocked/live Playwright 실행과
+  issue #720 종결은 최종 C7 n150 증거 뒤 수행한다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C6a 리뷰·로컬 gate 완료
 

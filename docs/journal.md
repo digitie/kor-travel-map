@@ -2,7 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-17 (codex, agent A) — C6b 최종 리뷰·로컬 gate 완료
+## 2026-07-17 (codex, agent B) — C7A 선행 적대 리뷰 보강
+
+- dataset grid/detail 합성값 중 기존 `provider_sync` clock이 포괄하지 못한 integrity issue와
+  POI cache target을 `dataset_projection` topic으로 분리했다. 두 원본 table의 statement
+  trigger는 원본 transaction과 함께 revision을 올려 rollback과 동시 late commit을 보존한다.
+- malformed/비단조 frame 뒤 서버가 보내지 않을 same-socket 재구독을 기다리던 상태 머신을
+  socket 즉시 폐기·backoff 재연결·새 exact `replace` 방식으로 바꿨다. 인증 만료 UI는
+  `로그인 필요`로 표시하고 공유 secret 32자 하한을 launcher/container 기동 경계에 추가했다.
+- DB rollback/source mapping/topic row lock, 다른 tab/process projection invalidation, 실제
+  `socket.send` 재구독 계약 테스트를 보강했다. C6B 병합 정본 위에서 migration을
+  `0055`/`down_revision=0054`로 확정한 뒤 최종 2인 적대 리뷰와 전체 gate를 수행한다.
+
+## 2026-07-17 (codex, agent A) — C6b 최종 리뷰·로컬 gate·PR #724 병합 완료
 
 - C7B-720 병합 commit 위로 최종 rebase하고 admin/user OpenAPI와 generated type을 다시
   대조했다. 두 적대 리뷰어가 bridge/host/external overlay, BFF 인증, credential 격리,
@@ -12,6 +24,7 @@
   실제 PostGIS 92, frontend 142건 및 전체 정적·생성·build gate가 green이다.
 - local Playwright는 실행하지 않았다. live UI·파괴적 시나리오는 C7에서 n150 prod에 배포한
   뒤 file-by-file 저부하 실행과 상태 복원으로 종결한다.
+- 보안 감사와 전체 CI green 뒤 PR #724를 squash merge했다.
 
 ## 2026-07-17 (codex, agent A) — C6b backend/API legacy clean-cut 구현
 
@@ -63,7 +76,7 @@
   추가했고 POI mutation의 누락된 pipeline 무효화도 연결했다. 테스트는 최종 통합 리뷰 뒤로
   보류했다.
 
-## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
+## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일·PR #723 병합 완료
 
 - dataset/provider issue count를 합산하는 순수 projection을 두고 필터·정렬·행 badge가 같은
   의미를 사용하게 했다. grid 요약은 dataset을 `(provider,dataset)`, provider를 provider별로
@@ -71,6 +84,8 @@
 - provider-only, dataset-only, both, neither와 scope 중복을 unit/mock E2E 계약에 추가했다.
   두 독립 적대 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했고 unit 5건, type-check, lint,
   production build를 통과했다. Playwright 실제 실행은 C7 n150 live wave에 합친다.
+- 보안 감사와 전체 CI green 뒤 PR #723을 squash merge했다. issue #720 종결은 최종 n150
+  live 증거 뒤 수행한다.
 
 ## 2026-07-17 (codex, agent B) — C6a 통합 화면 링크 재배선 완료
 

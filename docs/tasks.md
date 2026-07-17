@@ -33,9 +33,18 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 계열은 PinVi 계약으로 존치).
 
 - [ ] `T-ADM-C7A` — **ops-live same-origin 인증 + query invalidation** (agent
-  **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
-  인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
-  전에 반드시 머지한다.
+  **B**, issue **#685**, **migration 0055**, **PR 1개**, 의존 C4·C5·C6b): 로그인
+  session을 확인하는 Origin+Fetch Metadata fail-closed ticket BFF, signed subprotocol
+  ticket 검증, DB nonce 단일 소비와 60초 연결 lease를 구현한다. 없음/변조 ticket은
+  browser-observable `4401`, handshake 전 만료는 data frame 없이 `4408`로 닫는다.
+  reconnect/backoff/polling 상태 모델과 topic→domain event adapter를 두고,
+  `/ops/pipeline`·`/ops/datasets`의 canonical query-key helper에 연결한다.
+  `provider_sync`와 transaction-coupled `dataset_projection` 전역 topic으로 다른
+  tab/process의 integrity issue·POI cache target 변경도 grid/detail에 반영한다. malformed·
+  비단조 frame은 오염 socket을 즉시 폐기하고 새 ticket/socket에서 exact `replace`를
+  다시 보낸다. root `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`는 launcher/container에서 앞뒤
+  공백 없이 32자 이상을 기동 전에 강제한다. migration은 `0055`, `down_revision=0054`인
+  단일 head로 확정하고 C7 live gate 전에 반드시 머지한다.
 - [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
   **migration 0056**, **PR 1개**, 의존 C7A/0055):
   `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔
@@ -70,15 +79,16 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
   생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
   fingerprint 변화와 grid cap 초과 fail-closed·scope별 durable failure를 검증한다.
-  C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720도 이 live 증거를
-  첨부한 뒤 닫는다.
+  실제 Chrome에서 없음/변조 ticket은 data frame 0건 + `CloseEvent.code===4401`,
+  signed-expired ticket은 data frame 0건 + `4408` 후 fresh ticket 재연결을 증거로
+  남긴다. C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720은 최종
+  live 증거를 첨부한 뒤 닫는다.
 
-병렬 wave는 다음처럼 고정한다. **Wave 1**은 C6a 뒤 C6b·C7A/0055·C7B-720을
-병렬 진행한다. **Wave 2**는 C7A/0055 뒤 AUD-718/0056과 AUD-686을 병렬 진행한다.
+병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7B-720은 완료했고 C7A/0055를
+최종 결선 중이다. **Wave 2**는 C7A/0055 뒤 AUD-718/0056과 AUD-686을 병렬 진행한다.
 **Wave 3**은 AUD-718/0056 뒤 C7B-API/0057, **Wave 4**는 C7B-API와 C7A 뒤
-C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5는 완료 이력으로 옮겼다.
-C7A의 query-key 결선은 C6b merge 뒤 rebase하고, 각 wave 시작·PR 직전·병합 직후
-원격 main에 자주 rebase한다.
+C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7B-720은 완료 이력으로
+옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은
 **C7A `0055` → AUD-718 `0056` → C7B-API `0057`** 단일 chain이며, 후속 migration
@@ -88,10 +98,6 @@ Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전
 적대적 리뷰어 2명.
-
-`T-ADM-C3a`~`C3e`는 PR #677 병합 후 적대적 리뷰에서 확인된 C5 차단 후속이다.
-순서를 바꾸거나 한 PR로 합치지 않는다. 기존 C5 PR #691은 재작업 대기 상태이며,
-**C3e까지 merge·CI green 전에는 신규 C5 구현이나 #691 merge를 진행하지 않는다.**
 
 ## T-101 — Materialized View 도입 검토
 

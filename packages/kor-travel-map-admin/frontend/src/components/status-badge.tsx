@@ -44,6 +44,8 @@ const STATUS_LABELS: Record<string, string> = {
   paused: "일시정지",
   connecting: "연결중",
   reconnecting: "재연결중",
+  live: "실시간",
+  polling: "폴링 보완",
   // 실패/부정 계열
   error: "오류",
   failed: "실패",
@@ -51,6 +53,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "취소됨",
   canceled: "취소됨",
   unavailable: "사용불가",
+  unauthorized: "로그인 필요",
   critical: "심각",
   rejected: "거절됨",
   denied: "거부됨",
@@ -107,6 +110,7 @@ function statusTone(status: string | null | undefined) {
       "merged",
       "resolved",
       "started",
+      "live",
     ].includes(normalized)
   ) {
     return "success" as const;
@@ -119,13 +123,24 @@ function statusTone(status: string | null | undefined) {
       "cancelled",
       "canceled",
       "unavailable",
+      "unauthorized",
       "critical",
       "rejected",
     ].includes(normalized)
   ) {
     return "destructive" as const;
   }
-  if (["queued", "pending", "loading", "running", "dry-run"].includes(normalized)) {
+  if (
+    [
+      "queued",
+      "pending",
+      "loading",
+      "running",
+      "dry-run",
+      "reconnecting",
+      "polling",
+    ].includes(normalized)
+  ) {
     return "warning" as const;
   }
   return "muted" as const;

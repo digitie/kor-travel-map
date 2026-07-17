@@ -1,0 +1,4 @@
+export const OPS_LIVE_PROTOCOL_PREFIX = "ktm.ops-live.v1.";
+export const OPS_LIVE_TICKET_TTL_SECONDS = 60;
+export const OPS_LIVE_EXPIRED_CLOSE_CODE = 4408;
+export const OPS_LIVE_UNAUTHORIZED_CLOSE_CODE = 4401;
