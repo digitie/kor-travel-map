@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent A) — C6b 최종 리뷰·로컬 gate 완료
+
+- C7B-720 병합 commit 위로 최종 rebase하고 admin/user OpenAPI와 generated type을 다시
+  대조했다. 두 적대 리뷰어가 bridge/host/external overlay, BFF 인증, credential 격리,
+  legacy 부재, canonical status URL과 C7B 필터 보존을 최종 S1/S2/S3 0건으로 승인했다.
+- 테스트에서 드러난 live envelope exact assertion과 direct service test의 canonical status
+  prefix를 두 리뷰어 재승인 뒤 보강했다. root unit 1,410, API 450, Dagster 457(1 skip),
+  실제 PostGIS 92, frontend 142건 및 전체 정적·생성·build gate가 green이다.
+- local Playwright는 실행하지 않았다. live UI·파괴적 시나리오는 C7에서 n150 prod에 배포한
+  뒤 file-by-file 저부하 실행과 상태 복원으로 종결한다.
+
 ## 2026-07-17 (codex, agent A) — C6b backend/API legacy clean-cut 구현
 
 - Dagster 9, provider ops 2, refresh policy 3, import job/event 5, feature update request 6,

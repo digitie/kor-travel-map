@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-17 (codex, agent A) — T-ADM-C6b backend/API clean-cut 구현·리뷰 대기
+## 2026-07-17 (codex, agent A) — T-ADM-C6b clean-cut 최종 gate 완료
 
 - C6A exact commit 위 독립 branch에서 legacy REST operation 28개를 제거했다. 삭제 범위는
   Dagster 9, provider 운영 2, refresh policy 3, import job/event 5, feature update request 6,
@@ -11,21 +11,15 @@
   credential settings·compose/load-env 주입을 제거했으며 preview catalog는 fixture/none만 가진다.
 - migration은 추가하지 않았다. UI 통합 뒤 admin/user OpenAPI와 generated type을 모두
   재생성했고, 삭제된 legacy path가 tracked 계약에 남지 않음을 확인했다.
-- 적대 리뷰 1차는 production S1/S2 결함 0건, 테스트 회귀 S3 3건으로 판정했다. CORS,
-  feature-update idempotency/strict DTO, public provider empty-list 회귀를 복원했다.
-- 적대 리뷰 2차의 S2 provider secret 경계를 반영해 API container를 package-scoped `.env`로
-  격리했다. dead Dagster NUX 표면을 제거하고 canonical request의 필수 UUID idempotency
-  계약을 현행 문서에 완결했다.
-- 재검증 S2에 따라 idempotency 문서를 actor-scoped ledger와 일치시키고 API 전용 env를
-  Compose 필수 입력으로 전환했다. root 예시의 중복 API runtime 설정도 제거했다.
-- runtime 재검토의 removed provider env, MOIS/file-registry/offline 설정, Compose frontend
-  auth/BFF 누락을 보강했다. BFF secret은 root 단일 정본으로 만들고 package env 중복을
-  fail-closed했으며 dead fixture helper와 no-auth/legacy endpoint 문서를 정리했다.
-- 최종 적대 리뷰에서 Docker bridge의 frontend peer가 loopback trusted CIDR에 막히는 S2를
-  확인했다. 전용 control-plane network의 frontend 고정 주소만 `/32`로 신뢰하고 host mode는
-  loopback으로 덮어쓰도록 수정했다.
-- **다음 한 작업**: bridge 인증 수정과 문서 drift를 두 리뷰어에게 같은 exact SHA로 다시
-  검증받는다. 승인 전에는 테스트·lint·push·PR을 실행하지 않는다.
+- 반복 적대 리뷰에서 provider secret 과다 주입, BFF bridge peer 403, raw env inline comment,
+  deleted status URL과 문서 drift를 보강했다. API/frontend는 env allowlist, Dagster만 provider
+  비밀을 소유하고 bridge는 frontend 고정 `/32`, host는 loopback만 신뢰한다.
+- 두 독립 리뷰어가 최종 제품과 테스트 보강을 S1/S2/S3 0건으로 승인했다. root unit 1,410,
+  API 450, Dagster 457(1 skip), 실제 PostGIS 92, frontend 142건과 Ruff, strict mypy
+  115+51파일, import 4/4, OpenAPI/admin/user type drift, Compose base·host rendering,
+  production build를 통과했다. local Playwright는 실행하지 않고 최종 n150 C7 gate에 남겼다.
+- **다음 한 작업**: 완료 task를 아카이브한 문서 commit을 만든 뒤 보안 감사·PR·CI green으로
+  C6b를 병합한다. 이어 C7A를 최신 main에 rebase하고 migration을 0055/down 0054로 확정한다.
 ## 2026-07-17 (agent B) — T-ADM-C6b UI clean-cut 리뷰 반영 완료
 
 - 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,

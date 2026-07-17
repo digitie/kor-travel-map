@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin legacy surface clean-cut (2026-07-17, `T-ADM-C6b`)
+
+- [x] **T-ADM-C6b — 운영 표면을 pipeline/datasets 두 화면으로 clean-cut.** legacy REST
+  operation 28개와 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`,
+  `/admin/dagster`, `/etl` UI를 redirect·호환 shim 없이 삭제했다. canonical
+  `/v1/ops/pipeline/*`, `/v1/ops/datasets/*`, 관측 read와 public provider read 2종만 유지했다.
+- [x] **provider credential과 BFF 런타임 경계 분리.** API/frontend는 process별 env allowlist와
+  package-scoped API env를 사용하고 provider 비밀은 Dagster에만 둔다. bridge mode는 전용
+  control-plane network의 frontend 고정 주소 `/32`만 신뢰하며 host mode는 loopback으로
+  덮어쓴다. root raw env 예제의 inline comment와 API package secret 중복은 fail-closed한다.
+- [x] **계약·검증 완료.** 두 독립 적대 리뷰어가 최종 제품 및 테스트 보강을 S1/S2/S3 0건으로
+  승인했다. root unit 1,410건, API 450건, Dagster 457건(1 skip), 실제 PostGIS 92건,
+  frontend unit 142건, Ruff, strict mypy 115+51파일, import 계약 4/4, OpenAPI/admin/user type
+  drift, base·host Compose rendering과 production build를 통과했다. live UI는 최종
+  `T-ADM-C7` n150 gate에서 검증한다.
+
 ## Admin datasets 이슈 의미 통일 (2026-07-17, `T-ADM-C7B-720`)
 
 - [x] **T-ADM-C7B-720 — dataset/provider open issue를 단일 행 의미로 통합.** `이슈 있음`
