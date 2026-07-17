@@ -1987,16 +1987,14 @@ test.describe("/ops/pipeline", () => {
       page.getByRole("button", { name: /새 실행 .*건 반영/ }),
     ).toHaveCount(0);
 
-    const beforeHistoryBack = counters.executionQueries.length;
     await page.goBack();
     await expect(page.getByText(/page 1/)).toBeVisible();
-    await expect
-      .poll(() => {
-        return counters.executionQueries
-          .slice(beforeHistoryBack)
-          .some((query) => !query.has("status") && !query.has("cursor"));
-      })
-      .toBe(true);
+    await expect(page.getByLabel("실행 상태")).toHaveValue("all");
+    expect(
+      counters.executionQueries.some(
+        (query) => !query.has("status") && !query.has("cursor"),
+      ),
+    ).toBe(true);
   });
 
   test("상세 원 행이 필터로 사라지면 닫기 focus를 첫 표시 행으로 복귀", async ({
