@@ -240,14 +240,11 @@ export function SchedulePanel({
 
   const data = schedules.data?.data;
   const scheduleItems = useMemo(() => data?.schedules ?? [], [data]);
-  const [frozenScheduleMutation, setFrozenScheduleMutation] = useState<
-    ReturnType<typeof readPipelineFrozenScheduleMutation>
-  >(null);
-  useEffect(() => {
-    setFrozenScheduleMutation(
+  const frozenScheduleMutation = useMemo(() => {
+    return (
       scheduleItems
         .map((schedule) => readPipelineFrozenScheduleMutation(schedule.name))
-        .find((submission) => submission !== null) ?? null,
+        .find((submission) => submission !== null) ?? null
     );
   }, [
     commandSchedule.status,
@@ -255,20 +252,17 @@ export function SchedulePanel({
     resolveClaim.status,
     scheduleItems,
   ]);
-  useEffect(() => {
-    const frozen =
+  const storedClaimResolutionSubmission = useMemo(() => {
+    return (
       scheduleItems
         .map((schedule) =>
           readPipelineFrozenScheduleClaimResolution(schedule.name),
         )
-        .find((submission) => submission !== null) ?? null;
-    if (frozen === null) {
-      return;
-    }
-    setClaimResolutionSubmission((current) => current ?? frozen.submission);
-    setClaimResolution(frozen.submission.body.resolution);
-    setClaimResolutionReason(frozen.submission.body.reason);
+        .find((submission) => submission !== null)?.submission ?? null
+    );
   }, [resolveClaim.status, scheduleItems]);
+  const effectiveClaimResolutionSubmission =
+    claimResolutionSubmission ?? storedClaimResolutionSubmission;
   const sensors = data?.sensors ?? [];
   const scheduleMutationPending =
     patchSchedule.isPending ||
@@ -288,20 +282,23 @@ export function SchedulePanel({
       commandSchedule.error,
       commandSchedule.variables?.scheduleName,
     ) ??
-    (claimResolutionSubmission
+    (effectiveClaimResolutionSubmission
       ? {
-          scheduleName: claimResolutionSubmission.scheduleName,
-          commandId: claimResolutionSubmission.commandId,
+          scheduleName: effectiveClaimResolutionSubmission.scheduleName,
+          commandId: effectiveClaimResolutionSubmission.commandId,
         }
       : null);
   const frozenClaimResolution =
     recoveryClaim &&
-    claimResolutionSubmission?.scheduleName === recoveryClaim.scheduleName &&
-    claimResolutionSubmission.commandId === recoveryClaim.commandId
-      ? claimResolutionSubmission
+    effectiveClaimResolutionSubmission?.scheduleName ===
+      recoveryClaim.scheduleName &&
+    effectiveClaimResolutionSubmission.commandId === recoveryClaim.commandId
+      ? effectiveClaimResolutionSubmission
       : null;
   const scheduleRecoveryLocked = Boolean(
-    recoveryClaim || claimResolutionSubmission || frozenScheduleMutation,
+    recoveryClaim ||
+      effectiveClaimResolutionSubmission ||
+      frozenScheduleMutation,
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
@@ -636,7 +633,9 @@ export function SchedulePanel({
                   disabled={
                     resolveClaim.isPending || frozenClaimResolution !== null
                   }
-                  value={claimResolution}
+                  value={
+                    frozenClaimResolution?.body.resolution ?? claimResolution
+                  }
                   onChange={(event) =>
                     setClaimResolution(
                       event.target
@@ -659,7 +658,9 @@ export function SchedulePanel({
                 label="확인 근거·해제 사유 (필수)"
                 maxLength={MAX_CLAIM_RESOLUTION_REASON_LENGTH}
                 placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
-                value={claimResolutionReason}
+                value={
+                  frozenClaimResolution?.body.reason ?? claimResolutionReason
+                }
                 onChange={(event) =>
                   setClaimResolutionReason(event.target.value)
                 }
