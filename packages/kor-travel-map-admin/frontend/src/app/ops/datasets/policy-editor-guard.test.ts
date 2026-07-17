@@ -162,6 +162,71 @@ describe("policy editor server state transition", () => {
     });
   });
 
+  it("clean 상태의 rev3→rev2 scope cache는 ack-only이고 이후 rev4는 적용한다", () => {
+    const current = initialPolicyEditorState(makePolicy("3"));
+    const staleScope = observePolicyProp(current, makePolicy("2"));
+
+    expect(staleScope).toEqual({
+      ...current,
+      acknowledgedPropRevision: "2",
+    });
+
+    const latest = makePolicy("4", { targeted_policy: "disabled" });
+    expect(observePolicyProp(staleScope, latest)).toMatchObject({
+      acknowledgedPropRevision: "4",
+      draft: { targeted_policy: "disabled" },
+      draftBasePolicy: latest,
+      draftBaseRevision: "4",
+      latestObservedPolicy: latest,
+      latestObservedRevision: "4",
+      serverSnapshotEpoch: 1,
+    });
+  });
+
+  it("dirty 상태의 rev3→rev2 scope cache도 draft/base/deferred/epoch를 보존한다", () => {
+    const current = initialPolicyEditorState(makePolicy("3"));
+    const dirty: PolicyEditorState = {
+      ...current,
+      dirty: true,
+      draft: { ...current.draft, targeted_policy: "allow_targeted" },
+    };
+
+    expect(observePolicyProp(dirty, makePolicy("2"))).toEqual({
+      ...dirty,
+      acknowledgedPropRevision: "2",
+    });
+  });
+
+  it("pending 중 낮은 scope cache는 epoch를 유지해 정상 mutation response를 막지 않는다", () => {
+    const pending = initialPolicyEditorState(makePolicy("3"));
+    const startEpoch = pending.serverSnapshotEpoch;
+    const staleScope = observePolicyProp(pending, makePolicy("2"));
+
+    expect(staleScope).toEqual({
+      ...pending,
+      acknowledgedPropRevision: "2",
+    });
+    expect(
+      applyPolicyMutationSuccess(staleScope, makePolicy("4"), startEpoch),
+    ).toMatchObject({
+      latestObservedRevision: "4",
+      serverSnapshotEpoch: startEpoch + 1,
+    });
+  });
+
+  it("2^53 초과의 낮은 scope cache도 정밀도 손실 없이 ack-only 처리한다", () => {
+    const current = initialPolicyEditorState(
+      makePolicy("9007199254740994"),
+    );
+
+    expect(
+      observePolicyProp(current, makePolicy("9007199254740993")),
+    ).toEqual({
+      ...current,
+      acknowledgedPropRevision: "9007199254740993",
+    });
+  });
+
   it("null→numeric과 numeric→null prop snapshot은 각각 epoch를 올려 적용한다", () => {
     const absent = initialPolicyEditorState(null);
     const createdPolicy = makePolicy("1");

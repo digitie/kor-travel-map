@@ -150,6 +150,28 @@ export function applyServerPolicyState(
   };
 }
 
+const POSITIVE_DECIMAL_REVISION = /^[1-9]\d*$/;
+
+/** candidate가 current보다 오래됐는지 정수 변환 없이 판정한다. */
+function isOlderPolicyRevision(
+  candidate: string | null,
+  current: string | null,
+): boolean {
+  if (
+    candidate === null ||
+    current === null ||
+    candidate === current ||
+    !POSITIVE_DECIMAL_REVISION.test(candidate) ||
+    !POSITIVE_DECIMAL_REVISION.test(current)
+  ) {
+    return false;
+  }
+  if (candidate.length !== current.length) {
+    return candidate.length < current.length;
+  }
+  return candidate < current;
+}
+
 /**
  * 새 prop revision을 render commit 전에 원자 반영한다. dirty draft는 보존하고,
  * mutation/409 본문에서 이미 본 revision의 refetch는 acknowledge만 한다.
@@ -172,6 +194,14 @@ export function observePolicyProp(
   if (incomingRevision === state.latestObservedRevision) {
     return acknowledgedState;
   }
+  // global policy mutation/409보다 늦게 온 scope-specific detail cache는
+  // authoritative snapshot을 되돌리지 않는다. prop 자체는 acknowledge해
+  // render/submit guard만 해제하고 pending mutation epoch도 유지한다.
+  if (
+    isOlderPolicyRevision(incomingRevision, state.latestObservedRevision)
+  ) {
+    return acknowledgedState;
+  }
   const observedState = {
     ...acknowledgedState,
     serverSnapshotEpoch: state.serverSnapshotEpoch + 1,
@@ -185,28 +215,6 @@ export function observePolicyProp(
     latestObservedPolicy: policy ?? null,
     latestObservedRevision: incomingRevision,
   };
-}
-
-const POSITIVE_DECIMAL_REVISION = /^[1-9]\d*$/;
-
-/** candidate가 current보다 오래됐는지 정수 변환 없이 판정한다. */
-function isOlderPolicyRevision(
-  candidate: string | null,
-  current: string | null,
-): boolean {
-  if (
-    candidate === null ||
-    current === null ||
-    candidate === current ||
-    !POSITIVE_DECIMAL_REVISION.test(candidate) ||
-    !POSITIVE_DECIMAL_REVISION.test(current)
-  ) {
-    return false;
-  }
-  if (candidate.length !== current.length) {
-    return candidate.length < current.length;
-  }
-  return candidate < current;
 }
 
 /** 늦게 도착한 mutation success는 더 최신인 prop/409 snapshot을 되돌리지 않는다. */
