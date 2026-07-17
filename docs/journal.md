@@ -34,6 +34,18 @@
   회귀를 추가했다. 적대 리뷰 2인에게 넘기기 위한 구현 스냅샷이며 지시에 따라 리뷰 전 테스트·lint·
   build는 아직 실행하지 않았다.
 
+## 2026-07-18 (codex, agent A) — AUD-686 적대 리뷰·전체 로컬 gate 완료
+
+- 두 독립 리뷰어가 KMA empty preflight, cancellation/cleanup, terminal transaction과
+  exact-scope event query를 제품 SHA `c07259fb`에서 검토해 S1/S2/S3 0건으로 승인했다.
+  뒤이은 변경은 Dagster test import sentinel 격리와 generated type 설명 동기화뿐이다.
+- 최종 SHA에서 root unit 1,413건, API 485건, Dagster 475건(1 skip), 실제 PostGIS 집중
+  6건과 frontend Vitest 185건을 통과했다. Ruff, strict mypy 115+52+23파일, import 계약
+  4/4, OpenAPI admin/user·generated type drift, frontend type-check·lint(오류 0, 기존 경고 6),
+  31-route production build도 모두 green이다.
+- `T-ADM-AUD-686`을 완료 이력으로 옮겼다. PR은 #686을 `Refs`로 연결하되 이슈는 닫지 않고,
+  최종 C7 n150 파괴적 live E2E 증거 뒤 #684/#712 등 운영 종결 이슈와 함께 닫는다.
+
 ## 2026-07-17 (codex, agent A) — AUD-686 2차 적대 리뷰 지적 반영
 
 - 정규 schedule resource가 client를 asset preflight 전에 생성하던 경로를

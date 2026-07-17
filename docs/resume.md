@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex, agent A) — T-ADM-AUD-686 로컬 종결·PR 준비 완료
+
+- direct runner뿐 아니라 정규 Dagster KMA grid asset 3종도 target mapping/dedupe/cap/empty와
+  cursor skip 뒤에 public client를 동기 생성하도록 resource를 lazy factory로 바꿨다. credential
+  부재·constructor sentinel materialization과 cancellation/close 이중 실패 계약을 보강했다.
+- `kma.target_scope_empty` terminal event는 canonical 전이와 같은 transaction에서 한 번만
+  기록한다. active duplicate loser, terminal replay, event writer fault rollback, generic KMA·
+  grid-limit·다른 provider의 오분류 0건을 회귀 계약으로 고정했다.
+- dataset 최근 event는 canonical job/request JOIN의 effective scope를 ORDER/LIMIT 전에 제한하고,
+  DTO scope·다음 cursor·history URL과 pipeline events exact filter를 API/UI/OpenAPI/generated
+  type에 연결했다. migration은 만들지 않았고 후속 C7B-API 0057 전 join-derived 경계를 문서화했다.
+- 두 독립 적대 리뷰어가 제품 SHA `c07259fb`를 S1/S2/S3 0건으로 승인했다. 이후 테스트 import
+  격리와 generated type 설명만 기계적으로 동기화한 최종 SHA에서 root unit 1,413건, API 485건,
+  Dagster 475건(1 skip), 실제 PostGIS 집중 6건, frontend unit 185건을 통과했다. Ruff,
+  strict mypy 115+52+23파일, import 계약 4/4, OpenAPI admin/user·generated type drift,
+  frontend type-check·lint(오류 0, 기존 경고 6), 31-route production build도 green이다.
+- **다음 한 작업**: 보안 감사 결과와 `Refs #686`을 포함한 PR을 게시해 CI green·승인 후
+  병합한다. 이슈 #686은 최종 C7 n150 live 증거를 첨부할 때까지 닫지 않는다.
+
 ## 2026-07-18 (codex, agent A) — T-ADM-AUD-718 로컬 종결·PR 준비 완료
 
 - C7A 병합 정본과 Alembic 0055 위에 0056 `provider_refresh_policies.revision` 양수 BIGINT를
@@ -18,20 +37,6 @@
   production build도 통과했다. local Playwright는 실행하지 않았고 최종 C7 n150 gate에 남겼다.
 - **다음 한 작업**: 완료 문서와 보안 감사를 포함한 PR을 올려 CI green·승인 후 병합한다.
   issue #718은 닫지 않고 최종 n150 live 증거를 첨부한 뒤 종결한다.
-
-## 2026-07-17 (codex, agent A) — T-ADM-AUD-686 2차 적대 리뷰 반영 snapshot
-
-- direct runner뿐 아니라 정규 Dagster KMA grid asset 3종도 target mapping/dedupe/cap/empty와
-  cursor skip 뒤에 public client를 동기 생성하도록 resource를 lazy factory로 바꿨다. credential
-  부재·constructor sentinel materialization과 cancellation/close 이중 실패 계약을 보강했다.
-- `kma.target_scope_empty` terminal event는 canonical 전이와 같은 transaction에서 한 번만
-  기록한다. active duplicate loser, terminal replay, event writer fault rollback, generic KMA·
-  grid-limit·다른 provider의 오분류 0건을 회귀 계약으로 고정했다.
-- dataset 최근 event는 canonical job/request JOIN의 effective scope를 ORDER/LIMIT 전에 제한하고,
-  DTO scope·다음 cursor·history URL과 pipeline events exact filter를 API/UI/OpenAPI/generated
-  type에 연결했다. migration은 만들지 않았고 후속 C7B-API 0057 전 join-derived 경계를 문서화했다.
-- **다음 한 작업**: 테스트를 실행하지 않은 이 snapshot을 동일 적대 리뷰어 2명에게 다시 보내
-  S1/S2/S3 0건 승인을 받은 뒤에만 집중/전체 gate와 PR 절차를 진행한다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 
