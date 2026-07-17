@@ -661,9 +661,16 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(
       dagsterCard.getByRole("link", { name: "작업 자동화" }),
     ).toHaveAttribute("href", "/ops/pipeline?tab=schedules");
-    await expect(page.getByRole("link", { name: "Dagster", exact: true })).toHaveAttribute(
-      "href",
-      "http://127.0.0.1:12702",
+    const dagsterLink = page.getByRole("link", {
+      name: "Dagster",
+      exact: true,
+    });
+    await expect(dagsterLink).toHaveAttribute("target", "_blank");
+    await expect(dagsterLink).toHaveAttribute("rel", "noreferrer");
+    const dagsterHref = await dagsterLink.getAttribute("href");
+    expect(dagsterHref).not.toBeNull();
+    expect(["http:", "https:"]).toContain(
+      new URL(dagsterHref as string).protocol,
     );
 
     // ── Dedup pending 카드 ──

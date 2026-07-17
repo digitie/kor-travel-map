@@ -191,6 +191,10 @@ export function useUpsertPoiCacheTargetMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["nearby-features-by-target"],
       });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "executions"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
       invalidateOpsDatasetQueries(queryClient);
       if (data.data.nearby_url) {
         void queryClient.invalidateQueries({ queryKey: ["features"] });
@@ -220,6 +224,10 @@ export function useDeletePoiCacheTargetMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["nearby-features-by-target"],
       });
+      void queryClient.invalidateQueries({
+        queryKey: ["pipeline", "executions"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
       invalidateOpsDatasetQueries(queryClient);
     },
   });

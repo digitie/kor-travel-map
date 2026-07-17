@@ -25,6 +25,17 @@
 - **다음 한 작업**: C5/C6A UI 최종 rebase 뒤 OpenAPI/admin type을 재생성한 단일 통합 SHA를
   적대 리뷰어 2명에게 재검증받는다. 그 전에는 사용자 지시대로 테스트·lint·push·PR을 실행하지
   않으며, 생성 계약 drift가 green이 아니면 C6b를 병합하지 않는다.
+## 2026-07-17 (agent B) — T-ADM-C6b UI clean-cut 리뷰 반영 완료
+
+- 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,
+  `/etl` UI와 전용 hook/mock E2E를 redirect 없이 삭제했다. navigation·홈·운영 로그·frontend
+  README inventory는 `/ops/pipeline`과 `/ops/datasets` 정본으로 수렴했다.
+- 외부 리뷰 B 지적에 따라 홈 Dagster 링크 E2E의 hard-coded 개발 fallback을 제거하고,
+  offline validation/load와 POI target upsert/delete의 canonical pipeline/datasets query
+  invalidation을 hook+QueryClient spy 단위 계약으로 고정했다. POI mutation도 pipeline
+  executions/overview를 직접 무효화한다.
+- **다음 한 작업**: backend/API branch와 결합해 OpenAPI/admin type을 재생성하고 최종 통합
+  SHA를 적대 리뷰어 2명에게 전달한다. 승인 전에는 테스트를 실행하지 않는다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7B-720 리뷰·로컬 gate 완료
 

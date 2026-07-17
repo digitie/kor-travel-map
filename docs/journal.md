@@ -40,6 +40,17 @@
   읽도록 바꾸고 package env의 구 API 전용 중복 secret을 금지했으며, dead fixture 목록 helper와
   no-auth/legacy endpoint 설명도 제거했다. 생성 OpenAPI와 admin type은 C6A/UI 최종 rebase 뒤
   반드시 갱신하고 drift green을 확인하기 전에는 C6b를 병합하지 않는다.
+## 2026-07-17 (agent B) — C6b 구 UI clean-cut 리뷰 반영
+
+- 구 `/ops/import-jobs*`, `/ops/providers`, `/admin/features/update-requests*`, `/admin/dagster`,
+  `/etl` route와 전용 hook/mock E2E를 redirect 없이 삭제했다. 홈은 canonical pipeline root와
+  overview 집계를 쓰고, 운영 로그는 system/API 감사 로그만 남겨 작업 event를 pipeline으로
+  일원화했다. frontend README의 route/API inventory도 같은 현행 표면으로 갱신했다.
+- 외부 적대 리뷰 B의 지적을 반영해 홈 Dagster 외부 링크 E2E를 배포별 환경 URL과 독립적인
+  절대 URL·새 탭 계약으로 바꿨다. offline validation/load와 POI target upsert/delete가
+  pipeline executions/overview 및 ops dataset grid/detail을 무효화하는 hook 단위 계약을
+  추가했고 POI mutation의 누락된 pipeline 무효화도 연결했다. 테스트는 최종 통합 리뷰 뒤로
+  보류했다.
 
 ## 2026-07-17 (codex, agent B) — C7B-720 datasets 이슈 의미 통일
 

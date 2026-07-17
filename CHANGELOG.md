@@ -35,7 +35,7 @@
 - **CHANGED**: 행 badge와 전체 이슈 요약도 같은 합계 의미를 사용하고, scope 반복 행은
   dataset/provider 귀속 단위로 한 번만 집계한다.
 
-### admin ops 통합 링크 정본화 (2026-07-17, ADR-064 T-ADM-C6a)
+### admin ops UI clean-cut (2026-07-17, ADR-064 T-ADM-C6a/C6b)
 
 - **CHANGED**: import job·갱신 요청·load batch·provider/dataset 딥링크와 홈·Feature·큐레이션·
   운영 로그의 작업 링크를 `/ops/pipeline`과 `/ops/datasets` 두 운영 화면으로 통합했다.
@@ -45,6 +45,14 @@
   pipeline endpoint를 가리킨다.
 - **TEST**: load batch·parent UUID deep link의 partial-index access path와 두 통합 화면의
   read/write·cross-surface 반영 시나리오를 회귀 계약으로 고정했다.
+- **CHANGED**: 홈은 canonical pipeline root와 pipeline overview의 작업 수를 표시하고,
+  운영 로그는 system/API 감사 로그만 소유한다. 작업 event·실행 이력·Dagster run·스케줄은
+  `/ops/pipeline`, provider×dataset×scope 상태·정책·preview는 `/ops/datasets`가 소유한다.
+- **REMOVED**: 구 `/ops/import-jobs*`, `/ops/providers`,
+  `/admin/features/update-requests*`, `/admin/dagster`, `/etl` UI route와 전용 hook/mock E2E를
+  redirect·호환 shim 없이 삭제하고 navigation을 두 canonical 운영 화면으로 정리했다.
+- **TEST**: offline validation/load와 POI target upsert/delete가 canonical pipeline/datasets
+  query를 무효화하는 hook 단위 계약을 추가했다.
 
 ### pipeline 운영 화면·조작 원장 통합 (2026-07-17, ADR-064 T-ADM-C5)
 

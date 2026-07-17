@@ -219,30 +219,25 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 
 | Route | 백엔드 API | 비고 |
 |-------|-----------|------|
-| `/` | `/v1/ops/metrics`, `/v1/ops/import-jobs`, `/v1/admin/features/dedup-reviews`, `/v1/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
+| `/` | `/v1/ops/metrics`, `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions`, `/v1/admin/features/dedup-reviews` | 구현됨. 운영 홈: Feature·canonical pipeline root·중복 검수·이슈·Dagster 상태 요약 |
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
 | `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/deactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
 | `/admin/features/curated` | `/v1/admin/features/curated*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
-| `/ops/import-jobs` | `/v1/ops/import-jobs`, `WS /v1/ops/live` | 구현됨. 작업 큐 상태, status/kind/batch/parent filter, live invalidate |
-| `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |
-| `/ops/providers` | `/v1/ops/providers`, `/v1/ops/providers/{provider}`, `/v1/admin/provider-refresh-policies*`, `/v1/admin/features/update-requests` | 구현됨. provider×dataset sync/detail, cursor, 최근 provider_dataset request, policy 편집/요청 생성 |
+| `/ops/pipeline` | `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions*`, `/v1/ops/pipeline/events`, `/v1/ops/pipeline/dagster-runs*`, `/v1/ops/pipeline/schedules*`, `/v1/ops/pipeline/requests*`, `WS /v1/ops/live` | 구현됨. canonical 실행 root·상세·전역 event·Dagster run·스케줄·갱신 요청 조작 |
+| `/ops/datasets` | `/v1/ops/datasets*`, `/v1/ops/datasets/refresh-policy`, `/v1/ops/datasets/preview`, `/v1/ops/pipeline/requests`, `WS /v1/ops/live` | 구현됨. provider×dataset×scope 상태, 정책, preview, 지금 갱신, 실행 이력 |
 | `/ops/consistency` | `/v1/ops/metrics`, `/v1/ops/consistency/reports`, `/v1/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
-| `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs`, `/v1/ops/import-job-events` | 구현됨. system/API log와 import job event stream 조회 |
+| `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs` | 구현됨. system/API 감사 로그 전용. 작업 event·실행 이력은 `/ops/pipeline`이 정본 |
 | `/admin/features/dedup-reviews` | `/v1/admin/features/dedup-reviews` | 구현됨. dedup 검토 큐와 결정 mutation |
 | `/admin/features/enrichment-reviews` | `/v1/admin/features/enrichment-reviews` | 구현됨. enrichment 검토 큐와 결정 mutation |
-| `/admin/features/update-requests` | `/v1/admin/features/update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
-| `/admin/features/update-requests/[request_id]` | `/v1/admin/features/update-requests/{request_id}`, `WS /v1/ops/live` | 구현됨. scope/matched_scope/job/Dagster 상세, cancel/run-now |
 | `/admin/poi-cache-targets` | `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
-| `/admin/dagster` | `/v1/ops/dagster/summary`, `/v1/ops/dagster/runs/{run_id}`, `/v1/ops/dagster/nux-seen` | 구현됨. Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed |
 | `/admin/settings` | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` | 구현됨. public API key 생성/폐기와 로그인 감사 로그 조회 |
-| `/etl` | `/v1/debug/etl/*` | 구현됨. fixture/live ETL preview |
 | `/admin/features/new` | `/v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 | 구현됨. 수동 feature 작성 change request + 지도 좌표/geocode/reverse/중복 후보 |
 | `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/{id}/weather`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/weather/nearby |
-| `/admin/offline-uploads` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL upload/list/detail + Dagster load launch. CSV/TSV wizard는 후속 |
+| `/admin/offline-uploads` | `/v1/admin/offline-uploads`, `/v1/admin/offline-uploads/{upload_id}/validate`, `/v1/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL/CSV/TSV upload·preview·validation·canonical load 실행 |
 | `/debug/explain` | 없음 | T-221e 재판정으로 제외. EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook에서 수행 |
-| `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/debug/etl` preview로 분리 |
+| `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/ops/datasets` preview로 분리 |
 
 패키지 경계: `../../../docs/architecture/debug-ui-package.md` §14. Admin 상세 구현 사양:
 `../../../docs/debug-ui-admin-workflows.md`.
