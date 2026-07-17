@@ -75,7 +75,8 @@ inactive grid/detail도 REST polling fallback으로 전환한다. `subscribed`�
 topic은 wire 표시 순서가 아니라 문자열 타입·중복 없음·동일 원소인 exact set으로 요청과
 비교한다. snapshot/update는 v1 envelope, 단조 증가 safe-integer sequence, 요청 topic,
 비어 있지 않은 revision, object data를 모두 만족해야 live로 전이하며, 형식 오류는 즉시
-REST polling으로 내리고 기존 watchdog을 갱신하지 않는다. protocol 위반 뒤에는 heartbeat만으로
+socket을 폐기하고 `standby` 재연결로 내리되 기존 watchdog을 갱신하지 않는다. 3회 연속
+실패부터 inactive REST polling fallback을 켠다. protocol 위반 뒤에는 heartbeat만으로
 복귀하지 않고 exact 재구독 뒤 유효 snapshot을 받아야 같은 socket을 다시 신뢰한다.
 
 ## 개발

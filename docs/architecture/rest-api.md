@@ -557,7 +557,8 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
   적용되지 않는다. frontend는 healthy 전 `4408`을 backoff 실패로, 중복 없는 exact topic set
   구독 ack 뒤 v1·단조 sequence·요청 topic·revision·object data 검증을 통과한 frame을 받은
   healthy 연결의 `4408`만 즉시 lease rotation으로 처리한다. wire topic 배열 순서는 의미가
-  없으며 형식 오류는 watchdog을 갱신하지 않고 REST polling으로 전환한다. ticket fetch,
+  없으며 형식 오류는 watchdog을 갱신하지 않고 socket 폐기 + `standby` 재연결로 전환한다.
+  ticket fetch,
   handshake, heartbeat watchdog이 silent network failure에서도 active 실행 polling과
   background reconnect를 유지하고, 3회 연속 실패부터 inactive grid/detail도 REST polling
   fallback으로 전환한다. BFF는 `Origin`과

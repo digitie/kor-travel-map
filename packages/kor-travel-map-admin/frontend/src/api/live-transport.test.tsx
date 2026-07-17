@@ -347,7 +347,7 @@ describe("ops live transport", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("정상 연결 뒤 heartbeat가 끊기면 polling으로 전환하고 재연결한다", async () => {
+  it("정상 연결 뒤 heartbeat가 끊기면 standby로 전환하고 재연결한다", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ticketResponse()));
     renderHarness();
     await flushMicrotasks();
