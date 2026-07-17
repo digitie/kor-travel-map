@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-17 (codex, agent B) — C6a 통합 화면 링크 재배선 완료
+
+- `EntityLink`의 import job·update request·load batch를 `/ops/pipeline`으로, provider를
+  `/ops/datasets`의 `provider/dataset/sync_scope` URL 계약으로 전환하고 단위 계약을 추가했다.
+  홈·Feature 지도·큐레이션·운영 로그·구 갱신 요청 전환 화면의 직접 링크도 같은 두 화면만
+  가리키게 해 구 상세 페이지 제거 전에 진입점을 먼저 끊었다.
+- ops-live topic은 legacy import-job/provider cache 대신 pipeline overview/execution/event와
+  dataset grid/detail을 무효화한다. import job 응답의 `status_url`과 self/events/cancel/parent,
+  Dagster run HATEOAS도 canonical pipeline API로 바꿨고 load batch는 통합 UI filter로 연결했다.
+- load batch와 parent UUID deep link가 전체 pipeline graph를 먼저 읽지 않도록 두 partial
+  index에서 member를 seed한 뒤 같은 root component를 확장하고, 실제 Postgres EXPLAIN gate로
+  access path를 고정했다. live E2E 시나리오 카탈로그에도 두 통합 화면의 read/write·반영
+  계약을 추가했다.
+- 두 독립 적대 리뷰어가 canonical identity, root membership, HATEOAS, 실시간 invalidation을
+  최종 SHA에서 재검토해 S1/S2/S3 0건으로 승인했다. root unit 18건, API 140건, 실제 Postgres
+  통합 22건, frontend unit 27건, Ruff·strict mypy·import 계약·type-check·lint·production
+  build를 통과했다.
+
 ## 2026-07-17 (codex) — admin 감사 후속 PR·migration single-head 계획
 
 - issue #720, #718, #686, #712, #719의 잔여를 C7B-720, AUD-718, AUD-686,

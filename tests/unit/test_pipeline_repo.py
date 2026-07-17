@@ -221,6 +221,8 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
         kind="import_job",
         status="running",
         provider="python-kma-api",
+        load_batch_id="33333333-3333-3333-3333-333333333333",
+        parent_job_id="11111111-1111-1111-1111-111111111111",
         limit=1,
     )
 
@@ -250,7 +252,21 @@ async def test_list_maps_rows_filters_and_next_cursor() -> None:
     assert params["filter_sync_scopes"] is False
     assert params["sync_scopes"] == []
     assert params["include_unscoped_scope"] is False
+    assert params["load_batch_id"] == "33333333-3333-3333-3333-333333333333"
+    assert params["parent_job_id"] == "11111111-1111-1111-1111-111111111111"
     assert params["page_limit"] == 2
+
+
+def test_component_membership_filters_precede_cursor_and_limit() -> None:
+    normalized = " ".join(pipeline_repo._LIST_EXECUTIONS_BODY_SQL.split())
+
+    load_filter = normalized.index("member.load_batch_id = CAST(:load_batch_id AS uuid)")
+    parent_filter = normalized.index("member.parent_job_id = CAST(:parent_job_id AS uuid)")
+    cursor_filter = normalized.index("CAST(:cursor_created_at AS timestamptz) IS NULL")
+    page_limit = normalized.index("LIMIT :page_limit")
+
+    assert load_filter < cursor_filter < page_limit
+    assert parent_filter < cursor_filter < page_limit
 
 
 async def test_status_counts_parses_aggregates() -> None:
@@ -322,4 +338,13 @@ async def test_list_requires_exact_dataset_identity_for_scope_filter() -> None:
             _NoQuerySession(),  # type: ignore[arg-type]
             provider="python-kma-api",
             dataset_sync_scopes=("target_grids",),
+        )
+
+
+@pytest.mark.parametrize("field_name", ["load_batch_id", "parent_job_id"])
+async def test_list_rejects_invalid_component_uuid_filter(field_name: str) -> None:
+    with pytest.raises(ValueError, match=rf"{field_name} must be a UUID"):
+        await list_pipeline_executions(
+            _NoQuerySession(),  # type: ignore[arg-type]
+            **{field_name: "not-a-uuid"},
         )

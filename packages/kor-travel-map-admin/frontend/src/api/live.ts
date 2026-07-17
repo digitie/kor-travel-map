@@ -3,8 +3,8 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
+import { invalidateOpsDatasetQueries } from "./datasets";
 import { publicUrlEnv } from "./env";
-import { invalidateOpsProviderQueries } from "./providers";
 
 export type OpsLiveConnectionState =
   | "disabled"
@@ -74,61 +74,78 @@ function invalidateFeatureSurfaces(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
 }
 
+function invalidatePipelineLivePage(
+  queryClient: QueryClient,
+  surface: "executions" | "events",
+) {
+  void queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "pipeline" && key[1] === surface && key[2] === "live"
+      );
+    },
+  });
+}
+
+function invalidatePipelineExecutionDetails(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({
+    queryKey: ["pipeline", "execution"],
+  });
+}
+
+function invalidatePipelineSurfaces(queryClient: QueryClient) {
+  invalidatePipelineLivePage(queryClient, "executions");
+  void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+  invalidatePipelineLivePage(queryClient, "events");
+}
+
 function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   if (topic === "import_jobs") {
-    void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+    invalidatePipelineExecutionDetails(queryClient);
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic.startsWith("import_job_events:")) {
+    const jobId = topicId(topic, "import_job_events:");
     void queryClient.invalidateQueries({
-      queryKey: ["import-job-events", topicId(topic, "import_job_events:")],
+      queryKey: ["pipeline", "execution", "import_job", jobId],
     });
-    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
+    invalidatePipelineLivePage(queryClient, "events");
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic.startsWith("import_job:")) {
     const jobId = topicId(topic, "import_job:");
-    void queryClient.invalidateQueries({ queryKey: ["import-job", jobId] });
     void queryClient.invalidateQueries({
-      queryKey: ["import-job-events", jobId],
+      queryKey: ["pipeline", "execution", "import_job", jobId],
     });
-    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
-    void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic === "feature_update_requests") {
-    void queryClient.invalidateQueries({
-      queryKey: ["feature-update-requests"],
-    });
     invalidateFeatureSurfaces(queryClient);
-    void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
-    void queryClient.invalidateQueries({ queryKey: ["providers"] });
-    invalidateOpsProviderQueries(queryClient);
+    invalidatePipelineExecutionDetails(queryClient);
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic.startsWith("feature_update_request:")) {
+    const requestId = topicId(topic, "feature_update_request:");
     void queryClient.invalidateQueries({
-      queryKey: [
-        "feature-update-request",
-        topicId(topic, "feature_update_request:"),
-      ],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: ["feature-update-requests"],
+      queryKey: ["pipeline", "execution", "update_request", requestId],
     });
     invalidateFeatureSurfaces(queryClient);
-    void queryClient.invalidateQueries({ queryKey: ["providers"] });
-    invalidateOpsProviderQueries(queryClient);
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic === "offline_uploads") {
     void queryClient.invalidateQueries({ queryKey: ["offline-uploads"] });
-    void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic.startsWith("offline_upload:")) {
@@ -136,14 +153,33 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
       queryKey: ["offline-upload", topicId(topic, "offline_upload:")],
     });
     void queryClient.invalidateQueries({ queryKey: ["offline-uploads"] });
+    invalidatePipelineSurfaces(queryClient);
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic === "dagster_runs") {
-    void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["pipeline", "dagster-runs"],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["pipeline", "dagster-run"],
+    });
+    void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+    void queryClient.invalidateQueries({ queryKey: ["pipeline", "schedules"] });
+    invalidateOpsDatasetQueries(queryClient);
     return;
   }
   if (topic.startsWith("dagster_run:")) {
-    void queryClient.invalidateQueries({ queryKey: ["ops", "dagster"] });
+    const runId = topicId(topic, "dagster_run:");
+    void queryClient.invalidateQueries({
+      queryKey: ["pipeline", "dagster-run", runId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["pipeline", "dagster-runs"],
+    });
+    void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
+    void queryClient.invalidateQueries({ queryKey: ["pipeline", "schedules"] });
+    invalidateOpsDatasetQueries(queryClient);
   }
 }
 

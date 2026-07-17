@@ -165,7 +165,9 @@ export function FeatureUpdateRequestsClient() {
               {id ? (
                 <Link
                   className="underline underline-offset-2"
-                  href={`/admin/features/update-requests/${id}`}
+                  href={`/ops/pipeline?execution=update_request:${encodeURIComponent(
+                    id,
+                  )}`}
                 >
                   {shortId(id)}
                 </Link>
@@ -537,7 +539,9 @@ export function FeatureUpdateRequestsClient() {
                 원 요청{" "}
                 <Link
                   className="break-all font-mono underline underline-offset-2"
-                  href={`/admin/features/update-requests/${cancellation.root.id}`}
+                  href={`/ops/pipeline?execution=update_request:${encodeURIComponent(
+                    cancellation.root.id,
+                  )}`}
                 >
                   {cancellation.root.id}
                 </Link>
@@ -564,7 +568,9 @@ export function FeatureUpdateRequestsClient() {
                   : "기존 요청의 즉시 dispatch를 요청했습니다."}{" "}
                 <Link
                   className="break-all font-mono underline underline-offset-2"
-                  href={`/admin/features/update-requests/${runNow.data.data.request_id}`}
+                  href={`/ops/pipeline?execution=update_request:${encodeURIComponent(
+                    runNow.data.data.request_id,
+                  )}`}
                 >
                   {runNow.data.data.request_id}
                 </Link>

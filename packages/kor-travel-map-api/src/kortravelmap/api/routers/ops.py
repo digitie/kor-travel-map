@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -297,7 +298,7 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         started_at=row.started_at,
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
-        status_url=f"/v1/ops/import-jobs/{row.job_id}",
+        status_url=f"/v1/ops/pipeline/executions/import_job/{row.job_id}",
         links=_job_links(row),
     )
 
@@ -313,12 +314,12 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
     links = [
         OpsImportJobLink(
             rel="self",
-            href=f"/v1/ops/import-jobs/{row.job_id}",
-            label="import job",
+            href=f"/v1/ops/pipeline/executions/import_job/{row.job_id}",
+            label="pipeline execution",
         ),
         OpsImportJobLink(
             rel="events",
-            href=f"/v1/ops/import-jobs/{row.job_id}/events",
+            href=f"/v1/ops/pipeline/events?job_id={row.job_id}",
             label="event timeline",
         ),
     ]
@@ -326,34 +327,31 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
         links.append(
             OpsImportJobLink(
                 rel="cancel",
-                href=f"/v1/ops/import-jobs/{row.job_id}/cancel",
-                label="cancel import job",
+                href=f"/v1/ops/pipeline/executions/import_job/{row.job_id}/cancel",
+                label="cancel pipeline execution",
             )
         )
     if row.parent_job_id:
         links.append(
             OpsImportJobLink(
                 rel="parent_job",
-                href=f"/v1/ops/import-jobs/{row.parent_job_id}",
-                label="parent import job",
+                href=(f"/v1/ops/pipeline/executions/import_job/{row.parent_job_id}"),
+                label="parent pipeline execution",
             )
         )
     if row.load_batch_id:
         links.append(
             OpsImportJobLink(
                 rel="load_batch",
-                href=f"/v1/ops/import-jobs?load_batch_id={row.load_batch_id}",
-                label="load batch jobs",
+                href=(f"/v1/ops/pipeline/executions?load_batch_id={row.load_batch_id}"),
+                label="load batch executions",
             )
         )
     if row.update_request_id:
         links.append(
             OpsImportJobLink(
                 rel="feature_update_request",
-                href=(
-                    "/v1/ops/pipeline/executions/update_request/"
-                    f"{row.update_request_id}"
-                ),
+                href=(f"/v1/ops/pipeline/executions/update_request/{row.update_request_id}"),
                 label="feature update request",
             )
         )
@@ -366,12 +364,14 @@ def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
                 label="offline upload",
             )
         )
-    dagster_run_id = _payload_text(row, "dagster_run_id") or _payload_text(row, "run_id")
+    dagster_run_id = (
+        row.dagster_run_id or _payload_text(row, "dagster_run_id") or _payload_text(row, "run_id")
+    )
     if dagster_run_id:
         links.append(
             OpsImportJobLink(
                 rel="dagster_run",
-                href=f"/v1/ops/dagster/runs/{dagster_run_id}",
+                href=(f"/v1/ops/pipeline/dagster-runs/{quote(dagster_run_id, safe='')}"),
                 label="Dagster run",
             )
         )
@@ -515,9 +515,7 @@ async def _check_database(session: AsyncSession) -> OpsHealthCheck:
     try:
         await session.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
-        return OpsHealthCheck(
-            component="database", status="error", detail=str(exc)[:200]
-        )
+        return OpsHealthCheck(component="database", status="error", detail=str(exc)[:200])
     return OpsHealthCheck(component="database", status="ok")
 
 
@@ -529,9 +527,7 @@ async def _check_postgis(session: AsyncSession) -> OpsHealthCheck:
             )
         ).scalar_one_or_none()
     except SQLAlchemyError as exc:
-        return OpsHealthCheck(
-            component="postgis", status="error", detail=str(exc)[:200]
-        )
+        return OpsHealthCheck(component="postgis", status="error", detail=str(exc)[:200])
     if version is None:
         return OpsHealthCheck(
             component="postgis", status="error", detail="postgis extension 미설치"
@@ -543,19 +539,13 @@ async def _check_prewarm(session: AsyncSession) -> OpsHealthCheck:
     """pg_prewarm 확장/autoprewarm 상태(정보용, T-102). opt-in이라 degrade 안 함."""
     try:
         present = (
-            await session.execute(
-                text("SELECT 1 FROM pg_extension WHERE extname = 'pg_prewarm'")
-            )
+            await session.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_prewarm'"))
         ).scalar_one_or_none() is not None
         spl = (
-            await session.execute(
-                text("SELECT current_setting('shared_preload_libraries', true)")
-            )
+            await session.execute(text("SELECT current_setting('shared_preload_libraries', true)"))
         ).scalar_one_or_none() or ""
     except SQLAlchemyError as exc:
-        return OpsHealthCheck(
-            component="prewarm", status="ok", detail=f"미점검: {str(exc)[:120]}"
-        )
+        return OpsHealthCheck(component="prewarm", status="ok", detail=f"미점검: {str(exc)[:120]}")
     autoprewarm = "pg_prewarm" in spl
     return OpsHealthCheck(
         component="prewarm",

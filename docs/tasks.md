@@ -9,7 +9,6 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C7A` — ops-live same-origin 인증+무효화 (agent B, issue #685, PR 1개)
-  - [ ] `T-ADM-C6a` — 존치 화면 링크 재배선 (선착)
   - [ ] `T-ADM-C6b` — 구 표면 삭제 + nav 정리 (선착)
   - [ ] `T-ADM-C7B-720` — datasets 이슈 필터 의미 통일 (issue #720, frontend-only, PR 1개)
   - [ ] `T-ADM-AUD-718` — 갱신 정책 BIGINT revision CAS (issue #718, migration 0056, PR 1개)
@@ -39,9 +38,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   **B**, issue **#685**, **PR 1개**, 의존 C4·C5): 브라우저 live 연결을 same-origin
   인증 경계로 옮기고 datasets/pipeline query invalidation을 연결한다. C7 live gate
   전에 반드시 머지한다.
-- [ ] `T-ADM-C6a` — **존치 화면 링크 재배선** (선착, 의존 C4·C5): entity-link kind
-  재매핑(1급)+직접 href 9파일+live.ts topic 매핑+HATEOAS `_job_links`+
-  scenario catalog. 구 페이지 제거 **전** 독립 PR.
 - [ ] `T-ADM-C6b` — **구 표면 삭제** (선착, 의존 C6a): 라우트 6종·라우터
   ~30 endpoint·구 훅·mock spec 19파일 삭제 + nav/홈 정리 + OpenAPI 재생성(삭제분).
   C3a/#687에서 Dagster application service/schema와 feature update service/schema의

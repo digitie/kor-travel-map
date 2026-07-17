@@ -364,7 +364,9 @@ export function LogsClient({
               className={
                 "inline-flex items-center gap-1 text-primary hover:underline"
               }
-              href={`/ops/import-jobs/${row.original.job_id}`}
+              href={`/ops/pipeline?execution=import_job:${encodeURIComponent(
+                row.original.job_id,
+              )}`}
             >
               {shortId(row.original.job_id)}
               <ArrowUpRightIcon className="size-3" />

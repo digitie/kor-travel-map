@@ -780,7 +780,8 @@ function RefreshNowSection({
   const statusQuery = useDatasetRefreshRequestStatus(requestId);
 
   // 생성된 request의 WS topic 구독 — snapshot/update가 오면 live.ts가
-  // ["feature-update-request", id] 키를 무효화해 statusQuery가 즉시 refetch된다.
+  // canonical ["pipeline", "execution", "update_request", id] prefix를
+  // 무효화해 statusQuery가 즉시 refetch된다.
   const liveTopics = useMemo<readonly OpsLiveTopic[]>(
     () => (requestId ? [`feature_update_request:${requestId}`] : []),
     [requestId],

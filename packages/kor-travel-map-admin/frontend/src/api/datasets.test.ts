@@ -286,29 +286,29 @@ describe("ops datasets scope capability", () => {
 });
 
 describe("dataset refresh status query identity", () => {
-  it("legacy detail과 pipeline child가 shape를 공유하지 않고 prefix로 함께 무효화된다", async () => {
+  it("갱신 상태가 canonical pipeline execution detail key를 사용한다", async () => {
     const queryClient = new QueryClient();
     const requestId = "request-1";
-    const legacyKey = ["feature-update-request", requestId] as const;
     const pipelineKey = datasetRefreshExecutionQueryKey(requestId);
-    const legacyShape = { data: { request_id: requestId, status: "running" } };
     const pipelineShape = {
       data: { execution: { id: requestId, kind: "update_request", status: "running" } },
     };
-    queryClient.setQueryData(legacyKey, legacyShape);
     queryClient.setQueryData(pipelineKey, pipelineShape);
 
-    expect(queryClient.getQueryData(legacyKey)).toBe(legacyShape);
+    expect(pipelineKey).toEqual([
+      "pipeline",
+      "execution",
+      "update_request",
+      requestId,
+      { page_size: 1 },
+    ]);
     expect(queryClient.getQueryData(pipelineKey)).toBe(pipelineShape);
-    expect(queryClient.getQueryCache().getAll()).toHaveLength(2);
 
     await queryClient.invalidateQueries({
-      queryKey: ["feature-update-request", requestId],
+      queryKey: ["pipeline", "execution", "update_request", requestId],
     });
 
-    expect(queryClient.getQueryState(legacyKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(pipelineKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryData(legacyKey)).toBe(legacyShape);
     expect(queryClient.getQueryData(pipelineKey)).toBe(pipelineShape);
   });
 });

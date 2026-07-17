@@ -1990,7 +1990,7 @@ export function CuratedFeaturesClient() {
                       className={cn(
                         buttonVariants({ variant: "ghost", size: "sm" }),
                       )}
-                      href={`/admin/dagster?schedule=${encodeURIComponent(
+                      href={`/ops/pipeline?tab=schedules&schedule=${encodeURIComponent(
                         CURATED_FEATURES_REFRESH_SCHEDULE,
                       )}`}
                     >
@@ -2111,7 +2111,7 @@ export function CuratedFeaturesClient() {
                     className={cn(
                       buttonVariants({ variant: "outline", size: "sm" }),
                     )}
-                    href={`/admin/dagster?schedule=${encodeURIComponent(
+                    href={`/ops/pipeline?tab=schedules&schedule=${encodeURIComponent(
                       CURATED_FEATURES_REFRESH_SCHEDULE,
                     )}`}
                   >

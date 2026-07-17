@@ -626,6 +626,11 @@ async function fulfillJson(
   });
 }
 
+function observedApiContract(request: { method(): string; url(): string }) {
+  const pathname = new URL(request.url()).pathname.replace(/^\/api\/proxy/, "");
+  return `${request.method()} ${pathname}`;
+}
+
 interface MockOptions {
   executions?: PipelineExecutionRootRecord[];
   executionsForQuery?: (
@@ -675,6 +680,7 @@ interface MockOptions {
 }
 
 interface MockCounters {
+  observedApiContracts: string[];
   executionQueries: URLSearchParams[];
   patchBodies: unknown[];
   commandBodies: unknown[];
@@ -708,6 +714,7 @@ async function installPipelineMocks(
   options: MockOptions = {},
 ): Promise<MockCounters> {
   const counters: MockCounters = {
+    observedApiContracts: [],
     executionQueries: [],
     patchBodies: [],
     commandBodies: [],
@@ -741,6 +748,7 @@ async function installPipelineMocks(
     }
     const url = new URL(request.url());
     const pathname = url.pathname;
+    counters.observedApiContracts.push(observedApiContract(request));
 
     if (pathname.endsWith("/v1/ops/pipeline/overview")) {
       await fulfillJson(route, options.overview ?? makeOverview({}));
@@ -1358,6 +1366,7 @@ async function installPipelineMocks(
 
   // 요청 dialog는 C4와 같은 canonical ops datasets catalog만 사용한다.
   await page.route("**/v1/ops/datasets", async (route) => {
+    counters.observedApiContracts.push(observedApiContract(route.request()));
     const sequenceResponse =
       options.catalogResponses?.[
         Math.min(counters.catalogCalls, options.catalogResponses.length - 1)
@@ -1907,6 +1916,9 @@ test.describe("/ops/pipeline", () => {
     await expect(panel.getByText("우선 dispatch 요청됨")).toBeVisible();
     await expect(panel.getByText(REQUEST_ID.slice(0, 12))).toBeVisible();
     expect(counters.runNowBodies).toEqual([null]);
+    expect(counters.observedApiContracts).toContain(
+      `POST /v1/ops/pipeline/requests/${REQUEST_ID}/run-now`,
+    );
     await expect
       .poll(() => counters.catalogCalls)
       .toBeGreaterThan(catalogCallsBeforeRunNow);
@@ -2517,6 +2529,11 @@ test.describe("/ops/pipeline", () => {
         reason: "Dagster run 목록에 해당 실행이 없음을 확인",
       },
     ]);
+    expect(counters.observedApiContracts).toContain(
+      "POST /v1/ops/pipeline/schedules/" +
+        `${encodeURIComponent(SCHEDULE_NAME)}/claims/` +
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/resolve",
+    );
     await page
       .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
       .click();
@@ -2996,6 +3013,7 @@ test.describe("/ops/pipeline", () => {
       dialog.getByText("provider/dataset 카탈로그 최신 상태를 확인할 수 없어"),
     ).toBeVisible();
     expect(counters.catalogCalls).toBeGreaterThanOrEqual(2);
+    expect(counters.observedApiContracts).toContain("GET /v1/ops/datasets");
     expect(counters.previewBodies).toHaveLength(0);
   });
 
@@ -3062,6 +3080,9 @@ test.describe("/ops/pipeline", () => {
       dialog.getByText("MOIS 선행 source sync 최신 상태를 조회할 수 없어"),
     ).toBeVisible();
     expect(counters.moisPrecheckCalls).toBeGreaterThanOrEqual(2);
+    expect(counters.observedApiContracts).toContain(
+      "GET /v1/ops/pipeline/prechecks/mois-source-sync",
+    );
     expect(counters.previewBodies).toHaveLength(0);
   });
 

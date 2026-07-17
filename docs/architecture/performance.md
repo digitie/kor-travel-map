@@ -753,7 +753,9 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   `uuid[] path` cycle guard로 반드시 종료한다. provider/dataset 선택 조회는 typed job과
   request 배열의 indexed seed에서 양방향 parent/child component와 관련 request만
   먼저 좁힌 뒤 같은 root projection을 적용한다. UUID detail도 요청 또는 member가 속한
-  component만 투영한다. 따라서 selective 조회에서 전체 job/request graph를 먼저 순회하면
+  component만 투영한다. `load_batch_id`/`parent_job_id` deep link도 각각
+  `idx_import_jobs_load_batch_created`/`idx_import_jobs_parent_created`에서 member를 먼저
+  선택한 뒤 component를 확장한다. 따라서 selective 조회에서 전체 job/request graph를 먼저 순회하면
   회귀다. 실행 identity는 `import_jobs` typed pair만 사용하고 `import_jobs.payload`와
   `import_job_events`를 projection에서 읽지 않는다.
 - C3e canonical provider operation: overview/timeline/datasets grid/detail은 위 root CTE를

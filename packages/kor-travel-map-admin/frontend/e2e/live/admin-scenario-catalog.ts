@@ -88,7 +88,58 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/dagster/summary",
     ],
     writeApis: [],
-    reflectedSurfaces: ["/ops/import-jobs", "/ops/providers", "/admin/dagster"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
+  },
+  {
+    id: "pipeline",
+    route: "/ops/pipeline",
+    readyHeading: "파이프라인",
+    readApis: [
+      "/v1/ops/pipeline/overview",
+      "/v1/ops/pipeline/executions",
+      "/v1/ops/pipeline/executions/{kind}/{execution_id}",
+      "/v1/ops/pipeline/events",
+      "/v1/ops/pipeline/dagster-runs",
+      "/v1/ops/pipeline/dagster-runs/{run_id}",
+      "/v1/ops/pipeline/schedules",
+      "/v1/ops/datasets",
+      "/v1/ops/pipeline/prechecks/mois-source-sync",
+    ],
+    writeApis: [
+      writeApi("POST", "/v1/ops/pipeline/requests"),
+      writeApi("POST", "/v1/ops/pipeline/requests/preview"),
+      writeApi("POST", "/v1/ops/pipeline/requests/{request_id}/run-now"),
+      writeApi(
+        "POST",
+        "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel",
+      ),
+      writeApi("PATCH", "/v1/ops/pipeline/schedules/{schedule_name}"),
+      writeApi(
+        "POST",
+        "/v1/ops/pipeline/schedules/{schedule_name}/commands",
+      ),
+      writeApi(
+        "POST",
+        "/v1/ops/pipeline/schedules/{schedule_name}/claims/{command_id}/resolve",
+      ),
+    ],
+    reflectedSurfaces: ["/ops/datasets", "/features", "/ops/logs"],
+  },
+  {
+    id: "datasets",
+    route: "/ops/datasets",
+    readyHeading: "데이터셋",
+    readApis: [
+      "/v1/ops/datasets",
+      "/v1/ops/datasets/detail",
+      "/v1/ops/pipeline/executions",
+    ],
+    writeApis: [
+      writeApi("PUT", "/v1/ops/datasets/refresh-policy"),
+      writeApi("POST", "/v1/ops/datasets/preview"),
+      writeApi("POST", "/v1/ops/pipeline/requests"),
+    ],
+    reflectedSurfaces: ["/ops/pipeline", "/features/{feature_id}"],
   },
   {
     id: "features-map",
@@ -109,7 +160,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/features/nearby",
     ],
     writeApis: [],
-    reflectedSurfaces: ["/features", "/admin/features"],
+    reflectedSurfaces: ["/features", "/admin/features", "/ops/datasets"],
   },
   {
     id: "admin-features",
@@ -125,7 +176,11 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi("PATCH", "/v1/admin/features/{feature_id}"),
       writeApi("DELETE", "/v1/admin/features/{feature_id}", "destructive"),
     ],
-    reflectedSurfaces: ["/features", "/features/{feature_id}"],
+    reflectedSurfaces: [
+      "/features",
+      "/features/{feature_id}",
+      "/ops/datasets",
+    ],
   },
   {
     id: "feature-change-requests",
@@ -196,7 +251,10 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi("PATCH", "/v1/admin/curated-source-rules/{rule_id}"),
       writeApi("POST", "/v1/curated-features/{curated_feature_id}/pinvi-copy"),
     ],
-    reflectedSurfaces: ["/admin/features/curated/{curated_feature_id}"],
+    reflectedSurfaces: [
+      "/admin/features/curated/{curated_feature_id}",
+      "/ops/pipeline",
+    ],
   },
   {
     id: "curated-feature-detail",
@@ -227,7 +285,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "적재 작업",
     readApis: ["/v1/ops/import-jobs", "/v1/ops/live"],
     writeApis: [],
-    reflectedSurfaces: ["/ops/logs", "/admin/dagster"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/logs"],
   },
   {
     id: "import-job-detail",
@@ -238,7 +296,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/import-jobs/{job_id}/events",
     ],
     writeApis: [writeApi("POST", "/v1/ops/import-jobs/{job_id}/cancel")],
-    reflectedSurfaces: ["/ops/import-jobs", "/ops/logs"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/logs"],
   },
   {
     id: "providers",
@@ -256,7 +314,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       ),
       writeApi("POST", "/v1/admin/features/update-requests"),
     ],
-    reflectedSurfaces: ["/admin/features/update-requests", "/ops/logs"],
+    reflectedSurfaces: ["/ops/datasets", "/ops/pipeline"],
   },
   {
     id: "consistency",
@@ -268,7 +326,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/consistency/issues",
     ],
     writeApis: [],
-    reflectedSurfaces: ["/admin/issues"],
+    reflectedSurfaces: ["/admin/issues", "/ops/pipeline"],
   },
   {
     id: "logs",
@@ -280,7 +338,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/ops/import-job-events",
     ],
     writeApis: [],
-    reflectedSurfaces: ["/ops/import-jobs", "/admin/settings"],
+    reflectedSurfaces: ["/ops/pipeline", "/admin/settings"],
   },
   {
     id: "dedup-reviews",
@@ -317,7 +375,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
         "/v1/admin/features/update-requests/{request_id}/run-now",
       ),
     ],
-    reflectedSurfaces: ["/ops/import-jobs", "/ops/providers", "/features"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets", "/features"],
   },
   {
     id: "feature-update-request-detail",
@@ -334,7 +392,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
         "/v1/admin/features/update-requests/{request_id}/run-now",
       ),
     ],
-    reflectedSurfaces: ["/admin/features/update-requests", "/ops/import-jobs"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
   },
   {
     id: "poi-cache-targets",
@@ -353,7 +411,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       ),
       writeApi("POST", "/v1/admin/features/update-requests"),
     ],
-    reflectedSurfaces: ["/features", "/admin/features/update-requests"],
+    reflectedSurfaces: ["/features", "/ops/pipeline"],
   },
   {
     id: "offline-uploads",
@@ -374,7 +432,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
         "destructive",
       ),
     ],
-    reflectedSurfaces: ["/ops/import-jobs", "/ops/logs"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/logs"],
   },
   {
     id: "backups",
@@ -403,7 +461,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi("POST", "/v1/admin/files/rescan"),
       writeApi("POST", "/v1/admin/files/{file_id}/purge", "destructive"),
     ],
-    reflectedSurfaces: ["/ops/import-jobs", "/admin/offline-uploads"],
+    reflectedSurfaces: ["/ops/pipeline", "/admin/offline-uploads"],
   },
   {
     id: "dagster",
@@ -421,7 +479,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/start"),
       writeApi("POST", "/v1/ops/dagster/schedules/{schedule_name}/stop"),
     ],
-    reflectedSurfaces: ["/ops/import-jobs", "/ops/providers"],
+    reflectedSurfaces: ["/ops/pipeline", "/ops/datasets"],
   },
   {
     id: "settings",
@@ -441,7 +499,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "ETL 미리보기",
     readApis: ["/v1/debug/etl/providers", "/v1/debug/etl/preview"],
     writeApis: [],
-    reflectedSurfaces: ["/ops/providers", "/admin/features"],
+    reflectedSurfaces: ["/ops/datasets", "/admin/features"],
   },
 ];
 

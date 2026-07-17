@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin 통합 화면 링크 정본화 (2026-07-17, `T-ADM-C6a`)
+
+- [x] **T-ADM-C6a — 존치 화면과 API 링크를 두 운영 화면으로 재배선.** import job,
+  update request, load batch, provider/dataset과 홈·Feature·큐레이션·로그의 링크를
+  `/ops/pipeline`·`/ops/datasets`로 전환했다. provider/dataset/scope와 canonical root
+  identity를 보존하고 caller query가 엔티티 identity를 덮어쓰지 못하게 했다.
+- [x] **선택 조회와 실시간 갱신 계약 보강.** load batch와 parent UUID deep link는 전용
+  partial index에서 member를 먼저 선택한 뒤 root component를 확장한다. ops-live query key,
+  import job HATEOAS와 live scenario catalog도 두 통합 화면 계약으로 맞췄다.
+- [x] **적대 리뷰·회귀 검증.** 두 독립 리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했다.
+  root unit 18건, API 140건, 실제 Postgres 통합 22건, frontend unit 27건과 Ruff, strict
+  mypy 115파일, import 계약 4/4, type-check, lint, production build를 통과했다.
+
 ## Admin pipeline 통합 화면 (2026-07-17, `T-ADM-C5`)
 
 - [x] **T-ADM-C5 — `/ops/pipeline` 실행·스케줄 조작 단일 표면.** canonical root 기준

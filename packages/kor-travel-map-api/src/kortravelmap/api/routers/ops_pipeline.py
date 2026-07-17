@@ -1103,7 +1103,9 @@ def _parse_dagster_overview(
         "partition으로 접어 root만 반환한다. keyset total order는 "
         "`(created_at DESC, id DESC, kind DESC)`이며 Dagster run은 각 root/대표 job의 "
         "`dagster_run_id`로만 연결한다. `sync_scope`는 `provider`와 `dataset_key`를 "
-        "함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다."
+        "함께 요구하며 dataset 기본 state의 logical scope alias를 적용한다. "
+        "`load_batch_id`와 `parent_job_id`는 root의 전체 component membership에 "
+        "대해 cursor/LIMIT 전에 적용한다."
     ),
 )
 async def list_executions(
@@ -1122,6 +1124,8 @@ async def list_executions(
             ),
         ),
     ] = None,
+    load_batch_id: Annotated[UUID | None, Query()] = None,
+    parent_job_id: Annotated[UUID | None, Query()] = None,
     created_from: Annotated[datetime | None, Query()] = None,
     created_to: Annotated[datetime | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -1145,6 +1149,8 @@ async def list_executions(
             provider=provider,
             dataset_key=dataset_key,
             dataset_sync_scopes=dataset_sync_scopes,
+            load_batch_id=(str(load_batch_id) if load_batch_id is not None else None),
+            parent_job_id=(str(parent_job_id) if parent_job_id is not None else None),
             created_from=created_from,
             created_to=created_to,
             limit=page_size,
@@ -1481,7 +1487,7 @@ async def get_mois_source_sync_precheck(
 
 
 @router.get(
-    "/dagster-runs/{run_id}",
+    "/dagster-runs/{run_id:path}",
     response_model=DagsterRunDetailResponse,
     summary="Dagster run event/failure 상세",
     description=(
