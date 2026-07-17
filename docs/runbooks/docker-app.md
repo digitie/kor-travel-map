@@ -282,6 +282,9 @@ frontend는 `NEXT_PUBLIC_*`와 UI/BFF 설정만 받는다. 두 process는 빈 �
 채우므로 root `.env`의 provider loader credential을 상속하지 않는다. Dagster
 webserver/daemon만 main `KOR_TRAVEL_MAP_*` provider 설정을 받는다. API와 frontend의
 admin proxy secret이 비어 있거나 서로 다르면 process를 시작하기 전에 실패한다.
+상대 `KOR_TRAVEL_MAP_API_BACKUP_ROOT`는 project root 기준 절대경로로 정규화한다. API env의
+inline comment와 API/frontend proxy secret 주변 공백도 모호한 값으로 간주해 기동 전에
+거절한다.
 
 ## 6. 스모크
 

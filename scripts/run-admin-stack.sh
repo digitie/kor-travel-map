@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=load-env.sh
 source "$ROOT_DIR/scripts/load-env.sh"
 
-API_ENV_FILE="$ROOT_DIR/packages/kor-travel-map-api/.env"
+API_ENV_FILE="${KOR_TRAVEL_MAP_API_ENV_FILE:-$ROOT_DIR/packages/kor-travel-map-api/.env}"
 if [[ ! -f "$API_ENV_FILE" ]]; then
   echo "required API env file is missing: $API_ENV_FILE" >&2
   echo "copy packages/kor-travel-map-api/.env.example and configure it first" >&2
@@ -86,6 +86,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     last="${value: -1}"
     if [[ "$first$last" == '""' || "$first$last" == "''" ]]; then
       value="${value:1:${#value}-2}"
+    elif [[ "$value" =~ [[:space:]]# ]]; then
+      echo "inline comments are not allowed in API env values: $key" >&2
+      exit 1
+    fi
+  fi
+  if [[ "$key" == "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET" ]]; then
+    trimmed_value="${value#"${value%%[![:space:]]*}"}"
+    trimmed_value="${trimmed_value%"${trimmed_value##*[![:space:]]}"}"
+    if [[ "$value" != "$trimmed_value" ]]; then
+      echo "API admin proxy secret must not have surrounding whitespace" >&2
+      exit 1
     fi
   fi
   API_SCOPED_VALUES["$key"]="$value"
@@ -94,6 +105,12 @@ done <"$API_ENV_FILE"
 
 api_proxy_secret="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET]:-}"
 frontend_proxy_secret="${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:-}"
+trimmed_frontend_proxy_secret="${frontend_proxy_secret#"${frontend_proxy_secret%%[![:space:]]*}"}"
+trimmed_frontend_proxy_secret="${trimmed_frontend_proxy_secret%"${trimmed_frontend_proxy_secret##*[![:space:]]}"}"
+if [[ "$frontend_proxy_secret" != "$trimmed_frontend_proxy_secret" ]]; then
+  echo "frontend admin proxy secret must not have surrounding whitespace" >&2
+  exit 1
+fi
 if [[ -z "$api_proxy_secret" || -z "$frontend_proxy_secret" ]]; then
   echo "API/frontend admin proxy secrets must both be configured" >&2
   exit 1
@@ -101,6 +118,16 @@ fi
 if [[ "$api_proxy_secret" != "$frontend_proxy_secret" ]]; then
   echo "API/frontend admin proxy secrets do not match" >&2
   exit 1
+fi
+
+api_backup_root="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_BACKUP_ROOT]:-data/backups}"
+if [[ "$api_backup_root" != /* ]]; then
+  api_backup_root="$ROOT_DIR/$api_backup_root"
+fi
+
+if [[ "${KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY:-0}" == "1" ]]; then
+  echo "admin stack environment is valid"
+  exit 0
 fi
 
 LOG_DIR="${KOR_TRAVEL_MAP_LOG_DIR:-"$ROOT_DIR/.codex_tmp/admin-stack"}"
@@ -264,6 +291,7 @@ start_bg() {
     "${API_SCOPED_ENV[@]}" \
     KOR_TRAVEL_MAP_API_HOST="$API_BIND_HOST" \
     KOR_TRAVEL_MAP_API_PORT="$KOR_TRAVEL_MAP_API_PORT" \
+    KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root" \
     KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT="$ROOT_DIR" \
     "$PYTHON_BIN" -m uvicorn kortravelmap.api.app:app \
     --host "$API_BIND_HOST" --port "$KOR_TRAVEL_MAP_API_PORT"

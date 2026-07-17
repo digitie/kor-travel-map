@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -225,8 +227,10 @@ def test_dagster_image_config_serializes_provider_pools() -> None:
 def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
     script = _script("scripts/run-admin-stack.sh")
 
-    assert 'API_ENV_FILE="$ROOT_DIR/packages/kor-travel-map-api/.env"' in script
+    assert "KOR_TRAVEL_MAP_API_ENV_FILE" in script
     assert "required API env file is missing" in script
+    assert "inline comments are not allowed in API env values" in script
+    assert "API admin proxy secret must not have surrounding whitespace" in script
     assert "API/frontend admin proxy secrets do not match" in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
     assert "start_bg api env -i" in script
@@ -237,6 +241,7 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert '"${API_SCOPED_ENV[@]}"' in script
     assert '"${FRONTEND_PROCESS_ENV[@]}"' in script
     assert '"${DAGSTER_PROCESS_ENV[@]}"' in script
+    assert 'KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root"' in script
     assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
     assert "CREATE DATABASE" in script
     assert "dagster-webserver" in script
@@ -245,6 +250,103 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert 'KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in script
     assert "start_bg dagster-daemon env" in script
     assert "ensure_bg_alive dagster-daemon" in script
+
+
+@pytest.mark.unit
+def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Path) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret\n", encoding="utf-8")
+
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+        "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+        "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+    }
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n"
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
+        encoding="utf-8",
+    )
+    valid = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert valid.returncode == 0, valid.stderr
+    assert valid.stdout.strip() == "admin stack environment is valid"
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret # ambiguous\n",
+        encoding="utf-8",
+    )
+    inline_comment = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert inline_comment.returncode != 0
+    assert "inline comments are not allowed" in inline_comment.stderr
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=' shared-secret '\n",
+        encoding="utf-8",
+    )
+    surrounding_whitespace = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert surrounding_whitespace.returncode != 0
+    assert "must not have surrounding whitespace" in surrounding_whitespace.stderr
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET=shared-secret\n",
+        encoding="utf-8",
+    )
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=' shared-secret '\n",
+        encoding="utf-8",
+    )
+    frontend_whitespace = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert frontend_whitespace.returncode != 0
+    assert "frontend admin proxy secret must not have surrounding whitespace" in (
+        frontend_whitespace.stderr
+    )
+
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=different-secret\n",
+        encoding="utf-8",
+    )
+    mismatch = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "API/frontend admin proxy secrets do not match" in mismatch.stderr
 
 
 @pytest.mark.unit
