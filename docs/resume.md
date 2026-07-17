@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-17 (codex, agent A) — T-ADM-AUD-718 구현·리뷰 대기
+## 2026-07-18 (codex, agent A) — T-ADM-AUD-718 로컬 종결·PR 준비 완료
 
 - C7A 병합 정본과 Alembic 0055 위에 0056 `provider_refresh_policies.revision` 양수 BIGINT를
   추가했다. create-only는 `expected_revision=null`, update-only는 조회한 revision 일치 시에만
@@ -8,11 +8,16 @@
 - HTTP의 BIGINT revision은 JavaScript 정밀도 손실을 피하도록 정규화된 10진 문자열로 고정했다.
   admin UI는 초안 기준 revision과 최신 관측 revision을 분리해 background refetch/충돌에도 입력을
   보존하며, 명시적 3-way 조정 뒤 최신 revision으로 재저장한다.
-- migration·저장소 경합·router/OpenAPI·mock UI 충돌 회귀를 작성하고 계약 문서와 생성물을
-  갱신했다. 1차 적대 리뷰의 실제 row-lock 경합, BIGINT 소진, `source_kind` 불변,
-  non-problem OpenAPI ref 오인, 탭 상태 수명·저장 guard·popstate focus 지적을 반영했다.
-  **다음 한 작업**: 같은 리뷰어 2인의 재검토를 받은 뒤 전체 gate와 n150 결선 대상 live E2E를
-  진행한다. 재리뷰 전 테스트·lint·typecheck·build는 아직 실행하지 않았다.
+- 실제 row-lock 경합, BIGINT 소진, `source_kind` 불변, non-problem OpenAPI ref 오인, 탭 상태
+  수명·저장 guard·popstate focus와 지연 cache 응답 세대 지적을 반영했다. DB/API와 frontend
+  적대 리뷰어는 최종 제품 SHA `b7b600447368d8ed79bc1a8b56772af881104bf3`을 S1/S2/S3 0건으로
+  승인했다.
+- root unit 1,411건, API 489건, 실제 PostGIS migration/schema 14건·CAS 저장소/API 23건·집중
+  10건과 row-lock 경쟁 3회, Ruff, strict mypy 115+52파일, import 계약 4/4가 통과했다. 같은
+  SHA의 frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin type drift와 31-route
+  production build도 통과했다. local Playwright는 실행하지 않았고 최종 C7 n150 gate에 남겼다.
+- **다음 한 작업**: 완료 문서와 보안 감사를 포함한 PR을 올려 CI green·승인 후 병합한다.
+  issue #718은 닫지 않고 최종 n150 live 증거를 첨부한 뒤 종결한다.
 
 ## 2026-07-17 (codex, agent B) — T-ADM-C7A 로컬 종결·PR 준비 완료
 

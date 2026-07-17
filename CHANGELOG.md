@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-### 갱신 정책 revision CAS (2026-07-17, ADR-064 T-ADM-AUD-718)
+### 갱신 정책 revision CAS (2026-07-18, ADR-064 T-ADM-AUD-718)
 
 - **ADDED**: `ops.provider_refresh_policies`에 단조 증가 BIGINT `revision`을 추가했다. 생성은
   `expected_revision=null`, 갱신은 현재 revision 일치가 필수이며 성공 시 원자적으로 1 증가한다.

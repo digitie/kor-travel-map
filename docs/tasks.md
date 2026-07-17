@@ -8,7 +8,6 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-AUD-718` — 갱신 정책 BIGINT revision CAS (issue #718, migration 0056, PR 1개)
   - [ ] `T-ADM-AUD-686` — KMA 유효 대상 0건 fail-closed (issue #686, PR 1개)
   - [ ] `T-ADM-C7B-API` — active projection·exact-scope 이력 API (issues #712/#719, migration 0057, PR 1개)
   - [ ] `T-ADM-C7B-UI` — exact-scope 조작·이력 UI 소비 (issues #712/#719, PR 1개)
@@ -31,15 +30,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-AUD-718` — **갱신 정책 BIGINT revision CAS** (issue **#718**,
-  **migration 0056**, **PR 1개**, 의존 C7A/0055):
-  `ops.provider_refresh_policies`에 `BIGINT NOT NULL DEFAULT 1`과 양수 CHECK를 둔
-  단조 revision을 추가하고, 전체 정책 write를 `expected_revision` 조건부 갱신과
-  원자적 `revision + 1`로 바꾼다. 불일치는 write 없이 현재 서버 record/revision을
-  포함한 typed 409로 반환하고 UI draft를 보존한다. `source_kind`는 생성 뒤 불변이며
-  BIGINT 최댓값에서는 증가식을 평가하지 않고 typed 소진 conflict로 닫는다.
-  두 독립 transaction의 실제 row-lock 경쟁, create/update 구분, rollback, 2^53 초과
-  문자열 왕복과 OpenAPI/UI 충돌 복구를 검증한다.
 - [ ] `T-ADM-AUD-686` — **KMA 유효 대상 0건 fail-closed** (issue **#686**,
   **PR 1개**, migration 없음, `T-ADM-AUD-718`과 병렬): C45X가 완성한 typed
   scope·active request 멱등성 위에서 KMA target 해석 결과가 0건이면 dispatch/provider
@@ -71,11 +61,11 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720은 최종
   live 증거를 첨부한 뒤 닫는다.
 
-병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720은 완료했다.
-**Wave 2**는 AUD-718/0056과 AUD-686을 병렬 진행한다.
+병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720과
+**Wave 2**의 AUD-718/0056은 완료했다. Wave 2의 AUD-686은 병행 중이다.
 **Wave 3**은 AUD-718/0056 뒤 C7B-API/0057, **Wave 4**는 C7B-API와 C7A 뒤
-C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720은 완료 이력으로
-옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
+C7B-UI, 마지막은 C7 n150이다. C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-718은
+완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은
 **C7A `0055` → AUD-718 `0056` → C7B-API `0057`** 단일 chain이며, 후속 migration

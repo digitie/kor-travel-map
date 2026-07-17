@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex, agent A) — AUD-718 적대 리뷰·전체 로컬 gate 완료
+
+- DB/API와 frontend 적대 리뷰어가 실제 row-lock 경쟁, BIGINT 최댓값 소진, source 불변과
+  RFC7807 schema, 탭 수명·browser Back focus·지연 응답 세대·scope cache 경합을 재검토했다.
+  최종 제품 SHA `b7b600447368d8ed79bc1a8b56772af881104bf3`의 판정은 S1/S2/S3 0건이다.
+- root unit 1,411건, API 489건, 실제 PostGIS migration/schema 14건·CAS 저장소/API 23건·집중
+  10건과 독립 row-lock 경쟁 3회를 통과했다. Ruff, strict mypy 115+52파일, import 계약 4/4도
+  green이다.
+- 같은 제품 SHA에서 frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin 생성 타입
+  drift와 31-route production build가 통과했다. local Playwright는 실행하지 않았으며 issue #718은
+  최종 C7 n150 live 증거 뒤 닫는다.
+
 ## 2026-07-17 (codex, agent A) — AUD-718 revision CAS 구현 스냅샷
 
 - 1차 적대 리뷰에서 단순 순차 stale 테스트, BIGINT overflow, `source_kind` 재적용,
