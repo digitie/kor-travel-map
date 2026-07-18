@@ -55,6 +55,7 @@ def _ops_request(
     headers: dict[str, str] | None = None,
     peer: str = "198.51.100.10",
     route_path: str = "/v1/ops/datasets",
+    request_path: str | None = None,
     kind: str | None = None,
 ) -> Any:
     return SimpleNamespace(
@@ -63,7 +64,10 @@ def _ops_request(
         headers=headers or {},
         method=method,
         path_params={} if kind is None else {"kind": kind},
-        scope={"route": SimpleNamespace(path=route_path)},
+        scope={
+            "path": request_path or route_path,
+            "route": SimpleNamespace(path=route_path),
+        },
     )
 
 
@@ -400,8 +404,12 @@ def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
     exact_cancel = _ops_request(
         settings,
         method="POST",
-        route_path=(
-            "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+        # FastAPI/Starlette 조합에 따라 route.path의 include_router prefix 보존
+        # 여부가 달라도 실제 ASGI path에 결박된 권한 판정은 같아야 한다.
+        route_path="/executions/import_job/{execution_id}/cancel",
+        request_path=(
+            "/v1/ops/pipeline/executions/import_job/"
+            "11111111-1111-1111-1111-111111111111/cancel"
         ),
         kind="import_job",
     )
@@ -415,8 +423,10 @@ def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
     update_request_cancel = _ops_request(
         settings,
         method="POST",
-        route_path=(
-            "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel"
+        route_path="/executions/update_request/{execution_id}/cancel",
+        request_path=(
+            "/v1/ops/pipeline/executions/update_request/"
+            "11111111-1111-1111-1111-111111111111/cancel"
         ),
         kind="update_request",
     )

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
@@ -82,8 +83,10 @@ OPS_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     },
 }
 
-_OPS_CANCEL_ROUTE_PATH = (
-    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+_OPS_CANCEL_PATH_PATTERN = re.compile(
+    r"\A/v1/ops/pipeline/executions/import_job/"
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/cancel\Z"
 )
 
 # auto_error=False — 토큰 미설정(opt-out) 환경에서 헤더가 없어도 통과시키기 위해
@@ -231,11 +234,10 @@ def _ops_principal_is_enabled(settings: ApiSettings) -> bool:
 
 
 def _is_exact_import_job_cancel(request: Request) -> bool:
-    route = request.scope.get("route")
-    route_path = getattr(route, "path", None)
     return (
         request.method == "POST"
-        and route_path == _OPS_CANCEL_ROUTE_PATH
+        and _OPS_CANCEL_PATH_PATTERN.fullmatch(request.scope.get("path", ""))
+        is not None
     )
 
 

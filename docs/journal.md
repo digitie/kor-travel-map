@@ -19,6 +19,11 @@
   2건을 반영한 뒤 root unit 1,463건과 API 563건, targeted C6c 306건, ruff, strict mypy
   190파일, import 계약 4/4, admin/user OpenAPI·admin generated type drift, frontend type-check·
   unit 210건·lint(오류 0, 기존 경고 6)·production build를 통과했다.
+- PR #733의 Python 3.11~3.13 CI에서 FastAPI/Starlette 조합에 따라 `route.path`가 router prefix를
+  보존하지 않아 exact cancel principal이 거짓 거부되는 차이를 확인했다. 권한 판정을 framework
+  내부 route template 대신 ASGI decoded path의 anchored import-job UUID cancel 경로에 결박하고,
+  상대 route template과 실제 full path를 분리한 회귀 테스트를 추가했다. 이 보정 diff도 두 독립
+  적대 리뷰어가 fail-open 없음으로 승인했으며 집중 API 217건과 API 전체 563건을 통과했다.
 
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 

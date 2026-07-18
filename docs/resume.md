@@ -13,6 +13,9 @@
 - 독립 적대 리뷰 2건을 반영한 최종 diff에서 root unit 1,463건과 API 563건, targeted C6c
   306건, ruff, strict mypy 190파일, import 계약 4/4, admin/user OpenAPI·admin generated type
   drift, frontend type-check·unit 210건·lint(오류 0, 기존 경고 6)·production build가 통과했다.
+- PR #733의 Python 3.11~3.13에서 framework별 `route.path` prefix 차이로 exact cancel이 403이
+  되는 회귀를 ASGI full path 결박으로 제거했다. update-request·suffix·trailing path는 계속
+  fail-closed하고, 별도 적대 리뷰 2인 승인과 집중 API 217건·API 전체 563건을 확인했다.
 - **다음 한 작업**: 보안 감사와 최신 main rebase 뒤 map PR을 CI green·승인으로 병합한다.
   이어 PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit 조합으로
   cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
