@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — T-ADM-C7 n150 실행환경 preflight 보강
+
+- PinVi C6c PR #387은 전체 CI green 뒤 `main@1b833ce`로 병합됐다.
+- n150 read-only preflight에서 host는 `python3`만 제공하지만 C7 runner가 `python`을 호출해 시작할 수
+  없음을 확인했다. host-side helper를 모두 `python3`로 고정하고 명시적 command preflight를 추가한다.
+  Dagster container 내부의 `python` 호출은 container 계약이므로 유지한다.
+- root-owned host/origin attestation은 아직 provision 전이고 `BLOCKED.json`·4종 residual은 없다.
+  attestation은 민감값을 tracked 파일이나 로그에 남기지 않는 local-only atomic 절차로 배포 직전에
+  만든 뒤 runner가 machine/origin hash와 권한을 자체 검증한다.
+- 단일 적대적 리뷰의 정적 회귀 P2를 반영해 host `python3` 6곳, container `python` 1곳과 preflight
+  순서를 exact 고정했고 재승인을 받았다. `bash -n`, Ruff, targeted pytest `16 passed`가 통과했다.
+- **다음 한 작업**: 이 runner 보정을 단일 적대적 리뷰한 뒤 정적 계약 테스트·CI·병합하고, Manager
+  C6c merge 후 n150 compatible-pair 배포와 prod live E2E를 실행한다.
+
 ## 2026-07-18 (codex) — PR #732 vNext 재설계 정본 전개 (PR #736)
 
 - PR #732의 재설계 보고서 D-1~D-12를 실제 다음 번호 ADR-066~075로 전개하고 기존
