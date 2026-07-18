@@ -9,9 +9,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/t-vn]
   pull_request:
-    branches: [main]
+    branches: [main, integration/t-vn]
 
 # 동일 PR/branch 안에서 push 연속 시 이전 실행을 취소해 CI 시간 절약.
 concurrency:
