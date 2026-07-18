@@ -343,6 +343,43 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     assert links["feature:poi:resolver"].active is False
     assert links["feature:poi:resolver-next"].active is True
 
+    # resolver가 같은 (target, feature)를 재-upsert해도 manual 분류를 되돌리지
+    # 못한다 — 되돌아가면 다음 snapshot sync가 manual link를 비활성화하게 된다.
+    reclassified_direct = await upsert_poi_cache_target_feature_link(
+        migrated_session,
+        target_id=target.target_id,
+        feature_id="feature:poi:manual",
+        relation="within_radius",
+    )
+    assert reclassified_direct is not None
+    assert reclassified_direct.relation == "manual"
+
+    resynced = await sync_poi_cache_target_feature_links(
+        migrated_session,
+        target_ids=(target.target_id,),
+        candidates=(
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=target.target_id,
+                feature_id="feature:poi:manual",
+                relation="within_radius",
+            ),
+        ),
+    )
+    assert [link.relation for link in resynced] == ["manual"]
+
+    links = {
+        link.feature_id: link
+        for link in await list_poi_cache_target_feature_links(
+            migrated_session,
+            target.target_id,
+            active_only=False,
+        )
+    }
+    assert links["feature:poi:manual"].active is True
+    assert links["feature:poi:manual"].relation == "manual"
+    # manual이 아닌 resolver link는 이번 sync 후보에 없으므로 비활성화된다.
+    assert links["feature:poi:resolver-next"].active is False
+
 
 async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     migrated_session: AsyncSession,

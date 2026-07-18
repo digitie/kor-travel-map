@@ -8,6 +8,9 @@
   `_LOCK_ACTIVE_TARGET_SQL` `FOR UPDATE` lock-first로 옮겼다(DELETE 경로와 동일 패턴).
   create 경합의 패자는 `DO NOTHING` insert 뒤 lock 재획득으로 stable row에서 재판정한다 —
   동시 PUT(reject)의 조용한 좌표 덮어쓰기와 stale `moved=False` link 잔존을 닫는다.
+  재-lock이 다시 비는 3자 경합(winner commit 직후 동시 soft-delete)은 create→재-lock
+  유한 반복(상한 3, 소진 시 명확한 실패)으로 닫아 `DO UPDATE` tail이 lock 보유 없이는
+  실행되지 않는다(3자 통합 재현은 결정적 관측점이 없어 unit 계약으로 고정).
   receipt/lock_version은 trigger 소유 그대로다. 두-세션 blocking 통합 회귀
   (`test_concurrent_put_reject_race_yields_single_winner_and_conflict`)를 추가했다.
 - **S2-2**: ADR-074 결정 1의 ledger key를 D-10-1 3요소
@@ -23,7 +26,9 @@
   결박의 canonical hyphenated UUID·ASGI root_path fail-closed caveat.
 - **S3 code**: snapshot sync `_DEACTIVATE_LINKS_FOR_TARGETS_SQL`에 `relation <> 'manual'`
   guard(#699 패턴, 운영자 manual link 보존 — 단건 delete/move 경로는 기존대로 전체
-  비활성화) + unit/integration 회귀. playwright.live.config.ts `E2E_LIVE_WORKERS`를
+  비활성화) + unit/integration 회귀. link upsert 두 경로의 `ON CONFLICT DO UPDATE`도
+  `CASE` guard로 manual→resolver 재분류를 차단해 다음 sync가 manual link를
+  비활성화하지 못하게 했다. playwright.live.config.ts `E2E_LIVE_WORKERS`를
   1 이상 정수로 검증(garbage는 redacted 오류). C7 runner의 causal POI grep을 한글
   제목에서 안정 `@c7-causal` tag로 교체하고 runner 정적 계약을 갱신했다. OpenAPI의
   canonical ops service 대안을 `OpsToken`+`OpsScope` AND 결합으로 선언해 런타임의
@@ -32,6 +37,8 @@
   entrypoint 테스트는 미병합 T-VN-01 profile 개념에 의존해 보류. BLOCKED sentinel의
   preflight 이전 생성은 PR #735 본문·journal("state root→lock→BLOCKED→residue 순서를
   정적 계약으로 고정")과 runner 계약 테스트의 순서 고정이 의도를 명시하므로 유지한다.
+
+## 2026-07-18 (codex) — C7 n150 runner Python preflight 보강
 
 - read-only n150 점검에서 SSH·Docker·Node·Playwright runner는 사용 가능하고 C7 residual state도
   없지만 host `python` 명령과 고정 attestation 파일은 아직 없음을 확인했다.

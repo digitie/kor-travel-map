@@ -10,11 +10,14 @@
 - **FIXED**: POI cache target upsert의 moved/reject 판정을 active natural-key row
   `FOR UPDATE` lock 아래로 옮겼다. 동시 PUT(`on_conflict="reject"`)의 패자는 승자
   commit 뒤 `PoiCacheTargetConflict`로 거부되며, 승자의 좌표를 `ON CONFLICT UPDATE`로
-  조용히 덮어쓰거나 이전 좌표의 active feature link를 남기지 않는다. receipt와
-  trigger 소유 `lock_version` 의미는 그대로다.
+  조용히 덮어쓰거나 이전 좌표의 active feature link를 남기지 않는다. create 경합의
+  재-lock이 다시 비는 극단 3자 경합은 유한 create→재-lock 반복 뒤 명확한 오류로
+  실패한다 — `DO UPDATE`는 lock 보유 없이는 실행되지 않는다. receipt와 trigger 소유
+  `lock_version` 의미는 그대로다.
 - **FIXED**: target-link snapshot sync가 운영자 `relation='manual'` link를 더 이상
-  비활성화하지 않는다(resolver link만 교체). 단건 delete/move 경로는 기존대로 전체
-  link를 비활성화한다.
+  비활성화하지 않는다(resolver link만 교체). link upsert의 `ON CONFLICT DO UPDATE`도
+  manual→resolver 재분류를 차단해 후속 sync가 manual link를 비활성화하지 못한다.
+  단건 delete/move 경로는 기존대로 전체 link를 비활성화한다.
 - **CHANGED**: OpenAPI의 canonical ops service 대안 security를 `OpsToken`+`OpsScope`
   AND 결합으로 선언했다 — 런타임이 `X-Kor-Travel-Map-Ops-Scope` 누락을 422로
   거부하는 계약과 일치한다. `openapi.json` 재수출(경로/응답 변화 없음).

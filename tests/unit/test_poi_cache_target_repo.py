@@ -280,6 +280,72 @@ async def test_poi_target_writer_rejects_noncanonical_external_system(
 
 
 @pytest.mark.unit
+async def test_upsert_create_race_loser_relocks_before_do_update() -> None:
+    """create 경합의 패자는 재-lock으로 active row를 잡은 뒤에만 DO UPDATE한다."""
+    at = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
+    target_id = "11111111-1111-4111-8111-111111111111"
+    row = _row(target_id, at=at)
+    session = _Session(
+        _Result([]),  # FOR UPDATE lock — active row 없음
+        _Result([]),  # DO NOTHING create — 경합 패배(0 row)
+        _Result(
+            [
+                {
+                    "target_id": target_id,
+                    "lock_version": 1,
+                    "coord_key": row["coord_key"],
+                }
+            ]
+        ),  # 재-lock — winner row 확보
+        _Result([row]),  # lock 보유 상태의 DO UPDATE upsert
+    )
+
+    target = await upsert_poi_cache_target(
+        cast(Any, session),
+        external_system="external-app",
+        target_key="poi-1",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=5,
+    )
+
+    assert target.target_id == target_id
+    assert "FOR UPDATE" in session.statements[0]
+    assert "DO NOTHING" in session.statements[1]
+    assert "DO UPDATE" not in session.statements[1]
+    assert "FOR UPDATE" in session.statements[2]
+    assert "DO UPDATE" in session.statements[3]
+
+
+@pytest.mark.unit
+async def test_upsert_create_race_bounded_retry_fails_closed_without_lock() -> None:
+    """재-lock이 계속 비면 유한 재시도 뒤 실패한다 — 잠금 없는 DO UPDATE 금지.
+
+    winner commit 직후 동시 soft-delete가 반복되는 3자 경합은 winner commit과
+    패자 재-lock 사이에 delete를 결정적으로 끼워 넣을 관측점이 없어 통합
+    테스트로 재현하기 어렵다. 여기서는 unit 수준에서 "DO UPDATE tail은 active
+    row FOR UPDATE 보유 없이는 절대 실행되지 않는다"는 계약을 고정한다.
+    """
+    # 초기 lock 1회 + (create + 재-lock) × 상한 3회 = 7개 statement, 전부 빈 결과.
+    session = _Session(*[_Result([]) for _ in range(7)])
+
+    with pytest.raises(RuntimeError, match="create race"):
+        await upsert_poi_cache_target(
+            cast(Any, session),
+            external_system="external-app",
+            target_key="poi-1",
+            lon=126.978,
+            lat=37.5665,
+            radius_km=5,
+        )
+
+    assert len(session.statements) == 7
+    assert all("DO UPDATE" not in statement for statement in session.statements)
+    assert sum("DO NOTHING" in statement for statement in session.statements) == 3
+    assert sum("FOR UPDATE" in statement for statement in session.statements) == 4
+
+
+@pytest.mark.unit
 async def test_external_system_accepts_exact_112_character_limit() -> None:
     external_system = "x" * 112
     session = _Session(_Result([], scalar=False))

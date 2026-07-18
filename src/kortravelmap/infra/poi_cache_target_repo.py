@@ -52,6 +52,10 @@ __all__ = [
 
 OnConflict = Literal["reject", "move"]
 
+# create 경합(패자 DO NOTHING → 재-lock)이 극단적으로 반복될 때의 상한.
+# 소진되면 잠금 없는 DO UPDATE fall-through 대신 명확한 실패로 닫는다.
+_CREATE_RACE_MAX_ATTEMPTS: Final[int] = 3
+
 _LIST_ACTIVE_TARGET_COORDS_SQL: Final[str] = """
 SELECT lon, lat
 FROM ops.poi_cache_targets
@@ -531,6 +535,15 @@ ORDER BY target_id, feature_id
 FOR UPDATE
 """
 
+# 기존 row가 운영자 ``relation='manual'``이면 resolver 재-upsert가 분류를 되돌리지
+# 못한다(#699 패턴) — 되돌아가면 다음 snapshot sync가 manual link를 비활성화한다.
+# 재분류가 필요하면 운영자가 link를 명시적으로 비활성화/삭제한 뒤 다시 만든다.
+_LINK_RELATION_PRESERVE_MANUAL_SQL: Final[str] = """CASE
+        WHEN poi_cache_target_feature_links.relation = 'manual'
+            THEN poi_cache_target_feature_links.relation
+        ELSE EXCLUDED.relation
+    END"""
+
 _UPSERT_LINK_SQL: Final[str] = f"""
 WITH active_target AS (
     SELECT target_id
@@ -550,7 +563,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = EXCLUDED.relation,
+    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}
@@ -568,7 +581,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = EXCLUDED.relation,
+    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}
@@ -640,6 +653,8 @@ async def upsert_poi_cache_target(
     판정하면 동시 PUT의 패자가 ``ON CONFLICT UPDATE``로 승자의 좌표를 조용히
     덮어쓰거나, stale ``moved=False``로 이전 좌표의 active link를 남길 수 있다.
     create 경합의 패자는 ``DO NOTHING`` insert 뒤 lock을 재획득해 재판정한다.
+    이 create→재-lock은 상한(``_CREATE_RACE_MAX_ATTEMPTS``) 있는 반복이며, 소진 시
+    ``RuntimeError``로 실패한다 — ``DO UPDATE``는 lock 보유 없이는 실행되지 않는다.
     """
     _validate_target(
         external_system=external_system,
@@ -702,7 +717,17 @@ async def upsert_poi_cache_target(
 
     existing = await _lock_existing()
     moved = _moved(existing)
-    if existing is None:
+    # DO UPDATE tail은 active row의 FOR UPDATE lock을 보유했을 때만 실행한다.
+    # create 경합에서 밀린 뒤 재-lock이 다시 비면(winner commit 직후 동시
+    # soft-delete) create→재-lock을 유한 반복하고, 소진 시 조용한 덮어쓰기 대신
+    # 명확히 실패한다 — 잠금 없는 fall-through로 3자 경합 clobber를 열지 않는다.
+    attempts_remaining = _CREATE_RACE_MAX_ATTEMPTS
+    while existing is None:
+        if attempts_remaining <= 0:
+            raise RuntimeError(
+                "poi cache target create race did not stabilize; retry the upsert"
+            )
+        attempts_remaining -= 1
         created = (
             (await session.execute(text(_CREATE_TARGET_SQL), write_params))
             .mappings()
