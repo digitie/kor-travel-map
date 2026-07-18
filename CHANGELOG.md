@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### C7 prod live runner host Python 계약 (2026-07-18, T-ADM-C7)
+
+- **FIXED**: n150 host가 제공하지 않는 `python` alias에 의존하지 않고 host-side fsync·lock·attestation·
+  state 검증을 표준 `python3`로 실행한다. runner는 production state를 만들기 전에 `python3` 존재를
+  명시적으로 확인하며, Dagster container 내부 Python 계약은 변경하지 않는다.
+
 ### POI target causal receipt·조건부 삭제 (2026-07-18, ADR-065 T-ADM-C7C)
 
 - **ADDED**: Alembic 0058은 POI target에 server-owned BIGINT `lock_version`과 모든 UPDATE에서

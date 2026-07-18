@@ -42,6 +42,11 @@ require_enabled() {
   [[ "${!name-}" == "1" ]] || die "explicit opt-in is required: $name=1"
 }
 
+require_command() {
+  local name="$1"
+  command -v -- "$name" >/dev/null 2>&1 || die "required command is missing: $name"
+}
+
 initialize_state_paths() {
   (( EUID == 0 )) || die "fixed production state root requires root execution"
   [[ -z "${XDG_STATE_HOME+x}" ]] ||
@@ -65,7 +70,7 @@ initialize_state_paths() {
 
 fsync_file_and_parent() {
   local target="$1"
-  python - "$target" <<'PY'
+  python3 - "$target" <<'PY'
 import os
 import sys
 from pathlib import Path
@@ -85,7 +90,7 @@ PY
 }
 
 fsync_state_root() {
-  python - "$STATE_ROOT" <<'PY'
+  python3 - "$STATE_ROOT" <<'PY'
 import os
 import sys
 
@@ -118,7 +123,7 @@ atomic_replace_state() {
 start_orchestrator_lock_guard() {
   local lock_status
   coproc C7_LOCK_GUARD {
-    python - "$LOCK_FILE" 3<&0 2>/dev/null <<'PY'
+    python3 - "$LOCK_FILE" 3<&0 2>/dev/null <<'PY'
 import fcntl
 import os
 import stat
@@ -246,6 +251,7 @@ has_residual_state() {
     compgen -G "$STATE_ROOT/poi-*.json" >/dev/null
 }
 
+require_command python3
 initialize_state_paths
 readonly STATE_ROOT BLOCKED_FILE LOCK_FILE
 start_orchestrator_lock_guard
@@ -304,7 +310,7 @@ verify_trusted_host_attestation() {
     die "trusted host attestation mode read failed"
   (( (8#$mode & 8#022) == 0 )) ||
     die "trusted host attestation must not be group/world writable"
-  python - "$HOST_ATTESTATION_FILE" <<'PY'
+  python3 - "$HOST_ATTESTATION_FILE" <<'PY'
 import hashlib
 import ipaddress
 import json
@@ -528,7 +534,7 @@ verify_ui_auth_preflight() {
   (( ${#container_ids[@]} == 1 )) ||
     die "UI compose service must resolve to exactly one running container"
   [[ -n "${container_ids[0]}" ]] || die "UI container id is empty"
-  docker inspect -- "${container_ids[0]}" | python -c '
+  docker inspect -- "${container_ids[0]}" | python3 -c '
 import json
 import sys
 
@@ -606,7 +612,7 @@ npm run e2e:live -- \
 state_is_exact_restored() {
   local kind="$1"
   local state_file="$2"
-  python - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" <<'PY'
+  python3 - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" <<'PY'
 import json
 import re
 import sys

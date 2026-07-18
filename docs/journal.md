@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex) — C7 n150 runner Python preflight 보강
+
+- read-only n150 점검에서 SSH·Docker·Node·Playwright runner는 사용 가능하고 C7 residual state도
+  없지만 host `python` 명령과 고정 attestation 파일은 아직 없음을 확인했다.
+- host-side fsync/lock/attestation/state/UI env 검증을 `python3`로 고정하고 실행 전 command 존재를
+  fail-fast한다. Dagster container 내부 Python 호출은 변경하지 않는다.
+- attestation은 tracked 문서에 실제 host/origin/hash를 기록하지 않고 배포 직전 local-only root atomic
+  write로 provision한다. 기능 보정은 단일 적대적 리뷰 승인 전 테스트·lint를 실행하지 않는다.
+- 리뷰가 요구한 정적 계약을 보강해 host 6곳 exact count, container 1곳, pipe alias 0건과
+  `python3` preflight→state root→lock→BLOCKED 순서를 고정했다. 재승인 뒤 `bash -n`, Ruff와 targeted
+  pytest `16 passed`를 확인했다. 첫 pytest는 NTFS capture 임시파일 오류였고 `/tmp` 재실행은 green이다.
+
 ## 2026-07-18 (codex) — vNext 재설계 ADR·architecture·tasks 정본 전개
 
 - PR #732 보고서 §0, D-1~D-12, §3~§8을 ADR-066~075와 PostgreSQL/REST/data model/

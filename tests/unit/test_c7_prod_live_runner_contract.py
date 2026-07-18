@@ -27,6 +27,28 @@ def _assert_in_order(source: str, *markers: str) -> None:
 def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     script = _read(RUNNER)
 
+    host_python_invocations = (
+        'python3 - "$target"',
+        'python3 - "$STATE_ROOT"',
+        'python3 - "$LOCK_FILE"',
+        'python3 - "$HOST_ATTESTATION_FILE"',
+        "| python3 -c '",
+        'python3 - "$kind" "$state_file"',
+    )
+    for invocation in host_python_invocations:
+        assert script.count(invocation) == 1
+    assert [
+        line.strip() for line in script.splitlines() if line.lstrip().startswith("python ")
+    ] == ["python -c \\"]
+    assert "| python " not in script
+    _assert_in_order(
+        script,
+        "require_command python3\n",
+        "initialize_state_paths\n",
+        "start_orchestrator_lock_guard\n",
+        '[[ ! -e "$BLOCKED_FILE" ]]',
+        "create_blocked_sentinel\n",
+    )
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
     assert 'machine_id_sha256' in script
     assert 'hostname_sha256' in script

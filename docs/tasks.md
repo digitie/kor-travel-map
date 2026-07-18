@@ -99,7 +99,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   fingerprint 변화와 grid cap 초과 fail-closed·scope별 durable failure를 검증한다.
   실제 Chrome에서 없음/변조 ticket은 data frame 0건 + `CloseEvent.code===4401`,
   signed-expired ticket은 data frame 0건 + `4408` 후 fresh ticket 재연결을 증거로
-  남긴다. 운영 종결이 남은 #684/#694/#712/#719는 최종 live 증거를 첨부한 뒤 닫는다.
+  남긴다. n150 host runner는 `python3`를 명시적으로 요구하고, 실행 전 root-owned host/origin
+  attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
+  최종 live 증거를 첨부한 뒤 닫는다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
