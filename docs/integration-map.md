@@ -12,7 +12,8 @@
 > **ADR-054 적용 완료**: public 배포명은 `kor-travel-map`, Python import root는
 > `kortravelmap`이다. 구 import root용 호환 shim은 없다.
 
-> **2026-07-18 계약 차단**: KTM PR #724가 legacy admin ops API를 삭제했지만 PinVi
+> **2026-07-18 계약 차단(PR #730 재검증에서 확정)**: KTM PR #724가 legacy admin ops API를
+> 삭제했지만 PinVi
 > `origin/main@48085afb`의 admin server는 삭제된 경로를 계속 호출한다. KTM 최신 main과 같은
 > 버전으로 배포하면 provider-sync proxy는 upstream 404를 반환하고 ETL summary는 degraded/down으로
 > 축약된다. 새 canonical ops는 frontend BFF gate라 경로만 교체해도 403이다. `T-ADM-C6c`에서

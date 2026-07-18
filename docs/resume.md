@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증
+## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 
 - KTM `origin/main@13eb8d40`과 PinVi `origin/main@48085afb`를 기준으로 PR #708 정본을
   #691·#721~#729의 실제 route, migration 0054~0057, actor·인증·멱등 구현과 다시 대조했다.
@@ -13,6 +13,8 @@
 - 재설계 보고서·integration map·tasks를 같은 결론으로 보강했다. 삭제 route나 alias를
   되살리지 않고 PinVi caller와 contract test를 canonical datasets/pipeline으로 옮기며,
   BFF secret 공유가 아닌 최소 service/operator principal을 설치한다.
+- 문서 보강은 PR #730의 CI 8개 게이트 통과 후 merge commit `d0609226`으로 `main`에
+  반영됐다. 이 항목은 #730 문서 마감 기록이며 C6c 구현 완료를 뜻하지 않는다.
 - **다음 한 작업**: `T-ADM-C6c` cross-repo 계약 복구를 양 저장소에서 완료한다. 해당 commit
   조합의 인증·응답 smoke 전에는 `T-ADM-C7` n150 배포와 live E2E를 시작하지 않는다.
 
