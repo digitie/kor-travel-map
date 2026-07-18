@@ -21,8 +21,10 @@
 - 두 독립 적대 리뷰어가 최종 diff를 승인했다. root unit 1,435건, API 520건, 실제 PostgreSQL
   migration/up-down·경쟁 8건, frontend unit 212건, mocked POI E2E 10건, Ruff, strict mypy
   115+52파일, import 계약 4/4, OpenAPI/생성 타입 drift, type-check·lint와 31-route build가 green이다.
-- **다음 한 작업**: C6c map PR #733 병합 뒤 최신 main에 rebase해 OpenAPI/생성 타입을 재생성하고,
-  `T-ADM-C7C`를 완료 이력으로 옮긴 뒤 C7C PR을 CI green·승인으로 병합한다.
+- PR #733 merge commit `a5af45f2` 위에 rebase해 admin/user OpenAPI와 생성 타입을 다시 만들었고,
+  `T-ADM-C7C`를 완료 이력으로 옮겼다.
+- **다음 한 작업**: 보안 감사 뒤 C7C PR을 게시하고 CI green·승인으로 병합한다. 직후 C7 live
+  branch를 rebase해 n150 same-socket causal E2E를 수행한다.
 
 ## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 문서 선행
 

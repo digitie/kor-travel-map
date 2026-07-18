@@ -3,6 +3,25 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## POI target causal receipt·조건부 삭제 (2026-07-18, `T-ADM-C7C`)
+
+- [x] **T-ADM-C7C — mutation과 live invalidation을 transaction-coupled receipt로 결박.** POI target
+  PUT/DELETE는 원본 transaction에서 증가한 `dataset_projection_revision`을 반환한다. C7 live
+  E2E는 같은 기존 socket의 새 update frame에서 `live_revision >= receipt`만 causal 증거로 인정하며
+  snapshot·top-level fingerprint revision은 제외한다.
+- [x] **server-owned version과 exact `If-Match`로 재생성 경쟁을 차단.** Alembic 0058의 양수
+  BIGINT `lock_version` trigger와 target UUID로 strong `ETag`/body `entity_tag`를 만든다. DELETE는
+  누락 `428`, weak·wildcard·결합/중복/malformed `422`, stale UUID/version `412`, 실제 부재 `404`를
+  구분하고 active natural-key row lock 뒤 UUID+version이 모두 같은 행만 soft-delete한다.
+- [x] **parent→link lock order와 UI retry를 완결.** executor는 모든 active parent를 UUID 순서로
+  `FOR KEY SHARE` 잠근 뒤 link를 교체한다. UI/BFF는 `If-Match`/`ETag`를 보존하고 stale `412`에서
+  list·nearby·datasets·pipeline을 refetch해 같은 target UUID의 최신 tag로만 재시도한다.
+- [x] **적대 리뷰·로컬 gate 완료.** 두 독립 리뷰어가 최종 기능 diff를 승인했다. root unit
+  1,435건, API 520건, 실제 PostgreSQL migration/up-down·2-session 경쟁 8건, frontend unit
+  212건, mocked POI E2E 10건을 통과했다. Ruff, strict mypy 115+52파일, import 계약 4/4,
+  admin/user OpenAPI·생성 타입 drift, type-check·lint(오류 0)와 31-route production build도 green이다.
+  실제 same-socket causal 증거와 destructive cleanup은 최종 `T-ADM-C7` n150 live E2E에서 수행한다.
+
 ## Admin exact-scope 조작·이력 UI 소비 (2026-07-18, `T-ADM-C7B-UI`)
 
 - [x] **T-ADM-C7B-UI — exact provider/dataset/scope를 조작과 이력의 단일 정본으로 소비.**

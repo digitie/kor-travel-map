@@ -9,7 +9,6 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — PinVi legacy ops caller canonical 전환 + 인증 계약 복구
-  - [ ] `T-ADM-C7C` — live invalidation causal receipt + target 조건부 삭제
   - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (C6c 뒤)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
@@ -59,26 +58,11 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720은 최종
   live 증거를 첨부한 뒤 닫는다.
 
-- [ ] `T-ADM-C7C` — **live invalidation causal receipt + target 조건부 삭제**
-  (C7 선행): POI target PUT/DELETE 성공 응답 `meta.dataset_projection_revision`을 source
-  transaction 안에서 읽어 반환하고, C7은 같은 socket의 `dataset_projection` update frame이
-  `data.live_revision >= receipt`를 전달한 경우에만 causal invalidation으로 인정한다(snapshot 및
-  top-level fingerprint revision 제외). Alembic 0058의 server-owned `lock_version`으로
-  `ETag: "{canonical_uuid}:{version}"`을 만들며 DELETE는 body `entity_tag`를 합성 없이
-  `If-Match`로 수신한다. repository soft-delete는 natural key row lock 뒤 UUID+version 조건을
-  검증해 GET→DELETE 사이 PUT/delete-recreate 경쟁을 `412`로 닫는다. link sync는 UUID 순서로 모든
-  active parent를 먼저 KEY SHARE lock한 뒤 link를 교체해 delete와 parent→link 순서로 직렬화한다.
-  API·admin UI·OpenAPI·생성 타입·일반/live E2E를 함께 갱신한다.
-  구현·2인 적대 리뷰·로컬 gate와 admin OpenAPI/생성 타입 검증을 완료했으며 user OpenAPI는
-  불변이다. 현재 남은 완료 조건은 최신 main rebase와 CI green·승인·병합이다. header 누락은 RFC7807 `428`,
-  weak·wildcard·쉼표 결합 multiple·물리적 duplicate line·malformed 값은 RFC7807 `422` 계약으로
-  검증한다.
-
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
 **Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤
 C7 n150을 수행한다.
-C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI는
+C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI·C7C는
 완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은

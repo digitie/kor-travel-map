@@ -25,6 +25,8 @@
   실제 PostgreSQL migration/up-down·2-session 경쟁 묶음 8건, frontend unit 212건과 mocked POI
   E2E 10건을 통과했다. Ruff, strict mypy 115+52파일, import 계약 4/4, admin/user OpenAPI·생성
   타입 drift, frontend type-check·lint(오류 0)와 31-route production build도 green이다.
+- C6c Map PR #733의 merge commit `a5af45f2` 위에 rebase한 뒤 admin/user OpenAPI와 생성 타입을
+  정본에서 다시 생성했다. `T-ADM-C7C`는 완료 이력으로 옮기고 최종 C7 n150 live gate만 남겼다.
 
 ## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 설계 확정
 
