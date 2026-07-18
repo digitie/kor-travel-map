@@ -12,10 +12,8 @@ type CategoriesQuery = NonNullable<
   paths["/v1/categories"]["get"]["parameters"]["query"]
 >;
 
-export type CategoriesParams = Pick<
-  CategoriesQuery,
-  "active_only" | "include_counts"
->;
+// T-VN-04(ADR-067): counts는 항상 공개 projection 기준 — active_only 파라미터 제거됨.
+export type CategoriesParams = Pick<CategoriesQuery, "include_counts">;
 
 function fetchCategories(
   params: CategoriesParams = {},
@@ -23,7 +21,6 @@ function fetchCategories(
 ): Promise<CategoriesResponse> {
   return getJson<CategoriesResponse>(
     pathWithQuery("/v1/categories", {
-      active_only: params.active_only,
       include_counts: params.include_counts,
     }),
     { signal },

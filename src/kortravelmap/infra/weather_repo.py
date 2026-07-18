@@ -221,19 +221,21 @@ def _nearest_anchor_sql(exists_predicate: str) -> str:
     재작성하고, weather 보유 여부는 ``EXISTS`` 상관 서브쿼리로 확인한다. 결정적
     tie-break으로 ``f.feature_id``를 정렬 말미에 둔다(같은 좌표 다수 시 안정).
     ADR-012: STORED ``coord_5179`` 대상, ``x_extension`` qualify, ST_Transform 금지.
+
+    공개 weather 표면(card/forecast)이 anchor feature_id를 응답에 노출하므로
+    target·anchor 모두 ADR-067 ``feature.public_features`` projection에서만 찾는다
+    — 비공개 feature는 anchor가 될 수 없고, 비공개 target은 빈 결과가 된다(F-1).
     """
     return f"""
 WITH target AS (
     SELECT coord_5179
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND coord_5179 IS NOT NULL
 )
 SELECT f.feature_id
-FROM feature.features AS f, target AS t
-WHERE f.deleted_at IS NULL
-  AND f.coord_5179 IS NOT NULL
+FROM feature.public_features AS f, target AS t
+WHERE f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -334,9 +336,8 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     x_extension.ST_Distance(f.coord_5179, input.geom_5179) AS distance_m
-FROM feature.features AS f, input
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+FROM feature.public_features AS f, input
+WHERE f.coord IS NOT NULL
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, input.geom_5179, CAST(:radius_m AS double precision)
@@ -354,9 +355,8 @@ LIMIT 1
 _NEAREST_WEATHER_BY_FEATURE_SQL: Final[str] = f"""
 WITH target AS (
     SELECT coord_5179
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND coord_5179 IS NOT NULL
 )
 SELECT
@@ -365,9 +365,8 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     x_extension.ST_Distance(f.coord_5179, target.coord_5179) AS distance_m
-FROM feature.features AS f, target
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+FROM feature.public_features AS f, target
+WHERE f.coord IS NOT NULL
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, target.coord_5179, CAST(:radius_m AS double precision)

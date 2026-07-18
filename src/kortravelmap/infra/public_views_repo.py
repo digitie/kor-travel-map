@@ -149,10 +149,10 @@ LEFT JOIN LATERAL (
 ) AS ps ON true
 """
 
+# 공개 여부는 ADR-067 ``feature.public_features`` projection이 정본이다 — 아래
+# SQL은 그 projection만 FROM 하고 술어를 재구현하지 않는다(T-VN-04, F-1).
 _PUBLIC_BEACH_BASE_WHERE_SQL: Final[str] = """
-f.deleted_at IS NULL
-  AND f.status = 'active'
-  AND f.kind = 'place'
+f.kind = 'place'
   AND f.detail ->> 'place_kind' = 'beach'
   AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
   AND (
@@ -178,7 +178,7 @@ SELECT
     f.marker_color,
     sp.source_providers,
     f.updated_at
-FROM feature.features AS f
+FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
@@ -220,7 +220,7 @@ SELECT
     f.marker_color,
     sp.source_providers,
     f.updated_at
-FROM feature.features AS f
+FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
@@ -234,7 +234,7 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.sigungu_code
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
@@ -252,9 +252,7 @@ LIMIT :limit
 """
 
 _PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = """
-f.deleted_at IS NULL
-  AND f.status = 'active'
-  AND f.kind = 'event'
+f.kind = 'event'
   AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
   AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
   AND (
@@ -285,7 +283,7 @@ SELECT
     f.marker_color,
     sp.source_providers,
     f.updated_at
-FROM feature.features AS f
+FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
@@ -322,12 +320,10 @@ SELECT
     f.marker_color,
     sp.source_providers,
     f.updated_at
-FROM feature.features AS f
+FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
-WHERE f.deleted_at IS NULL
-  AND f.status = 'active'
-  AND f.kind = 'event'
+WHERE f.kind = 'event'
   AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
   AND f.feature_id = CAST(:feature_id AS text)
 """
@@ -339,7 +335,7 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.sigungu_code
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
@@ -369,10 +365,8 @@ SELECT
     EXTRACT(MONTH FROM m.month_start)::int AS month,
     count(f.feature_id)::int AS count
 FROM months AS m
-LEFT JOIN feature.features AS f
-  ON f.deleted_at IS NULL
- AND f.status = 'active'
- AND f.kind = 'event'
+LEFT JOIN feature.public_features AS f
+  ON f.kind = 'event'
  AND COALESCE(f.detail ->> 'event_kind', 'festival') IN ('festival', 'cultural_festival')
  AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
  AND (

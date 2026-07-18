@@ -432,12 +432,14 @@ ORDER BY i.feature_id, c.edition_key DESC, c.title, i.sort_order,
 """
 )
 
+# 공개 큐레이션 group read — feature 공개 여부는 ADR-067
+# ``feature.public_features`` projection이 정본이다(T-VN-04, F-1). 과거의
+# ``status NOT IN ('deleted','hidden')`` 재구현은 draft/broken/inactive를
+# 노출했다. ``:public_only``는 collection/item 상태 필터에만 관여한다.
 _LIST_GROUP_KEYS_SQL: Final[str] = """
 SELECT f.feature_id
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND f.status NOT IN ('deleted','hidden')
-  AND (
+FROM feature.public_features AS f
+WHERE (
       NOT CAST(:bbox_enabled AS boolean)
       OR (
           f.coord IS NOT NULL
@@ -503,10 +505,8 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
     f.status
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = :feature_id
-  AND f.deleted_at IS NULL
-  AND f.status NOT IN ('deleted','hidden')
 """
 
 _GET_FEATURES_BY_IDS_SQL: Final[str] = """
@@ -519,7 +519,7 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
     f.status
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
@@ -1699,6 +1699,13 @@ async def archive_curation_item(
 async def get_feature_curation_group(
     session: AsyncSession, *, feature_id: str, public_only: bool = True
 ) -> FeatureCurationGroup | None:
+    """feature 1건의 큐레이션 group을 조회한다.
+
+    feature 자체의 공개 여부는 ``public_only``와 무관하게 항상 ADR-067
+    ``feature.public_features`` projection을 따른다(공개 표면 전용 read).
+    ``public_only``는 collection/item 상태(published·included·public) 필터만
+    제어한다.
+    """
     feature = (
         (await session.execute(text(_GET_FEATURE_SQL), {"feature_id": feature_id}))
         .mappings()

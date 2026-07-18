@@ -62,7 +62,6 @@ __all__ = [
 
 router = APIRouter(prefix="/features", tags=["features"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
-_PUBLICLY_HIDDEN_FEATURE_STATUSES = frozenset({"hidden", "deleted"})
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -486,29 +485,42 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     )
 
 
-def _is_public_feature(row: dict[str, Any] | None) -> bool:
-    return bool(
-        row is not None
-        and row.get("deleted_at") is None
-        and row.get("status") not in _PUBLICLY_HIDDEN_FEATURE_STATUSES
-    )
-
-
-async def _is_public_feature_for_request(
+async def _public_feature_row(
     session: AsyncSession,
-    row: dict[str, Any] | None,
-) -> bool:
-    """기본 공개 상태와 notice의 active/latest 계보 조건을 함께 확인한다."""
-    if not _is_public_feature(row):
-        return False
-    assert row is not None
+    feature_id: str,
+) -> dict[str, Any] | None:
+    """공개 feature row 1건 — ADR-067 단일 공개 projection + notice 계보 조건.
+
+    공개 여부 술어는 ``feature.public_features`` VIEW(alembic 0059) 한 곳에만
+    있고 본 라우터는 재구현하지 않는다(F-1 재발 방지). notice는 추가로
+    active/latest 계보 조건(``public_active_notice_feature_ids``)을 통과해야 한다.
+    비공개면 ``None``.
+    """
+    row = await feature_repo.get_public_feature_row(session, feature_id)
+    if row is None:
+        return None
     if row.get("kind") != "notice":
-        return True
+        return row
     visible_ids = await feature_repo.public_active_notice_feature_ids(
         session,
         [str(row["feature_id"])],
     )
-    return str(row["feature_id"]) in visible_ids
+    if str(row["feature_id"]) not in visible_ids:
+        return None
+    return row
+
+
+async def _public_feature_row_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> dict[str, Any]:
+    row = await _public_feature_row(session, feature_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    return row
 
 
 def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
@@ -545,7 +557,8 @@ def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
     description=(
         "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST "
         "인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 "
-        "필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외."
+        "필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 "
+        "(ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외)."
     ),
 )
 async def list_features_in_bbox(
@@ -979,13 +992,7 @@ async def get_feature(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureDetailEnvelopeResponse:
     started_at = perf_counter()
-    row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
-    assert row is not None
+    row = await _public_feature_row_or_404(session, feature_id)
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=True
     )
@@ -1020,12 +1027,7 @@ async def get_feature_observation_history(
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
-    row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
+    await _public_feature_row_or_404(session, feature_id)
     try:
         page = await observation_repo.get_observation_history(
             session,
@@ -1093,6 +1095,7 @@ class FeatureWeatherResponse(BaseModel):
     "/{feature_id}/weather",
     response_model=FeatureWeatherResponse,
     summary="feature weather card (forecast_style별 최신값 + freshness)",
+    responses={404: {"description": "공개 feature 없음"}},
 )
 async def get_feature_weather(
     request: Request,
@@ -1104,6 +1107,9 @@ async def get_feature_weather(
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
+    # parent feature 공개 검사 (ADR-067) — 비공개/미존재 feature의 weather payload
+    # 노출 금지. detail 단건과 동일한 404 계약.
+    await _public_feature_row_or_404(session, feature_id)
     card = await weather_repo.build_weather_card(session, feature_id=feature_id, asof=asof)
     metrics = [
         WeatherMetricOut(
@@ -1154,13 +1160,7 @@ async def get_area_contained_features(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
-    area_row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, area_row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
-    assert area_row is not None
+    area_row = await _public_feature_row_or_404(session, feature_id)
     if area_row["kind"] != "area":
         raise HTTPException(
             status_code=422,
@@ -1186,6 +1186,7 @@ async def get_area_contained_features(
     "/{feature_id}/price",
     response_model=FeaturePriceResponse,
     summary="feature price card (제품별 최신 가격 + 최근 이력)",
+    responses={404: {"description": "공개 feature 없음"}},
 )
 async def get_feature_price(
     request: Request,
@@ -1201,6 +1202,9 @@ async def get_feature_price(
     ] = 100,
 ) -> FeaturePriceResponse:
     started_at = perf_counter()
+    # parent feature 공개 검사 (ADR-067) — 비공개/미존재 feature의 price payload
+    # 노출 금지. detail 단건과 동일한 404 계약.
+    await _public_feature_row_or_404(session, feature_id)
     card = await price_repo.build_price_card(
         session,
         feature_id=feature_id,
@@ -1234,8 +1238,10 @@ async def get_features_batch(
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
     feature_ids = list(dict.fromkeys(body.feature_ids))
-    rows = await feature_repo.get_feature_rows_by_ids(session, feature_ids)
-    public_rows = {feature_id: row for feature_id, row in rows.items() if _is_public_feature(row)}
+    # 공개 batch — ADR-067 단일 projection에서만 payload를 만든다. projection에
+    # 없는 ID는 일괄 ``missing``이며, retired/suppressed 세분화(5-state item 계약)는
+    # T-VN-11에서 이 projection과 base 상태를 조합해 도입한다.
+    public_rows = await feature_repo.get_public_feature_rows_by_ids(session, feature_ids)
     notice_ids = [
         feature_id for feature_id, row in public_rows.items() if row.get("kind") == "notice"
     ]

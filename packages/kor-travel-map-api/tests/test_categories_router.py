@@ -67,7 +67,8 @@ def test_categories_include_counts_merges_db(
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import categories as cat_mod
 
-    async def _fake_counts(_session: Any, *, active_only: bool = False) -> dict[str, int]:
+    async def _fake_counts(_session: Any) -> dict[str, int]:
+        # T-VN-04: counts는 항상 공개 projection 기준 — active_only 파라미터 없음.
         return {"01070100": 5}
 
     monkeypatch.setattr(cat_mod.feature_repo, "category_feature_counts", _fake_counts)

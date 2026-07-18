@@ -1024,7 +1024,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포) */
+        /**
+         * PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포)
+         * @description counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다.
+         *
+         *     과거의 ``active_only`` 스위치는 비공개(draft/hidden/inactive 등) 분포를 공개
+         *     표면에 노출했기에 제거됐다(T-VN-04, F-1) — 미지정 query param은 무시되므로
+         *     기존 caller는 깨지지 않는다.
+         */
         get: operations["list_categories_v1_categories_get"];
         put?: never;
         post?: never;
@@ -1196,7 +1203,7 @@ export interface paths {
         };
         /**
          * bbox 안 feature 목록 (지도 뷰포트)
-         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.
+         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 (ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외).
          */
         get: operations["list_features_in_bbox_v1_features_get"];
         put?: never;
@@ -13356,10 +13363,8 @@ export interface operations {
     list_categories_v1_categories_get: {
         parameters: {
             query?: {
-                /** @description 현재 DB feature 분포(category별 수)를 포함 */
+                /** @description 현재 DB 공개 feature 분포(category별 수)를 포함 */
                 include_counts?: boolean;
-                /** @description counts를 status='active' feature만으로 집계 */
-                active_only?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };
@@ -14468,6 +14473,15 @@ export interface operations {
                     "application/json": components["schemas"]["FeaturePriceResponse"];
                 };
             };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14511,6 +14525,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */

@@ -4470,29 +4470,18 @@
     },
     "/v1/categories": {
       "get": {
+        "description": "counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다.\n\n과거의 ``active_only`` 스위치는 비공개(draft/hidden/inactive 등) 분포를 공개\n표면에 노출했기에 제거됐다(T-VN-04, F-1) — 미지정 query param은 무시되므로\n기존 caller는 깨지지 않는다.",
         "operationId": "list_categories_v1_categories_get",
         "parameters": [
           {
-            "description": "현재 DB feature 분포(category별 수)를 포함",
+            "description": "현재 DB 공개 feature 분포(category별 수)를 포함",
             "in": "query",
             "name": "include_counts",
             "required": false,
             "schema": {
               "default": false,
-              "description": "현재 DB feature 분포(category별 수)를 포함",
+              "description": "현재 DB 공개 feature 분포(category별 수)를 포함",
               "title": "Include Counts",
-              "type": "boolean"
-            }
-          },
-          {
-            "description": "counts를 status='active' feature만으로 집계",
-            "in": "query",
-            "name": "active_only",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "counts를 status='active' feature만으로 집계",
-              "title": "Active Only",
               "type": "boolean"
             }
           },
@@ -7205,6 +7194,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -7295,6 +7294,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
           },
           "422": {
             "content": {
