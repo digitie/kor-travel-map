@@ -397,16 +397,13 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = ApiSettings()
-    admin_routes_enabled = (
-        settings.features_routes_enabled
-        if settings.admin_routes_enabled is None
-        else settings.admin_routes_enabled
-    )
-    ops_routes_enabled = (
-        settings.features_routes_enabled
-        if settings.ops_routes_enabled is None
-        else settings.ops_routes_enabled
-    )
+    # ``model_construct``/``model_copy(update=...)``처럼 Pydantic 검증을 우회한
+    # settings가 주입되더라도 production app 조립 전에 같은 불변식을 다시 확인한다.
+    settings.assert_production_ready()
+    # flag 해석은 settings의 resolved 속성이 정본이다 — production fail-closed
+    # 검증(ADR-066 T-VN-01)이 mount 규칙과 같은 해석을 공유해야 하기 때문.
+    admin_routes_enabled = settings.resolved_admin_routes_enabled
+    ops_routes_enabled = settings.resolved_ops_routes_enabled
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude) — T-VN-01 production fail-closed 전환 구현·리뷰 반영
+
+- `feat/t-vn-01-fail-closed`에 `KOR_TRAVEL_MAP_API_PROFILE`(production|local-dev)과 production
+  기동 거부 matrix를 구현했다: admin proxy secret(앞뒤 공백 없는 32자 이상), ops surface 활성 시
+  read/cancel token, features surface 활성 시 `public_api_key_required=true`+service token(앞뒤
+  공백 없는 32자 이상), 인증 없는 `/debug` off. local-dev fallback은 non-production 전용으로
+  격리하고 auth dependency도 production에서 방어적으로 닫는다.
+- Docker image/compose는 기본 production으로 기동하고 compose가 debug off·public key 필수를
+  컨테이너 기본으로 주입한다. 적대 리뷰(PASS-WITH-FIXES)의 S2/S3 — service token 필수화·
+  compose hard-require·root/package env 문서화·hermetic 테스트 — 를 반영했다.
+- **배포 전제**: n150 다음 배포 전 root `.env`에 admin secret·ops token들과 서로 다른 32자 이상
+  `KOR_TRAVEL_MAP_API_SERVICE_TOKEN`을 추가해야 compose가 기동한다.
+- **다음 한 작업**: orchestrator가 `feat/t-vn-01-fail-closed`를 `integration/t-vn` 대상 PR로 열어
+  CI green 후 머지하고, T-VN-02(route policy matrix)·T-VN-03(잔여 read 게이트)과의 통합 순서를
+  진행한다.
+
 ## 2026-07-18 (codex) — T-ADM-C7 n150 실행환경 preflight 보강
 
 - PinVi C6c PR #387은 전체 CI green 뒤 `main@1b833ce`로 병합됐다.

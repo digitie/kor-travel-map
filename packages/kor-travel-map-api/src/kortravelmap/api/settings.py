@@ -11,6 +11,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 __all__ = ["ApiSettings"]
 
 
+def _deployable_secret_shape(raw: str) -> bool:
+    """production 배포 가능한 secret 형태 — 앞뒤 공백 없는 32자 이상.
+
+    ``docker/api-entrypoint.sh``의 admin proxy secret 검사와 같은 기준이다.
+    내부 공백 금지는 ops token 전용 규칙이라 여기서는 강제하지 않는다.
+    """
+
+    return raw == raw.strip() and len(raw) >= 32
+
+
 class ApiSettings(BaseSettings):
     """디버그/관리 API 백엔드 설정 (`KOR_TRAVEL_MAP_API_*` env prefix).
 
@@ -45,6 +55,20 @@ class ApiSettings(BaseSettings):
     log_level: str = Field(
         default="info",
         description="uvicorn log level — debug/info/warning/error.",
+    )
+    profile: str = Field(
+        default="local-dev",
+        pattern="^(production|local-dev)$",
+        description=(
+            "실행 profile (ADR-066 D-1, T-VN-01). ``production``은 fail-closed로 "
+            "기동을 검증한다 — admin proxy secret(앞뒤 공백 없는 32자 이상) 필수, "
+            "ops surface 활성 시 read/cancel token 필수, features surface 활성 시 "
+            "``public_api_key_required=True``와 service token(앞뒤 공백 없는 32자 "
+            "이상) 필수, 인증 없는 ``/debug`` 라우터 비활성 필수. secret 미설정 "
+            "local-dev fallback은 ``local-dev``에서만 동작한다. Docker "
+            "image/compose 기본값은 production이고 코드 기본값은 local-dev다"
+            "(비-Docker 로컬 하위호환). env ``KOR_TRAVEL_MAP_API_PROFILE``."
+        ),
     )
     debug_routes_enabled: bool = Field(
         default=True,
@@ -129,6 +153,8 @@ class ApiSettings(BaseSettings):
             "``/providers``)는 ``X-Kor-Travel-Map-Service-Token`` 헤더가 이 값과 일치(상수시간 "
             "비교)해야 한다. **미설정(None)이면 강제하지 않음**(intranet/dev 기본, 하위호환 — "
             "운영 인증의 1차 책임은 여전히 infra 계층의 reverse proxy/Cloudflare). "
+            "단 production profile은 features surface 활성 시 이 token을 앞뒤 공백 "
+            "없는 32자 이상으로 필수화한다(ADR-066 T-VN-01). "
             "``/health`` · ``/version`` · ``/debug`` · ``/admin`` · ``/ops``는 면제(liveness/"
             "operator는 proxy SSO). env ``KOR_TRAVEL_MAP_API_SERVICE_TOKEN``."
         ),
@@ -470,3 +496,109 @@ class ApiSettings(BaseSettings):
         min_length=1,
         description="Default staging RustFS Docker volume for restore command plans.",
     )
+
+    @property
+    def is_production(self) -> bool:
+        """production profile 여부 (ADR-066 fail-closed 검증 대상)."""
+
+        return self.profile == "production"
+
+    @property
+    def resolved_admin_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 admin 라우터 활성 최종값."""
+
+        if self.admin_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.admin_routes_enabled
+
+    @property
+    def resolved_ops_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 ops 라우터 활성 최종값."""
+
+        if self.ops_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.ops_routes_enabled
+
+    def assert_production_ready(self) -> None:
+        """ADR-066 D-1의 production 불변식을 검증한다.
+
+        secret 미설정 fallback(admin actor ``local-dev`` 통과, keyless public read,
+        인증 없는 ``/debug``)은 non-production profile에서만 허용한다. Docker 밖
+        배포도 같은 검증을 받도록 entrypoint(shell)가 아닌 settings에서 검사하며,
+        admin/service secret 기준은 ``docker/api-entrypoint.sh``의 admin secret과
+        동일하다(앞뒤 공백 없는 32자 이상).
+        """
+
+        if not self.is_production:
+            return
+
+        problems: list[str] = []
+
+        admin_secret = (
+            None
+            if self.admin_proxy_secret is None
+            else self.admin_proxy_secret.get_secret_value()
+        )
+        if admin_secret is None or not _deployable_secret_shape(admin_secret):
+            problems.append(
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be set to at least 32 "
+                "characters without surrounding whitespace"
+            )
+
+        if self.resolved_ops_routes_enabled and (
+            self.ops_read_token is None or self.ops_cancel_token is None
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while "
+                "the ops surface is enabled"
+            )
+
+        if self.features_routes_enabled and not self.public_api_key_required:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED must be true while "
+                "the public features surface is enabled"
+            )
+
+        if self.debug_routes_enabled:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED must be false because "
+                "/debug routes have no authentication"
+            )
+
+        service_token_raw = (
+            None if self.service_token is None else self.service_token.get_secret_value()
+        )
+        if admin_secret is not None and admin_secret == service_token_raw:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be distinct from "
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"
+            )
+        if self.features_routes_enabled:
+            # D-1-2의 service secret: `/v1/features/batch` 같은 service surface가
+            # public key로만 조용히 격하되지 않도록 features surface에서는 필수다.
+            if service_token_raw is None or not _deployable_secret_shape(service_token_raw):
+                problems.append(
+                    "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be set to at least 32 "
+                    "characters without surrounding whitespace while the public "
+                    "features surface is enabled"
+                )
+        elif service_token_raw is not None and not _deployable_secret_shape(
+            service_token_raw
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be at least 32 characters "
+                "without surrounding whitespace when set"
+            )
+
+        if problems:
+            raise ValueError(
+                "production profile is fail-closed (ADR-066): " + "; ".join(problems)
+            )
+
+    @model_validator(mode="after")
+    def _validate_production_fail_closed(self) -> ApiSettings:
+        """정상 settings 생성 시 production 불변식을 적용한다."""
+
+        self.assert_production_ready()
+        return self
