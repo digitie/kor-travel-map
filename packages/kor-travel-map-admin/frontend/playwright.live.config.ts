@@ -40,6 +40,24 @@ function expectedSha256(envName: string): string {
 }
 
 /**
+ * `E2E_LIVE_WORKERS` 검증: 미설정이면 기본 4, 설정됐으면 1 이상의 정수만 허용한다.
+ * 빈 문자열/garbage는 `Number()`가 NaN/0으로 조용히 무너뜨리지 않고 config 평가
+ * 시점에 명확한 오류로 실행을 막는다(값은 redact).
+ */
+function liveWorkers(): number {
+  const raw = process.env.E2E_LIVE_WORKERS;
+  if (raw === undefined) {
+    return 4;
+  }
+  if (!/^[0-9]+$/.test(raw) || Number(raw) < 1) {
+    throw new Error(
+      "[playwright.live] E2E_LIVE_WORKERS는 1 이상의 정수여야 합니다 (value redacted)",
+    );
+  }
+  return Number(raw);
+}
+
+/**
  * prod-target 가드 (#501): live config은 baseURL을 `E2E_BASE_URL`로 자유롭게
  * override할 수 있어, 실수로 prod(map.<domain>) 같은 비-로컬 호스트를 가리킨 채
  * admin UI/API 시나리오 taxonomy와 opt-in 실제 write flow를 돌릴 위험이 있다.
@@ -138,7 +156,7 @@ export default defineConfig({
   fullyParallel: true,
   // worker 상한(#501): 캡이 없으면 fullyParallel이 머신 코어 수만큼 worker를 띄워
   // 라이브 백엔드에 과한 동시성을 건다(flaky·부하). 기본 4, `E2E_LIVE_WORKERS`로 조정.
-  workers: Number(process.env.E2E_LIVE_WORKERS ?? 4),
+  workers: liveWorkers(),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [

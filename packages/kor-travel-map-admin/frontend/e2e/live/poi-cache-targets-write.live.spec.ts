@@ -929,7 +929,9 @@ async function softDeleteByKey(
 }
 
 test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)", () => {
-  test("API PUT로 target을 생성/수정/삭제하면 백엔드와 admin 목록·상세에 모두 반영된다", async ({
+  // `@c7-causal`은 C7 prod runner(scripts/run-c7-prod-live-e2e.sh)가 grep하는
+  // 안정 tag다 — 한글 제목 문구가 바뀌어도 runner 계약이 깨지지 않는다.
+  test("API PUT로 target을 생성/수정/삭제하면 백엔드와 admin 목록·상세에 모두 반영된다 @c7-causal", async ({
     page,
   }, testInfo) => {
     test.skip(

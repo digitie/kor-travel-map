@@ -18,10 +18,12 @@ from kortravelmap.infra.integrity_violation_repo import (
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetConflict,
+    PoiCacheTargetFeatureLinkCandidate,
     delete_poi_cache_target,
     get_poi_cache_target_by_key,
     list_poi_cache_target_feature_links,
     list_poi_cache_targets,
+    sync_poi_cache_target_feature_links,
     upsert_poi_cache_target,
     upsert_poi_cache_target_feature_link,
 )
@@ -284,6 +286,62 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     )
     assert target_page.items == (deleted,)
     assert target_page.next_cursor is None
+
+
+async def test_link_snapshot_sync_preserves_operator_manual_links(
+    migrated_session: AsyncSession,
+) -> None:
+    """resolver link만 교체하는 snapshot sync가 manual link를 보존한다 (#699 패턴)."""
+    await _insert_feature(migrated_session, "feature:poi:manual")
+    await _insert_feature(migrated_session, "feature:poi:resolver")
+    await _insert_feature(migrated_session, "feature:poi:resolver-next")
+
+    target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system="external-app",
+        target_key="poi-manual",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=3.0,
+    )
+    resolver_link = await upsert_poi_cache_target_feature_link(
+        migrated_session,
+        target_id=target.target_id,
+        feature_id="feature:poi:resolver",
+    )
+    assert resolver_link is not None
+    manual_link = await upsert_poi_cache_target_feature_link(
+        migrated_session,
+        target_id=target.target_id,
+        feature_id="feature:poi:manual",
+        relation="manual",
+    )
+    assert manual_link is not None
+
+    synced = await sync_poi_cache_target_feature_links(
+        migrated_session,
+        target_ids=(target.target_id,),
+        candidates=(
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=target.target_id,
+                feature_id="feature:poi:resolver-next",
+            ),
+        ),
+    )
+    assert [link.feature_id for link in synced] == ["feature:poi:resolver-next"]
+
+    links = {
+        link.feature_id: link
+        for link in await list_poi_cache_target_feature_links(
+            migrated_session,
+            target.target_id,
+            active_only=False,
+        )
+    }
+    assert links["feature:poi:manual"].active is True
+    assert links["feature:poi:manual"].relation == "manual"
+    assert links["feature:poi:resolver"].active is False
+    assert links["feature:poi:resolver-next"].active is True
 
 
 async def test_data_integrity_violation_lifecycle_and_fk_behavior(

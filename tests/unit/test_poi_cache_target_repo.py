@@ -450,6 +450,8 @@ async def test_link_sync_locks_all_parents_before_link_writes_in_uuid_order() ->
     assert "ORDER BY target_id, feature_id" in session.statements[1]
     assert "FOR UPDATE" in session.statements[1]
     assert "UPDATE ops.poi_cache_target_feature_links" in session.statements[2]
+    # snapshot sync는 resolver link만 비활성화한다 — 운영자 manual link 보존(#699).
+    assert "relation <> 'manual'" in session.statements[2]
     assert "INSERT INTO ops.poi_cache_target_feature_links" in session.statements[3]
     assert session.params == [
         {"target_ids": [first_id, second_id]},

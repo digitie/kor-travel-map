@@ -687,6 +687,17 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
         "in": "header",
         "name": OPS_TOKEN_HEADER,
     }
+    assert schemes["OpsScope"] == {
+        "type": "apiKey",
+        "in": "header",
+        "name": OPS_SCOPE_HEADER,
+        "description": (
+            "service principal 사용 시 OpsToken과 함께 필수인 scope 헤더. GET은 "
+            "`ops:read`, exact import-job cancel POST는 `ops:cancel`이다. scope "
+            "문자열만으로는 권한을 얻지 못하며 token 종류와 method/exact path도 "
+            "일치해야 한다."
+        ),
+    }
 
     canonical_operations = 0
     cancel_path = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
@@ -700,8 +711,10 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
             service_capable = method == "get" or (
                 method == "post" and path == cancel_path
             )
+            # service 대안은 OpsToken+OpsScope AND 결합 — 런타임의 scope 헤더 필수
+            # 판정(누락 422)과 선언이 일치해야 한다.
             assert operation["security"] == (
-                [{"AdminBFF": []}, {"OpsToken": []}]
+                [{"AdminBFF": []}, {"OpsToken": [], "OpsScope": []}]
                 if service_capable
                 else [{"AdminBFF": []}]
             ), (method, path)

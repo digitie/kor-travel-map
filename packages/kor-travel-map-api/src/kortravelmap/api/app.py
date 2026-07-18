@@ -115,10 +115,28 @@ _OPS_CANONICAL_PREFIXES = (
 )
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
+# service principal 대안은 OpsToken과 OpsScope를 AND로 함께 요구한다 — 런타임
+# 판정(require_ops_operator)이 token만으로는 통과시키지 않고 scope 헤더 누락을
+# 422로 거부하는 계약과 일치시킨다.
 _ADMIN_OR_OPS_SECURITY: list[dict[str, list[str]]] = [
     {"AdminBFF": []},
-    {"OpsToken": []},
+    {"OpsToken": [], "OpsScope": []},
 ]
+
+# OpsScope는 runtime dependency상 `Header` 파라미터라 FastAPI가 security scheme을
+# 자동 생성하지 않는다. OpenAPI 계약에는 OpsToken과 AND로 선언해야 하므로 여기서
+# scheme을 주입한다.
+_OPS_SCOPE_SECURITY_SCHEME: dict[str, str] = {
+    "type": "apiKey",
+    "in": "header",
+    "name": OPS_SCOPE_HEADER,
+    "description": (
+        "service principal 사용 시 OpsToken과 함께 필수인 scope 헤더. GET은 "
+        "`ops:read`, exact import-job cancel POST는 `ops:cancel`이다. scope "
+        "문자열만으로는 권한을 얻지 못하며 token 종류와 method/exact path도 "
+        "일치해야 한다."
+    ),
+}
 
 
 def _build_problem_components() -> dict[str, Any]:
@@ -235,8 +253,13 @@ def _apply_ops_security_contract(schema: dict[str, Any]) -> None:
 
     FastAPI는 router dependency의 여러 ``Security`` scheme을 operation 단위 권한으로
     정확히 분리하지 못한다. 실제 런타임 판정과 동일하게 GET 및 exact import-job
-    cancel만 OpsToken 대안을 열고, 나머지 mutation은 AdminBFF만 허용한다.
+    cancel만 OpsToken+OpsScope AND 대안을 열고, 나머지 mutation은 AdminBFF만
+    허용한다.
     """
+
+    security_schemes = schema.get("components", {}).get("securitySchemes")
+    if isinstance(security_schemes, dict) and "OpsToken" in security_schemes:
+        security_schemes.setdefault("OpsScope", dict(_OPS_SCOPE_SECURITY_SCHEME))
 
     paths = schema.get("paths")
     if not isinstance(paths, dict):

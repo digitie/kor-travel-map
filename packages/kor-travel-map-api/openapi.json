@@ -21867,6 +21867,12 @@
         "name": "X-Kor-Travel-Map-Admin-Proxy-Secret",
         "type": "apiKey"
       },
+      "OpsScope": {
+        "description": "service principal 사용 시 OpsToken과 함께 필수인 scope 헤더. GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이다. scope 문자열만으로는 권한을 얻지 못하며 token 종류와 method/exact path도 일치해야 한다.",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Ops-Scope",
+        "type": "apiKey"
+      },
       "OpsToken": {
         "description": "canonical ops server-to-server read/cancel token. scope 문자열만으로는 권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다.",
         "in": "header",
@@ -32993,6 +32999,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -33122,6 +33129,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -33535,6 +33543,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -33698,6 +33707,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -33907,6 +33917,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -34189,6 +34200,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -34369,6 +34381,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -34701,6 +34714,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -34803,6 +34817,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -34913,6 +34928,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],
@@ -35325,6 +35341,7 @@
             "AdminBFF": []
           },
           {
+            "OpsScope": [],
             "OpsToken": []
           }
         ],

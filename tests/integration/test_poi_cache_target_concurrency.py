@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.infra.feature_update_executor import _sync_cache_target_links
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
+    PoiCacheTargetConflict,
     delete_poi_cache_target,
     get_poi_cache_target_by_key,
     list_poi_cache_target_feature_links,
@@ -232,6 +233,109 @@ async def test_delete_recreate_race_maps_stale_delete_to_412(
                     "WHERE external_system = :external_system"
                 ),
                 {"external_system": external_system},
+            )
+
+
+async def test_concurrent_put_reject_race_yields_single_winner_and_conflict(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """동시 PUT(reject, 서로 다른 좌표)은 승자 1 + PoiCacheTargetConflict 1이다.
+
+    S2-1 TOCTOU 회귀: unlocked pre-read로 moved/reject를 판정하면 패자가
+    ``ON CONFLICT UPDATE``로 승자의 좌표를 조용히 덮어쓰고, 승자 좌표로 계산된
+    active link가 stale 좌표의 link로 남는다. lock-first 판정에서는 패자가
+    승자 commit을 기다렸다가 conflict로 거부돼야 한다.
+    """
+    suffix = uuid4().hex
+    external_system = f"put-race-{suffix}"
+    target_key = f"target-{suffix}"
+    feature_id = f"feature:put-race:{suffix}"
+    try:
+        async with AsyncSession(migrated_engine) as setup, setup.begin():
+            await setup.execute(
+                text(
+                    "INSERT INTO feature.features (feature_id, kind, name, category) "
+                    "VALUES (:feature_id, 'place', :feature_id, 'test')"
+                ),
+                {"feature_id": feature_id},
+            )
+
+        async with (
+            AsyncSession(migrated_engine) as winner,
+            AsyncSession(migrated_engine) as loser,
+        ):
+            await winner.begin()
+            created = await upsert_poi_cache_target(
+                winner,
+                external_system=external_system,
+                target_key=target_key,
+                lon=126.978,
+                lat=37.5665,
+                radius_km=5,
+                on_conflict="reject",
+            )
+            winner_link = await upsert_poi_cache_target_feature_link(
+                winner,
+                target_id=created.target_id,
+                feature_id=feature_id,
+            )
+            assert winner_link is not None
+
+            await loser.begin()
+            loser_pid = await loser.scalar(text("SELECT pg_backend_pid()"))
+            assert loser_pid is not None
+
+            async def _losing_put() -> str:
+                try:
+                    await upsert_poi_cache_target(
+                        loser,
+                        external_system=external_system,
+                        target_key=target_key,
+                        lon=127.001,
+                        lat=37.401,
+                        radius_km=5,
+                        on_conflict="reject",
+                    )
+                except PoiCacheTargetConflict:
+                    await loser.rollback()
+                    return "conflict"
+                await loser.commit()
+                return "success"
+
+            loser_task = asyncio.create_task(_losing_put())
+            await _wait_for_lock(migrated_engine, int(loser_pid))
+            await winner.commit()
+            outcome = await asyncio.wait_for(loser_task, timeout=5)
+            assert outcome == "conflict"
+
+        async with AsyncSession(migrated_engine) as probe:
+            surviving = await get_poi_cache_target_by_key(
+                probe,
+                external_system=external_system,
+                target_key=target_key,
+            )
+            assert surviving is not None
+            assert surviving.target_id == created.target_id
+            assert surviving.coord_key == created.coord_key
+            links = await list_poi_cache_target_feature_links(
+                probe,
+                created.target_id,
+                active_only=False,
+            )
+            # 승자 좌표로 계산된 link만 active — stale 좌표로 남는 active link가 없다.
+            assert [link.feature_id for link in links if link.active] == [feature_id]
+    finally:
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.poi_cache_targets "
+                    "WHERE external_system = :external_system"
+                ),
+                {"external_system": external_system},
+            )
+            await cleanup.execute(
+                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+                {"feature_id": feature_id},
             )
 
 
