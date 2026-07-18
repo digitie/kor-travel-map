@@ -77,6 +77,13 @@
 - 위 문서 보강은 PR #730의 8개 CI 게이트가 모두 통과한 뒤 merge commit `d0609226`으로
   `main`에 반영됐다. 후속 구현 범위를 넓히지 않고 #730 관련 문서 이력만 마감했다.
 
+## 2026-07-18 (codex) — 완료 admin ops 이슈 4건 종결
+
+- 이슈 본문과 최신 `main`, 병합 PR, 적대 리뷰·CI 증거를 다시 대조해 #682, #686, #718,
+  #720에 완료 근거를 코멘트하고 닫았다. #680은 기존 CLOSED 상태를 재확인했다.
+- #684·#712·#719는 본문의 n150/live 수용조건이 남았고 #694는 C7 UI 의미 단언이 남아
+  열린 상태를 유지한다. `T-ADM-C7`의 최종 이슈 종결 대상도 이 네 건으로 줄였다.
+
 ## 2026-07-18 (codex, agent B) — C7B-UI 적대 리뷰·전체 frontend gate 완료
 
 - `/ops/datasets`가 exact scope의 active/terminal 실행과 nested run/event history,

@@ -82,8 +82,8 @@
   job/request JOIN의 typed job scope에서 파생한다.
 - **VERIFIED**: 두 적대 리뷰어의 S1/S2/S3 0건 승인 뒤 root unit 1,413건, API 485건,
   Dagster 475건(1 skip), 실제 PostGIS 집중 6건, frontend unit 185건과 전체 정적·OpenAPI·
-  generated type·production build gate를 통과했다. #686 종결은 최종 C7 n150 live 증거까지
-  보류한다.
+  generated type·production build gate를 통과했다. #686은 후속 #726/#728/#729까지의
+  수용조건과 CI를 재확인한 뒤 2026-07-18 닫았다.
 
 ### ops-live dataset projection·복구 경계 보강 (2026-07-17, ADR-064 T-ADM-C7A)
 

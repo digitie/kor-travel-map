@@ -89,8 +89,8 @@
   type-check, lint 오류 0건, `git diff --check`와 31-route production build가 green이다.
   Playwright는 최종 n150 live gate에 남겼다.
 - **다음 한 작업**: 최신 main rebase와 보안 감사 뒤 C7B-UI PR을 CI green·승인으로 병합한다.
-  직후 `T-ADM-C7` n150 prod 파괴적 live E2E를 수행하고 #684/#686/#712/#718/#719/#720을
-  증거와 함께 종결한다.
+  직후 `T-ADM-C7` n150 prod 파괴적 live E2E를 수행하고 남은 #684/#694/#712/#719를
+  증거와 함께 종결한다. 완료된 #682/#686/#718/#720은 2026-07-18 닫았다.
 
 ## 2026-07-18 (codex, agent A) — T-ADM-C7B-API 로컬 종결·PR 준비
 
