@@ -8,7 +8,8 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (선착)
+  - [ ] `T-ADM-C6c` — PinVi legacy ops caller canonical 전환 + 인증 계약 복구
+  - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (C6c 뒤)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
 
@@ -27,8 +28,18 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 2페이지로 통합 재작성한다. 구 표면은 redirect 없이 폐기(공용 `GET /v1/providers`
 계열은 PinVi 계약으로 존치).
 
-- [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (선착, 의존
-  C6b·C7A·C7B-720·AUD-686·C7B-UI): 기존 게이트
+- [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
+  (C7 선행): PR #724가 `/v1/ops/dagster/summary`, `/v1/ops/providers*`,
+  `/v1/ops/import-jobs*`를 clean-cut한 뒤에도 PinVi 최신 main의 admin client·provider-sync
+  proxy·unit test가 해당 경로를 호출하므로, PinVi caller를 `/v1/ops/datasets`와
+  `/v1/ops/pipeline` 계약으로 전환하고 양 저장소 contract test를 같은 commit 조합으로 고정한다.
+  KTM frontend BFF secret을 공유하거나 trusted frontend `/32`를 넓히지 말고, PinVi server에
+  필요한 최소 service/operator principal과 route policy를 명시한다. 완료 조건은 PinVi production
+  코드·테스트의 삭제 경로 0건, canonical success와 principal 없음/오류 scope의 typed
+  401/403/422, raw/debug/BFF 우회 0건, 배포 순서와 rollback image가 명시된 cross-repo smoke다.
+
+- [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤, 의존
+  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
   생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
@@ -40,7 +51,8 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
-**Wave 4**의 C7B-UI까지 완료했다. 마지막은 C7 n150이다.
+**Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤
+C7 n150을 수행한다.
 C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI는
 완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
