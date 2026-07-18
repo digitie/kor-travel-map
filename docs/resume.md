@@ -1,5 +1,43 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — T-ADM-C7C 로컬 종결·PR 준비
+
+- POI target PUT/DELETE transaction 안에서 `dataset_projection` revision을 읽어 mutation 응답의
+  필수 causal receipt로 반환하고, Alembic 0058의 server-owned UUID+BIGINT version ETag를
+  단건·목록 body와 GET/PUT/DELETE header에 연결했다.
+- repository soft-delete는 active natural key `FOR UPDATE` 뒤 UUID+version을 검증하고, no-row를
+  READ COMMITTED 새 statement에서 한 번 재확인해 concurrent recreate `412`와 실제 부재 `404`를
+  구분한다. executor link sync는 모든 active parent를 UUID 순서로 먼저 `FOR KEY SHARE` 잠근 뒤
+  link를 교체해 delete와 parent→link 순서로 직렬화한다.
+- DELETE는 `If-Match` 누락/형식 오류/UUID·version 불일치/active 부재를 RFC7807
+  `428`/`422`/`412`/`404`로 구분한다. admin UI는 row의 `entity_tag`를 exact `If-Match`로 보내고 BFF는
+  요청 `If-Match`와 응답 `ETag`를 allowlist로 보존한다.
+- 실제 2-session PUT/delete-recreate/link race와 strict ETag, migration 불변, 같은 기존 socket의
+  `update.data.live_revision >= receipt` live E2E 검증 코드를 준비했다. snapshot과 top-level
+  fingerprint revision은 causal 증거에서 제외한다.
+- admin OpenAPI와 생성 TypeScript 타입을 갱신했고 user OpenAPI hash는 불변이다.
+- create/update/delete 각각 같은 기존 socket의 새 frame 구간에서 causal receipt를 검증하고, UI는
+  `412` 때 list/nearby/dataset/pipeline을 refetch해 UUID로 선택한 최신 row의 tag를 재사용한다.
+- 두 독립 적대 리뷰어가 최종 diff를 승인했다. root unit 1,435건, API 520건, 실제 PostgreSQL
+  migration/up-down·경쟁 8건, frontend unit 212건, mocked POI E2E 10건, Ruff, strict mypy
+  115+52파일, import 계약 4/4, OpenAPI/생성 타입 drift, type-check·lint와 31-route build가 green이다.
+- PR #733 merge commit `a5af45f2` 위에 rebase해 admin/user OpenAPI와 생성 타입을 다시 만들었고,
+  `T-ADM-C7C`를 완료 이력으로 옮겼다.
+- **다음 한 작업**: 보안 감사 뒤 C7C PR을 게시하고 CI green·승인으로 병합한다. 직후 C7 live
+  branch를 rebase해 n150 same-socket causal E2E를 수행한다.
+
+## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 문서 선행
+
+- C7 live E2E 적대 리뷰에서 mutation 이후 임의 global revision 증가를 causal invalidation으로
+  오인하고, GET 소유권 확인과 DELETE 사이 target 재생성 경쟁에서 새 UUID를 삭제할 수 있는 두
+  차단 결함을 확인했다.
+- 문서 선행 당시 UUID만 ETag version으로 쓰고 schema가 불필요하다고 판단했으나 적대 리뷰에서 같은
+  UUID의 concurrent PUT과 link reactivation 경쟁을 놓친 것으로 확인했다. ADR-065의 최종 결정은
+  Alembic 0058 BIGINT version/trigger와 parent lock protocol로 교체됐다.
+- **다음 한 작업**: T-ADM-C7C를 독립 PR로 구현·2인 적대 리뷰·로컬 gate·CI merge한 뒤 C7 live
+  branch를 rebase해 같은 기존 socket의 `update.data.live_revision >= receipt`와 조건부 cleanup을
+  증명한다.
+
 ## 2026-07-18 (codex, agent B) — T-ADM-C6c map principal 적대 리뷰 반영
 
 - map API에 API-only read/cancel token을 추가했다. read는 canonical datasets/pipeline
@@ -18,9 +56,8 @@
   fail-closed하고, 별도 적대 리뷰 2인 승인과 집중 API 217건·API 전체 563건을 확인했다.
 - 재실행 integration의 구 `403` 기대 1건은 새 `401 OPS_TOKEN_REQUIRED` 계약과 code까지 단언하도록
   시험만 교정했고, 해당 실제 PostgreSQL projection test가 통과했다.
-- **다음 한 작업**: 보안 감사와 최신 main rebase 뒤 map PR을 CI green·승인으로 병합한다.
-  이어 PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit 조합으로
-  cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
+- **다음 한 작업**: PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit
+  조합으로 cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
 
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 

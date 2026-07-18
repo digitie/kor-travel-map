@@ -54,6 +54,8 @@ export type PoiCacheTargetRecord =
   PoiCacheTargetSchemas["PoiCacheTargetRecord"];
 export type PoiCacheTargetResponse =
   PoiCacheTargetSchemas["PoiCacheTargetResponse"];
+export type PoiCacheTargetMutationResponse =
+  PoiCacheTargetSchemas["PoiCacheTargetMutationResponse"];
 export type PoiCacheTargetListResponse =
   PoiCacheTargetSchemas["PoiCacheTargetListResponse"];
 
@@ -104,8 +106,8 @@ function upsertPoiCacheTarget(
   externalSystem: string,
   targetKey: string,
   body: PoiCacheTargetUpsertRequest,
-): Promise<PoiCacheTargetResponse> {
-  return putJson<PoiCacheTargetResponse>(
+): Promise<PoiCacheTargetMutationResponse> {
+  return putJson<PoiCacheTargetMutationResponse>(
     `/v1/admin/poi-cache-targets/${encodeURIComponent(
       externalSystem,
     )}/${encodeURIComponent(targetKey)}`,
@@ -116,11 +118,14 @@ function upsertPoiCacheTarget(
 function deletePoiCacheTarget(
   externalSystem: string,
   targetKey: string,
-): Promise<PoiCacheTargetResponse> {
-  return deleteJson<PoiCacheTargetResponse>(
+  entityTag: string,
+): Promise<PoiCacheTargetMutationResponse> {
+  return deleteJson<PoiCacheTargetMutationResponse>(
     `/v1/admin/poi-cache-targets/${encodeURIComponent(
       externalSystem,
     )}/${encodeURIComponent(targetKey)}`,
+    undefined,
+    { headers: { "If-Match": entityTag } },
   );
 }
 
@@ -169,7 +174,7 @@ export function useNearbyFeaturesByTarget(params: NearbyByTargetParams | null) {
 export function useUpsertPoiCacheTargetMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    PoiCacheTargetResponse,
+    PoiCacheTargetMutationResponse,
     Error,
     {
       externalSystem: string;
@@ -205,30 +210,38 @@ export function useUpsertPoiCacheTargetMutation() {
 
 export function useDeletePoiCacheTargetMutation() {
   const queryClient = useQueryClient();
-  return useMutation<
-    PoiCacheTargetResponse,
-    Error,
-    { externalSystem: string; targetKey: string }
-  >({
-    mutationFn: ({ externalSystem, targetKey }) =>
-      deletePoiCacheTarget(externalSystem, targetKey),
-    onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["poi-cache-targets"] });
-      void queryClient.invalidateQueries({
+  const invalidateDeleteProjections = async (variables: {
+    externalSystem: string;
+    targetKey: string;
+  }) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["poi-cache-targets"] }),
+      queryClient.invalidateQueries({
         queryKey: [
           "poi-cache-target",
           variables.externalSystem,
           variables.targetKey,
         ],
-      });
-      void queryClient.invalidateQueries({
+      }),
+      queryClient.invalidateQueries({
         queryKey: ["nearby-features-by-target"],
-      });
-      void queryClient.invalidateQueries({
+      }),
+      queryClient.invalidateQueries({
         queryKey: ["pipeline", "executions"],
-      });
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] });
-      invalidateOpsDatasetQueries(queryClient);
-    },
+      }),
+      queryClient.invalidateQueries({ queryKey: ["pipeline", "overview"] }),
+      queryClient.invalidateQueries({ queryKey: ["ops-datasets"] }),
+      queryClient.invalidateQueries({ queryKey: ["ops-dataset"] }),
+    ]);
+  };
+  return useMutation<
+    PoiCacheTargetMutationResponse,
+    Error,
+    { externalSystem: string; targetKey: string; entityTag: string }
+  >({
+    mutationFn: ({ externalSystem, targetKey, entityTag }) =>
+      deletePoiCacheTarget(externalSystem, targetKey, entityTag),
+    onSuccess: (_data, variables) => invalidateDeleteProjections(variables),
+    onError: (_error, variables) => invalidateDeleteProjections(variables),
   });
 }

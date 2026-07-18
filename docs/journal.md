@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 로컬 gate 완료
+
+- POI target mutation transaction에서 trigger 이후 `ops.ops_live_topic_revisions`의
+  `dataset_projection` 값을 필수 receipt로 읽고, Alembic 0058의 server-owned BIGINT version과
+  UUID로 body/header strong ETag를 만든다.
+- DELETE repository는 active natural key `FOR UPDATE`와 READ COMMITTED 재조회로 concurrent
+  recreate와 실제 부재를 구분한다. UUID+version 일치 시에만 UPDATE하며 link upsert는 active parent
+  `FOR KEY SHARE`로 직렬화한다.
+- API의 RFC7807 `428`/`422`/`412`/`404`, OpenAPI header/response 선언, admin UI exact
+  `If-Match`, BFF request/response header allowlist를 연결했다.
+- 일반 unit/integration와 live write E2E에 strict ETag, stale PUT/recreate, 실패 revision 불변,
+  link/delete 2-session race, 같은 기존 socket update의 `live_revision >= receipt`를 추가했다.
+- admin OpenAPI와 TypeScript 타입을 재생성했고 admin-only 계약 변경으로 user OpenAPI는 불변이다.
+- 재리뷰에서 multi-target sync의 교차 parent 잠금과 stale UI selection을 보강했다. repository가 모든
+  active parent를 UUID 순서로 먼저 잠근 뒤 link를 교체하고, UI는 target UUID에서 refetch row를
+  파생한다. live E2E도 create/update/delete별 새 frame cursor와 최신 server `entity_tag`를 사용한다.
+- Reviewer B 잔여 지적에 따라 `If-Match` raw header line을 strict parser보다 먼저 계수한다. 누락은
+  `428`, 물리적 중복은 순서와 무관하게 `422`로 닫고 ASGI raw tuple 양방향 회귀 테스트로 고정했다.
+- 최종 제품 diff는 두 독립 적대 리뷰어가 DB locking·HTTP precondition·causal socket·UI stale
+  selection 관점에서 차단 finding 없음으로 승인했다. 승인 뒤 root unit 1,435건, API 520건,
+  실제 PostgreSQL migration/up-down·2-session 경쟁 묶음 8건, frontend unit 212건과 mocked POI
+  E2E 10건을 통과했다. Ruff, strict mypy 115+52파일, import 계약 4/4, admin/user OpenAPI·생성
+  타입 drift, frontend type-check·lint(오류 0)와 31-route production build도 green이다.
+- C6c Map PR #733의 merge commit `a5af45f2` 위에 rebase한 뒤 admin/user OpenAPI와 생성 타입을
+  정본에서 다시 생성했다. `T-ADM-C7C`는 완료 이력으로 옮기고 최종 C7 n150 live gate만 남겼다.
+
+## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 설계 확정
+
+- C7 테스트 전 적대 리뷰에서 `updated_at` 이후의 임의 `dataset_projection` revision을 해당
+  mutation 원인으로 인정하는 거짓 양성과, target exact GET 뒤 자연키 DELETE가 concurrent
+  delete/recreate된 새 UUID를 지울 수 있는 TOCTOU를 확인했다.
+- 이 문서 선행 결론의 exact equality와 UUID-only version/schema 불필요 판단은 적대 리뷰에서
+  각각 coalesced topic update와 same-row concurrent PUT을 처리하지 못하는 것으로 확인됐다.
+  최종 계약은 ADR-065의 `live_revision >= receipt`와 Alembic 0058 UUID+BIGINT version으로 대체한다.
+
 ## 2026-07-18 (codex, agent B) — T-ADM-C6c map service principal 적대 리뷰 반영
 
 - canonical `/v1/ops/datasets*`·`/v1/ops/pipeline*`만 기존 trusted frontend BFF 또는 별도

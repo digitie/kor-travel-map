@@ -35,11 +35,11 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import record_import_job_event
 from kortravelmap.infra.poi_cache_target_repo import (
-    deactivate_poi_cache_target_feature_links,
+    PoiCacheTargetFeatureLinkCandidate,
     mark_poi_cache_targets_refresh_failed,
     mark_poi_cache_targets_refresh_requested,
     mark_poi_cache_targets_refreshed,
-    upsert_poi_cache_target_feature_link,
+    sync_poi_cache_target_feature_links,
 )
 from kortravelmap.infra.provider_refresh_policy_repo import (
     ProviderRefreshPolicy,
@@ -473,18 +473,21 @@ async def _sync_cache_target_links(
     session: AsyncSession,
     resolution: ScopeResolution,
 ) -> None:
-    for target in resolution.cache_targets:
-        await deactivate_poi_cache_target_feature_links(session, target.target_id)
-    for match in resolution.cache_target_matches:
-        await upsert_poi_cache_target_feature_link(
-            session,
-            target_id=match.target_id,
-            feature_id=match.feature_id,
-            provider=match.provider,
-            dataset_key=match.dataset_key,
-            distance_m=match.distance_m,
-            relation=match.relation,
-        )
+    await sync_poi_cache_target_feature_links(
+        session,
+        target_ids=tuple(target.target_id for target in resolution.cache_targets),
+        candidates=tuple(
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=match.target_id,
+                feature_id=match.feature_id,
+                provider=match.provider,
+                dataset_key=match.dataset_key,
+                distance_m=match.distance_m,
+                relation=match.relation,
+            )
+            for match in resolution.cache_target_matches
+        ),
+    )
 
 
 async def _final_resolution(

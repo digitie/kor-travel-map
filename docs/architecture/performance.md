@@ -345,6 +345,19 @@ row-tuple cursor를 사용한다.
 - **인덱스 보조**: `idx_features_dedup_refresh_keyset` partial index가 active,
   좌표 보유 feature만 keyset 순서로 훑도록 돕는다.
 
+### 6.2 POI target entity version과 link/delete 잠금
+
+Alembic 0058의 `ops.poi_cache_targets.lock_version`은 인덱스에 넣지 않는다. DELETE는 active
+natural key partial unique index로 row를 찾고 `FOR UPDATE` 한 뒤 heap의 UUID+version을 비교한다.
+version을 인덱싱하면 모든 target UPDATE가 불필요한 index churn을 만들고 HOT update 기회를 줄인다.
+
+target UPDATE는 row-level version trigger와 `dataset_projection` topic row lock을 함께 사용하므로 같은
+topic writer가 많은 경우 직렬화 비용이 생긴다. 이는 stale mutation 방지와 causal live receipt를 위한
+의도된 비용이다. link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
+잠그고, 그 뒤 link를 `(target_id, feature_id)` 순서로 비활성화/upsert한다. 각 parent lock은 target
+DELETE의 `FOR UPDATE`와 직렬화되지만 일반 active parent read는 막지 않는다. multi-target sync와
+delete 모두 parent target → feature link 순서를 지켜 교착을 피한다.
+
 ## 7. JSONB 인덱싱
 
 ### 7.1 자주 조회하는 필드는 generated column으로

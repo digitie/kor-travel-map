@@ -18248,7 +18248,7 @@
       },
       "PoiCacheTargetMeta": {
         "additionalProperties": false,
-        "description": "쓰기 요청의 간단한 메타데이터.",
+        "description": "단건 조회 메타데이터.",
         "properties": {
           "duration_ms": {
             "title": "Duration Ms",
@@ -18334,6 +18334,50 @@
       },
       "PoiCacheTargetMetadata-Output": {
         "additionalProperties": true,
+        "type": "object"
+      },
+      "PoiCacheTargetMutationMeta": {
+        "additionalProperties": false,
+        "description": "live projection과 인과적으로 연결된 쓰기 응답 메타데이터.",
+        "properties": {
+          "dataset_projection_revision": {
+            "minimum": 0.0,
+            "title": "Dataset Projection Revision",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "dataset_projection_revision"
+        ],
+        "title": "PoiCacheTargetMutationMeta",
+        "type": "object"
+      },
+      "PoiCacheTargetMutationResponse": {
+        "additionalProperties": false,
+        "description": "PUT/DELETE 단건 응답. revision receipt는 항상 존재한다.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PoiCacheTargetRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PoiCacheTargetMutationMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PoiCacheTargetMutationResponse",
         "type": "object"
       },
       "PoiCacheTargetProviderOverride-Input": {
@@ -18473,6 +18517,10 @@
             ],
             "title": "Deleted At"
           },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
           "external_system": {
             "title": "External System",
             "type": "string"
@@ -18596,6 +18644,7 @@
         },
         "required": [
           "target_id",
+          "entity_tag",
           "external_system",
           "target_key",
           "coord",
@@ -28155,6 +28204,15 @@
               "title": "Target Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 GET/PUT body의 entity_tag와 같은 UUID+version strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -28162,11 +28220,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PoiCacheTargetResponse"
+                  "$ref": "#/components/schemas/PoiCacheTargetMutationResponse"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "soft delete 완료",
+            "headers": {
+              "ETag": {
+                "description": "현재 target UUID와 server-owned version의 strong entity tag.",
+                "schema": {
+                  "example": "\"00000000-0000-0000-0000-000000000000:1\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "403": {
             "content": {
@@ -28188,6 +28255,16 @@
             },
             "description": "target 없음"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match target UUID 또는 version 불일치"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -28196,7 +28273,17 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-Match가 canonical UUID+version strong ETag가 아님"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -28262,7 +28349,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "단건 조회 완료",
+            "headers": {
+              "ETag": {
+                "description": "현재 target UUID와 server-owned version의 strong entity tag.",
+                "schema": {
+                  "example": "\"00000000-0000-0000-0000-000000000000:1\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "content": {
@@ -28344,11 +28440,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PoiCacheTargetResponse"
+                  "$ref": "#/components/schemas/PoiCacheTargetMutationResponse"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "등록 또는 갱신 완료",
+            "headers": {
+              "ETag": {
+                "description": "현재 target UUID와 server-owned version의 strong entity tag.",
+                "schema": {
+                  "example": "\"00000000-0000-0000-0000-000000000000:1\"",
+                  "type": "string"
+                }
+              }
+            }
           },
           "409": {
             "content": {

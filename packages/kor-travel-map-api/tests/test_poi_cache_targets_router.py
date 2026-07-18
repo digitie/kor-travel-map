@@ -7,17 +7,22 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from kortravelmap.infra.feature_repo import NearbyFeaturePage, NearbyFeatureRow
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
+    PoiCacheTargetDeleteResult,
     PoiCacheTargetPage,
 )
+from starlette.requests import Request
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
+
+TARGET_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
 class _Tx:
@@ -60,10 +65,11 @@ def client(session: _FakeSession) -> TestClient:
     return TestClient(app)
 
 
-def _target(*, target_key: str = "poi-1") -> PoiCacheTarget:
+def _target(*, target_key: str = "poi-1", lock_version: int = 7) -> PoiCacheTarget:
     now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
     return PoiCacheTarget(
-        target_id="target-1",
+        target_id=TARGET_ID,
+        lock_version=lock_version,
         external_system="external-app",
         target_key=target_key,
         name="서울시청",
@@ -127,6 +133,25 @@ def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
         item for item in path_parameters if item["name"] == "external_system"
     )
     assert external_system["schema"]["maxLength"] == 112
+    item_path = spec["paths"][
+        "/v1/admin/poi-cache-targets/{external_system}/{target_key}"
+    ]
+    delete_operation = item_path["delete"]
+    if_match = next(
+        item
+        for item in delete_operation["parameters"]
+        if item["name"] == "If-Match"
+    )
+    assert if_match["in"] == "header"
+    assert if_match["required"] is True
+    assert {"403", "404", "412", "422", "428"} <= set(
+        delete_operation["responses"]
+    )
+    for method in ("get", "put", "delete"):
+        assert "ETag" in item_path[method]["responses"]["200"]["headers"]
+    mutation_meta = schemas["PoiCacheTargetMutationMeta"]
+    assert "dataset_projection_revision" in mutation_meta["required"]
+    assert "entity_tag" in schemas["PoiCacheTargetRecord"]["required"]
 
 
 @pytest.mark.unit
@@ -168,7 +193,11 @@ def test_put_poi_cache_target_uses_transaction(
         }
         return _target()
 
+    async def _revision(_session: Any) -> int:
+        return 41
+
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
+    monkeypatch.setattr(router_mod, "get_dataset_projection_revision", _revision)
 
     response = client.put(
         "/v1/admin/poi-cache-targets/external-app/poi-1",
@@ -186,8 +215,11 @@ def test_put_poi_cache_target_uses_transaction(
     )
 
     assert response.status_code == 200
+    assert response.headers["etag"] == f'"{TARGET_ID}:7"'
+    assert response.json()["data"]["entity_tag"] == response.headers["etag"]
     assert response.json()["data"]["coord_key"] == "126.978000:37.566500:p6"
     assert response.json()["data"]["metadata"] == {"external_poi_id": "poi-1"}
+    assert response.json()["meta"]["dataset_projection_revision"] == 41
     assert session.begin_count == 1
 
 
@@ -206,7 +238,11 @@ def test_put_poi_cache_target_accepts_legacy_external_poi_id_aliases(
         assert kwargs["metadata"] == {"external_poi_id": "poi-legacy"}
         return _target(target_key="poi-legacy")
 
+    async def _revision(_session: Any) -> int:
+        return 42
+
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
+    monkeypatch.setattr(router_mod, "get_dataset_projection_revision", _revision)
 
     response = client.put(
         "/v1/admin/poi-cache-targets/external-app/poi-legacy",
@@ -305,6 +341,7 @@ def test_list_poi_cache_targets_passes_filters(
         "total": None,
     }
     assert body["data"]["items"][0]["target_key"] == "poi-1"
+    assert body["data"]["items"][0]["entity_tag"] == f'"{TARGET_ID}:7"'
 
 
 @pytest.mark.unit
@@ -343,6 +380,26 @@ def test_get_poi_cache_target_404_when_missing(
 
 
 @pytest.mark.unit
+def test_get_poi_cache_target_returns_strong_target_etag(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import poi_cache_targets as router_mod
+
+    async def _get(_session: Any, **_kwargs: Any) -> PoiCacheTarget:
+        return _target()
+
+    monkeypatch.setattr(router_mod, "get_poi_cache_target_by_key", _get)
+
+    response = client.get("/v1/admin/poi-cache-targets/external-app/poi-1")
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == f'"{TARGET_ID}:7"'
+    assert response.json()["data"]["entity_tag"] == response.headers["etag"]
+    assert "dataset_projection_revision" not in response.json()["meta"]
+
+
+@pytest.mark.unit
 def test_delete_poi_cache_target_uses_transaction(
     client: TestClient,
     session: _FakeSession,
@@ -350,17 +407,160 @@ def test_delete_poi_cache_target_uses_transaction(
 ) -> None:
     from kortravelmap.api.routers import poi_cache_targets as router_mod
 
-    async def _delete(_session: Any, **kwargs: Any) -> PoiCacheTarget:
+    async def _delete(_session: Any, **kwargs: Any) -> PoiCacheTargetDeleteResult:
         assert kwargs["external_system"] == "external-app"
         assert kwargs["target_key"] == "poi-1"
-        return _target()
+        assert kwargs["expected_target_id"] == TARGET_ID
+        assert kwargs["expected_lock_version"] == 7
+        return PoiCacheTargetDeleteResult(
+            status="deleted",
+            target=_target(lock_version=8),
+        )
+
+    async def _revision(_session: Any) -> int:
+        return 43
 
     monkeypatch.setattr(router_mod, "delete_poi_cache_target", _delete)
+    monkeypatch.setattr(router_mod, "get_dataset_projection_revision", _revision)
 
-    response = client.delete("/v1/admin/poi-cache-targets/external-app/poi-1")
+    response = client.delete(
+        "/v1/admin/poi-cache-targets/external-app/poi-1",
+        headers={"If-Match": f'"{TARGET_ID}:7"'},
+    )
 
     assert response.status_code == 200
-    assert response.json()["data"]["target_id"] == "target-1"
+    assert response.headers["etag"] == f'"{TARGET_ID}:8"'
+    assert response.json()["data"]["target_id"] == TARGET_ID
+    assert response.json()["data"]["entity_tag"] == response.headers["etag"]
+    assert response.json()["meta"]["dataset_projection_revision"] == 43
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("header", "expected_status"),
+    [
+        (None, 428),
+        ("*", 422),
+        (f'W/"{TARGET_ID}:7"', 422),
+        (
+            f'"{TARGET_ID}:7", "22222222-2222-4222-8222-222222222222:1"',
+            422,
+        ),
+        ('"not-a-uuid"', 422),
+        (f'"{TARGET_ID}"', 422),
+        (f'"{TARGET_ID}:0"', 422),
+        (f'"{TARGET_ID}:01"', 422),
+        (f'"{TARGET_ID.upper()}:7"', 422),
+        (f'"{TARGET_ID}:9223372036854775808"', 422),
+        (f' "{TARGET_ID}:7"', 422),
+    ],
+)
+def test_delete_poi_cache_target_rejects_missing_or_invalid_if_match(
+    client: TestClient,
+    session: _FakeSession,
+    header: str | None,
+    expected_status: int,
+) -> None:
+    headers = {} if header is None else {"If-Match": header}
+
+    response = client.delete(
+        "/v1/admin/poi-cache-targets/external-app/poi-1",
+        headers=headers,
+    )
+
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            f'"{TARGET_ID}:7"',
+            '"22222222-2222-4222-8222-222222222222:1"',
+        ),
+        (
+            '"22222222-2222-4222-8222-222222222222:1"',
+            f'"{TARGET_ID}:7"',
+        ),
+    ],
+)
+def test_expected_target_identity_rejects_duplicate_raw_if_match_lines(
+    first: str,
+    second: str,
+) -> None:
+    from kortravelmap.api.routers.poi_cache_targets import (
+        _expected_target_identity,
+    )
+
+    raw_headers = [
+        (b"if-match", first.encode("ascii")),
+        (b"if-match", second.encode("ascii")),
+    ]
+    request = Request(
+        {
+            "type": "http",
+            "method": "DELETE",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": raw_headers,
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "http_version": "1.1",
+        }
+    )
+
+    assert request.headers.getlist("if-match") == [first, second]
+    with pytest.raises(HTTPException) as exc_info:
+        _expected_target_identity(request)
+
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("result", "expected_status"),
+    [
+        (PoiCacheTargetDeleteResult(status="not_found"), 404),
+        (PoiCacheTargetDeleteResult(status="precondition_failed"), 412),
+    ],
+)
+def test_delete_poi_cache_target_maps_atomic_precondition_result(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    result: PoiCacheTargetDeleteResult,
+    expected_status: int,
+) -> None:
+    from kortravelmap.api.routers import poi_cache_targets as router_mod
+
+    async def _delete(
+        _session: Any, **_kwargs: Any
+    ) -> PoiCacheTargetDeleteResult:
+        return result
+
+    async def _unexpected_revision(_session: Any) -> int:
+        raise AssertionError("failed delete must not read a mutation revision receipt")
+
+    monkeypatch.setattr(router_mod, "delete_poi_cache_target", _delete)
+    monkeypatch.setattr(
+        router_mod,
+        "get_dataset_projection_revision",
+        _unexpected_revision,
+    )
+
+    response = client.delete(
+        "/v1/admin/poi-cache-targets/external-app/poi-1",
+        headers={"If-Match": f'"{TARGET_ID}:7"'},
+    )
+
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/problem+json")
     assert session.begin_count == 1
 
 
@@ -377,7 +577,7 @@ def test_features_nearby_by_target_passes_filters(
         return _target()
 
     async def _nearby(_session: Any, **kwargs: Any) -> NearbyFeaturePage:
-        assert kwargs["target_id"] == "target-1"
+        assert kwargs["target_id"] == TARGET_ID
         assert kwargs["radius_km"] == 3.0
         assert kwargs["kinds"] == ["place"]
         assert kwargs["categories"] == ["06020000"]

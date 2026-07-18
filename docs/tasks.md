@@ -48,7 +48,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   401/403/422, raw/debug/BFF 우회 0건, 배포 순서와 rollback image가 명시된 cross-repo smoke다.
 
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤, 의존
-  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c): 기존 게이트
+  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c·C7C): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
   생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
@@ -62,7 +62,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
 **Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤
 C7 n150을 수행한다.
-C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI는
+C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI·C7C는
 완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은

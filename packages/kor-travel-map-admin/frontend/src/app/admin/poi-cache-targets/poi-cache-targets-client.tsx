@@ -10,7 +10,6 @@ import {
 import { useMemo, useRef, useState } from "react";
 
 import {
-  type PoiCacheTargetRecord,
   useDeletePoiCacheTargetMutation,
   useNearbyFeaturesByTarget,
   usePoiCacheTargets,
@@ -45,9 +44,7 @@ export function PoiCacheTargetsClient() {
   const [scopeMode, setScopeMode] = useState<"center_radius" | "sigungu_by_radius">(
     "center_radius",
   );
-  const [selectedTarget, setSelectedTarget] = useState<PoiCacheTargetRecord | null>(
-    null,
-  );
+  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [errors, setErrors] = useState<
     Partial<Record<"externalSystem" | "targetKey" | "lon" | "lat" | "radiusKm", string>>
@@ -61,6 +58,9 @@ export function PoiCacheTargetsClient() {
     cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
 
   const targets = usePoiCacheTargets({ page_size: 100, cursor: currentCursor });
+  const targetItems = targets.data?.data.items ?? [];
+  const selectedTarget =
+    targetItems.find((target) => target.target_id === selectedTargetId) ?? null;
   const upsert = useUpsertPoiCacheTargetMutation();
   const remove = useDeletePoiCacheTargetMutation();
   const confirm = useConfirm();
@@ -74,7 +74,6 @@ export function PoiCacheTargetsClient() {
       : null,
   );
 
-  const targetItems = targets.data?.data.items ?? [];
   const nearbyItems = nearby.data?.data.items ?? [];
   type TargetRow = NonNullable<
     typeof targets.data
@@ -144,6 +143,7 @@ export function PoiCacheTargetsClient() {
           const target = row.original;
           return (
             <Button
+              disabled={remove.isPending || targets.isFetching}
               size="sm"
               type="button"
               variant="ghost"
@@ -158,10 +158,20 @@ export function PoiCacheTargetsClient() {
                     destructive: true,
                   });
                   if (!ok) return;
-                  remove.mutate({
-                    externalSystem: target.external_system,
-                    targetKey: target.target_key,
-                  });
+                  remove.mutate(
+                    {
+                      externalSystem: target.external_system,
+                      targetKey: target.target_key,
+                      entityTag: target.entity_tag,
+                    },
+                    {
+                      onSuccess: () => {
+                        setSelectedTargetId((selectedId) =>
+                          selectedId === target.target_id ? null : selectedId,
+                        );
+                      },
+                    },
+                  );
                 })();
               }}
             >
@@ -172,7 +182,7 @@ export function PoiCacheTargetsClient() {
         },
       },
     ],
-    [confirm, remove],
+    [confirm, remove, targets.isFetching],
   );
 
   const nearbyColumns = useMemo<ColumnDef<NearbyRow, unknown>[]>(
@@ -416,9 +426,9 @@ export function PoiCacheTargetsClient() {
               getRowId={(row) => row.target_id}
               isLoading={targets.isLoading}
               emptyMessage="데이터가 없습니다."
-              onRowClick={(target) => setSelectedTarget(target)}
+              onRowClick={(target) => setSelectedTargetId(target.target_id)}
               isRowActive={(target) =>
-                target.target_id === selectedTarget?.target_id
+                target.target_id === selectedTargetId
               }
               containerClassName="overflow-auto"
             />

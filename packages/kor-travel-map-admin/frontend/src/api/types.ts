@@ -8398,7 +8398,7 @@ export interface components {
         };
         /**
          * PoiCacheTargetMeta
-         * @description 쓰기 요청의 간단한 메타데이터.
+         * @description 단건 조회 메타데이터.
          */
         PoiCacheTargetMeta: {
             /** Duration Ms */
@@ -8427,6 +8427,29 @@ export interface components {
         };
         "PoiCacheTargetMetadata-Output": {
             [key: string]: unknown;
+        };
+        /**
+         * PoiCacheTargetMutationMeta
+         * @description live projection과 인과적으로 연결된 쓰기 응답 메타데이터.
+         */
+        PoiCacheTargetMutationMeta: {
+            /** Dataset Projection Revision */
+            dataset_projection_revision: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
+        };
+        /**
+         * PoiCacheTargetMutationResponse
+         * @description PUT/DELETE 단건 응답. revision receipt는 항상 존재한다.
+         */
+        PoiCacheTargetMutationResponse: {
+            data: components["schemas"]["PoiCacheTargetRecord"];
+            meta: components["schemas"]["PoiCacheTargetMutationMeta"];
         };
         /**
          * PoiCacheTargetProviderOverride
@@ -8468,6 +8491,8 @@ export interface components {
             created_at: string;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Entity Tag */
+            entity_tag: string;
             /** External System */
             external_system: string;
             /** Last Failed At */
@@ -12940,9 +12965,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 단건 조회 완료 */
             200: {
                 headers: {
+                    /** @description 현재 target UUID와 server-owned version의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12994,13 +13021,15 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description 등록 또는 갱신 완료 */
             200: {
                 headers: {
+                    /** @description 현재 target UUID와 server-owned version의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoiCacheTargetResponse"];
+                    "application/json": components["schemas"]["PoiCacheTargetMutationResponse"];
                 };
             };
             /** @description 같은 key의 좌표 conflict */
@@ -13035,7 +13064,10 @@ export interface operations {
     delete_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET/PUT body의 entity_tag와 같은 UUID+version strong ETag. */
+                "If-Match": string;
+            };
             path: {
                 external_system: string;
                 target_key: string;
@@ -13044,13 +13076,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description soft delete 완료 */
             200: {
                 headers: {
+                    /** @description 현재 target UUID와 server-owned version의 strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoiCacheTargetResponse"];
+                    "application/json": components["schemas"]["PoiCacheTargetMutationResponse"];
                 };
             };
             /** @description 파괴적 admin 작업 비활성 */
@@ -13071,8 +13105,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match target UUID 또는 version 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 canonical UUID+version strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

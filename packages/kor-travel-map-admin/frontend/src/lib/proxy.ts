@@ -2,6 +2,7 @@ const ALLOWED_FORWARD_HEADERS = new Set([
   "accept",
   "content-type",
   "idempotency-key",
+  "if-match",
   "user-agent",
 ]);
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";

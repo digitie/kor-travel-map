@@ -1450,6 +1450,13 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 들어오면 upsert, 다른 normalized 좌표로 들어오면 기본 409다. 이동을 의도한 경우
 `on_conflict="move"`를 명시한다.
 
+단건·목록 body는 server canonical `entity_tag="{lowercase_uuid}:{positive_version}"`을 포함하고,
+GET/PUT/DELETE 성공 header `ETag`는 body 값과 octet-exact하게 같다. PUT/DELETE 성공 응답의
+`meta.dataset_projection_revision`은 같은 source transaction에서 statement trigger가 증가시킨
+`dataset_projection` topic revision이다. live consumer는 mutation 전에 열린 같은 socket의
+`dataset_projection` update에서 `data.live_revision >= receipt`인 경우만 causal invalidation으로
+인정한다. reconnect snapshot과 top-level fingerprint `revision`은 비교하지 않는다.
+
 요청 body의 `provider_overrides`는 provider 또는 `provider:dataset_key` 문자열 key
 최대 64개만 허용한다. 각 값은 `targeted_policy`, interval/rate-limit 계열 숫자,
 `max_concurrent`, `note`만 받을 수 있고 unknown key는 `422`다. `metadata`는 Pydantic
@@ -1471,7 +1478,17 @@ Cache target 단건을 반환한다. 기본은 active target만 조회하고,
 
 ### `DELETE /admin/poi-cache-targets/{external_system}/{target_key}`
 
-외부 POI 삭제를 반영한다. target을 soft delete하고 이후 targeted update에서 제외한다.
+외부 POI 삭제를 반영한다. 목록/직전 GET/PUT body의 `entity_tag`를 합성하지 않고 `If-Match`로
+필수 전달한다. 서버는 active natural key를 `FOR UPDATE`로 잠근 뒤 ETag UUID+version이 같은
+행만 soft delete한다. concurrent PUT 또는 재생성은 새 target을 건드리지 않고
+`412 Precondition Failed`, active target이 실제 없으면 `404`다.
+`If-Match` 누락은 RFC7807 `428 Precondition Required`, weak/wildcard/쉼표 결합 multiple/물리적
+duplicate line/noncanonical 값은 RFC7807 `422 Unprocessable Entity`다. 성공 DELETE도 삭제한
+target UUID의 같은 strong `ETag`를 새로 증가한 version으로 반환한다.
+성공한 target은 이후 targeted update에서 제외한다.
+admin UI는 선택 target UUID로 refetch된 list row를 다시 파생한다. `412` 응답은 target list/nearby와
+관련 dataset/pipeline projection을 모두 refetch한다. refetch 중 삭제 버튼은 비활성화되며 재시도는
+갱신된 row의 새 `entity_tag`를 쓴다.
 
 ### `GET /features/nearby/by-target`
 

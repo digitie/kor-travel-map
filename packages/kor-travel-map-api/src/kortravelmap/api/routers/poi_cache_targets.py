@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
     delete_poi_cache_target,
+    get_dataset_projection_revision,
     get_poi_cache_target_by_key,
     list_poi_cache_targets,
     upsert_poi_cache_target,
@@ -34,6 +46,7 @@ __all__ = [
     "router",
     "PoiCacheTargetRecord",
     "PoiCacheTargetUpsertRequest",
+    "PoiCacheTargetMutationResponse",
     "PoiCacheTargetResponse",
     "PoiCacheTargetListResponse",
 ]
@@ -166,6 +179,7 @@ class PoiCacheTargetRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     target_id: str
+    entity_tag: str
     external_system: str
     target_key: str
     name: str | None = None
@@ -193,12 +207,18 @@ class PoiCacheTargetRecord(BaseModel):
 
 
 class PoiCacheTargetMeta(BaseModel):
-    """쓰기 요청의 간단한 메타데이터."""
+    """단건 조회 메타데이터."""
 
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
     request_id: str = ""
+
+
+class PoiCacheTargetMutationMeta(PoiCacheTargetMeta):
+    """live projection과 인과적으로 연결된 쓰기 응답 메타데이터."""
+
+    dataset_projection_revision: int = Field(ge=0)
 
 
 class PoiCacheTargetResponse(BaseModel):
@@ -208,6 +228,15 @@ class PoiCacheTargetResponse(BaseModel):
 
     data: PoiCacheTargetRecord
     meta: PoiCacheTargetMeta
+
+
+class PoiCacheTargetMutationResponse(BaseModel):
+    """PUT/DELETE 단건 응답. revision receipt는 항상 존재한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PoiCacheTargetRecord
+    meta: PoiCacheTargetMutationMeta
 
 
 class PoiCacheTargetListData(BaseModel):
@@ -242,6 +271,7 @@ def _metadata_payload(metadata: PoiCacheTargetMetadata) -> dict[str, object]:
 def _record_from_target(target: PoiCacheTarget) -> PoiCacheTargetRecord:
     return PoiCacheTargetRecord(
         target_id=target.target_id,
+        entity_tag=target.entity_tag,
         external_system=target.external_system,
         target_key=target.target_key,
         name=target.name,
@@ -283,15 +313,109 @@ def _response(
     )
 
 
+def _mutation_response(
+    target: PoiCacheTarget,
+    *,
+    started_at: float,
+    dataset_projection_revision: int,
+) -> PoiCacheTargetMutationResponse:
+    return PoiCacheTargetMutationResponse(
+        data=_record_from_target(target),
+        meta=PoiCacheTargetMutationMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            dataset_projection_revision=dataset_projection_revision,
+        ),
+    )
+
+
+def _target_etag(target: PoiCacheTarget) -> str:
+    return target.entity_tag
+
+
+def _set_target_etag(response: Response, target: PoiCacheTarget) -> None:
+    response.headers["ETag"] = _target_etag(target)
+
+
+_ENTITY_TAG_PATTERN = re.compile(
+    r'^"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
+    r':([1-9][0-9]*)"$'
+)
+_MAX_LOCK_VERSION = 9_223_372_036_854_775_807
+
+
+def _expected_target_identity(request: Request) -> tuple[str, int]:
+    """DELETE ``If-Match``를 server canonical UUID+version ETag로 검증한다."""
+    values = request.headers.getlist("if-match")
+    if not values:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={
+                "code": "PRECONDITION_REQUIRED",
+                "message": "If-Match header가 필요합니다.",
+            },
+        )
+    if len(values) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="If-Match는 정확히 하나의 header line이어야 합니다.",
+        )
+    value = values[0]
+    matched = _ENTITY_TAG_PATTERN.fullmatch(value)
+    if matched is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="If-Match는 server canonical UUID+version strong ETag여야 합니다.",
+        )
+    try:
+        target_id = str(UUID(matched.group(1)))
+        lock_version = int(matched.group(2))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="If-Match는 server canonical UUID+version strong ETag여야 합니다.",
+        ) from exc
+    canonical = f'"{target_id}:{lock_version}"'
+    if value != canonical or lock_version > _MAX_LOCK_VERSION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="If-Match는 server canonical UUID+version strong ETag여야 합니다.",
+        )
+    return target_id, lock_version
+
+
+_ETAG_RESPONSE_HEADER = {
+    "ETag": {
+        "description": "현재 target UUID와 server-owned version의 strong entity tag.",
+        "schema": {
+            "type": "string",
+            "example": '"00000000-0000-0000-0000-000000000000:1"',
+        },
+    }
+}
+_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "description": "직전 GET/PUT body의 entity_tag와 같은 UUID+version strong ETag.",
+    "schema": {"type": "string"},
+}
+
+
 def _unprocessable(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=422, detail=str(exc))
 
 
 @router.put(
     "/{external_system}/{target_key}",
-    response_model=PoiCacheTargetResponse,
+    response_model=PoiCacheTargetMutationResponse,
     summary="POI/cache target 등록 또는 갱신",
-    responses={409: {"description": "같은 key의 좌표 conflict"}},
+    responses={
+        200: {
+            "description": "등록 또는 갱신 완료",
+            "headers": _ETAG_RESPONSE_HEADER,
+        },
+        409: {"description": "같은 key의 좌표 conflict"},
+    },
 )
 async def put_poi_cache_target(
     external_system: Annotated[
@@ -301,7 +425,8 @@ async def put_poi_cache_target(
     target_key: str,
     body: PoiCacheTargetUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> PoiCacheTargetResponse:
+    response: Response,
+) -> PoiCacheTargetMutationResponse:
     started_at = perf_counter()
     try:
         async with session.begin():
@@ -321,6 +446,7 @@ async def put_poi_cache_target(
                 metadata=_metadata_payload(body.metadata_),
                 on_conflict=body.on_conflict,
             )
+            revision = await get_dataset_projection_revision(session)
     except PoiCacheTargetConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -328,7 +454,12 @@ async def put_poi_cache_target(
         ) from exc
     except ValueError as exc:
         raise _unprocessable(exc) from exc
-    return _response(target, started_at=started_at)
+    _set_target_etag(response, target)
+    return _mutation_response(
+        target,
+        started_at=started_at,
+        dataset_projection_revision=revision,
+    )
 
 
 @router.get(
@@ -375,7 +506,10 @@ async def list_poi_cache_target_records(
     "/{external_system}/{target_key}",
     response_model=PoiCacheTargetResponse,
     summary="POI/cache target 단건 조회",
-    responses={404: {"description": "target 없음"}},
+    responses={
+        200: {"description": "단건 조회 완료", "headers": _ETAG_RESPONSE_HEADER},
+        404: {"description": "target 없음"},
+    },
 )
 async def get_poi_cache_target_record(
     external_system: Annotated[
@@ -384,6 +518,7 @@ async def get_poi_cache_target_record(
     ],
     target_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    response: Response,
     include_deleted: Annotated[bool, Query()] = False,
 ) -> PoiCacheTargetResponse:
     started_at = perf_counter()
@@ -398,18 +533,24 @@ async def get_poi_cache_target_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"POI/cache target 없음: {external_system!r}/{target_key!r}",
         )
+    _set_target_etag(response, target)
     return _response(target, started_at=started_at)
 
 
 @router.delete(
     "/{external_system}/{target_key}",
-    response_model=PoiCacheTargetResponse,
+    response_model=PoiCacheTargetMutationResponse,
     summary="POI/cache target soft delete",
     dependencies=[Depends(require_admin_destructive_enabled)],
     responses={
+        200: {"description": "soft delete 완료", "headers": _ETAG_RESPONSE_HEADER},
         404: {"description": "target 없음"},
+        412: {"description": "If-Match target UUID 또는 version 불일치"},
+        422: {"description": "If-Match가 canonical UUID+version strong ETag가 아님"},
+        428: {"description": "If-Match 누락"},
         403: {"description": "파괴적 admin 작업 비활성"},
     },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 async def delete_poi_cache_target_record(
     external_system: Annotated[
@@ -418,17 +559,39 @@ async def delete_poi_cache_target_record(
     ],
     target_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> PoiCacheTargetResponse:
+    request: Request,
+    response: Response,
+) -> PoiCacheTargetMutationResponse:
     started_at = perf_counter()
+    expected_target_id, expected_lock_version = _expected_target_identity(request)
     async with session.begin():
-        target = await delete_poi_cache_target(
+        result = await delete_poi_cache_target(
             session,
             external_system=external_system,
             target_key=target_key,
+            expected_target_id=expected_target_id,
+            expected_lock_version=expected_lock_version,
         )
-        if target is None:
+        if result.status == "not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"POI/cache target 없음: {external_system!r}/{target_key!r}",
             )
-    return _response(target, started_at=started_at)
+        if result.status == "precondition_failed":
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail={
+                    "code": "PRECONDITION_FAILED",
+                    "message": "If-Match target UUID/version이 현재 active target과 다릅니다.",
+                },
+            )
+        target = result.target
+        if target is None:  # pragma: no cover - dataclass invariant guard
+            raise RuntimeError("deleted POI/cache target result is missing target")
+        revision = await get_dataset_projection_revision(session)
+    _set_target_etag(response, target)
+    return _mutation_response(
+        target,
+        started_at=started_at,
+        dataset_projection_revision=revision,
+    )

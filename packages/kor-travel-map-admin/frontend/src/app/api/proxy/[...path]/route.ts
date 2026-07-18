@@ -12,6 +12,7 @@ const INTERNAL_BASE =
 const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-disposition",
+  "etag",
   "retry-after",
 ] as const;
 

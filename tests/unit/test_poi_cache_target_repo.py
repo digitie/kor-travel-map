@@ -11,12 +11,19 @@ from typing import Any, cast
 import pytest
 
 from kortravelmap.infra.poi_cache_target_repo import (
+    PoiCacheTargetDeleteResult,
+    PoiCacheTargetFeatureLinkCandidate,
     PoiCacheTargetPage,
+    delete_poi_cache_target,
+    get_dataset_projection_revision,
     has_active_poi_cache_targets_for_external_system,
     list_active_poi_cache_target_external_systems,
     list_active_target_coords,
     list_poi_cache_targets,
+    poi_cache_target_entity_tag,
+    sync_poi_cache_target_feature_links,
     upsert_poi_cache_target,
+    upsert_poi_cache_target_feature_link,
 )
 
 
@@ -31,6 +38,15 @@ class _Result:
     def all(self) -> list[Any]:
         return self._rows
 
+    def one(self) -> Any:
+        return self._rows[0]
+
+    def one_or_none(self) -> Any | None:
+        return self._rows[0] if self._rows else None
+
+    def scalars(self) -> _Result:
+        return self
+
     def scalar_one(self) -> object:
         return self._scalar
 
@@ -39,12 +55,14 @@ class _Session:
     def __init__(self, *results: _Result) -> None:
         self._results = list(results)
         self.params: list[dict[str, Any]] = []
+        self.statements: list[str] = []
 
     async def execute(
         self,
         _statement: Any,
         params: dict[str, Any] | None = None,
     ) -> _Result:
+        self.statements.append(str(_statement))
         self.params.append(dict(params or {}))
         return self._results.pop(0)
 
@@ -52,6 +70,7 @@ class _Session:
 def _row(target_id: str, *, at: datetime) -> dict[str, Any]:
     return {
         "target_id": target_id,
+        "lock_version": 1,
         "external_system": "external-app",
         "target_key": f"poi-{target_id[:8]}",
         "name": "서울시청",
@@ -73,6 +92,21 @@ def _row(target_id: str, *, at: datetime) -> dict[str, Any]:
         "deleted_at": None,
         "created_at": at,
         "updated_at": at,
+    }
+
+
+def _link_row(target_id: str, feature_id: str, *, at: datetime) -> dict[str, Any]:
+    return {
+        "target_id": target_id,
+        "feature_id": feature_id,
+        "provider": "python-test-api",
+        "dataset_key": "places",
+        "distance_m": 12.5,
+        "relation": "within_radius",
+        "active": True,
+        "first_seen_at": at,
+        "last_seen_at": at,
+        "last_refreshed_at": None,
     }
 
 
@@ -257,3 +291,200 @@ async def test_external_system_accepts_exact_112_character_limit() -> None:
 
     assert exists is False
     assert session.params == [{"external_system": external_system}]
+
+
+@pytest.mark.unit
+async def test_delete_poi_cache_target_uses_uuid_precondition_and_deactivates_links() -> None:
+    at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    target_id = "11111111-1111-4111-8111-111111111111"
+    deleted_row = {
+        **_row(target_id, at=at),
+        "active_target_id": target_id,
+        "deleted_at": at,
+        "lock_version": 2,
+        "update_enabled": False,
+    }
+    session = _Session(
+        _Result([{"target_id": target_id, "lock_version": 1}]),
+        _Result([deleted_row]),
+        _Result([1]),
+    )
+
+    result = await delete_poi_cache_target(
+        cast(Any, session),
+        external_system="external-app",
+        target_key="poi-1",
+        expected_target_id=target_id,
+        expected_lock_version=1,
+    )
+
+    assert result.status == "deleted"
+    assert result.target is not None
+    assert result.target.target_id == target_id
+    assert result.target.deleted_at == at
+    assert session.params == [
+        {
+            "external_system": "external-app",
+            "target_key": "poi-1",
+        },
+        {
+            "external_system": "external-app",
+            "target_key": "poi-1",
+            "expected_target_id": target_id,
+            "expected_lock_version": 1,
+        },
+        {"target_id": target_id},
+    ]
+
+
+@pytest.mark.unit
+async def test_delete_poi_cache_target_distinguishes_absent_from_uuid_mismatch() -> None:
+    active_target_id = "11111111-1111-4111-8111-111111111111"
+    expected_target_id = "22222222-2222-4222-8222-222222222222"
+    mismatch = _Session(
+        _Result([{"target_id": active_target_id, "lock_version": 2}])
+    )
+    absent = _Session(_Result([]), _Result([]))
+
+    mismatch_result = await delete_poi_cache_target(
+        cast(Any, mismatch),
+        external_system="external-app",
+        target_key="poi-1",
+        expected_target_id=expected_target_id,
+        expected_lock_version=1,
+    )
+    absent_result = await delete_poi_cache_target(
+        cast(Any, absent),
+        external_system="external-app",
+        target_key="poi-1",
+        expected_target_id=expected_target_id,
+        expected_lock_version=1,
+    )
+
+    assert mismatch_result == PoiCacheTargetDeleteResult(
+        status="precondition_failed"
+    )
+    assert absent_result == PoiCacheTargetDeleteResult(status="not_found")
+
+
+@pytest.mark.unit
+async def test_delete_poi_cache_target_recheck_maps_concurrent_recreate_to_412() -> None:
+    expected_target_id = "11111111-1111-4111-8111-111111111111"
+    recreated_target_id = "22222222-2222-4222-8222-222222222222"
+    session = _Session(
+        _Result([]),
+        _Result([{"target_id": recreated_target_id, "lock_version": 1}]),
+    )
+
+    result = await delete_poi_cache_target(
+        cast(Any, session),
+        external_system="external-app",
+        target_key="poi-1",
+        expected_target_id=expected_target_id,
+        expected_lock_version=1,
+    )
+
+    assert result == PoiCacheTargetDeleteResult(status="precondition_failed")
+
+
+@pytest.mark.unit
+async def test_get_dataset_projection_revision_requires_canonical_topic_row() -> None:
+    session = _Session(_Result([], scalar=42))
+
+    revision = await get_dataset_projection_revision(cast(Any, session))
+
+    assert revision == 42
+    assert session.params == [{}]
+
+
+@pytest.mark.unit
+async def test_link_upsert_skips_inactive_parent() -> None:
+    session = _Session(_Result([]))
+
+    link = await upsert_poi_cache_target_feature_link(
+        cast(Any, session),
+        target_id="11111111-1111-4111-8111-111111111111",
+        feature_id="feature-1",
+    )
+
+    assert link is None
+
+
+@pytest.mark.unit
+async def test_link_sync_locks_all_parents_before_link_writes_in_uuid_order() -> None:
+    at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    first_id = "11111111-1111-4111-8111-111111111111"
+    second_id = "22222222-2222-4222-8222-222222222222"
+    session = _Session(
+        _Result([first_id, second_id]),
+        _Result([]),
+        _Result([1]),
+        _Result([_link_row(first_id, "feature-a", at=at)]),
+        _Result([_link_row(second_id, "feature-b", at=at)]),
+    )
+
+    links = await sync_poi_cache_target_feature_links(
+        cast(Any, session),
+        target_ids=(second_id, first_id, second_id),
+        candidates=(
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=second_id,
+                feature_id="feature-b",
+                provider="python-test-api",
+                dataset_key="places",
+                distance_m=12.5,
+            ),
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=first_id,
+                feature_id="feature-a",
+                provider="python-test-api",
+                dataset_key="places",
+                distance_m=12.5,
+            ),
+        ),
+    )
+
+    assert [link.target_id for link in links] == [first_id, second_id]
+    assert "ORDER BY target_id" in session.statements[0]
+    assert "FOR KEY SHARE" in session.statements[0]
+    assert "ORDER BY target_id, feature_id" in session.statements[1]
+    assert "FOR UPDATE" in session.statements[1]
+    assert "UPDATE ops.poi_cache_target_feature_links" in session.statements[2]
+    assert "INSERT INTO ops.poi_cache_target_feature_links" in session.statements[3]
+    assert session.params == [
+        {"target_ids": [first_id, second_id]},
+        {"target_ids": [first_id, second_id]},
+        {"target_ids": [first_id, second_id]},
+        {
+            "target_id": first_id,
+            "feature_id": "feature-a",
+            "provider": "python-test-api",
+            "dataset_key": "places",
+            "distance_m": 12.5,
+            "relation": "within_radius",
+        },
+        {
+            "target_id": second_id,
+            "feature_id": "feature-b",
+            "provider": "python-test-api",
+            "dataset_key": "places",
+            "distance_m": 12.5,
+            "relation": "within_radius",
+        },
+    ]
+
+
+@pytest.mark.unit
+def test_poi_cache_target_entity_tag_is_canonical_and_versioned() -> None:
+    assert (
+        poi_cache_target_entity_tag(
+            "11111111-1111-4111-8111-111111111111",
+            7,
+        )
+        == '"11111111-1111-4111-8111-111111111111:7"'
+    )
+    with pytest.raises(ValueError, match="positive"):
+        poi_cache_target_entity_tag(
+            "11111111-1111-4111-8111-111111111111",
+            0,
+        )

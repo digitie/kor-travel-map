@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### POI target causal receipt·조건부 삭제 (2026-07-18, ADR-065 T-ADM-C7C)
+
+- **ADDED**: Alembic 0058은 POI target에 server-owned BIGINT `lock_version`과 모든 UPDATE에서
+  `OLD + 1`을 강제하는 trigger를 추가했다. POI target PUT/DELETE는 source transaction의
+  `dataset_projection` revision receipt를 반환하고 GET/PUT/DELETE 성공 응답은 target UUID의
+  versioned strong `ETag`를 반환한다. 단건·목록 body `entity_tag`도 header와 정확히 같다.
+- **CHANGED**: DELETE는 body `entity_tag`의 `If-Match`를 필수화했다. 누락·형식 오류·UUID/version
+  불일치·active target 부재를 각각 RFC7807 `428`·`422`·`412`·`404`로 구분하며, natural key와 UUID가 같은
+  active 행을 잠근 뒤 UUID+version이 같은 경우에만 soft-delete한다.
+- **FIXED**: admin BFF와 UI가 `If-Match`/`ETag`를 보존해 GET과 DELETE 사이 target이 재생성돼도
+  새 UUID의 target을 지우지 않는다.
+- **FIXED**: executor가 모든 active parent를 UUID 순서로 `FOR KEY SHARE` 잠근 뒤 link를 교체하고,
+  target `FOR UPDATE` delete와 parent→link 순서로 직렬화해 교착과 삭제 뒤 link 재활성화를 막는다.
+- **FIXED**: stale DELETE `412`는 list/nearby/dataset/pipeline projection을 모두 refetch한다. 선택
+  상태는 target UUID로 최신 row를 파생해 새 opaque tag로 안전하게 재시도한다.
+
 ### canonical ops service principal (2026-07-18, ADR-064 T-ADM-C6c)
 
 - **SECURITY**: PinVi server용 `OpsToken` principal을 read와 import-job cancel로 분리했다.

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GET } from "./route";
+import { DELETE, GET } from "./route";
 
 vi.mock("@/lib/auth", () => ({
   adminUsernameFromEnv: () => "proxy-test-admin",
@@ -13,19 +13,21 @@ describe("admin API proxy response headers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("upstream Retry-After만 응답 allowlist를 통해 브라우저에 전달한다", async () => {
-    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
-        Promise.resolve(
-          new Response(JSON.stringify({ detail: "retry later" }), {
-            status: 503,
-            headers: {
-              "Content-Type": "application/problem+json",
-              "Retry-After": "17",
-              "X-Upstream-Internal": "must-not-leak",
-            },
-          }),
-        ),
-    );
+  it("응답 allowlist만 브라우저에 전달한다", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(
+        new Response(JSON.stringify({ detail: "retry later" }), {
+          status: 503,
+          headers: {
+            "Content-Type": "application/problem+json",
+            "Retry-After": "17",
+            "X-Upstream-Internal": "must-not-leak",
+          },
+        }),
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const request = new NextRequest(
       "http://127.0.0.1:12705/api/proxy/v1/ops/pipeline/executions",
@@ -55,5 +57,48 @@ describe("admin API proxy response headers", () => {
     );
     expect(forwarded.get("x-browser-secret")).toBeNull();
     expect(forwarded.get("x-kor-travel-map-actor")).toBe("proxy-test-admin");
+  });
+
+  it("If-Match를 upstream에 보내고 ETag를 브라우저에 돌려준다", async () => {
+    const targetId = "11111111-1111-4111-8111-111111111111";
+    const entityTag = `"${targetId}:7"`;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: { target_id: targetId } }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ETag: entityTag,
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest(
+      "http://127.0.0.1:12705/api/proxy/v1/admin/poi-cache-targets/external-app/poi-1",
+      {
+        method: "DELETE",
+        headers: { "If-Match": entityTag },
+      },
+    );
+
+    const response = await DELETE(request, {
+      params: Promise.resolve({
+        path: [
+          "v1",
+          "admin",
+          "poi-cache-targets",
+          "external-app",
+          "poi-1",
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe(entityTag);
+    const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(forwarded.get("if-match")).toBe(entityTag);
   });
 });

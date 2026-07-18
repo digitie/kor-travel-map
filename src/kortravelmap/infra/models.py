@@ -2746,6 +2746,10 @@ class PoiCacheTargetRow(Base):
             name="ck_poi_cache_targets_precision",
         ),
         CheckConstraint(
+            "lock_version >= 1",
+            name="ck_poi_cache_targets_lock_version",
+        ),
+        CheckConstraint(
             "external_system <> '' AND char_length(external_system) <= 112 "
             "AND external_system = "
             f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL})",
@@ -2776,6 +2780,11 @@ class PoiCacheTargetRow(Base):
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
+    )
+    lock_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
     )
     external_system: Mapped[str] = mapped_column(Text, nullable=False)
     target_key: Mapped[str] = mapped_column(Text, nullable=False)
