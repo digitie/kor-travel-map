@@ -36,4 +36,5 @@ upsert 경로를 단순화할 수 있다.
 
 ## 기존 결정과의 관계
 
-ADR-045에서 도입한 override 저장 방향을 완결한다. ADR-070과 독립 채택·독립 rollback한다.
+ADR-046에서 도입한 override 저장 방향(`ops.feature_overrides`)을 완결한다. ADR-070과 독립
+채택·독립 rollback한다.

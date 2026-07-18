@@ -353,7 +353,9 @@ version을 인덱싱하면 모든 target UPDATE가 불필요한 index churn을 �
 
 target UPDATE는 row-level version trigger와 `dataset_projection` topic row lock을 함께 사용하므로 같은
 topic writer가 많은 경우 직렬화 비용이 생긴다. 이는 stale mutation 방지와 causal live receipt를 위한
-의도된 비용이다. link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
+의도된 비용이다. 특히 0055의 statement trigger는 `ops.data_integrity_violations` write도 같은
+`dataset_projection` revision row에 결박하므로, 그 테이블을 쓰는 장기 ETL transaction이 열려 있는 동안
+admin POI mutation latency는 해당 writer의 commit까지 직렬화되어 지연될 수 있다. link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
 잠그고, 그 뒤 link를 `(target_id, feature_id)` 순서로 비활성화/upsert한다. 각 parent lock은 target
 DELETE의 `FOR UPDATE`와 직렬화되지만 일반 active parent read는 막지 않는다. multi-target sync와
 delete 모두 parent target → feature link 순서를 지켜 교착을 피한다.

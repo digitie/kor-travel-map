@@ -45,3 +45,7 @@ vNext는 identity, lineage, 상태, weather schema와 PinVi 계약을 함께 바
 
 ADR-040/045의 backup·restore 경계를 강화한다. ADR-046의 무호환 원칙은 유지하되 live PinVi는
 consumer-first cutover라는 유일한 운영 예외를 따른다.
+
+부합 기록: Alembic 0058은 소형 ops 테이블(`ops.poi_cache_targets`)의 CHECK를 `NOT VALID`
+없이 직접 추가했다. 소형 테이블이라 실질 무해하지만, 결정 5의 DDL 유형표 원칙에 대한
+기록된 예외다.

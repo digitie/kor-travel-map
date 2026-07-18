@@ -22,6 +22,8 @@ REST와 WebSocket 인증이 router별 dependency와 설정 기본값에 흩어�
    명시적으로 둔다.
 3. `/metrics`는 scrape identity 또는 management 경계로 제한한다. raw provider payload는
    operator/debug projection에서만 반환한다. 공개 경로는 별도 read-only DB role을 사용한다.
+   무키 legacy `/v1/curated-*` 공개 read는 `public-keyed` 정책으로 배선한다(D-1-3,
+   T-VN-03 소유).
 4. 단일 FastAPI app과 그룹별 dependency를 유지한다. 물리 listener/process 분리는 실측이
    도입 조건을 충족할 때만 별도 결정한다.
 5. 모든 write의 감사 actor는 인증 principal에서만 파생한다. request body의 `operator`,

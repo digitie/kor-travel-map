@@ -54,7 +54,7 @@ consumer-first/write-fence 절차를 따른다.
 | `feature.public_features` | `active AND published AND valid` 단일 공개 projection | T-VN-04·34 |
 | `ops.feature_overrides` + effective projection | `(feature_id, field_path)` active UNIQUE; provider base와 override 분리 | T-VN-36 |
 | weather facts/current summary | `target_at`/`known_at`, native semantic UNIQUE, range/FK; current는 재생성 가능한 projection | T-VN-17·38 |
-| domain command ledgers/outbox | principal-key replay, body fingerprint, 저장 결과, generation/restore epoch, 멱등 relay | T-VN-12·41 |
+| domain command ledgers/outbox | `(principal, operation, Idempotency-Key)` replay, body fingerprint, 저장 결과, generation/restore epoch, 멱등 relay | T-VN-12·41 |
 | `feature.curation_collections/items` | 유일한 curation write 정본; legacy flat writer/trigger 없음 | T-VN-40 |
 
 정규화가 기본이며 JSONB는 provider 원문과 확장 metadata에만 쓴다. 모든 FK 참조 열은 실제 join
