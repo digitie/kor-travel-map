@@ -112,6 +112,16 @@ services:
     environment:
       KOR_TRAVEL_MAP_API_HOST: 0.0.0.0
       KOR_TRAVEL_MAP_API_PORT: ${KOR_TRAVEL_MAP_API_PORT:-12701}
+      # ADR-066 T-VN-01 — Docker 배포는 기본 production profile로 기동하고, 필수
+      # secret 누락 시 ApiSettings 검증이 기동을 거부한다(fail-closed). 로컬
+      # full-stack 검증만 KOR_TRAVEL_MAP_API_PROFILE=local-dev를 명시한다.
+      KOR_TRAVEL_MAP_API_PROFILE: ${KOR_TRAVEL_MAP_API_PROFILE:-production}
+      # 인증 없는 /debug 라우터는 production 기동 거부 사유라 컨테이너 기본을 끄고,
+      # public read는 기본 keyed로 둔다. environment가 env_file(packages/
+      # kor-travel-map-api/.env)보다 우선하므로 package .env의 local 값이 production
+      # 컨테이너로 새지 않는다. 필요 시 host env로만 명시 override한다.
+      KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED: ${KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED:-false}
+      KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED: ${KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED:-true}
       KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS: '${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS:-["dagster","127.0.0.1","localhost","::1"]}'
       KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET: ${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:?KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required}

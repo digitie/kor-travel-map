@@ -46,6 +46,20 @@ class ApiSettings(BaseSettings):
         default="info",
         description="uvicorn log level — debug/info/warning/error.",
     )
+    profile: str = Field(
+        default="local-dev",
+        pattern="^(production|local-dev)$",
+        description=(
+            "실행 profile (ADR-066 D-1, T-VN-01). ``production``은 fail-closed로 "
+            "기동을 검증한다 — admin proxy secret(공백 없는 32자 이상) 필수, "
+            "ops surface 활성 시 read/cancel token 필수, features surface 활성 시 "
+            "``public_api_key_required=True`` 필수, 인증 없는 ``/debug`` 라우터 "
+            "비활성 필수. secret 미설정 local-dev fallback은 ``local-dev``에서만 "
+            "동작한다. Docker image/compose 기본값은 production이고 코드 기본값은 "
+            "local-dev다(비-Docker 로컬 하위호환). env "
+            "``KOR_TRAVEL_MAP_API_PROFILE``."
+        ),
+    )
     debug_routes_enabled: bool = Field(
         default=True,
         description=(
@@ -470,3 +484,91 @@ class ApiSettings(BaseSettings):
         min_length=1,
         description="Default staging RustFS Docker volume for restore command plans.",
     )
+
+    @property
+    def is_production(self) -> bool:
+        """production profile 여부 (ADR-066 fail-closed 검증 대상)."""
+
+        return self.profile == "production"
+
+    @property
+    def resolved_admin_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 admin 라우터 활성 최종값."""
+
+        if self.admin_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.admin_routes_enabled
+
+    @property
+    def resolved_ops_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 ops 라우터 활성 최종값."""
+
+        if self.ops_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.ops_routes_enabled
+
+    @model_validator(mode="after")
+    def _validate_production_fail_closed(self) -> ApiSettings:
+        """ADR-066 D-1 (T-VN-01): production profile은 필수 secret 없이 기동을 거부한다.
+
+        secret 미설정 fallback(admin actor ``local-dev`` 통과, keyless public read,
+        인증 없는 ``/debug``)은 non-production profile에서만 허용한다. Docker 밖
+        배포도 같은 검증을 받도록 entrypoint(shell)가 아닌 settings에서 검사하며,
+        admin secret 기준은 ``docker/api-entrypoint.sh``와 동일하다(공백 미부착
+        32자 이상).
+        """
+
+        if not self.is_production:
+            return self
+
+        problems: list[str] = []
+
+        admin_secret = (
+            None
+            if self.admin_proxy_secret is None
+            else self.admin_proxy_secret.get_secret_value()
+        )
+        if (
+            admin_secret is None
+            or admin_secret != admin_secret.strip()
+            or len(admin_secret) < 32
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be set to at least 32 "
+                "characters without surrounding whitespace"
+            )
+
+        if self.resolved_ops_routes_enabled and (
+            self.ops_read_token is None or self.ops_cancel_token is None
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while "
+                "the ops surface is enabled"
+            )
+
+        if self.features_routes_enabled and not self.public_api_key_required:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED must be true while "
+                "the public features surface is enabled"
+            )
+
+        if self.debug_routes_enabled:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED must be false because "
+                "/debug routes have no authentication"
+            )
+
+        if self.service_token is not None:
+            raw_service_token = self.service_token.get_secret_value()
+            if raw_service_token != raw_service_token.strip() or not raw_service_token.strip():
+                problems.append(
+                    "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must not be blank or "
+                    "surrounded by whitespace when set"
+                )
+
+        if problems:
+            raise ValueError(
+                "production profile is fail-closed (ADR-066): " + "; ".join(problems)
+            )
+        return self

@@ -173,10 +173,14 @@ def resolve_admin_proxy_context(
 
     ``admin_proxy_secret``이 설정되지 않은 개발/테스트 환경에서는 기존 localhost
     직접 호출을 유지한다. 운영/로컬 실사용은 gitignored ``.env``에 secret을 넣어
-    Next.js 프론트 프록시만 FastAPI admin API를 호출하게 한다.
+    Next.js 프론트 프록시만 FastAPI admin API를 호출하게 한다. ADR-066(T-VN-01):
+    이 local-dev fallback은 non-production profile 전용이다 — production은 settings
+    검증이 secret을 필수화하므로 secret 없는 production 상태는 방어적으로 거부한다.
     """
 
     if settings.admin_proxy_secret is None:
+        if settings.is_production:
+            return None
         return AdminProxyContext(actor="local-dev")
     if not _peer_is_trusted(request, settings):
         return None
@@ -199,6 +203,17 @@ def require_admin_frontend(
 
     settings = _settings(request)
     if settings.admin_proxy_secret is None:
+        # ADR-066(T-VN-01): secret 없는 local-dev pass-through는 non-production
+        # 전용. production settings는 기동 시점에 secret을 필수화하므로 이 분기는
+        # 검증 우회로 만든 비정상 상태에서만 도달한다 — fail-closed로 닫는다.
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "production profile에서는 admin proxy secret 없이 admin API를 "
+                    "사용할 수 없습니다."
+                ),
+            )
         return AdminProxyContext(actor="local-dev")
     if not _peer_is_trusted(request, settings):
         raise HTTPException(

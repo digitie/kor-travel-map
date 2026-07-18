@@ -23,6 +23,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_ops_operator,
     require_service_token,
+    resolve_admin_proxy_context,
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
@@ -332,6 +333,34 @@ def test_admin_frontend_gate_keeps_local_dev_compat_when_secret_unset() -> None:
         headers={},
     )
     assert require_admin_frontend(request).actor == "local-dev"
+
+
+@pytest.mark.unit
+def test_admin_frontend_local_dev_fallback_is_closed_in_production() -> None:
+    # ADR-066(T-VN-01): production settings는 생성 시점에 secret을 필수화하므로
+    # 이 상태는 검증 우회(model_construct)로만 만들 수 있다. 그래도 dependency는
+    # local-dev actor를 돌려주지 않고 fail-closed로 닫혀야 한다.
+    settings = ApiSettings.model_construct(profile="production")
+    assert settings.admin_proxy_secret is None
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={ADMIN_ACTOR_HEADER: "admin"},
+    )
+    with pytest.raises(HTTPException) as exc:
+        require_admin_frontend(request)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.unit
+def test_resolve_admin_proxy_context_returns_none_in_production_without_secret() -> None:
+    settings = ApiSettings.model_construct(profile="production")
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={ADMIN_ACTOR_HEADER: "admin"},
+    )
+    assert resolve_admin_proxy_context(request, settings) is None
 
 
 @pytest.mark.unit

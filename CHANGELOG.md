@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### production profile fail-closed 기동 검증 (2026-07-19, ADR-066 T-VN-01)
+
+- **SECURITY**: `KOR_TRAVEL_MAP_API_PROFILE=production`이면 `ApiSettings`가 기동 시점에
+  fail-closed 검증을 수행한다. admin proxy secret(공백 없는 32자 이상) 누락, ops surface 활성
+  상태의 read/cancel token 누락, public features surface의 `public_api_key_required=false`,
+  인증 없는 `/debug` 라우터 활성, 공백/공백 부착 service token은 각각 기동 거부 사유이며 한
+  번의 에러로 모두 보고된다. secret 미설정 local-dev fallback(admin actor `local-dev`
+  pass-through)은 non-production profile에서만 동작하고, production 상태에서는 dependency
+  수준에서도 403으로 닫힌다.
+- **CHANGED**: API Docker image와 compose는 기본 production profile로 기동한다. compose는
+  `/debug` 라우터 off와 `public_api_key_required=true`를 컨테이너 기본값으로 함께 주입하며
+  (`environment`가 package `.env`보다 우선), 로컬 full-stack 검증은
+  `KOR_TRAVEL_MAP_API_PROFILE=local-dev`를 host env로 명시해 기존 fallback을 유지한다.
+  비-Docker 실행의 코드 기본값은 `local-dev`로 하위호환을 유지한다.
+
 ### C7 prod live runner host Python 계약 (2026-07-18, T-ADM-C7)
 
 - **FIXED**: n150 host가 제공하지 않는 `python` alias에 의존하지 않고 host-side fsync·lock·attestation·

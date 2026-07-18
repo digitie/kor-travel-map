@@ -19,8 +19,11 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 FROM python:3.12-slim AS runtime
 
+# ADR-066 T-VN-01 — API image는 production 배포 아티팩트다. compose 밖에서 바로
+# 실행해도 fail-closed 기동 검증이 걸리도록 image 기본 profile을 production으로 둔다.
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    KOR_TRAVEL_MAP_API_PROFILE=production
 
 WORKDIR /app
 
