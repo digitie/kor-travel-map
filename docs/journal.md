@@ -25,6 +25,10 @@
   거부 포함), root/package `.env.example`의 compose override 우선순위 문서화, wording(앞뒤 공백),
   hermetic env 테스트 fixture. startup 거부/통과 matrix + dependency 격리 테스트를 추가했고
   uvicorn import 경로로 거부·기동 양방향을 실검증했다.
+- PR #740 CI에서 app 조립 테스트 1건이 3.11/3.12/3.13 전부 실패(로컬 green): FastAPI 0.136+가
+  `include_router`를 lazy `_IncludedRouter`로 담아 `app.routes` 순회로는 sub-router `path`가 안
+  보이는 내부 표현 변화였다(로컬은 0.135.3, CI는 0.139.2 — CI 버전 재현 venv로 확정). 테스트를
+  공개 API인 `application.openapi()["paths"]` 기반으로 고쳐 두 버전 모두 green. 코드 결함 아님.
 
 ## 2026-07-18 (codex) — C7 n150 runner Python preflight 보강
 

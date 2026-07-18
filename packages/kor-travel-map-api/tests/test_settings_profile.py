@@ -356,7 +356,10 @@ def test_local_dev_profile_keeps_all_fallbacks() -> None:
 def test_create_app_boots_with_production_settings_and_omits_debug_routes() -> None:
     application = create_app(settings=_production_settings())
     assert application.state.settings.is_production
-    paths = {getattr(route, "path", "") for route in application.routes}
+    # ``application.routes`` 순회는 FastAPI 내부 표현에 묶인다 — 0.136+는 included
+    # router를 lazy 객체로 담아 ``route.path``가 없다. 공개 API인 OpenAPI 스키마
+    # (ADR-031 drift gate와 같은 소스)로 mount 여부를 검증한다.
+    paths = set(application.openapi()["paths"])
     assert not any(path.startswith("/v1/debug") for path in paths)
     # 운영 surface는 그대로 mount된다.
     assert any(path.startswith("/v1/features") for path in paths)
