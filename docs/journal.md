@@ -24,6 +24,9 @@
   내부 route template 대신 ASGI decoded path의 anchored import-job UUID cancel 경로에 결박하고,
   상대 route template과 실제 full path를 분리한 회귀 테스트를 추가했다. 이 보정 diff도 두 독립
   적대 리뷰어가 fail-open 없음으로 승인했으며 집중 API 217건과 API 전체 563건을 통과했다.
+- 첫 재실행의 PostGIS integration은 principal 활성 시 무헤더 read를 구 계약 `403`으로 기대한 기존
+  assertion 1건 때문에 실패했다. 제품 코드는 바꾸지 않고 새 typed 계약 `401 OPS_TOKEN_REQUIRED`를
+  함께 단언하도록 고쳤으며 해당 실제 PostgreSQL REST projection test를 다시 통과했다.
 
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 
