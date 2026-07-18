@@ -124,11 +124,27 @@ Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정
 
 정본은 [`system-structure-api-schema-review-2026-07-16.md`](reports/system-structure-api-schema-review-2026-07-16.md)와
 ADR-066~075다. **`T-VN-00`은 별도 task가 아니라 `T-ADM-C6c`의 별칭**이므로 checkbox를
-중복 생성하지 않는다. 현재 순서는 `T-ADM-C6c` → `T-ADM-C7`이며, C7의 n150 종결 뒤
-`T-VN-01`부터 착수한다. 같은 wave에서 의존성이 없는 task는 agent A/B가 병렬 수행하되
+중복 생성하지 않는다. 같은 wave에서 의존성이 없는 task는 agent A/B가 병렬 수행하되
 PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin/main`에 rebase한다.
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
+
+#### Lane 분배 (2026-07-19, issue #738)
+
+KTM 내부 표면은 agent A(Claude), PinVi 결합·C6c cutover 결합·기존
+ledger(0054/0055)·POI causal(ADR-065) 기반 위 작업은 agent B(codex)가 소유한다.
+A lane은 즉시 착수하고, B lane은 `T-ADM-C6c`/`T-ADM-C7` 종결 뒤 착수한다.
+
+| lane | 담당 | 순서 | 비고 |
+|---|---|---|---|
+| a1 | Claude | T-VN-01 → T-VN-02 → T-VN-07 → T-VN-19 | 기동 fail-closed → route matrix → actor 1차 → alembic 정합 CI |
+| a2 | Claude | T-VN-04 → T-VN-06 → T-VN-05 → T-VN-17 | 공개 predicate view → notice cast → raw payload 경계 → weather 제약 |
+| b1 | codex | T-VN-03 → T-VN-11 → T-VN-12 | T-VN-03은 C6c principal cutover와 **같은 배포 단위**(F-17 재발 방지) |
+| b2 | codex | T-VN-08 → T-VN-16 → T-VN-41 | PinVi consumer 수정 → weather batch(N+1 제거) → cache-target outbox |
+
+migration 번호는 a2가 0059를 예약했고, 이후 branch는 PR 직전 rebase에서 단일 head를
+재확인 후 재번호한다. T-VN-13/14/15/18/20/21과 Wave 2(T-VN-31~40)는 위 lane 소화 후
+재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
 
 ### Wave 0 — P0, 즉시 가역
 
