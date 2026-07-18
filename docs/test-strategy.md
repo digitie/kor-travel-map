@@ -378,6 +378,73 @@ admin frontend의 Playwright e2e suite는 n150 Linux 우선으로 실행하며, 
 curated-features, `features/new`, 그리고 3개 상세 페이지는 아직 시나리오로
 커버되지 않는다 (상세는 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
 
+### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
+
+C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. root-owned 고정 attestation 파일의
+machine-id/hostname/origin hash와 실제 host·URL을 대조하고, 로그인 POST `200 + Set-Cookie` 및
+UI container의 비어 있지 않은 admin password hash를 선행 조건으로 둔다. 값은 로그·attachment에
+출력하지 않는다.
+
+POI target mutation은 PUT 전에 자연키와 intended body를 원자 journal에 먼저 기록하고 응답 뒤
+UUID·strong ETag·version을 보강한다. 모든 DELETE/cleanup은 직전 exact GET ETag를 `If-Match`로
+사용하며 `412`는 concurrent update 증거로 실패 처리한다. create/update/delete 각각은 연결을
+다시 열지 않은 같은 WebSocket에서 mutation 직전 frame cursor 이후의 `update` frame과
+`live_revision >= dataset_projection_revision`을 확인한다. 최종 read-only 검증은 각 자연키의
+exact RFC7807 `404 application/problem+json`과 owned external-system active list 0을 다시 확인한다.
+
+KMA request 전에는 owned external-system의 active target 전체 key/UUID/ETag 집합을 journal과 exact
+비교한다. 실행·event 다음 페이지는 request의 provider/dataset/sync_scope/cursor와 response item
+tuple·`next_cursor`를 함께 검증한다. `route.fetch()`를 사용하는 interception은 handler in-flight
+settlement가 끝나기 전 teardown하지 않는다.
+
+같은 자연키를 삭제 후 재생성하는 시나리오는 새 UUID·ETag·version을 active 소유 객체로 교체하고
+이전 UUID는 삭제된 history로 분리해 최종 두 identity를 모두 검증한다. PUT 응답 유실은 exact GET
+재탐색, 서버 부재 시 동일 PUT 1회 재생, 다시 exact GET 순으로 처리한다. 어느 단계에서도 body·UUID·
+strong ETag를 증명하지 못하면 target 삭제와 restored 성공을 금지한다.
+
+preview 응답은 request의 provider-dataset scope, 빈 중복 filters, update policy, run mode, priority와
+exact 일치해야 한다. terminal matched scope의 eligible/skipped/executed 집합은 KMA exact pair의
+합집합이어야 하며 다른 provider/dataset을 허용하지 않는다. KMA metadata와 cursor의 fingerprint는
+소문자 64자리 SHA-256, base datetime은 달력상 유효한 비어 있지 않은 `YYYYMMDDHHmm`만 허용한다.
+
+KMA/sensor/schedule/runner journal은 임시 파일 fsync 뒤 rename하고 최종 파일과 부모 디렉터리도
+fsync한다. runner state·lock·`BLOCKED.json`은 root-owned `0700` 고정 경로만 사용하며
+`XDG_STATE_HOME` override를 fail-closed한다. 이 순서와 모든 route handler settlement→unroute 순서는
+실제 source 구간을 읽는 정적 회귀 테스트로 고정한다.
+
+누적 journal의 이전 payload는 현재 in-memory state를 합치기 전에 독립적으로 restored residue를
+통과해야 한다. 합칠 때 현재 target/request/idempotency key나 더 전진한 status는 이전 snapshot으로
+덮어쓰지 않는다. 서로 다른 scenario의 current pending 상태는 이전 restored 판정 입력에 포함하지
+않는다. create와 실제 run-now/provider dispatch는 각각 직전 서버 active target 전체 집합 barrier를
+독립적으로 통과해야 한다.
+
+자연키 recreate는 삭제된 history UUID와 다른 새 UUID 및 version 1 strong ETag를 요구한다. 최종
+runner는 non-empty history와 current/history UUID 상호 배타성을 교차 검증한다. lock 파일은
+`O_NOFOLLOW|O_CREAT`로 열고 regular/root-owned/`0600`을 fstat한 같은 FD에 non-blocking flock을
+보유하며 shell truncate redirection을 사용하지 않는다.
+
+standalone POI journal도 temp fsync→rename→final fsync→parent fsync 순서를 따른다. PUT 응답 유실은
+intended body exact GET 후 404일 때만 동일 PUT을 한 번 재생하고, 응답과 후속 GET의 body·UUID·strong
+ETag·version을 다시 exact 비교한다. causal receipt가 유실됐거나 identity가 불확실하면 runner의
+`BLOCKED.json`을 남기며 intended body 검증 없는 identity-only cleanup delete를 금지한다. KMA cursor
+`base_datetime`은 달력상 유효한 비어 있지 않은 `YYYYMMDDHHmm` 필수값이다.
+
+target 전체 집합 barrier는 `external_system`별 `page_size=500` cursor를 최대 두 페이지까지 완주해
+501건을 검증한다. continuation page가 비거나 cursor가 반복되고, 상한 뒤에도 cursor가 남거나 다른
+external-system item이 섞이면 불완전한 소유권 증거이므로 mutation을 금지한다. preview의
+`matched_scope.provider_datasets`는 KMA provider/dataset/effective scope 한 쌍과 비음수 정수
+`feature_count`를 반드시 포함해야 하며 빈 배열과 추가 pair는 실패다.
+
+execution identity는 `(created_at, id, kind)`, event identity는 `(occurred_at, event_id)` total order를
+사용한다. 각 API page는 중복 없는 엄격 내림차순, page 1과 page 2는 서로소이면서 경계 순서를
+보존해야 한다. UI table은 각 행에 불투명 `data-row-identity`를 제공하고 현재 응답 tuple 배열과 DOM
+전체 행 배열을 순서까지 exact 비교한다. 일부 행 존재나 단순 화면 text 변경은 cursor 증거가 아니다.
+
+standalone POI 첫 create에는 실제 route가 `route.fetch()`로 upstream commit 응답·ETag·causal receipt를
+먼저 보관한 뒤 client response만 abort하는 결정적 fault를 주입한다. exact GET으로 같은 intended
+body/UUID/ETag/version을 재탐색하고 보관 receipt와 일치할 때만 성공하며, commit 증거가 없으면
+BLOCKED한다. route handler가 모두 settlement된 뒤에만 interception을 제거한다.
+
 ## 6. fixture replay (`tests/fixtures/`)
 
 ### 6.1 구조

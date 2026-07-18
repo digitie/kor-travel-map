@@ -2,6 +2,73 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex) — T-ADM-C7 prod live E2E 4차 적대 리뷰 반영
+
+- KMA target 소유권 barrier는 `external_system`별 active 목록을 500건 cursor 두 페이지까지
+  완주하고 최대 501건 전체 key/UUID/ETag 집합을 journal과 exact 비교한다. 빈 continuation,
+  cursor 반복, page/집합 상한 초과와 scope 누출은 모두 mutation 전에 차단한다.
+- preview의 `matched_scope.provider_datasets`는 빈 배열이나 부가 pair를 허용하지 않고 KMA
+  provider/dataset/effective sync scope 한 쌍과 비음수 정수 feature count를 요구한다.
+- 실행과 event history는 각 응답의 total-order identity tuple을 중복 없이 엄격한 내림차순으로
+  검증한다. 다음 페이지는 첫 페이지와 서로소이고 경계 순서를 보존해야 하며, DataTable의
+  `data-row-identity` 전체 배열이 현재 응답 tuple 배열과 순서까지 exact 일치해야 한다.
+- standalone POI의 첫 create는 실제 `route.fetch()`로 서버 commit 응답과 causal receipt를 확보한
+  뒤 브라우저 응답만 결정적으로 끊는다. exact GET 재탐색과 commit 증거 일치 후에만 성공하며,
+  handler settlement 뒤 route를 제거한다. fresh 리뷰 2인 승인 전 규율에 따라 테스트·lint·build·
+  외부 호출은 실행하지 않고 정적 계약과 `git diff --check`만 확인한다.
+
+## 2026-07-18 (codex) — T-ADM-C7 prod live E2E 3차 적대 리뷰 반영
+
+- 이전 KMA journal은 그 payload만으로 restored residue를 먼저 판정한 뒤 누적 이력에 합친다. 현재
+  scenario의 target/request/idempotency key와 진행된 status는 이전 snapshot으로 절대 덮어쓰지 않아,
+  새 scenario의 pending 상태를 과거 scenario residue로 오판하지 않는다.
+- create뿐 아니라 실제 run-now/provider dispatch 직전에도 서버 active target 전체 key/UUID/ETag를
+  owned journal과 exact 비교한다. 같은 자연키 재생성은 삭제된 이전 UUID와 다른 새 UUID, version 1
+  strong ETag, 필수 history를 증명하며 runner도 current/history UUID 교차 중복을 거부한다.
+- 고정 `orchestrator.lock`은 Python guard가 `O_NOFOLLOW|O_CREAT`로 열고 regular root-owned `0600`을
+  `fstat`한 뒤 non-blocking `flock`한다. 기존 symlink/FIFO/device와 truncate redirection은 허용하지
+  않으며 runner의 state root→lock→BLOCKED→residue 순서를 정적 계약으로 고정했다.
+- standalone POI journal에도 최종 파일 fsync를 추가했다. causal PUT 응답 유실은 intended body exact
+  GET, 404일 때만 동일 PUT 1회 재생, 최종 exact body/UUID/ETag/version 재검증으로 처리한다. receipt나
+  identity가 불확실하면 BLOCKED하며 cleanup도 intended body 없이 identity만 보고 삭제하지 않는다.
+- KMA cursor의 `base_datetime`은 선택값이 아니라 달력상 유효한 비어 있지 않은 `YYYYMMDDHHmm` 필수값으로
+  강화했다. 새 리뷰 2인 승인 전 규율에 따라 테스트·lint·build·외부 호출 없이 `git diff --check`만
+  수행한다.
+
+## 2026-07-18 (codex) — T-ADM-C7 prod live E2E 2차 적대 리뷰 반영
+
+- 같은 자연키를 삭제 후 재생성하면 active 소유 객체를 새 UUID·strong ETag·version으로 교체하고,
+  과거 객체는 별도 `target_history`에 보존한다. PUT 응답 유실은 intended body journal을 기준으로
+  exact GET 재탐색 후 부재일 때 한 번 같은 PUT을 재생하며, 끝내 identity를 증명하지 못하면 cleanup을
+  `restored=false`로 닫는다.
+- 모든 KMA create 직전에 external-system의 서버 active target 전체 집합을 owned journal과 비교한다.
+  preview plan과 terminal의 eligible/skipped/executed provider scope 전체를 KMA-only로 검증하고,
+  `membership_fingerprint`는 소문자 SHA-256, `base_datetime`은 실제 달력에 존재하는 `YYYYMMDDHHmm`만
+  허용한다.
+- KMA/sensor/schedule/runner 상태와 `BLOCKED.json`은 임시 파일 fsync→rename→최종 파일·부모 디렉터리
+  fsync 순서로 기록한다. runner 상태·lock·BLOCKED는 `/var/lib/kor-travel-map/c7-prod-live-e2e`의
+  root-owned `0700` 경로로 고정하고 `XDG_STATE_HOME` 우회는 거부한다.
+- 모든 `route.fetch()` interception은 in-flight handler 정산 뒤 `unroute`하며 이를 실제 파일 순서로
+  고정하는 정적 회귀 계약을 추가했다. 사용자 규율에 따라 신규 리뷰 2인 승인 전 테스트·lint·build·
+  외부 호출은 실행하지 않았고 `git diff --check`만 허용했다.
+
+## 2026-07-18 (codex) — T-ADM-C7 prod live E2E 적대 리뷰 보강
+
+- C7C POI causal live spec를 최종 runner에 포함하고 create/update/delete마다 mutation 직전 frame
+  cursor 이후 같은 원본 socket의 `update.data.live_revision >= receipt`만 인정하도록 보강했다.
+  socket close/reconnect와 snapshot은 causal 성공을 만들 수 없다.
+- KMA/standalone POI PUT은 자연키·intended body를 응답 전 durable journal에 기록하고, 응답 뒤
+  UUID·strong ETag·lock version을 보강한다. 모든 cleanup은 exact GET ETag 기반 `If-Match`만 쓰며
+  `412`와 소유 version drift를 fail-closed한다.
+- KMA request 직전 external-system active target의 전체 key/UUID/ETag 집합, 실행·event continuation의
+  provider/dataset/scope/cursor request와 response tuple을 exact 검증한다. RFC7807
+  `application/problem+json`도 최종 shell browser probe가 JSON으로 파싱한다.
+- 고정 root-owned attestation 파일로 실제 machine-id/hostname/UI·API-WS·Dagster origin을 검증하고,
+  로그인 POST `200 + Set-Cookie`와 실행 중 UI container의 non-empty password hash를 preflight에
+  추가했다. 실제 host·URL·hash·비밀 값은 코드·로그·문서에 기록하지 않는다.
+- 본 변경은 두 fresh 적대 리뷰 승인 전이므로 Playwright·lint·build를 실행하지 않았다. reviewer
+  승인 뒤 정적/로컬 gate와 최종 n150 prod runner를 순서대로 수행한다.
+
 ## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 로컬 gate 완료
 
 - POI target mutation transaction에서 trigger 이후 `ops.ops_live_topic_revisions`의
@@ -76,6 +143,13 @@
   caller 전환·명시적 service/operator principal·양 저장소 contract smoke를 완료 조건으로 고정했다.
 - 위 문서 보강은 PR #730의 8개 CI 게이트가 모두 통과한 뒤 merge commit `d0609226`으로
   `main`에 반영됐다. 후속 구현 범위를 넓히지 않고 #730 관련 문서 이력만 마감했다.
+
+## 2026-07-18 (codex) — 완료 admin ops 이슈 4건 종결
+
+- 이슈 본문과 최신 `main`, 병합 PR, 적대 리뷰·CI 증거를 다시 대조해 #682, #686, #718,
+  #720에 완료 근거를 코멘트하고 닫았다. #680은 기존 CLOSED 상태를 재확인했다.
+- #684·#712·#719는 본문의 n150/live 수용조건이 남았고 #694는 C7 UI 의미 단언이 남아
+  열린 상태를 유지한다. `T-ADM-C7`의 최종 이슈 종결 대상도 이 네 건으로 줄였다.
 
 ## 2026-07-18 (codex, agent B) — C7B-UI 적대 리뷰·전체 frontend gate 완료
 

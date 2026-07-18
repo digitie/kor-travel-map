@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { chmod, open, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
 
 import type { components } from "../../src/api/types";
@@ -20,6 +24,10 @@ type BrowserFetchResult<T> = {
 const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const STRONG_ENTITY_TAG_PATTERN =
+  /^"([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):([1-9][0-9]*)"$/;
 
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -43,10 +51,144 @@ const LIVE_API_BASE =
 
 const POI_HEADING = "POI cache targets";
 
+type PoiMutationJournal = {
+  entity_tag: string | null;
+  intended_body: PoiCacheTargetUpsertRequest;
+  lock_version: number | null;
+  natural_key: { external_system: string; target_key: string };
+  phase: string;
+  run_id: string;
+  same_socket_receipts: number[];
+  target_id: string | null;
+  updated_at: string;
+  version: 1;
+};
+
 test.describe.configure({ mode: "serial" });
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseStrongEntityTag(
+  entityTag: string,
+  expectedTargetId?: string,
+): number {
+  const match = STRONG_ENTITY_TAG_PATTERN.exec(entityTag);
+  if (
+    match === null ||
+    (expectedTargetId !== undefined && match[1] !== expectedTargetId)
+  ) {
+    throw new Error("POI target UUID+version strong entity_tag 계약 불일치");
+  }
+  const version = Number(match[2]);
+  if (!Number.isSafeInteger(version) || version <= 0) {
+    throw new Error("POI target lock version 계약 불일치");
+  }
+  return version;
+}
+
+function requireTargetIdentity(
+  result: BrowserFetchResult<PoiCacheTargetResponse | PoiCacheTargetMutationResponse>,
+  expectedTargetId?: string,
+): { entityTag: string; lockVersion: number; targetId: string } {
+  const targetId = result.body?.data.target_id;
+  const entityTag = result.body?.data.entity_tag;
+  if (
+    result.status !== 200 ||
+    typeof targetId !== "string" ||
+    !UUID_PATTERN.test(targetId) ||
+    typeof entityTag !== "string" ||
+    result.etag !== entityTag ||
+    (expectedTargetId !== undefined && targetId !== expectedTargetId)
+  ) {
+    throw new Error("POI target response UUID/ETag identity 계약 불일치");
+  }
+  return {
+    entityTag,
+    lockVersion: parseStrongEntityTag(entityTag, targetId),
+    targetId,
+  };
+}
+
+function poiStateFile(): string {
+  const configured = process.env.E2E_C7_POI_STATE_FILE;
+  if (!configured || !path.isAbsolute(configured)) {
+    throw new Error(
+      "E2E_C7_POI_STATE_FILE은 host orchestrator가 지정한 절대 경로여야 합니다.",
+    );
+  }
+  return configured;
+}
+
+async function claimPoiStateFile(): Promise<void> {
+  const raw = JSON.parse(await readFile(poiStateFile(), "utf8")) as unknown;
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    Array.isArray(raw) ||
+    (raw as { phase?: unknown }).phase !== "orchestrator_pending" ||
+    (raw as { version?: unknown }).version !== 1
+  ) {
+    throw new Error(
+      "C7 POI mutation journal이 신규 orchestrator sentinel이 아닙니다.",
+    );
+  }
+}
+
+async function writePoiJournal(
+  phase: string,
+  intendedBody: PoiCacheTargetUpsertRequest,
+  identity: {
+    entityTag: string | null;
+    lockVersion: number | null;
+    targetId: string | null;
+  },
+  sameSocketReceipts: readonly number[],
+): Promise<void> {
+  const stateFile = poiStateFile();
+  const temporary = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
+  const journal: PoiMutationJournal = {
+    entity_tag: identity.entityTag,
+    intended_body: intendedBody,
+    lock_version: identity.lockVersion,
+    natural_key: {
+      external_system: EXTERNAL_SYSTEM,
+      target_key: TARGET_KEY,
+    },
+    phase,
+    run_id: RUN_ID,
+    same_socket_receipts: [...sameSocketReceipts],
+    target_id: identity.targetId,
+    updated_at: new Date().toISOString(),
+    version: 1,
+  };
+  await writeFile(temporary, `${JSON.stringify(journal)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  await chmod(temporary, 0o600);
+  const temporaryHandle = await open(temporary, "r");
+  try {
+    await temporaryHandle.sync();
+  } finally {
+    await temporaryHandle.close();
+  }
+  await rename(temporary, stateFile);
+  await chmod(stateFile, 0o600);
+  const stateHandle = await open(stateFile, "r");
+  try {
+    await stateHandle.sync();
+  } finally {
+    await stateHandle.close();
+  }
+  const directoryHandle = await open(path.dirname(stateFile), "r");
+  try {
+    await directoryHandle.sync();
+  } finally {
+    await directoryHandle.close();
+  }
 }
 
 function apiPath(response: Response): string {
@@ -181,13 +323,322 @@ function rowContaining(page: Page, text: string): Locator {
 
 async function deleteTargetByApi(
   page: Page,
-  entityTag: string,
+  expected: { entityTag: string; lockVersion: number; targetId: string },
+  expectedBody: PoiCacheTargetUpsertRequest,
 ): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  const current = await fetchTarget(page);
+  const identity = requireTargetIdentity(current, expected.targetId);
+  assertExactIntendedTarget(current, expectedBody, expected.targetId);
+  if (
+    identity.entityTag !== expected.entityTag ||
+    identity.lockVersion !== expected.lockVersion
+  ) {
+    throw new Error(
+      "POI target가 마지막 관찰 뒤 변경되어 cleanup/delete를 차단했습니다",
+    );
+  }
   return browserFetch<PoiCacheTargetMutationResponse>(
     page,
     poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
-    { method: "DELETE", headers: { "If-Match": entityTag } },
+    { method: "DELETE", headers: { "If-Match": identity.entityTag } },
   );
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalJson(item)]),
+  );
+}
+
+function exactJson(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(canonicalJson(left)) ===
+    JSON.stringify(canonicalJson(right))
+  );
+}
+
+function assertExactIntendedTarget(
+  result: BrowserFetchResult<PoiCacheTargetResponse | PoiCacheTargetMutationResponse>,
+  intendedBody: PoiCacheTargetUpsertRequest,
+  expectedTargetId?: string,
+): { entityTag: string; lockVersion: number; targetId: string } {
+  const identity = requireTargetIdentity(result, expectedTargetId);
+  const record = result.body?.data;
+  if (
+    record === undefined ||
+    record.external_system !== EXTERNAL_SYSTEM ||
+    record.target_key !== TARGET_KEY ||
+    (record.deleted_at !== null && record.deleted_at !== undefined) ||
+    !exactJson(record.coord, intendedBody.coord) ||
+    record.coord_precision_digits !== intendedBody.coord_precision_digits ||
+    record.radius_km !== intendedBody.radius_km ||
+    record.name !== (intendedBody.name ?? null) ||
+    record.scope_mode !== intendedBody.scope_mode ||
+    record.update_enabled !== intendedBody.update_enabled ||
+    record.refresh_policy !== intendedBody.refresh_policy ||
+    !exactJson(
+      record.provider_overrides,
+      intendedBody.provider_overrides ?? {},
+    ) ||
+    !exactJson(record.metadata, intendedBody.metadata ?? {})
+  ) {
+    throw new Error("POI target intended body exact ownership 계약 불일치");
+  }
+  return identity;
+}
+
+async function putWithCausalResponseRecovery(
+  page: Page,
+  intendedBody: PoiCacheTargetUpsertRequest,
+  priorIdentity: {
+    entityTag: string;
+    lockVersion: number;
+    targetId: string;
+  } | null,
+  sameSocketReceipts: readonly number[],
+  phase: "create" | "update",
+  committedResponseEvidence?: () => BrowserFetchResult<PoiCacheTargetMutationResponse> | null,
+): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  const put = () =>
+    browserFetch<PoiCacheTargetMutationResponse>(
+      page,
+      poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
+      { method: "PUT", body: intendedBody },
+    );
+  let result: BrowserFetchResult<PoiCacheTargetMutationResponse>;
+  try {
+    result = await put();
+  } catch {
+    await writePoiJournal(
+      `${phase}_put_response_lost`,
+      intendedBody,
+      priorIdentity ?? { entityTag: null, lockVersion: null, targetId: null },
+      sameSocketReceipts,
+    );
+    const rediscovered = await fetchTarget(page);
+    if (rediscovered.status === 200) {
+      const identity = assertExactIntendedTarget(
+        rediscovered,
+        intendedBody,
+        priorIdentity?.targetId,
+      );
+      if (
+        priorIdentity !== null &&
+        identity.lockVersion <= priorIdentity.lockVersion
+      ) {
+        throw new Error("POI PUT response-loss update version이 전진하지 않았습니다");
+      }
+      await writePoiJournal(
+        `${phase}_put_response_lost_rediscovered`,
+        intendedBody,
+        identity,
+        sameSocketReceipts,
+      );
+      const committed = committedResponseEvidence?.() ?? null;
+      if (committed === null) {
+        throw new Error(
+          "POI PUT commit은 재탐색됐지만 causal receipt가 유실되어 BLOCKED합니다",
+        );
+      }
+      const committedIdentity = assertExactIntendedTarget(
+        committed,
+        intendedBody,
+        identity.targetId,
+      );
+      if (
+        committedIdentity.entityTag !== identity.entityTag ||
+        committedIdentity.lockVersion !== identity.lockVersion ||
+        causalRevision(committed) <= 0
+      ) {
+        throw new Error("POI PUT committed response/rediscovery identity 불일치");
+      }
+      await writePoiJournal(
+        `${phase}_put_response_lost_causal_receipt_recovered`,
+        intendedBody,
+        identity,
+        sameSocketReceipts,
+      );
+      result = committed;
+    } else if (rediscovered.status !== 404) {
+      throw new Error(
+        `POI PUT response-loss 재탐색 실패(status=${rediscovered.status})`,
+      );
+    } else {
+      await writePoiJournal(
+        `${phase}_put_replay_intent`,
+        intendedBody,
+        priorIdentity ?? { entityTag: null, lockVersion: null, targetId: null },
+        sameSocketReceipts,
+      );
+      try {
+        result = await put();
+      } catch {
+        const afterReplay = await fetchTarget(page);
+        if (afterReplay.status === 200) {
+          const identity = assertExactIntendedTarget(
+            afterReplay,
+            intendedBody,
+            priorIdentity?.targetId,
+          );
+          await writePoiJournal(
+            `${phase}_put_replay_response_lost`,
+            intendedBody,
+            identity,
+            sameSocketReceipts,
+          );
+        } else {
+          await writePoiJournal(
+            `${phase}_put_replay_uncertain`,
+            intendedBody,
+            priorIdentity ?? {
+              entityTag: null,
+              lockVersion: null,
+              targetId: null,
+            },
+            sameSocketReceipts,
+          );
+        }
+        throw new Error("POI PUT replay 응답도 유실되어 BLOCKED합니다");
+      }
+    }
+  }
+
+  const identity = assertExactIntendedTarget(
+    result,
+    intendedBody,
+    priorIdentity?.targetId,
+  );
+  if (
+    priorIdentity !== null &&
+    identity.lockVersion <= priorIdentity.lockVersion
+  ) {
+    throw new Error("POI target update lock version이 전진하지 않았습니다");
+  }
+  const exactRead = await fetchTarget(page);
+  const exactIdentity = assertExactIntendedTarget(
+    exactRead,
+    intendedBody,
+    identity.targetId,
+  );
+  if (
+    exactIdentity.entityTag !== identity.entityTag ||
+    exactIdentity.lockVersion !== identity.lockVersion
+  ) {
+    throw new Error("POI PUT 직후 exact GET identity/version 불일치");
+  }
+  return result;
+}
+
+async function putWithDeterministicCommittedResponseLoss(
+  page: Page,
+  intendedBody: PoiCacheTargetUpsertRequest,
+  sameSocketReceipts: readonly number[],
+): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  const exactUrl = new URL(
+    `/api/proxy${poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY)}`,
+    page.url(),
+  ).href;
+  let activeRouteHandlers = 0;
+  let committed: BrowserFetchResult<PoiCacheTargetMutationResponse> | null = null;
+  let handlerError: unknown = null;
+  let putAttempts = 0;
+  const settlementWaiters = new Set<() => void>();
+  const waitForSettlement = (): Promise<void> => {
+    if (activeRouteHandlers === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => settlementWaiters.add(resolve));
+  };
+  const routeHandler = async (
+    route: import("@playwright/test").Route,
+  ): Promise<void> => {
+    activeRouteHandlers += 1;
+    try {
+      const request = route.request();
+      if (request.method() !== "PUT") {
+        await route.fallback();
+        return;
+      }
+      putAttempts += 1;
+      if (
+        putAttempts !== 1 ||
+        request.url() !== exactUrl ||
+        !exactJson(request.postDataJSON(), intendedBody)
+      ) {
+        throw new Error("deterministic PUT response-loss request 계약 불일치");
+      }
+      const upstream = await route.fetch();
+      const text = await upstream.text();
+      let body: PoiCacheTargetMutationResponse | null = null;
+      try {
+        body = JSON.parse(text) as PoiCacheTargetMutationResponse;
+      } catch {
+        body = null;
+      }
+      const evidence: BrowserFetchResult<PoiCacheTargetMutationResponse> = {
+        body,
+        etag: upstream.headers()["etag"] ?? null,
+        status: upstream.status(),
+        text,
+      };
+      assertExactIntendedTarget(evidence, intendedBody);
+      causalRevision(evidence);
+      committed = evidence;
+      await route.abort("failed");
+    } catch (error) {
+      handlerError = error;
+      await route.abort("failed").catch(() => undefined);
+    } finally {
+      activeRouteHandlers -= 1;
+      if (activeRouteHandlers === 0) {
+        for (const resolve of settlementWaiters) resolve();
+        settlementWaiters.clear();
+      }
+    }
+  };
+  await page.route(exactUrl, routeHandler);
+  let primaryError: unknown;
+  try {
+    const result = await putWithCausalResponseRecovery(
+      page,
+      intendedBody,
+      null,
+      sameSocketReceipts,
+      "create",
+      () => committed,
+    );
+    if (putAttempts !== 1 || committed === null || handlerError !== null) {
+      throw new Error("deterministic committed PUT response-loss 증거 불완전");
+    }
+    return result;
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    const teardownErrors: unknown[] = [];
+    await Promise.race([
+      waitForSettlement(),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("POI PUT route settlement timeout")),
+          UI_TIMEOUT,
+        ),
+      ),
+    ]).catch((error: unknown) => teardownErrors.push(error));
+    await page
+      .unroute(exactUrl, routeHandler)
+      .catch((error: unknown) => teardownErrors.push(error));
+    if (teardownErrors.length > 0) {
+      throw new AggregateError(
+        primaryError === undefined
+          ? teardownErrors
+          : [primaryError, ...teardownErrors],
+        "POI committed response-loss primary/route cleanup 실패",
+      );
+    }
+  }
 }
 
 function causalRevision(
@@ -216,11 +667,24 @@ async function openDatasetProjectionSocket(page: Page): Promise<void> {
     url.pathname = `${url.pathname.replace(/\/+$/, "")}/v1/ops/live`;
     url.search = "?poll_interval_ms=1000";
     const state = globalThis as typeof globalThis & {
-      __c7cLive?: { frames: unknown[]; socket: WebSocket };
+      __c7cLive?: {
+        closed: boolean;
+        connectionId: string;
+        frames: unknown[];
+        socket: WebSocket;
+      };
     };
     const frames: unknown[] = [];
     const socket = new WebSocket(url, ticket.subprotocol);
-    state.__c7cLive = { frames, socket };
+    state.__c7cLive = {
+      closed: false,
+      connectionId: crypto.randomUUID(),
+      frames,
+      socket,
+    };
+    socket.addEventListener("close", () => {
+      if (state.__c7cLive?.socket === socket) state.__c7cLive.closed = true;
+    });
     socket.addEventListener("message", (event) => {
       try {
         frames.push(JSON.parse(String(event.data)));
@@ -261,15 +725,30 @@ async function expectCausalDatasetProjectionUpdate(
   page: Page,
   receipt: number,
   frameCursor: number,
+  connectionId: string,
 ): Promise<void> {
+  if (!Number.isSafeInteger(receipt) || receipt <= 0) {
+    throw new Error("dataset_projection receipt는 positive safe integer여야 합니다");
+  }
   await expect
     .poll(
       () =>
         page.evaluate(({ frameCursor, receipt }) => {
           const state = globalThis as typeof globalThis & {
-            __c7cLive?: { frames: unknown[]; socket: WebSocket };
+            __c7cLive?: {
+              closed: boolean;
+              connectionId: string;
+              frames: unknown[];
+              socket: WebSocket;
+            };
           };
-          if (state.__c7cLive?.socket.readyState !== WebSocket.OPEN) return false;
+          if (
+            state.__c7cLive?.socket.readyState !== WebSocket.OPEN ||
+            state.__c7cLive.closed ||
+            state.__c7cLive.connectionId !== connectionId
+          ) {
+            return false;
+          }
           return state.__c7cLive.frames.slice(frameCursor).some((frame) => {
             const value = frame as {
               data?: { live_revision?: unknown };
@@ -283,7 +762,7 @@ async function expectCausalDatasetProjectionUpdate(
               value.data.live_revision >= receipt
             );
           });
-        }, { frameCursor, receipt }),
+        }, { connectionId, frameCursor, receipt }),
       { timeout: FLOW_TIMEOUT },
     )
     .toBe(true);
@@ -298,6 +777,25 @@ async function datasetProjectionFrameCursor(page: Page): Promise<number> {
       throw new Error("dataset_projection socket is not open");
     }
     return state.__c7cLive.frames.length;
+  });
+}
+
+async function datasetProjectionConnectionId(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const state = globalThis as typeof globalThis & {
+      __c7cLive?: {
+        closed: boolean;
+        connectionId: string;
+        socket: WebSocket;
+      };
+    };
+    if (
+      state.__c7cLive?.socket.readyState !== WebSocket.OPEN ||
+      state.__c7cLive.closed
+    ) {
+      throw new Error("dataset_projection original socket is not open");
+    }
+    return state.__c7cLive.connectionId;
   });
 }
 
@@ -416,53 +914,100 @@ async function softDeleteByKey(
   if (current.status !== 200 || current.etag === null) {
     return { ...current, body: null };
   }
-  return browserFetch<PoiCacheTargetMutationResponse>(
+  const identity = requireTargetIdentity(current);
+  const deleted = await browserFetch<PoiCacheTargetMutationResponse>(
     page,
     poiTargetPath(externalSystem, targetKey),
-    { method: "DELETE", headers: { "If-Match": current.etag } },
+    { method: "DELETE", headers: { "If-Match": identity.entityTag } },
   );
+  if (deleted.status === 412) {
+    throw new Error(
+      "POI cleanup DELETE가 412를 반환해 concurrent update 삭제를 차단했습니다",
+    );
+  }
+  return deleted;
 }
 
 test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)", () => {
   test("API PUT로 target을 생성/수정/삭제하면 백엔드와 admin 목록·상세에 모두 반영된다", async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.skip(
       !EXECUTE_POI_CACHE_WRITE,
       "E2E_POI_CACHE_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 POI cache target write flow를 실행",
     );
     test.setTimeout(FLOW_TIMEOUT);
+    if (
+      process.env.E2E_LIVE_ALLOW_PROD !== "1" ||
+      process.env.E2E_ADMIN_WRITE !== "1" ||
+      testInfo.config.workers !== 1 ||
+      testInfo.project.retries !== 0
+    ) {
+      throw new Error(
+        "C7 POI prod causal test는 orchestrator opt-in/workers=1/retries=0이 필요합니다.",
+      );
+    }
+    await claimPoiStateFile();
 
-    let created = false;
+    let mutationIntentWritten = false;
     let removed = false;
     let liveSocketOpened = false;
-    let latestEntityTag: string | null = null;
+    let connectionId: string | null = null;
+    let latestIdentity: {
+      entityTag: string;
+      lockVersion: number;
+      targetId: string;
+    } | null = null;
+    let intendedBody = upsertBody(CREATE_NAME, POI_ID_A);
+    const sameSocketReceipts: number[] = [];
+    let primaryError: unknown;
 
     try {
       await test.step("admin POI cache targets 화면을 열어 same-origin 컨텍스트를 확보한다", async () => {
         await gotoPoiTargets(page);
         await openDatasetProjectionSocket(page);
         liveSocketOpened = true;
+        connectionId = await datasetProjectionConnectionId(page);
       });
 
       await test.step("API PUT로 고유 target을 생성하고 GET으로 영속화를 확인한다", async () => {
+        await writePoiJournal(
+          "create_put_intent",
+          intendedBody,
+          { entityTag: null, lockVersion: null, targetId: null },
+          sameSocketReceipts,
+        );
+        mutationIntentWritten = true;
         const frameCursor = await datasetProjectionFrameCursor(page);
-        const createResponse = await browserFetch<PoiCacheTargetMutationResponse>(
+        const createResponse = await putWithDeterministicCommittedResponseLoss(
           page,
-          poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
-          { method: "PUT", body: upsertBody(CREATE_NAME, POI_ID_A) },
+          intendedBody,
+          sameSocketReceipts,
         );
         expect(createResponse.status).toBe(200);
-        created = true;
-        expect(createResponse.etag).toBe(createResponse.body?.data.entity_tag);
-        latestEntityTag = createResponse.body?.data.entity_tag ?? null;
-        expect(latestEntityTag).not.toBeNull();
+        latestIdentity = requireTargetIdentity(createResponse);
+        await writePoiJournal(
+          "created",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
+        );
         const receipt = causalRevision(createResponse);
-        expect(receipt).toEqual(expect.any(Number));
+        sameSocketReceipts.push(receipt);
+        if (connectionId === null) {
+          throw new Error("original dataset_projection socket identity 없음");
+        }
         await expectCausalDatasetProjectionUpdate(
           page,
           receipt,
           frameCursor,
+          connectionId,
+        );
+        await writePoiJournal(
+          "created_same_socket_observed",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
         );
         expect(createResponse.body?.data).toMatchObject({
           external_system: EXTERNAL_SYSTEM,
@@ -487,7 +1032,9 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
         const detail = await fetchTarget(page);
         expect(detail.status).toBe(200);
-        expect(detail.etag).toBe(detail.body?.data.entity_tag);
+        expect(requireTargetIdentity(detail, latestIdentity.targetId)).toEqual(
+          latestIdentity,
+        );
         expect(detail.body?.data).toMatchObject({
           external_system: EXTERNAL_SYSTEM,
           target_key: TARGET_KEY,
@@ -529,22 +1076,59 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
       });
 
       await test.step("API PUT로 name/metadata를 수정하면 GET과 admin 목록이 갱신값으로 바뀐다", async () => {
+        intendedBody = upsertBody(UPDATED_NAME, POI_ID_B);
+        await writePoiJournal(
+          "update_put_intent",
+          intendedBody,
+          latestIdentity ?? {
+            entityTag: null,
+            lockVersion: null,
+            targetId: null,
+          },
+          sameSocketReceipts,
+        );
         const frameCursor = await datasetProjectionFrameCursor(page);
-        const updateResponse = await browserFetch<PoiCacheTargetMutationResponse>(
+        const priorIdentity = latestIdentity;
+        if (priorIdentity === null) {
+          throw new Error("create identity 없이 update를 수행할 수 없습니다");
+        }
+        const updateResponse = await putWithCausalResponseRecovery(
           page,
-          poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
-          { method: "PUT", body: upsertBody(UPDATED_NAME, POI_ID_B) },
+          intendedBody,
+          priorIdentity,
+          sameSocketReceipts,
+          "update",
         );
         expect(updateResponse.status).toBe(200);
-        expect(updateResponse.etag).toBe(updateResponse.body?.data.entity_tag);
-        latestEntityTag = updateResponse.body?.data.entity_tag ?? null;
-        expect(latestEntityTag).not.toBeNull();
+        latestIdentity = requireTargetIdentity(
+          updateResponse,
+          priorIdentity.targetId,
+        );
+        if (latestIdentity.lockVersion <= priorIdentity.lockVersion) {
+          throw new Error("POI target update lock version이 전진하지 않았습니다");
+        }
+        await writePoiJournal(
+          "updated",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
+        );
         const receipt = causalRevision(updateResponse);
-        expect(receipt).toEqual(expect.any(Number));
+        sameSocketReceipts.push(receipt);
+        if (connectionId === null) {
+          throw new Error("original dataset_projection socket identity 없음");
+        }
         await expectCausalDatasetProjectionUpdate(
           page,
           receipt,
           frameCursor,
+          connectionId,
+        );
+        await writePoiJournal(
+          "updated_same_socket_observed",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
         );
         expect(updateResponse.body?.data.name).toBe(UPDATED_NAME);
 
@@ -568,19 +1152,36 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
       await test.step("API DELETE 후 GET은 404, admin 목록에서도 ROW가 사라진다", async () => {
         const frameCursor = await datasetProjectionFrameCursor(page);
-        if (latestEntityTag === null) {
-          throw new Error("latest server entity_tag is missing before DELETE");
+        if (latestIdentity === null) {
+          throw new Error("latest server identity is missing before DELETE");
         }
-        const deleted = await deleteTargetByApi(page, latestEntityTag);
+        await writePoiJournal(
+          "delete_intent",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
+        );
+        const beforeDelete = latestIdentity;
+        const deleted = await deleteTargetByApi(
+          page,
+          beforeDelete,
+          intendedBody,
+        );
         expect(deleted.status).toBe(200);
-        expect(deleted.etag).toBe(deleted.body?.data.entity_tag);
-        latestEntityTag = deleted.body?.data.entity_tag ?? null;
+        latestIdentity = requireTargetIdentity(deleted, beforeDelete.targetId);
+        if (latestIdentity.lockVersion <= beforeDelete.lockVersion) {
+          throw new Error("POI target delete lock version이 전진하지 않았습니다");
+        }
         const receipt = causalRevision(deleted);
-        expect(receipt).toEqual(expect.any(Number));
+        sameSocketReceipts.push(receipt);
+        if (connectionId === null) {
+          throw new Error("original dataset_projection socket identity 없음");
+        }
         await expectCausalDatasetProjectionUpdate(
           page,
           receipt,
           frameCursor,
+          connectionId,
         );
         removed = true;
 
@@ -605,18 +1206,94 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
         await refreshList(page);
         await expect(rowContaining(page, UPDATED_NAME)).toHaveCount(0, T);
         await expect(rowContaining(page, CREATE_NAME)).toHaveCount(0, T);
+        await writePoiJournal(
+          "restored",
+          intendedBody,
+          latestIdentity,
+          sameSocketReceipts,
+        );
       });
+    } catch (error) {
+      primaryError = error;
+      throw error;
     } finally {
-      if (liveSocketOpened) {
-        await closeDatasetProjectionSocket(page);
-      }
-      // 생성됐고 아직 살아있으면 정리. 이미 삭제됐거나(404) destructive kill-switch(403)면 무시.
-      if (created && !removed && latestEntityTag !== null) {
+      const cleanupErrors: unknown[] = [];
+      if (mutationIntentWritten && !removed) {
         try {
-          await deleteTargetByApi(page, latestEntityTag);
-        } catch {
-          // best-effort cleanup
+          const trackedIdentity = latestIdentity as {
+            entityTag: string;
+            lockVersion: number;
+            targetId: string;
+          } | null;
+          const current = await fetchTarget(page);
+          if (current.status === 200) {
+            assertExactIntendedTarget(
+              current,
+              intendedBody,
+              trackedIdentity?.targetId,
+            );
+            const currentIdentity = requireTargetIdentity(
+              current,
+              trackedIdentity?.targetId,
+            );
+            if (
+              trackedIdentity !== null &&
+              (currentIdentity.entityTag !== trackedIdentity.entityTag ||
+                currentIdentity.lockVersion !== trackedIdentity.lockVersion)
+            ) {
+              throw new Error(
+                "cleanup 전 concurrent target update가 확인되어 삭제를 차단했습니다",
+              );
+            }
+            latestIdentity = currentIdentity;
+            await writePoiJournal(
+              "cleanup_delete_intent",
+              intendedBody,
+              latestIdentity,
+              sameSocketReceipts,
+            );
+            const deleted = await deleteTargetByApi(
+              page,
+              latestIdentity,
+              intendedBody,
+            );
+            if (deleted.status !== 200) {
+              throw new Error(`cleanup DELETE 실패(status=${deleted.status})`);
+            }
+            latestIdentity = requireTargetIdentity(
+              deleted,
+              latestIdentity.targetId,
+            );
+          } else if (current.status !== 404) {
+            throw new Error(`cleanup GET 실패(status=${current.status})`);
+          }
+          const absent = await fetchTarget(page);
+          if (absent.status !== 404 || latestIdentity === null) {
+            throw new Error("cleanup 후 exact 404 복원 증거가 없습니다");
+          }
+          removed = true;
+          await writePoiJournal(
+            "restored",
+            intendedBody,
+            latestIdentity,
+            sameSocketReceipts,
+          );
+        } catch (error) {
+          cleanupErrors.push(error);
         }
+      }
+      if (liveSocketOpened) {
+        await closeDatasetProjectionSocket(page).catch((error: unknown) =>
+          cleanupErrors.push(error),
+        );
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          primaryError === undefined
+            ? cleanupErrors
+            : [primaryError, ...cleanupErrors],
+          "C7 POI primary/deterministic cleanup 실패",
+        );
       }
     }
   });

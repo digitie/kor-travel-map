@@ -597,6 +597,9 @@ export function ExecutionTimeline({
             (row.id === selectedExecutionId ||
               row.projected_job?.id === selectedExecutionId)
           }
+          rowIdentity={(row) =>
+            JSON.stringify([row.created_at, row.id, row.kind])
+          }
           rowTestId={(row) => `pipeline-execution-row-${row.id}`}
           onRowClick={(row) => onSelectExecution(row.kind, row.id, row.id)}
         />

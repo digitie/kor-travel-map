@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +10,34 @@ const artifactRoot =
   path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend-live");
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function isC7ReadAuthRun(): boolean {
+  return process.argv.some((argument) => argument.includes(C7_READ_AUTH_SPEC));
+}
+
+function shouldAssertC7OriginGuard(): boolean {
+  return (
+    isC7ReadAuthRun() ||
+    process.env.E2E_C7_EXPECTED_UI_ORIGIN_SHA256 !== undefined ||
+    process.env.E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256 !== undefined
+  );
+}
+
+function expectedSha256(envName: string): string {
+  const value = process.env[envName];
+  if (!value || !SHA256_PATTERN.test(value)) {
+    throw new Error(
+      `[playwright.live] ${envName}은 lowercase SHA256이어야 합니다 (value redacted)`,
+    );
+  }
+  return value;
+}
 
 /**
  * prod-target 가드 (#501): live config은 baseURL을 `E2E_BASE_URL`로 자유롭게
@@ -28,22 +57,44 @@ function isLocalHost(hostname: string): boolean {
 }
 
 (function assertNotProdUnlessOptedIn() {
-  let hostname: string;
+  let parsed: URL;
   try {
-    hostname = new URL(baseURL).hostname;
+    parsed = new URL(baseURL);
   } catch {
     throw new Error(
-      `[playwright.live] E2E_BASE_URL이 유효한 URL이 아닙니다: ${JSON.stringify(
-        baseURL,
-      )}`,
+      "[playwright.live] E2E_BASE_URL이 유효한 URL이 아닙니다 (value redacted)",
     );
   }
-  if (!isLocalHost(hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
+  if (!isLocalHost(parsed.hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
-      `[playwright.live] E2E_BASE_URL host "${hostname}"가 비-로컬(prod 등)입니다. ` +
-        `라이브 e2e는 실데이터를 읽고 일부 spec은 별도 opt-in 시 write도 수행하므로 비-로컬 대상은 명시 opt-in이 ` +
-        `필요합니다. 의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.`,
+      "[playwright.live] E2E_BASE_URL이 비-로컬(prod 등)입니다 (value redacted). " +
+        "의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.",
     );
+  }
+
+  // C7 read/auth origin guard는 project/webServer 생성 전 config 평가에서 끝낸다.
+  // UI origin만 여기서 실제 값과 대조하고, API WSS origin은 browser tracer가 실제
+  // socket에서 관측한 값을 별도 expected hash와 대조한다.
+  if (shouldAssertC7OriginGuard()) {
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      throw new Error(
+        "[playwright.live] C7 E2E_BASE_URL은 공개 HTTPS origin이어야 합니다 (value redacted)",
+      );
+    }
+    const expectedUi = expectedSha256("E2E_C7_EXPECTED_UI_ORIGIN_SHA256");
+    expectedSha256("E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256");
+    if (sha256(parsed.origin) !== expectedUi) {
+      throw new Error(
+        "[playwright.live] C7 expected UI origin guard 불일치 (values redacted)",
+      );
+    }
   }
 })();
 
@@ -69,6 +120,8 @@ function isLocalHost(hostname: string): boolean {
  * worker 수는 `E2E_LIVE_WORKERS`(기본 4)로 조정한다. 비-로컬(prod 등) 대상은 실수
  * 방지를 위해 `E2E_LIVE_ALLOW_PROD=1` 명시 opt-in이 필요하다(아래 가드 참고):
  *   E2E_LIVE_ALLOW_PROD=1 E2E_LIVE_WORKERS=4 E2E_ADMIN_PASSWORD=<admin-pw> \
+ *     E2E_C7_EXPECTED_UI_ORIGIN_SHA256=<sha256> \
+ *     E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256=<sha256> \
  *     E2E_BASE_URL=https://map.<domain> E2E_DAGSTER_URL=https://map-dagster.<domain> \
  *     npm run e2e:live -- --retries=1
  *

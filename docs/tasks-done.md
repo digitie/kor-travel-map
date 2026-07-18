@@ -82,7 +82,7 @@
   1,411건, API 489건, 실제 PostGIS migration/schema 14건·CAS 저장소/API 23건·집중 10건과
   독립 row-lock 경쟁 3회, Ruff, strict mypy 115+52파일, import 계약 4/4를 통과했다. 같은 SHA의
   frontend Vitest 212건, type-check, lint 오류 0건, OpenAPI/admin type drift와 31-route production
-  build도 통과했다. 실제 browser 검증과 issue #718 종결은 최종 `T-ADM-C7` n150 live E2E에 남긴다.
+  build도 통과했다. issue #718은 PR #727의 수용조건과 CI를 재확인한 뒤 2026-07-18 닫았다.
 
 ## KMA 빈 target fail-closed·exact-scope event (2026-07-18, `T-ADM-AUD-686`)
 
@@ -101,8 +101,8 @@
   1,413건, API 485건, Dagster 475건(1 skip), 실제 PostGIS 집중 6건, frontend Vitest
   185건을 통과했다. Ruff, strict mypy 115+52+23파일, import 계약 4/4,
   OpenAPI admin/user·generated type drift, frontend type-check·lint(오류 0, 기존 경고 6),
-  31-route production build도 통과했다. 이슈 #686은 닫지 않고 최종 `T-ADM-C7` n150 live
-  증거와 함께 종결한다.
+  31-route production build도 통과했다. #686은 #701/#726/#728/#729의 전체 수용조건과
+  CI를 재확인한 뒤 2026-07-18 닫았다.
 
 ## Admin ops-live 인증·무효화 완결 (2026-07-17, `T-ADM-C7A`)
 
@@ -149,7 +149,7 @@
 - [x] **네 소유 조합과 frontend-only 경계를 고정.** provider-only, dataset-only, both,
   neither를 unit과 mocked E2E 계약에 추가했고 API·OpenAPI·DB는 변경하지 않았다. 두 독립
   리뷰어가 최종 SHA를 S1/S2/S3 0건으로 승인했으며 unit 5건, type-check, lint와 production
-  build를 통과했다. Playwright 실행 증거는 `T-ADM-C7` n150 live wave에서 함께 남긴다.
+  build를 통과했다. #720은 본문 수용조건을 재확인한 뒤 2026-07-18 닫았다.
 
 ## Admin 통합 화면 링크 정본화 (2026-07-17, `T-ADM-C6a`)
 

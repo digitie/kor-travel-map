@@ -2293,7 +2293,11 @@ export function DatasetsClient({
           </Alert>
         ) : null}
 
-        <section className="flex flex-wrap gap-2">
+        <section
+          aria-label="데이터셋 상태 요약"
+          className="flex flex-wrap gap-2"
+          data-testid="datasets-status-summary"
+        >
           <Badge
             data-testid="datasets-live-mode"
             title={live.lastError ?? `ops live: ${live.state}`}

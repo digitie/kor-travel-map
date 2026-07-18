@@ -75,6 +75,8 @@ export interface DataTableProps<TData> {
   isRowActive?: (row: TData) => boolean
   /** 행별 data-testid(e2e 셀렉터 등). 값을 주면 비가상 경로의 <tr data-testid>로 렌더. */
   rowTestId?: (row: TData) => string | undefined
+  /** cursor 순서 검증용 불투명 행 identity. 비가상 경로의 <tr data-row-identity>로 렌더. */
+  rowIdentity?: (row: TData) => string | undefined
   /** 가상화(대용량/무한 목록만). 켜면 명시 ARIA + display:grid 레이아웃. */
   virtualized?: boolean
   estimateRowSize?: number
@@ -172,6 +174,7 @@ export function DataTable<TData>({
   onRowClick,
   isRowActive,
   rowTestId,
+  rowIdentity,
   virtualized = false,
   estimateRowSize = 40,
   overscan = 12,
@@ -268,6 +271,7 @@ export function DataTable<TData>({
                 rows.map((row) => (
                   <TableRow
                     key={row.id}
+                    data-row-identity={rowIdentity?.(row.original)}
                     data-testid={rowTestId?.(row.original)}
                     data-state={
                       row.getIsSelected() || isRowActive?.(row.original)
