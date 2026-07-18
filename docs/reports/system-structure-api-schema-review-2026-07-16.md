@@ -3,8 +3,8 @@
 > 작성일: 2026-07-18 (최신 코드 3차 재검증판)
 > 기준: KTM `origin/main@13eb8d40` · PinVi `origin/main@48085afb`
 > 반영: PR #730(2차, merge `d0609226`) → PR #732(3차, 본 판)
-> 정본 전개: `docs/vnext-review-propagation` branch에서 ADR-066~075와 architecture/tasks/runbook에
-> 전개 완료. 이 전개 변경의 PR 번호는 아직 정해지지 않았으며 실제 PR 생성 뒤에만 역기입한다.
+> 정본 전개: PR #736(`docs/vnext-review-propagation`)에서 ADR-066~075와
+> architecture/tasks/runbook에 전개했다.
 > 전신: 본 문서는 PR #702(원 리뷰 §1~10) → #703(§11 Claude 다관점) → #704(§12 Codex 재검토
 > 병합본 위 §13 대질·수렴) → #707(§14 Codex 재보강)의 **왕복 리뷰 4회를 소화한 최종 정본**이다.
 > 왕복 세부(§11~§14의 개별 논증·정정 이력)는 git 이력(위 PR들)에 보존되며, 본 문서는 그
@@ -601,6 +601,6 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 
 ### 정본 전개 상태 (2026-07-18)
 
-`docs/vnext-review-propagation` branch에서 §7 매핑을 ADR-066~075, architecture, integration,
-deploy/runbook, tasks, entry/status 문서에 전개했다. 이 전개 변경은 PR 번호 미정이며 존재하지 않는
-PR 번호를 기록하지 않는다. 실제 PR 생성·merge 뒤 branch 상태와 번호만 후속 역기입한다.
+PR #736(`docs/vnext-review-propagation`)에서 §7 매핑을 ADR-066~075, architecture, integration,
+deploy/runbook, tasks, entry/status 문서에 전개했다. merge 뒤에도 본 보고서를 설계 근거 정본으로
+유지하고 구현 완료 증거는 각 T-VN task와 PR에 기록한다.

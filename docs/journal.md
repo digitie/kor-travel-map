@@ -11,8 +11,7 @@
 - `T-ADM-C6c`/`C7` 다음의 T-VN Wave 0~3과 hardening을 모두 PR 단위 open task로 기록했다.
   `T-VN-00`은 C6c 별칭이라 중복 checkbox를 만들지 않았고 문서 전개 완료 항목도 백로그에 남기지
   않았다. 코드 PR 리뷰는 최신 정책대로 테스트 전 적대적 리뷰어 1명으로 정리했다.
-- source 보고서에는 `docs/vnext-review-propagation` branch 전개 완료와 PR 번호 미정을 기록했다.
-  존재하지 않는 PR 번호는 쓰지 않았으며 실제 PR이 만들어진 뒤에만 역기입한다.
+- source 보고서에는 PR #736(`docs/vnext-review-propagation`)을 §7 정본 전개 PR로 역기입했다.
 
 ## 2026-07-18 (codex) — T-ADM-C7 prod live E2E 4차 적대 리뷰 반영
 
