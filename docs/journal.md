@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증
+
+- PR #708은 이미 병합된 상태여서 최신 KTM `main@13eb8d40`과 PinVi
+  `origin/main@48085afb`를 기준으로 후속 검토했다. C5~C7B의 route·migration·auth·actor·CAS·
+  exact-scope 구현을 코드와 테스트에서 재대조해 해소된 판정을 제거하거나 남은 범위로 좁혔다.
+- feature-update와 schedule의 0054 domain ledger, #725 ops-live ticket, #727 policy CAS를
+  범용 미구현으로 오판하지 않도록 목표 구조와 실행 계획을 보정했다. 잔여 무인증 ops/debug read,
+  body actor, Feature revision은 별도 위험으로 유지했다.
+- PR #724가 legacy ops를 삭제했지만 PinVi admin client·proxy·test가 삭제 경로를 계속 호출하는
+  cross-repo 계약 단절을 새 P0로 확정했다. `T-ADM-C6c`를 C7 선행 task로 만들고, canonical
+  caller 전환·명시적 service/operator principal·양 저장소 contract smoke를 완료 조건으로 고정했다.
+
 ## 2026-07-18 (codex, agent B) — C7B-UI 적대 리뷰·전체 frontend gate 완료
 
 - `/ops/datasets`가 exact scope의 active/terminal 실행과 nested run/event history,

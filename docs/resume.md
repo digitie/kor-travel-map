@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증
+
+- KTM `origin/main@13eb8d40`과 PinVi `origin/main@48085afb`를 기준으로 PR #708 정본을
+  #691·#721~#729의 실제 route, migration 0054~0057, actor·인증·멱등 구현과 다시 대조했다.
+  feature-update/schedule 도메인 ledger, ops-live ticket, refresh-policy CAS, exact-scope 이력은
+  이미 구현된 기준선으로 판정을 좁혔다.
+- PR #724가 삭제한 `/v1/ops/dagster/summary`, `/v1/ops/providers*`,
+  `/v1/ops/import-jobs*`를 PinVi 최신 main의 admin client·proxy·test가 여전히 호출하고 있음을
+  확인했다. 새 canonical ops는 frontend BFF admin gate이므로 경로만 바꿔도 PinVi server는
+  인증되지 않는다.
+- 재설계 보고서·integration map·tasks를 같은 결론으로 보강했다. 삭제 route나 alias를
+  되살리지 않고 PinVi caller와 contract test를 canonical datasets/pipeline으로 옮기며,
+  BFF secret 공유가 아닌 최소 service/operator principal을 설치한다.
+- **다음 한 작업**: `T-ADM-C6c` cross-repo 계약 복구를 양 저장소에서 완료한다. 해당 commit
+  조합의 인증·응답 smoke 전에는 `T-ADM-C7` n150 배포와 live E2E를 시작하지 않는다.
+
 ## 2026-07-18 (codex, agent B) — T-ADM-C7B-UI 로컬 종결·PR 준비
 
 - datasets UI는 exact tuple을 기준으로 활성 실행과 최근 종료 실행, run/event continuation과

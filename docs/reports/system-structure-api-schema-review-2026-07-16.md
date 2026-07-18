@@ -1,13 +1,14 @@
 # kor-travel-map vNext 재설계 정본 — 설계 결정·목표 구조·실행 계획
 
-> 작성일: 2026-07-17 (최신 코드 재검증판)
-> 기준: KTM `origin/main@4ffdb588` · PinVi `origin/main@48085afb`
+> 작성일: 2026-07-18 (최신 코드 2차 재검증판)
+> 기준: KTM `origin/main@13eb8d40` · PinVi `origin/main@48085afb`
 > 전신: 본 문서는 PR #702(원 리뷰 §1~10) → #703(§11 Claude 다관점) → #704(§12 Codex 재검토
 > 병합본 위 §13 대질·수렴) → #707(§14 Codex 재보강)의 **왕복 리뷰 4회를 소화한 최종 정본**이다.
 > 왕복 세부(§11~§14의 개별 논증·정정 이력)는 git 이력(위 PR들)에 보존되며, 본 문서는 그
-> **최종 유효 판정과 실행 계획만** 담는다. PR #708의 전면 재작성 내용을 canonical operation
-> 체인(#709/#710/#711/#713/#714/#715), scope 멱등성(#701), datasets 통합 UI(#698)가 포함된
-> 최신 기준선과 다시 대조했다.
+> **최종 유효 판정과 실행 계획만** 담는다. PR #708의 전면 재작성은 PR #717에서
+> canonical operation 체인(#709/#710/#711/#713/#714/#715), scope 멱등성(#701), datasets
+> 통합 UI(#698)까지 1차 재검증했다. 이번 판은 그 뒤의 C5~C7B 구현(#691, #721~#729)과
+> PinVi 최신 `origin/main`을 다시 대조한 결과를 기존 판정·결정·실행 계획 안에 직접 반영했다.
 > 충돌 시 본 문서가 우선한다.
 
 ## 0. 지도 원칙 — 모든 후속 작업에 적용
@@ -45,33 +46,47 @@
 ## 1. 판정 확정 요약 — 왕복 리뷰의 최종 유효 결론
 
 4회 왕복(§11~§14)에서 검증·정정을 거쳐 확정한 사실을 최신 기준선에서 다시 판정했다. 최신
-구현이 일부 해소한 항목은 **현재 구현 범위**와 **남은 목표**를 같은 행에 구분했다.
+구현이 일부 해소한 항목은 **현재 구현 범위**와 **남은 목표**를 같은 행에 구분했다. 특히
+KTM 내부 green만으로 cross-repo 계약이 보존됐다고 간주하지 않고, PinVi `origin/main`의 실제
+호출 문자열과 KTM의 현재 OpenAPI route를 정적으로 대조했다.
 
 | # | 확정 판정 | 근거 요지 |
 |---|---|---|
 | F-1 | **공개 상태 오분류는 양방향이다**: provider-retired(inactive+deleted_at)는 공개/서비스 batch에서 `missing`으로 은닉되고, admin-inactive·draft·broken(deleted_at 미세팅)은 `found`로 노출된다 | `_is_public_feature`가 hidden/deleted 2종+`deleted_at IS NULL`만 검사(`features.py:64,488-493`); provider retire는 deleted_at 세팅(`feature_repo.py:1491-1492`), admin deactivate는 미세팅(`admin_feature_repo.py:1365-1379`) |
-| F-2 | **범용 HTTP replay 멱등성과 Feature revision은 미해결**: Idempotency-Key ledger가 없고 feature change-request는 매 호출 새 uuid row다. 다만 #701은 direct provider-dataset 갱신에 한해 `(provider,dataset_key,sync_scope)` active partial UNIQUE, 동일 계획 200 재사용, run-now dispatch 멱등성을 구현했다. 이는 terminal 결과·응답 유실을 replay하는 HTTP ledger와 대체 관계가 아니다. `generation`은 executor claim/run-owner CAS이고, `data_version`은 provider-owned 행에서 0이며 user-request 보호 행의 기존 양수 값만 보존하므로 전체 Feature ETag validator로 쓸 수 없다 | `0053_feature_update_scope_dispatch.py:439-507`; `feature_update_service.py:553-742`; `admin_feature_repo.py:2029-2065`; `feature_repo.py:235-240` |
-| F-3 | **route 경계 결함은 legacy 표면에 잔존한다**: 신규 canonical `ops/datasets`·`ops/pipeline`은 admin gate가 있지만 legacy `curated`/`ops`/`ops_live`/`ops_logs`/`dagster`는 무의존 mount다. **`mois_detail`은 무게이트로 `source_records.raw_data`를 반환**하고 `/metrics`·debug ETL도 열려 있으며 WebSocket은 인증 전에 accept한다. secret 미설정 시 local-dev/무검증 통과(fail-open)하고, `etl_live_preview_enabled`는 설정 설명만 바뀐 채 실제 분기에서 미소비다 | `app.py:487-488,513,530-531,622-646`; `ops_live.py:697-704`; `auth.py:115-116,137-138,181-183`; `settings.py:56-58,94,194`; `ops_datasets.py:162-190` |
-| F-4 | **actor 신뢰는 canonical request/cancel에서만 보강됐다**: feature-update·pipeline request/cancel은 principal의 `context.actor`를 쓰지만, 다수 admin feature write와 일부 schedule command는 body `operator`를 저장하고 auth-event는 body를 principal보다 우선한다(`body.actor or context.actor`) | `feature_update_requests.py:124-137`; `ops_pipeline.py:1180-1190,1501-1515,1590-1610`; `admin_features.py:872-1011`; `admin_auth.py:187-202` |
+| F-2 | **HTTP replay는 두 운영 command군에서 구현됐지만 범용 계약과 Feature revision은 남았다**: 0054는 feature-update create에 `(actor, Idempotency-Key)` append-only ledger·request fingerprint·terminal replay/불일치 409를, schedule command에 append-only audit·active claim·불명 결과 수동 해소를 구현했다. #701의 exact-scope active UNIQUE는 업무 single-flight로 계속 직교하며, #727의 policy `revision` CAS도 갱신 정책 한정이다. 다른 command route와 Feature 행에는 같은 replay/If-Match 계약이 없고, `data_version`은 provider-owned 행에서 0이라 ETag validator가 될 수 없다 | `0054_dagster_schedule_audit.py:24-260`; `ops_pipeline.py:1732-2008`; `0056_provider_refresh_policy_revision.py:23-37`; `feature_repo.py:235-240` |
+| F-3 | **운영 인증은 크게 좁아졌지만 route policy는 아직 부분적이다**: #724가 legacy command 28개와 live ETL을 삭제했고 #725가 ops-live에 same-origin BFF 발급 HMAC ticket·DB nonce 단일 소비·60초 lease를 설치했다. Docker entrypoint도 admin proxy secret을 fail-closed한다. 반면 `/v1/ops/{metrics,system-logs,api-call-logs,consistency/*}`는 여전히 무의존 mount이고, **`/v1/debug/mois-license/*`는 무게이트로 `source_records.raw_data`를 반환**하며 `/metrics`도 인증이 없다. 앱 settings 자체는 service/admin/public key 미설정 시 통과하므로 비-Docker production profile과 미분류 route CI가 없다 | `app.py:396-398,523-666`; `ops_live.py:1020-1085`; `mois_detail.py:1-118`; `auth.py:115-183`; `docker/api-entrypoint.sh:18-30` |
+| F-4 | **canonical ops actor는 principal로 수렴했지만 legacy admin write가 남았다**: pipeline request/cancel/schedule·curation collection write는 `context.actor`를 쓴다. 반면 admin Feature create/patch/delete/review/deactivate, legacy curated select/unselect, admin auth-event는 body `operator`/`actor`를 감사 actor로 저장하고 PinVi client도 이 필드를 계속 전송한다 | `ops_pipeline.py:1369-1992`; `curations.py:865-1065`; `admin_features.py:853-1011`; `curated.py:1123-1174`; `admin_auth.py:187-202`; PinVi `kor_travel_map_admin.py:260-319` |
 | F-5 | **Feature ID(64-bit SHA-1 prefix)는 정본 identity로 부적합**: 코드 주석의 "10^9건 충돌 ~3e-11"은 birthday bound(≈2.7%) 오인. 게다가 bjd/category가 해시 입력이라 보정만으로 재키잉 발생(코드가 자인) | `ids.py:68-70,149-154` |
 | F-6 | **source lineage denorm 미정합**: head-pointer deferrable FK는 존재하나, `source_records`의 denorm identity 4튜플(provider/dataset/type/id)이 부모 entity와 일치하도록 강제하는 composite FK는 없다(entity A에 provider B record 연결 가능) | `models.py:431-440,519-533` |
 | F-7 | **weather/price 비대칭**: weather에는 semantic UNIQUE·source-record FK·`valid_from<=valid_until` CHECK가 없다. price는 semantic UNIQUE·source-record FK·nonnegative CHECK를 보유한다. PG16에서 UNIQUE는 `NOT VALID` 불가 — `CREATE UNIQUE INDEX CONCURRENTLY`(+writer conflict target 배포와 **같은 cutover**)로 도입해야 한다 | `0017` vs `0034` DDL; PG16 문법 사실 |
 | F-8 | **공간·조회 결함**: `include_geometry`가 응답이 아닌 **결과집합**을 바꿈(EXPLAIN 재현 2220→2221행), `&&`-only MBR false positive 실재, bbox LATERAL이 kind 무관 매행 실행, GiST 6개(자동 full 3 + 수동 partial 3)로 write ~1.6×, `include_total=false`여도 COUNT 무조건 실행, cursor가 query 파라미터 미포함(재사용 시 조용한 누락/중복) | `feature_repo.py:689,828,963,3534,3766-3788`; `models.py:200-217,283-293`; scratch EXPLAIN 실측 |
 | F-9 | **notice cast 취약**: `detail->>'valid_end_time'` timestamptz 직접 cast — 오염 row 1건이 모든 공개 read를 500으로 만들 수 있고, lineage anti-join이 모든 공개 read의 상시 hot-path 비용 | `feature_repo.py:533-539,638` |
 | F-10 | **Alembic metadata ≠ schema**: weather/price/log/api-key/auth-event 등 table이 `models.metadata`에 없고 `include_object` 콜백도 없어 clean DB `alembic check`가 실패(PostGIS object까지 drop 후보) | `env.py:54,65,82` |
-| F-11 | **migration 방식은 변경 성격에 따라 이미 셋이 공존한다**: 0051은 additive, 0052는 maintenance clean-cut, 0053은 additive shape(열·backfill)에 30초 획득 상한의 `ACCESS EXCLUSIVE`와 trigger/index 원자 교체를 결합했다. "전부 additive"도 "전부 clean-cut"도 아니다 — **변경 유형별 DDL 규율(D-12)이 정답** | `0051`:97-386; `0052`:27-74,450-466,2304-2348; `0053`:167-194,439-507 |
+| F-11 | **migration 방식은 변경 성격별로 더 분화됐다**: 0051은 additive, 0052는 maintenance clean-cut, 0053·0057은 additive shape/backfill에 30초 획득 상한의 `ACCESS EXCLUSIVE`와 trigger/index 원자 교체를 결합했다. 0054·0055는 소형 ops table/append-only trigger 신설, 0056은 소형 table의 revision column+CHECK다. "전부 additive"도 "전부 clean-cut"도 아니며 **lock mode·획득 상한·보유 시간을 별도 판정하는 D-12가 유효**하다 | `0053`:167-194,439-507; `0054`:24-260; `0055`:23-173; `0056`:23-37; `0057`:52-84,249-299 |
 | F-12 | **rollback은 snapshot 보존만으로 불성립**: 쓰기 재개 후 old snapshot 복원은 사이 write를 유실한다. 현재 도구는 cold backup뿐(WAL archiving/PITR/journal 0건) → write-freeze 유지 또는 forward journal replay가 완료 조건 | `docs/backup-restore.md`; scripts/ 실태 |
 | F-13 | **재취득은 유일 복구 전략이 될 수 없다**: 3년 보존 weather·창이 닫힌 feed는 upstream이 재서빙하지 않고, 전국 재수집은 quota(OpiNet 실증)·WAL(MOIS 실증)·시간에서 비현실적. 정본 이관은 DB-to-DB, 검증된 파생만 재계산 | ADR-062; 운영 실증(quota·WAL 사고 이력) |
 | F-14 | **PinVi 소비측 결함**: client는 batch `missing`을 파싱하지만 trip view 소비 계층이 authoritative missing과 transport 실패를 모두 전건 broken으로 축약한다. TripMap은 서버 cluster를 폐기하고, weather는 POI별 N+1이며, admin client는 Idempotency-Key/If-Match를 보내지 않는다. `TripDayPoi.version`도 soft delete에서 증가하지 않아 generation으로 부적합하다 | PinVi `kor_travel_map.py:240-261`; `trip_view_builder.py:131-168`; `TripMapView.tsx:144-159`; `TripWeatherSummary.tsx:123-143`; `poi.py:169-171` |
 | F-15 | **PinVi 라이브 소비 전제**: 운영상 소비 중으로 간주하되(공유 n150 가동·운영 노트), cutover preflight에서 runtime 증거(`/version`·`api_call_logs` nonzero·smoke)로 최종 확정한다 | §13.3↔§14.6 합의 위치 |
 | F-16 | **curation 정본이 두 개**: legacy `curated_features`와 신규 `curation_collections/items`가 title/status/relation을 중복 저장하고 trigger가 legacy→신규 단방향만 동기화 — legacy 수정이 collection을 강제 `published`/`archived_at=NULL`로 되돌릴 수 있다(왕복 4회에서 반박된 적 없는 유효 진단) | §구판 P1-7; migration trigger 실태 |
+| F-17 | **#724 clean-cut이 PinVi 선전환보다 먼저 병합돼 현재 cross-repo 계약이 끊겼다**: KTM은 `/v1/ops/dagster/summary`, `/v1/ops/providers*`, `/v1/ops/import-jobs*`를 삭제했지만 PinVi 최신 main의 admin client·provider-sync proxy·unit test는 그대로 호출한다. 같은 버전을 배포하면 provider-sync proxy는 upstream 404를 반환하고 ETL summary는 오류를 모아 degraded/down으로 축약한다. 새 `/v1/ops/{datasets,pipeline}`는 BFF admin gate이고 Docker가 frontend 고정 `/32`만 신뢰하므로 경로만 바꿔도 PinVi service 호출은 403이다. 별도 service/operator principal과 소비자 선배포가 필요하다 | KTM `test_admin_ops_clean_cut.py:8-48`, `docker-compose.yml:117-120`; PinVi `kor_travel_map_admin.py:338-404`, `provider_sync.py:28-141`, `admin_etl.py:359-391`, `test_kor_travel_map_admin_client.py:437-554` |
+
+이번 2차 재검증은 한 종류의 diff review로 끝내지 않고 다음 경계를 교차 확인했다.
+
+| 관점 | 확인 대상 | 이번 판정에 반영한 결과 |
+|---|---|---|
+| REST/API | `app.py` mount dependency, canonical router, generated OpenAPI, clean-cut test | 삭제/존치 route와 operator gate를 분리하고 PinVi의 실제 legacy caller를 F-17로 승격 |
+| DB/동시성 | Alembic 0054~0057, command service·repository test | domain ledger·claim·CAS·exact-scope를 완료 기준선으로 인정하고 범용 ledger 과설계를 철회 |
+| 보안/감사 | BFF secret·trusted CIDR, WebSocket ticket, actor 저장 원천 | #725 해소 범위와 잔여 무게이트 read/body actor를 분리 |
+| 데이터·성능 | migration lock, exact-scope index·cursor, Feature revision | 30초 lock 획득 상한과 Feature row validator 미해결을 별도 운영 gate로 유지 |
+| cross-repo 소비 | PinVi `origin/main` client·proxy·summary builder·unit test | provider-sync 404, ETL degraded/down, canonical route의 403 선행 위험을 재현 가능한 계약 단절로 확정 |
+| 운영 | repository 증거와 n150 적용 증거 분리 | 이 판은 정적 코드/계약 검토이며 0053~0057 n150 적용·live E2E는 C6c 뒤 C7에서 검증 |
 
 **유지가 확정된 기존 설계**(재설계에서 버리지 않는다): immutable `source_records` 분리,
 WGS84+5179 이중 표현과 GiST 반경 조회, keyset pagination, RFC7807 problem+json(+중앙 핸들러의
 stack 미노출), PinVi의 OpenAPI HTTP 경계(직접 DB/패키지 접근 금지), canonical operation
-영속화·실행 manifest·양방향 reconcile·typed scope(0050~0053,
-#709/#710/#711/#713/#714/#715·#701),
-provider×dataset×scope datasets 운영 화면(#698).
+영속화·실행 manifest·양방향 reconcile·typed scope·append-only command audit·exact-scope history
+(0050~0057, #709/#710/#711/#713/#714/#715·#701·#691·#725~#729),
+provider×dataset×scope datasets 운영 화면(#698·#723).
 
 ## 2. 설계 결정 (ADR 후보)
 
@@ -81,8 +96,9 @@ provider×dataset×scope datasets 운영 화면(#698).
 ### D-1. 인증·라우트 경계 — fail-closed + route policy matrix
 
 - **컨텍스트**: F-3. 인증 게이트가 라우터별로 산발 배선되고 기본값이 전부 fail-open이라, 설정
-  하나 빠지면 스케줄 변경·ETL 실행·내부 상태가 열린다. 신규 datasets/pipeline gate는 올바른
-  선례지만 legacy 그룹과 WebSocket에는 아직 전파되지 않았다.
+  하나 빠지면 내부 상태가 열린다. #724의 legacy command 삭제, #725의 ticket WebSocket,
+  Docker admin secret 기동 검사는 올바른 선례다. 남은 문제는 관측/log/consistency와 raw MOIS
+  debug read, `/metrics`, 비-Docker profile, public/service opt-out을 한 정책으로 검증하지 않는 점이다.
 - **결정**:
   1. 모든 Starlette route와 WebSocket을 `public-unauthenticated`(liveness/version) /
      `public-keyed` / `service` / `operator` / `debug` / `metrics` 중 하나로 분류하는
@@ -90,23 +106,24 @@ provider×dataset×scope datasets 운영 화면(#698).
   2. **production profile은 fail-closed**: service/admin/operator secret이 없거나 debug live가
      인증 없이 켜져 있으면 **기동 자체가 실패**한다. `local-dev` fallback은 non-production
      profile에서만 허용.
-  3. legacy `curated`/`ops`/`ops_live`/`ops_logs`/`dagster` 라우터에 즉시 게이트 배선(C6b 삭제
-     전까지의 방어). legacy live ETL을 유지하면 `etl_live_preview_enabled`를 실제 분기에 연결하고,
-     C6b에서 fixture-only로 수렴하면 오해를 만드는 설정과 live route를 함께 삭제한다.
-  4. `/metrics`는 scrape identity 또는 management 경계로 제한. WebSocket은 짧은 수명 서명
-     ticket / same-site session / BFF proxy 중 하나로 인증 후 accept.
+  3. 현재 남은 `/ops/{metrics,system-logs,api-call-logs,consistency/*}`와
+     `/debug/mois-license/*`를 operator/debug 정책에 배선하고 raw provider payload는 operator
+     projection으로만 반환한다. 삭제된 legacy command/live ETL은 되살리지 않는다.
+  4. `/metrics`는 scrape identity 또는 management 경계로 제한한다. WebSocket은 #725의
+     same-origin BFF → HMAC subprotocol ticket → DB nonce 단일 소비 → bounded lease를 정본으로
+     유지하고 route matrix가 이 예외 인증도 검사한다.
   5. **물리적 3-app/listener 분리는 하지 않는다**(측정 후 재검토) — 단일 app + 그룹별 의존성
      주입 + **공개 경로 전용 read-only DB role**로 동일한 실질을 달성한다.
 - **근거**: 위협의 실체는 "분리 부재"가 아니라 fail-open 기본값과 배선 누락이다. 단일 N150
   1~2인 운영에서 3개 배포 유닛은 §0-3(단순성) 위반.
-- **영향**: `app.py`/`auth.py`/`settings.py` 재작성, route matrix 생성기+CI 게이트 신설,
-  runbook의 노출 전제 갱신.
+- **영향**: `app.py`/`auth.py`/`settings.py`의 잔여 fail-open 제거, route matrix 생성기+CI 게이트,
+  PinVi server-to-server operator principal(D-11/F-17), runbook의 노출 전제 갱신.
 
 ### D-2. actor 정본 — 인증 principal에서만 파생
 
-- **컨텍스트**: F-4. canonical request/cancel은 principal actor를 쓰기 시작했지만 legacy feature·
-  auth-event·일부 schedule write는 body `operator`/`actor`를 감사 기록에 저장해 신뢰 CIDR 내
-  위조가 가능하다.
+- **컨텍스트**: F-4. canonical pipeline·schedule·curation collection은 principal actor를 쓰지만
+  legacy feature·curated status·auth-event는 body `operator`/`actor`를 감사 기록에 저장해 신뢰
+  경계 안에서 위조가 가능하다.
 - **결정**: 모든 write의 actor는 인증 principal(AdminProxyContext 등)에서만 파생한다. request
   body의 operator/actor 필드는 **스키마에서 제거**한다. 비동기 검수는 제출 actor와 승인 actor를
   각각 principal에서 보존한다.
@@ -240,26 +257,35 @@ provider×dataset×scope datasets 운영 화면(#698).
      CI 실패.
 - **영향**: features/public_views/curated 라우터 재작성, user-client 재생성, PinVi typed 소비.
 
-### D-10. write 안전성 — Idempotency-Key ledger + row_revision/If-Match
+### D-10. write 안전성 — Idempotency-Key protocol + domain ledger + row_revision/If-Match
 
-- **컨텍스트**: F-2·F-14. #701이 direct provider-dataset의 active scope 유일성과 동일 계획 재사용은
-  해결했지만, 응답 유실 뒤 terminal 결과 replay와 다른 command route의 재시도 계약은 없다. 동시
-  수정 덮어쓰기 방지도 없고 기존 컬럼(generation·data_version·TripDayPoi.version)은 validator로
+- **컨텍스트**: F-2·F-14. #701은 active scope single-flight를, 0054/#691은 feature-update create와
+  schedule command의 terminal replay·불명 결과 claim을, #727은 refresh-policy CAS를 해결했다.
+  이 구현들은 멱등성의 도메인별 상태가 서로 다름을 입증한다. 아직 다른 command route와 Feature
+  행의 동시 수정 계약은 없고 기존 generation/data_version/TripDayPoi.version은 validator로
   부적합하다.
 - **결정**:
-  1. command POST: `(principal, route, Idempotency-Key)` UNIQUE ledger + canonical request hash.
-     같은 key·같은 body는 저장된 결과 replay, 같은 key·다른 body는 409.
-  2. PATCH/DELETE: **`row_revision`**(신설, 모든 write에서 단조 증가) 기반 `If-Match` — 누락
+  1. 모든 재시도 가능 command는 `(principal, operation, Idempotency-Key)` + canonical request
+     hash를 공통 HTTP 계약으로 사용한다. 같은 key·같은 body는 저장된 결과를 replay하고, 같은
+     key·다른 body는 409다.
+  2. **저장소는 도메인 lifecycle이 소유한다.** 0054의
+     `feature_update_request_idempotency`와 schedule audit/active-claim/resolution을 유지하며,
+     그 위에 중복 범용 ledger를 만들지 않는다. 동일한 단순 lifecycle을 공유하는 command가
+     실제로 둘 이상일 때만 공용 table/helper를 도입한다. fingerprint·problem code·header 생성은
+     공통 유틸리티로 통일할 수 있다.
+  3. PATCH/DELETE: **`row_revision`**(신설, 모든 Feature write에서 단조 증가) 기반 `If-Match` — 누락
      428, stale 412. 비동기 검수는 승인 시점에 base revision 재검사.
-  3. 우선 도입 표면: 갱신요청/변경요청 create(중복 실발생) → correction PATCH/DELETE → 조회
-     ETag(D-9-8) 순.
-  4. PinVi: 모든 재시도에 동일 Idempotency-Key 유지, POI 전파는 outbox
+  4. 전개 순서: 이미 완료된 canonical 갱신요청/schedule은 회귀 기준선으로 고정 → 남은
+     create/command route inventory → correction PATCH/DELETE → 조회 ETag(D-9-8). #727 policy
+     revision은 Feature row revision이 아니라 해당 resource의 선례로 유지한다.
+  5. PinVi: 모든 재시도에 동일 Idempotency-Key 유지, POI 전파는 outbox
      sequence(+restore epoch)를 generation으로 사용(`TripDayPoi.version` 미신뢰 — F-14),
      relay 상태·주기 reconciliation job 포함. cache-target 동기화는 **critical path에서 분리**.
-  5. 현행 `(provider,dataset_key,sync_scope)` active partial UNIQUE와 동일 계획 재사용은 **업무
+  6. 현행 `(provider,dataset_key,sync_scope)` active partial UNIQUE와 동일 계획 재사용은 **업무
      불변식으로 유지**한다. ledger는 HTTP key/body/result replay를 담당하므로 둘은 직교한다.
      같은 active scope·다른 계획의 409와 같은 Idempotency-Key·다른 body의 409를 별도 계약으로 둔다.
-- **영향**: idempotency ledger 테이블, 전 write 라우터, PinVi client/relay.
+- **영향**: 기존 도메인 ledger 보존, 남은 write 라우터의 protocol 전개, Feature row revision,
+  PinVi client/relay. "하나의 범용 table" 자체는 목표가 아니다.
 
 ### D-11. cutover 방식 — shadow vNext + write-fence 순차 전환
 
@@ -276,8 +302,11 @@ provider×dataset×scope datasets 운영 화면(#698).
   4. **shadow vNext 구축**: UUID 컬럼+alias 등 신규 구조를 side-by-side로 backfill, 새 구조에서
      visibility matrix·계약·planner-default EXPLAIN·p95를 **먼저** 통과.
   5. **소비자 선전환**: PinVi의 legacy admin `ops/*` 호출자를 canonical datasets/pipeline으로
-     옮기고 consumer contract test를 통과한 뒤에만 C6b가 legacy route를 삭제한다. public 계약
-     변경도 새 응답을 소비하는 PinVi 배포를 준비하고 runtime preflight를 통과한다.
+     옮기고 consumer contract test를 통과한 뒤에만 legacy route를 삭제한다. 이 순서는 #724에서
+     실제로 위반됐다(F-17). 즉시 복구는 삭제 route/shim 부활이 아니라 PinVi caller 전환과
+     BFF secret 공유가 아닌 명시적 service/operator principal 설치를 우선한다. 이미 최신 KTM이
+     배포돼 운영 화면이 필요하면 코드 alias 추가 대신 검증된 pre-#724 image rollback을 임시
+     운영 선택지로 둔다. public 계약도 새 응답을 소비하는 PinVi 배포를 먼저 준비한다.
   6. **write-fence cutover**: maintenance window에 쓰기를 멈추고(fence) 마지막 delta 반영 →
      KTM·PinVi를 순차 전환(원자 아님 — 5단계 절차) → **rollback window 동안 write-fence를
      유지하거나 forward journal replay를 준비**(F-12: 이것 없이는 rollback이 데이터를 유실한다).
@@ -288,7 +317,8 @@ provider×dataset×scope datasets 운영 화면(#698).
 
 ### D-12. DDL·성능 규율 — 변경 유형별 고정 절차
 
-- **컨텍스트**: F-11(0051 additive, 0052 clean-cut, 0053 lock-protected additive 공존이 실증),
+- **컨텍스트**: F-11(0051 additive, 0052 clean-cut, 0053·0057 lock-protected additive,
+  0054~0056 소형 ops DDL 공존이 실증),
   F-8(성능 게이트 부재), F-10(metadata drift).
 - **결정**:
   1. DDL 절차를 유형별로 고정한다:
@@ -322,9 +352,9 @@ provider×dataset×scope datasets 운영 화면(#698).
 | 공개 정본 | `public_features` VIEW/projection (`published∧active∧valid`) | base table의 동일 술어 partial index, 전 공개 payload SQL이 VIEW만 사용 | D-3 |
 | notice | `notice_states`: typed lineage + `valid_during tstzrange` + `is_current` | current partial UNIQUE, range GiST, hot path에서 JSON cast/anti-join 제거 | D-9-7 |
 | weather/price | typed history(bitemporal) + `current_*_summary` | tuple UNIQUE(NULLS NOT DISTINCT, CONCURRENTLY), range·payload CHECK, source/kind FK, BRIN-on-time | D-8 |
-| operation | `ops.import_jobs`가 provider load와 feature refresh lifecycle 정본(0050~0053) + `sync_scope`·dispatch intent·active partial UNIQUE 구현, `feature_update_requests`는 입력·감사·generation companion | 기존 identity UNIQUE/트리거·registry·reconcile 유지, provider_datasets FK 후속 정렬 | D-5, D-10, ADR-064 계열 |
+| operation | `ops.import_jobs`가 provider load와 feature refresh lifecycle 정본(0050~0057) + typed/exact `sync_scope`·dispatch intent·active partial UNIQUE·append-only event history 구현, `feature_update_requests`는 입력·감사·generation companion | 기존 identity UNIQUE/트리거·registry·reconcile 유지, provider_datasets FK 후속 정렬 | D-5, D-10, ADR-064 계열 |
 | curation | `curation_collections/items` **단일 write model** — legacy `curated_features`·단방향 trigger·legacy route는 제거, 후보는 `theme_feature_candidates` 분리 | archive 상태·`archived_at` 결합 CHECK | F-16 |
-| idempotency | `idempotency_ledger`: (principal, route, key) UNIQUE + request hash + 결과 | replay/409 판정 | D-10 |
+| idempotency | `feature_update_request_idempotency` + schedule command audit/active claim/resolution처럼 lifecycle별 append-only 저장소 | `(principal, operation, key)`·request hash·terminal replay/409. 같은 lifecycle이 검증될 때만 공용 저장소 | D-10 |
 | POI target | canonical point 1개 + generated 파생, membership/provider-scope 분리. 현행 external-system identity·exact scope 검증 위에 `source_generation` 단조 적용을 보강 | external identity UNIQUE, generation 비교 적용 | D-10·§구판 P1-8 |
 
 ## 4. 목표 REST API
@@ -357,8 +387,10 @@ operator-api  (admin principal, If-Match/Idempotency-Key)
 ```
 
 현재 `main`에서 `/v1/features/batch`를 PinVi가 실제 소비하고, canonical
-`/v1/ops/datasets`·`/v1/ops/pipeline` backend와 `/ops/datasets` UI가 구현돼 있다. 위 표는 이
-기반을 유지하면서 응답 state/revision과 service/operator 경계를 교체하는 **목표 계약**이다.
+`/v1/ops/datasets`·`/v1/ops/pipeline` backend와 두 admin UI, exact-scope 이력, ops-live ticket이
+구현돼 있다. 위 표는 이 기반을 유지하면서 응답 state/revision과 service/operator 경계를
+교체하는 **목표 계약**이다. 단, PinVi admin server는 삭제된 legacy ops 경로를 아직 호출하고
+canonical operator principal도 없으므로 현재 두 저장소 최신 main 조합은 운영 계약이 아니다(F-17).
 `features:batchGet` 같은 우월성 없는 경로 개명은 하지 않고 기존 resource path에서 응답 계약만
 clean-cut한다. PinVi batch client는 service token 설정 시 이미 해당 header를 보내므로 production에서
 이를 필수화하고 public-key/fail-open fallback을 제거하며 5-state envelope를 함께 소비하게 한다.
@@ -375,9 +407,10 @@ revision), `CURSOR_QUERY_MISMATCH`, rate quota는 edge/app 중 정본 위치를 
 
 - **단일 FastAPI app 유지** + route policy matrix(D-1) + 그룹별 dependency + 공개 전용 read-only
   DB role. 물리 분리는 측정 후.
-- canonical datasets/pipeline은 schema/service/query 분리, exact scope, operation registry와
-  reconcile까지 구현된 **유지 기준선**이다. C2R·C3a~C3e에서 확립된 패턴을 나머지 표면에
-  적용하고, 삭제 예정 legacy 라우터의 공유 로직은 중립 모듈로 이식한 뒤 C6b에서 삭제한다.
+- canonical datasets/pipeline은 schema/service/query 분리, exact scope, operation registry,
+  reconcile, append-only command audit까지 구현된 **유지 기준선**이다. C6b clean-cut은 끝났으므로
+  legacy alias를 되살리지 않고, PinVi caller를 canonical 계약과 명시적 service/operator principal로
+  전환한다. 이후 이 패턴을 나머지 표면에 적용한다.
 - upsert 경로: whole-row 동결 CASE 제거(D-7)로 `_UPSERT_FEATURE_SQL` 대폭 단순화. bbox SQL:
   candidate 술어 단일화 + LATERAL→summary JOIN(D-8·D-9)으로 이중 SQL 복제 제거.
 - 공개 판정·notice 판정·상태 전이는 각각 **한 곳**(view/typed table/상태 머신)으로 수렴 —
@@ -393,30 +426,29 @@ revision), `CURSOR_QUERY_MISMATCH`, rate quota는 edge/app 중 정본 위치를 
 admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 이미 구현한 **본 재설계의
 유지 기준선**이다. 최신 상태와 남은 순서는 다음과 같다.
 
-- **완료 기반**: C3e-B1/C/B2/B3/I1/I2는 #709/#710/#711/#713/#714/#715로 registry·REST 실DB
-  증거·provider guard·양방향 sensor/reconcile·n150 종결까지 끝났다. #701은 Alembic 0053과
-  typed `sync_scope`, active
-  operation 재사용을 병합했고, #698은 provider×dataset×scope datasets API/UI와 C4/C4R을 끝냈다.
-  0051/0052는 n150에 적용·검증됐으며 더 이상 선행 배포 task가 아니다.
-- **현재 잔여**: C5 pipeline frontend와 C7A same-origin live 인증을 병행한 뒤 C6a 호출자 링크
-  재배선 → **PinVi admin HTTP caller·consumer contract test 전환** → C6b legacy 삭제 → C7A query
-  invalidation 결선 → C7 live E2E/n150 순으로 진행한다. PinVi 전환은 별도 저장소 PR이어도 C6b의
-  필수 선행 gate이며, KTM 내부 링크만 바꾼 상태에서는 C6b를 시작하지 않는다. #691은 이 기준선에
-  맞춘 재작업 대상이고, C4의 구 #683은 #698로 대체돼 닫혔다.
-- **0053 운영 gate**: repository head와 migration 검증은 완료됐지만 n150 적용 증거는 아직 없다.
-  C7 전에 production clone에서 lock 획득·보유 시간, WAL, 전후 checksum을 측정하고 maintenance
-  적용·external scope live 증거를 남긴다. 30초는 lock **획득** 상한이지 전체 중단 상한이 아니다.
-- **겹침 조정**: T-VN-02의 WebSocket 인증은 C7A에 흡수하고 route matrix/CI 분류만 별도 소유한다.
-  T-VN-03은 C6b 전에 실제 노출되는 legacy route의 최소 방어만 허용하며, 먼저 삭제될 route에
-  게이트를 중복 구현하지 않는다. 나머지 공개 API·PinVi Wave 0만 T-ADM과 독립 병행한다.
+- **완료 기반**: C3e-B1/C/B2/B3/I1/I2(#709/#710/#711/#713/#714/#715), typed scope와 active
+  operation 재사용(#701), datasets API/UI(#698), C5 pipeline(#691), C6a/b(#722/#724), C7A
+  ops-live 인증(#725), 감사 후속과 C7B exact-scope API/UI(#723·#726~#729)가 병합됐다.
+- **현재 잔여**: C6b의 소비자 선전환 누락을 `T-ADM-C6c`로 먼저 복구한다. PinVi admin caller와
+  contract test를 canonical datasets/pipeline으로 옮기고 explicit service/operator principal을
+  설치한 뒤, 그 두 저장소 commit 조합으로 인증·응답 smoke를 통과해야 한다. 그 전에는
+  `T-ADM-C7` n150 배포·live E2E를 시작하지 않는다.
+- **0053~0057 운영 gate**: repository head와 migration 검증은 완료됐지만 최신 migration의 n150
+  적용 증거는 아직 없다. C7에서 production clone의 lock 획득·보유 시간, WAL, 전후 checksum을
+  측정하고 maintenance 적용·external/exact scope live 증거를 남긴다. 30초는 lock **획득**
+  상한이지 전체 중단 상한이 아니다.
+- **겹침 조정**: T-VN-02는 #725의 WebSocket 인증을 재사용하고 route matrix/CI 분류만 소유한다.
+  T-VN-03은 삭제된 legacy command가 아니라 현재 노출된 관측/log/consistency와 raw MOIS debug
+  read를 방어한다. T-ADM-C6c가 cross-repo 복구의 단일 소유자다.
 
 ### 6.2 Wave 0 — 즉시 (P0, 테이블 변경 0 — 유일한 DDL은 T-VN-04의 CREATE VIEW, 전부 가역)
 
 | ID | task | 내용 | 관련 |
 |---|---|---|---|
+| T-VN-00 | PinVi admin 계약 복구 | `T-ADM-C6c`와 동일 범위: 삭제된 ops caller 0건, canonical datasets/pipeline 전환, BFF secret 공유 없는 service/operator principal, 양 저장소 contract test 후 C7 허용 | D-1·D-11, F-17 |
 | T-VN-01 | fail-closed 전환 | production profile secret 필수·기동 거부, local-dev fallback 격리 | D-1, F-3 |
-| T-VN-02 | route policy matrix | 전 route/WS 분류 생성기 + 미분류 CI 실패 + `/metrics` 관리 경계. WS 인증 구현은 C7A를 재사용하고, legacy ETL은 setting 실배선 또는 C6b 삭제 중 하나로 수렴 | D-1 |
-| T-VN-03 | legacy 라우터 게이트 배선 | C6b 전에 남아 실제 노출되는 curated/ops/ops_live/ops_logs/dagster만 즉시 방어. 먼저 삭제되는 route에는 중복 구현 금지 | D-1 |
+| T-VN-02 | route policy matrix | 전 route/WS 분류 생성기 + 미분류 CI 실패 + `/metrics` 관리 경계. WS는 #725의 ticket 인증을 재사용 | D-1 |
+| T-VN-03 | 잔여 운영 read 게이트 | 현재 노출되는 ops metrics/logs/consistency와 raw MOIS debug read를 operator/debug 경계로 이동. 삭제된 command/live ETL은 부활 금지 | D-1 |
 | T-VN-04 | 공개 predicate 통일(1차) | 기존 상태 위에 `public_features` view(CREATE VIEW만 — 전용 인덱스는 T-VN-34) + 전 공개 SQL 교체 — **양방향 오분류(F-1) 동시 해소** | D-3 |
 | T-VN-05 | raw payload 경계 | 공개 DTO에서 raw 계열(`raw_data`·`raw_payload_hash`·`source_record_key`·**`mois_detail` passthrough**) 제거, observations를 operator 표면으로, batch `trip_card` 고정 | D-9 |
 | T-VN-06 | notice 방어적 cast | 오염 row 1건의 공개 read 500 차단(완화 — 재설계는 W2) | D-9-7, F-9 |
@@ -428,8 +460,8 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 | ID | task | 내용 | 관련 |
 |---|---|---|---|
 | T-VN-11 | service batch item-state | 5-state envelope + revision (503≠missing) | D-3 |
-| T-VN-12 | Idempotency-Key ledger | create 계열 key/body/result replay·409. #701의 active-scope single-flight는 업무 불변식으로 유지하고 ledger는 terminal HTTP replay를 담당(동일 목적 ledger 중복만 금지) | D-10 |
-| T-VN-13 | row_revision + If-Match | 신설 revision, correction PATCH/DELETE, 이후 ETag/304 | D-10, D-9-8 |
+| T-VN-12 | Idempotency-Key protocol 전개 | 0054의 도메인 ledger를 회귀 기준선으로 보존하고 남은 command에 key/body/result replay·409를 전개. lifecycle이 다른 저장소를 범용 table 하나로 합치지 않음 | D-10 |
+| T-VN-13 | row_revision + If-Match | Feature용 revision 신설, correction PATCH/DELETE, 이후 ETag/304. #727 policy CAS는 resource-specific 선례로만 재사용 | D-10, D-9-8 |
 | T-VN-14 | 지도 completeness | mode/truncated/coverage/cluster_key + include_geometry serialization화 + candidate 술어 단일화 + `ST_Intersects` | D-9 |
 | T-VN-15 | search 계약 | include_total 실전달 + cursor fingerprint/version | D-9 |
 | T-VN-16 | weather batch + 부모 404 | set-based batch, bitemporal 파라미터, PinVi N+1 제거 | D-8·D-9 |
@@ -476,13 +508,14 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 ### 6.7 공통 규율
 
 - PR 1개=task 1개, 적대적 리뷰(2인 또는 지시된 인원)→CI green→merge. migration 포함 PR은
-  단일 head·번호 경합 확인(현 head `0053_update_scope_dispatch`; #701 병합 완료).
+  단일 head·번호 경합 확인(현 head `0057_import_job_event_scope`; #729 기준).
 - **T-VN task의 수용 기준 정본**: 각 task가 참조하는 D-결정 본문 + §8 검증 게이트다. task 표의
   "내용" 칸은 요약이며 계약을 재정의하지 않는다. 특히 T-VN-21은 §8.3 계층 3단 전부,
   T-VN-31은 §3~§5의 freeze 산출물(ADR·OpenAPI diff·DDL 테스트) 존재가 완료 조건.
 - 각 wave 종료 시 §8 검증 게이트 통과를 확인하고 journal/resume 갱신.
-- Wave 0·1의 공개 API·PinVi 범위는 T-ADM과 병행할 수 있다. WS 인증은 C7A, legacy route 삭제는
-  C6b를 단일 소유자로 삼고 T-VN에서 같은 동작을 중복 구현하지 않는다.
+- `T-ADM-C6c`/T-VN-00은 C7의 선행 gate이며 양 저장소의 caller path·principal·응답 계약을 함께
+  고정한다. Wave 0·1의 다른 공개 API·PinVi 범위는 T-ADM과 병행할 수 있다. WS 인증은 #725,
+  legacy clean-cut은 #724를 기준선으로 삼고 같은 동작을 중복 구현하거나 alias를 부활시키지 않는다.
 
 ## 7. 후속 반영 매핑표 — 이 문서 → 실제 문서 전개
 
@@ -499,14 +532,14 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 | D-11·D-12 | `docs/adr/0NN-cutover-and-ddl-discipline.md` | 신규 ADR; `docs/deploy.md`·runbook에 write-fence/rollback 조건 추가 |
 | §3 | `docs/architecture/postgres-schema.md` | "목표(vNext)" 섹션 신설(현행 서술과 구분) |
 | §4 | `docs/architecture/rest-api.md` + `docs/integration-map.md` | 목표 표면 섹션 신설; PinVi 계약 변경분은 integration-map에 cutover 조건부로 |
-| §6 | `docs/tasks.md` + PinVi cross-repo consumer task | `T-VN-*` 블록 신설, C6b 전 PinVi admin HTTP caller/contract cutover를 양 저장소에 mirror, tasks-rule 준수 |
+| §6 | `docs/tasks.md` + PinVi cross-repo consumer task | `T-VN-*` 블록 신설, `T-ADM-C6c` PinVi admin HTTP caller/auth contract 복구를 양 저장소에 mirror, tasks-rule 준수 |
 | §8 | `docs/architecture/performance.md` + CI workflow | 게이트 정의 이관 |
 | 전체 | `docs/journal.md`·`docs/resume.md` | 반영 작업 자체의 엔트리 |
 
 반영 시 주의: (1) ADR 번호는 반영 시점 README의 다음 후보 사용. (2) 기존 ADR을 supersede할 때
-원문을 삭제하지 말고 상태·후속 포인터만 갱신. (3) tasks.md의 T-ADM 블록은 건드리지 않고 T-VN
-블록을 별도 추가. (4) 본 문서는 반영 완료 후에도 "재설계 정본"으로 유지하며, 반영 PR들이 본
-문서의 해당 섹션에 반영 PR 번호를 역기입한다.
+원문을 삭제하지 말고 상태·후속 포인터만 갱신. (3) T-VN은 별도 블록으로 전개하되 이미 발생한
+cross-repo 차단은 `T-ADM-C6c`와 양 저장소 task에 함께 mirror. (4) 본 문서는 반영 완료 후에도
+"재설계 정본"으로 유지하며, 반영 PR들이 본 문서의 해당 섹션에 반영 PR 번호를 역기입한다.
 
 ## 8. 검증 게이트
 
@@ -527,9 +560,11 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 - opaque ID byte-for-byte 보존, cursor mismatch 거부, `include_total=false`에서 COUNT 0회,
   미구현 옵션은 OpenAPI에 없음.
 - active scope 동시 생성은 operation 1개로 수렴하고 같은 계획만 재사용하며 다른 계획은 409.
-- terminal 뒤에도 같은 Idempotency-Key·같은 body는 저장된 동일 결과를 replay하고, 같은 key·다른
-  body는 409. stale If-Match는 412, 조건부 GET은 304.
+- terminal 뒤에도 같은 Idempotency-Key·같은 body는 각 도메인 ledger에서 저장된 동일 결과를
+  replay한다. 같은 key·다른 body는 409, stale If-Match는 412, 조건부 GET은 304다.
 - route policy matrix에 미분류 route 0건, production 기동이 secret 없이는 실패.
+- PinVi production caller에 삭제된 ops path 0건. canonical datasets/pipeline 호출은 명시적
+  service/operator principal로 성공하고, principal 없음·잘못된 scope는 typed 401/403/422로 닫힌다.
 
 ### 8.3 성능 (계층)
 
@@ -545,8 +580,8 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 본 문서의 결정 근거가 된 왕복 리뷰 원문은 PR #702(§1~10 원 리뷰), #703(§11 5관점 검증 —
 scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱등성·UNIQUE NOT VALID 판정),
 #705·#706(0052 clean-cut·C3e 재분할), #707(§14 — 양방향 오분류·write-fence·DDL 유형표)에
-보존돼 있고 #708이 이를 현재 구조로 전면 재작성했다. 이 재검증판의 최신 구현 근거는
-#709/#710/#711/#713/#714/#715(canonical registry·REST·guard·reconcile·n150 종결),
-#701(0053 typed scope와 active operation 재사용), #698(datasets 3원 scope API/UI)이다. 세부
-논증은 해당 PR diff와
+보존돼 있고 #708이 이를 현재 구조로 전면 재작성했다. #717은 #698/#701과
+#709/#710/#711/#713/#714/#715를 1차 재대조했다. 이번 2차 재검증은 #691(C5),
+#721~#729(C6a/b·C7A·감사 후속·C7B)와 PinVi `origin/main@48085afb`의 실제 caller/test를 함께
+대조했다. 세부 논증은 해당 PR diff와
 `docs/tasks-done.md`의 완료 증거를 함께 참조한다.
