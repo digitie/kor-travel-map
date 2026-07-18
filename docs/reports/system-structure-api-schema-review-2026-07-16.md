@@ -1,8 +1,8 @@
 # kor-travel-map vNext 재설계 정본 — 설계 결정·목표 구조·실행 계획
 
-> 작성일: 2026-07-18 (최신 코드 2차 재검증판)
+> 작성일: 2026-07-18 (최신 코드 3차 재검증판)
 > 기준: KTM `origin/main@13eb8d40` · PinVi `origin/main@48085afb`
-> 반영: PR #730, merge commit `d0609226` (CI 8개 게이트 통과)
+> 반영: PR #730(2차, merge `d0609226`) → PR #732(3차, 본 판)
 > 전신: 본 문서는 PR #702(원 리뷰 §1~10) → #703(§11 Claude 다관점) → #704(§12 Codex 재검토
 > 병합본 위 §13 대질·수렴) → #707(§14 Codex 재보강)의 **왕복 리뷰 4회를 소화한 최종 정본**이다.
 > 왕복 세부(§11~§14의 개별 논증·정정 이력)는 git 이력(위 PR들)에 보존되며, 본 문서는 그
@@ -53,20 +53,20 @@ KTM 내부 green만으로 cross-repo 계약이 보존됐다고 간주하지 않�
 
 | # | 확정 판정 | 근거 요지 |
 |---|---|---|
-| F-1 | **공개 상태 오분류는 양방향이다**: provider-retired(inactive+deleted_at)는 공개/서비스 batch에서 `missing`으로 은닉되고, admin-inactive·draft·broken(deleted_at 미세팅)은 `found`로 노출된다 | `_is_public_feature`가 hidden/deleted 2종+`deleted_at IS NULL`만 검사(`features.py:64,488-493`); provider retire는 deleted_at 세팅(`feature_repo.py:1491-1492`), admin deactivate는 미세팅(`admin_feature_repo.py:1365-1379`) |
+| F-1 | **공개 상태 오분류는 양방향이다**: provider-retired(inactive+deleted_at)는 공개/서비스 batch에서 `missing`으로 은닉되고, admin-inactive·draft·broken(deleted_at 미세팅)은 `found`로 노출된다 | `_is_public_feature`가 hidden/deleted 2종+`deleted_at IS NULL`만 검사(`features.py:65,489-494`); provider retire는 deleted_at 세팅(`feature_repo.py:1491-1492`), admin deactivate는 미세팅(`admin_feature_repo.py:1365-1379`) |
 | F-2 | **HTTP replay는 두 운영 command군에서 구현됐지만 범용 계약과 Feature revision은 남았다**: 0054는 feature-update create에 `(actor, Idempotency-Key)` append-only ledger·request fingerprint·terminal replay/불일치 409를, schedule command에 append-only audit·active claim·불명 결과 수동 해소를 구현했다. #701의 exact-scope active UNIQUE는 업무 single-flight로 계속 직교하며, #727의 policy `revision` CAS도 갱신 정책 한정이다. 다른 command route와 Feature 행에는 같은 replay/If-Match 계약이 없고, `data_version`은 provider-owned 행에서 0이라 ETag validator가 될 수 없다 | `0054_dagster_schedule_audit.py:24-260`; `ops_pipeline.py:1732-2008`; `0056_provider_refresh_policy_revision.py:23-37`; `feature_repo.py:235-240` |
-| F-3 | **운영 인증은 크게 좁아졌지만 route policy는 아직 부분적이다**: #724가 legacy command 28개와 live ETL을 삭제했고 #725가 ops-live에 same-origin BFF 발급 HMAC ticket·DB nonce 단일 소비·60초 lease를 설치했다. Docker entrypoint도 admin proxy secret을 fail-closed한다. 반면 `/v1/ops/{metrics,system-logs,api-call-logs,consistency/*}`는 여전히 무의존 mount이고, **`/v1/debug/mois-license/*`는 무게이트로 `source_records.raw_data`를 반환**하며 `/metrics`도 인증이 없다. 앱 settings 자체는 service/admin/public key 미설정 시 통과하므로 비-Docker production profile과 미분류 route CI가 없다 | `app.py:396-398,523-666`; `ops_live.py:1020-1085`; `mois_detail.py:1-118`; `auth.py:115-183`; `docker/api-entrypoint.sh:18-30` |
-| F-4 | **canonical ops actor는 principal로 수렴했지만 legacy admin write가 남았다**: pipeline request/cancel/schedule·curation collection write는 `context.actor`를 쓴다. 반면 admin Feature create/patch/delete/review/deactivate, legacy curated select/unselect, admin auth-event는 body `operator`/`actor`를 감사 actor로 저장하고 PinVi client도 이 필드를 계속 전송한다 | `ops_pipeline.py:1369-1992`; `curations.py:865-1065`; `admin_features.py:853-1011`; `curated.py:1123-1174`; `admin_auth.py:187-202`; PinVi `kor_travel_map_admin.py:260-319` |
+| F-3 | **운영 인증은 크게 좁아졌지만 route policy는 아직 부분적이다**: #724가 legacy command 28개와 live ETL을 삭제했고 #725가 ops-live에 same-origin BFF 발급 HMAC ticket·DB nonce 단일 소비·60초 lease를 설치했다. Docker entrypoint도 admin proxy secret을 fail-closed한다. 반면 `/v1/ops/{metrics,system-logs,api-call-logs,consistency/*}`는 여전히 무의존 mount이고, **`/v1/debug/mois-license/*`는 무게이트로 `source_records.raw_data`를 반환**하며 `/metrics`도 인증이 없고, 공개 read 중 legacy `/v1/curated-*`만 `require_public_api_key` 의존 없이 mount돼 `public_api_key_required=True`여도 키 없이 열린다(`app.py:548`). 앱 settings 자체는 service/admin/public key 미설정 시 통과하므로 비-Docker production profile과 미분류 route CI가 없다 | `app.py:396-398,523-666`; `ops_live.py:1020-1085`; `mois_detail.py:1-118`; `auth.py:115-233`; `docker/api-entrypoint.sh:24-34` |
+| F-4 | **canonical ops actor는 principal로 수렴했지만 legacy admin write가 남았다**: pipeline request/cancel/schedule·curation collection write는 `context.actor`를 쓴다. 반면 admin Feature create/patch/delete/review/deactivate, legacy curated select/unselect, admin auth-event에 더해 data-integrity 이슈 액션, offline upload 생성·검증, dedup/enrichment 검수도 body `operator`/`actor`/`created_by`/`reviewed_by`를 감사 actor로 저장한다. PinVi client는 이 중 admin Feature·curated·auth-event·이슈 액션·dedup 검수에서 해당 필드를 계속 전송한다(enrichment 검수·offline upload는 PinVi 미호출) | `ops_pipeline.py:1369-1992`; `curations.py:865-1065`; `admin_features.py:853-1011`; `curated.py:1123-1174`; `admin_auth.py:187-202`; `admin_issues.py:437,567,616`; `offline_uploads.py:780,838,1146,1165`; `dedup_review.py:432,464`; `enrichment_review.py:381`; PinVi `kor_travel_map_admin.py:260-319,437-455,488-502` |
 | F-5 | **Feature ID(64-bit SHA-1 prefix)는 정본 identity로 부적합**: 코드 주석의 "10^9건 충돌 ~3e-11"은 birthday bound(≈2.7%) 오인. 게다가 bjd/category가 해시 입력이라 보정만으로 재키잉 발생(코드가 자인) | `ids.py:68-70,149-154` |
 | F-6 | **source lineage denorm 미정합**: head-pointer deferrable FK는 존재하나, `source_records`의 denorm identity 4튜플(provider/dataset/type/id)이 부모 entity와 일치하도록 강제하는 composite FK는 없다(entity A에 provider B record 연결 가능) | `models.py:431-440,519-533` |
 | F-7 | **weather/price 비대칭**: weather에는 semantic UNIQUE·source-record FK·`valid_from<=valid_until` CHECK가 없다. price는 semantic UNIQUE·source-record FK·nonnegative CHECK를 보유한다. PG16에서 UNIQUE는 `NOT VALID` 불가 — `CREATE UNIQUE INDEX CONCURRENTLY`(+writer conflict target 배포와 **같은 cutover**)로 도입해야 한다 | `0017` vs `0034` DDL; PG16 문법 사실 |
-| F-8 | **공간·조회 결함**: `include_geometry`가 응답이 아닌 **결과집합**을 바꿈(EXPLAIN 재현 2220→2221행), `&&`-only MBR false positive 실재, bbox LATERAL이 kind 무관 매행 실행, GiST 6개(자동 full 3 + 수동 partial 3)로 write ~1.6×, `include_total=false`여도 COUNT 무조건 실행, cursor가 query 파라미터 미포함(재사용 시 조용한 누락/중복) | `feature_repo.py:689,828,963,3534,3766-3788`; `models.py:200-217,283-293`; scratch EXPLAIN 실측 |
+| F-8 | **공간·조회 결함**: `include_geometry`가 응답이 아닌 **결과집합**을 바꿈(EXPLAIN 재현 2220→2221행), `&&`-only MBR false positive 실재, bbox LATERAL이 kind 무관 매행 실행, GiST 6개(자동 full 3 + 수동 partial 3)로 write ~1.6×, `include_total=false`여도 COUNT 무조건 실행, cursor가 query 파라미터 미포함(재사용 시 조용한 누락/중복) | `feature_repo.py:689,828,963,3534,3766-3788`; `models.py:204-221,288-297`; scratch EXPLAIN 실측 |
 | F-9 | **notice cast 취약**: `detail->>'valid_end_time'` timestamptz 직접 cast — 오염 row 1건이 모든 공개 read를 500으로 만들 수 있고, lineage anti-join이 모든 공개 read의 상시 hot-path 비용 | `feature_repo.py:533-539,638` |
 | F-10 | **Alembic metadata ≠ schema**: weather/price/log/api-key/auth-event 등 table이 `models.metadata`에 없고 `include_object` 콜백도 없어 clean DB `alembic check`가 실패(PostGIS object까지 drop 후보) | `env.py:54,65,82` |
 | F-11 | **migration 방식은 변경 성격별로 더 분화됐다**: 0051은 additive, 0052는 maintenance clean-cut, 0053·0057은 additive shape/backfill에 30초 획득 상한의 `ACCESS EXCLUSIVE`와 trigger/index 원자 교체를 결합했다. 0054·0055는 소형 ops table/append-only trigger 신설, 0056은 소형 table의 revision column+CHECK다. "전부 additive"도 "전부 clean-cut"도 아니며 **lock mode·획득 상한·보유 시간을 별도 판정하는 D-12가 유효**하다 | `0053`:167-194,439-507; `0054`:24-260; `0055`:23-173; `0056`:23-37; `0057`:52-84,249-299 |
 | F-12 | **rollback은 snapshot 보존만으로 불성립**: 쓰기 재개 후 old snapshot 복원은 사이 write를 유실한다. 현재 도구는 cold backup뿐(WAL archiving/PITR/journal 0건) → write-freeze 유지 또는 forward journal replay가 완료 조건 | `docs/backup-restore.md`; scripts/ 실태 |
 | F-13 | **재취득은 유일 복구 전략이 될 수 없다**: 3년 보존 weather·창이 닫힌 feed는 upstream이 재서빙하지 않고, 전국 재수집은 quota(OpiNet 실증)·WAL(MOIS 실증)·시간에서 비현실적. 정본 이관은 DB-to-DB, 검증된 파생만 재계산 | ADR-062; 운영 실증(quota·WAL 사고 이력) |
-| F-14 | **PinVi 소비측 결함**: client는 batch `missing`을 파싱하지만 trip view 소비 계층이 authoritative missing과 transport 실패를 모두 전건 broken으로 축약한다. TripMap은 서버 cluster를 폐기하고, weather는 POI별 N+1이며, admin client는 Idempotency-Key/If-Match를 보내지 않는다. `TripDayPoi.version`도 soft delete에서 증가하지 않아 generation으로 부적합하다 | PinVi `kor_travel_map.py:240-261`; `trip_view_builder.py:131-168`; `TripMapView.tsx:144-159`; `TripWeatherSummary.tsx:123-143`; `poi.py:169-171` |
+| F-14 | **PinVi 소비측 결함**: client는 batch `missing`을 파싱하지만 trip view 소비 계층이 authoritative missing과 transport 실패를 모두 전건 broken으로 축약한다. TripMap은 서버 cluster를 폐기하고, weather는 POI별 N+1이며, admin client는 Idempotency-Key/If-Match를 보내지 않는다. `TripDayPoi.version`도 soft delete에서 증가하지 않아 generation으로 부적합하다 | PinVi `kor_travel_map.py:240-261`; `trip_view_builder.py:131-168`; `TripMapView.tsx:144-159`; `TripWeatherSummary.tsx:123-143`; `services/poi.py:169-171` |
 | F-15 | **PinVi 라이브 소비 전제**: 운영상 소비 중으로 간주하되(공유 n150 가동·운영 노트), cutover preflight에서 runtime 증거(`/version`·`api_call_logs` nonzero·smoke)로 최종 확정한다 | §13.3↔§14.6 합의 위치 |
 | F-16 | **curation 정본이 두 개**: legacy `curated_features`와 신규 `curation_collections/items`가 title/status/relation을 중복 저장하고 trigger가 legacy→신규 단방향만 동기화 — legacy 수정이 collection을 강제 `published`/`archived_at=NULL`로 되돌릴 수 있다(왕복 4회에서 반박된 적 없는 유효 진단) | §구판 P1-7; migration trigger 실태 |
 | F-17 | **#724 clean-cut이 PinVi 선전환보다 먼저 병합돼 현재 cross-repo 계약이 끊겼다**: KTM은 `/v1/ops/dagster/summary`, `/v1/ops/providers*`, `/v1/ops/import-jobs*`를 삭제했지만 PinVi 최신 main의 admin client·provider-sync proxy·unit test는 그대로 호출한다. 같은 버전을 배포하면 provider-sync proxy는 upstream 404를 반환하고 ETL summary는 오류를 모아 degraded/down으로 축약한다. 새 `/v1/ops/{datasets,pipeline}`는 BFF admin gate이고 Docker가 frontend 고정 `/32`만 신뢰하므로 경로만 바꿔도 PinVi service 호출은 403이다. 별도 service/operator principal과 소비자 선배포가 필요하다 | KTM `test_admin_ops_clean_cut.py:8-48`, `docker-compose.yml:117-120`; PinVi `kor_travel_map_admin.py:338-404`, `provider_sync.py:28-141`, `admin_etl.py:359-391`, `test_kor_travel_map_admin_client.py:437-554` |
@@ -99,7 +99,8 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
 - **컨텍스트**: F-3. 인증 게이트가 라우터별로 산발 배선되고 기본값이 전부 fail-open이라, 설정
   하나 빠지면 내부 상태가 열린다. #724의 legacy command 삭제, #725의 ticket WebSocket,
   Docker admin secret 기동 검사는 올바른 선례다. 남은 문제는 관측/log/consistency와 raw MOIS
-  debug read, `/metrics`, 비-Docker profile, public/service opt-out을 한 정책으로 검증하지 않는 점이다.
+  debug read, 무키 legacy `/v1/curated-*` 공개 read, `/metrics`, 비-Docker profile,
+  public/service opt-out을 한 정책으로 검증하지 않는 점이다.
 - **결정**:
   1. 모든 Starlette route와 WebSocket을 `public-unauthenticated`(liveness/version) /
      `public-keyed` / `service` / `operator` / `debug` / `metrics` 중 하나로 분류하는
@@ -108,8 +109,11 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
      인증 없이 켜져 있으면 **기동 자체가 실패**한다. `local-dev` fallback은 non-production
      profile에서만 허용.
   3. 현재 남은 `/ops/{metrics,system-logs,api-call-logs,consistency/*}`와
-     `/debug/mois-license/*`를 operator/debug 정책에 배선하고 raw provider payload는 operator
-     projection으로만 반환한다. 삭제된 legacy command/live ETL은 되살리지 않는다.
+     `/debug/mois-license/*`를 operator/debug 정책에, 무키 legacy `/v1/curated-*` 공개 read를
+     public-keyed 정책에 배선하고 raw provider payload는 operator projection으로만 반환한다.
+     `/ops/*` 관측 route는 PinVi admin proxy가 라이브 소비 중이므로 배선 시점을
+     T-VN-00(service/operator principal)과 조율한다. 삭제된 legacy command/live ETL은
+     되살리지 않는다.
   4. `/metrics`는 scrape identity 또는 management 경계로 제한한다. WebSocket은 #725의
      same-origin BFF → HMAC subprotocol ticket → DB nonce 단일 소비 → bounded lease를 정본으로
      유지하고 route matrix가 이 예외 인증도 검사한다.
@@ -123,8 +127,9 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
 ### D-2. actor 정본 — 인증 principal에서만 파생
 
 - **컨텍스트**: F-4. canonical pipeline·schedule·curation collection은 principal actor를 쓰지만
-  legacy feature·curated status·auth-event는 body `operator`/`actor`를 감사 기록에 저장해 신뢰
-  경계 안에서 위조가 가능하다.
+  legacy feature·curated status·auth-event와 data-integrity 이슈 액션·offline upload·
+  dedup/enrichment 검수는 body `operator`/`actor`/`created_by`/`reviewed_by`를 감사 기록에
+  저장해 신뢰 경계 안에서 위조가 가능하다.
 - **결정**: 모든 write의 actor는 인증 principal(AdminProxyContext 등)에서만 파생한다. request
   body의 operator/actor 필드는 **스키마에서 제거**한다. 비동기 검수는 제출 actor와 승인 actor를
   각각 principal에서 보존한다.
@@ -427,7 +432,7 @@ revision), `CURSOR_QUERY_MISMATCH`, rate quota는 edge/app 중 정본 위치를 
 admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 이미 구현한 **본 재설계의
 유지 기준선**이다. 최신 상태와 남은 순서는 다음과 같다.
 
-- **완료 기반**: C3e-B1/C/B2/B3/I1/I2(#709/#710/#711/#713/#714/#715), typed scope와 active
+- **완료 기반**: C3e-B1/C/B2/B3/I1/I2(#709/#710/#713/#711/#714/#715), typed scope와 active
   operation 재사용(#701), datasets API/UI(#698), C5 pipeline(#691), C6a/b(#722/#724), C7A
   ops-live 인증(#725), 감사 후속과 C7B exact-scope API/UI(#723·#726~#729)가 병합됐다.
 - **현재 잔여**: C6b의 소비자 선전환 누락을 `T-ADM-C6c`로 먼저 복구한다. PinVi admin caller와
@@ -449,9 +454,9 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 | T-VN-00 | PinVi admin 계약 복구 | `T-ADM-C6c`와 동일 범위: 삭제된 ops caller 0건, canonical datasets/pipeline 전환, BFF secret 공유 없는 service/operator principal, 양 저장소 contract test 후 C7 허용 | D-1·D-11, F-17 |
 | T-VN-01 | fail-closed 전환 | production profile secret 필수·기동 거부, local-dev fallback 격리 | D-1, F-3 |
 | T-VN-02 | route policy matrix | 전 route/WS 분류 생성기 + 미분류 CI 실패 + `/metrics` 관리 경계. WS는 #725의 ticket 인증을 재사용 | D-1 |
-| T-VN-03 | 잔여 운영 read 게이트 | 현재 노출되는 ops metrics/logs/consistency와 raw MOIS debug read를 operator/debug 경계로 이동. 삭제된 command/live ETL은 부활 금지 | D-1 |
+| T-VN-03 | 잔여 운영 read 게이트 | 현재 노출되는 ops metrics/logs/consistency와 raw MOIS debug read를 operator/debug 경계로, 무키 legacy `/v1/curated-*` 공개 read는 public-keyed 정책으로 이동. 삭제된 command/live ETL은 부활 금지. 단 PinVi admin proxy가 `/v1/ops/{metrics,system-logs,api-call-logs,consistency/*}`를 라이브 소비 중이므로(PinVi `kor_travel_map_admin.py:350-565` 및 `admin_etl.py`/`integrity.py`/`debug_logs.py` caller), 경계 이동은 T-VN-00의 service/operator principal 설치·PinVi caller 전환과 같은 cutover로 조율한다(F-17 재발 방지) | D-1, T-VN-00 |
 | T-VN-04 | 공개 predicate 통일(1차) | 기존 상태 위에 `public_features` view(CREATE VIEW만 — 전용 인덱스는 T-VN-34) + 전 공개 SQL 교체 — **양방향 오분류(F-1) 동시 해소** | D-3 |
-| T-VN-05 | raw payload 경계 | 공개 DTO에서 raw 계열(`raw_data`·`raw_payload_hash`·`source_record_key`·**`mois_detail` passthrough**) 제거, observations를 operator 표면으로, batch `trip_card` 고정 | D-9 |
+| T-VN-05 | raw payload 경계 | 공개 DTO에서 raw 계열(`raw_data`·`raw_payload_hash`·`source_record_key`·**MOIS raw 부분집합의 `detail.payload` passthrough**(`providers/mois.py`의 `PlaceDetail.payload`)) 제거, observations를 operator 표면으로, batch `trip_card` 고정 | D-9 |
 | T-VN-06 | notice 방어적 cast | 오염 row 1건의 공개 read 500 차단(완화 — 재설계는 W2) | D-9-7, F-9 |
 | T-VN-07 | no-op 옵션 삭제 + actor principal(1차) | beach 옵션 제거; auth-event `body.actor` 우선 제거 등 최소 수정 | D-2, F-4 |
 | T-VN-08 | PinVi false-broken 수정 | transport 실패↔missing 분리(stale 유지), `split("@")` 제거, status/state 소비 준비 | D-10, F-14 |
@@ -584,5 +589,9 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 보존돼 있고 #708이 이를 현재 구조로 전면 재작성했다. #717은 #698/#701과
 #709/#710/#711/#713/#714/#715를 1차 재대조했다. 이번 2차 재검증은 #691(C5),
 #721~#729(C6a/b·C7A·감사 후속·C7B)와 PinVi `origin/main@48085afb`의 실제 caller/test를 함께
-대조했고, 그 결과는 PR #730으로 병합했다. 세부 논증은 해당 PR diff와
+대조했고, 그 결과는 PR #730으로 병합했다. 3차 재검증은 같은 기준선에서 6관점 병렬
+검증(인증/라우트·쓰기 안전성·스키마/마이그레이션·공개 읽기·PinVi cross-repo·문서 정합) +
+발견 건별 독립 적대 검증으로 진행해 PR #732로 병합했다. 무키 legacy curated 공개 read(F-3), 잔여 body-actor
+4개 route군(F-4·D-2), 존치 ops 관측 route의 PinVi 라이브 소비와 T-VN-03 cutover 조율
+(F-17 연계), C3e B2/B3↔PR 대응 정정을 반영했다. 세부 논증은 해당 PR diff와
 `docs/tasks-done.md`의 완료 증거를 함께 참조한다.
