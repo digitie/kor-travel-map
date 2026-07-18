@@ -1,6 +1,6 @@
 # ADR-005: 디버그 REST API는 인증 없음, 내부망 전용
 
-- **상태**: accepted (위치 부분은 ADR-020에서 superseded — 디버그 REST는 별도
+- **상태**: superseded by ADR-066 (위치 부분은 ADR-020에서 superseded — 디버그 REST는 별도
   패키지 `kor-travel-map-admin`에 둠. 인증 없음 + 내부망 전용 정책은 ADR-035
   amendment에서 "프로덕션 admin/관리 라우터로도 운영 가능"으로 확장 — 인증/
   네트워크 보호는 앱 코드 밖 infra(reverse proxy/SSO 게이트웨이) 책임이라는
@@ -40,3 +40,8 @@
   → 배포 가이드에서 `127.0.0.1` 바인드를 default로 강제.
 - **후속**: `KOR_TRAVEL_MAP_DEBUG_API_HOST=127.0.0.1` default. 0.0.0.0 바인드 시
   경고 로그.
+
+## Supersede (2026-07-18)
+
+ADR-066이 production의 debug/operator/service 인증을 route policy matrix와 fail-closed
+기동으로 바꾼다. 본문은 과거 결정 이력으로 보존하며, 별도 API 패키지 위치는 ADR-020을 따른다.

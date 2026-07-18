@@ -3,6 +3,7 @@
 - 상태: accepted
 - 날짜: 2026-07-18
 - 결정자: human, Codex
+- 관련: ADR-074 — resource revision과 generation/outbox 쓰기 안전성
 
 ## 컨텍스트
 

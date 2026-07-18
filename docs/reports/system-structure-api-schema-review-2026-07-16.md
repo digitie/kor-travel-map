@@ -3,6 +3,8 @@
 > 작성일: 2026-07-18 (최신 코드 3차 재검증판)
 > 기준: KTM `origin/main@13eb8d40` · PinVi `origin/main@48085afb`
 > 반영: PR #730(2차, merge `d0609226`) → PR #732(3차, 본 판)
+> 정본 전개: PR #736(`docs/vnext-review-propagation`)에서 ADR-066~075와
+> architecture/tasks/runbook에 전개했다.
 > 전신: 본 문서는 PR #702(원 리뷰 §1~10) → #703(§11 Claude 다관점) → #704(§12 Codex 재검토
 > 병합본 위 §13 대질·수렴) → #707(§14 Codex 재보강)의 **왕복 리뷰 4회를 소화한 최종 정본**이다.
 > 왕복 세부(§11~§14의 개별 논증·정정 이력)는 git 이력(위 PR들)에 보존되며, 본 문서는 그
@@ -513,7 +515,8 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 
 ### 6.7 공통 규율
 
-- PR 1개=task 1개, 적대적 리뷰(2인 또는 지시된 인원)→CI green→merge. migration 포함 PR은
+- PR 1개=task 1개, 코드 변경은 테스트 전 적대적 리뷰어 1명→CI green→merge. 문서 전용,
+  rebase-only, 변수명·import 정렬 같은 기계적 변경은 추가 적대적 재리뷰를 생략한다. migration 포함 PR은
   단일 head·번호 경합 확인(현 head `0057_import_job_event_scope`; #729 기준).
 - **T-VN task의 수용 기준 정본**: 각 task가 참조하는 D-결정 본문 + §8 검증 게이트다. task 표의
   "내용" 칸은 요약이며 계약을 재정의하지 않는다. 특히 T-VN-21은 §8.3 계층 3단 전부,
@@ -528,14 +531,14 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 | 본 문서 | 대상 파일 | 반영 방식 |
 |---|---|---|
 | §0 지도 원칙 | `AGENTS.md`/`CLAUDE.md` 참조 한 줄 + 신규 ADR 서문 | 인용(원문은 본 문서 유지) |
-| D-1·D-2 | `docs/adr/0NN-route-policy-fail-closed.md` (1건) | 신규 ADR; ADR-005(ops 무인증)·ADR-060 일부 supersede |
-| D-3 | `docs/adr/0NN-orthogonal-publication-state.md` | 신규 ADR; ADR-017의 place 유지 규정은 **이관 문서(data-model 계열 architecture 문서)** 갱신으로 반영(ADR 원문은 포인터만) |
-| D-4 | `docs/adr/0NN-feature-uuid-identity.md` | 신규 ADR; ADR-057(concierge stable id)와 관계 명시, `docs/etl/feature-id-determinism.md`는 **개정**(UUID 정본·기존 ID는 alias로 강등) |
-| D-5 | `docs/adr/0NN-provider-datasets-canonical.md` | 신규 ADR; ADR-063 확장 |
-| D-6·D-7 | `docs/adr/0NN-feature-subtype-decomposition.md`, `0NN-field-level-override.md` | 신규 ADR **2건 확정**(D-6/D-7 각 1건 — 독립 채택·독립 rollback 가능해야 함) |
-| D-8 | `docs/adr/0NN-weather-bitemporal.md` | 신규 ADR; ADR-062(3년 보존)와 정합 명시 |
-| D-9·D-10 | `docs/adr/0NN-public-rest-contract.md`, `0NN-write-safety.md` | 신규 ADR; `docs/architecture/rest-api.md` 전면 개정 |
-| D-11·D-12 | `docs/adr/0NN-cutover-and-ddl-discipline.md` | 신규 ADR; `docs/deploy.md`·runbook에 write-fence/rollback 조건 추가 |
+| D-1·D-2 | `docs/adr/066-route-policy-fail-closed.md` (1건) | 신규 ADR; ADR-005(ops 무인증) supersede·ADR-060 production 정책 개정 |
+| D-3 | `docs/adr/067-orthogonal-publication-state.md` | 신규 ADR; ADR-017의 place 유지 규정은 **이관 문서(data-model 계열 architecture 문서)** 갱신으로 반영(ADR 원문은 포인터만) |
+| D-4 | `docs/adr/068-feature-uuid-identity.md` | 신규 ADR; ADR-009 supersede·ADR-057(concierge stable id)와 관계 명시, `docs/etl/feature-id-determinism.md`는 **개정**(UUID 정본·기존 ID는 alias로 강등) |
+| D-5 | `docs/adr/069-provider-datasets-canonical.md` | 신규 ADR; ADR-063 확장 |
+| D-6·D-7 | `docs/adr/070-feature-subtype-decomposition.md`, `071-field-level-override.md` | 신규 ADR **2건 확정**(D-6/D-7 각 1건 — 독립 채택·독립 rollback 가능해야 함) |
+| D-8 | `docs/adr/072-weather-bitemporal.md` | 신규 ADR; ADR-062(3년 보존)와 정합 명시 |
+| D-9·D-10 | `docs/adr/073-public-rest-contract.md`, `074-write-safety.md` | 신규 ADR; `docs/architecture/rest-api.md` 목표 표면 개정 |
+| D-11·D-12 | `docs/adr/075-cutover-and-ddl-discipline.md` | 신규 ADR; `docs/deploy.md`·runbook에 write-fence/rollback 조건 추가 |
 | §3 | `docs/architecture/postgres-schema.md` | "목표(vNext)" 섹션 신설(현행 서술과 구분) |
 | §4 | `docs/architecture/rest-api.md` + `docs/integration-map.md` | 목표 표면 섹션 신설; PinVi 계약 변경분은 integration-map에 cutover 조건부로 |
 | §6 | `docs/tasks.md` + PinVi cross-repo consumer task | `T-VN-*` 블록 신설, `T-ADM-C6c` PinVi admin HTTP caller/auth contract 복구를 양 저장소에 mirror, tasks-rule 준수 |
@@ -595,3 +598,9 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 4개 route군(F-4·D-2), 존치 ops 관측 route의 PinVi 라이브 소비와 T-VN-03 cutover 조율
 (F-17 연계), C3e B2/B3↔PR 대응 정정을 반영했다. 세부 논증은 해당 PR diff와
 `docs/tasks-done.md`의 완료 증거를 함께 참조한다.
+
+### 정본 전개 상태 (2026-07-18)
+
+PR #736(`docs/vnext-review-propagation`)에서 §7 매핑을 ADR-066~075, architecture, integration,
+deploy/runbook, tasks, entry/status 문서에 전개했다. merge 뒤에도 본 보고서를 설계 근거 정본으로
+유지하고 구현 완료 증거는 각 T-VN task와 PR에 기록한다.

@@ -120,6 +120,29 @@
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
 `min_lon/min_lat/max_lon/max_lat`(ADR-048 #10 — cross-repo 정본).
 
+### 3.1 vNext PinVi 조건부 cutover
+
+ADR-073 목표 REST는 문서에 채택됐지만 아직 현재 OpenAPI/운영 계약이 아니다. PinVi 변경은 다음
+compatible pair가 모두 준비된 뒤에만 활성화한다.
+
+| 변경 | PinVi 선행 조건 | KTM 전환 조건 |
+|---|---|---|
+| ops datasets/pipeline | `T-ADM-C6c` canonical caller, 최소 service/operator principal, 삭제 경로 0건 | 양 저장소 commit pair 인증·응답 smoke 뒤 C7 |
+| feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
+| Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
+| weather | set-based batch와 `target_at`/`known_at` typed consumer | bitemporal fact/current projection과 parent 404 |
+| cache target/refresh | generation·ETag·Idempotency-Key·outbox consumer | service resource와 replay/outbox 활성화 |
+| public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
+
+Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone 복구·shadow 검증 → KTM
+write fence → KTM API/DB 전환 → PinVi 활성화 → 양방향 smoke → soak 순서다. rollback window에는
+write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 delta를 되살릴 수 있어야 한다.
+단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
+이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
+
+현재 공개 read·weather·batch 경로를 목표 계약으로 바꾸는 호환 alias는 두지 않는다. 변경 시점은
+각 T-VN task와 PinVi mirror task가 소유하며, 이 문서는 조건만 고정한다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |

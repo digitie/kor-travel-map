@@ -36,7 +36,33 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `ops` | 운영 (작업 큐, 검수, 정합성, 사용자 변경 요청, api 로그) | 13 |
 | `x_extension` | 확장 (postgis 등) | extensions only |
 
-## 3. 테이블 카탈로그 (alphabetical by schema)
+## vNext 목표 schema (미구현, 재설계 정본 §3)
+
+아래는 ADR-067~075가 고정한 **목표 구조**다. 번호가 붙은 §3 이하는 현재 `main`의 현행 catalog이며,
+T-VN-31 target freeze와 각 shadow migration이 완료되기 전에는 목표 이름을 현재 DDL로 오해하지
+않는다. 기존 계약 보존보다 정본 단일화와 DB 무결성을 우선하되, live PinVi 전환은 ADR-075의
+consumer-first/write-fence 절차를 따른다.
+
+| schema.object | 목표 책임과 핵심 제약 | 전환 task |
+|---|---|---|
+| `provider_sync.provider_datasets` | DB 소유 provider×dataset identity/capability; 자연 identity UNIQUE | T-VN-33 |
+| `provider_sync.source_entities` | `provider_dataset_id` + source-native identity UNIQUE; 검증된 current head | T-VN-33 |
+| `provider_sync.source_records` | entity FK 아래 immutable payload/hash/known time; denormalized provider identity 없음 | T-VN-33 |
+| `feature.features` | UUID PK, 공통 필드, category FK, 3축 상태, `row_revision`; mutable 속성은 identity 입력 아님 | T-VN-32·34 |
+| `feature.feature_aliases` | legacy `f_*` → UUID의 명시적 alias; 전환/복구용 | T-VN-32 |
+| `feature.feature_{point,event,notice,route,area}_*` | core와 1:1 typed subtype; geometry type/SRID·kind 일치 CHECK/FK | T-VN-35·37 |
+| `feature.public_features` | `active AND published AND valid` 단일 공개 projection | T-VN-04·34 |
+| `ops.feature_overrides` + effective projection | `(feature_id, field_path)` active UNIQUE; provider base와 override 분리 | T-VN-36 |
+| weather facts/current summary | `target_at`/`known_at`, native semantic UNIQUE, range/FK; current는 재생성 가능한 projection | T-VN-17·38 |
+| domain command ledgers/outbox | principal-key replay, body fingerprint, 저장 결과, generation/restore epoch, 멱등 relay | T-VN-12·41 |
+| `feature.curation_collections/items` | 유일한 curation write 정본; legacy flat writer/trigger 없음 | T-VN-40 |
+
+정규화가 기본이며 JSONB는 provider 원문과 확장 metadata에만 쓴다. 모든 FK 참조 열은 실제 join
+계획에 필요한 인덱스를 갖고, 공간 열은 subtype에 맞는 SRID/type을 강제한다. GiST·BRIN은
+[`performance.md`](performance.md)의 실측 gate를 통과한 hot path에만 둔다. DDL 적용 방식과
+rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
+
+## 3. 현행 테이블 카탈로그 (alphabetical by schema)
 
 ### 3.1 `feature.*`
 
@@ -400,14 +426,17 @@ def run_migrations_online():
             context.run_migrations()
 ```
 
-### 8.2 backward-compatible 우선
+### 8.2 현행 migration 기준
 
-1. **컬럼 추가** — nullable + default. 별도 마이그레이션에서 백필 후 NOT NULL
-   tighten.
-2. **인덱스 추가** — `CREATE INDEX CONCURRENTLY` (운영 중 lock 회피). Alembic
-   `op.execute()`로 직접 SQL 작성 (autogen은 CONCURRENTLY 모름).
-3. **인덱스 삭제** — `DROP INDEX CONCURRENTLY IF EXISTS`.
-4. **컬럼 타입 변경** — `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
+호환성 자체는 설계 목표가 아니다. 데이터 보존과 lock 특성에 따라 ADR-075의 DDL 유형을 고른다.
+
+1. **FK/CHECK** — 가능한 경우 `NOT VALID`로 추가하고 별도 transaction에서 `VALIDATE`한다.
+2. **UNIQUE/인덱스** — `CREATE INDEX CONCURRENTLY`로 build한다. 이는 lock이 없는 명령이 아니므로
+   acquisition/보유 시간을 관측하고 실패한 INVALID index를 제거한다. UNIQUE writer conflict
+   target은 index와 같은 cutover에서 전환한다.
+3. **소형 ops 수술형** — drain, lock acquisition timeout, 예상 보유 시간을 clone에서 각각 측정한다.
+4. **대형 rewrite/타입·identity 변경** — shadow column/table, batch backfill, checksum, write fence,
+   swap을 사용한다. rollback window에는 legacy 구조와 delta/PITR 복구 경로를 보존한다.
 
 ### 8.3 마이그레이션 net 검증
 

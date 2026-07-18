@@ -28,6 +28,26 @@ CHECK constraint가 여기에 박혀 있고, Alembic migration 작성 시 본 �
   `curation_items.feature_id ON DELETE SET NULL`,
   `feature_files.source_record_key ON DELETE SET NULL` 등.
 
+### 0.1 vNext 목표 모델과 현행 경계
+
+아래 §1~12의 DDL은 현재 `main` 구현 reference다. vNext 목표는 ADR-067~075와
+[`postgres-schema.md`의 vNext 목표](postgres-schema.md#vnext-목표-schema-미구현-재설계-정본-3)가 정본이며,
+T-VN-31 이후 shadow migration으로 전환한다.
+
+| 직교 책임 | vNext 정본 | 관련 결정 |
+|---|---|---|
+| identity | UUID Feature PK + provider natural UNIQUE + legacy alias | ADR-068 |
+| publication | lifecycle/publication/quality 3축 + `public_features` | ADR-067 |
+| lineage | DB-owned provider dataset → source entity → immutable record/head | ADR-069 |
+| subtype | 작은 Feature core + typed point/event/notice/route/area table과 geometry/category 제약 | ADR-070 |
+| 수동 보정 | provider base + field override + effective projection; whole-row freeze 없음 | ADR-071 |
+| weather | `target_at`/`known_at` bitemporal fact + semantic UNIQUE/FK/range + current summary | ADR-072 |
+| 쓰기 | resource revision, domain replay ledger, generation/restore epoch, outbox | ADR-074 |
+
+각 축은 다른 축의 상태나 payload를 복제하지 않는다. JSONB는 원문·확장 metadata에만 사용하고,
+kind/geometry/category/상태/시간 범위처럼 query와 무결성에 필요한 값은 typed column과 FK/CHECK로
+표현한다. 보관 기간은 기존 정책을 유지하지만 보관 여부를 공개 상태로 대신 표현하지 않는다.
+
 ## 1. `feature.features` (기준 테이블)
 
 ```sql
@@ -2379,11 +2399,10 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 ## 12. 마이그레이션 가이드
 
 - 모든 schema 변경은 Alembic migration + ADR 동반.
-- 마이그레이션은 backward-compatible 우선:
-  1. 컬럼 추가 (nullable + default)
-  2. 백필 (BRIN 인덱스 영향 없음 — `UPDATE` 시 batched)
-  3. nullability tighten (옵션)
-- 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 (운영 중 lock 없음).
+- 마이그레이션은 호환성보다 데이터 보존과 검증 가능한 cutover를 우선한다. 작은 additive 제약은
+  `NOT VALID`→backfill→`VALIDATE`, 대형 변경은 shadow/backfill/write-fence/swap으로 수행한다.
+- 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID 잔여·writer 동시
+  cutover를 ADR-075 절차로 검증한다.
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 

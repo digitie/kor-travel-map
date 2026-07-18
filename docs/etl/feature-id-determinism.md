@@ -1,11 +1,22 @@
-# feature-id-determinism.md — geocoder-의존/외부 export provider의 feature_id 결정성
+# feature-id-determinism.md — UUID 정본과 legacy feature ID 전환
 
-본 문서는 `make_feature_id`(핵심 규칙은 ADR-009, `docs/adr/009-deterministic-feature-id.md`)가
-**bjd_code·category를 식별자에 embed**하는 전제가 깨지는 provider — 즉 bjd를 reverse
-geocoding으로 늦게 채우거나 category가 enrich로 늦게 채워지는 provider — 에서 feature_id
-멱등성(같은 record/후보가 재import마다 같은 feature로 수렴)을 어떻게 보장하는지 정리한다.
+Feature identity의 정본은 ADR-068의 **UUID surrogate**다. provider identity는
+`(provider_dataset_id, source_entity_type, source_entity_id)` 자연키 UNIQUE로 따로 보장하며
+`bjd_code`, `category`, 이름, 좌표는 Feature ID를 만들지 않는다. 아래 구 `make_feature_id`
+규칙은 T-VN-32 전환 전 현행 동작과 legacy alias의 유래를 설명하기 위해서만 보존한다.
 
-## 1. 문제: 늦은-바인딩 식별자
+## 1. vNext UUID 정본과 legacy alias
+
+- 신규 Feature PK는 애플리케이션 generator가 만드는 UUID다. REST와 consumer는 이를 opaque
+  string으로 취급하며 prefix·순서·provider를 파싱하지 않는다.
+- 기존 `f_*` 값은 `feature.feature_aliases`에서 UUID를 가리키는 `legacy_feature_id` alias로
+  강등한다. 신규 row의 정본 ID를 `make_feature_id`로 생성하지 않는다.
+- provider 재수집 멱등성은 Feature UUID hash가 아니라 provider dataset FK와 source-native
+  identity UNIQUE, source entity→Feature 연결로 보장한다.
+- T-VN-32는 UUID shadow column/FK와 alias map을 backfill하고 PinVi를 consumer-first로 전환한다.
+  soak 전에는 alias를 제거하지 않으며 rollback은 alias projection으로 수행한다(ADR-075).
+
+## 2. legacy 문제: 늦은-바인딩 식별자
 
 `make_feature_id`는 모든 provider 공통으로 `bjd_code`·`category`를 식별자 입력에 넣는다
 (ADR-009 결정성). 대부분 provider는 둘 다 안정적이다 — bjd는 provider가 주는 주소/좌표에서
@@ -20,7 +31,7 @@ geocoding으로 늦게 채우거나 category가 enrich로 늦게 채워지는 pr
 두 경우 모두 멱등 upsert가 깨지고 dedup이 단절된다. reject/tombstone→inactive 라이프사이클
 경로는 `source_entity_id` 매칭이라 면역이지만, upsert 경로가 비멱등이었다.
 
-## 2. kor-travel-concierge: 안정 candidate.id에 고정 (구 ADR-057)
+## 3. legacy concierge 완화: 안정 candidate.id에 고정 (구 ADR-057)
 
 kor-travel-concierge export는 `place.address.{legal_dong_code,sido_code,sigungu_code}`를
 항상 None으로 보내고(bjd는 소비자가 reverse geocoding으로 채우는 계약), `category_code_suggestion`은
@@ -40,7 +51,7 @@ feature_id 파생에서 `bjd_code`(→`bjd_code=None`, prefix `f_global_`)와 ca
 None↔8자리 동일 feature_id). 검증 정본: `docs/reports/concierge-loader-verify-2026-06-15.md`
 (C-01/C-02). (구 ADR-057)
 
-## 3. geocoder-의존 provider 일반: geocoder 필수화 (F-01, 구 ADR-058)
+## 4. legacy geocoder 완화: geocoder 필수화 (F-01, 구 ADR-058)
 
 concierge 외 ~11개 geocoder-의존 provider는 bjd를 Dagster `reverse_geocoder` resource에서
 얻는데, 이 resource가 `kor_travel_geo_base_url` 미설정 시 조용히 None을 yield해 같은 record가
@@ -59,7 +70,7 @@ concierge 외 ~11개 geocoder-의존 provider는 bjd를 Dagster `reverse_geocode
 
 **잔여(약한 보장)**: geocoder 필수화는 좌표→bjd가 항상 채워지게만 보장한다. geocoder가 같은
 좌표에 다른 bjd를 주면(버전 drift) 여전히 분기 가능하다. 완전 결정성은 식별자에서 bjd를 제거하는
-방식(=concierge에 적용한 §2 방식의 일반화, 선택지 A)이 필요하나, 전 feature_id 재키 + provider별
+방식(=concierge에 적용한 §3 방식의 일반화, 선택지 A)이 필요하나, 전 feature_id 재키 + provider별
 natural_key 전역유일성·collision 분석이 동반돼 실데이터 운영 중에는 보류한다(후속 `T-AUDIT-0616`).
 "안정적"이 진짜 보장되는 케이스는 MOIS의 source-native `legal_dong_code`처럼 provider가 직접
 제공하는 행정코드 케이스에 한정된다.

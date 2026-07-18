@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — PR #732 vNext 재설계 정본 전개 (PR #736)
+
+- PR #732의 재설계 보고서 D-1~D-12를 실제 다음 번호 ADR-066~075로 전개하고 기존
+  ADR-005·009 supersede, ADR-060·062·063 확장 관계를 연결했다.
+- 목표 PostgreSQL schema, typed REST와 PinVi 조건부 cutover, 직교 상태/lineage/subtype/override/
+  weather 모델, 3단 성능 gate, write-fence·PITR/journal rollback을 architecture와 tracked runbook에
+  반영했다. 구현 전인 목표와 현재 `main` DDL/OpenAPI를 명시적으로 분리했다.
+- `tasks.md`에는 `T-VN-00`을 `T-ADM-C6c` 별칭으로만 두고 Wave 0~3과 독립 hardening을
+  PR 1개=task 1개로 모두 열었다. 완료된 문서 전개 task checkbox는 남기지 않았다.
+- 정본 전개 PR은 #736(`docs/vnext-review-propagation`)이다. 문서 전용이라 적대적 재리뷰·코드
+  테스트는 생략하고 링크/경로/tasks 형식과 `git diff --check`만 검증한다.
+- **다음 한 작업**: `T-ADM-C6c` compatible pair smoke를 종결한 뒤 `T-ADM-C7` n150 live E2E를
+  완료하고, 이어 `T-VN-01`부터 의존성 없는 task를 agent A/B로 병렬 진행한다.
+
 ## 2026-07-18 (codex) — T-ADM-C7 live harness 4차 적대 리뷰 반영·재리뷰 대기
 
 - owned target barrier를 500건 cursor 페이지 두 개, 최대 501건까지 완주하도록 강화했다. 각

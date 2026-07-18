@@ -3,7 +3,7 @@
 - 상태: accepted
 - 날짜: 2026-07-13
 - 결정자: human + Codex
-- 관련: GitHub #665, T-230
+- 관련: GitHub #665, T-230, ADR-069
 
 ## 컨텍스트
 
@@ -176,3 +176,9 @@ collection actor 또는 legacy `selected_by`와 일치하지 않는 item actor�
 - Feature merge는 loser의 source entity link와 curation item을 master로 함께 옮긴다.
 - n150 prod에서 공식 seed CSV를 적재하고 실제 중복 회차 Feature로 REST/UI live E2E를
   수행한다.
+
+## 개정 (2026-07-18, ADR-069)
+
+immutable entity/record 분리와 collection/item 결정은 유지한다. provider×dataset identity를 각
+entity/record에 문자열로 반복하던 부분은 ADR-069의 DB-owned `provider_datasets` FK로 정규화하고,
+record는 부모 entity의 identity를 중복 저장하지 않는다. curation lifecycle은 이 개정의 범위 밖이다.

@@ -8,8 +8,52 @@
 ## 진행 중인 작업 인덱스
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
-  - [ ] `T-ADM-C6c` — PinVi legacy ops caller canonical 전환 + 인증 계약 복구
-  - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (C6c 뒤)
+  - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
+  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
+- **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
+  - [ ] `T-VN-01` — **production fail-closed 전환**
+  - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
+  - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
+  - [ ] `T-VN-04` — **공개 predicate 단일화 1차**
+  - [ ] `T-VN-05` — **공개 raw payload 경계 제거**
+  - [ ] `T-VN-06` — **notice 방어적 cast**
+  - [ ] `T-VN-07` — **no-op 옵션 삭제와 principal actor 1차**
+  - [ ] `T-VN-08` — **PinVi false-broken 수정**
+  - [ ] `T-VN-11` — **service batch 5-state 계약**
+  - [ ] `T-VN-12` — **domain-owned Idempotency-Key 전개**
+  - [ ] `T-VN-13` — **Feature row revision과 If-Match**
+  - [ ] `T-VN-14` — **지도 completeness와 exact spatial predicate**
+  - [ ] `T-VN-15` — **search total과 cursor fingerprint**
+  - [ ] `T-VN-16` — **weather batch와 부모 404**
+  - [ ] `T-VN-17` — **weather 무결성 제약**
+  - [ ] `T-VN-18` — **중복 GiST 제거와 BRIN 감사**
+  - [ ] `T-VN-19` — **Alembic metadata 정합 CI**
+  - [ ] `T-VN-20` — **principal actor 전면 전환**
+  - [ ] `T-VN-21` — **3단 성능 gate**
+  - [ ] `T-VN-31` — **vNext target freeze**
+  - [ ] `T-VN-32` — **UUID identity shadow 전환**
+  - [ ] `T-VN-33` — **provider dataset 정본 전환**
+  - [ ] `T-VN-34` — **직교 상태 모델 전환**
+  - [ ] `T-VN-35` — **typed subtype 분해**
+  - [ ] `T-VN-36` — **field override 단일화**
+  - [ ] `T-VN-37` — **typed notice state**
+  - [ ] `T-VN-38` — **weather·price current summary**
+  - [ ] `T-VN-39` — **KTM·PinVi write-fence cutover**
+  - [ ] `T-VN-40` — **curation write model 단일화**
+  - [ ] `T-VN-41` — **cache-target generation·outbox 전파**
+  - [ ] `T-VN-51` — **MVT tile 도입 조건 측정**
+  - [ ] `T-VN-52` — **범용 feature-context batch 도입 조건 측정**
+  - [ ] `T-VN-53` — **cursor HMAC 도입 조건 측정**
+  - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
+  - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
+  - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
+  - [ ] `T-VN-H01` — **public API key header 전환**
+  - [ ] `T-VN-H02` — **destructive admin 기본값 fail-closed**
+  - [ ] `T-VN-H03` — **surface별 CORS 분리**
+  - [ ] `T-VN-H04` — **PROJ pin·drift·REINDEX runbook**
+  - [ ] `T-VN-H05` — **INVALID concurrent index 복구 runbook**
+  - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
+  - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
 
@@ -71,7 +115,243 @@ Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정
 
 공통 규율: 잦은 rebase(origin/main), task 완료 시 상대 agent 2일치 PR(닫힘 무관,
 리뷰 반영 PR 제외) 적대적 리뷰→코멘트→이슈→수정→머지. 각 구현 PR은 테스트 전
-적대적 리뷰어 2명.
+적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용 PR, rebase-only, 변수명 수정·import 정렬 같은
+기계적 변경은 추가 적대적 재리뷰 없이 진행한다.
+
+## T-VN — vNext 재설계 전개 (ADR-066~075)
+
+정본은 [`system-structure-api-schema-review-2026-07-16.md`](reports/system-structure-api-schema-review-2026-07-16.md)와
+ADR-066~075다. **`T-VN-00`은 별도 task가 아니라 `T-ADM-C6c`의 별칭**이므로 checkbox를
+중복 생성하지 않는다. 현재 순서는 `T-ADM-C6c` → `T-ADM-C7`이며, C7의 n150 종결 뒤
+`T-VN-01`부터 착수한다. 같은 wave에서 의존성이 없는 task는 agent A/B가 병렬 수행하되
+PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin/main`에 rebase한다.
+각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
+변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
+
+### Wave 0 — P0, 즉시 가역
+
+- [ ] T-VN-01 — **production fail-closed 전환**
+
+  Production profile에서 필수 secret 누락 시 기동을 거부하고 local-dev fallback을 별도 profile로
+  격리한다. 수용 기준은 ADR-066과 보고서 D-1·§8이다.
+
+- [ ] T-VN-02 — **route policy matrix와 미분류 CI gate**
+
+  전 HTTP/WS route 분류 생성기, 미분류 CI 실패, `/metrics` management 경계를 구현한다.
+  ops-live는 기존 HMAC ticket을 재사용하고 인증을 중복 구현하지 않는다.
+
+- [ ] T-VN-03 — **잔여 운영 read·debug·public-key gate**
+
+  ops metrics/log/consistency와 MOIS raw debug를 operator/debug로, 무키 legacy curated read를
+  public-keyed로 옮긴다. PinVi principal 선전환과 같은 cutover에서 수행하며 삭제 route는 복원하지 않는다.
+
+- [ ] T-VN-04 — **공개 predicate 단일화 1차**
+
+  현행 상태 위에 `feature.public_features` view를 만들고 모든 공개 SQL을 그 projection으로
+  교체해 retired 은닉과 draft/broken 노출을 동시에 막는다.
+
+- [ ] T-VN-05 — **공개 raw payload 경계 제거**
+
+  공개 DTO의 raw data/hash/source record와 MOIS `detail.payload` passthrough를 제거하고 observation
+  lineage를 operator 표면으로 이동한다. service batch는 고정 typed payload만 반환한다.
+
+- [ ] T-VN-06 — **notice 방어적 cast**
+
+  오염된 notice timestamp 한 행이 전체 공개 read를 500으로 만들지 않도록 안전한 1차 완화를
+  적용한다. typed notice 재설계는 T-VN-37이 소유한다.
+
+- [ ] T-VN-07 — **no-op 옵션 삭제와 principal actor 1차**
+
+  실제 동작하지 않는 beach 옵션을 OpenAPI와 코드에서 제거하고 auth-event 등 최소 write 경로에서
+  body actor 우선을 없앤다.
+
+- [ ] T-VN-08 — **PinVi false-broken 수정**
+
+  transport 실패와 authoritative missing을 분리해 실패 시 stale snapshot을 유지하고 brittle ID
+  parsing을 제거한다. 5-state 계약 소비 준비까지 PinVi consumer task로 mirror한다.
+
+### Wave 1 — additive 조기 전개
+
+- [ ] T-VN-11 — **service batch 5-state 계약**
+
+  `found|retired|suppressed|missing|unchanged`와 revision을 반환하고 transport 실패를 503으로 분리한다.
+  PinVi typed consumer contract test를 같은 cutover 산출물로 둔다.
+
+- [ ] T-VN-12 — **domain-owned Idempotency-Key 전개**
+
+  기존 pipeline/schedule ledger를 회귀 기준선으로 두고 남은 retryable command에 body fingerprint,
+  result replay, key reuse 409를 domain별로 구현한다.
+
+- [ ] T-VN-13 — **Feature row revision과 If-Match**
+
+  Feature에 단조 revision을 추가하고 correction PATCH/DELETE에 `If-Match`/412, read에 ETag/304를
+  연결한다. policy revision ledger와 합치지 않는다.
+
+- [ ] T-VN-14 — **지도 completeness와 exact spatial predicate**
+
+  in-bounds의 mode/truncated/coverage/cluster key를 명시하고 `include_geometry`를 serialization으로만
+  사용한다. candidate 술어를 하나로 만들고 exact `ST_Intersects`를 적용한다.
+
+- [ ] T-VN-15 — **search total과 cursor fingerprint**
+
+  `include_total=false`에서 COUNT를 실행하지 않고 cursor version·query fingerprint를 검증해 다른
+  query 재사용을 typed error로 거부한다.
+
+- [ ] T-VN-16 — **weather batch와 부모 404**
+
+  set-based weather batch와 `target_at`/`known_at` parameter를 제공해 PinVi N+1을 없애고 존재하지
+  않는 parent feature를 빈 결과가 아닌 404로 구분한다.
+
+- [ ] T-VN-17 — **weather 무결성 제약**
+
+  semantic UNIQUE를 concurrent writer cutover와 함께 도입하고 range/payload CHECK와 source FK는
+  `NOT VALID`→`VALIDATE`로 적용한다.
+
+- [ ] T-VN-18 — **중복 GiST 제거와 BRIN 감사**
+
+  자동 full GiST를 제거하고 필요한 partial GiST만 유지한다. 전후 write 비용과 hot query를 실측하고
+  weather/price BRIN은 실제 누락된 시간축만 보강한다.
+
+- [ ] T-VN-19 — **Alembic metadata 정합 CI**
+
+  모든 소유 table mapping/include filter를 정리하고 빈 PostGIS DB의
+  `alembic upgrade head && alembic check`를 상시 CI gate로 만든다.
+
+- [ ] T-VN-20 — **principal actor 전면 전환**
+
+  모든 write schema에서 body `operator`/`actor`/`created_by`/`reviewed_by`를 제거하고 제출·승인
+  principal을 인증 context에서 보존해 ADR-066의 actor 결정을 완결한다.
+
+- [ ] T-VN-21 — **3단 성능 gate**
+
+  PR planner-default smoke·query-count/shape, release 실분포 분석, index before/after write 비용의
+  3단 gate를 CI와 release 절차에 연결한다. 정본은 performance.md의 vNext 절이다.
+
+### Wave 2 — shadow와 write-fence 구조 전환
+
+- [ ] T-VN-31 — **vNext target freeze**
+
+  ADR-066~075, 목표 OpenAPI diff, 목표 DDL과 제약 테스트를 실행 전 고정한다. 이 task는 구현
+  변경을 섞지 않고 소비자·복구 preflight의 입력을 확정한다.
+
+- [ ] T-VN-32 — **UUID identity shadow 전환**
+
+  UUID column과 legacy alias를 backfill하고 FK·notice lineage·PinVi alias-map의 consumer-first
+  전환을 준비한다. legacy ID 제거는 soak 뒤 별도 단계다.
+
+- [ ] T-VN-33 — **provider dataset 정본 전환**
+
+  `provider_datasets`를 신설하고 참조 table을 FK화하며 source record denormalization을 제거한다.
+  전환기에는 composite FK로 entity-record identity 불일치를 먼저 막는다.
+
+- [ ] T-VN-34 — **직교 상태 모델 전환**
+
+  lifecycle/publication/quality 3축과 결합 CHECK를 backfill하고 `public_features` view와 partial index를
+  새 정본으로 전환한다.
+
+- [ ] T-VN-35 — **typed subtype 분해**
+
+  core와 point/event/notice/route/area subtype을 typed table·geometry/category 제약으로 분리한다.
+  subtype별 독립 shadow 전환과 rollback을 증명한다.
+
+- [ ] T-VN-36 — **field override 단일화**
+
+  whole-row freeze를 field override로 이관하고 effective projection을 대조한 뒤 provider upsert의
+  중복 `CASE`를 제거한다. T-VN-35와 독립 rollback 가능해야 한다.
+
+- [ ] T-VN-37 — **typed notice state**
+
+  notice 유효 기간을 typed range와 DB 제약으로 재설계하고 공개 hot path의 cast·lineage anti-join을
+  제거한다.
+
+- [ ] T-VN-38 — **weather·price current summary**
+
+  원본 이력을 보존하는 current summary projection을 만들고 bbox/detail의 per-row LATERAL 조회를
+  set-based join으로 바꾼다.
+
+- [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
+
+  보존 분류, restore/PITR 또는 journal 검증, shadow checksum, consumer-first 배포, write fence,
+  순차 전환, soak, legacy 제거를 ADR-075 절차대로 수행한다.
+
+- [ ] T-VN-40 — **curation write model 단일화**
+
+  `curation_collections/items`만 write 정본으로 남기고 legacy table·trigger·route를 제거한다.
+  자동 후보는 `theme_feature_candidates`처럼 별도 lifecycle로 분리한다.
+
+- [ ] T-VN-41 — **cache-target generation·outbox 전파**
+
+  기존 external identity와 exact scope를 유지하면서 source generation/restore epoch, outbox relay,
+  backfill·reconciliation을 설치하고 critical path 밖에서 enable한다.
+
+### Wave 3 — 도입 조건을 먼저 측정
+
+- [ ] T-VN-51 — **MVT tile 도입 조건 측정**
+
+  전국 low-zoom 응답 byte·p95와 현재 cluster 계약을 측정하고 MVT가 정한 budget을 유의미하게
+  개선할 때만 별도 구현 task를 연다.
+
+- [ ] T-VN-52 — **범용 feature-context batch 도입 조건 측정**
+
+  실제 consumer round-trip과 query count를 측정해 weather 전용 batch를 넘어선 범용 batch의
+  필요 조건·최대 크기·응답 shape를 먼저 고정한다.
+
+- [ ] T-VN-53 — **cursor HMAC 도입 조건 측정**
+
+  fingerprint cursor의 위변조 위험과 운영 비용을 측정하고 서명 필요성이 입증될 때 key rotation과
+  실패 계약을 포함한 구현 task를 연다.
+
+- [ ] T-VN-54 — **weather partition·hypertable·event clock 측정**
+
+  3년 데이터량, ingest/update 비율, retention query를 실측해 native partition 또는 hypertable 후보와
+  event clock 직렬화의 채택 기준을 문서화한다.
+
+- [ ] T-VN-55 — **물리 listener/process 분리 측정**
+
+  단일 app의 resource contention과 장애 격리를 측정해 세 listener가 배포 복잡성보다 큰 이득을
+  줄 때만 분리 설계를 연다.
+
+- [ ] T-VN-56 — **대규모 fixture 실행 주기 측정**
+
+  100만+ fixture gate의 시간·비용과 결함 검출률을 수집해 매 PR, nightly, release 중 적절한 실행
+  주기를 확정한다.
+
+### 독립 하드닝 — 각 항목 PR 1개
+
+- [ ] T-VN-H01 — **public API key header 전환**
+
+  URL query key를 header로 clean-cut해 로그·referrer 노출을 막고 public OpenAPI와 consumer를 함께
+  갱신한다.
+
+- [ ] T-VN-H02 — **destructive admin 기본값 fail-closed**
+
+  `admin_destructive_enabled` 기본값을 False로 바꾸고 production에서 명시적 enable과 감사 로그를
+  요구한다.
+
+- [ ] T-VN-H03 — **surface별 CORS 분리**
+
+  public/service/operator surface별 origin·header·method 정책을 나누고 wildcard와 credential 조합을
+  거부한다.
+
+- [ ] T-VN-H04 — **PROJ pin·drift·REINDEX runbook**
+
+  `coord_5179` generated 값의 PROJ 버전을 고정하고 drift 검사, 재계산, 공간 index REINDEX와 검증
+  순서를 운영 runbook에 추가한다.
+
+- [ ] T-VN-H05 — **INVALID concurrent index 복구 runbook**
+
+  `CREATE INDEX CONCURRENTLY` 실패 뒤 남은 INVALID index를 탐지·검증·drop하는 자동 검사와 운영
+  절차를 추가한다.
+
+- [ ] T-VN-H06 — **admin 목록 keyset 전환**
+
+  OFFSET 기반 admin 목록을 stable total-order keyset과 fingerprint cursor로 바꾸고 page 경계
+  mutation 회귀를 검증한다.
+
+- [ ] T-VN-H07 — **PinVi field-level contract와 OpenAPI SHA 검증**
+
+  양 저장소 contract test를 required/type/enum 필드까지 강화하고 배포 compatible pair에 pinned
+  OpenAPI SHA manifest를 요구한다.
 
 ## T-101 — Materialized View 도입 검토
 
