@@ -14,6 +14,36 @@
 
 ---
 
+## vNext 목표 표면 (ADR-066·067·072~074, 미구현)
+
+기계 정본 OpenAPI는 **현재 구현 계약**이고, 아래 표는 T-VN task가 clean-cut으로 도달할 목표다.
+PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의 consumer-first 조건을
+통과하기 전 현재 운영 계약으로 간주하지 않는다. 호환 alias는 만들지 않는다.
+
+| 표면 | 목표 resource | 핵심 계약 |
+|---|---|---|
+| public-keyed | `GET /v1/features/{feature_id}` | kind-discriminated typed detail, `ETag(row_revision)` |
+| public-keyed | `GET /v1/features/{search,nearby,in-bounds}` | fingerprint cursor, total opt-in, 지도 mode/truncated/coverage/cluster key |
+| public-keyed | `GET /v1/categories` | catalog revision ETag |
+| public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
+| service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
+| service | `POST /v1/features/weather/batch` | set-based `target_at`/`known_at` bitemporal query |
+| service | `PUT/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 `source_generation`, ETag/If-Match |
+| service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
+| operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
+| operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
+| operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
+| operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
+
+공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough가 없다.
+`include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
+실행하지 않는다. cursor는 version과 정규화 query fingerprint가 다르면
+`CURSOR_QUERY_MISMATCH`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
+제거하고 route policy에서 public/service/operator profile을 생성한다.
+
+MVT tile, 범용 `feature-context` batch, cursor HMAC, 물리 listener 분리는 목표 계약이 아니라
+T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 연다.
+
 ## 0. 한눈에 — #317이 한 것 vs ADR-048 delta
 
 | 영역 | #317(T-214/T-215) | ADR-048 보강 |
@@ -56,13 +86,15 @@
   (`Deprecation`/`Sunset` 헤더), OpenAPI major별 분리 export. 즉 "지금은 깨도 되고, GA 후엔
   `/v2`로만 깬다"를 규칙화.
 
-### 1.3 인증 (ADR-005 / ADR-045 D-1, #314)
+### 1.3 인증 (현행 구현; 목표 ADR-066)
 - `POST /v1/features/batch`(service read): `ServiceToken`(`X-Kor-Travel-Map-Service-Token`, 미설정 시
   비강제, 상수시간) route-level gate. 나머지 `/v1/features/*` GET은 공용 read.
 - `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`·`/v1/curations*`: 공용 read,
   앱 토큰 비강제(인프라 SSO).
 - `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`: 인프라 SSO + IP allowlist. 파괴적 admin은
   `admin_destructive_enabled` kill-switch.
+- 위 opt-out은 현재 구현 설명일 뿐 목표 정책이 아니다. T-VN-01~03에서 production secret 누락
+  기동 거부, 전 route matrix, principal actor, 공개 read-only DB role로 clean-cut한다(ADR-066).
 
 ### 1.4 응답 envelope (🔁 ADR-048 — payload/meta 완전 분리)
 - 성공 `{ "data": <payload>, "meta": <Meta> }`. **`data`는 payload만**:

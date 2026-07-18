@@ -2,6 +2,7 @@
 
 - 상태: accepted
 - 날짜: 2026-06-23
+- 개정: ADR-066 — production fail-closed route policy와 principal-only actor
 
 ## 맥락
 
@@ -46,3 +47,10 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
 - 기존 로컬/테스트 하위호환을 위해 `admin_proxy_secret`이 없는 설정에서는 admin gate를 강제하지
   않는다. 실제 운용 `.env`에는 secret을 넣어 프론트 프록시 경계를 활성화한다.
 - `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 settings key 추출 규칙을 공유한다.
+
+## 개정 (2026-07-18, ADR-066)
+
+로그인·HttpOnly 세션·same-origin frontend proxy·해시된 public API key 구조는 유지한다.
+다만 production에서 secret 미설정 통과는 폐기하고, 모든 route를 policy matrix로 분류하며,
+감사 actor는 검증된 proxy principal에서만 파생한다. body actor와 production opt-out은 더 이상
+계약이 아니다.

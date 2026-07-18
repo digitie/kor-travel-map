@@ -399,6 +399,24 @@ ORDER BY valid_at DESC NULLS LAST
 LIMIT 1;
 ```
 
+### 8.3 vNext 3단 성능·DDL gate (ADR-075)
+
+성능 최적화는 도입 전 budget과 재현 fixture를 고정하고 다음 세 계층으로 검증한다.
+
+1. **모든 PR**: planner 설정을 바꾸지 않은 hot-query `EXPLAIN` smoke, batch item 수에 비례해
+   DB query 수가 늘지 않는 검사, response shape 회귀를 수행한다. `enable_seqscan=off` 결과는
+   채택 근거가 아니다.
+2. **release/cutover**: 100만 건 이상 실제 분포 fixture에서 `EXPLAIN (ANALYZE, BUFFERS)`를
+   실행한다. 서울 밀집 viewport, 전국 low-zoom, 100km nearby, 상용 검색어, 200건 batch를
+   고정하고 n150 기준 p95, shared read blocks, response bytes를 기록한다.
+3. **index/DDL PR**: 변경 전후 read와 write 비용, index 크기, WAL, lock acquisition/보유 시간을
+   함께 측정한다. GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택하고, concurrent build
+   실패 뒤 INVALID index가 0건인지 확인한다.
+
+T-VN-21이 이 계층을 CI/release 절차에 연결한다. MVT, 범용 batch, cursor HMAC, weather partition/
+hypertable, 물리 listener, 대규모 fixture 주기는 T-VN-51~56에서 먼저 채택 기준을 측정하며,
+"확장 가능해 보인다"는 이유만으로 구현하지 않는다.
+
 ## 9. 캐싱 정책 (Postgres 외)
 
 ### 9.1 라이브러리 레벨 캐시 — 사용하지 않는다

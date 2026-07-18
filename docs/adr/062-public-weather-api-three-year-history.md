@@ -3,6 +3,7 @@
 - 상태: accepted
 - 날짜: 2026-07-09
 - 결정자: user + codex
+- 관련: ADR-072 — bitemporal 시간 의미·무결성·batch/current projection
 
 ## 컨텍스트
 
@@ -42,3 +43,9 @@
 - weather는 독립 리소스가 아니라 feature의 공용 속성/시계열로 다루므로, 공개 REST 표면도
   `/v1/features` 아래에서 관리한다.
 - 3년을 넘는 장기 기후 분석은 본 API의 1차 범위가 아니다.
+
+## 개정 (2026-07-18, ADR-072)
+
+3년 보존과 feature 하위 공개 weather 표면은 유지한다. `issued_at`/`valid_at`/`observed_at`
+나열만으로 시간 의미를 정의하던 부분은 ADR-072의 `target_at`/`known_at` bitemporal 계약으로
+확장하며, 공개 원문 payload 대신 typed projection을 사용한다.

@@ -16,6 +16,10 @@ PostgreSQL + PostGIS에 저장·조회·병합하는 한국 여행 지도 데이
 Python core(`import kortravelmap as ktm`)는 정규화·적재 엔진이고, 외부 경계는
 OpenAPI다 — `api`/`dagster`가 이 core를 내부에서 import하고 PinVi는 HTTP로만 호출한다.
 
+vNext 재설계는 **정확성·보안 → 단일 정본/설계적 우월성 → 단순성 → 확장성 → 실측 성능 →
+호환성** 순이며, 기존 계약은 계획된 PinVi cutover 외에는 상위 원칙보다 우선하지 않는다
+(ADR-066~075).
+
 운영 모델·서비스 구성·역할은 `AGENTS.md` §역할, 배포명·import root·CLI·DB·버킷 등
 identity table은 `AGENTS.md` §식별자가 정본이다.
 
@@ -28,7 +32,7 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
 - v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001); v1 스펙은 루트 `kor-travel-map-spec.docx`.
-- ADR 현황·작성 규약은 `docs/adr/README.md`(다음 후보 ADR-060). 고정 기준값만 아래 둔다.
+- ADR 현황·작성 규약은 `docs/adr/README.md`(다음 후보 ADR-076). 고정 기준값만 아래 둔다.
 - **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

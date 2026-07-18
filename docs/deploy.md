@@ -101,6 +101,27 @@ restore 기본 대상은 `kor_travel_map_restore`, `kor_travel_map_dagster_resto
 `kor-travel-map-rustfs-restore`라 운영 DB/volume에 직접 쓰지 않는다. 산출물과 검증 절차는
 `docs/backup-restore.md`를 따른다.
 
+## vNext write-fence cutover와 rollback (ADR-075)
+
+vNext schema/API 전환은 일반 image 교체가 아니라 데이터 보존 작업이다. 배포 전 정본·감사·파생
+데이터를 분류하고, production clone에서 restore/PITR 또는 forward journal replay와 shadow
+checksum을 검증한다. upstream 재수집은 닫힌 feed, quota, 3년 weather 이력을 복원하지 못하므로
+정본 복구책으로 인정하지 않는다.
+
+배포 순서는 다음과 같다.
+
+1. target ADR·DDL·OpenAPI SHA와 KTM/PinVi compatible commit pair를 freeze한다.
+2. PinVi typed consumer를 비활성 상태로 선배포하고 contract smoke를 통과시킨다.
+3. write fence를 열기 전에 background writer, Dagster, API mutation, outbox relay를 모두 식별한다.
+4. fence 또는 검증된 delta capture를 활성화하고 drain 뒤 backup/checksum을 남긴다.
+5. shadow backfill 검증 후 KTM DB/API를 전환하고 PinVi 기능을 활성화한다.
+6. 양방향 smoke와 reconciliation을 통과한 뒤 soak한다. legacy column/table/alias 제거는 별도 PR이다.
+
+Rollback은 fence 이후 write가 없을 때만 old snapshot restore를 허용한다. write가 있었다면 PITR 또는
+forward journal로 해당 delta를 이전 schema에 적용하고 checksum을 다시 맞춘 뒤 writer를 연다.
+복구 경로가 검증되지 않았거나 어느 쪽 identity/lineage라도 불일치하면 서비스를 read-only로 유지하고
+forward-fix한다. lock acquisition timeout과 실제 중단 시간은 별도로 기록한다.
+
 ## 환경변수
 
 루트 `.env`와 API 전용 `packages/kor-travel-map-api/.env`는 배포 환경의 secret store,
@@ -162,9 +183,9 @@ API→Dagster GraphQL 호출은 docker 내부망(`http://dagster:12702`,
 
 ## 보안 경계
 
-`kor-travel-map-admin`은 ADR-005에 따라 코드 레벨 인증을 넣지 않는다. 외부 노출이
-필요하면 Cloudflare Tunnel, SSO 게이트웨이, VPN, IP allowlist 같은 네트워크 계층에서
-보호한다.
+현재 `kor-travel-map-admin`은 ADR-060의 로그인/BFF와 네트워크 계층을 사용한다. vNext production은
+ADR-066에 따라 route policy matrix와 필수 secret을 앱에서도 fail-closed로 검사하며, infra SSO,
+VPN, IP allowlist는 그 위의 추가 경계다. debug/operator/raw route를 네트워크 보호만 믿고 열지 않는다.
 
 Docker compose의 host publish는 기본 `KOR_TRAVEL_MAP_DOCKER_BIND_HOST=127.0.0.1`로
 localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 없는 운영 surface를
@@ -189,11 +210,10 @@ localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 �
   노드 복제)는 범위 밖으로 두며 운영 DB 복구성은 cold backup/restore와 hot-swap restore
   훈련으로 확인한다 — 같은 manifest여야 두 노드 배포 절차가 갈라지지 않고, DB HA는 운영
   토폴로지 확정 후 별도로 다루는 편이 낫기 때문이다(구 ADR-056, 위 §T-108에서 결정).
-- admin UI(`kor-travel-map-admin`)는 디버그 전용을 넘어 프로덕션 admin/유지보수 운영
-  surface로 확장하되, 인증 로직은 코드에 넣지 않고 네트워크 계층(Cloudflare Tunnel/SSO/
-  IP allowlist + bind host 기본 `127.0.0.1`)에서만 보호한다 — 별도 admin 앱을 만들면
-  인증·DB·디버깅이 중복되고, 인증을 코드에서 떼면 인프라 보안 정책이 바뀌어도 코드를
-  고칠 필요가 없기 때문이다(구 ADR-035, 위 §보안 경계에서 결정). 프로덕션에서 노출되는
+- admin UI(`kor-travel-map-admin`)를 디버그 전용에서 프로덕션 admin/유지보수 surface로 확장한
+  결정은 유지한다. 과거에는 네트워크 계층만으로 보호했지만 ADR-060의 로그인/BFF와 ADR-066의
+  production fail-closed app gate가 이를 supersede했다. 네트워크 SSO/IP allowlist와 bind host
+  기본 `127.0.0.1`도 defense-in-depth로 계속 사용한다. 프로덕션에서 노출되는
   라우터는 prefix를 `/admin/...`·`/ops/...`(운영)와 `/debug/...`(디버그)로 분리하고,
   운영 라우터는 읽기 우선 + 쓰기는 explicit confirmation을 요구한다(구 ADR-035).
 

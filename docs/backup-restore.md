@@ -59,6 +59,11 @@ best-effort snapshot을 남길 때만 다음 opt-in을 사용한다.
 KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING=1 npm run docker:backup
 ```
 
+이 opt-in 산출물은 진단용 best-effort snapshot이다. vNext cutover rollback 기준점으로 사용할 수
+없다. rollback 기준점은 write fence 뒤 생성하고, fence 이후 write가 있으면 검증된 PITR 또는
+forward journal replay를 함께 준비한다(ADR-075). upstream 재수집은 정본·감사·3년 weather 이력의
+복구 수단이 아니다.
+
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해
 PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lock이 이미

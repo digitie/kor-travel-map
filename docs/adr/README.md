@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-065.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-076.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -18,11 +18,11 @@
 | ADR-002 | 의존 계층 강제 + async-only API | [002-dependency-layer-enforcement-async-only.md](002-dependency-layer-enforcement-async-only.md) |
 | ADR-003 | ~~(삭제됨)~~ | 삭제 — ADR-045로 폐기된 소비자 함수-호출 연동 모델 |
 | ADR-004 | ORM은 매핑만, 쿼리는 raw SQL `text()` | [004-orm-mapping-only-raw-sql-text.md](004-orm-mapping-only-raw-sql-text.md) |
-| ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 | [005-debug-rest-api-no-auth-internal-only.md](005-debug-rest-api-no-auth-internal-only.md) |
+| ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 (인증 결정은 ADR-066으로 superseded) | [005-debug-rest-api-no-auth-internal-only.md](005-debug-rest-api-no-auth-internal-only.md) |
 | ADR-006 | provider adapter/wrapper 신규 생성 금지 | → 개발 규칙 ([SKILL.md §4](../../SKILL.md)) |
 | ADR-007 | 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas | [007-dependency-stack-postgres-postgis-sqlalchemy.md](007-dependency-stack-postgres-postgis-sqlalchemy.md) |
 | ADR-008 | PostGIS extension은 `x_extension` schema에 격리 | [008-postgis-extension-x-extension-schema.md](008-postgis-extension-x-extension-schema.md) |
-| ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) | [009-deterministic-feature-id.md](009-deterministic-feature-id.md) |
+| ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) (ADR-068로 superseded) | [009-deterministic-feature-id.md](009-deterministic-feature-id.md) |
 | ADR-010 | weather forecast_style + timeline_bucket 두 축 분리 | → 이관 [etl/weather-feature-normalization.md](../etl/weather-feature-normalization.md) |
 | ADR-011 | 작업 큐는 `import_jobs` 영속화 + advisory lock + SKIP LOCKED | [011-import-jobs-advisory-lock-skip-locked.md](011-import-jobs-advisory-lock-skip-locked.md) |
 | ADR-012 | 공간 쿼리 ST_Transform 1회·인덱스 컬럼 | → 개발 규칙 ([SKILL.md §4](../../SKILL.md)) |
@@ -79,6 +79,16 @@
 | ADR-063 | Feature 관측과 큐레이션 collection 분리 | [063-feature-observations-curation-collections.md](063-feature-observations-curation-collections.md) |
 | ADR-064 | admin ops 표면을 파이프라인/데이터셋 2페이지로 통합 재작성 | [064-admin-ops-consolidation-two-pages.md](064-admin-ops-consolidation-two-pages.md) |
 | ADR-065 | POI target mutation causal receipt와 ETag 조건부 삭제 | [065-poi-target-causal-receipt-conditional-delete.md](065-poi-target-causal-receipt-conditional-delete.md) |
+| ADR-066 | Route policy fail-closed와 principal actor | [066-route-policy-fail-closed.md](066-route-policy-fail-closed.md) |
+| ADR-067 | 직교 상태 모델과 단일 공개 projection | [067-orthogonal-publication-state.md](067-orthogonal-publication-state.md) |
+| ADR-068 | Feature UUID 정본 identity와 legacy alias | [068-feature-uuid-identity.md](068-feature-uuid-identity.md) |
+| ADR-069 | DB 소유 provider dataset과 immutable lineage 정본 | [069-provider-datasets-canonical.md](069-provider-datasets-canonical.md) |
+| ADR-070 | Feature core와 typed subtype 분해 | [070-feature-subtype-decomposition.md](070-feature-subtype-decomposition.md) |
+| ADR-071 | Field-level override 단일화 | [071-field-level-override.md](071-field-level-override.md) |
+| ADR-072 | Weather bitemporal 사실과 current summary | [072-weather-bitemporal.md](072-weather-bitemporal.md) |
+| ADR-073 | Typed public/service/operator REST 계약 | [073-public-rest-contract.md](073-public-rest-contract.md) |
+| ADR-074 | Domain-owned replay, revision, outbox 쓰기 안전성 | [074-write-safety.md](074-write-safety.md) |
+| ADR-075 | 보존 우선 cutover와 DDL 규율 | [075-cutover-and-ddl-discipline.md](075-cutover-and-ddl-discipline.md) |
 
 ## 새 ADR 작성 규약
 

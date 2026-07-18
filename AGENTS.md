@@ -16,6 +16,10 @@
 4. **운용**: 비전문가도 다룰 수 있는 데이터 수집·관리·백업·복원용 admin UI와 CLI
    인터페이스를 제공한다.
 
+vNext 재설계는 **정확성·보안 → 단일 정본/설계적 우월성 → 단순성 → 확장성 → 실측 성능 →
+호환성** 순이며, 기존 계약은 계획된 PinVi cutover 외에는 상위 원칙보다 우선하지 않는다
+(ADR-066~075).
+
 ## Think Before Coding
 
 - 요청이 모호할 때는 해석을 조용히 정하지 말 것
@@ -104,7 +108,7 @@ REST/OpenAPI backend는 별도 Python 패키지 `kor-travel-map-api`, admin UI�
 | Category 모듈 출처 | `kortravelmap.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 | Address DTO + 행정코드 utility | `kortravelmap.dto.Address` + `kortravelmap.core.address` (구 `kraddr.base`에서 흡수, ADR-041 — `PlaceCoordinate`는 제외, 좌표는 `Coordinate`로 단일화) |
 | Provider 라이브러리 git URL/sha 핀 status | `docs/architecture/provider-contract.md` §12 표 (Sprint별 그룹화, kma/datagokr는 Protocol 박힘) |
-| ADR 현황 | ADR-001~059 전부 accepted; 상세·색인은 `docs/adr/README.md`. 다음 후보 번호 = ADR-060. |
+| ADR 현황 | ADR-001~075의 상태·색인은 `docs/adr/README.md`. 다음 후보 번호 = ADR-076. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 

@@ -371,6 +371,24 @@ npm run docker:restore -- <backup_id>
 `KOR_TRAVEL_MAP_RESTORE_RECREATE=1`을 명시한다. 자세한 대상 override와 검증 절차는
 `docs/backup-restore.md`를 따른다.
 
+### 8.1 vNext production cutover gate
+
+ADR-075/T-VN-39 cutover에서는 §8 cold backup만으로 rollback 가능하다고 판정하지 않는다.
+
+- target ADR·DDL·OpenAPI SHA와 KTM/PinVi compatible image tag를 먼저 기록한다.
+- API mutation, Dagster/daemon, admin write, outbox relay를 모두 fence하고 active writer 0건과
+  queue/drain 상태를 확인한다.
+- production clone에서 restore/PITR 또는 forward journal replay, shadow row count·checksum·FK/
+  semantic duplicate 0건을 검증한다.
+- PinVi consumer를 먼저 배포한 뒤 KTM DB/API를 전환하고, typed contract와 principal 401/403/422,
+  read/write smoke를 수행한다.
+- rollback window에는 fence를 유지한다. fence 이후 delta가 있으면 old snapshot만 복원하지 말고
+  검증된 journal/PITR을 적용한다. upstream 재수집으로 정본·감사·weather 이력을 대체하지 않는다.
+- soak와 reconciliation 전에는 legacy table/column/alias와 backup을 제거하지 않는다.
+
+실패한 DDL은 lock 획득 시간과 보유 시간을 구분해 기록한다. `CREATE INDEX CONCURRENTLY` 실패 시
+INVALID index를 찾아 제거하며, UNIQUE writer conflict target을 index보다 먼저 전환하지 않는다.
+
 ## 9. T-108 양 노드 배포 경계
 
 T-108의 양 노드 운영은 같은 image tag를 N150 16GB(x86_64)와 Odroid M1S(ARM64)에 배포할
