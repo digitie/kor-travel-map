@@ -208,6 +208,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         dataset_key="mois_license_features_bulk",
         distance_m=120.5,
     )
+    assert link is not None
     assert link.active is True
     assert link.distance_m == 120.5
 
@@ -240,12 +241,34 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         )
     )[0].active is False
 
-    deleted = await delete_poi_cache_target(
+    mismatch = await delete_poi_cache_target(
         migrated_session,
         external_system="external-app",
         target_key="poi-1",
+        expected_target_id="22222222-2222-4222-8222-222222222222",
+        expected_lock_version=moved.lock_version,
     )
+    assert mismatch.status == "precondition_failed"
+    assert (
+        await get_poi_cache_target_by_key(
+            migrated_session,
+            external_system="external-app",
+            target_key="poi-1",
+        )
+        is not None
+    )
+
+    delete_result = await delete_poi_cache_target(
+        migrated_session,
+        external_system="external-app",
+        target_key="poi-1",
+        expected_target_id=moved.target_id,
+        expected_lock_version=moved.lock_version,
+    )
+    assert delete_result.status == "deleted"
+    deleted = delete_result.target
     assert deleted is not None
+    assert deleted.lock_version == moved.lock_version + 1
     assert deleted.deleted_at is not None
     assert deleted.update_enabled is False
     assert (

@@ -22,7 +22,11 @@ function hookContext() {
       new Response(
         JSON.stringify({
           data: { nearby_url: null },
-          meta: { duration_ms: 1, request_id: "test" },
+          meta: {
+            dataset_projection_revision: 41,
+            duration_ms: 1,
+            request_id: "test",
+          },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -37,7 +41,7 @@ function hookContext() {
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  return { invalidateQueries, wrapper };
+  return { fetchMock, invalidateQueries, wrapper };
 }
 
 function expectCanonicalInvalidation(
@@ -88,9 +92,61 @@ describe("POI cache target canonical query invalidation", () => {
       await result.current.mutateAsync({
         externalSystem: "concierge",
         targetKey: "poi-1",
+        entityTag: '"11111111-1111-4111-8111-111111111111:7"',
       });
     });
 
+    expectCanonicalInvalidation(context.invalidateQueries);
+    const request = context.fetchMock.mock.calls[0];
+    expect(request?.[0]).toBe(
+      "/api/proxy/v1/admin/poi-cache-targets/concierge/poi-1",
+    );
+    expect(new Headers(request?.[1]?.headers).get("if-match")).toBe(
+      '"11111111-1111-4111-8111-111111111111:7"',
+    );
+  });
+
+  it("delete 412도 list/nearby/dataset/pipeline projection을 refetch한다", async () => {
+    const context = hookContext();
+    context.fetchMock.mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            code: "PRECONDITION_FAILED",
+            detail: "stale entity tag",
+            errors: [],
+            request_id: "test",
+            status: 412,
+            title: "stale entity tag",
+            type: "https://kor-travel-map/errors/precondition-failed",
+          }),
+          {
+            status: 412,
+            headers: { "Content-Type": "application/problem+json" },
+          },
+        ),
+      ),
+    );
+    const { result } = renderHook(() => useDeletePoiCacheTargetMutation(), {
+      wrapper: context.wrapper,
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          externalSystem: "concierge",
+          targetKey: "poi-1",
+          entityTag: '"11111111-1111-4111-8111-111111111111:7"',
+        }),
+      ).rejects.toThrow();
+    });
+
+    const keys = context.invalidateQueries.mock.calls.map(
+      ([filters]) => filters?.queryKey,
+    );
+    expect(keys).toContainEqual(["poi-cache-targets"]);
+    expect(keys).toContainEqual(["poi-cache-target", "concierge", "poi-1"]);
+    expect(keys).toContainEqual(["nearby-features-by-target"]);
     expectCanonicalInvalidation(context.invalidateQueries);
   });
 });

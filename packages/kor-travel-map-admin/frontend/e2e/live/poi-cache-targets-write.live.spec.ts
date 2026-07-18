@@ -5,11 +5,14 @@ import type { components } from "../../src/api/types";
 type PoiCacheTargetUpsertRequest =
   components["schemas"]["PoiCacheTargetUpsertRequest"];
 type PoiCacheTargetResponse = components["schemas"]["PoiCacheTargetResponse"];
+type PoiCacheTargetMutationResponse =
+  components["schemas"]["PoiCacheTargetMutationResponse"];
 type PoiCacheTargetListResponse =
   components["schemas"]["PoiCacheTargetListResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
+  etag: string | null;
   status: number;
   text: string;
 };
@@ -35,6 +38,8 @@ const LAT = 37.5665;
 
 const EXECUTE_POI_CACHE_WRITE =
   process.env.E2E_ADMIN_WRITE === "1" || process.env.E2E_POI_CACHE_WRITE === "1";
+const LIVE_API_BASE =
+  process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API ?? "http://127.0.0.1:12701";
 
 const POI_HEADING = "POI cache targets";
 
@@ -76,16 +81,18 @@ async function browserFetch<T>(
   path: string,
   options: {
     body?: unknown;
+    headers?: Record<string, string>;
     method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
-    async ({ body, method, path }) => {
+    async ({ body, headers, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
         headers: {
           Accept: "application/json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...headers,
         },
         credentials: "same-origin",
         cache: "no-store",
@@ -98,10 +105,16 @@ async function browserFetch<T>(
       } catch {
         parsed = null;
       }
-      return { body: parsed as T | null, status: response.status, text };
+      return {
+        body: parsed as T | null,
+        etag: response.headers.get("etag"),
+        status: response.status,
+        text,
+      };
     },
     {
       body: options.body,
+      headers: options.headers,
       method: options.method ?? "GET",
       path,
     },
@@ -166,13 +179,136 @@ function rowContaining(page: Page, text: string): Locator {
   return page.getByRole("row", { name: new RegExp(escapeRegExp(text)) });
 }
 
-async function deleteTargetByApi(page: Page): Promise<number> {
-  const response = await browserFetch<PoiCacheTargetResponse>(
+async function deleteTargetByApi(
+  page: Page,
+  entityTag: string,
+): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  return browserFetch<PoiCacheTargetMutationResponse>(
     page,
     poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
-    { method: "DELETE" },
+    { method: "DELETE", headers: { "If-Match": entityTag } },
   );
-  return response.status;
+}
+
+function causalRevision(
+  response: BrowserFetchResult<PoiCacheTargetMutationResponse>,
+): number {
+  const revision = response.body?.meta.dataset_projection_revision;
+  if (typeof revision !== "number") {
+    throw new Error("mutation response is missing dataset_projection_revision");
+  }
+  return revision;
+}
+
+async function openDatasetProjectionSocket(page: Page): Promise<void> {
+  await page.evaluate(async ({ liveApiBase }) => {
+    const ticketResponse = await fetch("/api/auth/live-ticket", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    });
+    if (!ticketResponse.ok) {
+      throw new Error(`live ticket failed: ${ticketResponse.status}`);
+    }
+    const ticket = (await ticketResponse.json()) as { subprotocol: string };
+    const url = new URL(liveApiBase);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/v1/ops/live`;
+    url.search = "?poll_interval_ms=1000";
+    const state = globalThis as typeof globalThis & {
+      __c7cLive?: { frames: unknown[]; socket: WebSocket };
+    };
+    const frames: unknown[] = [];
+    const socket = new WebSocket(url, ticket.subprotocol);
+    state.__c7cLive = { frames, socket };
+    socket.addEventListener("message", (event) => {
+      try {
+        frames.push(JSON.parse(String(event.data)));
+      } catch {
+        frames.push({ type: "malformed" });
+      }
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener("open", () => resolve(), { once: true });
+      socket.addEventListener(
+        "error",
+        () => reject(new Error("dataset_projection socket open failed")),
+        { once: true },
+      );
+    });
+    socket.send(
+      JSON.stringify({ type: "replace", topics: ["dataset_projection"] }),
+    );
+  }, { liveApiBase: LIVE_API_BASE });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const state = globalThis as typeof globalThis & {
+            __c7cLive?: { frames: unknown[] };
+          };
+          return state.__c7cLive?.frames.some((frame) => {
+            const value = frame as { topic?: unknown; type?: unknown };
+            return value.type === "snapshot" && value.topic === "dataset_projection";
+          }) ?? false;
+        }),
+      T,
+    )
+    .toBe(true);
+}
+
+async function expectCausalDatasetProjectionUpdate(
+  page: Page,
+  receipt: number,
+  frameCursor: number,
+): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(({ frameCursor, receipt }) => {
+          const state = globalThis as typeof globalThis & {
+            __c7cLive?: { frames: unknown[]; socket: WebSocket };
+          };
+          if (state.__c7cLive?.socket.readyState !== WebSocket.OPEN) return false;
+          return state.__c7cLive.frames.slice(frameCursor).some((frame) => {
+            const value = frame as {
+              data?: { live_revision?: unknown };
+              topic?: unknown;
+              type?: unknown;
+            };
+            return (
+              value.type === "update" &&
+              value.topic === "dataset_projection" &&
+              typeof value.data?.live_revision === "number" &&
+              value.data.live_revision >= receipt
+            );
+          });
+        }, { frameCursor, receipt }),
+      { timeout: FLOW_TIMEOUT },
+    )
+    .toBe(true);
+}
+
+async function datasetProjectionFrameCursor(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const state = globalThis as typeof globalThis & {
+      __c7cLive?: { frames: unknown[]; socket: WebSocket };
+    };
+    if (state.__c7cLive?.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("dataset_projection socket is not open");
+    }
+    return state.__c7cLive.frames.length;
+  });
+}
+
+async function closeDatasetProjectionSocket(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const state = globalThis as typeof globalThis & {
+      __c7cLive?: { socket: WebSocket };
+    };
+    state.__c7cLive?.socket.close(1000, "c7c complete");
+    delete state.__c7cLive;
+  });
 }
 
 // ---- DEEPEN(#574 후속): 추가 시나리오용 파라미터화 helper ----
@@ -240,8 +376,8 @@ async function putTarget(
   externalSystem: string,
   targetKey: string,
   body: PoiCacheTargetUpsertRequest,
-): Promise<BrowserFetchResult<PoiCacheTargetResponse>> {
-  return browserFetch<PoiCacheTargetResponse>(
+): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  return browserFetch<PoiCacheTargetMutationResponse>(
     page,
     poiTargetPath(externalSystem, targetKey),
     { method: "PUT", body },
@@ -275,13 +411,16 @@ async function softDeleteByKey(
   page: Page,
   externalSystem: string,
   targetKey: string,
-): Promise<number> {
-  const response = await browserFetch<PoiCacheTargetResponse>(
+): Promise<BrowserFetchResult<PoiCacheTargetMutationResponse>> {
+  const current = await getTargetByKey(page, externalSystem, targetKey);
+  if (current.status !== 200 || current.etag === null) {
+    return { ...current, body: null };
+  }
+  return browserFetch<PoiCacheTargetMutationResponse>(
     page,
     poiTargetPath(externalSystem, targetKey),
-    { method: "DELETE" },
+    { method: "DELETE", headers: { "If-Match": current.etag } },
   );
-  return response.status;
 }
 
 test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)", () => {
@@ -296,20 +435,35 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
     let created = false;
     let removed = false;
+    let liveSocketOpened = false;
+    let latestEntityTag: string | null = null;
 
     try {
       await test.step("admin POI cache targets 화면을 열어 same-origin 컨텍스트를 확보한다", async () => {
         await gotoPoiTargets(page);
+        await openDatasetProjectionSocket(page);
+        liveSocketOpened = true;
       });
 
       await test.step("API PUT로 고유 target을 생성하고 GET으로 영속화를 확인한다", async () => {
-        const createResponse = await browserFetch<PoiCacheTargetResponse>(
+        const frameCursor = await datasetProjectionFrameCursor(page);
+        const createResponse = await browserFetch<PoiCacheTargetMutationResponse>(
           page,
           poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
           { method: "PUT", body: upsertBody(CREATE_NAME, POI_ID_A) },
         );
         expect(createResponse.status).toBe(200);
         created = true;
+        expect(createResponse.etag).toBe(createResponse.body?.data.entity_tag);
+        latestEntityTag = createResponse.body?.data.entity_tag ?? null;
+        expect(latestEntityTag).not.toBeNull();
+        const receipt = causalRevision(createResponse);
+        expect(receipt).toEqual(expect.any(Number));
+        await expectCausalDatasetProjectionUpdate(
+          page,
+          receipt,
+          frameCursor,
+        );
         expect(createResponse.body?.data).toMatchObject({
           external_system: EXTERNAL_SYSTEM,
           target_key: TARGET_KEY,
@@ -333,6 +487,7 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
         const detail = await fetchTarget(page);
         expect(detail.status).toBe(200);
+        expect(detail.etag).toBe(detail.body?.data.entity_tag);
         expect(detail.body?.data).toMatchObject({
           external_system: EXTERNAL_SYSTEM,
           target_key: TARGET_KEY,
@@ -356,7 +511,7 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
       });
 
       await test.step("admin 목록을 다시 열면 새 target ROW가 필드와 함께 보이고, 선택 시 Nearby 상세에 key가 노출된다", async () => {
-        await gotoPoiTargets(page);
+        await refreshList(page);
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
@@ -374,12 +529,23 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
       });
 
       await test.step("API PUT로 name/metadata를 수정하면 GET과 admin 목록이 갱신값으로 바뀐다", async () => {
-        const updateResponse = await browserFetch<PoiCacheTargetResponse>(
+        const frameCursor = await datasetProjectionFrameCursor(page);
+        const updateResponse = await browserFetch<PoiCacheTargetMutationResponse>(
           page,
           poiTargetPath(EXTERNAL_SYSTEM, TARGET_KEY),
           { method: "PUT", body: upsertBody(UPDATED_NAME, POI_ID_B) },
         );
         expect(updateResponse.status).toBe(200);
+        expect(updateResponse.etag).toBe(updateResponse.body?.data.entity_tag);
+        latestEntityTag = updateResponse.body?.data.entity_tag ?? null;
+        expect(latestEntityTag).not.toBeNull();
+        const receipt = causalRevision(updateResponse);
+        expect(receipt).toEqual(expect.any(Number));
+        await expectCausalDatasetProjectionUpdate(
+          page,
+          receipt,
+          frameCursor,
+        );
         expect(updateResponse.body?.data.name).toBe(UPDATED_NAME);
 
         await expect
@@ -401,8 +567,21 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
       });
 
       await test.step("API DELETE 후 GET은 404, admin 목록에서도 ROW가 사라진다", async () => {
-        const status = await deleteTargetByApi(page);
-        expect(status).toBe(200);
+        const frameCursor = await datasetProjectionFrameCursor(page);
+        if (latestEntityTag === null) {
+          throw new Error("latest server entity_tag is missing before DELETE");
+        }
+        const deleted = await deleteTargetByApi(page, latestEntityTag);
+        expect(deleted.status).toBe(200);
+        expect(deleted.etag).toBe(deleted.body?.data.entity_tag);
+        latestEntityTag = deleted.body?.data.entity_tag ?? null;
+        const receipt = causalRevision(deleted);
+        expect(receipt).toEqual(expect.any(Number));
+        await expectCausalDatasetProjectionUpdate(
+          page,
+          receipt,
+          frameCursor,
+        );
         removed = true;
 
         await expect
@@ -428,10 +607,98 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
         await expect(rowContaining(page, CREATE_NAME)).toHaveCount(0, T);
       });
     } finally {
+      if (liveSocketOpened) {
+        await closeDatasetProjectionSocket(page);
+      }
       // 생성됐고 아직 살아있으면 정리. 이미 삭제됐거나(404) destructive kill-switch(403)면 무시.
-      if (created && !removed) {
+      if (created && !removed && latestEntityTag !== null) {
         try {
-          await deleteTargetByApi(page);
+          await deleteTargetByApi(page, latestEntityTag);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+    }
+  });
+
+  test("DELETE는 UUID+version strong If-Match를 요구하고 stale version으로 active target을 지우지 않는다", async ({
+    page,
+  }) => {
+    test.skip(
+      !EXECUTE_POI_CACHE_WRITE,
+      "E2E_POI_CACHE_WRITE=1 또는 E2E_ADMIN_WRITE=1일 때만 실제 POI cache target write flow를 실행",
+    );
+    test.setTimeout(FLOW_TIMEOUT);
+
+    const { externalSystem, targetKey, name } = scenarioKeys("if-match");
+    let created = false;
+
+    try {
+      await gotoPoiTargets(page);
+      const createdResponse = await putTarget(
+        page,
+        externalSystem,
+        targetKey,
+        buildUpsert({ name }),
+      );
+      expect(createdResponse.status).toBe(200);
+      created = true;
+      const staleEntityTag = createdResponse.body?.data.entity_tag;
+      expect(staleEntityTag).toEqual(expect.any(String));
+      expect(createdResponse.etag).toBe(staleEntityTag);
+
+      const missing = await browserFetch<PoiCacheTargetMutationResponse>(
+        page,
+        poiTargetPath(externalSystem, targetKey),
+        { method: "DELETE" },
+      );
+      expect(missing.status).toBe(428);
+
+      const updatedResponse = await putTarget(
+        page,
+        externalSystem,
+        targetKey,
+        buildUpsert({ name: `${name} updated` }),
+      );
+      expect(updatedResponse.status).toBe(200);
+      expect(updatedResponse.body?.data.target_id).toBe(
+        createdResponse.body?.data.target_id,
+      );
+      const currentEntityTag = updatedResponse.body?.data.entity_tag;
+      expect(currentEntityTag).toEqual(expect.any(String));
+      expect(updatedResponse.etag).toBe(currentEntityTag);
+      expect(currentEntityTag).not.toBe(staleEntityTag);
+
+      const stale = await browserFetch<PoiCacheTargetMutationResponse>(
+        page,
+        poiTargetPath(externalSystem, targetKey),
+        {
+          method: "DELETE",
+          headers: { "If-Match": staleEntityTag ?? "" },
+        },
+      );
+      expect(stale.status).toBe(412);
+      const surviving = await getTargetByKey(page, externalSystem, targetKey);
+      expect(surviving.status).toBe(200);
+      expect(surviving.etag).toBe(currentEntityTag);
+
+      const deleted = await browserFetch<PoiCacheTargetMutationResponse>(
+        page,
+        poiTargetPath(externalSystem, targetKey),
+        {
+          method: "DELETE",
+          headers: { "If-Match": currentEntityTag ?? "" },
+        },
+      );
+      expect(deleted.status).toBe(200);
+      expect(deleted.etag).toBe(deleted.body?.data.entity_tag);
+      expect(deleted.etag).not.toBe(currentEntityTag);
+      expect(causalRevision(deleted)).toEqual(expect.any(Number));
+      created = false;
+    } finally {
+      if (created) {
+        try {
+          await softDeleteByKey(page, externalSystem, targetKey);
         } catch {
           // best-effort cleanup
         }
@@ -636,8 +903,9 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
       });
 
       await test.step("API DELETE로 soft-delete한다", async () => {
-        const status = await softDeleteByKey(page, externalSystem, targetKey);
-        expect(status).toBe(200);
+        const deleted = await softDeleteByKey(page, externalSystem, targetKey);
+        expect(deleted.status).toBe(200);
+        expect(causalRevision(deleted)).toEqual(expect.any(Number));
       });
 
       await test.step("단건 GET: 기본(include_deleted=false)은 404, include_deleted=true는 200+deleted_at", async () => {

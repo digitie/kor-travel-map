@@ -29,7 +29,8 @@ import { bffApiPath } from "./bff-api-path";
 type PoiCacheTargetRecord = components["schemas"]["PoiCacheTargetRecord"];
 type PoiCacheTargetListResponse =
   components["schemas"]["PoiCacheTargetListResponse"];
-type PoiCacheTargetResponse = components["schemas"]["PoiCacheTargetResponse"];
+type PoiCacheTargetMutationResponse =
+  components["schemas"]["PoiCacheTargetMutationResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const TARGET_ID_A = "44444444-4444-4444-8444-44444444aaaa";
@@ -49,12 +50,13 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 function makePoiTarget(
   overrides: Partial<PoiCacheTargetRecord> = {},
 ): PoiCacheTargetRecord {
-  return {
+  const target = {
     coord: { lon: 126.978, lat: 37.5665 },
     coord_key: "126.978000:37.566500",
     coord_precision_digits: 6,
     created_at: MOCK_NOW,
     deleted_at: null,
+    entity_tag: '"44444444-4444-4444-8444-444444444444:1"',
     external_system: "external-app",
     last_failed_at: null,
     last_refreshed_at: null,
@@ -76,6 +78,10 @@ function makePoiTarget(
     updated_at: MOCK_NOW,
     ...overrides,
   };
+  return {
+    ...target,
+    entity_tag: overrides.entity_tag ?? `"${target.target_id}:1"`,
+  };
 }
 
 function makeListResponse(
@@ -94,12 +100,15 @@ function makeListResponse(
 
 function makeUpsertResponse(
   record: PoiCacheTargetRecord,
-): PoiCacheTargetResponse {
-  // PoiCacheTargetResponse.meta는 PoiCacheTargetMeta { duration_ms, request_id } —
-  // pageable Meta가 아니다.
+): PoiCacheTargetMutationResponse {
+  // mutation meta는 causal receipt를 포함하고 pageable Meta와 구분된다.
   return {
     data: record,
-    meta: { duration_ms: 1, request_id: "e2e-poi-target-upsert" },
+    meta: {
+      dataset_projection_revision: 41,
+      duration_ms: 1,
+      request_id: "e2e-poi-target-upsert",
+    },
   };
 }
 
@@ -109,6 +118,7 @@ function makeUpsertResponse(
 async function routeListAndUpsert(
   page: Page,
   handlers: {
+    onDelete?: (route: Route, apiPath: string) => Promise<void>;
     onGet: (route: Route, url: URL) => Promise<void>;
     onPut?: (route: Route, apiPath: string) => Promise<void>;
   },
@@ -139,6 +149,10 @@ async function routeListAndUpsert(
         await handlers.onPut(route, apiPath);
         return;
       }
+    }
+    if (request.method() === "DELETE" && handlers.onDelete) {
+      await handlers.onDelete(route, apiPath);
+      return;
     }
     throw new Error(
       `Unhandled POI cache target route: ${request.method()} ${apiPath}`,
@@ -343,6 +357,124 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     // by-target 요청이 external_system=external-app & target_key=mock-target-1을 실었는지.
     await expect.poll(() => nearbyExternal).toBe("external-app");
     await expect.poll(() => nearbyTargetKey).toBe("mock-target-1");
+  });
+
+  test("stale DELETE 412 뒤 fresh list entity_tag로 재시도하고 선택 상세를 갱신한다", async ({
+    page,
+  }) => {
+    const targetId = "55555555-5555-4555-8555-555555555555";
+    const staleTag = `"${targetId}:7"`;
+    const freshTag = `"${targetId}:8"`;
+    let current = makePoiTarget({
+      entity_tag: staleTag,
+      name: "Stale delete target",
+      target_id: targetId,
+    });
+    let deleted = false;
+    let listRequests = 0;
+    let nearbyRequests = 0;
+    const deleteTags: (string | undefined)[] = [];
+
+    await routeListAndUpsert(page, {
+      onGet: async (route) => {
+        listRequests += 1;
+        await fulfillJson(
+          route,
+          makeListResponse(deleted ? [] : [current], null),
+        );
+      },
+      onDelete: async (route, apiPath) => {
+        expect(apiPath).toBe(UPSERT_PATH);
+        deleteTags.push(route.request().headers()["if-match"]);
+        if (deleteTags.length === 1) {
+          current = makePoiTarget({
+            entity_tag: freshTag,
+            name: "Stale delete target",
+            target_id: targetId,
+            updated_at: "2026-06-08T00:01:00.000Z",
+          });
+          await fulfillJson(
+            route,
+            {
+              code: "PRECONDITION_FAILED",
+              detail: "stale entity tag",
+              errors: [],
+              request_id: "e2e-stale-delete",
+              status: 412,
+              title: "stale entity tag",
+              type: "https://kor-travel-map/errors/precondition-failed",
+            },
+            412,
+          );
+          return;
+        }
+        deleted = true;
+        await fulfillJson(
+          route,
+          makeUpsertResponse(
+            makePoiTarget({
+              deleted_at: "2026-06-08T00:02:00.000Z",
+              entity_tag: `"${targetId}:9"`,
+              name: "Stale delete target",
+              target_id: targetId,
+              update_enabled: false,
+            }),
+          ),
+        );
+      },
+    });
+    await page.route("**/v1/features/nearby/by-target**", async (route) => {
+      nearbyRequests += 1;
+      await fulfillJson(route, {
+        data: {
+          items: [],
+          target: {
+            external_system: "external-app",
+            lat: 37.5665,
+            lon: 126.978,
+            target_key: "mock-target-1",
+          },
+        },
+        meta: {
+          duration_ms: 1,
+          page: { page_size: 100, next_cursor: null, total: null },
+          request_id: "e2e-stale-delete-nearby",
+        },
+      });
+    });
+
+    await page.goto("/admin/poi-cache-targets");
+    const row = page.getByRole("row", { name: /Stale delete target/ });
+    await expect(row).toBeVisible();
+    await row.click();
+    const nearbyPanelHeader = page.getByText("Nearby features").locator("..");
+    await expect(
+      nearbyPanelHeader.getByText("external-app/mock-target-1", { exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => nearbyRequests).toBeGreaterThanOrEqual(1);
+
+    const confirmDelete = async () => {
+      await row.getByRole("button", { name: "삭제" }).click();
+      const dialog = page.getByRole("alertdialog", {
+        name: "'mock-target-1' 대상을 삭제할까요?",
+      });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "삭제", exact: true }).click();
+    };
+
+    await confirmDelete();
+    await expect.poll(() => deleteTags).toEqual([staleTag]);
+    await expect.poll(() => listRequests).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => nearbyRequests).toBeGreaterThanOrEqual(2);
+    await expect(row).toBeVisible();
+    await expect(
+      nearbyPanelHeader.getByText("external-app/mock-target-1", { exact: true }),
+    ).toBeVisible();
+
+    await confirmDelete();
+    await expect.poll(() => deleteTags).toEqual([staleTag, freshTag]);
+    await expect(row).toHaveCount(0);
+    await expect(page.getByText("target을 선택하세요")).toBeVisible();
   });
 
   test("upsert body가 scope_mode=sigungu_by_radius + on_conflict=move를 싣는다", async ({

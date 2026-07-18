@@ -94,6 +94,7 @@ function makePoiTarget(
     coord_precision_digits: 6,
     created_at: MOCK_NOW,
     deleted_at: null,
+    entity_tag: `"${POI_TARGET_ID}:1"`,
     external_system: "external-app",
     last_failed_at: null,
     last_refreshed_at: null,
@@ -448,21 +449,25 @@ async function mockPoiCacheTargetMutations(page: Page) {
       targets = [target];
       await fulfillJson(route, {
         data: target,
-        meta: { duration_ms: 1 },
+        meta: { dataset_projection_revision: 41, duration_ms: 1 },
       });
       return;
     }
 
     if (request.method() === "DELETE" && apiPath === targetPath) {
       requests.delete += 1;
+      expect(request.headers()["if-match"]).toBe(
+        '"44444444-4444-4444-8444-444444444444:1"',
+      );
       targets = [];
       await fulfillJson(route, {
         data: makePoiTarget({
           deleted_at: "2026-06-08T00:03:00.000Z",
+          entity_tag: `"${POI_TARGET_ID}:2"`,
           update_enabled: false,
           updated_at: "2026-06-08T00:03:00.000Z",
         }),
-        meta: { duration_ms: 1 },
+        meta: { dataset_projection_revision: 42, duration_ms: 1 },
       });
       return;
     }
@@ -1321,6 +1326,7 @@ test.describe("admin/ops pages", () => {
       .click();
     await expect.poll(() => requests.delete).toBe(1);
     await expect(page.getByRole("row", { name: /Mock target/ })).toHaveCount(0);
+    await expect(page.getByText("target을 선택하세요")).toBeVisible();
   });
 
   test("/v1/admin/poi-cache-targets validation (T-218b a11y)", async ({ page }) => {

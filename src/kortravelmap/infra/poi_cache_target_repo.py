@@ -20,19 +20,22 @@ from sqlalchemy import text
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "PoiCacheTarget",
     "PoiCacheTargetConflict",
+    "PoiCacheTargetDeleteResult",
     "PoiCacheTargetFeatureLink",
+    "PoiCacheTargetFeatureLinkCandidate",
     "PoiCacheTargetPage",
     "deactivate_poi_cache_target_feature_links",
     "delete_poi_cache_target",
     "get_poi_cache_target",
     "get_poi_cache_target_by_key",
+    "get_dataset_projection_revision",
     "has_active_poi_cache_targets_for_external_system",
     "list_active_poi_cache_target_external_systems",
     "list_poi_cache_target_feature_links",
@@ -40,6 +43,8 @@ __all__ = [
     "mark_poi_cache_targets_refresh_failed",
     "mark_poi_cache_targets_refresh_requested",
     "mark_poi_cache_targets_refreshed",
+    "poi_cache_target_entity_tag",
+    "sync_poi_cache_target_feature_links",
     "upsert_poi_cache_target",
     "upsert_poi_cache_target_feature_link",
     "list_active_target_coords",
@@ -147,7 +152,8 @@ _LINK_RELATIONS: Final[frozenset[str]] = frozenset({"within_radius", "same_sigun
 _MAX_LIST_LIMIT: Final[int] = 500
 
 _TARGET_COLUMNS: Final[str] = (
-    "target_id, external_system, target_key, name, lon, lat, coord_precision_digits, "
+    "target_id, lock_version, external_system, target_key, name, lon, lat, "
+    "coord_precision_digits, "
     "coord_key, radius_km, scope_mode, update_enabled, refresh_policy, "
     "provider_overrides, metadata, last_seen_at, last_requested_at, "
     "last_refreshed_at, last_failed_at, next_eligible_refresh_at, deleted_at, "
@@ -165,10 +171,23 @@ class PoiCacheTargetConflict(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PoiCacheTargetDeleteResult:
+    """조건부 soft-delete 결과.
+
+    active row lock과 READ COMMITTED 재조회로 ``not_found``와
+    ``precondition_failed``를 구분해 HTTP 계층이 각각 404와 412로 매핑하게 한다.
+    """
+
+    status: Literal["deleted", "not_found", "precondition_failed"]
+    target: PoiCacheTarget | None = None
+
+
+@dataclass(frozen=True)
 class PoiCacheTarget:
     """``ops.poi_cache_targets`` row."""
 
     target_id: str
+    lock_version: int
     external_system: str
     target_key: str
     name: str | None
@@ -190,6 +209,11 @@ class PoiCacheTarget:
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def entity_tag(self) -> str:
+        """server canonical strong ETag."""
+        return poi_cache_target_entity_tag(self.target_id, self.lock_version)
 
 
 @dataclass(frozen=True)
@@ -216,10 +240,29 @@ class PoiCacheTargetFeatureLink:
     last_refreshed_at: datetime | None
 
 
+@dataclass(frozen=True)
+class PoiCacheTargetFeatureLinkCandidate:
+    """한 번의 target-link 동기화에서 활성화할 link 입력."""
+
+    target_id: str
+    feature_id: str
+    provider: str | None = None
+    dataset_key: str | None = None
+    distance_m: float | None = None
+    relation: str = "within_radius"
+
+
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
     return dict(value) if value else {}
+
+
+def poi_cache_target_entity_tag(target_id: str, lock_version: int) -> str:
+    """UUID와 positive entity version으로 canonical opaque ETag를 만든다."""
+    if lock_version < 1:
+        raise ValueError("lock_version must be positive")
+    return f'"{UUID(target_id)}:{lock_version}"'
 
 
 def _limit(value: int) -> int:
@@ -264,6 +307,7 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 def _row_to_target(row: Any) -> PoiCacheTarget:
     return PoiCacheTarget(
         target_id=str(row["target_id"]),
+        lock_version=int(row["lock_version"]),
         external_system=str(row["external_system"]),
         target_key=str(row["target_key"]),
         name=row["name"],
@@ -417,15 +461,32 @@ ORDER BY updated_at DESC, target_id DESC
 LIMIT :limit_plus_one
 """
 
+_LOCK_ACTIVE_TARGET_SQL: Final[str] = """
+SELECT target_id, lock_version
+FROM ops.poi_cache_targets
+WHERE external_system = :external_system
+  AND target_key = :target_key
+  AND deleted_at IS NULL
+FOR UPDATE
+"""
+
 _DELETE_TARGET_SQL: Final[str] = f"""
 UPDATE ops.poi_cache_targets
-SET deleted_at = COALESCE(deleted_at, now()),
+SET deleted_at = now(),
     update_enabled = false,
     updated_at = now()
 WHERE external_system = :external_system
   AND target_key = :target_key
+  AND target_id = CAST(:expected_target_id AS uuid)
+  AND lock_version = :expected_lock_version
   AND deleted_at IS NULL
 RETURNING {_TARGET_COLUMNS}
+"""
+
+_GET_DATASET_PROJECTION_REVISION_SQL: Final[str] = """
+SELECT revision
+FROM ops.ops_live_topic_revisions
+WHERE topic = 'dataset_projection'
 """
 
 _DEACTIVATE_LINKS_SQL: Final[str] = """
@@ -437,12 +498,63 @@ WHERE target_id = :target_id
 RETURNING 1
 """
 
+_LOCK_ACTIVE_TARGETS_SQL: Final[str] = """
+SELECT target_id
+FROM ops.poi_cache_targets
+WHERE target_id = ANY(CAST(:target_ids AS uuid[]))
+  AND deleted_at IS NULL
+ORDER BY target_id
+FOR KEY SHARE
+"""
+
+_DEACTIVATE_LINKS_FOR_TARGETS_SQL: Final[str] = """
+UPDATE ops.poi_cache_target_feature_links
+SET active = false,
+    last_seen_at = now()
+WHERE target_id = ANY(CAST(:target_ids AS uuid[]))
+  AND active
+RETURNING 1
+"""
+
+_LOCK_TARGET_LINKS_SQL: Final[str] = """
+SELECT target_id, feature_id
+FROM ops.poi_cache_target_feature_links
+WHERE target_id = ANY(CAST(:target_ids AS uuid[]))
+ORDER BY target_id, feature_id
+FOR UPDATE
+"""
+
 _UPSERT_LINK_SQL: Final[str] = f"""
+WITH active_target AS (
+    SELECT target_id
+    FROM ops.poi_cache_targets
+    WHERE target_id = CAST(:target_id AS uuid)
+      AND deleted_at IS NULL
+    FOR KEY SHARE
+)
+INSERT INTO ops.poi_cache_target_feature_links (
+    target_id, feature_id, provider, dataset_key, distance_m, relation,
+    active, last_seen_at
+) SELECT
+    active_target.target_id, :feature_id, :provider, :dataset_key, :distance_m,
+    :relation, true, now()
+FROM active_target
+ON CONFLICT (target_id, feature_id) DO UPDATE SET
+    provider = EXCLUDED.provider,
+    dataset_key = EXCLUDED.dataset_key,
+    distance_m = EXCLUDED.distance_m,
+    relation = EXCLUDED.relation,
+    active = true,
+    last_seen_at = now()
+RETURNING {_LINK_COLUMNS}
+"""
+
+_UPSERT_LOCKED_LINK_SQL: Final[str] = f"""
 INSERT INTO ops.poi_cache_target_feature_links (
     target_id, feature_id, provider, dataset_key, distance_m, relation,
     active, last_seen_at
 ) VALUES (
-    :target_id, :feature_id, :provider, :dataset_key, :distance_m,
+    CAST(:target_id AS uuid), :feature_id, :provider, :dataset_key, :distance_m,
     :relation, true, now()
 )
 ON CONFLICT (target_id, feature_id) DO UPDATE SET
@@ -667,23 +779,65 @@ async def delete_poi_cache_target(
     *,
     external_system: str,
     target_key: str,
-) -> PoiCacheTarget | None:
-    """target을 soft-delete하고 active feature links를 비활성화한다."""
-    row = (
+    expected_target_id: str,
+    expected_lock_version: int,
+) -> PoiCacheTargetDeleteResult:
+    """natural key row lock 뒤 UUID+version이 일치할 때만 soft-delete한다."""
+    expected_target_id = str(UUID(expected_target_id))
+    if expected_lock_version < 1:
+        raise ValueError("expected_lock_version must be positive")
+    lock_params = {"external_system": external_system, "target_key": target_key}
+    active = (
         (
             await session.execute(
-                text(_DELETE_TARGET_SQL),
-                {"external_system": external_system, "target_key": target_key},
+                text(_LOCK_ACTIVE_TARGET_SQL),
+                lock_params,
             )
         )
         .mappings()
         .one_or_none()
     )
-    if row is None:
-        return None
+    if active is None:
+        recreated = (
+            (await session.execute(text(_LOCK_ACTIVE_TARGET_SQL), lock_params))
+            .mappings()
+            .one_or_none()
+        )
+        return PoiCacheTargetDeleteResult(
+            status="precondition_failed" if recreated is not None else "not_found"
+        )
+    if (
+        str(active["target_id"]) != expected_target_id
+        or int(active["lock_version"]) != expected_lock_version
+    ):
+        return PoiCacheTargetDeleteResult(status="precondition_failed")
+    row = (
+        (
+            await session.execute(
+                text(_DELETE_TARGET_SQL),
+                {
+                    **lock_params,
+                    "expected_target_id": expected_target_id,
+                    "expected_lock_version": expected_lock_version,
+                },
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:  # row lock을 보유하므로 invariant 위반이다.
+        raise RuntimeError("locked POI/cache target conditional delete returned no row")
     target = _row_to_target(row)
     await deactivate_poi_cache_target_feature_links(session, target.target_id)
-    return target
+    return PoiCacheTargetDeleteResult(status="deleted", target=target)
+
+
+async def get_dataset_projection_revision(session: AsyncSession) -> int:
+    """현재 transaction에서 관측되는 ``dataset_projection`` live revision."""
+    revision = (
+        await session.execute(text(_GET_DATASET_PROJECTION_REVISION_SQL))
+    ).scalar_one()
+    return int(revision)
 
 
 async def deactivate_poi_cache_target_feature_links(
@@ -707,8 +861,8 @@ async def upsert_poi_cache_target_feature_link(
     dataset_key: str | None = None,
     distance_m: float | None = None,
     relation: str = "within_radius",
-) -> PoiCacheTargetFeatureLink:
-    """target-feature link를 upsert한다."""
+) -> PoiCacheTargetFeatureLink | None:
+    """active parent를 KEY SHARE lock한 경우에만 target-feature link를 upsert한다."""
     if relation not in _LINK_RELATIONS:
         raise ValueError(f"relation must be one of {sorted(_LINK_RELATIONS)}")
     row = (
@@ -726,9 +880,88 @@ async def upsert_poi_cache_target_feature_link(
             )
         )
         .mappings()
-        .one()
+        .one_or_none()
     )
-    return _row_to_link(row)
+    return _row_to_link(row) if row is not None else None
+
+
+async def sync_poi_cache_target_feature_links(
+    session: AsyncSession,
+    *,
+    target_ids: Sequence[str],
+    candidates: Sequence[PoiCacheTargetFeatureLinkCandidate],
+) -> tuple[PoiCacheTargetFeatureLink, ...]:
+    """active parent 전체를 먼저 잠근 뒤 link snapshot을 원자적으로 교체한다.
+
+    caller transaction 안에서 canonical UUID 순서로 모든 parent ``KEY SHARE`` lock을
+    획득한다. 이후에만 기존 link를 비활성화하고 ``target_id, feature_id`` 순서로 새
+    link를 upsert한다. target delete도 parent ``FOR UPDATE`` 뒤 link를 갱신하므로 두
+    경로의 잠금 순서는 항상 parent → link다.
+    """
+    canonical_target_ids = tuple(
+        sorted({str(UUID(str(value))) for value in target_ids})
+    )
+    canonical_candidates: list[tuple[str, PoiCacheTargetFeatureLinkCandidate]] = []
+    requested = set(canonical_target_ids)
+    for candidate in candidates:
+        if candidate.relation not in _LINK_RELATIONS:
+            raise ValueError(f"relation must be one of {sorted(_LINK_RELATIONS)}")
+        target_id = str(UUID(str(candidate.target_id)))
+        if target_id not in requested:
+            raise ValueError("candidate target_id must be included in target_ids")
+        canonical_candidates.append((target_id, candidate))
+    canonical_candidates.sort(key=lambda item: (item[0], item[1].feature_id))
+    if not canonical_target_ids:
+        return ()
+
+    locked_target_ids = tuple(
+        str(UUID(str(value)))
+        for value in (
+            await session.execute(
+                text(_LOCK_ACTIVE_TARGETS_SQL),
+                {"target_ids": list(canonical_target_ids)},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not locked_target_ids:
+        return ()
+    locked = set(locked_target_ids)
+    (
+        await session.execute(
+            text(_LOCK_TARGET_LINKS_SQL),
+            {"target_ids": list(locked_target_ids)},
+        )
+    ).all()
+    await session.execute(
+        text(_DEACTIVATE_LINKS_FOR_TARGETS_SQL),
+        {"target_ids": list(locked_target_ids)},
+    )
+
+    links: list[PoiCacheTargetFeatureLink] = []
+    for target_id, candidate in canonical_candidates:
+        if target_id not in locked:
+            continue
+        row = (
+            (
+                await session.execute(
+                    text(_UPSERT_LOCKED_LINK_SQL),
+                    {
+                        "target_id": target_id,
+                        "feature_id": candidate.feature_id,
+                        "provider": candidate.provider,
+                        "dataset_key": candidate.dataset_key,
+                        "distance_m": candidate.distance_m,
+                        "relation": candidate.relation,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+        links.append(_row_to_link(row))
+    return tuple(links)
 
 
 async def list_poi_cache_target_feature_links(

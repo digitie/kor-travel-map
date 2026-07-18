@@ -2200,7 +2200,7 @@ CREATE INDEX idx_feature_change_feature
 - provider reload와 snapshot 누락 정리는 `data_origin='user_request'` row를 삭제하거나
   되살리지 않는다.
 
-### 9.10 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (ADR-045 T-205c, alembic 0009)
+### 9.10 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (ADR-045/065, alembic 0009/0058)
 
 외부 앱 POI/cache target을 `external_system + target_key + 좌표 + 반경`으로 저장하고,
 target 주변 feature와 다대다로 연결한다. 목적은 전체 provider 재적재 없이 저장 POI
@@ -2211,10 +2211,15 @@ target 주변 feature와 다대다로 연결한다. 목적은 전체 provider �
 - `target_key`는 좌표가 아니라 외부 앱이 보장하는 고유 key다.
 - 같은 key와 같은 normalized 좌표는 idempotent upsert다.
 - 같은 key와 다른 normalized 좌표는 기본 409이며, 이동은 명시적 `move`로 처리한다.
+- `lock_version BIGINT NOT NULL DEFAULT 1 CHECK (lock_version >= 1)`은 모든 UPDATE의 BEFORE
+  trigger가 `OLD + 1`로 강제한다. UUID+version이 HTTP `entity_tag`의 정본이다.
 - soft deleted target은 targeted update에서 제외한다.
+- target soft-delete는 parent `FOR UPDATE` 뒤 link를 비활성화한다. executor link sync는 모든 active
+  parent를 UUID 순서의 `FOR KEY SHARE`로 먼저 잠근 뒤 link를 비활성화/upsert한다. 두 경로의
+  parent → link 순서를 통일해 삭제 뒤 link 재활성화와 multi-target 교착을 막는다.
 - 여러 target 반경의 교집합 feature/provider scope는 한 번만 업데이트한다.
 
-상세 DDL은 `docs/poi-cache-update-targets.md` §6과 `alembic 0009`가 정본이다.
+상세 DDL은 `docs/poi-cache-update-targets.md` §6과 `alembic 0009/0058`이 정본이다.
 repository는 `infra.poi_cache_target_repo`가 제공한다. `infra.scope_repo`의
 `resolve_cache_target_keys`와 `infra.feature_update_executor`는 active target 주변
 feature를 계산하고 `ops.poi_cache_target_feature_links`를 재계산한다.

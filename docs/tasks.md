@@ -62,11 +62,17 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 - [ ] `T-ADM-C7C` — **live invalidation causal receipt + target 조건부 삭제**
   (C7 선행): POI target PUT/DELETE 성공 응답 `meta.dataset_projection_revision`을 source
   transaction 안에서 읽어 반환하고, C7은 같은 socket의 `dataset_projection` update frame이
-  정확히 그 revision을 전달한 경우에만 causal invalidation으로 인정한다. 단건 GET/PUT은
-  `ETag: "{target_id}"`를 반환하며 DELETE는 해당 값을 `If-Match`로 필수 수신한다. repository
-  soft-delete는 natural key와 `target_id`를 한 SQL predicate에 결박해 GET→DELETE 사이
-  delete/recreate 경쟁에서 새 target을 지우지 않고 `412`로 닫는다. API·admin UI·OpenAPI·생성
-  타입·일반/live E2E를 함께 갱신하며 migration은 추가하지 않는다.
+  `data.live_revision >= receipt`를 전달한 경우에만 causal invalidation으로 인정한다(snapshot 및
+  top-level fingerprint revision 제외). Alembic 0058의 server-owned `lock_version`으로
+  `ETag: "{canonical_uuid}:{version}"`을 만들며 DELETE는 body `entity_tag`를 합성 없이
+  `If-Match`로 수신한다. repository soft-delete는 natural key row lock 뒤 UUID+version 조건을
+  검증해 GET→DELETE 사이 PUT/delete-recreate 경쟁을 `412`로 닫는다. link sync는 UUID 순서로 모든
+  active parent를 먼저 KEY SHARE lock한 뒤 link를 교체해 delete와 parent→link 순서로 직렬화한다.
+  API·admin UI·OpenAPI·생성 타입·일반/live E2E를 함께 갱신한다.
+  구현·2인 적대 리뷰·로컬 gate와 admin OpenAPI/생성 타입 검증을 완료했으며 user OpenAPI는
+  불변이다. 현재 남은 완료 조건은 최신 main rebase와 CI green·승인·병합이다. header 누락은 RFC7807 `428`,
+  weak·wildcard·쉼표 결합 multiple·물리적 duplicate line·malformed 값은 RFC7807 `422` 계약으로
+  검증한다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,

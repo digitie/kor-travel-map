@@ -143,6 +143,7 @@ rate limit 출처:
 ```sql
 CREATE TABLE ops.poi_cache_targets (
   target_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  lock_version BIGINT NOT NULL DEFAULT 1,
   external_system TEXT NOT NULL,
   target_key TEXT NOT NULL,
   name TEXT,
@@ -176,7 +177,8 @@ CREATE TABLE ops.poi_cache_targets (
   CONSTRAINT ck_poi_cache_targets_radius CHECK (radius_km > 0 AND radius_km <= 100),
   CONSTRAINT ck_poi_cache_targets_coord CHECK (
     ST_X(coord) BETWEEN 124.0 AND 132.0 AND ST_Y(coord) BETWEEN 33.0 AND 39.5
-  )
+  ),
+  CONSTRAINT ck_poi_cache_targets_lock_version CHECK (lock_version >= 1)
 );
 
 CREATE UNIQUE INDEX uq_poi_cache_targets_active_key
@@ -195,6 +197,10 @@ CREATE INDEX idx_poi_cache_targets_next_refresh
 ```text
 126.978000:37.566500:p6
 ```
+
+Alembic 0058의 BEFORE UPDATE trigger는 caller가 어떤 값을 보내더라도
+`NEW.lock_version = OLD.lock_version + 1`을 강제한다. HTTP strong ETag와 body `entity_tag`는
+`"{lowercase-canonical-uuid}:{positive-version}"`이다.
 
 ### 6.2 `ops.poi_cache_target_feature_links`
 
@@ -377,15 +383,22 @@ Query:
 
 처리:
 
-- 직전 GET/PUT의 `ETag: "{target_id}"`를 `If-Match`로 필수 전달한다.
-- natural key와 expected `target_id`가 같은 active row만 원자적으로 갱신한다. UUID가 바뀌었으면
-  삭제 없이 `412`, active row가 없으면 `404`다.
+- 목록/직전 GET/PUT body의 `entity_tag`를 합성 없이 `If-Match`로 필수 전달한다.
+- `If-Match` 누락은 RFC7807 `428`, weak/wildcard/multiple/noncanonical/malformed 값은 RFC7807 `422`로
+  거절한다.
+- active natural key를 `FOR UPDATE`로 잠근 뒤 expected UUID+version이 같은 row만 갱신한다.
+  concurrent PUT/recreate면 삭제 없이 `412`, READ COMMITTED 재조회에도 active row가 없으면 `404`다.
 - `deleted_at`을 설정한다.
 - active feature links를 false로 바꾼다.
 - 이후 targeted update request에서 제외한다.
 - feature 자체는 삭제하지 않는다.
 - PUT/DELETE 성공 응답 `meta.dataset_projection_revision`은 같은 transaction에서 증가한 live
-  topic revision이며, causal UI 갱신 검증에 사용한다.
+  topic revision이다. mutation 전부터 열린 같은 socket의 update frame
+  `data.live_revision >= receipt`만 causal 검증에 사용하고 snapshot/fingerprint는 제외한다.
+- 성공 DELETE는 trigger가 증가시킨 새 version의 strong `ETag`를 반환한다.
+- executor link sync는 UUID 순서로 모든 active parent의 `FOR KEY SHARE` lock을 먼저 얻은 뒤 기존
+  link 비활성화와 새 link upsert를 수행한다. inactive parent는 건너뛰며 delete의 parent `FOR UPDATE`
+  → link 비활성화 순서와 직렬화된다.
 
 ### 7.4 주변 feature 목록
 
