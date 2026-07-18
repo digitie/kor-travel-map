@@ -1831,8 +1831,6 @@ export interface components {
             feature_id?: string | null;
             /** Feature Name */
             feature_name?: string | null;
-            /** Feature Status */
-            feature_status?: string | null;
             /** Fetched At */
             fetched_at?: string | null;
             /** Imported At */
@@ -2516,7 +2514,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
+                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
                 status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
@@ -2574,7 +2572,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
+                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
                 status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;

@@ -15,6 +15,7 @@ in-area/collection/curated/weather anchor/public views) 교차 검사.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -526,3 +527,177 @@ async def test_category_counts_use_projection(migrated_session: AsyncSession) ->
     )
     counts = await feature_repo.category_feature_counts(migrated_session)
     assert counts.get("09990001", 0) == len(_expected_public(ids))
+
+
+async def test_collection_items_redact_non_public_linked_features(
+    migrated_session: AsyncSession,
+) -> None:
+    """공개 collection 상세의 item 연결 feature 판정도 view 한 곳이다 (리뷰 S1).
+
+    ``GET /v1/curations/collections/{id}``(무인증)의 ``_public_item``이 예전
+    술어(status not in deleted/hidden)를 재구현해 draft/broken/admin-inactive
+    연결 feature의 id/name/좌표/주소가 새던 구멍을 상태 matrix 전체로 잠근다.
+    """
+    theme_id, source_id = await _seed_curation_foundation(migrated_session)
+    collection = await curation_repo.create_curation_collection(
+        migrated_session,
+        collection_key="pfv-items:2026",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="공개 item matrix 컬렉션",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    # 연결 시점에는 전부 active로 넣고 이후 상태를 바꾼다 — write-side 검증
+    # (NOT IN deleted/hidden)은 admin 계약이라 "연결 후 상태 변경" 시나리오가
+    # 실제 leak 경로다.
+    for i, (suffix, *_rest) in enumerate(_STATE_MATRIX):
+        await _ins_feature(
+            migrated_session,
+            feature_id=f"pfv:item:{suffix}",
+            name=f"아이템장소 {suffix}",
+            lon=126.978 + i * 0.0001,
+            lat=37.5665 + i * 0.0001,
+        )
+        await curation_repo.add_curation_item(
+            migrated_session,
+            collection_id=collection.collection_id,
+            feature_id=f"pfv:item:{suffix}",
+            external_item_id=f"pfv-item-{suffix}",
+            status="included",
+            sort_order=i,
+        )
+    for suffix, status, soft_deleted, _public in _STATE_MATRIX:
+        await migrated_session.execute(
+            text(
+                """
+                UPDATE feature.features
+                SET status = :status,
+                    deleted_at = CASE
+                        WHEN CAST(:soft_deleted AS boolean)
+                        THEN CAST(:ts AS timestamptz)
+                    END
+                WHERE feature_id = :fid
+                """
+            ),
+            {
+                "status": status,
+                "soft_deleted": soft_deleted,
+                "ts": _NOW,
+                "fid": f"pfv:item:{suffix}",
+            },
+        )
+    await migrated_session.flush()
+
+    result = await curation_repo.get_curation_collection(
+        migrated_session, collection_id=collection.collection_id, public_only=True
+    )
+    assert result is not None
+    _row, items = result
+    # item row 자체는 전부 남는다 — 연결 feature 정보만 공개 판정으로 가려진다.
+    assert len(items) == len(_STATE_MATRIX)
+    by_external = {item.external_item_id: item for item in items}
+    for suffix, _status, _deleted, public in _STATE_MATRIX:
+        item = by_external[f"pfv-item-{suffix}"]
+        if public:
+            assert item.feature_id == f"pfv:item:{suffix}"
+            assert item.feature_name == f"아이템장소 {suffix}"
+            assert item.lon is not None
+            assert item.lat is not None
+        else:
+            assert item.feature_id is None, f"linked feature leaked for {suffix}"
+            assert item.feature_name is None
+            assert item.feature_kind is None
+            assert item.feature_category is None
+            assert item.lon is None
+            assert item.lat is None
+            assert item.address == {}
+            assert item.source_record_key is None
+
+
+async def test_weather_alert_history_hides_non_public_anchor(
+    migrated_session: AsyncSession,
+) -> None:
+    """특보 이력은 alert row를 보존하되 비공개 anchor의 feature 필드는 NULL이다 (리뷰 S2)."""
+    for fid, status in (("pfv:alert:active", "active"), ("pfv:alert:hidden", "hidden")):
+        await _ins_feature(
+            migrated_session, feature_id=fid, name=f"특보 {status}", status=status, kind="notice"
+        )
+    for i, fid in enumerate(["pfv:alert:active", "pfv:alert:hidden"]):
+        entity_key = f"se_pfv_alert_{i}"
+        raw_data = {
+            "alert_id": f"PFV-{i}",
+            "phenomenon": "호우",
+            "level": "주의보",
+            "title": "호우주의보",
+            "issued_at": _NOW.isoformat(),
+            "region_code": "99Z99999",
+            "region_name": "검증구역",
+        }
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_entities (
+                    source_entity_key, provider, dataset_key, source_entity_type,
+                    source_entity_id, first_seen_at, last_seen_at
+                )
+                VALUES (
+                    :entity_key, 'python-kma-api', 'kma_weather_alerts',
+                    'weather_alert', :entity_id, :ts, :ts
+                )
+                """
+            ),
+            {"entity_key": entity_key, "entity_id": f"99Z99999::호우::{i}", "ts": _NOW},
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_records (
+                    source_record_key, source_entity_key,
+                    provider, dataset_key, source_entity_type,
+                    source_entity_id, raw_name, raw_data,
+                    raw_payload_hash, fetched_at
+                )
+                VALUES (
+                    :record_key, :entity_key,
+                    'python-kma-api', 'kma_weather_alerts',
+                    'weather_alert', :entity_id, '호우주의보',
+                    CAST(:raw_data AS jsonb), :payload_hash, :ts
+                )
+                """
+            ),
+            {
+                "record_key": f"sr_pfv_alert_{i}",
+                "entity_key": entity_key,
+                "entity_id": f"99Z99999::호우::{i}",
+                "raw_data": json.dumps(raw_data),
+                "payload_hash": f"hash-pfv-alert-{i}",
+                "ts": _NOW,
+            },
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.source_links (
+                    feature_id, source_entity_key, source_role, match_method,
+                    confidence, is_primary_source
+                )
+                VALUES (:fid, :entity_key, 'primary', 'natural_key', 100, true)
+                """
+            ),
+            {"fid": fid, "entity_key": entity_key},
+        )
+    await migrated_session.flush()
+
+    rows = await weather_repo.list_kma_weather_alert_history(
+        migrated_session, region_code="99Z99999"
+    )
+    by_key = {row.source_record_key: row for row in rows}
+    # alert row 2건 모두 생존 — 기상특보 자체는 anchor 공개 여부와 무관한 정보다.
+    assert set(by_key) == {"sr_pfv_alert_0", "sr_pfv_alert_1"}
+    assert by_key["sr_pfv_alert_0"].feature_id == "pfv:alert:active"
+    assert by_key["sr_pfv_alert_0"].feature_name == "특보 active"
+    # 비공개 anchor는 feature 필드가 NULL로 떨어진다 (이름/상태 leak 차단).
+    assert by_key["sr_pfv_alert_1"].feature_id is None
+    assert by_key["sr_pfv_alert_1"].feature_name is None

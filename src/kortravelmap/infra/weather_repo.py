@@ -123,7 +123,6 @@ class WeatherAlertHistoryRow:
     source_record_key: str
     feature_id: str | None
     feature_name: str | None
-    feature_status: str | None
     region_code: str | None
     region_name: str | None
     phenomenon: str | None
@@ -385,9 +384,8 @@ _KMA_WEATHER_ALERT_HISTORY_SQL: Final[str] = """
 WITH alert_records AS (
     SELECT
         sr.source_record_key,
-        sl.feature_id,
+        f.feature_id,
         f.name AS feature_name,
-        f.status AS feature_status,
         sr.raw_data,
         sr.raw_data->>'region_code' AS region_code,
         sr.raw_data->>'region_name' AS region_name,
@@ -416,7 +414,9 @@ WITH alert_records AS (
     LEFT JOIN provider_sync.source_links AS sl
       ON sl.source_entity_key = sr.source_entity_key
      AND sl.is_primary_source
-    LEFT JOIN feature.features AS f
+    -- 공개 projection에만 조인: 비공개 anchor의 alert row는 살아남되
+    -- feature_id/feature_name은 NULL로 떨어진다 (ADR-067 / T-VN-04).
+    LEFT JOIN feature.public_features AS f
       ON f.feature_id = sl.feature_id
     WHERE sr.provider = 'python-kma-api'
       AND sr.dataset_key = 'kma_weather_alerts'
@@ -669,7 +669,6 @@ def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
         source_record_key=str(row["source_record_key"]),
         feature_id=row["feature_id"],
         feature_name=row["feature_name"],
-        feature_status=row["feature_status"],
         region_code=row["region_code"],
         region_name=row["region_name"],
         phenomenon=row["phenomenon"],

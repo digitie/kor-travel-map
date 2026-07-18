@@ -130,8 +130,7 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "lon": 126.98,
         "lat": 37.56,
         "address": {"road": "서울"},
-        "linked_feature_status": "active",
-        "linked_feature_deleted_at": None,
+        "linked_feature_is_public": True,
         "source_record_key": "source-record:one",
         "external_item_id": "official:one",
         "place_name": "테스트 장소",
@@ -217,7 +216,7 @@ def test_row_projection_and_public_feature_redaction() -> None:
     assert linked.lon == 126.98
     assert repo._public_item(_item_row()) == linked
 
-    hidden = repo._public_item(_item_row(linked_feature_status="hidden"))
+    hidden = repo._public_item(_item_row(linked_feature_is_public=False))
     assert hidden.feature_id is None
     assert hidden.feature_name is None
     assert hidden.address == {}
@@ -232,7 +231,7 @@ def test_row_projection_and_public_feature_redaction() -> None:
             lon=None,
             lat=None,
             address=None,
-            linked_feature_status=None,
+            linked_feature_is_public=False,
         )
     )
     assert unresolved.feature_id is None
@@ -363,7 +362,7 @@ async def test_get_collection_found_missing_and_public_projection() -> None:
 
     found = _FakeSession(
         _FakeResult(rows=[_collection_row()]),
-        _FakeResult(rows=[_item_row(linked_feature_status="hidden")]),
+        _FakeResult(rows=[_item_row(linked_feature_is_public=False)]),
     )
     result = await repo.get_curation_collection(
         found,

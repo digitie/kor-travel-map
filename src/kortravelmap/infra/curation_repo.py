@@ -288,8 +288,11 @@ _ITEM_SELECT_FIELDS: Final[str] = """
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.status AS linked_feature_status,
-    f.deleted_at AS linked_feature_deleted_at,
+    EXISTS (
+        SELECT 1
+        FROM feature.public_features AS pf
+        WHERE pf.feature_id = i.feature_id
+    ) AS linked_feature_is_public,
     i.source_record_key,
     i.external_item_id,
     i.place_name,
@@ -1085,11 +1088,9 @@ def _public_item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
     """비공개 Feature 연결은 공식 미연결 item처럼 투영해 장소 정보 노출을 막는다."""
 
     item = _item(row)
-    feature_is_public = (
-        row.get("linked_feature_status") is not None
-        and row.get("linked_feature_deleted_at") is None
-        and row.get("linked_feature_status") not in {"deleted", "hidden"}
-    )
+    # 공개 여부 판정은 feature.public_features view가 단일 정본이다 (ADR-067 /
+    # T-VN-04). 여기서 status/deleted_at을 다시 조합하지 말 것.
+    feature_is_public = bool(row.get("linked_feature_is_public"))
     if item.feature_id is None or feature_is_public:
         return item
     return replace(

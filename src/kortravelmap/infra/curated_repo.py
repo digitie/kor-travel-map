@@ -526,6 +526,7 @@ _FEATURE_CURSOR_SQL: Final[str] = """
   )
 """
 
+
 def _list_features_sql(*, public_only: bool) -> str:
     return f"""
 SELECT {_FEATURE_COLUMNS}

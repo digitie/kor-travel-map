@@ -23,8 +23,10 @@ Wave 0(T-VN-04)에서는 **현행 컬럼 위에** 그 술어를 매핑한 VIEW�
 - ``lifecycle=active``      → 현행 ``status``에서 inactive/deleted 아님 + soft-delete 아님
 - ``quality=valid``         → 현행 ``status``에서 broken 아님
 
-세 조건의 교집합은 현행 CHECK(``features_status``: draft/active/inactive/hidden/
-broken/deleted) 아래에서 정확히 ``status = 'active'``다. ``deleted_at IS NULL``은
+세 조건의 교집합은 현행 CHECK(DB 제약명 ``ck_features_status``, 0002에서 생성:
+draft/active/inactive/hidden/broken/deleted) 아래에서 정확히 ``status = 'active'``다.
+(``models.py``의 선언명 ``features_status``와 DB 제약명이 어긋나는 것은 기존
+드리프트로 F-10 소관이다.) ``deleted_at IS NULL``은
 status와 deleted_at 사이 결합 CHECK가 아직 없어(불변식 미보장) 방어적으로
 함께 요구한다 — provider retire 경로는 둘을 함께 세팅하지만 강제 장치가 없다.
 

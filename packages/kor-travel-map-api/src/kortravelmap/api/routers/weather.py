@@ -95,7 +95,6 @@ class WeatherAlertHistoryItem(BaseModel):
     source_record_key: str
     feature_id: str | None = None
     feature_name: str | None = None
-    feature_status: str | None = None
     region_code: str | None = None
     region_name: str | None = None
     phenomenon: str | None = None
@@ -176,7 +175,6 @@ def _alert_out(value: weather_repo.WeatherAlertHistoryRow) -> WeatherAlertHistor
         source_record_key=value.source_record_key,
         feature_id=value.feature_id,
         feature_name=value.feature_name,
-        feature_status=value.feature_status,
         region_code=value.region_code,
         region_name=value.region_name,
         phenomenon=value.phenomenon,

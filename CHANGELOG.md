@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+### 공개 predicate 단일화 — `feature.public_features` view (2026-07-19, ADR-067 T-VN-04)
+
+- **ADDED**: migration 0059가 공개 정본 projection `feature.public_features`
+  (`status='active' AND deleted_at IS NULL`) VIEW를 추가했다. bbox/cluster/search/nearby/
+  in-area/detail/batch/category counts/notice/weather anchor/public views/curation·curated의
+  모든 공개 read가 이 한 정의를 소비한다.
+- **SECURITY**: admin-inactive/draft/broken feature가 일부 공개 경로(단건/batch/특보 이력/
+  curation collection item)에 노출되고 provider-retired feature가 경로마다 다르게 은닉되던
+  F-1 양방향 오분류를 해소했다. 무인증 collection 상세의 연결 feature 공개 판정도 view 기반
+  `linked_feature_is_public`으로 교체됐다.
+- **CHANGED**: `POST /v1/features/batch`는 모든 비공개 feature를 균일하게 `missing`으로
+  분류한다(이전: admin-inactive는 `found`+`status='inactive'`). 5-state typed DTO 전환은
+  T-VN-11 — 소비자 조정 노트는 `docs/integration-map.md` §3.2.
+- **CHANGED**: `GET /v1/features/{id}/weather`·`/price`는 비공개/미존재 feature에서 404를
+  반환한다(이전: 임의 id에 200 + 빈/합성 카드).
+- **CHANGED**: `GET /v1/features/weather/alerts`는 anchor를 공개 projection에 LEFT JOIN한다 —
+  alert row는 유지되고 비공개 anchor의 `feature_id`/`feature_name`은 null이다. 항상
+  `'active'`로 상수화된 응답 필드 `feature_status`는 제거됐다.
+- **REMOVED**: `GET /v1/categories`의 `active_only` 파라미터 — counts는 항상 공개
+  projection 기준이다.
+- **CHANGED**: nearby `status` 파라미터는 공개 projection과 교집합으로만 동작한다는 설명이
+  OpenAPI에 명시됐다(active 외 값은 빈 결과, 파라미터 정리는 T-VN-11/34).
+
 ### production profile fail-closed 기동 검증 (2026-07-19, ADR-066 T-VN-01)
 
 - **SECURITY**: `KOR_TRAVEL_MAP_API_PROFILE=production`이면 `ApiSettings`가 기동 시점에
