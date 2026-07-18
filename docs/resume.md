@@ -29,6 +29,20 @@
   CI green 후 머지하고, T-VN-02(route policy matrix)·T-VN-03(잔여 read 게이트)과의 통합 순서를
   진행한다.
 
+## 2026-07-19 (claude) — #733~#737 심층 적대 리뷰 후속 수정 (fix/codex-pr-deep-review)
+
+- S2-1 POI target upsert TOCTOU를 lock-first(moved/reject 판정을 `FOR UPDATE` row lock
+  아래로) + create 경합 `DO NOTHING`→재판정으로 수정하고 두-세션 blocking 통합 회귀를
+  추가했다. S2-2로 ADR-074 ledger 3요소 key와 If-Match 428/412 구분을 복원했다.
+- S3 일괄: snapshot sync의 manual link 보존 guard(#699 패턴)+회귀, `E2E_LIVE_WORKERS`
+  정수 검증, C7 runner `@c7-causal` 안정 tag grep, OpenAPI OpsToken+OpsScope AND 선언
+  +재수출, ADR-066/069/070/071/073/075·performance·integration-map 문서 정합.
+- 보류(의존성): #740×#733 ops-pair validation 조정 + production/both-explicit-empty
+  entrypoint 테스트는 T-VN-01 profile 개념 병합 후 진행. BLOCKED-sentinel-before-preflight는
+  #735 계약 테스트·journal이 의도를 명시해 그대로 둔다.
+- **다음 한 작업**: `fix/codex-pr-deep-review` PR 생성·CI green·병합 뒤, T-VN-01 병합
+  시점에 보류한 ops-pair validation 조정을 재개한다.
+
 ## 2026-07-18 (codex) — T-ADM-C7 n150 실행환경 preflight 보강
 
 - PinVi C6c PR #387은 전체 CI green 뒤 `main@1b833ce`로 병합됐다.

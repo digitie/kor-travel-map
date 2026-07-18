@@ -17,7 +17,8 @@ operation registry에 반복된다. `source_records`의 denormalized identity는
    활성 상태의 정본으로 둔다.
 2. `source_entities`는 `provider_dataset_id`와 source-native identity의 유일성을 가진다.
    `source_records`는 entity FK, immutable raw payload, payload hash, 수집 시각만 저장하고
-   provider/dataset/type/id 중복 컬럼을 제거한다.
+   provider/dataset/type/id 중복 컬럼을 제거한다. primary source 판정은 `source_role`
+   단일 필드로 일원화하고 `is_primary_source`는 제거한다(D-5-4).
 3. 현재 record는 entity의 검증된 head pointer로 표현한다. head FK는 같은 entity의 record만
    가리키도록 composite FK 또는 동등한 DB 제약으로 보장한다.
 4. `provider_catalog`은 DB capability projection, `operation_registry`는 실행 가능한 operation

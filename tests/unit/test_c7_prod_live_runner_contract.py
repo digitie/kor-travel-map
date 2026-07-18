@@ -57,6 +57,10 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert 'response.headers.get("set-cookie")' in script
     assert 'poi-cache-targets-write.live.spec.ts' in script
     assert 'state_is_exact_restored poi "$POI_STATE_FILE"' in script
+    # causal POI spec 선택은 한글 제목이 아니라 안정 tag grep으로 고정한다.
+    assert '"@c7-causal"' in script
+    assert "API PUT로 target을" not in script
+    assert "--pass-with-no-tests" not in script
 
 
 def test_final_restore_probe_parses_problem_json_and_requires_exact_404() -> None:
@@ -80,6 +84,7 @@ def test_poi_cleanup_is_journaled_and_conditional() -> None:
     assert '"create_put_intent"' in poi_spec
     assert '"update_put_intent"' in poi_spec
     assert '"cleanup_delete_intent"' in poi_spec
+    assert "@c7-causal" in poi_spec
     assert 'deleted.status === 412' in poi_spec
     assert 'sameSocketReceipts' in poi_spec
 

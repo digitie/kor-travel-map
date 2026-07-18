@@ -602,12 +602,14 @@ readonly SPECS=(
 for spec in "${SPECS[@]}"; do
   npm run e2e:live -- "$spec" --workers=1 --retries=0
 done
+# `@c7-causal`은 spec 제목의 안정 tag다. Playwright는 grep이 아무 test도 매칭하지
+# 못하면 fail-loud로 실패한다(no-match를 무시하는 옵션은 쓰지 않는다).
 npm run e2e:live -- \
   "e2e/live/poi-cache-targets-write.live.spec.ts" \
   --workers=1 \
   --retries=0 \
   --grep \
-  "API PUT로 target을 생성/수정/삭제하면 백엔드와 admin 목록·상세에 모두 반영된다"
+  "@c7-causal"
 
 state_is_exact_restored() {
   local kind="$1"

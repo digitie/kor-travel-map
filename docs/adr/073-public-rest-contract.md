@@ -16,7 +16,8 @@ shape를 완전하게 표현하지 않는다.
 1. public-keyed 표면은 typed kind-discriminated feature detail/search/nearby/in-bounds,
    categories, collections만 제공한다. raw payload·hash·source record identity는 반환하지 않는다.
 2. service 표면은 5-state feature batch, bitemporal weather batch, generation-aware cache target,
-   idempotent refresh-request resource를 제공한다.
+   idempotent refresh-request resource를 제공한다. service batch의 기본 projection은
+   `trip_card`로 고정한다 — 서버 정의 enum이며 raw projection은 선택할 수 없다(D-9-1).
 3. operator 표면은 source/observation lineage, change request, canonical datasets/pipeline,
    provider dataset 관리를 제공하며 ADR-066 principal을 사용한다.
 4. `include_geometry`는 동일 candidate set의 serialization만 제어한다. in-bounds는

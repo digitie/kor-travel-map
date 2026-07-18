@@ -14,8 +14,10 @@ Feature base row와 detail JSONB/부분 detail table은 kind별 필수 필드와
 
 1. `feature.features`에는 UUID, 공통 표시 필드, 직교 상태, category FK, revision만 둔다.
 2. point/place, event, notice, route, area 등 subtype은 1:1 typed table로 분리한다. 각 subtype은
-   필요한 필드와 `geometry(Point|LineString|MultiPolygon, 4326)`처럼 허용 geometry type/SRID를
-   DB 제약으로 가진다.
+   필요한 필드와 `geometry(Point|MultiLineString|MultiPolygon, 4326)`처럼 허용 geometry
+   type/SRID를 DB 제약으로 가진다(D-6-2 — route는 `LineString`이 아니라 `MultiLineString`).
+   geometry CHECK는 세 가지다: `ST_IsValid`, `NOT ST_IsEmpty`, core 좌표와 geometry의
+   anchor 일치.
 3. core kind와 subtype row의 일치, category 존재, 좌표/geometry 불변식은 deferred validation이
    가능한 DB 제약과 통합 테스트로 검증한다.
 4. provider membership, source lineage, publication state, override는 subtype payload와 분리한다.

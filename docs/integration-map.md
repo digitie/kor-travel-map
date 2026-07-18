@@ -61,7 +61,10 @@
   `X-Kor-Travel-Map-Ops-Scope`를 함께 보낸다. read secret은 canonical datasets/pipeline의
   `GET` + `ops:read`, cancel secret은
   `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` + `ops:cancel`에만 결박한다. scope
-  문자열 자체는 권한 근거가 아니며 secret·method·exact route가 모두 맞아야 한다. schedule,
+  문자열 자체는 권한 근거가 아니며 secret·method·exact route가 모두 맞아야 한다. cancel
+  결박은 canonical hyphenated(8-4-4-4-12) UUID 표기만 exact 매칭한다 — 비정규 UUID 표기는
+  `403` fail-closed다. API를 ASGI `root_path`(prefix) 아래에 mount하면 exact path 매칭이
+  전부 실패해 cancel binding이 전면 fail-closed된다(현 배포는 root mount 전제). schedule,
   policy, preview, claim, update-request 등 나머지 mutation은 service principal에 항상 `403`이고
   trusted frontend BFF만 실행한다. token 누락은 `401`, token 또는 결박 불일치는 `403`, token이
   있는데 scope가 없거나 알 수 없는 값이면 `422` RFC7807이다. 감사 actor는 설정값이 아닌
