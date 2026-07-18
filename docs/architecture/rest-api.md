@@ -390,7 +390,8 @@ GET  /v1/ops/pipeline/overview · executions · events · dagster-runs · schedu
 GET  /v1/ops/pipeline/executions                     # root 목록 + current cancellation summary
 GET  /v1/ops/pipeline/executions/{kind}/{execution_id}
                                                       # root 상세 + current member/run 결과
-POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel
+POST /v1/ops/pipeline/executions/import_job/{execution_id}/cancel
+POST /v1/ops/pipeline/executions/update_request/{execution_id}/cancel
                                                       # root 계층 취소(kind=import_job|update_request)
 POST /v1/ops/pipeline/requests                        # 필수 UUID Idempotency-Key; 생성(201)/재생·활성 재사용(200)
 POST /v1/ops/pipeline/requests/preview                # 비영속 실행 계획 미리보기(200)

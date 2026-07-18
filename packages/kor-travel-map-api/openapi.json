@@ -21812,6 +21812,18 @@
       }
     },
     "securitySchemes": {
+      "AdminBFF": {
+        "description": "trusted admin frontend BFF가 주입하는 server-only secret. 허용된 peer CIDR과 X-Kor-Travel-Map-Actor actor header도 함께 검증한다.",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Admin-Proxy-Secret",
+        "type": "apiKey"
+      },
+      "OpsToken": {
+        "description": "canonical ops server-to-server read/cancel token. scope 문자열만으로는 권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다.",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Ops-Token",
+        "type": "apiKey"
+      },
       "ServiceToken": {
         "description": "외부 서비스 호출 토큰 (ADR-045 D-1).",
         "in": "header",
@@ -21950,6 +21962,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Admin Auth Events",
         "tags": [
           "admin-auth"
@@ -22000,6 +22017,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Auth Event",
         "tags": [
           "admin-auth"
@@ -22021,16 +22043,6 @@
             },
             "description": "Successful Response"
           },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "default": {
             "content": {
               "application/problem+json": {
@@ -22042,6 +22054,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Backups",
         "tags": [
           "admin-backups"
@@ -22099,6 +22116,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Backup",
         "tags": [
           "admin-backups"
@@ -22152,6 +22174,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Delete Backup",
         "tags": [
           "admin-backups"
@@ -22203,6 +22230,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Backup",
         "tags": [
           "admin-backups"
@@ -22354,6 +22386,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Curated Source Rules Route",
         "tags": [
           "admin-curated"
@@ -22403,6 +22440,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Curated Source Rule Route",
         "tags": [
           "admin-curated"
@@ -22465,6 +22507,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curated Source Rule Route",
         "tags": [
           "admin-curated"
@@ -22517,6 +22564,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Apply Admin Curated Source Rule Route",
         "tags": [
           "admin-curated"
@@ -22626,6 +22678,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Curated Sources Route",
         "tags": [
           "admin-curated"
@@ -22675,6 +22732,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Curated Source Route",
         "tags": [
           "admin-curated"
@@ -22737,6 +22799,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curated Source Route",
         "tags": [
           "admin-curated"
@@ -22828,6 +22895,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Curated Themes Route",
         "tags": [
           "admin-curated"
@@ -22877,6 +22949,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Curated Theme Route",
         "tags": [
           "admin-curated"
@@ -22939,6 +23016,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curated Theme Route",
         "tags": [
           "admin-curated"
@@ -23125,6 +23207,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Curation Collections",
         "tags": [
           "admin-curations"
@@ -23174,6 +23261,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Curation Collection",
         "tags": [
           "admin-curations"
@@ -23238,6 +23330,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Import Admin Curations",
         "tags": [
           "admin-curations"
@@ -23260,16 +23357,6 @@
             },
             "description": "UTF-8 BOM 큐레이션 CSV 업로드 양식"
           },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "default": {
             "content": {
               "application/problem+json": {
@@ -23281,6 +23368,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Download Curation Import Template",
         "tags": [
           "admin-curations"
@@ -23334,6 +23426,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Archive Admin Curation Collection",
         "tags": [
           "admin-curations"
@@ -23385,6 +23482,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Admin Curation Collection",
         "tags": [
           "admin-curations"
@@ -23446,6 +23548,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curation Collection",
         "tags": [
           "admin-curations"
@@ -23509,6 +23616,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Add Admin Curation Item",
         "tags": [
           "admin-curations"
@@ -23572,6 +23684,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Archive Admin Curation Item",
         "tags": [
           "admin-curations"
@@ -23643,6 +23760,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curation Item",
         "tags": [
           "admin-curations"
@@ -23973,6 +24095,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Features",
         "tags": [
           "admin-features"
@@ -24022,6 +24149,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Feature Route",
         "tags": [
           "admin-features"
@@ -24141,6 +24273,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Feature Change Request Route",
         "tags": [
           "admin-features"
@@ -24223,6 +24360,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Approve Feature Change Request Route",
         "tags": [
           "admin-features"
@@ -24295,6 +24437,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Reject Feature Change Request Route",
         "tags": [
           "admin-features"
@@ -24667,6 +24814,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Curated Features Route",
         "tags": [
           "admin-curated"
@@ -24716,6 +24868,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Create Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -24768,6 +24925,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Delete Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -24818,6 +24980,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -24878,6 +25045,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -24930,6 +25102,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Admin Curated Feature Detail Snapshot Route",
         "tags": [
           "admin-curated"
@@ -24999,6 +25176,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Search Admin Curated Feature Places Route",
         "tags": [
           "admin-curated"
@@ -25061,6 +25243,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Select Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -25123,6 +25310,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Unselect Admin Curated Feature Route",
         "tags": [
           "admin-curated"
@@ -25345,6 +25537,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Reviews",
         "tags": [
           "admin-dedup"
@@ -25407,6 +25604,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Review Detail",
         "tags": [
           "admin-dedup"
@@ -25487,6 +25689,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Decide Review",
         "tags": [
           "admin-dedup"
@@ -25651,6 +25858,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Reviews",
         "tags": [
           "admin-enrichment"
@@ -25713,6 +25925,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Review Detail",
         "tags": [
           "admin-enrichment"
@@ -25783,6 +26000,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Decide Review",
         "tags": [
           "admin-enrichment"
@@ -25865,6 +26087,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Delete Feature Route",
         "tags": [
           "admin-features"
@@ -25925,6 +26152,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Feature Detail Route",
         "tags": [
           "admin-features"
@@ -26005,6 +26237,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Feature Route",
         "tags": [
           "admin-features"
@@ -26097,6 +26334,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Deactivate Feature Route",
         "tags": [
           "admin-features"
@@ -26317,6 +26559,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Files",
         "tags": [
           "admin-files"
@@ -26369,6 +26616,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Rescan Files",
         "tags": [
           "admin-files"
@@ -26390,16 +26642,6 @@
             },
             "description": "Successful Response"
           },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
           "default": {
             "content": {
               "application/problem+json": {
@@ -26411,6 +26653,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Files Summary",
         "tags": [
           "admin-files"
@@ -26464,6 +26711,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "File Detail",
         "tags": [
           "admin-files"
@@ -26540,6 +26792,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "File Events",
         "tags": [
           "admin-files"
@@ -26593,6 +26850,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Purge File",
         "tags": [
           "admin-files"
@@ -26864,6 +27126,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "List Admin Issues",
         "tags": [
           "admin-issues"
@@ -26927,6 +27194,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Admin Issue",
         "tags": [
           "admin-issues"
@@ -27018,6 +27290,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Patch Admin Issue",
         "tags": [
           "admin-issues"
@@ -27147,6 +27424,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "오프라인 업로드 목록",
         "tags": [
           "admin-offline-uploads"
@@ -27206,6 +27488,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "오프라인 원본 업로드",
         "tags": [
           "admin-offline-uploads"
@@ -27289,6 +27576,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "오프라인 업로드 삭제 (정리 lifecycle)",
         "tags": [
           "admin-offline-uploads"
@@ -27349,6 +27641,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "오프라인 업로드 단건 조회",
         "tags": [
           "admin-offline-uploads"
@@ -27431,6 +27728,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Dagster offline_upload_load job 실행",
         "tags": [
           "admin-offline-uploads"
@@ -27525,6 +27827,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "CSV/TSV 오프라인 업로드 header/sample preview",
         "tags": [
           "admin-offline-uploads"
@@ -27617,6 +27924,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "CSV/TSV 오프라인 업로드 column mapping 검증",
         "tags": [
           "admin-offline-uploads"
@@ -27689,6 +28001,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "CSV/TSV 오프라인 업로드 최근 validation 결과 조회",
         "tags": [
           "admin-offline-uploads"
@@ -27804,6 +28121,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "POI/cache target 목록",
         "tags": [
           "admin-poi-cache-targets"
@@ -27887,6 +28209,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "POI/cache target soft delete",
         "tags": [
           "admin-poi-cache-targets"
@@ -27968,6 +28295,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "POI/cache target 단건 조회",
         "tags": [
           "admin-poi-cache-targets"
@@ -28049,6 +28381,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "POI/cache target 등록 또는 갱신",
         "tags": [
           "admin-poi-cache-targets"
@@ -28105,6 +28442,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Get Public Api Keys",
         "tags": [
           "admin-auth"
@@ -28155,6 +28497,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Post Public Api Key",
         "tags": [
           "admin-auth"
@@ -28208,6 +28555,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Post Revoke Public Api Key",
         "tags": [
           "admin-auth"
@@ -28278,6 +28630,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Restore Backup",
         "tags": [
           "admin-backups"
@@ -28348,6 +28705,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "Plan Restore Swap",
         "tags": [
           "admin-backups"
@@ -32449,6 +32811,26 @@
       "get": {
         "description": "freshness SLA, Dagster 실제 다음 schedule tick, 최신 DB-recorded execution, dataset/provider integrity issue를 batch 조회한다. `eligible_after`는 backoff/rate-limit 시각이며 `schedule.next_scheduled_at`과 의미가 다르다.",
         "operationId": "list_datasets_grid_v1_ops_datasets_get",
+        "parameters": [
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -32460,6 +32842,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -32468,7 +32870,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -32481,6 +32883,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "provider×dataset×sync_scope 상태 그리드",
         "tags": [
           "ops-datasets"
@@ -32520,6 +32930,24 @@
               "title": "Sync Scope",
               "type": "string"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -32532,6 +32960,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
           },
           "404": {
             "content": {
@@ -32564,6 +33012,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "dataset 상세 — scope 상태·실행·이벤트·정책",
         "tags": [
           "ops-datasets"
@@ -32617,6 +33073,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -32645,7 +33121,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "504": {
             "content": {
@@ -32668,6 +33144,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "fixture ETL 변환 preview",
         "tags": [
           "ops-datasets"
@@ -32720,6 +33201,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -32748,7 +33249,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -32761,6 +33262,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "canonical dataset refresh policy upsert",
         "tags": [
           "ops-datasets"
@@ -32847,6 +33353,24 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -32860,6 +33384,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -32868,7 +33412,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -32881,6 +33425,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "보조 패널용 최근 Dagster run",
         "tags": [
           "ops-pipeline"
@@ -32934,6 +33486,24 @@
               "description": "이전 응답의 event_cursor(Dagster opaque cursor).",
               "title": "After"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -32946,6 +33516,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
           },
           "404": {
             "content": {
@@ -32965,7 +33555,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "502": {
             "content": {
@@ -32998,6 +33588,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "Dagster run event/failure 상세",
         "tags": [
           "ops-pipeline"
@@ -33127,6 +33725,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -33140,6 +33756,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -33148,7 +33784,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -33161,6 +33797,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "전역 job 이벤트 스트림",
         "tags": [
           "ops-pipeline"
@@ -33363,6 +34007,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -33376,6 +34038,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -33384,7 +34066,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -33397,7 +34079,354 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "root 실행 타임라인",
+        "tags": [
+          "ops-pipeline"
+        ]
+      }
+    },
+    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel": {
+      "post": {
+        "operationId": "cancel_import_job_execution_v1_ops_pipeline_executions_import_job__execution_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Execution Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PipelineCancellationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineCancellationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "실행 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "동시 취소 또는 안전한 reconcile 불가",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster terminate 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
+        "summary": "canonical import-job 실행 계층 취소",
+        "tags": [
+          "ops-pipeline"
+        ]
+      }
+    },
+    "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel": {
+      "post": {
+        "operationId": "cancel_update_request_execution_v1_ops_pipeline_executions_update_request__execution_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Execution Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PipelineCancellationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineCancellationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "실행 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "동시 취소 또는 안전한 reconcile 불가",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster terminate 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "headers": {
+              "Retry-After": {
+                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "canonical update-request 실행 계층 취소",
         "tags": [
           "ops-pipeline"
         ]
@@ -33480,6 +34509,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -33493,6 +34540,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -33511,7 +34578,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -33524,154 +34591,15 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "실행 상세 (+이벤트 cursor, 연결 개체)",
-        "tags": [
-          "ops-pipeline"
-        ]
-      }
-    },
-    "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel": {
-      "post": {
-        "operationId": "cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post",
-        "parameters": [
+        "security": [
           {
-            "in": "path",
-            "name": "kind",
-            "required": true,
-            "schema": {
-              "enum": [
-                "import_job",
-                "update_request"
-              ],
-              "title": "Kind",
-              "type": "string"
-            }
+            "AdminBFF": []
           },
           {
-            "in": "path",
-            "name": "execution_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Execution Id",
-              "type": "string"
-            }
+            "OpsToken": []
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PipelineCancellationRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PipelineCancellationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "실행 없음"
-          },
-          "409": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "동시 취소 또는 안전한 reconcile 불가",
-            "headers": {
-              "Retry-After": {
-                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "502": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Dagster terminate 실패",
-            "headers": {
-              "Retry-After": {
-                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Dagster 연결 또는 terminal 확인 실패",
-            "headers": {
-              "Retry-After": {
-                "description": "재시도 가능한 오류일 때 적용할 대기 시간(초).",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "canonical 실행 계층 취소",
+        "summary": "실행 상세 (+이벤트 cursor, 연결 개체)",
         "tags": [
           "ops-pipeline"
         ]
@@ -33693,6 +34621,24 @@
               "title": "Run Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -33706,6 +34652,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -33714,7 +34680,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -33727,6 +34693,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "파이프라인 상태 스트립 집계",
         "tags": [
           "ops-pipeline"
@@ -33737,6 +34711,26 @@
       "get": {
         "description": "Dagster runs를 exact jobName=mois_localdata_source_sync로 직접 필터링한다. 최신 run이 SUCCESS이고, 현재 PROMOTED slug 집합의 SHA-256을 포함한 full-coverage tag가 일치하며, endTime이 존재하고 미래가 아닌 TTL 이내 시각일 때만 ready다. 조건 누락·불일치는 fail-closed로 거부하며 provider sync_state의 가상 dataset key를 사용하지 않는다.",
         "operationId": "get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get",
+        "parameters": [
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -33748,6 +34742,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -33756,7 +34770,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "502": {
             "content": {
@@ -33789,6 +34803,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "MOIS source sync 선행 job freshness 확인",
         "tags": [
           "ops-pipeline"
@@ -33797,7 +34819,7 @@
     },
     "/v1/ops/pipeline/requests": {
       "post": {
-        "description": "6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.",
+        "description": "6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 ops principal actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.",
         "operationId": "create_pipeline_update_request_v1_ops_pipeline_requests_post",
         "parameters": [
           {
@@ -33842,6 +34864,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -33860,7 +34902,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "502": {
             "content": {
@@ -33893,6 +34935,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "feature update request 생성",
         "tags": [
           "ops-pipeline"
@@ -33903,6 +34950,7 @@
       "post": {
         "description": "scope 대상과 provider/dataset 실행 계획을 계산하며 DB 행은 만들지 않는다.",
         "operationId": "preview_pipeline_update_request_v1_ops_pipeline_requests_preview_post",
+        "parameters": [],
         "requestBody": {
           "content": {
             "application/json": {
@@ -33924,6 +34972,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -33932,7 +35000,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -33945,6 +35013,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "feature update request 비영속 미리보기",
         "tags": [
           "ops-pipeline"
@@ -33995,6 +35068,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -34023,7 +35116,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -34036,6 +35129,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "기존 canonical request 우선 dispatch 요청",
         "tags": [
           "ops-pipeline"
@@ -34045,6 +35143,26 @@
     "/v1/ops/pipeline/schedules": {
       "get": {
         "operationId": "list_pipeline_schedules_v1_ops_pipeline_schedules_get",
+        "parameters": [
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -34056,6 +35174,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -34064,7 +35202,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope"
           },
           "default": {
             "content": {
@@ -34077,6 +35215,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsToken": []
+          }
+        ],
         "summary": "스케줄 목록 (override 병합) + sensor 상태",
         "tags": [
           "ops-pipeline"
@@ -34129,6 +35275,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "409": {
             "content": {
               "application/problem+json": {
@@ -34190,6 +35356,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "스케줄 cron 수정 (null = override 삭제)",
         "tags": [
           "ops-pipeline"
@@ -34242,6 +35413,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -34293,6 +35484,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "결과 불명 schedule claim 수동 확인 및 해제",
         "tags": [
           "ops-pipeline"
@@ -34344,6 +35540,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "X-Kor-Travel-Map-Ops-Token 누락"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
           },
           "409": {
             "content": {
@@ -34406,6 +35622,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "스케줄 명령 실행 — {command: run|start|stop|reset}",
         "tags": [
           "ops-pipeline"

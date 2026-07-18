@@ -99,7 +99,7 @@ PATCH/PUT)이 포함되므로 기존 무인증 ops 패턴을 쓰면 **현행 adm
 | `/ops/pipeline/overview` | GET | 상태 스트립 집계(dagster 요약+sensor+작업/요청 카운트) |
 | `/ops/pipeline/executions` | GET | DB-only UNION 목록(keyset cursor, kind/상태/provider/기간 필터) |
 | `/ops/pipeline/executions/{kind}/{id}` | GET | 실행 상세(+이벤트 cursor, 연결 개체) — kind enum `import_job\|update_request` |
-| `/ops/pipeline/executions/{kind}/{id}/cancel` | POST | 종류별 cancel 위임 |
+| `/ops/pipeline/executions/{import_job|update_request}/{id}/cancel` | POST | 종류별 static cancel 위임 |
 | `/ops/pipeline/events` | GET | 전역 job 이벤트 스트림(level/provider/dataset/job 필터) |
 | `/ops/pipeline/dagster-runs` | GET | 보조 패널용 최근 run(GraphQL, limit, degrade 허용) |
 | `/ops/pipeline/dagster-runs/{run_id}` | GET | 개별 run event/failure 상세(Dagster event cursor 전진 페이지네이션) |

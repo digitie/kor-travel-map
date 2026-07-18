@@ -37,8 +37,10 @@ from starlette.responses import JSONResponse, Response
 
 from kortravelmap.api import __version__
 from kortravelmap.api.auth import (
+    OPS_SCOPE_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_ops_operator,
     require_public_api_key,
 )
 from kortravelmap.api.db import configure_prometheus_metrics
@@ -106,6 +108,17 @@ _PROBLEM_DEFAULT_DESCRIPTION = (
     "핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 "
     "(docs/architecture/rest-api.md §1.5)."
 )
+
+_OPS_CANONICAL_PREFIXES = (
+    "/v1/ops/datasets",
+    "/v1/ops/pipeline",
+)
+_OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+_ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
+_ADMIN_OR_OPS_SECURITY: list[dict[str, list[str]]] = [
+    {"AdminBFF": []},
+    {"OpsToken": []},
+]
 
 
 def _build_problem_components() -> dict[str, Any]:
@@ -215,6 +228,47 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
     # 모든 422가 problem+json으로 대체되어 FastAPI 검증 schema는 orphan이 된다.
     for orphan in ("HTTPValidationError", "ValidationError"):
         components.pop(orphan, None)
+
+
+def _apply_ops_security_contract(schema: dict[str, Any]) -> None:
+    """canonical ops operation별 실제 BFF/service principal 권한을 선언한다.
+
+    FastAPI는 router dependency의 여러 ``Security`` scheme을 operation 단위 권한으로
+    정확히 분리하지 못한다. 실제 런타임 판정과 동일하게 GET 및 exact import-job
+    cancel만 OpsToken 대안을 열고, 나머지 mutation은 AdminBFF만 허용한다.
+    """
+
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+    for path, path_item in paths.items():
+        if not isinstance(path, str) or not path.startswith(_OPS_CANONICAL_PREFIXES):
+            continue
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            service_capable = method == "get" or (
+                method == "post" and path == _OPS_CANCEL_PATH
+            )
+            operation["security"] = (
+                _ADMIN_OR_OPS_SECURITY if service_capable else _ADMIN_BFF_SECURITY
+            )
+            if service_capable:
+                continue
+            parameters = operation.get("parameters")
+            if not isinstance(parameters, list):
+                continue
+            operation["parameters"] = [
+                parameter
+                for parameter in parameters
+                if not (
+                    isinstance(parameter, Mapping)
+                    and parameter.get("in") == "header"
+                    and parameter.get("name") == OPS_SCOPE_HEADER
+                )
+            ]
 
 
 def _request_id(request: Request) -> str:
@@ -649,24 +703,24 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         application.include_router(ops_live_router, prefix="/v1")
         application.include_router(ops_logs_router, prefix="/v1")
 
-    # ADR-064 (T-ADM-C2) — 신규 `/ops/datasets` 그룹. 조작(PUT/POST)이 포함되어
-    # 위의 무인증 ops 패턴을 승계하지 않고 admin frontend 게이트를 강제한다.
+    # ADR-064 (T-ADM-C2/C6c) — canonical `/ops/datasets`는 기존 admin frontend와
+    # read-only server-to-server principal만 허용한다. service mutation은 거부한다.
     # T-ADM-C3(pipeline 그룹)와의 rebase 충돌을 줄이기 위해 자체 블록으로 둔다.
     if ops_routes_enabled:
         application.include_router(
             ops_datasets_router,
             prefix="/v1",
-            dependencies=[Depends(require_admin_frontend)],
+            dependencies=[Depends(require_ops_operator)],
         )
 
-    # ADR-064 (T-ADM-C3) — 신규 `/ops/pipeline` 그룹은 조작(POST/PATCH)이 포함되어
-    # 무인증 ops 패턴 대신 admin frontend 게이트로 마운트한다. datasets 그룹
+    # ADR-064 (T-ADM-C3/C6c) — canonical `/ops/pipeline`도 같은 ops principal로
+    # 마운트한다. legacy ops와 admin/BFF route의 인증 범위는 넓히지 않는다. datasets 그룹
     # (T-ADM-C2)과의 병렬 작업 충돌을 줄이기 위해 include 블록을 분리해 둔다.
     if ops_routes_enabled:
         application.include_router(
             ops_pipeline_router,
             prefix="/v1",
-            dependencies=[Depends(require_admin_frontend)],
+            dependencies=[Depends(require_ops_operator)],
         )
 
     # ADR-031/T-452 — 생성 openapi에 RFC7807 problem+json 에러 응답을 주입한다.
@@ -679,6 +733,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             return application.openapi_schema
         schema = _default_openapi()
         _augment_problem_responses(schema)
+        _apply_ops_security_contract(schema)
         application.openapi_schema = schema
         return schema
 

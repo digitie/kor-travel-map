@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex, agent B) — T-ADM-C6c map service principal 적대 리뷰 반영
+
+- canonical `/v1/ops/datasets*`·`/v1/ops/pipeline*`만 기존 trusted frontend BFF 또는 별도
+  `OpsToken` principal이 통과하도록 인증 dependency를 분리했다. read secret은 `GET`의
+  `ops:read`, cancel secret은 exact import-job cancel POST의 `ops:cancel`에 결박했다. 나머지
+  mutation은 BFF 전용이며 token·scope 오류를 typed RFC7807 `401/403/422`로 구분했다.
+- service actor를 설정 불가능한 코드 상수 `service:pinvi`로 고정했다. 요청 actor header와 제거된
+  actor env를 거부하고 `/v1/admin/*`, legacy ops, frontend BFF의 권한은 넓히지 않았다. OpenAPI는
+  GET/exact cancel만 AdminBFF 또는 OpsToken이고 다른 mutation은 AdminBFF만 표시한다.
+- `OPS_PRINCIPAL_REQUIRED=true`는 non-empty pair를 강제한다. local false는 두 값 모두 absent 또는
+  모두 explicit empty만 허용하며 partial/missing+empty/모든 whitespace/read=cancel/admin·service
+  secret 재사용을 거부한다. API-only ops env가 Dagster webserver/daemon에 유입되면 image
+  entrypoint가 값의 유무와 무관하게 시작을 차단한다.
+- 위 경계를 고정하는 dependency/OpenAPI/launcher/compose test code를 보강했다. 독립 적대 리뷰
+  2건을 반영한 뒤 root unit 1,463건과 API 563건, targeted C6c 306건, ruff, strict mypy
+  190파일, import 계약 4/4, admin/user OpenAPI·admin generated type drift, frontend type-check·
+  unit 210건·lint(오류 0, 기존 경고 6)·production build를 통과했다.
+- PR #733의 Python 3.11~3.13 CI에서 FastAPI/Starlette 조합에 따라 `route.path`가 router prefix를
+  보존하지 않아 exact cancel principal이 거짓 거부되는 차이를 확인했다. 권한 판정을 framework
+  내부 route template 대신 ASGI decoded path의 anchored import-job UUID cancel 경로에 결박하고,
+  상대 route template과 실제 full path를 분리한 회귀 테스트를 추가했다. 이 보정 diff도 두 독립
+  적대 리뷰어가 fail-open 없음으로 승인했으며 집중 API 217건과 API 전체 563건을 통과했다.
+- 첫 재실행의 PostGIS integration은 principal 활성 시 무헤더 read를 구 계약 `403`으로 기대한 기존
+  assertion 1건 때문에 실패했다. 제품 코드는 바꾸지 않고 새 typed 계약 `401 OPS_TOKEN_REQUIRED`를
+  함께 단언하도록 고쳤으며 해당 실제 PostgreSQL REST projection test를 다시 통과했다.
+
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 
 - PR #708은 이미 병합된 상태여서 최신 KTM `main@13eb8d40`과 PinVi

@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### canonical ops service principal (2026-07-18, ADR-064 T-ADM-C6c)
+
+- **SECURITY**: PinVi server용 `OpsToken` principal을 read와 import-job cancel로 분리했다.
+  read token은 canonical datasets/pipeline `GET`, cancel token은
+  `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` 한 곳에만 결박한다. scope 문자열만
+  바꾸어 schedule/policy/update-request mutation 권한을 얻을 수 없으며 token·scope 오류는 typed
+  RFC7807 `401/403/422`로 닫는다.
+- **CHANGED**: service principal의 감사 actor는 설정 불가능한 코드 상수 `service:pinvi`를 사용한다.
+  요청 actor header는 무시하며 기존 trusted admin frontend BFF와 `/v1/admin/*` 권한은 변경하지
+  않는다. 제거된 actor env는 시작 시 거부한다.
+- **SECURITY**: n150 production은 `KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true`와 non-empty
+  read/cancel pair를 강제한다. local opt-out은 두 값 모두 absent 또는 모두 explicit empty일 때만
+  허용하고 partial/missing+empty/모든 whitespace/다른 trust-boundary secret 재사용을 거부한다.
+  API-only ops env가 Dagster webserver/daemon에 유입되면 image entrypoint가 시작을 차단한다.
+
 ### exact-scope 조작·이력 UI 소비 (2026-07-18, ADR-064 T-ADM-C7B-UI)
 
 - **CHANGED**: `/ops/pipeline`의 provider/dataset/scope filter를 URL controlled state로

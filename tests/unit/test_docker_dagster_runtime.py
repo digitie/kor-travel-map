@@ -63,6 +63,9 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster-webserver" in _command_text(dagster["command"])
     assert "dagster dev" not in _command_text(dagster["command"])
     assert "dagster-daemon run" in _command_text(daemon["command"])
+    for service in (dagster, daemon):
+        assert service["build"]["dockerfile"] == "docker/dagster.Dockerfile"
+        assert "entrypoint" not in service
 
     assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
@@ -189,6 +192,9 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
         "KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED",
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
         "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
@@ -196,6 +202,20 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
     } <= package_api_keys
+    assert "KOR_TRAVEL_MAP_API_OPS_ACTOR" not in package_api_keys
+
+    ops_keys = {
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        "KOR_TRAVEL_MAP_API_OPS_ACTOR",
+    }
+    assert ops_keys.isdisjoint(api["environment"])
+    assert all(
+        all(key not in services[name]["environment"] for key in ops_keys)
+        for name in ("frontend", "dagster", "dagster-daemon")
+    )
+    assert "KOR_TRAVEL_MAP_OPS_TOKEN" not in _script(".env.example")
 
     load_env_api_keys = _assigned_env_keys(
         _script("scripts/load-env.sh"), prefix="KOR_TRAVEL_MAP_API_"
@@ -305,6 +325,12 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
         "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters "
         "without surrounding whitespace"
     ) in script
+    assert "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" in script
+    assert "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" in script
+    assert "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED" in script
+    assert "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed" in script
+    assert "ops read and cancel tokens must be distinct" in script
+    assert "ops principal keys are allowed only in the API package env" in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
     assert "start_bg api env -i" in script
     assert "start_bg web env -i" in script
@@ -349,7 +375,10 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     }
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n",
+        "KOR_TRAVEL_MAP_API_BACKUP_ROOT=data/backups\n"
+        "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=false\n"
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n",
         encoding="utf-8",
     )
     valid = subprocess.run(
@@ -437,6 +466,105 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("ops_lines", "expected_error"),
+    [
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=read-token-00000000000000000000000000000000\n",
+            "must be configured together",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n",
+            "must be configured together",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n",
+            "must be configured together",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
+            "must both be empty or both be non-empty",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=short\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
+            "must be at least 32 characters",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=read token-00000000000000000000000000000000\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
+            "must contain no whitespace",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=same-token-00000000000000000000000000000000\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=same-token-00000000000000000000000000000000\n",
+            "ops read and cancel tokens must be distinct",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true\n",
+            "required but read/cancel tokens are absent",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true\n"
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=\n",
+            "required but read/cancel tokens are empty",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=TRUE\n",
+            "must be exactly true or false",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_ACTOR=service:pinvi\n",
+            "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=shared-secret-at-least-32-characters\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
+            "distinct from the admin proxy secret",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_SERVICE_TOKEN=read-token-00000000000000000000000000000000\n"
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=read-token-00000000000000000000000000000000\n"
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=cancel-token-000000000000000000000000000000\n",
+            "distinct from the service token",
+        ),
+    ],
+)
+def test_local_admin_stack_rejects_invalid_ops_principal_pair(
+    tmp_path: Path,
+    ops_lines: str,
+    expected_error: str,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(ops_lines, encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
+@pytest.mark.unit
 def test_api_container_rejects_stale_provider_env_even_when_empty() -> None:
     process_env = {
         "PATH": os.environ["PATH"],
@@ -452,6 +580,23 @@ def test_api_container_rejects_stale_provider_env_even_when_empty() -> None:
     )
     assert result.returncode != 0
     assert "removed provider runtime key must not enter API container" in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_rejects_legacy_root_ops_principal() -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_OPS_TOKEN": "legacy-secret",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "legacy root ops principal keys" in result.stderr
 
 
 @pytest.mark.unit
@@ -498,6 +643,213 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("ops_env", "expected_error"),
+    [
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": (
+                    "read-token-00000000000000000000000000000000"
+                )
+            },
+            "must be configured together",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": ""},
+            "must be configured together",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": ""},
+            "must be configured together",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "must both be empty or both be non-empty",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "short",
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "must be at least 32 characters",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": (
+                    "read token-00000000000000000000000000000000"
+                ),
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "must contain no whitespace",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": (
+                    "same-token-00000000000000000000000000000000"
+                ),
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "same-token-00000000000000000000000000000000"
+                ),
+            },
+            "ops read and cancel tokens must be distinct",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "true"},
+            "required but read/cancel tokens are absent",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "true",
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            },
+            "required but read/cancel tokens are empty",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": ""},
+            "must be exactly true or false",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_ACTOR": ""},
+            "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": (
+                    "shared-secret-at-least-32-characters"
+                ),
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "distinct from the admin proxy secret",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": (
+                    "read-token-00000000000000000000000000000000"
+                ),
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": (
+                    "read-token-00000000000000000000000000000000"
+                ),
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "distinct from the service token",
+        ),
+    ],
+)
+def test_api_container_rejects_invalid_ops_principal_pair(
+    ops_env: dict[str, str],
+    expected_error: str,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            **ops_env,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_allows_two_empty_ops_tokens_when_not_required(
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("alembic", "python"):
+        command = bin_dir / name
+        command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        command.chmod(0o755)
+
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "key",
+    [
+        "KOR_TRAVEL_MAP_OPS_TOKEN",
+        "KOR_TRAVEL_MAP_OPS_ACTOR",
+        "KOR_TRAVEL_MAP_OPS_FUTURE_KEY",
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        "KOR_TRAVEL_MAP_API_OPS_ACTOR",
+        "KOR_TRAVEL_MAP_API_OPS_FUTURE_KEY",
+    ],
+)
+def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
+    key: str,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "exit 0"],
+        cwd=ROOT,
+        env={"PATH": os.environ["PATH"], key: ""},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert f"API-only ops principal key must not enter Dagster process: {key}" in (
+        result.stderr
+    )
+
+
+@pytest.mark.unit
+def test_dagster_entrypoint_executes_command_without_api_ops_keys() -> None:
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "exit 0"],
+        cwd=ROOT,
+        env={"PATH": os.environ["PATH"]},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
 def test_admin_proxy_secret_minimum_is_enforced_at_runtime_boundaries() -> None:
     api_entrypoint = _script("docker/api-entrypoint.sh")
     admin_launcher = _script("scripts/run-admin-stack.sh")
@@ -537,6 +889,7 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     assert "FROM python:3.12-slim AS builder" in dagster
     assert "FROM python:3.12-slim AS runtime" in dagster
     assert "USER appuser" in dagster
+    assert 'ENTRYPOINT ["dagster-entrypoint.sh"]' in dagster
     assert "-e ." not in dagster
 
     assert "FROM node:22-bookworm-slim AS deps" in frontend

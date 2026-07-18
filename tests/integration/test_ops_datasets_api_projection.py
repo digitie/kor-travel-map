@@ -706,7 +706,8 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
                     },
                 )
 
-                assert denied_response.status_code == 403
+                assert denied_response.status_code == 401
+                assert denied_response.json()["code"] == "OPS_TOKEN_REQUIRED"
                 assert legacy_detail_response.status_code == 404
                 assert legacy_preview_response.status_code == 404
                 assert legacy_policy_response.status_code == 404

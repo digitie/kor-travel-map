@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["ApiSettings"]
@@ -23,6 +24,7 @@ class ApiSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
         populate_by_name=True,
     )
 
@@ -143,6 +145,39 @@ class ApiSettings(BaseSettings):
             "공유하는 env 정본은 ``KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET``이다."
         ),
     )
+    ops_read_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        description=(
+            "PinVi server가 canonical ``/v1/ops/datasets*``·"
+            "``/v1/ops/pipeline*``의 GET을 호출할 때만 사용하는 API-only "
+            "token. ``X-Kor-Travel-Map-Ops-Token``으로 전달하며 admin frontend "
+            "BFF secret이나 public service token과 공유하지 않는다."
+        ),
+    )
+    ops_cancel_token: SecretStr | None = Field(
+        default=None,
+        validation_alias="KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        description=(
+            "PinVi server가 canonical import-job cancel endpoint 한 곳을 호출할 "
+            "때만 사용하는 API-only token. read token과 달라야 하며 schedule, "
+            "policy, update-request 등 다른 mutation 권한을 부여하지 않는다."
+        ),
+    )
+    ops_principal_required: bool = Field(
+        default=False,
+        description=(
+            "True면 API startup에 read/cancel token 쌍을 필수로 요구한다. 로컬은 "
+            "False로 principal을 끌 수 있고 n150 production은 True를 주입한다."
+        ),
+    )
+    legacy_ops_actor: str | None = Field(
+        default=None,
+        validation_alias="KOR_TRAVEL_MAP_API_OPS_ACTOR",
+        exclude=True,
+        repr=False,
+        description="제거된 configurable ops actor 감지용 startup guard.",
+    )
     admin_trusted_proxy_cidrs: list[str] = Field(
         default=["127.0.0.1/32", "::1/128"],
         description=(
@@ -150,6 +185,121 @@ class ApiSettings(BaseSettings):
             "localhost만 허용한다. Docker/리버스 프록시 배포 시 프록시 CIDR을 명시한다."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_ops_principal_provenance(cls, data: object) -> object:
+        """missing/empty provenance를 보존해 부분 설정을 disabled로 접지 않는다."""
+
+        if not isinstance(data, Mapping):
+            return data
+
+        missing = object()
+
+        def _input_value(field_name: str, env_name: str) -> object:
+            if field_name in data:
+                return data[field_name]
+            if env_name in data:
+                return data[env_name]
+            return missing
+
+        read = _input_value(
+            "ops_read_token",
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        )
+        cancel = _input_value(
+            "ops_cancel_token",
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        )
+        if (read is missing) != (cancel is missing):
+            raise ValueError(
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must both be absent or configured together"
+            )
+        if read is missing:
+            return data
+
+        def _input_kind(value: object) -> str:
+            raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if raw is None:
+                return "none"
+            if raw == "":
+                return "empty"
+            return "value"
+
+        read_kind = _input_kind(read)
+        cancel_kind = _input_kind(cancel)
+        if read_kind != cancel_kind:
+            raise ValueError(
+                "ops read and cancel tokens must both be empty or both be non-empty"
+            )
+        return data
+
+    @field_validator("ops_read_token", "ops_cancel_token", mode="before")
+    @classmethod
+    def _validate_ops_token_shape(cls, value: object) -> object:
+        """빈 optional 값은 끄고, 활성 secret은 공백 없는 32자 이상으로 제한한다."""
+
+        if value is None:
+            return value
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if not isinstance(raw, str):
+            return value
+        if raw == "":
+            return None
+        if any(character.isspace() for character in raw) or len(raw) < 32:
+            raise ValueError(
+                "ops token must be non-empty, at least 32 characters, "
+                "and contain no whitespace"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _validate_ops_principal_pair(self) -> ApiSettings:
+        """C6c principal은 read/cancel secret을 한 쌍으로만 활성화한다."""
+
+        read = self.ops_read_token
+        cancel = self.ops_cancel_token
+        if self.legacy_ops_actor is not None:
+            raise ValueError(
+                "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed; the audit actor is fixed"
+            )
+        if (read is None) != (cancel is None):
+            raise ValueError(
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together"
+            )
+        if self.ops_principal_required and (read is None or cancel is None):
+            raise ValueError(
+                "ops principal is required but read/cancel tokens are not configured"
+            )
+        if (
+            read is not None
+            and cancel is not None
+            and read.get_secret_value() == cancel.get_secret_value()
+        ):
+            raise ValueError("ops read and cancel tokens must be distinct")
+        protected_secrets = {
+            "admin proxy secret": self.admin_proxy_secret,
+            "service token": self.service_token,
+        }
+        for ops_name, ops_token in (
+            ("ops read token", read),
+            ("ops cancel token", cancel),
+        ):
+            if ops_token is None:
+                continue
+            raw_ops_token = ops_token.get_secret_value()
+            for protected_name, protected_secret in protected_secrets.items():
+                if (
+                    protected_secret is not None
+                    and raw_ops_token == protected_secret.get_secret_value()
+                ):
+                    raise ValueError(
+                        f"{ops_name} must be distinct from {protected_name}"
+                    )
+        return self
+
     public_api_key_required: bool = Field(
         default=False,
         description=(

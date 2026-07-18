@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex, agent B) — T-ADM-C6c map principal 적대 리뷰 반영
+
+- map API에 API-only read/cancel token을 추가했다. read는 canonical datasets/pipeline
+  `GET`, cancel은 exact import-job cancel POST 한 곳에만 결박했다. trusted frontend
+  BFF는 기존 actor와 전체 operator mutation 권한을 유지하며 service 요청은 서버 고정
+  `service:pinvi`를 사용한다.
+- typed `401/403/422`, constant-time token 비교, actor 위조 차단, `/v1/admin/*` 권한 격리,
+  operation별 OpenAPI AdminBFF/OpsToken 계약과 API-only secret 전달 경계를 테스트 코드로 고정했다.
+  production required gate, fixed actor, 전체 whitespace와 admin/service secret 재사용 거부,
+  Dagster entrypoint 격리를 적대 리뷰 지적에 따라 보강했다.
+- 독립 적대 리뷰 2건을 반영한 최종 diff에서 root unit 1,463건과 API 563건, targeted C6c
+  306건, ruff, strict mypy 190파일, import 계약 4/4, admin/user OpenAPI·admin generated type
+  drift, frontend type-check·unit 210건·lint(오류 0, 기존 경고 6)·production build가 통과했다.
+- PR #733의 Python 3.11~3.13에서 framework별 `route.path` prefix 차이로 exact cancel이 403이
+  되는 회귀를 ASGI full path 결박으로 제거했다. update-request·suffix·trailing path는 계속
+  fail-closed하고, 별도 적대 리뷰 2인 승인과 집중 API 217건·API 전체 563건을 확인했다.
+- 재실행 integration의 구 `403` 기대 1건은 새 `401 OPS_TOKEN_REQUIRED` 계약과 code까지 단언하도록
+  시험만 교정했고, 해당 실제 PostgreSQL projection test가 통과했다.
+- **다음 한 작업**: 보안 감사와 최신 main rebase 뒤 map PR을 CI green·승인으로 병합한다.
+  이어 PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit 조합으로
+  cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
+
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 
 - KTM `origin/main@13eb8d40`과 PinVi `origin/main@48085afb`를 기준으로 PR #708 정본을

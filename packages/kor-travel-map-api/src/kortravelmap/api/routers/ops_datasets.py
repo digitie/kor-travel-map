@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import OPS_AUTH_ERROR_RESPONSES
 from kortravelmap.api.dagster_http import dagster_http_dependencies
 from kortravelmap.api.db import get_session
 from kortravelmap.api.ops_dataset_preview import (
@@ -53,7 +54,11 @@ __all__ = [
     "router",
 ]
 
-router = APIRouter(prefix="/ops/datasets", tags=["ops-datasets"])
+router = APIRouter(
+    prefix="/ops/datasets",
+    tags=["ops-datasets"],
+    responses=OPS_AUTH_ERROR_RESPONSES,
+)
 
 
 @router.get(
