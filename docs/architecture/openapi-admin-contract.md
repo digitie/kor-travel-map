@@ -1450,6 +1450,11 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 들어오면 upsert, 다른 normalized 좌표로 들어오면 기본 409다. 이동을 의도한 경우
 `on_conflict="move"`를 명시한다.
 
+단건 GET/PUT 성공 응답은 `ETag: "{target_id}"`를 반환한다. PUT/DELETE 성공 응답의
+`meta.dataset_projection_revision`은 같은 source transaction에서 statement trigger가 증가시킨
+`dataset_projection` topic revision이다. live consumer는 이 값과 같은 기존 socket의 update만
+해당 mutation의 causal invalidation으로 인정한다.
+
 요청 body의 `provider_overrides`는 provider 또는 `provider:dataset_key` 문자열 key
 최대 64개만 허용한다. 각 값은 `targeted_policy`, interval/rate-limit 계열 숫자,
 `max_concurrent`, `note`만 받을 수 있고 unknown key는 `422`다. `metadata`는 Pydantic
@@ -1471,7 +1476,10 @@ Cache target 단건을 반환한다. 기본은 active target만 조회하고,
 
 ### `DELETE /admin/poi-cache-targets/{external_system}/{target_key}`
 
-외부 POI 삭제를 반영한다. target을 soft delete하고 이후 targeted update에서 제외한다.
+외부 POI 삭제를 반영한다. 직전 GET/PUT의 `ETag`를 `If-Match`로 필수 전달한다. 서버는 natural
+key와 ETag의 `target_id`가 같은 active 행만 한 SQL predicate에서 soft delete한다. 다른 UUID로
+재생성됐으면 새 target을 건드리지 않고 `412 Precondition Failed`, active target이 없으면 `404`다.
+성공한 target은 이후 targeted update에서 제외한다.
 
 ### `GET /features/nearby/by-target`
 

@@ -9,6 +9,7 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — PinVi legacy ops caller canonical 전환 + 인증 계약 복구
+  - [ ] `T-ADM-C7C` — live invalidation causal receipt + target 조건부 삭제
   - [ ] `T-ADM-C7` — live e2e 재작성 + n150 검증 (C6c 뒤)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
@@ -48,7 +49,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   401/403/422, raw/debug/BFF 우회 0건, 배포 순서와 rollback image가 명시된 cross-repo smoke다.
 
 - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤, 의존
-  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c): 기존 게이트
+  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c·C7C): 기존 게이트
   체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
   금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
   생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
@@ -57,6 +58,15 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   signed-expired ticket은 data frame 0건 + `4408` 후 fresh ticket 재연결을 증거로
   남긴다. C4R의 운영 종결 이슈 #684/#686/#712와 후속 #718/#719/#720은 최종
   live 증거를 첨부한 뒤 닫는다.
+
+- [ ] `T-ADM-C7C` — **live invalidation causal receipt + target 조건부 삭제**
+  (C7 선행): POI target PUT/DELETE 성공 응답 `meta.dataset_projection_revision`을 source
+  transaction 안에서 읽어 반환하고, C7은 같은 socket의 `dataset_projection` update frame이
+  정확히 그 revision을 전달한 경우에만 causal invalidation으로 인정한다. 단건 GET/PUT은
+  `ETag: "{target_id}"`를 반환하며 DELETE는 해당 값을 `If-Match`로 필수 수신한다. repository
+  soft-delete는 natural key와 `target_id`를 한 SQL predicate에 결박해 GET→DELETE 사이
+  delete/recreate 경쟁에서 새 target을 지우지 않고 `412`로 닫는다. API·admin UI·OpenAPI·생성
+  타입·일반/live E2E를 함께 갱신하며 migration은 추가하지 않는다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,

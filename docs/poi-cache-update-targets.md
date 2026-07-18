@@ -377,10 +377,15 @@ Query:
 
 처리:
 
+- 직전 GET/PUT의 `ETag: "{target_id}"`를 `If-Match`로 필수 전달한다.
+- natural key와 expected `target_id`가 같은 active row만 원자적으로 갱신한다. UUID가 바뀌었으면
+  삭제 없이 `412`, active row가 없으면 `404`다.
 - `deleted_at`을 설정한다.
 - active feature links를 false로 바꾼다.
 - 이후 targeted update request에서 제외한다.
 - feature 자체는 삭제하지 않는다.
+- PUT/DELETE 성공 응답 `meta.dataset_projection_revision`은 같은 transaction에서 증가한 live
+  topic revision이며, causal UI 갱신 검증에 사용한다.
 
 ### 7.4 주변 feature 목록
 

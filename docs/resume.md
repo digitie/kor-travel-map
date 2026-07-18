@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 문서 선행
+
+- C7 live E2E 적대 리뷰에서 mutation 이후 임의 global revision 증가를 causal invalidation으로
+  오인하고, GET 소유권 확인과 DELETE 사이 target 재생성 경쟁에서 새 UUID를 삭제할 수 있는 두
+  차단 결함을 확인했다.
+- POI target mutation이 같은 transaction에서 증가한 `dataset_projection` revision을 응답 meta로
+  반환하고, DELETE는 GET/PUT의 `ETag`를 `If-Match`로 요구해 `target_id`까지 원자 predicate에
+  결박하는 clean contract를 ADR-065와 API 문서에 먼저 고정했다. 기존 revision table/trigger를
+  사용하므로 DB schema 변경은 필요하지 않다.
+- **다음 한 작업**: T-ADM-C7C를 독립 PR로 구현·2인 적대 리뷰·로컬 gate·CI merge한 뒤 C7 live
+  branch를 rebase해 exact revision update와 조건부 cleanup을 증명한다.
+
 ## 2026-07-18 (codex, agent B) — T-ADM-C6c map principal 적대 리뷰 반영
 
 - map API에 API-only read/cancel token을 추가했다. read는 canonical datasets/pipeline
@@ -18,9 +30,8 @@
   fail-closed하고, 별도 적대 리뷰 2인 승인과 집중 API 217건·API 전체 563건을 확인했다.
 - 재실행 integration의 구 `403` 기대 1건은 새 `401 OPS_TOKEN_REQUIRED` 계약과 code까지 단언하도록
   시험만 교정했고, 해당 실제 PostgreSQL projection test가 통과했다.
-- **다음 한 작업**: 보안 감사와 최신 main rebase 뒤 map PR을 CI green·승인으로 병합한다.
-  이어 PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit 조합으로
-  cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
+- **다음 한 작업**: PinVi caller와 docker-manager compatible-pair 배포 PR을 병합하고 같은 commit
+  조합으로 cross-repo smoke를 수행한다. `T-ADM-C6c`는 그 smoke 전까지 열린 task다.
 
 ## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 

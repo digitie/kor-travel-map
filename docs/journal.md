@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-18 (codex) — T-ADM-C7C causal receipt·조건부 삭제 설계 확정
+
+- C7 테스트 전 적대 리뷰에서 `updated_at` 이후의 임의 `dataset_projection` revision을 해당
+  mutation 원인으로 인정하는 거짓 양성과, target exact GET 뒤 자연키 DELETE가 concurrent
+  delete/recreate된 새 UUID를 지울 수 있는 TOCTOU를 확인했다.
+- POI target PUT/DELETE transaction에서 trigger가 증가시킨 topic revision을 다시 읽어 성공 응답
+  `meta.dataset_projection_revision`으로 반환한다. C7은 같은 기존 socket의 update frame revision과
+  exact equality를 요구하며 snapshot/다른 revision은 거부한다.
+- GET/PUT은 target UUID 기반 ETag를 반환하고 DELETE는 `If-Match`를 필수화한다. repository UPDATE는
+  natural key+expected target UUID가 모두 같은 행만 soft-delete하며 mismatch는 삭제 없이 412다.
+- 새 테이블·컬럼·migration은 필요하지 않다. 기존 `ops.ops_live_topic_revisions`와 target UUID가
+  이미 필요한 causal clock과 entity version 역할을 하므로 DB 추가가 오히려 중복이다.
+
 ## 2026-07-18 (codex, agent B) — T-ADM-C6c map service principal 적대 리뷰 반영
 
 - canonical `/v1/ops/datasets*`·`/v1/ops/pipeline*`만 기존 trusted frontend BFF 또는 별도
