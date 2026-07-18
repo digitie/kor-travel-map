@@ -5,9 +5,9 @@ name: lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/t-vn]
   pull_request:
-    branches: [main]
+    branches: [main, integration/t-vn]
 
 concurrency:
   group: lint-${{ github.workflow }}-${{ github.ref }}

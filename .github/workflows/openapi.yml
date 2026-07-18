@@ -14,9 +14,9 @@ name: openapi
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/t-vn]
   pull_request:
-    branches: [main]
+    branches: [main, integration/t-vn]
 
 concurrency:
   group: openapi-${{ github.workflow }}-${{ github.ref }}

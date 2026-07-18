@@ -11,9 +11,9 @@ name: frontend
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/t-vn]
   pull_request:
-    branches: [main]
+    branches: [main, integration/t-vn]
 
 concurrency:
   group: frontend-${{ github.workflow }}-${{ github.ref }}

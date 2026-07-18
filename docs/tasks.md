@@ -146,6 +146,13 @@ migration 번호는 a2가 0059를 예약했고, 이후 branch는 PR 직전 rebas
 재확인 후 재번호한다. T-VN-13/14/15/18/20/21과 Wave 2(T-VN-31~40)는 위 lane 소화 후
 재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
 
+**통합 브랜치 규율**: `T-ADM-C7` 종결 전까지 모든 T-VN task PR(a·b lane 공통)의 base는
+main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-vn` PR(CI green 후
+머지)로 쌓고, main의 변경은 주기적으로 `integration/t-vn`에 merge해 동기화한다
+(공유 브랜치이므로 rebase 금지). C7 종결 후 `integration/t-vn` → main PR 1건으로 합류하며,
+그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
+`integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
+
 ### Wave 0 — P0, 즉시 가역
 
 - [ ] T-VN-01 — **production fail-closed 전환**
