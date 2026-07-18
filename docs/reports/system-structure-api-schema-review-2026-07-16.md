@@ -2,7 +2,7 @@
 
 > 작성일: 2026-07-18 (최신 코드 3차 재검증판)
 > 기준: KTM `origin/main@13eb8d40` · PinVi `origin/main@48085afb`
-> 반영: PR #730, merge commit `d0609226` (CI 8개 게이트 통과)
+> 반영: PR #730(2차, merge `d0609226`) → PR #732(3차, 본 판)
 > 전신: 본 문서는 PR #702(원 리뷰 §1~10) → #703(§11 Claude 다관점) → #704(§12 Codex 재검토
 > 병합본 위 §13 대질·수렴) → #707(§14 Codex 재보강)의 **왕복 리뷰 4회를 소화한 최종 정본**이다.
 > 왕복 세부(§11~§14의 개별 논증·정정 이력)는 git 이력(위 PR들)에 보존되며, 본 문서는 그
@@ -591,7 +591,7 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 #721~#729(C6a/b·C7A·감사 후속·C7B)와 PinVi `origin/main@48085afb`의 실제 caller/test를 함께
 대조했고, 그 결과는 PR #730으로 병합했다. 3차 재검증은 같은 기준선에서 6관점 병렬
 검증(인증/라우트·쓰기 안전성·스키마/마이그레이션·공개 읽기·PinVi cross-repo·문서 정합) +
-발견 건별 독립 적대 검증으로 진행해, 무키 legacy curated 공개 read(F-3), 잔여 body-actor
+발견 건별 독립 적대 검증으로 진행해 PR #732로 병합했다. 무키 legacy curated 공개 read(F-3), 잔여 body-actor
 4개 route군(F-4·D-2), 존치 ops 관측 route의 PinVi 라이브 소비와 T-VN-03 cutover 조율
 (F-17 연계), C3e B2/B3↔PR 대응 정정을 반영했다. 세부 논증은 해당 PR diff와
 `docs/tasks-done.md`의 완료 증거를 함께 참조한다.
