@@ -89,6 +89,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
     assert not any(path.startswith("/debug") for path in user["paths"])
+    assert set(user["components"]["securitySchemes"]) == {"ServiceToken"}
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas

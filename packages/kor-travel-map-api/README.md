@@ -103,11 +103,17 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | `false` | `POST /admin/backups`, `POST /admin/restore/{backup_id}`의 host command 실행 허용 여부. false면 plan-only |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_TIMEOUT_SECONDS` | `1800` | opt-in host command 실행 timeout |
 | `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | (운영 필수, root `.env`) | API와 frontend가 함께 읽는 admin REST BFF 검증·ops-live 60초 ticket HMAC server-only secret(32자 이상). API package `.env`에는 두지 않음 |
+| `KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED` | `false` | `true`면 API 시작 시 non-empty read/cancel token 쌍을 필수로 요구한다. n150 production은 `true`, 로컬 opt-out만 `false` |
+| `KOR_TRAVEL_MAP_API_OPS_READ_TOKEN` | (선택, API package `.env`) | PinVi server의 canonical datasets/pipeline `GET` 전용 token. 로컬 `required=false`에서 두 token이 모두 없거나 모두 빈 값일 때만 비활성. 활성화 시 cancel token과 함께 모든 공백을 금지한 32자 이상이며 admin BFF/service token과도 다른 값 필수 |
+| `KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN` | (선택, API package `.env`) | `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` 한 곳 전용 token. local `required=false` opt-out 외에는 non-empty pair 필수이며 schedule/policy/request 등 다른 mutation은 항상 거부 |
 | `KOR_TRAVEL_MAP_API_RESTORE_APP_DB` | `kor_travel_map_restore` | staging restore app DB 기본값 |
 | `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` | `kor_travel_map_dagster_restore` | staging restore Dagster DB 기본값 |
 | `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | `kor-travel-map-rustfs-restore` | staging restore RustFS volume 기본값 |
 | `KOR_TRAVEL_MAP_API_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 | `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE` | `require_review` | place/event feature 추가·수정·삭제 요청 처리 모드. `require_review` 또는 `immediate` |
+
+Ops service principal의 감사 actor는 코드 상수 `service:pinvi`다. actor 설정 env는 없으며,
+제거된 `KOR_TRAVEL_MAP_API_OPS_ACTOR`가 존재하면 API가 시작을 거부한다.
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
 
@@ -143,9 +149,10 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
   `/v1/ops/system-logs`
 - `/v1/admin/offline-uploads` (JSON/JSONL/CSV/TSV upload/list/detail/preview/validate/Dagster load)
 
-`/v1/admin/*`와 조작을 포함하는 canonical `/v1/ops/pipeline/*`·`/v1/ops/datasets/*`는
-admin frontend proxy 인증 context를 요구한다. health·metrics·live·운영 로그·정합성 같은
-관측용 ops read는 별도 인프라 접근 제어 경계에서 제공한다. 런타임
+`/v1/admin/*`와 canonical `/v1/ops/pipeline/*`·`/v1/ops/datasets/*`는 admin frontend
+proxy 인증 context를 요구한다. 예외적으로 별도 service principal은 canonical read와 exact
+import-job cancel 한 곳만 호출한다. health·metrics·live·운영 로그·정합성 같은 관측용 ops read는
+별도 인프라 접근 제어 경계에서 제공한다. 런타임
 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
 PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.

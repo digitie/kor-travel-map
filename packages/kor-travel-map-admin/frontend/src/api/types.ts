@@ -1682,6 +1682,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** canonical import-job 실행 계층 취소 */
+        post: operations["cancel_import_job_execution_v1_ops_pipeline_executions_import_job__execution_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** canonical update-request 실행 계층 취소 */
+        post: operations["cancel_update_request_execution_v1_ops_pipeline_executions_update_request__execution_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/pipeline/executions/{kind}/{execution_id}": {
         parameters: {
             query?: never;
@@ -1693,23 +1727,6 @@ export interface paths {
         get: operations["get_execution_detail_v1_ops_pipeline_executions__kind___execution_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** canonical 실행 계층 취소 */
-        post: operations["cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1767,7 +1784,7 @@ export interface paths {
         put?: never;
         /**
          * feature update request 생성
-         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
+         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 ops principal actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
          */
         post: operations["create_pipeline_update_request_v1_ops_pipeline_requests_post"];
         delete?: never;
@@ -9777,15 +9794,6 @@ export interface operations {
                     "application/json": components["schemas"]["BackupListResponse"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
             default: {
                 headers: {
@@ -10498,15 +10506,6 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -12094,15 +12093,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManagedFileSummaryResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -14688,7 +14678,10 @@ export interface operations {
     list_datasets_grid_v1_ops_datasets_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14703,7 +14696,25 @@ export interface operations {
                     "application/json": components["schemas"]["OpsDatasetsGridResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14730,7 +14741,10 @@ export interface operations {
                 dataset_key: string;
                 sync_scope: string;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14743,6 +14757,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsDatasetDetailResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description 카탈로그·sync state·policy 또는 exact scope 없음 */
@@ -14799,6 +14831,24 @@ export interface operations {
                     "application/json": components["schemas"]["OpsDatasetPreviewResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description 등록되지 않은 dataset */
             404: {
                 headers: {
@@ -14817,7 +14867,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14871,6 +14921,24 @@ export interface operations {
                     "application/json": components["schemas"]["OpsDatasetRefreshPolicyResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description dataset 없음 */
             404: {
                 headers: {
@@ -14889,7 +14957,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProviderRefreshPolicyConflictProblem"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14972,7 +15040,10 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14987,7 +15058,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineDagsterRunsResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15014,7 +15103,10 @@ export interface operations {
                 /** @description 이전 응답의 event_cursor(Dagster opaque cursor). */
                 after?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path: {
                 run_id: string;
             };
@@ -15031,6 +15123,24 @@ export interface operations {
                     "application/json": components["schemas"]["DagsterRunDetailResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description DAGSTER_RUN_NOT_FOUND — Dagster run 없음 */
             404: {
                 headers: {
@@ -15040,7 +15150,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15089,7 +15199,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15104,7 +15217,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineEventsListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15140,7 +15271,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15155,7 +15289,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineExecutionsListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15175,66 +15327,14 @@ export interface operations {
             };
         };
     };
-    get_execution_detail_v1_ops_pipeline_executions__kind___execution_id__get: {
-        parameters: {
-            query?: {
-                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path: {
-                kind: "import_job" | "update_request";
-                execution_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineExecutionDetailResponse"];
-                };
-            };
-            /** @description 실행 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    cancel_execution_v1_ops_pipeline_executions__kind___execution_id__cancel_post: {
+    cancel_import_job_execution_v1_ops_pipeline_executions_import_job__execution_id__cancel_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path: {
-                kind: "import_job" | "update_request";
                 execution_id: string;
             };
             cookie?: never;
@@ -15252,6 +15352,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineCancellationResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description 실행 없음 */
@@ -15274,7 +15392,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15316,12 +15434,194 @@ export interface operations {
             };
         };
     };
+    cancel_update_request_execution_v1_ops_pipeline_executions_update_request__execution_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PipelineCancellationRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineCancellationResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 실행 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 동시 취소 또는 안전한 reconcile 불가 */
+            409: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster terminate 실패 */
+            502: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            503: {
+                headers: {
+                    /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_execution_detail_v1_ops_pipeline_executions__kind___execution_id__get: {
+        parameters: {
+            query?: {
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                kind: "import_job" | "update_request";
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineExecutionDetailResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 실행 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_pipeline_overview_v1_ops_pipeline_overview_get: {
         parameters: {
             query?: {
                 run_limit?: number;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15336,7 +15636,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineOverviewResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15359,7 +15677,10 @@ export interface operations {
     get_mois_source_sync_precheck_v1_ops_pipeline_prechecks_mois_source_sync_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15374,7 +15695,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineJobPrecheckResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15445,6 +15784,24 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description 요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족 */
             409: {
                 headers: {
@@ -15454,7 +15811,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15514,7 +15871,25 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestPreviewResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15558,6 +15933,24 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureUpdateRequestMutationResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description request_id 없음 */
             404: {
                 headers: {
@@ -15576,7 +15969,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15599,7 +15992,10 @@ export interface operations {
     list_pipeline_schedules_v1_ops_pipeline_schedules_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15614,7 +16010,25 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineSchedulesResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -15658,6 +16072,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Idempotency-Key 충돌/결과 확인 필요 */
@@ -15741,6 +16173,24 @@ export interface operations {
                     "application/json": components["schemas"]["PipelineScheduleClaimResolutionResponse"];
                 };
             };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description schedule claim 없음 */
             404: {
                 headers: {
@@ -15812,6 +16262,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineScheduleCommandResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Idempotency-Key 충돌/결과 확인 필요 */

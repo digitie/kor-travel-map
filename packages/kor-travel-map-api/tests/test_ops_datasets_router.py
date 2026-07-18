@@ -24,6 +24,7 @@ from kortravelmap.infra.provider_refresh_policy_repo import ProviderRefreshPolic
 from kortravelmap.infra.sync_state_repo import SyncState
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.auth import OPS_SCOPE_HEADER
 from kortravelmap.api.db import get_session
 from kortravelmap.api.ops_dataset_schedule import (
     DatasetScheduleIndex,
@@ -266,6 +267,8 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
             ("provider", "query"),
             ("dataset_key", "query"),
         }
+        if method == "get":
+            expected_parameters.add((OPS_SCOPE_HEADER, "header"))
         if path.endswith("/detail"):
             expected_parameters.add(("sync_scope", "query"))
         assert {(item["name"], item["in"]) for item in parameters} == (
@@ -397,9 +400,9 @@ def test_ops_datasets_openapi_exposes_hardened_contract(client: TestClient) -> N
 
 
 @pytest.mark.unit
-def test_ops_datasets_requires_admin_gate() -> None:
+def test_ops_datasets_requires_bff_or_ops_principal() -> None:
     client = TestClient(create_app(ApiSettings(admin_proxy_secret="secret")))
-    assert client.get("/v1/ops/datasets").status_code == 403
+    assert client.get("/v1/ops/datasets").status_code == 401
 
 
 @pytest.mark.unit

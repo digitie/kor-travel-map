@@ -56,9 +56,12 @@ RUN apt-get update \
 
 COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
+COPY --chown=appuser:appuser docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/dagster-entrypoint.sh
 
 USER appuser
 
 EXPOSE 12702
 
+ENTRYPOINT ["dagster-entrypoint.sh"]
 CMD ["sh", "-c", "dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"]

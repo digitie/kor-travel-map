@@ -57,6 +57,35 @@
   `/v1/ops/dagster/summary`·`/v1/ops/providers*`·`/v1/ops/import-jobs*`는 alias로 부활시키지
   않고 PinVi caller를 전환한다. KTM frontend 전용 BFF secret·trusted CIDR을 PinVi에 공유하거나
   넓히지 않으며 server-to-server용 최소 service/operator principal을 별도로 둔다.
+- service principal은 `X-Kor-Travel-Map-Ops-Token`과 권한 설명용
+  `X-Kor-Travel-Map-Ops-Scope`를 함께 보낸다. read secret은 canonical datasets/pipeline의
+  `GET` + `ops:read`, cancel secret은
+  `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` + `ops:cancel`에만 결박한다. scope
+  문자열 자체는 권한 근거가 아니며 secret·method·exact route가 모두 맞아야 한다. schedule,
+  policy, preview, claim, update-request 등 나머지 mutation은 service principal에 항상 `403`이고
+  trusted frontend BFF만 실행한다. token 누락은 `401`, token 또는 결박 불일치는 `403`, token이
+  있는데 scope가 없거나 알 수 없는 값이면 `422` RFC7807이다. 감사 actor는 설정값이 아닌
+  코드 상수 `service:pinvi`이며 요청 `X-Kor-Travel-Map-Actor`를 신뢰하지 않는다. 제거된
+  `KOR_TRAVEL_MAP_API_OPS_ACTOR`가 존재하면 API 시작을 거부한다.
+- 이 principal은 canonical datasets/pipeline router에만 적용한다. 기존 trusted frontend BFF는
+  그대로 통과하고 `/v1/admin/*`, legacy unguarded ops, frontend BFF 인증 권한은 얻지 않는다.
+- map API는 `KOR_TRAVEL_MAP_API_OPS_READ_TOKEN`과
+  `KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN`, production 필수 게이트
+  `KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED`, PinVi API는
+  `PINVI_KOR_TRAVEL_MAP_OPS_READ_TOKEN`과
+  `PINVI_KOR_TRAVEL_MAP_OPS_CANCEL_TOKEN`을 사용한다. 양쪽 token은 각각 모든 공백을 금지한
+  32자 이상이며 read/cancel끼리뿐 아니라 admin BFF secret·public service token과도 달라야
+  한다. map local은 required=`false`일 때 두 token이 모두 없거나 모두 명시적 빈 문자열인
+  경우만 principal을 끌 수 있다. missing+empty, 한쪽 empty/non-empty, partial pair는 direct
+  uvicorn과 launcher에서 모두 거부한다. n150 production은 required=`true`와 non-empty pair를
+  함께 주입한다. map token/required는 API package env에만 두고 root `.env`, frontend,
+  Dagster webserver/daemon에는 주입하지 않는다. Dagster image entrypoint도
+  `KOR_TRAVEL_MAP_API_OPS_*`가 하나라도 존재하면 값이 비어 있어도 시작을 거부한다.
+- n150 실제 주입은 `kor-travel-docker-manager` 배포 lane에서 map API의 required=`true`와
+  두 token, PinVi API의 대응 token을 각 컨테이너에만
+  추가한다. 배포는 secret 선주입 → map API → signed read/cancel smoke → PinVi API 순서다.
+  rollback은 map만 먼저 내리지 않고 검증된 map/PinVi image pair를 함께 복원한다. 한쪽 token이
+  없거나 짧거나 공백을 포함하거나 두 token이 같으면 C6c를 활성화하지 않는다.
 
 | PinVi 현재 용도 | 삭제된 KTM 호출 | canonical 전환 대상 | 필수 의미 변환 |
 |---|---|---|---|

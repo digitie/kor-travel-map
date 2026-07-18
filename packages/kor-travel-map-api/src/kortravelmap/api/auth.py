@@ -7,6 +7,8 @@ ADR-045 D-1 defense-in-depth (ADR-005 amendment): 운영 인증의 **1차 책임
 - ``require_service_token`` — ``settings.service_token`` 설정 시 외부 surface에서
   ``X-Kor-Travel-Map-Service-Token`` 헤더를 **상수시간** 비교로 검증. 미설정이면 통과
   (intranet/dev 하위호환).
+- ``require_ops_operator`` — canonical datasets/pipeline에 trusted frontend BFF,
+  read-only principal 또는 exact import-job cancel principal만 허용.
 - ``require_admin_destructive_enabled`` — 파괴적 ``/admin`` 작업 kill-switch.
 
 ``APIKeyHeader``를 ``Security``로 의존하므로 OpenAPI ``securitySchemes``에 자동
@@ -35,13 +37,20 @@ from kortravelmap.infra.public_api_keys import (
 )
 
 from kortravelmap.api.db import get_session
+from kortravelmap.api.response import ProblemDetail
 
 __all__ = [
     "ADMIN_ACTOR_HEADER",
     "ADMIN_PROXY_SECRET_HEADER",
+    "OPS_ACTOR",
+    "OPS_SCOPE_HEADER",
+    "OPS_TOKEN_HEADER",
+    "OPS_AUTH_ERROR_RESPONSES",
     "SERVICE_TOKEN_HEADER",
     "AdminProxyContext",
+    "OpsOperatorContext",
     "require_admin_frontend",
+    "require_ops_operator",
     "require_service_token",
     "require_public_api_key",
     "require_admin_destructive_enabled",
@@ -51,7 +60,31 @@ __all__ = [
 
 ADMIN_ACTOR_HEADER = "X-Kor-Travel-Map-Actor"
 ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
+OPS_ACTOR = "service:pinvi"
+OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
+OPS_TOKEN_HEADER = "X-Kor-Travel-Map-Ops-Token"
 SERVICE_TOKEN_HEADER = "X-Kor-Travel-Map-Service-Token"
+
+OPS_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    401: {
+        "model": ProblemDetail,
+        "description": f"{OPS_TOKEN_HEADER} 누락",
+    },
+    403: {
+        "model": ProblemDetail,
+        "description": (
+            "token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청"
+        ),
+    },
+    422: {
+        "model": ProblemDetail,
+        "description": f"{OPS_SCOPE_HEADER} 누락 또는 알 수 없는 scope",
+    },
+}
+
+_OPS_CANCEL_ROUTE_PATH = (
+    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+)
 
 # auto_error=False — 토큰 미설정(opt-out) 환경에서 헤더가 없어도 통과시키기 위해
 # 강제 401을 끄고, 실제 검증은 dependency 함수가 한다(설정 유무에 따라 분기).
@@ -62,10 +95,37 @@ _service_token_scheme = APIKeyHeader(
     description="외부 서비스 호출 토큰 (ADR-045 D-1).",
 )
 
+_admin_proxy_secret_scheme = APIKeyHeader(
+    name=ADMIN_PROXY_SECRET_HEADER,
+    scheme_name="AdminBFF",
+    auto_error=False,
+    description=(
+        "trusted admin frontend BFF가 주입하는 server-only secret. 허용된 peer CIDR과 "
+        f"{ADMIN_ACTOR_HEADER} actor header도 함께 검증한다."
+    ),
+)
+
+_ops_token_scheme = APIKeyHeader(
+    name=OPS_TOKEN_HEADER,
+    scheme_name="OpsToken",
+    auto_error=False,
+    description=(
+        "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+        "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
+    ),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AdminProxyContext:
     """Next.js admin frontend proxy가 주입한 운영자 컨텍스트."""
+
+    actor: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpsOperatorContext:
+    """canonical ops route가 신뢰한 audit actor 컨텍스트."""
 
     actor: str
 
@@ -104,6 +164,7 @@ def _admin_proxy_secret_matches(
 def resolve_admin_proxy_context(
     request: Request,
     settings: ApiSettings,
+    proxy_secret: str | None = None,
 ) -> AdminProxyContext | None:
     """신뢰할 수 있는 admin frontend proxy 요청이면 actor를 반환한다.
 
@@ -116,7 +177,7 @@ def resolve_admin_proxy_context(
         return AdminProxyContext(actor="local-dev")
     if not _peer_is_trusted(request, settings):
         return None
-    if not _admin_proxy_secret_matches(request, settings):
+    if not _admin_proxy_secret_matches(request, settings, proxy_secret):
         return None
     actor = (request.headers.get(ADMIN_ACTOR_HEADER) or "").strip()
     if not actor:
@@ -128,7 +189,7 @@ def require_admin_frontend(
     request: Request,
     proxy_secret: Annotated[
         str | None,
-        Header(alias=ADMIN_PROXY_SECRET_HEADER, include_in_schema=False),
+        Security(_admin_proxy_secret_scheme),
     ] = None,
 ) -> AdminProxyContext:
     """admin API가 Next.js frontend proxy를 통해 들어왔는지 검증한다."""
@@ -153,6 +214,120 @@ def require_admin_frontend(
             detail=f"{ADMIN_ACTOR_HEADER} 헤더가 필요합니다.",
         )
     return AdminProxyContext(actor=actor)
+
+
+def _ops_auth_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "details": {}},
+    )
+
+
+def _ops_principal_is_enabled(settings: ApiSettings) -> bool:
+    return (
+        settings.ops_read_token is not None
+        or settings.ops_cancel_token is not None
+    )
+
+
+def _is_exact_import_job_cancel(request: Request) -> bool:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    return (
+        request.method == "POST"
+        and route_path == _OPS_CANCEL_ROUTE_PATH
+    )
+
+
+def require_ops_operator(
+    request: Request,
+    admin_proxy_secret: Annotated[
+        str | None,
+        Security(_admin_proxy_secret_scheme),
+    ] = None,
+    token: Annotated[str | None, Security(_ops_token_scheme)] = None,
+    scope: Annotated[
+        str | None,
+        Header(
+            alias=OPS_SCOPE_HEADER,
+            description=(
+                "service principal을 사용할 때 GET은 `ops:read`, exact import-job "
+                "cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 "
+                "각각의 secret과 method/exact path 결박으로 판정한다. trusted admin "
+                "frontend BFF 인증에는 이 헤더가 필요하지 않다."
+            ),
+        ),
+    ] = None,
+) -> OpsOperatorContext:
+    """canonical ops의 BFF 또는 read/exact-cancel principal을 검증한다."""
+
+    settings = _settings(request)
+    # admin secret이 없는 개발 환경은 ops principal도 완전히 꺼졌을 때만
+    # local-dev 호환을 유지한다. principal을 켠 순간 headerless BFF 우회는 닫힌다.
+    if (
+        settings.admin_proxy_secret is not None
+        or not _ops_principal_is_enabled(settings)
+    ):
+        frontend = resolve_admin_proxy_context(
+            request,
+            settings,
+            admin_proxy_secret,
+        )
+        if frontend is not None:
+            return OpsOperatorContext(actor=frontend.actor)
+
+    if token is None or token == "":
+        raise _ops_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "OPS_TOKEN_REQUIRED",
+            f"{OPS_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+
+    read_expected = settings.ops_read_token
+    cancel_expected = settings.ops_cancel_token
+    read_matches = read_expected is not None and hmac.compare_digest(
+        token, read_expected.get_secret_value()
+    )
+    cancel_matches = cancel_expected is not None and hmac.compare_digest(
+        token, cancel_expected.get_secret_value()
+    )
+    if not read_matches and not cancel_matches:
+        raise _ops_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "OPS_TOKEN_INVALID",
+            f"{OPS_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+        )
+
+    if scope is None or scope.strip() == "":
+        raise _ops_auth_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "OPS_SCOPE_REQUIRED",
+            f"{OPS_SCOPE_HEADER} 헤더가 필요합니다.",
+        )
+    if scope not in {"ops:read", "ops:cancel"}:
+        raise _ops_auth_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "OPS_SCOPE_INVALID",
+            f"{OPS_SCOPE_HEADER} 헤더가 유효하지 않습니다.",
+        )
+
+    read_allowed = (
+        scope == "ops:read"
+        and read_matches
+        and request.method == "GET"
+    )
+    cancel_allowed = (
+        scope == "ops:cancel"
+        and cancel_matches
+        and _is_exact_import_job_cancel(request)
+    )
+    if not read_allowed and not cancel_allowed:
+        raise _ops_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "OPS_SCOPE_FORBIDDEN",
+            "token에 결박된 scope, method와 exact path가 일치하지 않습니다.",
+        )
+    return OpsOperatorContext(actor=OPS_ACTOR)
 
 
 def service_token_matches(request: Request, token: str | None = None) -> bool:

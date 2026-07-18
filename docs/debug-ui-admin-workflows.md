@@ -833,7 +833,7 @@ path segment로 percent-encode한다. 실행 상세는
 
 ### 12.5 취소
 
-#### `POST /v1/ops/pipeline/executions/{kind}/{execution_id}/cancel`
+#### `POST /v1/ops/pipeline/executions/{import_job|update_request}/{execution_id}/cancel`
 
 요청:
 

@@ -137,6 +137,40 @@ def _prune_schemas(spec: dict[str, Any]) -> dict[str, Any]:
     return spec
 
 
+def _prune_security_schemes(spec: dict[str, Any]) -> dict[str, Any]:
+    """선택된 operation에서 실제 참조하는 security scheme만 남긴다."""
+
+    referenced: set[str] = set()
+    security_values: list[Any] = [spec.get("security", [])]
+    paths = spec.get("paths", {})
+    if isinstance(paths, dict):
+        for path_item in paths.values():
+            if not isinstance(path_item, dict):
+                continue
+            for method, operation in path_item.items():
+                if method not in HTTP_METHODS or not isinstance(operation, dict):
+                    continue
+                security_values.append(operation.get("security", []))
+
+    for security in security_values:
+        if not isinstance(security, list):
+            continue
+        for requirement in security:
+            if isinstance(requirement, dict):
+                referenced.update(str(name) for name in requirement)
+
+    components = spec.get("components")
+    if not isinstance(components, dict):
+        return spec
+    schemes = components.get("securitySchemes")
+    if not isinstance(schemes, dict):
+        return spec
+    components["securitySchemes"] = {
+        name: value for name, value in schemes.items() if name in referenced
+    }
+    return spec
+
+
 def _validate_user_operations(spec: dict[str, Any]) -> None:
     paths = spec.get("paths", {})
     if not isinstance(paths, dict):
@@ -184,7 +218,7 @@ def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
         if any(method in filtered_item for method in allowed_methods):
             filtered_paths[path] = filtered_item
     out["paths"] = filtered_paths
-    return _prune_schemas(out)
+    return _prune_security_schemes(_prune_schemas(out))
 
 
 def _profile_spec(spec: dict[str, Any], profile: OpenApiProfile) -> dict[str, Any]:

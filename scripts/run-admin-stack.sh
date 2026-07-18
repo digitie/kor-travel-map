@@ -32,6 +32,12 @@ FRONTEND_PROCESS_ENV=()
 DAGSTER_PROCESS_ENV=()
 while IFS= read -r name; do
   case "$name" in
+    KOR_TRAVEL_MAP_OPS_* | KOR_TRAVEL_MAP_API_OPS_*)
+      echo "ops principal keys are allowed only in the API package env: $name" >&2
+      exit 1
+      ;;
+  esac
+  case "$name" in
     KOR_TRAVEL_MAP_PG_* | KOR_TRAVEL_MAP_OBJECT_STORE_* | KOR_TRAVEL_MAP_OFFLINE_UPLOAD_* | KOR_TRAVEL_MAP_FILE_REGISTRY_* | KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS)
       API_SHARED_ENV+=("$name=${!name}")
       ;;
@@ -78,6 +84,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       echo "shared admin proxy secret must be configured only in root env: KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" >&2
       exit 1
       ;;
+    KOR_TRAVEL_MAP_API_OPS_ACTOR)
+      echo "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed; the audit actor is fixed" >&2
+      exit 1
+      ;;
     KOR_TRAVEL_MAP_API_* | KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_* | KOR_TRAVEL_MAP_KAKAO_* | KOR_TRAVEL_MAP_NAVER_* | KOR_TRAVEL_MAP_GOOGLE_PLACES_*)
       ;;
     *)
@@ -109,6 +119,74 @@ trimmed_frontend_proxy_secret="${trimmed_frontend_proxy_secret%"${trimmed_fronte
 if [[ "$frontend_proxy_secret" != "$trimmed_frontend_proxy_secret" || ${#frontend_proxy_secret} -lt 32 ]]; then
   echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters without surrounding whitespace" >&2
   exit 1
+fi
+
+ops_read_key=KOR_TRAVEL_MAP_API_OPS_READ_TOKEN
+ops_cancel_key=KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN
+ops_required_key=KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED
+ops_read_is_set=0
+ops_cancel_is_set=0
+[[ -v "API_SCOPED_VALUES[$ops_read_key]" ]] && ops_read_is_set=1
+[[ -v "API_SCOPED_VALUES[$ops_cancel_key]" ]] && ops_cancel_is_set=1
+if [[ "$ops_read_is_set" != "$ops_cancel_is_set" ]]; then
+  echo "$ops_read_key and $ops_cancel_key must be configured together" >&2
+  exit 1
+fi
+ops_principal_required=false
+if [[ -v "API_SCOPED_VALUES[$ops_required_key]" ]]; then
+  ops_principal_required="${API_SCOPED_VALUES[$ops_required_key]}"
+  if [[ "$ops_principal_required" != "true" && "$ops_principal_required" != "false" ]]; then
+    echo "$ops_required_key must be exactly true or false" >&2
+    exit 1
+  fi
+fi
+if [[ "$ops_read_is_set" == "0" ]]; then
+  if [[ "$ops_principal_required" == "true" ]]; then
+    echo "ops principal is required but read/cancel tokens are absent" >&2
+    exit 1
+  fi
+else
+  ops_read_token="${API_SCOPED_VALUES[$ops_read_key]}"
+  ops_cancel_token="${API_SCOPED_VALUES[$ops_cancel_key]}"
+  if [[ -z "$ops_read_token" && -z "$ops_cancel_token" ]]; then
+    if [[ "$ops_principal_required" == "true" ]]; then
+      echo "ops principal is required but read/cancel tokens are empty" >&2
+      exit 1
+    fi
+  elif [[ -z "$ops_read_token" || -z "$ops_cancel_token" ]]; then
+    echo "ops read and cancel tokens must both be empty or both be non-empty" >&2
+    exit 1
+  else
+    if [[ "$ops_read_token" =~ [[:space:]] ]]; then
+      echo "$ops_read_key must contain no whitespace" >&2
+      exit 1
+    fi
+    if [[ "$ops_cancel_token" =~ [[:space:]] ]]; then
+      echo "$ops_cancel_key must contain no whitespace" >&2
+      exit 1
+    fi
+    if [[ ${#ops_read_token} -lt 32 ]]; then
+      echo "$ops_read_key must be at least 32 characters" >&2
+      exit 1
+    fi
+    if [[ ${#ops_cancel_token} -lt 32 ]]; then
+      echo "$ops_cancel_key must be at least 32 characters" >&2
+      exit 1
+    fi
+    if [[ "$ops_read_token" == "$ops_cancel_token" ]]; then
+      echo "ops read and cancel tokens must be distinct" >&2
+      exit 1
+    fi
+    if [[ "$ops_read_token" == "$frontend_proxy_secret" || "$ops_cancel_token" == "$frontend_proxy_secret" ]]; then
+      echo "ops read/cancel tokens must be distinct from the admin proxy secret" >&2
+      exit 1
+    fi
+    api_service_token="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_SERVICE_TOKEN]:-}"
+    if [[ -n "$api_service_token" && ( "$ops_read_token" == "$api_service_token" || "$ops_cancel_token" == "$api_service_token" ) ]]; then
+      echo "ops read/cancel tokens must be distinct from the service token" >&2
+      exit 1
+    fi
+  fi
 fi
 
 api_backup_root="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_BACKUP_ROOT]:-data/backups}"

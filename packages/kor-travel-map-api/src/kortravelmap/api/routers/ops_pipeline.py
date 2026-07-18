@@ -12,8 +12,9 @@ admin ops 통합 재작성 페이지 ①(`/ops/pipeline`)의 백엔드 리소스
   ``dagster_schedule_service``를 사용한다. 갱신 요청은
   ``feature_update_schema``·``feature_update_service``의 6-type scope union,
   카탈로그 검증, geo resolver, advisory lock 계약을 공유한다.
-- 게이트: ``app.py``에서 ``ops_routes_enabled`` + ``require_admin_frontend``
-  의존성으로 마운트한다(조작 포함 — 무인증 ops 패턴 금지, ADR-064 §2).
+- 게이트: ``app.py``에서 ``ops_routes_enabled`` + ``require_ops_operator``
+  의존성으로 마운트한다. trusted frontend BFF, read-only service principal, exact
+  import-job cancel principal만 허용한다(그 밖의 조작은 BFF 전용, ADR-064 §2).
 """
 
 from __future__ import annotations
@@ -60,7 +61,11 @@ from kortravelmap.api import (
     mois_source_precheck,
     pipeline_cancellation_service,
 )
-from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.auth import (
+    OPS_AUTH_ERROR_RESPONSES,
+    OpsOperatorContext,
+    require_ops_operator,
+)
 from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError, DagsterUrls
 from kortravelmap.api.dagster_http import (
     SCHEDULE_WRITE_ERROR_RESPONSES,
@@ -133,7 +138,11 @@ __all__ = [
 ]
 
 
-router = APIRouter(prefix="/ops/pipeline", tags=["ops-pipeline"])
+router = APIRouter(
+    prefix="/ops/pipeline",
+    tags=["ops-pipeline"],
+    responses=OPS_AUTH_ERROR_RESPONSES,
+)
 
 ExecutionKind = Literal["import_job", "update_request"]
 ExecutionState = OperationState
@@ -1355,20 +1364,17 @@ async def get_execution_detail(
     )
 
 
-@router.post(
-    "/executions/{kind}/{execution_id}/cancel",
-    response_model=PipelineCancellationResponse,
-    summary="canonical 실행 계층 취소",
-    responses=cancellation_error_responses(not_found_description="실행 없음"),
-)
-async def cancel_execution(
+async def _cancel_execution(
+    *,
     kind: ExecutionKind,
     execution_id: UUID,
     request: Request,
-    engine: Annotated[AsyncEngine, Depends(get_engine)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    body: PipelineCancellationRequest | None = None,
+    engine: AsyncEngine,
+    context: OpsOperatorContext,
+    body: PipelineCancellationRequest | None,
 ) -> PipelineCancellationResponse:
+    """static kind별 HTTP operation이 공유하는 cancellation 구현."""
+
     started_at = perf_counter()
     settings, http_client = dagster_http_dependencies(request)
     try:
@@ -1386,6 +1392,52 @@ async def cancel_execution(
     return PipelineCancellationResponse(
         data=record,
         meta=make_meta(started_at=started_at),
+    )
+
+
+@router.post(
+    "/executions/import_job/{execution_id}/cancel",
+    response_model=PipelineCancellationResponse,
+    summary="canonical import-job 실행 계층 취소",
+    responses=cancellation_error_responses(not_found_description="실행 없음"),
+)
+async def cancel_import_job_execution(
+    execution_id: UUID,
+    request: Request,
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
+    body: PipelineCancellationRequest | None = None,
+) -> PipelineCancellationResponse:
+    return await _cancel_execution(
+        kind="import_job",
+        execution_id=execution_id,
+        request=request,
+        engine=engine,
+        context=context,
+        body=body,
+    )
+
+
+@router.post(
+    "/executions/update_request/{execution_id}/cancel",
+    response_model=PipelineCancellationResponse,
+    summary="canonical update-request 실행 계층 취소",
+    responses=cancellation_error_responses(not_found_description="실행 없음"),
+)
+async def cancel_update_request_execution(
+    execution_id: UUID,
+    request: Request,
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
+    body: PipelineCancellationRequest | None = None,
+) -> PipelineCancellationResponse:
+    return await _cancel_execution(
+        kind="update_request",
+        execution_id=execution_id,
+        request=request,
+        engine=engine,
+        context=context,
+        body=body,
     )
 
 
@@ -1745,7 +1797,7 @@ async def patch_pipeline_schedule(
     schedule_name: str,
     body: PipelineScheduleUpdateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
@@ -1814,7 +1866,7 @@ async def post_pipeline_schedule_command(
     schedule_name: str,
     body: PipelineScheduleCommandRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> PipelineScheduleCommandResponse:
     started_at = perf_counter()
@@ -1892,7 +1944,7 @@ async def resolve_pipeline_schedule_claim(
     command_id: UUID,
     body: PipelineScheduleClaimResolutionRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
 ) -> PipelineScheduleClaimResolutionResponse:
     started_at = perf_counter()
     try:
@@ -1949,7 +2001,8 @@ async def resolve_pipeline_schedule_claim(
     description=(
         "6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/"
         "provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 "
-        "전량 승계한다. operator는 인증된 admin actor를 사용한다. 카탈로그 refreshable 검증과 "
+        "전량 승계한다. operator는 인증된 ops principal actor를 사용한다. "
+        "카탈로그 refreshable 검증과 "
         "run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다."
     ),
     responses={
@@ -1970,7 +2023,7 @@ async def create_pipeline_update_request(
     response: Response,
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
 ) -> FeatureUpdateRequestCreateResponse:
     api_settings = _settings_from_request(request)
     dagster_client = _http_client_from_request(request, api_settings)
@@ -2044,7 +2097,7 @@ async def preview_pipeline_update_request(
 async def run_pipeline_update_request_now(
     request_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    _context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
     _body: FeatureUpdateRequestRunNowRequest | None = None,
 ) -> FeatureUpdateRequestMutationResponse:
     started_at = perf_counter()

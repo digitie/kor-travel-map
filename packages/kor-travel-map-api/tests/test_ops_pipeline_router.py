@@ -60,7 +60,12 @@ from kortravelmap.api import dagster_schedule_service as dagster_schedule
 from kortravelmap.api import feature_update_service as fur_mod
 from kortravelmap.api import mois_source_precheck
 from kortravelmap.api.app import create_app
-from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
+from kortravelmap.api.auth import (
+    ADMIN_ACTOR_HEADER,
+    ADMIN_PROXY_SECRET_HEADER,
+    OPS_SCOPE_HEADER,
+    OPS_TOKEN_HEADER,
+)
 from kortravelmap.api.dagster_schema import DagsterScheduleClaimResolution
 from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.pipeline_cancellation_schema import (
@@ -71,12 +76,15 @@ from kortravelmap.api.routers import ops_pipeline as pipeline_mod
 from kortravelmap.api.settings import ApiSettings
 
 _NOW = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
+_OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
+_OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 
 _PIPELINE_PATHS = [
     "/v1/ops/pipeline/overview",
     "/v1/ops/pipeline/executions",
     "/v1/ops/pipeline/executions/{kind}/{execution_id}",
-    "/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel",
+    "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel",
+    "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel",
     "/v1/ops/pipeline/events",
     "/v1/ops/pipeline/dagster-runs",
     "/v1/ops/pipeline/dagster-runs/{run_id}",
@@ -848,9 +856,9 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
     detail_schema = spec["components"]["schemas"]["DagsterRunDetailData"]
     assert "현재 event page" in detail_schema["properties"]["failure_reason"]["description"]
     assert "현재 event page" in detail_schema["properties"]["failure_events"]["description"]
-    cancel_operation = spec["paths"]["/v1/ops/pipeline/executions/{kind}/{execution_id}/cancel"][
-        "post"
-    ]
+    cancel_operation = spec["paths"][
+        "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+    ]["post"]
     assert {"200", "404", "409", "422", "502", "503", "default"} <= set(
         cancel_operation["responses"]
     )
@@ -858,6 +866,10 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
         assert cancel_operation["responses"][status_code]["headers"]["Retry-After"]["schema"] == {
             "type": "integer"
         }
+    update_cancel_operation = spec["paths"][
+        "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel"
+    ]["post"]
+    assert update_cancel_operation["security"] == [{"AdminBFF": []}]
     cancel_request = spec["components"]["schemas"]["PipelineCancellationRequest"]
     assert set(cancel_request["properties"]) == {"reason"}
     cancel_run = spec["components"]["schemas"]["PipelineCancellationRunRecord"]
@@ -902,7 +914,7 @@ def test_pipeline_routes_mounted_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_pipeline_routes_require_admin_frontend_when_secret_set(
+def test_pipeline_routes_require_bff_or_ops_principal_when_secret_set(
     session: _FakeSession,
 ) -> None:
     app = create_app(
@@ -921,7 +933,7 @@ def test_pipeline_routes_require_admin_frontend_when_secret_set(
 
     response = gated_client.get("/v1/ops/pipeline/executions")
 
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.unit
@@ -969,6 +981,123 @@ def test_cancel_execution_uses_authenticated_proxy_actor(
 
     assert response.status_code == 200
     assert captured["requested_by"] == "admin:reviewer"
+
+
+@pytest.mark.unit
+def test_exact_import_job_cancel_uses_server_actor_and_cancel_token(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            ops_read_token=_OPS_READ_TOKEN,
+            ops_cancel_token=_OPS_CANCEL_TOKEN,
+            dagster_url="http://dagster.example:12302",
+            dagster_allowed_hosts=["dagster.example"],
+        )
+    )
+    captured: dict[str, Any] = {}
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    async def _fake_engine() -> Any:
+        return object()
+
+    async def _cancel(**kwargs: Any) -> PipelineCancellationDetailRecord:
+        captured.update(kwargs)
+        return _cancellation_detail()
+
+    app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_engine] = _fake_engine
+    monkeypatch.setattr(
+        pipeline_mod.pipeline_cancellation_service,
+        "cancel_pipeline_execution",
+        _cancel,
+    )
+    service_client = TestClient(app, client=("198.51.100.10", 50000))
+    path = (
+        "/v1/ops/pipeline/executions/import_job/"
+        "11111111-1111-1111-1111-111111111111/cancel"
+    )
+
+    response = service_client.post(
+        path,
+        headers={
+            ADMIN_ACTOR_HEADER: "spoofed",
+            OPS_SCOPE_HEADER: "ops:cancel",
+            OPS_TOKEN_HEADER: _OPS_CANCEL_TOKEN,
+        },
+        json={"reason": "service request"},
+    )
+
+    assert response.status_code == 200
+    assert captured["requested_by"] == "service:pinvi"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "scope", "token"),
+    [
+        (
+            "put",
+            "/v1/ops/datasets/refresh-policy",
+            "ops:cancel",
+            _OPS_CANCEL_TOKEN,
+        ),
+        (
+            "patch",
+            "/v1/ops/pipeline/schedules/example",
+            "ops:cancel",
+            _OPS_CANCEL_TOKEN,
+        ),
+        (
+            "post",
+            "/v1/ops/pipeline/requests",
+            "ops:cancel",
+            _OPS_CANCEL_TOKEN,
+        ),
+        (
+            "post",
+            "/v1/ops/pipeline/executions/update_request/"
+            "11111111-1111-1111-1111-111111111111/cancel",
+            "ops:cancel",
+            _OPS_CANCEL_TOKEN,
+        ),
+        (
+            "post",
+            "/v1/ops/pipeline/executions/import_job/"
+            "11111111-1111-1111-1111-111111111111/cancel",
+            "ops:read",
+            _OPS_READ_TOKEN,
+        ),
+    ],
+)
+def test_service_principal_rejects_non_bound_mutations(
+    method: str,
+    path: str,
+    scope: str,
+    token: str,
+) -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            ops_read_token=_OPS_READ_TOKEN,
+            ops_cancel_token=_OPS_CANCEL_TOKEN,
+        )
+    )
+    service_client = TestClient(app, client=("198.51.100.10", 50000))
+
+    response = service_client.request(
+        method,
+        path,
+        headers={OPS_SCOPE_HEADER: scope, OPS_TOKEN_HEADER: token},
+        json={},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "OPS_SCOPE_FORBIDDEN"
 
 
 @pytest.mark.unit

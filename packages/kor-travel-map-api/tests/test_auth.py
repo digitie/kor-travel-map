@@ -9,24 +9,33 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import (
     ADMIN_ACTOR_HEADER,
     ADMIN_PROXY_SECRET_HEADER,
+    OPS_ACTOR,
+    OPS_SCOPE_HEADER,
+    OPS_TOKEN_HEADER,
     SERVICE_TOKEN_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_ops_operator,
     require_service_token,
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
+OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
+OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
+
 
 def _api_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
         "admin_proxy_secret": None,
+        "ops_cancel_token": None,
+        "ops_read_token": None,
         "public_api_key_required": False,
         "service_token": None,
         "vworld_api_key": None,
@@ -37,6 +46,25 @@ def _api_settings(**overrides: Any) -> ApiSettings:
 
 def _request(settings: ApiSettings) -> Any:
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+
+
+def _ops_request(
+    settings: ApiSettings,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    peer: str = "198.51.100.10",
+    route_path: str = "/v1/ops/datasets",
+    kind: str | None = None,
+) -> Any:
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host=peer),
+        headers=headers or {},
+        method=method,
+        path_params={} if kind is None else {"kind": kind},
+        scope={"route": SimpleNamespace(path=route_path)},
+    )
 
 
 # ── dependency 단위 ──────────────────────────────────────────────────────────
@@ -51,6 +79,197 @@ def test_settings_reads_shared_admin_proxy_secret_name(
     settings = ApiSettings(_env_file=None)
     assert settings.admin_proxy_secret is not None
     assert settings.admin_proxy_secret.get_secret_value() == "shared-secret"
+
+
+@pytest.mark.unit
+def test_settings_reads_server_only_ops_principal_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
+    settings = ApiSettings(_env_file=None)
+    assert settings.ops_read_token is not None
+    assert settings.ops_cancel_token is not None
+    assert settings.ops_read_token.get_secret_value() == OPS_READ_TOKEN
+    assert settings.ops_cancel_token.get_secret_value() == OPS_CANCEL_TOKEN
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("actor", ["", "service:pinvi-test"])
+def test_settings_rejects_removed_ops_actor_env(
+    monkeypatch: pytest.MonkeyPatch,
+    actor: str,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_ACTOR", actor)
+    with pytest.raises(ValidationError):
+        ApiSettings(_env_file=None)
+
+
+@pytest.mark.unit
+def test_settings_treats_two_empty_ops_tokens_as_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", "")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", "")
+    settings = ApiSettings(_env_file=None)
+    assert settings.ops_read_token is None
+    assert settings.ops_cancel_token is None
+
+
+@pytest.mark.unit
+def test_settings_allows_absent_ops_pair_only_when_not_required() -> None:
+    settings = ApiSettings(
+        _env_file=None,
+        admin_proxy_secret=None,
+        public_api_key_required=False,
+        service_token=None,
+        vworld_api_key=None,
+    )
+    assert settings.ops_read_token is None
+    assert settings.ops_cancel_token is None
+    with pytest.raises(ValidationError):
+        _api_settings(ops_principal_required=True)
+
+
+@pytest.mark.unit
+def test_settings_rejects_required_explicit_empty_ops_pair() -> None:
+    with pytest.raises(ValidationError):
+        _api_settings(
+            ops_principal_required=True,
+            ops_read_token="",
+            ops_cancel_token="",
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"ops_read_token": ""},
+        {"ops_cancel_token": ""},
+        {"ops_read_token": None},
+        {"ops_cancel_token": None},
+        {"ops_read_token": "", "ops_cancel_token": OPS_CANCEL_TOKEN},
+        {"ops_read_token": OPS_READ_TOKEN, "ops_cancel_token": ""},
+    ],
+)
+def test_settings_rejects_missing_empty_or_partial_ops_pair(
+    values: dict[str, str | None],
+) -> None:
+    base: dict[str, Any] = {
+        "admin_proxy_secret": None,
+        "public_api_key_required": False,
+        "service_token": None,
+        "vworld_api_key": None,
+    }
+    with pytest.raises(ValidationError):
+        ApiSettings(_env_file=None, **base, **values)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("read_token", "cancel_token"),
+    [
+        ("read token-00000000000000000000000000000000", OPS_CANCEL_TOKEN),
+        ("read\ttoken-0000000000000000000000000000000", OPS_CANCEL_TOKEN),
+        (OPS_READ_TOKEN, "cancel token-000000000000000000000000000000"),
+        (OPS_READ_TOKEN, "cancel\ttoken-00000000000000000000000000000"),
+    ],
+)
+def test_settings_rejects_ops_token_whitespace_anywhere(
+    read_token: str,
+    cancel_token: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        _api_settings(
+            ops_read_token=read_token,
+            ops_cancel_token=cancel_token,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("read_token", "cancel_token", "admin_secret", "service_token"),
+    [
+        (OPS_READ_TOKEN, OPS_CANCEL_TOKEN, OPS_READ_TOKEN, None),
+        (OPS_READ_TOKEN, OPS_CANCEL_TOKEN, OPS_CANCEL_TOKEN, None),
+        (OPS_READ_TOKEN, OPS_CANCEL_TOKEN, None, OPS_READ_TOKEN),
+        (OPS_READ_TOKEN, OPS_CANCEL_TOKEN, None, OPS_CANCEL_TOKEN),
+    ],
+)
+def test_settings_rejects_ops_token_reuse_across_trust_boundaries(
+    read_token: str,
+    cancel_token: str,
+    admin_secret: str | None,
+    service_token: str | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        _api_settings(
+            ops_read_token=read_token,
+            ops_cancel_token=cancel_token,
+            admin_proxy_secret=(
+                SecretStr(admin_secret) if admin_secret is not None else None
+            ),
+            service_token=(
+                SecretStr(service_token) if service_token is not None else None
+            ),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("read_token", "cancel_token"),
+    [
+        ("", OPS_CANCEL_TOKEN),
+        ("short", OPS_CANCEL_TOKEN),
+        (f" {OPS_READ_TOKEN}", OPS_CANCEL_TOKEN),
+        (OPS_READ_TOKEN, None),
+        (None, OPS_CANCEL_TOKEN),
+        (OPS_READ_TOKEN, OPS_READ_TOKEN),
+    ],
+)
+def test_ops_principal_rejects_empty_short_trimmed_partial_or_shared_tokens(
+    read_token: str | None,
+    cancel_token: str | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        _api_settings(
+            ops_read_token=read_token,
+            ops_cancel_token=cancel_token,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"ops_read_token": "SENTINEL_RAW_SHORT"},
+        {
+            "ops_read_token": "SENTINEL RAW TOKEN 0000000000000000000000",
+            "ops_cancel_token": OPS_CANCEL_TOKEN,
+        },
+        {
+            "ops_read_token": "SENTINEL_RAW_TOKEN_00000000000000000000",
+        },
+        {
+            "ops_read_token": "SENTINEL_RAW_TOKEN_00000000000000000000",
+            "ops_cancel_token": "SENTINEL_RAW_TOKEN_00000000000000000000",
+        },
+        {
+            "ops_read_token": "SENTINEL_RAW_TOKEN_00000000000000000000",
+            "ops_cancel_token": OPS_CANCEL_TOKEN,
+            "admin_proxy_secret": "SENTINEL_RAW_TOKEN_00000000000000000000",
+        },
+    ],
+)
+def test_ops_principal_validation_errors_hide_raw_secret_inputs(
+    values: dict[str, str],
+) -> None:
+    with pytest.raises(ValidationError) as captured:
+        _api_settings(**values)
+
+    diagnostic = f"{captured.value!s}\n{captured.value!r}"
+    assert "SENTINEL" not in diagnostic
 
 
 @pytest.mark.unit
@@ -111,6 +330,143 @@ def test_admin_frontend_gate_keeps_local_dev_compat_when_secret_unset() -> None:
     assert require_admin_frontend(request).actor == "local-dev"
 
 
+@pytest.mark.unit
+def test_ops_operator_keeps_trusted_frontend_actor() -> None:
+    settings = _api_settings(admin_proxy_secret=SecretStr("proxy-secret"))
+    request = _ops_request(
+        settings,
+        headers={
+            ADMIN_ACTOR_HEADER: "admin-actor",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+        peer="127.0.0.1",
+    )
+    context = require_ops_operator(request)
+    assert context.actor == "admin-actor"
+
+
+@pytest.mark.unit
+def test_ops_operator_uses_constant_time_token_and_server_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _api_settings(
+        admin_proxy_secret=SecretStr("proxy-secret"),
+        ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+        ops_read_token=SecretStr(OPS_READ_TOKEN),
+    )
+    compared: list[tuple[str, str]] = []
+
+    def _compare(left: str, right: str) -> bool:
+        compared.append((left, right))
+        return left == right
+
+    monkeypatch.setattr("kortravelmap.api.auth.hmac.compare_digest", _compare)
+    request = _ops_request(
+        settings,
+        headers={ADMIN_ACTOR_HEADER: "spoofed"},
+    )
+    context = require_ops_operator(
+        request,
+        token=OPS_READ_TOKEN,
+        scope="ops:read",
+    )
+    assert context.actor == OPS_ACTOR
+    assert compared == [
+        (OPS_READ_TOKEN, OPS_READ_TOKEN),
+        (OPS_READ_TOKEN, OPS_CANCEL_TOKEN),
+    ]
+
+
+@pytest.mark.unit
+def test_ops_principal_disables_local_dev_bypass_when_admin_secret_is_unset() -> None:
+    settings = _api_settings(
+        admin_proxy_secret=None,
+        ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+        ops_read_token=SecretStr(OPS_READ_TOKEN),
+    )
+    with pytest.raises(HTTPException) as exc:
+        require_ops_operator(_ops_request(settings))
+    assert exc.value.status_code == 401
+    assert exc.value.detail["code"] == "OPS_TOKEN_REQUIRED"
+
+
+@pytest.mark.unit
+def test_ops_cancel_token_is_bound_to_exact_import_job_cancel_route() -> None:
+    settings = _api_settings(
+        admin_proxy_secret=SecretStr("proxy-secret"),
+        ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+        ops_read_token=SecretStr(OPS_READ_TOKEN),
+    )
+    exact_cancel = _ops_request(
+        settings,
+        method="POST",
+        route_path=(
+            "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+        ),
+        kind="import_job",
+    )
+    context = require_ops_operator(
+        exact_cancel,
+        token=OPS_CANCEL_TOKEN,
+        scope="ops:cancel",
+    )
+    assert context.actor == OPS_ACTOR
+
+    update_request_cancel = _ops_request(
+        settings,
+        method="POST",
+        route_path=(
+            "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel"
+        ),
+        kind="update_request",
+    )
+    with pytest.raises(HTTPException) as exc:
+        require_ops_operator(
+            update_request_cancel,
+            token=OPS_CANCEL_TOKEN,
+            scope="ops:cancel",
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "OPS_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "token", "scope", "expected_status", "expected_code"),
+    [
+        ("GET", None, None, 401, "OPS_TOKEN_REQUIRED"),
+        ("GET", "wrong", "ops:read", 403, "OPS_TOKEN_INVALID"),
+        ("GET", OPS_READ_TOKEN, None, 422, "OPS_SCOPE_REQUIRED"),
+        ("GET", OPS_READ_TOKEN, "unknown", 422, "OPS_SCOPE_INVALID"),
+        ("GET", OPS_READ_TOKEN, "ops:cancel", 403, "OPS_SCOPE_FORBIDDEN"),
+        ("GET", OPS_CANCEL_TOKEN, "ops:read", 403, "OPS_SCOPE_FORBIDDEN"),
+        ("POST", OPS_READ_TOKEN, "ops:read", 403, "OPS_SCOPE_FORBIDDEN"),
+        ("POST", OPS_CANCEL_TOKEN, "ops:cancel", 403, "OPS_SCOPE_FORBIDDEN"),
+        ("HEAD", OPS_READ_TOKEN, "ops:read", 403, "OPS_SCOPE_FORBIDDEN"),
+    ],
+)
+def test_ops_operator_rejects_missing_invalid_or_excess_scope(
+    method: str,
+    token: str | None,
+    scope: str | None,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    settings = _api_settings(
+        admin_proxy_secret=SecretStr("proxy-secret"),
+        ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+        ops_read_token=SecretStr(OPS_READ_TOKEN),
+    )
+    with pytest.raises(HTTPException) as exc:
+        require_ops_operator(
+            _ops_request(settings, method=method),
+            token=token,
+            scope=scope,
+        )
+    assert exc.value.status_code == expected_status
+    assert exc.value.detail["code"] == expected_code
+
+
 # ── TestClient 통합 ──────────────────────────────────────────────────────────
 
 
@@ -147,6 +503,228 @@ def _client(settings: ApiSettings) -> TestClient:
 
     app.dependency_overrides[get_session] = _fake_session
     return TestClient(app, client=("127.0.0.1", 50000))
+
+
+def _ops_client() -> TestClient:
+    return _client(
+        _api_settings(
+            admin_proxy_secret=SecretStr("proxy-secret"),
+            ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+            ops_read_token=SecretStr(OPS_READ_TOKEN),
+        )
+    )
+
+
+@pytest.mark.unit
+def test_canonical_ops_read_accepts_bff_and_service_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.ops_dataset_schema import OpsDatasetsGridData
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    async def _grid(*_args: object, **_kwargs: object) -> OpsDatasetsGridData:
+        return OpsDatasetsGridData(
+            items=[],
+            schedule_source_status="unavailable",
+            schedule_source_errors=[],
+            execution_coverage="db_recorded_canonical_operations",
+        )
+
+    monkeypatch.setattr(router_module, "load_datasets_grid", _grid)
+    client = _ops_client()
+
+    bff = client.get(
+        "/v1/ops/datasets",
+        headers={
+            ADMIN_ACTOR_HEADER: "frontend-admin",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+    )
+    service = client.get(
+        "/v1/ops/datasets",
+        headers={
+            ADMIN_ACTOR_HEADER: "spoofed",
+            OPS_SCOPE_HEADER: "ops:read",
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+        },
+    )
+    assert bff.status_code == 200
+    assert service.status_code == 200
+
+
+@pytest.mark.unit
+def test_canonical_ops_mutation_is_bff_only_except_exact_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.ops_dataset_preview import DatasetPreviewResult
+    from kortravelmap.api.routers import ops_datasets as router_module
+
+    monkeypatch.setattr(
+        router_module,
+        "find_catalog_entry",
+        lambda *_args: SimpleNamespace(preview="fixture"),
+    )
+
+    async def _preview(
+        provider: str,
+        dataset_key: str,
+        *,
+        max_items: int,
+    ) -> DatasetPreviewResult:
+        return DatasetPreviewResult(
+            provider=provider,
+            dataset=dataset_key,
+            variant="contract",
+            description="ops principal contract",
+            items=(),
+            total_items=0,
+            max_items=max_items,
+        )
+
+    monkeypatch.setattr(router_module, "run_dataset_fixture_preview", _preview)
+    client = _ops_client()
+    params = {"provider": "test", "dataset_key": "fixture"}
+    body = {"source": "fixture", "max_items": 1}
+    service = client.post(
+        "/v1/ops/datasets/preview",
+        params=params,
+        json=body,
+        headers={
+            OPS_SCOPE_HEADER: "ops:read",
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+        },
+    )
+    bff = client.post(
+        "/v1/ops/datasets/preview",
+        params=params,
+        json=body,
+        headers={
+            ADMIN_ACTOR_HEADER: "frontend-admin",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+    )
+    assert service.status_code == 403
+    assert service.json()["code"] == "OPS_SCOPE_FORBIDDEN"
+    assert bff.status_code == 200
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("headers", "expected_status", "expected_code"),
+    [
+        ({}, 401, "OPS_TOKEN_REQUIRED"),
+        (
+            {OPS_TOKEN_HEADER: "wrong", OPS_SCOPE_HEADER: "ops:read"},
+            403,
+            "OPS_TOKEN_INVALID",
+        ),
+        ({OPS_TOKEN_HEADER: OPS_READ_TOKEN}, 422, "OPS_SCOPE_REQUIRED"),
+        (
+            {OPS_TOKEN_HEADER: OPS_READ_TOKEN, OPS_SCOPE_HEADER: "unknown"},
+            422,
+            "OPS_SCOPE_INVALID",
+        ),
+        (
+            {OPS_TOKEN_HEADER: OPS_CANCEL_TOKEN, OPS_SCOPE_HEADER: "ops:read"},
+            403,
+            "OPS_SCOPE_FORBIDDEN",
+        ),
+    ],
+)
+def test_canonical_ops_http_errors_are_typed_problem_details(
+    headers: dict[str, str],
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    response = _ops_client().get("/v1/ops/datasets", headers=headers)
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == expected_code
+
+
+@pytest.mark.unit
+def test_ops_service_principal_cannot_access_admin_routes() -> None:
+    response = _ops_client().get(
+        "/v1/admin/auth-events",
+        headers={
+            ADMIN_ACTOR_HEADER: "spoofed",
+            OPS_SCOPE_HEADER: "ops:read",
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.unit
+def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
+    spec = _ops_client().get("/openapi.json").json()
+    schemes = spec["components"]["securitySchemes"]
+    assert schemes["AdminBFF"] == {
+        "type": "apiKey",
+        "description": (
+            "trusted admin frontend BFF가 주입하는 server-only secret. 허용된 peer "
+            f"CIDR과 {ADMIN_ACTOR_HEADER} actor header도 함께 검증한다."
+        ),
+        "in": "header",
+        "name": ADMIN_PROXY_SECRET_HEADER,
+    }
+    assert schemes["OpsToken"] == {
+        "type": "apiKey",
+        "description": (
+            "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+            "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
+        ),
+        "in": "header",
+        "name": OPS_TOKEN_HEADER,
+    }
+
+    canonical_operations = 0
+    cancel_path = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
+    for path, path_item in spec["paths"].items():
+        if not path.startswith(("/v1/ops/datasets", "/v1/ops/pipeline")):
+            continue
+        for method, operation in path_item.items():
+            if method not in {"get", "put", "post", "delete", "patch"}:
+                continue
+            canonical_operations += 1
+            service_capable = method == "get" or (
+                method == "post" and path == cancel_path
+            )
+            assert operation["security"] == (
+                [{"AdminBFF": []}, {"OpsToken": []}]
+                if service_capable
+                else [{"AdminBFF": []}]
+            ), (method, path)
+            assert {"401", "403", "422"} <= set(operation["responses"])
+            scope_parameters = [
+                item
+                for item in operation.get("parameters", [])
+                if item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
+            ]
+            if service_capable:
+                assert len(scope_parameters) == 1, (method, path)
+                assert scope_parameters[0]["required"] is False
+                assert "service principal" in scope_parameters[0]["description"]
+            else:
+                assert scope_parameters == [], (method, path)
+                assert {"ServiceToken": []} not in operation["security"]
+    assert canonical_operations > 0
+
+    update_cancel = spec["paths"][
+        "/v1/ops/pipeline/executions/update_request/{execution_id}/cancel"
+    ]["post"]
+    assert update_cancel["security"] == [{"AdminBFF": []}]
+    assert not any(
+        item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
+        for item in update_cancel.get("parameters", [])
+    )
+
+    admin_operation = spec["paths"]["/v1/admin/auth-events"]["get"]
+    assert admin_operation["security"] == [{"AdminBFF": []}]
+    assert not any(
+        item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
+        for item in admin_operation.get("parameters", [])
+    )
 
 
 @pytest.mark.unit

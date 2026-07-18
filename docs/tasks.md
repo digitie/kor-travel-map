@@ -35,7 +35,15 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   proxy·unit test가 해당 경로를 호출하므로, PinVi caller를 `/v1/ops/datasets`와
   `/v1/ops/pipeline` 계약으로 전환하고 양 저장소 contract test를 같은 commit 조합으로 고정한다.
   KTM frontend BFF secret을 공유하거나 trusted frontend `/32`를 넓히지 말고, PinVi server에
-  필요한 최소 service/operator principal과 route policy를 명시한다. 완료 조건은 PinVi production
+  필요한 최소 service/operator principal과 route policy를 명시한다. service 권한은 canonical
+  GET read와 exact import-job cancel로 제한하고 schedule/policy/request mutation은 허용하지
+  않는다. n150은 `OPS_PRINCIPAL_REQUIRED=true`와 read/cancel non-empty pair를 강제하며 local
+  opt-out은 both absent 또는 both explicit empty만 허용한다. 두 token은 모든 whitespace를
+  금지하고 서로 및 admin BFF/service token과 달라야 한다. actor는 설정 불가능한
+  `service:pinvi` 상수이고 제거된 actor env는 거부한다. OpenAPI는 GET/exact cancel만
+  AdminBFF 또는 OpsToken, 나머지 mutation은 AdminBFF 전용으로 정확히 선언하며 API ops env가
+  Dagster web/daemon에 들어가면 entrypoint가 fail-closed한다.
+  완료 조건은 PinVi production
   코드·테스트의 삭제 경로 0건, canonical success와 principal 없음/오류 scope의 typed
   401/403/422, raw/debug/BFF 우회 0건, 배포 순서와 rollback image가 명시된 cross-repo smoke다.
 
