@@ -8,13 +8,17 @@ import {
 import {
   KMA_DATASET_KEY,
   KMA_PROVIDER,
+  assertExactKmaPreviewResponse,
+  assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
+  buildKmaRequest,
   buildPoiTargetBody,
   createCleanupState,
   destructiveGateBlocker,
   exactDatasetUiPath,
   getExactDatasetDetail,
   putTrackedTarget,
+  previewBody,
   requireBody,
   runCreateDeleteCanary,
   submitTrackedUiKmaCreate,
@@ -46,6 +50,7 @@ async function createCapRequestFromUi(
   syncScope: string,
   reason: string,
   state: ReturnType<typeof createCleanupState>,
+  targets: readonly TargetRef[],
 ): Promise<FeatureUpdateRequestCreateResponse> {
   await page.goto("/ops/pipeline");
   await page
@@ -72,16 +77,29 @@ async function createCapRequestFromUi(
   await dialog
     .getByRole("button", { name: "dry-run 실행", exact: true })
     .click();
-  expect((await previewResponsePromise).status()).toBe(200);
+  const expectedPreview = previewBody(
+    buildKmaRequest(
+      syncScope.slice("external_system:".length),
+      reason,
+    ),
+  );
+  await assertExactKmaPreviewResponse(
+    await previewResponsePromise,
+    expectedPreview,
+  );
   await expect(dialog.getByTestId("request-preview-result")).toContainText(
     syncScope,
   );
 
   await dialog.getByRole("checkbox", { name: /dry-run/ }).uncheck();
   await dialog.getByLabel("사유", { exact: true }).fill(reason);
+  const externalSystem = syncScope.slice("external_system:".length);
+  const expectedBody = buildKmaRequest(externalSystem, reason);
   const { created, recovered } = await submitTrackedUiKmaCreate(
     page,
     state,
+    expectedBody,
+    targets,
     () =>
       dialog
         .getByRole("button", { name: "요청 생성", exact: true })
@@ -262,6 +280,7 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
           syncScope,
           `C7 ${RUN_ID} runtime cap ${cap}`,
           state,
+          targets,
         );
 
         const terminal = await waitForTerminal(
@@ -271,6 +290,7 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
           state,
         );
         expect(terminal.data.execution.status).toBe("failed");
+        assertKmaOnlyTerminalProviderScopes(terminal, { executed: "empty" });
         expect(terminal.data.execution.error_message).toContain(
           "KmaWeatherGridLimitExceeded",
         );

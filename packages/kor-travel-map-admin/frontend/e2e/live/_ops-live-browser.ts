@@ -37,6 +37,46 @@ type LiveTicket = {
   subprotocol: string;
 };
 
+function trackedRouteFetchHandler(
+  handler: (route: Route) => Promise<void>,
+): {
+  routeHandler: (route: Route) => Promise<void>;
+  waitForSettlement: () => Promise<void>;
+} {
+  let activeHandlers = 0;
+  const waiters = new Set<() => void>();
+  const routeHandler = async (route: Route): Promise<void> => {
+    activeHandlers += 1;
+    try {
+      await handler(route);
+    } finally {
+      activeHandlers -= 1;
+      if (activeHandlers === 0) {
+        for (const resolve of waiters) resolve();
+        waiters.clear();
+      }
+    }
+  };
+  const waitForSettlement = async (): Promise<void> => {
+    if (activeHandlers === 0) return;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve) => waiters.add(resolve)),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("live ticket route handler settlement timeout")),
+            APP_RECOVERY_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+    }
+  };
+  return { routeHandler, waitForSettlement };
+}
+
 export type ClosedSocketProbe = {
   closeCode: number;
   dataFrames: number;
@@ -319,10 +359,16 @@ export async function probeRejectedOpsLiveSockets(
         });
 
       const missing = await waitForSocketClose();
-      const last = protocol.at(-1);
-      const tamperedProtocol = `${protocol.slice(0, -1)}${
-        last === "A" ? "B" : "A"
-      }`;
+      const signatureStart = protocol.lastIndexOf(".") + 1;
+      if (signatureStart <= 0 || signatureStart >= protocol.length) {
+        throw new Error("ops live ticket signature 형식 위반");
+      }
+      // signature 첫 글자는 6개 유효 비트 전체를 담는다. base64url 마지막 글자의
+      // unused padding bit만 바꾸는 비정규 변조를 피하고 decoded bytes를 반드시 바꾼다.
+      const original = protocol[signatureStart];
+      const tamperedProtocol = `${protocol.slice(0, signatureStart)}${
+        original === "A" ? "B" : "A"
+      }${protocol.slice(signatureStart + 1)}`;
       const tampered = await waitForSocketClose(tamperedProtocol);
       return { missing, tampered };
     },
@@ -584,7 +630,7 @@ export async function exerciseHealthyLeaseRotationThroughDatasetsHook(
   await installAppSocketObserver(page);
   const ticketRequestedAt: number[] = [];
   let previousSubprotocol: string | null = null;
-  const routeHandler = async (route: Route): Promise<void> => {
+  const handleRoute = async (route: Route): Promise<void> => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
@@ -615,6 +661,8 @@ export async function exerciseHealthyLeaseRotationThroughDatasetsHook(
       throw new Error("natural lease ticket pass-through 실패 (values redacted)");
     }
   };
+  const { routeHandler, waitForSettlement } =
+    trackedRouteFetchHandler(handleRoute);
   const socketUrlErrors: string[] = [];
   const socketListener = appSocketObservationListener(socketUrlErrors);
   await page.route(`**${TICKET_PATH}`, routeHandler);
@@ -686,6 +734,7 @@ export async function exerciseHealthyLeaseRotationThroughDatasetsHook(
     };
   } finally {
     page.off("websocket", socketListener);
+    await waitForSettlement();
     await page.unroute(`**${TICKET_PATH}`, routeHandler);
   }
 }
@@ -717,7 +766,7 @@ export async function exerciseExpiredTicketRecoveryThroughDatasetsHook(
 
   let bffTicketRequests = 0;
   let ticketHandlerFailed = false;
-  const routeHandler = async (route: Route): Promise<void> => {
+  const handleRoute = async (route: Route): Promise<void> => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
@@ -760,6 +809,8 @@ export async function exerciseExpiredTicketRecoveryThroughDatasetsHook(
       await route.abort("failed");
     }
   };
+  const { routeHandler, waitForSettlement } =
+    trackedRouteFetchHandler(handleRoute);
 
   const socketUrlErrors: string[] = [];
   const socketListener = appSocketObservationListener(socketUrlErrors);
@@ -828,6 +879,7 @@ export async function exerciseExpiredTicketRecoveryThroughDatasetsHook(
     };
   } finally {
     page.off("websocket", socketListener);
+    await waitForSettlement();
     await page.unroute(`**${TICKET_PATH}`, routeHandler);
   }
 }

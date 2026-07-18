@@ -72,7 +72,7 @@ function isLocalHost(hostname: string): boolean {
     );
   }
 
-  // C7 read/auth의 origin guard는 project/auth.setup 생성 전 config 평가에서 끝낸다.
+  // C7 read/auth origin guard는 project/webServer 생성 전 config 평가에서 끝낸다.
   // UI origin만 여기서 실제 값과 대조하고, API WSS origin은 browser tracer가 실제
   // socket에서 관측한 값을 별도 expected hash와 대조한다.
   if (shouldAssertC7OriginGuard()) {

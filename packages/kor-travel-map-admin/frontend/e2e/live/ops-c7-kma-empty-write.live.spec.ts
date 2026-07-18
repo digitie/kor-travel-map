@@ -17,7 +17,9 @@ import {
 import {
   KMA_DATASET_KEY,
   KMA_PROVIDER,
+  assertExactKmaPreviewResponse,
   assertExactNonTerminalFeatureUpdateRequests,
+  assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
   buildKmaRequest,
   buildPoiTargetBody,
@@ -29,6 +31,7 @@ import {
   getExactDatasetDetail,
   getRequestDetail,
   listActivePoiTargets,
+  previewBody,
   putTrackedTarget,
   requireBody,
   waitForTerminal,
@@ -80,7 +83,15 @@ async function previewEmptyRequestFromUi(
   await dialog
     .getByRole("button", { name: "dry-run 실행", exact: true })
     .click();
-  expect((await responsePromise).status()).toBe(200);
+  await assertExactKmaPreviewResponse(
+    await responsePromise,
+    previewBody(
+      buildKmaRequest(
+        syncScope.slice("external_system:".length),
+        reason,
+      ),
+    ),
+  );
   await expect(dialog.getByTestId("request-preview-result")).toContainText(
     syncScope,
   );
@@ -289,6 +300,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
           state,
         );
         expect(terminal.data.execution.status).toBe("failed");
+        assertKmaOnlyTerminalProviderScopes(terminal, { executed: "empty" });
         expect(terminal.data.execution.error_message).toContain(
           "KmaWeatherTargetScopeEmptyError",
         );

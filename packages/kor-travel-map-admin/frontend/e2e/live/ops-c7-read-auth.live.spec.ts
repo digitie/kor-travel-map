@@ -382,8 +382,16 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
           refresh_policy: "disabled" as const,
           update_enabled: false,
         };
+        const createBaseline = latestDatasetProjectionEvidence(
+          await observedAppSockets(page),
+        );
+        if (createBaseline === null) {
+          throw new Error("dataset_projection create 직전 baseline 소실");
+        }
         const createdTarget = await putTrackedTarget(page, state, target, body);
-        const createCompletedAtMs = Date.now();
+        const createTargetRevisionAtMs = targetRevisionAtMs(
+          createdTarget.data.updated_at,
+        );
         const exactCreatedTarget = requireBody(
           await getPoiTarget(page, target.externalSystem, target.targetKey),
           200,
@@ -401,22 +409,22 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
             async () =>
               datasetProjectionEvidenceAfter(
                 await observedAppSockets(page),
-                baselineEvidence,
-                createCompletedAtMs,
+                createBaseline,
+                createTargetRevisionAtMs,
               ) !== null,
             READY,
           )
           .toBe(true);
         const createEvidence = datasetProjectionEvidenceAfter(
           await observedAppSockets(page),
-          baselineEvidence,
-          createCompletedAtMs,
+          createBaseline,
+          createTargetRevisionAtMs,
         );
         if (createEvidence === null) {
           throw new Error("dataset_projection create ordering evidence 소실");
         }
         expect(createEvidence.revision).toBeGreaterThan(
-          baselineEvidence.revision,
+          createBaseline.revision,
         );
         await expect
           .poll(
@@ -424,7 +432,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
               gridResponsesAfterEvidence(
                 gridResponses,
                 createEvidence,
-                createCompletedAtMs,
+                createTargetRevisionAtMs,
               ).length,
             READY,
           )
@@ -432,7 +440,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
         const createdGridResponse = gridResponsesAfterEvidence(
           gridResponses,
           createEvidence,
-          createCompletedAtMs,
+          createTargetRevisionAtMs,
         ).at(-1)?.response;
         if (!createdGridResponse?.ok()) {
           throw new Error("dataset_projection create refetch 실패 (body redacted)");
@@ -447,11 +455,19 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
           ),
         ).toBe(stablePath);
 
+        const deleteBaseline = latestDatasetProjectionEvidence(
+          await observedAppSockets(page),
+        );
+        if (deleteBaseline === null) {
+          throw new Error("dataset_projection delete 직전 baseline 소실");
+        }
         const deletedTarget = requireBody(
           await deleteTrackedTarget(page, state, target),
           200,
         );
-        const deleteCompletedAtMs = Date.now();
+        const deleteTargetRevisionAtMs = targetRevisionAtMs(
+          deletedTarget.data.updated_at,
+        );
         expect(deletedTarget.data).toMatchObject({
           external_system: target.externalSystem,
           target_id: createdTarget.data.target_id,
@@ -468,22 +484,22 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
             async () =>
               datasetProjectionEvidenceAfter(
                 await observedAppSockets(page),
-                createEvidence,
-                deleteCompletedAtMs,
+                deleteBaseline,
+                deleteTargetRevisionAtMs,
               ) !== null,
             READY,
           )
           .toBe(true);
         const deleteEvidence = datasetProjectionEvidenceAfter(
           await observedAppSockets(page),
-          createEvidence,
-          deleteCompletedAtMs,
+          deleteBaseline,
+          deleteTargetRevisionAtMs,
         );
         if (deleteEvidence === null) {
           throw new Error("dataset_projection delete ordering evidence 소실");
         }
         expect(deleteEvidence.revision).toBeGreaterThan(
-          createEvidence.revision,
+          deleteBaseline.revision,
         );
         await expect
           .poll(
@@ -491,7 +507,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
               gridResponsesAfterEvidence(
                 gridResponses,
                 deleteEvidence,
-                deleteCompletedAtMs,
+                deleteTargetRevisionAtMs,
               ).length,
             READY,
           )
@@ -499,7 +515,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
         const restoredGridResponse = gridResponsesAfterEvidence(
           gridResponses,
           deleteEvidence,
-          deleteCompletedAtMs,
+          deleteTargetRevisionAtMs,
         ).at(-1)?.response;
         if (!restoredGridResponse?.ok()) {
           throw new Error("dataset_projection restore refetch 실패 (body redacted)");
@@ -619,7 +635,13 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
       });
     });
     let closeCodeBeforeLogoutResponse: number | null = null;
+    let logoutRouteSeen = false;
+    let resolveLogoutRouteSettled!: () => void;
+    const logoutRouteSettled = new Promise<void>((resolve) => {
+      resolveLogoutRouteSettled = resolve;
+    });
     const logoutRoute = async (route: Route) => {
+      logoutRouteSeen = true;
       try {
         const response = await route.fetch();
         await waitForObservedAppSocketClose(page, 0, 1000, 5_000);
@@ -633,10 +655,13 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
       } catch {
         await route.abort("failed");
         throw new Error("logout 응답 전 socket close 관측 실패 (values redacted)");
+      } finally {
+        resolveLogoutRouteSettled();
       }
     };
     await page.route("**/api/auth/logout", logoutRoute);
     const logoutStartedAt = Date.now();
+    let logoutPrimaryError: unknown;
     try {
       await Promise.all([
         closePromise,
@@ -647,10 +672,33 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
         undefined,
         { timeout: READY.timeout },
       );
-    } catch {
+    } catch (error) {
+      logoutPrimaryError = error;
       throw new Error("실제 logout UI 종료/redirect 확인 실패 (values redacted)");
     } finally {
-      await page.unroute("**/api/auth/logout", logoutRoute);
+      const teardownErrors: unknown[] = [];
+      if (logoutRouteSeen) {
+        await Promise.race([
+          logoutRouteSettled,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("logout route handler settlement timeout")),
+              READY.timeout,
+            ),
+          ),
+        ]).catch((error: unknown) => teardownErrors.push(error));
+      }
+      await page
+        .unroute("**/api/auth/logout", logoutRoute)
+        .catch((error: unknown) => teardownErrors.push(error));
+      if (teardownErrors.length > 0) {
+        throw new AggregateError(
+          logoutPrimaryError === undefined
+            ? teardownErrors
+            : [logoutPrimaryError, ...teardownErrors],
+          "logout primary/route cleanup 실패",
+        );
+      }
     }
     const redirectPath = await page.evaluate(() => window.location.pathname);
     const ticketRequestsAtRedirect = ticketRequests;
@@ -1059,10 +1107,18 @@ function latestDatasetProjectionEvidence(
   return latest;
 }
 
+function targetRevisionAtMs(updatedAt: string): number {
+  const value = Date.parse(updatedAt);
+  if (Number.isNaN(value)) {
+    throw new Error("POI target updated_at revision 계약 위반");
+  }
+  return value;
+}
+
 function datasetProjectionEvidenceAfter(
   observations: readonly AppSocketObservation[],
   baseline: DatasetProjectionEvidence,
-  mutationCompletedAtMs: number,
+  targetRevisionAtMs: number,
 ): DatasetProjectionEvidence | null {
   for (const [socketIndex, observation] of observations.entries()) {
     if (socketIndex < baseline.socketIndex) continue;
@@ -1086,7 +1142,7 @@ function datasetProjectionEvidenceAfter(
         orderedAfterBaseline &&
         revision > baseline.revision &&
         !Number.isNaN(sentAtMs) &&
-        sentAtMs >= mutationCompletedAtMs
+        sentAtMs >= targetRevisionAtMs
       ) {
         return {
           revision,
@@ -1103,11 +1159,11 @@ function datasetProjectionEvidenceAfter(
 function gridResponsesAfterEvidence(
   responses: readonly TimedGridResponse[],
   evidence: DatasetProjectionEvidence,
-  mutationCompletedAtMs: number,
+  targetRevisionAtMs: number,
 ): TimedGridResponse[] {
   return responses.filter(
     (item) =>
-      item.observedAtMs >= mutationCompletedAtMs &&
+      item.observedAtMs >= targetRevisionAtMs &&
       item.startedAtMs >= evidence.sentAtMs,
   );
 }

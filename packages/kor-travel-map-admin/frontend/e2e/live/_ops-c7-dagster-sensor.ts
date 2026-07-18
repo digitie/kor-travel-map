@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   mkdir,
+  open,
   readFile,
   rename,
   rm,
@@ -849,8 +850,26 @@ export class QueueSensorController {
         mode: 0o600,
       });
       await chmod(temporary, 0o600);
+      const temporaryHandle = await open(temporary, "r");
+      try {
+        await temporaryHandle.sync();
+      } finally {
+        await temporaryHandle.close();
+      }
       await rename(temporary, this.#stateFile);
       await chmod(this.#stateFile, 0o600);
+      const stateHandle = await open(this.#stateFile, "r");
+      try {
+        await stateHandle.sync();
+      } finally {
+        await stateHandle.close();
+      }
+      const directoryHandle = await open(directory, "r");
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
     } catch {
       await rm(temporary, { force: true }).catch(() => undefined);
       throw sensorError("STATE_WRITE_FAILED", "state_file");

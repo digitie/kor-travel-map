@@ -1,5 +1,51 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-18 (codex) — T-ADM-C7 live harness 4차 적대 리뷰 반영·재리뷰 대기
+
+- owned target barrier를 500건 cursor 페이지 두 개, 최대 501건까지 완주하도록 강화했다. 각
+  continuation의 형식·비반복·비어 있지 않은 페이지와 external-system scope를 검증하고 전체
+  key/UUID/ETag 집합이 journal과 exact 일치해야 create와 dispatch를 허용한다.
+- preview는 `matched_scope.provider_datasets`의 KMA exact 한 쌍, effective sync scope와 feature
+  count까지 검증한다. 실행/event continuation은 응답 identity tuple의 페이지 내부 total order,
+  페이지 간 서로소·경계 순서, UI DOM 전체 행의 동일 tuple·동일 순서를 함께 증명한다.
+- standalone POI create의 첫 PUT에 서버 commit 후 client 응답만 끊는 결정적 fault injection을
+  연결했다. route가 보관한 causal receipt와 exact GET의 body/UUID/ETag/version이 모두 맞을 때만
+  응답 유실을 복구하며 route handler 정산 뒤 teardown한다.
+- **검증 상태**: fresh 적대 리뷰어 2인 승인 전 실행 금지 규율에 따라 Playwright·test·lint·build·
+  외부 호출은 수행하지 않았다. 코드·정적 fixture·문서를 수동 점검하고 `git diff --check`만
+  수행한다.
+- **다음 한 작업**: fresh 리뷰어 2인의 승인과 차단 finding 반영 뒤 로컬 gate를 실행하고, PR CI
+  green·머지 후 n150 prod 파괴적 live runner와 완료 이슈 정리를 수행한다.
+
+## 2026-07-18 (codex) — T-ADM-C7 live harness 3차 적대 리뷰 반영·재리뷰 대기
+
+- 최종 n150 runner에 C7C POI create/update/delete same-socket causal spec와 별도 durable 복구 journal을
+  연결했다. PUT intent를 응답 전에 기록하고 UUID/strong ETag/version을 응답 뒤 보강하며, exact GET
+  ETag `If-Match` cleanup과 RFC7807 404·external-system 빈 집합을 최종 read-only 단계에서 재검증한다.
+- KMA helper도 target intent/identity를 누적 journal에 보존하고, request 전 owned external-system의
+  전체 key/UUID/ETag 집합과 실행/event continuation tuple·cursor를 exact 검증한다. `412`나 version
+  drift는 다른 쓰기를 지울 수 있으므로 cleanup 재시도 없이 차단한다.
+- fixed root-owned host attestation으로 machine-id/hostname/origin을 anchor하고 로그인 POST
+  `200 + Set-Cookie`, UI container admin password hash non-empty, route handler settlement를 preflight/
+  teardown 계약에 포함했다.
+- 같은 자연키 재생성은 새 UUID/ETag/version을 active 소유 객체로 교체하고 과거 객체를 별도 history로
+  보존한다. PUT 응답 유실은 exact 재탐색→동일 PUT 1회 재생→조건부 cleanup 순서로 수습하며, identity
+  증명이 불가능하면 다른 target을 삭제하지 않고 `restored=false`로 차단한다.
+- preview·terminal의 전체 provider scope를 KMA-only로 고정하고 fingerprint/base datetime 형식을
+  검증한다. 상태 journal은 temp/final/parent fsync를 포함하며 runner state·lock·BLOCKED는 root-owned
+  고정 경로만 사용하고 `XDG_STATE_HOME` override를 거부한다.
+- 이전 journal의 restored residue는 현재 scenario state를 합치기 전에 이전 payload만으로 판정하며,
+  current key/status를 과거 snapshot으로 덮어쓰지 않는다. KMA dispatch 직전에도 active target 전체
+  집합을 재확인하고, recreate current/history UUID의 상호 배타성과 필수 history를 최종 runner에서
+  검증한다.
+- lock은 no-follow safe open과 regular/root/`0600` fstat 뒤 guard process가 보유한다. standalone POI
+  PUT 응답 유실은 exact body 재탐색과 404 single replay만 허용하고 causal receipt가 없거나 identity가
+  불확실하면 BLOCKED한다. cursor base datetime도 canonical 필수값으로 강화했다.
+- **검증 상태**: 사용자 규율에 따라 두 fresh reviewer 승인 전 Playwright·test·lint·build를 실행하지
+  않았다. 코드·정적 fixture·문서 수정 후 `git diff --check`만 수행하고 재리뷰를 기다린다.
+- **다음 한 작업**: fresh 적대 리뷰어 2명의 차단 finding을 모두 해소한 뒤 승인된 diff에만 로컬 gate를
+  실행하고, PR CI green·머지 후 n150 prod 파괴적 live runner와 완료 이슈 정리를 수행한다.
+
 ## 2026-07-18 (codex) — T-ADM-C7C 로컬 종결·PR 준비
 
 - POI target PUT/DELETE transaction 안에서 `dataset_projection` revision을 읽어 mutation 응답의

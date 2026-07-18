@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   mkdir,
+  open,
   readFile,
   rename,
   rm,
@@ -15,6 +16,7 @@ import type { components } from "../../src/api/types";
 
 export type BrowserFetchResult<T> = {
   body: T | null;
+  entityTag: string | null;
   status: number;
 };
 
@@ -46,24 +48,35 @@ export type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
 
 export type TargetRef = { externalSystem: string; targetKey: string };
+type OwnedTarget = TargetRef & {
+  body: PoiCacheTargetUpsertRequest;
+  entityTag: string;
+  lockVersion: number;
+  targetId: string;
+};
 export type CleanupResult = {
   allRequestsTerminal: boolean;
   preservedForManualCleanup: boolean;
   restored: boolean;
 };
 export type CleanupScenario = "active" | "empty" | "cap" | "invalidation";
+type TrackedIdempotencyEntries = Map<
+  string,
+  {
+    body: FeatureUpdateRequestCreateRequest;
+    requestId: string | null;
+    status: string;
+  }
+>;
 export type CleanupState = {
+  allIdempotencyEntries: TrackedIdempotencyEntries;
+  allRequestIds: Set<string>;
+  allRequestTerminalStatuses: Map<string, string>;
   cleanupResult: CleanupResult | null;
   completedScenarios: Set<CleanupScenario>;
   externalSystems: Set<string>;
-  idempotencyEntries: Map<
-    string,
-    {
-      body: FeatureUpdateRequestCreateRequest;
-      requestId: string | null;
-      status: string;
-    }
-  >;
+  allExternalSystems: Set<string>;
+  idempotencyEntries: TrackedIdempotencyEntries;
   journalWrite: Promise<void>;
   requestIds: Set<string>;
   requestTerminalStatuses: Map<string, string>;
@@ -72,7 +85,23 @@ export type CleanupState = {
   scopeStateCount: number;
   stateFile: string;
   targetStatuses: Map<string, string>;
-  targets: TargetRef[];
+  targetHistory: TargetJournalRef[];
+  targets: OwnedTarget[];
+  allTargetRefs: Map<string, TargetJournalRef>;
+};
+
+type OwnedTargetRef = TargetRef & {
+  entityTag: string;
+  lockVersion: number;
+  targetId: string;
+};
+
+type TargetJournalRef = TargetRef & {
+  body: PoiCacheTargetUpsertRequest;
+  entityTag: string | null;
+  lockVersion: number | null;
+  status: string;
+  targetId: string | null;
 };
 
 type CleanupIssue = {
@@ -82,6 +111,7 @@ type CleanupIssue = {
     | "request_cancel"
     | "request_terminal_timeout"
     | "target_delete"
+    | "target_intent_recovery"
     | "target_residue"
     | "unexpected_exception";
   resource: string;
@@ -100,7 +130,7 @@ type CleanupManifest = {
   request_terminal_statuses: Record<string, string>;
   run_id: string;
   scenario: CleanupScenario;
-  target_refs: TargetRef[];
+  target_refs: OwnedTargetRef[];
   version: 1;
 };
 
@@ -125,12 +155,16 @@ const POI_TARGETS_PATH = "/v1/admin/poi-cache-targets";
 const PIPELINE_REQUESTS_PATH = "/v1/ops/pipeline/requests";
 const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
 const BROWSER_FETCH_TIMEOUT_MS = 30_000;
+const OWNED_TARGET_PAGE_SIZE = 500;
+const OWNED_TARGET_SET_LIMIT = 501;
+const OWNED_TARGET_PAGE_LIMIT = 2;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const bootstrappedPages = new WeakSet<Page>();
 
 type DurableCleanupJournal = {
   cleanup_result: CleanupResult | null;
   completed_scenarios: CleanupScenario[];
+  external_systems: string[];
   idempotency_entries: Array<{
     body: FeatureUpdateRequestCreateRequest;
     idempotency_key: string;
@@ -143,10 +177,35 @@ type DurableCleanupJournal = {
   run_id: string;
   scenario: CleanupScenario;
   scope_state_count: number;
-  target_refs: Array<TargetRef & { status: string }>;
+  target_refs: TargetJournalRef[];
+  target_history: TargetJournalRef[];
   updated_at: string;
-  version: 1;
+  version: 3;
 };
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const STRONG_ENTITY_TAG_PATTERN =
+  /^"([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):([1-9][0-9]*)"$/;
+
+async function boundedWait<T>(
+  promise: Promise<T>,
+  operation: string,
+  timeoutMs = BROWSER_FETCH_TIMEOUT_MS,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`${operation} 제한 시간 초과`)),
+        timeoutMs,
+      );
+      promise.then(resolve, reject);
+    });
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+  }
+}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -235,6 +294,21 @@ function targetJournalKey(target: TargetRef): string {
   return `${target.externalSystem}\u0000${target.targetKey}`;
 }
 
+function targetRefWithStatus(
+  target: OwnedTarget,
+  status: string,
+): TargetJournalRef {
+  return {
+    body: target.body,
+    entityTag: target.entityTag,
+    externalSystem: target.externalSystem,
+    lockVersion: target.lockVersion,
+    status,
+    targetId: target.targetId,
+    targetKey: target.targetKey,
+  };
+}
+
 function durableJournal(
   state: CleanupState,
   phase: string,
@@ -243,10 +317,26 @@ function durableJournal(
   if (phase === "restored" && state.cleanupResult?.restored === true) {
     completedScenarios.add(state.scenario);
   }
+  const allTargetRefs = new Map(state.allTargetRefs);
+  const allIdempotencyEntries = new Map(state.allIdempotencyEntries);
+  for (const [idempotencyKey, entry] of state.idempotencyEntries) {
+    allIdempotencyEntries.set(idempotencyKey, entry);
+  }
+  const allRequestIds = new Set([
+    ...state.allRequestIds,
+    ...state.requestIds,
+  ]);
+  const allRequestTerminalStatuses = new Map(
+    state.allRequestTerminalStatuses,
+  );
+  for (const [requestId, status] of state.requestTerminalStatuses) {
+    allRequestTerminalStatuses.set(requestId, status);
+  }
   return {
     cleanup_result: state.cleanupResult,
     completed_scenarios: [...completedScenarios].sort(),
-    idempotency_entries: [...state.idempotencyEntries.entries()]
+    external_systems: [...state.allExternalSystems].sort(),
+    idempotency_entries: [...allIdempotencyEntries.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([idempotencyKey, entry]) => ({
         body: entry.body,
@@ -255,21 +345,27 @@ function durableJournal(
         status: entry.status,
       })),
     phase,
-    request_ids: [...state.requestIds].sort(),
+    request_ids: [...allRequestIds].sort(),
     request_terminal_statuses: Object.fromEntries(
-      [...state.requestTerminalStatuses.entries()].sort(([left], [right]) =>
-        left.localeCompare(right),
+      [...allRequestTerminalStatuses.entries()].sort(
+        ([left], [right]) => left.localeCompare(right),
       ),
     ),
     run_id: state.runId,
     scenario: state.scenario,
     scope_state_count: state.scopeStateCount,
-    target_refs: state.targets.map((target) => ({
-      ...target,
-      status: state.targetStatuses.get(targetJournalKey(target)) ?? "pending",
-    })),
+    target_refs: [...allTargetRefs.values()].sort((left, right) =>
+      targetJournalKey(left).localeCompare(targetJournalKey(right)),
+    ),
+    target_history: [...state.targetHistory].sort((left, right) => {
+      const keyOrder = targetJournalKey(left).localeCompare(
+        targetJournalKey(right),
+      );
+      if (keyOrder !== 0) return keyOrder;
+      return (left.targetId ?? "").localeCompare(right.targetId ?? "");
+    }),
     updated_at: new Date().toISOString(),
-    version: 1,
+    version: 3,
   };
 }
 
@@ -280,11 +376,46 @@ function isCleanupScenario(value: unknown): value is CleanupScenario {
 async function mergePreviousJournal(state: CleanupState): Promise<void> {
   try {
     const previous = JSON.parse(await readFile(state.stateFile, "utf8")) as {
+      cleanup_result?: unknown;
       completed_scenarios?: unknown;
+      external_systems?: unknown;
+      idempotency_entries?: unknown;
       phase?: unknown;
+      request_ids?: unknown;
+      request_terminal_statuses?: unknown;
       run_id?: unknown;
+      scenario?: unknown;
+      target_refs?: unknown;
+      target_history?: unknown;
+      version?: unknown;
     };
-    if (previous.phase !== "restored" && previous.run_id !== state.runId) {
+    const isOrchestratorPlaceholder =
+      previous.phase === "restored" &&
+      previous.run_id === "__orchestrator_pending__" &&
+      previous.version === 3;
+    const isCurrentScenario =
+      previous.run_id === state.runId && previous.scenario === state.scenario;
+    if (
+      !isOrchestratorPlaceholder &&
+      (previous.version !== 3 ||
+        typeof previous.run_id !== "string" ||
+        previous.run_id.length === 0 ||
+        !isCleanupScenario(previous.scenario) ||
+        !Array.isArray(previous.completed_scenarios) ||
+        !Array.isArray(previous.external_systems) ||
+        !Array.isArray(previous.idempotency_entries) ||
+        !Array.isArray(previous.request_ids) ||
+        asRecord(previous.request_terminal_statuses) === null ||
+        !Array.isArray(previous.target_refs) ||
+        !Array.isArray(previous.target_history))
+    ) {
+      throw new Error("invalid target history");
+    }
+    if (
+      !isOrchestratorPlaceholder &&
+      previous.phase !== "restored" &&
+      !isCurrentScenario
+    ) {
       throw new Error("unrestored residue");
     }
     const completedScenarios = previous.completed_scenarios;
@@ -295,9 +426,293 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     ) {
       throw new Error("invalid completed scenarios");
     }
-    if (Array.isArray(completedScenarios)) {
-      for (const scenario of completedScenarios) {
-        state.completedScenarios.add(scenario as CleanupScenario);
+    const externalSystems = previous.external_systems;
+    if (
+      externalSystems !== undefined &&
+      (!Array.isArray(externalSystems) ||
+        !externalSystems.every(
+          (value): value is string => typeof value === "string" && value.length > 0,
+        ))
+    ) {
+      throw new Error("invalid target history");
+    }
+    const targetRefs = previous.target_refs;
+    if (
+      targetRefs !== undefined &&
+      (!Array.isArray(targetRefs) ||
+        !targetRefs.every((value) => {
+          const item = asRecord(value);
+          const body = asRecord(item?.body);
+          const pendingIdentity =
+            item?.targetId === null &&
+            item?.entityTag === null &&
+            item?.lockVersion === null;
+          const durableIdentity =
+            typeof item?.targetId === "string" &&
+            UUID_PATTERN.test(item.targetId) &&
+            typeof item?.entityTag === "string" &&
+            typeof item?.lockVersion === "number" &&
+            Number.isSafeInteger(item.lockVersion) &&
+            item.lockVersion > 0 &&
+            parseStrongEntityTag(item.entityTag, item.targetId) ===
+              item.lockVersion;
+          return (
+            item !== null &&
+            body !== null &&
+            typeof item.externalSystem === "string" &&
+            item.externalSystem.length > 0 &&
+            typeof item.targetKey === "string" &&
+            item.targetKey.length > 0 &&
+            typeof item.status === "string" &&
+            item.status.length > 0 &&
+            (pendingIdentity || durableIdentity)
+          );
+        }))
+    ) {
+      throw new Error("invalid target history");
+    }
+    if (Array.isArray(targetRefs)) {
+      const seenTargetKeys = new Set<string>();
+      for (const value of targetRefs) {
+        const item = value as TargetJournalRef;
+        const key = targetJournalKey(item);
+        if (seenTargetKeys.has(key)) {
+          throw new Error("invalid target history");
+        }
+        seenTargetKeys.add(key);
+      }
+    }
+    const targetHistory = previous.target_history;
+    if (
+      targetHistory !== undefined &&
+      (!Array.isArray(targetHistory) ||
+        !targetHistory.every((value) => {
+          const item = asRecord(value);
+          return (
+            item !== null &&
+            asRecord(item.body) !== null &&
+            typeof item.externalSystem === "string" &&
+            item.externalSystem.length > 0 &&
+            typeof item.targetKey === "string" &&
+            item.targetKey.length > 0 &&
+            typeof item.targetId === "string" &&
+            UUID_PATTERN.test(item.targetId) &&
+            typeof item.entityTag === "string" &&
+            typeof item.lockVersion === "number" &&
+            Number.isSafeInteger(item.lockVersion) &&
+            item.lockVersion > 0 &&
+            parseStrongEntityTag(item.entityTag, item.targetId) ===
+              item.lockVersion &&
+            typeof item.status === "string" &&
+            item.status.length > 0
+          );
+        }))
+    ) {
+      throw new Error("invalid target history");
+    }
+    if (
+      Array.isArray(targetHistory) &&
+      new Set(
+        targetHistory.map((value) => {
+          const item = value as TargetJournalRef;
+          return `${targetJournalKey(item)}\u0000${item.targetId}`;
+        }),
+      ).size !== targetHistory.length
+    ) {
+      throw new Error("invalid target history");
+    }
+    const targetExternalSystems = new Set(
+      (targetRefs as TargetJournalRef[] | undefined)?.map(
+        (item) => item.externalSystem,
+      ) ?? [],
+    );
+    if (
+      Array.isArray(externalSystems) &&
+      (externalSystems.length !== targetExternalSystems.size ||
+        externalSystems.some(
+          (externalSystem) => !targetExternalSystems.has(externalSystem),
+        ))
+    ) {
+      throw new Error("invalid target history");
+    }
+
+    const requestIds = previous.request_ids;
+    if (
+      requestIds !== undefined &&
+      (!Array.isArray(requestIds) ||
+        !requestIds.every(
+          (value): value is string =>
+            typeof value === "string" && UUID_PATTERN.test(value),
+        ) ||
+        new Set(requestIds).size !== requestIds.length)
+    ) {
+      throw new Error("invalid request history");
+    }
+    const terminalStatuses = asRecord(previous.request_terminal_statuses);
+    if (
+      previous.request_terminal_statuses !== undefined &&
+      (terminalStatuses === null ||
+        Object.entries(terminalStatuses).some(
+          ([requestId, status]) =>
+            !UUID_PATTERN.test(requestId) || typeof status !== "string",
+        ))
+    ) {
+      throw new Error("invalid request history");
+    }
+    if (terminalStatuses !== null) {
+      for (const requestId of Object.keys(terminalStatuses)) {
+        if (!(requestIds as string[] | undefined)?.includes(requestId)) {
+          throw new Error("invalid request history");
+        }
+      }
+    }
+
+    const idempotencyEntries = previous.idempotency_entries;
+    if (
+      idempotencyEntries !== undefined &&
+      (!Array.isArray(idempotencyEntries) ||
+        !idempotencyEntries.every((value) => {
+          const item = asRecord(value);
+          return (
+            item !== null &&
+            typeof item.idempotency_key === "string" &&
+            UUID_PATTERN.test(item.idempotency_key) &&
+            asRecord(item.body) !== null &&
+            (item.request_id === null ||
+              (typeof item.request_id === "string" &&
+                UUID_PATTERN.test(item.request_id))) &&
+            typeof item.status === "string" &&
+            item.status.length > 0
+          );
+        }))
+    ) {
+      throw new Error("invalid request history");
+    }
+    if (Array.isArray(idempotencyEntries)) {
+      const seenIdempotencyKeys = new Set<string>();
+      for (const value of idempotencyEntries) {
+        const item = value as DurableCleanupJournal["idempotency_entries"][number];
+        if (
+          seenIdempotencyKeys.has(item.idempotency_key) ||
+          (item.request_id !== null &&
+            !(requestIds as string[] | undefined)?.includes(item.request_id))
+        ) {
+          throw new Error("invalid request history");
+        }
+        seenIdempotencyKeys.add(item.idempotency_key);
+      }
+    }
+
+    if (!isOrchestratorPlaceholder && !isCurrentScenario) {
+      const cleanupResult = asRecord(previous.cleanup_result);
+      const scenario = previous.scenario as CleanupScenario;
+      const previousRequestIds = requestIds as string[];
+      const previousTerminalStatuses = terminalStatuses as Record<
+        string,
+        unknown
+      >;
+      if (
+        previous.phase !== "restored" ||
+        cleanupResult === null ||
+        cleanupResult.allRequestsTerminal !== true ||
+        cleanupResult.preservedForManualCleanup !== false ||
+        cleanupResult.restored !== true ||
+        !(completedScenarios as CleanupScenario[]).includes(scenario) ||
+        (targetRefs as TargetJournalRef[]).some(
+          (target) => target.status !== "deleted",
+        ) ||
+        (targetHistory as TargetJournalRef[]).some(
+          (target) => target.status !== "deleted",
+        ) ||
+        previousRequestIds.some(
+          (requestId) =>
+            !TERMINAL_STATUSES.has(
+              String(previousTerminalStatuses[requestId] ?? ""),
+            ),
+        )
+      ) {
+        throw new Error("unrestored residue");
+      }
+    }
+
+    // previous payload 자체가 완전한 restored 상태임을 먼저 판정한 뒤에만
+    // 누적 이력을 합친다. 현재 scenario가 이미 보유한 key/status는 절대 되감지 않는다.
+    for (const scenario of
+      (completedScenarios as CleanupScenario[] | undefined) ?? []) {
+      state.completedScenarios.add(scenario);
+    }
+    for (const externalSystem of
+      (externalSystems as string[] | undefined) ?? []) {
+      state.allExternalSystems.add(externalSystem);
+    }
+    for (const item of (targetRefs as TargetJournalRef[] | undefined) ?? []) {
+      const key = targetJournalKey(item);
+      const existing = state.allTargetRefs.get(key);
+      const currentReplacementIntent =
+        existing?.targetId === null &&
+        ["put_intent", "put_replay_pending", "put_response_lost"].includes(
+          existing.status,
+        );
+      if (
+        existing !== undefined &&
+        !currentReplacementIntent &&
+        (!exactJson(existing.body, item.body) ||
+          (existing.targetId !== null &&
+            item.targetId !== null &&
+            existing.targetId !== item.targetId))
+      ) {
+        throw new Error("invalid target history");
+      }
+      if (existing === undefined) state.allTargetRefs.set(key, item);
+    }
+    const knownHistory = new Set(
+      state.targetHistory.map(
+        (item) => `${targetJournalKey(item)}\u0000${item.targetId}`,
+      ),
+    );
+    for (const item of (targetHistory as TargetJournalRef[] | undefined) ?? []) {
+      const identity = `${targetJournalKey(item)}\u0000${item.targetId}`;
+      if (!knownHistory.has(identity)) {
+        knownHistory.add(identity);
+        state.targetHistory.push(item);
+      }
+    }
+    for (const requestId of (requestIds as string[] | undefined) ?? []) {
+      state.allRequestIds.add(requestId);
+    }
+    for (const [requestId, status] of Object.entries(terminalStatuses ?? {})) {
+      const current = state.requestTerminalStatuses.get(requestId);
+      if (
+        current === undefined &&
+        !state.allRequestTerminalStatuses.has(requestId)
+      ) {
+        state.allRequestTerminalStatuses.set(requestId, String(status));
+      }
+    }
+    for (const value of (idempotencyEntries as
+      | DurableCleanupJournal["idempotency_entries"]
+      | undefined) ?? []) {
+      const existing =
+        state.idempotencyEntries.get(value.idempotency_key) ??
+        state.allIdempotencyEntries.get(value.idempotency_key);
+      if (
+        existing !== undefined &&
+        (!exactJson(existing.body, value.body) ||
+          (existing.requestId !== null &&
+            value.request_id !== null &&
+            existing.requestId !== value.request_id))
+      ) {
+        throw new Error("invalid request history");
+      }
+      if (
+        !state.idempotencyEntries.has(value.idempotency_key) &&
+        !state.allIdempotencyEntries.has(value.idempotency_key)
+      ) {
+        state.allIdempotencyEntries.set(value.idempotency_key, {
+          body: value.body,
+          requestId: value.request_id,
+          status: value.status,
+        });
       }
     }
   } catch (error) {
@@ -314,6 +729,12 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       throw new Error(
         "C7 durable cleanup journal의 completed_scenarios가 손상되었습니다",
       );
+    }
+    if (error instanceof Error && error.message === "invalid target history") {
+      throw new Error("C7 durable cleanup journal의 target history가 손상되었습니다");
+    }
+    if (error instanceof Error && error.message === "invalid request history") {
+      throw new Error("C7 durable cleanup journal의 request history가 손상되었습니다");
     }
     throw error;
   }
@@ -335,8 +756,26 @@ async function writeDurableJournal(
         { encoding: "utf8", flag: "wx", mode: 0o600 },
       );
       await chmod(temporary, 0o600);
+      const temporaryHandle = await open(temporary, "r");
+      try {
+        await temporaryHandle.sync();
+      } finally {
+        await temporaryHandle.close();
+      }
       await rename(temporary, state.stateFile);
       await chmod(state.stateFile, 0o600);
+      const stateHandle = await open(state.stateFile, "r");
+      try {
+        await stateHandle.sync();
+      } finally {
+        await stateHandle.close();
+      }
+      const directoryHandle = await open(directory, "r");
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
       if (phase === "restored" && state.cleanupResult?.restored === true) {
         state.completedScenarios.add(state.scenario);
       }
@@ -391,7 +830,11 @@ export async function browserFetch<T>(
             parsed = null;
           }
         }
-        return { body: parsed as T | null, status: response.status };
+        return {
+          body: parsed as T | null,
+          entityTag: response.headers.get("etag"),
+          status: response.status,
+        };
       },
       {
         body: options.body,
@@ -410,6 +853,24 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function parseStrongEntityTag(
+  entityTag: string,
+  expectedTargetId?: string,
+): number {
+  const matched = STRONG_ENTITY_TAG_PATTERN.exec(entityTag);
+  if (
+    matched === null ||
+    (expectedTargetId !== undefined && matched[1] !== expectedTargetId)
+  ) {
+    throw new Error("POI target strong entity_tag 계약 불일치");
+  }
+  const lockVersion = Number(matched[2]);
+  if (!Number.isSafeInteger(lockVersion) || lockVersion <= 0) {
+    throw new Error("POI target lock version 계약 불일치");
+  }
+  return lockVersion;
 }
 
 /** raw body 대신 status와 RFC7807 allowlist만 노출한다. */
@@ -545,11 +1006,13 @@ export async function deletePoiTarget(
   page: Page,
   externalSystem: string,
   targetKey: string,
+  entityTag: string,
 ): Promise<BrowserFetchResult<PoiCacheTargetResponse>> {
+  parseStrongEntityTag(entityTag);
   return browserFetch<PoiCacheTargetResponse>(
     page,
     targetPath(externalSystem, targetKey),
-    { method: "DELETE" },
+    { headers: { "If-Match": entityTag }, method: "DELETE" },
   );
 }
 
@@ -645,28 +1108,216 @@ function assertKmaOnlyPlan(
   }
 }
 
+function kmaExternalSystem(
+  body: FeatureUpdateRequestCreateRequest | FeatureUpdateRequestPreviewRequest,
+): string {
+  assertKmaOnlyPlan(body);
+  const syncScope =
+    "sync_scope" in body.scope ? body.scope.sync_scope : undefined;
+  if (!syncScope?.startsWith("external_system:")) {
+    throw new Error("KMA request external_system scope가 없습니다");
+  }
+  const externalSystem = syncScope.slice("external_system:".length);
+  if (!externalSystem) {
+    throw new Error("KMA request external_system이 비어 있습니다");
+  }
+  return externalSystem;
+}
+
 export async function previewKmaRequest(
   page: Page,
   body: FeatureUpdateRequestPreviewRequest,
 ): Promise<BrowserFetchResult<FeatureUpdateRequestPreviewResponse>> {
   assertKmaOnlyPlan(body);
-  return browserFetch<FeatureUpdateRequestPreviewResponse>(
+  const result = await browserFetch<FeatureUpdateRequestPreviewResponse>(
     page,
     `${PIPELINE_REQUESTS_PATH}/preview`,
     { method: "POST", body },
   );
+  const response = requireBody(result, 200);
+  assertExactKmaPreviewBody(response, body);
+  return result;
+}
+
+function assertOnlyKmaProviderObjects(value: unknown, context: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertOnlyKmaProviderObjects(item, context);
+    return;
+  }
+  const record = asRecord(value);
+  if (record === null) return;
+  if (
+    "provider" in record &&
+    (record.provider !== KMA_PROVIDER ||
+      ("dataset_key" in record && record.dataset_key !== KMA_DATASET_KEY))
+  ) {
+    throw new Error(`${context}에 KMA 외 provider/dataset이 포함되었습니다`);
+  }
+  for (const item of Object.values(record)) {
+    assertOnlyKmaProviderObjects(item, context);
+  }
+}
+
+function assertExactKmaPreviewBody(
+  response: FeatureUpdateRequestPreviewResponse,
+  expected: FeatureUpdateRequestPreviewRequest,
+): void {
+  const data = response.data;
+  assertKmaOnlyPlan(expected);
+  const expectedEffectiveSyncScope =
+    expected.scope.type === "provider_dataset"
+      ? expected.scope.sync_scope
+      : undefined;
+  const responseScope = data.scope;
+  const matchedScope = asRecord(data.matched_scope);
+  if (
+    data.result_kind !== "preview" ||
+    data.scope_type !== "provider_dataset" ||
+    !exactJson(data.scope, expected.scope) ||
+    responseScope.type !== "provider_dataset" ||
+    responseScope.provider !== KMA_PROVIDER ||
+    responseScope.dataset_key !== KMA_DATASET_KEY ||
+    responseScope.sync_scope !== expectedEffectiveSyncScope ||
+    !expectedEffectiveSyncScope?.startsWith("external_system:") ||
+    !exactJson(data.providers, expected.providers ?? []) ||
+    !exactJson(data.dataset_keys, expected.dataset_keys ?? []) ||
+    data.run_mode !== expected.run_mode ||
+    data.priority !== expected.priority ||
+    !exactJson(data.update_policy, expected.update_policy ?? {}) ||
+    matchedScope === null
+  ) {
+    throw new Error("KMA preview response plan/resolved scope 계약 불일치");
+  }
+  const providerDatasets = matchedScope.provider_datasets;
+  if (
+    !Array.isArray(providerDatasets) ||
+    providerDatasets.length !== 1
+  ) {
+    throw new Error("KMA preview matched_scope exact provider pair가 없습니다");
+  }
+  const pair = asRecord(providerDatasets[0]);
+  if (
+    pair === null ||
+    pair.provider !== KMA_PROVIDER ||
+    pair.dataset_key !== KMA_DATASET_KEY ||
+    typeof pair.feature_count !== "number" ||
+    !Number.isSafeInteger(pair.feature_count) ||
+    pair.feature_count < 0 ||
+    ("sync_scope" in pair && pair.sync_scope !== expectedEffectiveSyncScope) ||
+    ("effective_sync_scope" in matchedScope &&
+      matchedScope.effective_sync_scope !== expectedEffectiveSyncScope)
+  ) {
+    throw new Error("KMA preview matched_scope provider/effective scope identity 불일치");
+  }
+  if (FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(data))) {
+    throw new Error("KMA preview response에 금지 provider가 포함되었습니다");
+  }
+  assertOnlyKmaProviderObjects(data.matched_scope, "KMA preview matched_scope");
+}
+
+export async function assertExactKmaPreviewResponse(
+  response: Response,
+  expected: FeatureUpdateRequestPreviewRequest,
+): Promise<FeatureUpdateRequestPreviewResponse> {
+  const contentType = response.headers()["content-type"] ?? "";
+  if (response.status() !== 200 || !contentType.toLowerCase().includes("json")) {
+    throw new Error("KMA preview HTTP/content-type 계약 불일치");
+  }
+  let body: FeatureUpdateRequestPreviewResponse;
+  try {
+    body = (await response.json()) as FeatureUpdateRequestPreviewResponse;
+  } catch {
+    throw new Error("KMA preview JSON 응답 계약 불일치");
+  }
+  assertExactKmaPreviewBody(body, expected);
+  return body;
+}
+
+export function assertKmaOnlyTerminalProviderScopes(
+  detail: PipelineExecutionDetailResponse,
+  options: { executed: "empty" | "nonempty" },
+): void {
+  const updateRequest = detail.data.update_request;
+  if (
+    updateRequest === null ||
+    updateRequest.scope.type !== "provider_dataset" ||
+    updateRequest.scope.provider !== KMA_PROVIDER ||
+    updateRequest.scope.dataset_key !== KMA_DATASET_KEY ||
+    !updateRequest.effective_sync_scope?.startsWith("external_system:") ||
+    updateRequest.providers.length !== 0 ||
+    updateRequest.dataset_keys.length !== 0
+  ) {
+    throw new Error("terminal update request KMA-only plan 계약 불일치");
+  }
+  const matched = asRecord(updateRequest.matched_scope);
+  if (matched === null) {
+    throw new Error("terminal matched_scope 계약 불일치");
+  }
+  const keys = [
+    "eligible_provider_scopes",
+    "skipped_provider_scopes",
+    "executed_provider_scopes",
+  ] as const;
+  if (
+    !Array.isArray(matched.eligible_provider_scopes) ||
+    !Array.isArray(matched.skipped_provider_scopes)
+  ) {
+    throw new Error("terminal provider scope 전체 집합 계약 불일치");
+  }
+  const providerIdentities = new Set<string>();
+  for (const key of keys) {
+    const raw = matched[key];
+    if (raw === undefined) continue;
+    if (!Array.isArray(raw)) {
+      throw new Error(`terminal ${key} 배열 계약 불일치`);
+    }
+    for (const value of raw) {
+      const item = asRecord(value);
+      if (
+        item?.provider !== KMA_PROVIDER ||
+        item.dataset_key !== KMA_DATASET_KEY
+      ) {
+        throw new Error(`terminal ${key} KMA-only 집합 불일치`);
+      }
+      providerIdentities.add(`${item.provider}\u0000${item.dataset_key}`);
+    }
+  }
+  const executed = matched.executed_provider_scopes;
+  if (
+    (options.executed === "empty" &&
+      executed !== undefined &&
+      (!Array.isArray(executed) || executed.length !== 0)) ||
+    (options.executed === "nonempty" &&
+      (!Array.isArray(executed) || executed.length !== 1)) ||
+    providerIdentities.size !== 1 ||
+    !providerIdentities.has(`${KMA_PROVIDER}\u0000${KMA_DATASET_KEY}`) ||
+    FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(matched))
+  ) {
+    throw new Error("terminal 전체 provider scope 집합이 exact KMA-only가 아닙니다");
+  }
+  assertOnlyKmaProviderObjects(matched, "terminal matched_scope");
 }
 
 export async function createKmaRequest(
   page: Page,
   body: FeatureUpdateRequestCreateRequest,
   idempotencyKey: string,
-  state?: CleanupState,
+  state: CleanupState,
 ): Promise<BrowserFetchResult<FeatureUpdateRequestCreateResponse>> {
   assertKmaOnlyPlan(body);
-  if (state) {
-    await journalPendingRequest(state, body, idempotencyKey);
-  }
+  const externalSystem = kmaExternalSystem(body);
+  const expectedTargets = state.targets.filter(
+    (target) =>
+      target.externalSystem === externalSystem &&
+      state.targetStatuses.get(targetJournalKey(target)) === "active",
+  );
+  await assertExactOwnedTargetsAtServer(
+    page,
+    state,
+    expectedTargets,
+    externalSystem,
+  );
+  await journalPendingRequest(state, body, idempotencyKey);
   const submit = () =>
     browserFetch<FeatureUpdateRequestCreateResponse>(
       page,
@@ -680,16 +1331,13 @@ export async function createKmaRequest(
   let result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>;
   try {
     result = await submit();
-  } catch (error) {
-    if (!state) throw error;
+  } catch {
     const pending = state.idempotencyEntries.get(idempotencyKey);
     if (pending) pending.status = "response_lost_replaying";
     await writeDurableJournal(state, "request_response_lost");
     result = await submit();
   }
-  if (state) {
-    await trackRequestResult(state, result, idempotencyKey);
-  }
+  await trackRequestResult(state, result, idempotencyKey);
   return result;
 }
 
@@ -730,7 +1378,11 @@ export async function resolveTrackedUiKmaCreateResponse(
     if (response === null || parsed === null) {
       throw new Error("UI KMA create response 분기 불변식이 깨졌습니다");
     }
-    result = { body: parsed, status: response.status() };
+    result = {
+      body: parsed,
+      entityTag: response.headers()["etag"] ?? null,
+      status: response.status(),
+    };
     await trackRequestResult(state, result, idempotencyKey);
   }
 
@@ -744,56 +1396,103 @@ export async function resolveTrackedUiKmaCreateResponse(
 export async function submitTrackedUiKmaCreate(
   page: Page,
   state: CleanupState,
+  expectedBody: FeatureUpdateRequestCreateRequest,
+  expectedTargets: readonly TargetRef[],
   submit: () => Promise<void>,
 ): Promise<TrackedUiKmaCreateResult> {
   let idempotencyKey: string | null = null;
   let journaledBody: FeatureUpdateRequestCreateRequest | null = null;
+  let routeSeen = false;
+  let resolveRouteHandled!: () => void;
+  let rejectRouteHandled!: (error: unknown) => void;
+  const routeHandled = new Promise<void>((resolve, reject) => {
+    resolveRouteHandled = resolve;
+    rejectRouteHandled = reject;
+  });
+  void routeHandled.catch(() => undefined);
+  let resolveHandlerSettled!: () => void;
+  const handlerSettled = new Promise<void>((resolve) => {
+    resolveHandlerSettled = resolve;
+  });
+  const exactUrl = new URL(
+    "/api/proxy/v1/ops/pipeline/requests",
+    expectedUiOrigin(),
+  ).href;
   const routeHandler = async (route: Route): Promise<void> => {
+    routeSeen = true;
     const request = route.request();
-    let pathname: string;
     try {
-      pathname = new URL(request.url()).pathname;
-    } catch {
-      await route.fallback();
-      return;
+      if (request.method() !== "POST" || request.url() !== exactUrl) {
+        throw new Error("UI KMA create exact origin/path/method 불일치");
+      }
+      const candidateKey = request.headers()["idempotency-key"];
+      if (!candidateKey || !UUID_PATTERN.test(candidateKey)) {
+        throw new Error("UI KMA create Idempotency-Key 계약 불일치");
+      }
+      const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
+      await assertExactOwnedTargetsAtServer(
+        page,
+        state,
+        expectedTargets,
+        kmaExternalSystem(expectedBody),
+      );
+      await journalExactUiKmaCreateRequest(
+        state,
+        body,
+        candidateKey,
+        expectedBody,
+        expectedTargets,
+      );
+      idempotencyKey = candidateKey;
+      journaledBody = body;
+      await route.continue();
+      resolveRouteHandled();
+    } catch (error) {
+      rejectRouteHandled(error);
+      await route.abort("failed").catch(() => undefined);
+    } finally {
+      resolveHandlerSettled();
     }
-    if (
-      request.method() !== "POST" ||
-      pathname !== "/api/proxy/v1/ops/pipeline/requests"
-    ) {
-      await route.fallback();
-      return;
-    }
-    const candidateKey = request.headers()["idempotency-key"];
-    if (!candidateKey) {
-      await route.abort("failed");
-      return;
-    }
-    const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
-    await journalPendingRequest(state, body, candidateKey);
-    idempotencyKey = candidateKey;
-    journaledBody = body;
-    await route.continue();
   };
 
-  await page.route("**/api/proxy/v1/ops/pipeline/requests", routeHandler);
+  await page.route(exactUrl, routeHandler);
   const responsePromise = page.waitForResponse((candidate) => {
-    try {
-      return (
-        candidate.request().method() === "POST" &&
-        new URL(candidate.url()).pathname ===
-          "/api/proxy/v1/ops/pipeline/requests"
-      );
-    } catch {
-      return false;
-    }
+    return (
+      candidate.request().method() === "POST" && candidate.url() === exactUrl
+    );
   });
   let response: Response | null = null;
+  let primaryError: unknown;
   try {
     await submit();
-    response = await responsePromise.catch(() => null);
+    await boundedWait(routeHandled, "UI KMA create route barrier");
+    response = await boundedWait(
+      responsePromise,
+      "UI KMA create response",
+    ).catch(() => null);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await page.unroute("**/api/proxy/v1/ops/pipeline/requests", routeHandler);
+    void responsePromise.catch(() => undefined);
+    const teardownErrors: unknown[] = [];
+    if (routeSeen) {
+      await boundedWait(
+        handlerSettled,
+        "UI KMA create route handler settlement",
+      ).catch((error: unknown) => teardownErrors.push(error));
+    }
+    await page
+      .unroute(exactUrl, routeHandler)
+      .catch((error: unknown) => teardownErrors.push(error));
+    if (teardownErrors.length > 0) {
+      throw new AggregateError(
+        primaryError === undefined
+          ? teardownErrors
+          : [primaryError, ...teardownErrors],
+        "UI KMA create primary/route cleanup 실패",
+      );
+    }
   }
   if (!idempotencyKey || !journaledBody) {
     throw new Error("UI KMA create durable journal identity가 없습니다");
@@ -812,22 +1511,135 @@ export async function runTrackedRequestNowFromUi(
   state: CleanupState,
   requestId: string,
   jobId: string,
+  syncScope: string,
   submit: () => Promise<void>,
 ): Promise<FeatureUpdateRequestMutationResponse> {
-  const responsePromise = page.waitForResponse((candidate) => {
-    try {
-      return (
-        candidate.request().method() === "POST" &&
-        new URL(candidate.url()).pathname ===
-          `/api/proxy/v1/ops/pipeline/requests/${requestId}/run-now`
-      );
-    } catch {
-      return false;
-    }
+  const exactPath = `/api/proxy/v1/ops/pipeline/requests/${encodeURIComponent(
+    requestId,
+  )}/run-now`;
+  const exactUrl = new URL(exactPath, expectedUiOrigin()).href;
+  let routeSeen = false;
+  let resolveBarrier!: () => void;
+  let rejectBarrier!: (error: unknown) => void;
+  const barrier = new Promise<void>((resolve, reject) => {
+    resolveBarrier = resolve;
+    rejectBarrier = reject;
   });
-  await journalRunNowMutation(state, requestId, "pending");
-  await submit();
-  const response = await responsePromise;
+  void barrier.catch(() => undefined);
+  let resolveHandlerSettled!: () => void;
+  const handlerSettled = new Promise<void>((resolve) => {
+    resolveHandlerSettled = resolve;
+  });
+  const routeHandler = async (route: Route): Promise<void> => {
+    routeSeen = true;
+    const request = route.request();
+    try {
+      if (
+        request.method() !== "POST" ||
+        request.url() !== exactUrl ||
+        request.postData() !== null
+      ) {
+        throw new Error("run-now exact origin/path/method/body 계약 불일치");
+      }
+      const detailResponse = await page.request.get(
+        new URL(
+          `/api/proxy/v1/ops/pipeline/executions/update_request/${encodeURIComponent(
+            requestId,
+          )}`,
+          expectedUiOrigin(),
+        ).href,
+        { headers: { Accept: "application/json" }, timeout: BROWSER_FETCH_TIMEOUT_MS },
+      );
+      const detail = detailResponse.ok()
+        ? ((await detailResponse.json()) as PipelineExecutionDetailResponse)
+        : null;
+      const updateRequest = detail?.data.update_request;
+      const scope = updateRequest?.scope;
+      if (
+        detailResponse.status() !== 200 ||
+        detail === null ||
+        detail.data.execution.kind !== "update_request" ||
+        detail.data.execution.id !== requestId ||
+        detail.data.execution.status !== "running" ||
+        detail.data.execution.job_id !== jobId ||
+        updateRequest == null ||
+        updateRequest.request_id !== requestId ||
+        updateRequest.job_id !== jobId ||
+        updateRequest.status !== "running" ||
+        updateRequest.effective_sync_scope !== syncScope ||
+        scope?.type !== "provider_dataset" ||
+        scope.provider !== KMA_PROVIDER ||
+        scope.dataset_key !== KMA_DATASET_KEY ||
+        scope.sync_scope !== syncScope ||
+        detail.data.cancellation !== null ||
+        detail.data.root.cancellation !== null
+      ) {
+        throw new Error(
+          "run-now mutation 직전 exact running KMA ownership barrier 실패",
+        );
+      }
+      const externalSystemPrefix = "external_system:";
+      const externalSystem = syncScope.startsWith(externalSystemPrefix)
+        ? syncScope.slice(externalSystemPrefix.length)
+        : "";
+      if (!externalSystem) {
+        throw new Error("run-now external_system scope identity가 없습니다");
+      }
+      const expectedTargets = state.targets.filter(
+        (target) =>
+          target.externalSystem === externalSystem &&
+          state.targetStatuses.get(targetJournalKey(target)) === "active",
+      );
+      await assertExactOwnedTargetsAtServer(
+        page,
+        state,
+        expectedTargets,
+        externalSystem,
+      );
+      await journalRunNowMutation(state, requestId, "pending");
+      await route.continue();
+      resolveBarrier();
+    } catch (error) {
+      rejectBarrier(error);
+      await route.abort("failed").catch(() => undefined);
+    } finally {
+      resolveHandlerSettled();
+    }
+  };
+  await page.route(exactUrl, routeHandler);
+  const responsePromise = page.waitForResponse((candidate) => {
+    return candidate.request().method() === "POST" && candidate.url() === exactUrl;
+  });
+  let response: Response;
+  let primaryError: unknown;
+  try {
+    await submit();
+    await boundedWait(barrier, "UI KMA run-now ownership barrier");
+    response = await boundedWait(responsePromise, "UI KMA run-now response");
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    void responsePromise.catch(() => undefined);
+    const teardownErrors: unknown[] = [];
+    if (routeSeen) {
+      await boundedWait(
+        handlerSettled,
+        "UI KMA run-now route handler settlement",
+      ).catch((error: unknown) => teardownErrors.push(error));
+    }
+    await page
+      .unroute(exactUrl, routeHandler)
+      .catch((error: unknown) => teardownErrors.push(error));
+    if (teardownErrors.length > 0) {
+      throw new AggregateError(
+        primaryError === undefined
+          ? teardownErrors
+          : [primaryError, ...teardownErrors],
+        "UI KMA run-now primary/route cleanup 실패",
+      );
+    }
+  }
   let body: FeatureUpdateRequestMutationResponse | null = null;
   if (response.status() === 200) {
     try {
@@ -852,13 +1664,42 @@ export async function runRequestNow(
   requestId: string,
   state?: CleanupState,
 ): Promise<BrowserFetchResult<FeatureUpdateRequestMutationResponse>> {
-  if (state) await writeDurableJournal(state, "run_now_pending");
+  if (!state) {
+    throw new Error("run-now direct dispatch에는 cleanup ownership state가 필요합니다");
+  }
+  const detail = requireBody(await getRequestDetail(page, requestId), 200);
+  const updateRequest = detail.data.update_request;
+  const scope = updateRequest?.scope;
+  if (
+    detail.data.execution.id !== requestId ||
+    updateRequest === null ||
+    updateRequest.request_id !== requestId ||
+    scope?.type !== "provider_dataset" ||
+    scope.provider !== KMA_PROVIDER ||
+    scope.dataset_key !== KMA_DATASET_KEY ||
+    !scope.sync_scope?.startsWith("external_system:")
+  ) {
+    throw new Error("run-now direct KMA request identity barrier 실패");
+  }
+  const externalSystem = scope.sync_scope.slice("external_system:".length);
+  const expectedTargets = state.targets.filter(
+    (target) =>
+      target.externalSystem === externalSystem &&
+      state.targetStatuses.get(targetJournalKey(target)) === "active",
+  );
+  await assertExactOwnedTargetsAtServer(
+    page,
+    state,
+    expectedTargets,
+    externalSystem,
+  );
+  await writeDurableJournal(state, "run_now_pending");
   const result = await browserFetch<FeatureUpdateRequestMutationResponse>(
     page,
     `${PIPELINE_REQUESTS_PATH}/${encodeURIComponent(requestId)}/run-now`,
     { method: "POST", body: {} },
   );
-  if (state) await writeDurableJournal(state, "run_now_observed");
+  await writeDurableJournal(state, "run_now_observed");
   return result;
 }
 
@@ -1003,6 +1844,11 @@ export function createCleanupState(
   runId: string,
 ): CleanupState {
   return {
+    allExternalSystems: new Set(),
+    allIdempotencyEntries: new Map(),
+    allRequestIds: new Set(),
+    allRequestTerminalStatuses: new Map(),
+    allTargetRefs: new Map(),
     cleanupResult: null,
     completedScenarios: new Set(),
     externalSystems: new Set(),
@@ -1015,22 +1861,320 @@ export function createCleanupState(
     scopeStateCount: 0,
     stateFile: cleanupStateFile(),
     targetStatuses: new Map(),
+    targetHistory: [],
     targets: [],
   };
 }
 
-export function trackTarget(state: CleanupState, target: TargetRef): void {
+function preserveTargetHistory(
+  state: CleanupState,
+  target: TargetJournalRef,
+): void {
+  if (target.targetId === null) return;
+  const identity = `${targetJournalKey(target)}\u0000${target.targetId}`;
   if (
-    !state.targets.some(
+    state.targetHistory.some(
       (item) =>
-        item.externalSystem === target.externalSystem &&
-        item.targetKey === target.targetKey,
+        `${targetJournalKey(item)}\u0000${item.targetId}` === identity,
     )
   ) {
+    return;
+  }
+  state.targetHistory.push({ ...target });
+}
+
+function trackOwnedTarget(state: CleanupState, target: OwnedTarget): void {
+  const index = state.targets.findIndex(
+    (item) =>
+      item.externalSystem === target.externalSystem &&
+      item.targetKey === target.targetKey,
+  );
+  if (index >= 0) {
+    const existing = state.targets[index];
+    if (existing && existing.targetId !== target.targetId) {
+      preserveTargetHistory(
+        state,
+        targetRefWithStatus(
+          existing,
+          state.targetStatuses.get(targetJournalKey(existing)) ?? "unknown",
+        ),
+      );
+    }
+    state.targets[index] = target;
+  } else {
     state.targets.push(target);
   }
   state.externalSystems.add(target.externalSystem);
-  state.targetStatuses.set(targetJournalKey(target), "pending");
+  state.allExternalSystems.add(target.externalSystem);
+  setTargetStatus(state, target, "active");
+}
+
+function setTargetStatus(
+  state: CleanupState,
+  target: OwnedTarget,
+  status: string,
+): void {
+  const key = targetJournalKey(target);
+  state.targetStatuses.set(key, status);
+  state.allTargetRefs.set(key, targetRefWithStatus(target, status));
+}
+
+function exactJson(left: unknown, right: unknown): boolean {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    const record = asRecord(value);
+    if (record === null) return value;
+    return Object.fromEntries(
+      Object.entries(record)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  };
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
+function assertOwnedTargetRecord(
+  response: PoiCacheTargetResponse,
+  target: TargetRef,
+  body: PoiCacheTargetUpsertRequest,
+  expectedTargetId?: string,
+): string {
+  const record = response.data;
+  if (
+    !UUID_PATTERN.test(record.target_id) ||
+    (expectedTargetId !== undefined && record.target_id !== expectedTargetId) ||
+    record.external_system !== target.externalSystem ||
+    record.target_key !== target.targetKey ||
+    record.deleted_at !== null && record.deleted_at !== undefined ||
+    record.coord.lon !== body.coord.lon ||
+    record.coord.lat !== body.coord.lat ||
+    record.coord_precision_digits !== body.coord_precision_digits ||
+    record.radius_km !== body.radius_km ||
+    record.name !== (body.name ?? null) ||
+    record.scope_mode !== body.scope_mode ||
+    record.update_enabled !== body.update_enabled ||
+    record.refresh_policy !== body.refresh_policy ||
+    !exactJson(record.provider_overrides, body.provider_overrides ?? {}) ||
+    !exactJson(record.metadata, body.metadata ?? {})
+  ) {
+    throw new Error("POI target ownership/body identity 불일치 (values redacted)");
+  }
+  return record.target_id;
+}
+
+function requireOwnedTarget(
+  state: CleanupState,
+  target: TargetRef,
+): OwnedTarget {
+  const owned = state.targets.find(
+    (item) =>
+      item.externalSystem === target.externalSystem &&
+      item.targetKey === target.targetKey,
+  );
+  if (!owned) {
+    throw new Error("소유권이 증명되지 않은 POI target 조작을 차단했습니다");
+  }
+  return owned;
+}
+
+function requireResponseEntityIdentity(
+  result: BrowserFetchResult<PoiCacheTargetResponse>,
+  response: PoiCacheTargetResponse,
+  expectedTargetId: string,
+): { entityTag: string; lockVersion: number } {
+  const entityTag = response.data.entity_tag;
+  if (result.entityTag !== entityTag) {
+    throw new Error("POI target ETag header/body 불일치");
+  }
+  return {
+    entityTag,
+    lockVersion: parseStrongEntityTag(entityTag, expectedTargetId),
+  };
+}
+
+async function verifyOwnedTargetStillExact(
+  page: Page,
+  owned: OwnedTarget,
+): Promise<
+  | { status: "active"; entityTag: string; lockVersion: number }
+  | { status: "deleted" }
+> {
+  const result = await getPoiTarget(
+    page,
+    owned.externalSystem,
+    owned.targetKey,
+  );
+  if (result.status === 404) return { status: "deleted" };
+  const current = requireBody(result, 200);
+  assertOwnedTargetRecord(current, owned, owned.body, owned.targetId);
+  const identity = requireResponseEntityIdentity(
+    result,
+    current,
+    owned.targetId,
+  );
+  if (
+    identity.entityTag !== owned.entityTag ||
+    identity.lockVersion !== owned.lockVersion
+  ) {
+    throw new Error(
+      "POI target가 소유권 획득 뒤 변경되어 삭제를 차단했습니다",
+    );
+  }
+  return { status: "active", ...identity };
+}
+
+export async function assertExactOwnedTargetsAtServer(
+  page: Page,
+  state: CleanupState,
+  expectedTargets: readonly TargetRef[],
+  expectedExternalSystem?: string,
+): Promise<void> {
+  assertBootstrappedPage(page);
+  const ownedTargets = expectedTargets.map((target) => {
+    const owned = requireOwnedTarget(state, target);
+    if (state.targetStatuses.get(targetJournalKey(owned)) !== "active") {
+      throw new Error("UI KMA create expected target가 active owned 상태가 아닙니다");
+    }
+    return owned;
+  });
+  for (let offset = 0; offset < ownedTargets.length; offset += 25) {
+    const batch = ownedTargets.slice(offset, offset + 25);
+    await Promise.all(
+      batch.map(async (owned) => {
+        const response = await page.request.get(
+          new URL(
+            `/api/proxy${targetPath(owned.externalSystem, owned.targetKey)}`,
+            expectedUiOrigin(),
+          ).href,
+          {
+            headers: { Accept: "application/json" },
+            timeout: BROWSER_FETCH_TIMEOUT_MS,
+          },
+        );
+        if (response.status() !== 200) {
+          throw new Error(
+            `UI KMA create target server ownership barrier 실패(status=${response.status()})`,
+          );
+        }
+        const body = (await response.json()) as PoiCacheTargetResponse;
+        assertOwnedTargetRecord(body, owned, owned.body, owned.targetId);
+        const entityTag = response.headers()["etag"] ?? null;
+        if (
+          entityTag !== owned.entityTag ||
+          parseStrongEntityTag(entityTag ?? "", owned.targetId) !==
+            owned.lockVersion
+        ) {
+          throw new Error("UI KMA create target GET strong ETag 불일치");
+        }
+      }),
+    );
+  }
+  if (
+    expectedExternalSystem !== undefined &&
+    (expectedExternalSystem.length === 0 ||
+      ownedTargets.some(
+        (target) => target.externalSystem !== expectedExternalSystem,
+      ))
+  ) {
+    throw new Error("UI KMA create expected external_system 집합 불일치");
+  }
+  const externalSystems = [
+    ...new Set([
+      ...ownedTargets.map((target) => target.externalSystem),
+      ...(expectedExternalSystem === undefined
+        ? []
+        : [expectedExternalSystem]),
+    ]),
+  ].sort();
+  for (const externalSystem of externalSystems) {
+    const expected = ownedTargets
+      .filter((target) => target.externalSystem === externalSystem)
+      .map((target) => ({
+        entityTag: target.entityTag,
+        targetId: target.targetId,
+        targetKey: target.targetKey,
+      }))
+      .sort((left, right) => left.targetKey.localeCompare(right.targetKey));
+    if (expected.length > OWNED_TARGET_SET_LIMIT) {
+      throw new Error("UI KMA create owned target set limit(501)을 초과했습니다");
+    }
+    const observed: Array<{
+      entityTag: string;
+      targetId: string;
+      targetKey: string;
+    }> = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    let completed = false;
+    for (let pageIndex = 0; pageIndex < OWNED_TARGET_PAGE_LIMIT; pageIndex += 1) {
+      const query = new URLSearchParams({
+        external_system: externalSystem,
+        include_deleted: "false",
+        page_size: String(OWNED_TARGET_PAGE_SIZE),
+      });
+      if (cursor !== null) query.set("cursor", cursor);
+      const response = await page.request.get(
+        new URL(
+          `/api/proxy${POI_TARGETS_PATH}?${query.toString()}`,
+          expectedUiOrigin(),
+        ).href,
+        {
+          headers: { Accept: "application/json" },
+          timeout: BROWSER_FETCH_TIMEOUT_MS,
+        },
+      );
+      if (response.status() !== 200) {
+        throw new Error(
+          `UI KMA create external_system full-list barrier 실패(status=${response.status()})`,
+        );
+      }
+      const envelope = (await response.json()) as PoiCacheTargetListResponse;
+      const items = envelope.data.items;
+      if (
+        items.length > OWNED_TARGET_PAGE_SIZE ||
+        (cursor !== null && items.length === 0)
+      ) {
+        throw new Error("UI KMA create target cursor page 크기 계약 불일치");
+      }
+      for (const item of items) {
+        if (item.external_system !== externalSystem) {
+          throw new Error("UI KMA create target cursor page scope 누출");
+        }
+        observed.push({
+          entityTag: item.entity_tag,
+          targetId: item.target_id,
+          targetKey: item.target_key,
+        });
+      }
+      if (observed.length > OWNED_TARGET_SET_LIMIT) {
+        throw new Error("UI KMA create server active target set limit(501) 초과");
+      }
+      const nextCursor = envelope.meta.page?.next_cursor;
+      if (nextCursor === null) {
+        completed = true;
+        break;
+      }
+      if (
+        typeof nextCursor !== "string" ||
+        nextCursor.length === 0 ||
+        nextCursor === cursor ||
+        seenCursors.has(nextCursor)
+      ) {
+        throw new Error("UI KMA create target cursor 반복/형식 계약 불일치");
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+    if (!completed) {
+      throw new Error("UI KMA create target cursor page limit(2) 초과");
+    }
+    observed.sort((left, right) => left.targetKey.localeCompare(right.targetKey));
+    if (!exactJson(observed, expected)) {
+      throw new Error(
+        "UI KMA create owned external_system key/UUID/entity_tag 전체 집합 불일치",
+      );
+    }
+  }
 }
 
 export async function journalPendingRequest(
@@ -1040,7 +2184,7 @@ export async function journalPendingRequest(
 ): Promise<void> {
   assertKmaOnlyPlan(body);
   const existing = state.idempotencyEntries.get(idempotencyKey);
-  if (existing && JSON.stringify(existing.body) !== JSON.stringify(body)) {
+  if (existing && !exactJson(existing.body, body)) {
     throw new Error("동일 Idempotency-Key의 KMA request body가 변경되었습니다");
   }
   if (existing) {
@@ -1053,6 +2197,61 @@ export async function journalPendingRequest(
     });
   }
   await writeDurableJournal(state, "request_pending");
+}
+
+export async function journalExactUiKmaCreateRequest(
+  state: CleanupState,
+  actualBody: FeatureUpdateRequestCreateRequest,
+  idempotencyKey: string,
+  expectedBody: FeatureUpdateRequestCreateRequest,
+  expectedTargets: readonly TargetRef[],
+): Promise<void> {
+  if (!UUID_PATTERN.test(idempotencyKey)) {
+    throw new Error("UI KMA create Idempotency-Key UUID 계약 불일치");
+  }
+  assertKmaOnlyPlan(actualBody);
+  assertKmaOnlyPlan(expectedBody);
+  if (!exactJson(actualBody, expectedBody)) {
+    throw new Error("UI KMA create body가 exact expected body와 다릅니다");
+  }
+  const syncScope =
+    "sync_scope" in expectedBody.scope
+      ? expectedBody.scope.sync_scope
+      : null;
+  const expectedExternalSystem = syncScope?.startsWith("external_system:")
+    ? syncScope.slice("external_system:".length)
+    : "";
+  if (!expectedExternalSystem || expectedTargets.length === 0) {
+    throw new Error("UI KMA create expected target scope가 비어 있습니다");
+  }
+  const expectedKeys = expectedTargets
+    .map(targetJournalKey)
+    .sort();
+  if (new Set(expectedKeys).size !== expectedKeys.length) {
+    throw new Error("UI KMA create expected target identity가 중복되었습니다");
+  }
+  const activeOwned = state.targets.filter(
+    (target) => state.targetStatuses.get(targetJournalKey(target)) === "active",
+  );
+  const activeKeys = activeOwned.map(targetJournalKey).sort();
+  if (!exactJson(activeKeys, expectedKeys)) {
+    throw new Error("UI KMA create active owned target 집합이 exact scope와 다릅니다");
+  }
+  for (const target of activeOwned) {
+    if (
+      target.externalSystem !== expectedExternalSystem ||
+      !UUID_PATTERN.test(target.targetId) ||
+      !Number.isFinite(target.body.coord.lon) ||
+      !Number.isFinite(target.body.coord.lat) ||
+      !Number.isFinite(target.body.radius_km) ||
+      target.body.radius_km <= 0
+    ) {
+      throw new Error(
+        "UI KMA create target key/UUID/coord/radius/scope ownership 불일치",
+      );
+    }
+  }
+  await journalPendingRequest(state, actualBody, idempotencyKey);
 }
 
 export async function trackRequestResult(
@@ -1080,16 +2279,126 @@ export async function putTrackedTarget(
   target: TargetRef,
   body: PoiCacheTargetUpsertRequest,
 ): Promise<PoiCacheTargetResponse> {
-  trackTarget(state, target);
-  await writeDurableJournal(state, "target_pending");
-  const result = await putPoiTarget(
+  const before = await getPoiTarget(page, target.externalSystem, target.targetKey);
+  if (before.status !== 404) {
+    throw new Error(
+      `POI target natural key가 이미 존재해 소유권 획득을 차단했습니다(status=${before.status})`,
+    );
+  }
+  const key = targetJournalKey(target);
+  const previousTarget = state.allTargetRefs.get(key);
+  if (previousTarget?.targetId !== null && previousTarget?.targetId !== undefined) {
+    if (previousTarget.status !== "deleted") {
+      throw new Error(
+        "POI target recreate는 삭제가 증명된 이전 identity만 교체할 수 있습니다",
+      );
+    }
+    preserveTargetHistory(state, previousTarget);
+  }
+  state.externalSystems.add(target.externalSystem);
+  state.allExternalSystems.add(target.externalSystem);
+  state.allTargetRefs.set(key, {
+    body,
+    entityTag: null,
+    externalSystem: target.externalSystem,
+    lockVersion: null,
+    status: "put_intent",
+    targetId: null,
+    targetKey: target.targetKey,
+  });
+  await writeDurableJournal(state, "target_put_intent");
+  let result: BrowserFetchResult<PoiCacheTargetResponse>;
+  try {
+    result = await putPoiTarget(
+      page,
+      target.externalSystem,
+      target.targetKey,
+      body,
+    );
+  } catch {
+    state.allTargetRefs.set(key, {
+      ...state.allTargetRefs.get(key)!,
+      status: "put_response_lost",
+    });
+    await writeDurableJournal(state, "target_put_response_lost");
+    result = await getPoiTarget(page, target.externalSystem, target.targetKey);
+    if (result.status === 404) {
+      state.allTargetRefs.set(key, {
+        ...state.allTargetRefs.get(key)!,
+        status: "put_replay_pending",
+      });
+      await writeDurableJournal(state, "target_put_replay_pending");
+      try {
+        result = await putPoiTarget(
+          page,
+          target.externalSystem,
+          target.targetKey,
+          body,
+        );
+      } catch {
+        state.allTargetRefs.set(key, {
+          ...state.allTargetRefs.get(key)!,
+          status: "put_response_lost",
+        });
+        await writeDurableJournal(state, "target_put_replay_response_lost");
+        result = await getPoiTarget(
+          page,
+          target.externalSystem,
+          target.targetKey,
+        );
+      }
+    }
+  }
+  const response = requireBody(result, 200);
+  const targetId = assertOwnedTargetRecord(response, target, body);
+  const identity = requireResponseEntityIdentity(result, response, targetId);
+  if (
+    previousTarget?.targetId !== null &&
+    previousTarget?.targetId !== undefined &&
+    (targetId === previousTarget.targetId ||
+      identity.entityTag === previousTarget.entityTag ||
+      identity.lockVersion !== 1 ||
+      !state.targetHistory.some(
+        (item) =>
+          targetJournalKey(item) === key &&
+          item.targetId === previousTarget.targetId &&
+          item.status === "deleted",
+      ))
+  ) {
+    throw new Error(
+      "POI target recreate의 새 UUID/strong ETag/version/history 계약 불일치",
+    );
+  }
+  const owned: OwnedTarget = {
+    ...target,
+    body,
+    entityTag: identity.entityTag,
+    lockVersion: identity.lockVersion,
+    targetId,
+  };
+  trackOwnedTarget(state, owned);
+  await writeDurableJournal(state, "target_put_observed");
+  if (response.data.created_at !== response.data.updated_at) {
+    throw new Error("POI target가 신규 insert가 아니어서 소유권 획득을 차단했습니다");
+  }
+  const exactResult = await getPoiTarget(
     page,
     target.externalSystem,
     target.targetKey,
-    body,
   );
-  const response = requireBody(result, 200);
-  state.targetStatuses.set(targetJournalKey(target), "active");
+  const exactRead = requireBody(exactResult, 200);
+  assertOwnedTargetRecord(exactRead, target, body, targetId);
+  const exactIdentity = requireResponseEntityIdentity(
+    exactResult,
+    exactRead,
+    targetId,
+  );
+  if (
+    exactIdentity.entityTag !== owned.entityTag ||
+    exactIdentity.lockVersion !== owned.lockVersion
+  ) {
+    throw new Error("POI target PUT 직후 GET version이 변경되었습니다");
+  }
   await writeDurableJournal(state, "target_active");
   return response;
 }
@@ -1099,16 +2408,44 @@ export async function deleteTrackedTarget(
   state: CleanupState,
   target: TargetRef,
 ): Promise<BrowserFetchResult<PoiCacheTargetResponse>> {
-  trackTarget(state, target);
-  state.targetStatuses.set(targetJournalKey(target), "delete_pending");
+  const owned = requireOwnedTarget(state, target);
+  const before = await verifyOwnedTargetStillExact(page, owned);
+  if (before.status === "deleted") {
+    setTargetStatus(state, owned, "deleted");
+    await writeDurableJournal(state, "target_delete_observed");
+    return { body: null, entityTag: null, status: 404 };
+  }
+  setTargetStatus(state, owned, "delete_pending");
   await writeDurableJournal(state, "target_delete_pending");
   const result = await deletePoiTarget(
     page,
     target.externalSystem,
     target.targetKey,
+    before.entityTag,
   );
-  if ([200, 404].includes(result.status)) {
-    state.targetStatuses.set(targetJournalKey(target), "deleted");
+  if (result.status === 200 && result.body !== null) {
+    if (result.body.data.target_id !== owned.targetId) {
+      throw new Error("POI target delete 응답 UUID ownership 불일치");
+    }
+    const deletedIdentity = requireResponseEntityIdentity(
+      result,
+      result.body,
+      owned.targetId,
+    );
+    if (deletedIdentity.lockVersion <= before.lockVersion) {
+      throw new Error("POI target delete lock version이 전진하지 않았습니다");
+    }
+    owned.entityTag = deletedIdentity.entityTag;
+    owned.lockVersion = deletedIdentity.lockVersion;
+    setTargetStatus(state, owned, "deleted");
+  } else if (result.status === 404) {
+    setTargetStatus(state, owned, "deleted");
+  } else if (result.status === 412) {
+    setTargetStatus(state, owned, "delete_conflict");
+    await writeDurableJournal(state, "target_delete_conflict");
+    throw new Error(
+      "POI target DELETE가 412를 반환해 concurrent update 삭제를 차단했습니다",
+    );
   }
   await writeDurableJournal(state, "target_delete_observed");
   return result;
@@ -1209,6 +2546,64 @@ async function targetCount(
     : null;
 }
 
+async function recoverUnresolvedTargetIntents(
+  page: Page,
+  state: CleanupState,
+): Promise<{ complete: boolean; issues: CleanupIssue[] }> {
+  const issues: CleanupIssue[] = [];
+  const unresolved = [...state.allTargetRefs.values()].filter(
+    (target) =>
+      state.externalSystems.has(target.externalSystem) &&
+      ["put_intent", "put_replay_pending", "put_response_lost"].includes(
+        target.status,
+      ),
+  );
+  for (const intent of unresolved) {
+    try {
+      const result = await getPoiTarget(
+        page,
+        intent.externalSystem,
+        intent.targetKey,
+      );
+      if (result.status === 404) {
+        state.allTargetRefs.set(targetJournalKey(intent), {
+          ...intent,
+          status: "absent_unowned",
+        });
+        await writeDurableJournal(state, "target_intent_absent_unowned");
+        issues.push({
+          http_status: 404,
+          kind: "target_intent_recovery",
+          resource: `${intent.externalSystem}/${intent.targetKey}`,
+        });
+        continue;
+      }
+      const response = requireBody(result, 200);
+      const targetId = assertOwnedTargetRecord(response, intent, intent.body);
+      const identity = requireResponseEntityIdentity(result, response, targetId);
+      if (response.data.created_at !== response.data.updated_at) {
+        throw new Error(
+          "response-lost POI target가 신규 insert identity가 아닙니다",
+        );
+      }
+      trackOwnedTarget(state, {
+        ...intent,
+        body: intent.body,
+        entityTag: identity.entityTag,
+        lockVersion: identity.lockVersion,
+        targetId,
+      });
+      await writeDurableJournal(state, "target_intent_rediscovered");
+    } catch {
+      issues.push({
+        kind: "target_intent_recovery",
+        resource: `${intent.externalSystem}/${intent.targetKey}`,
+      });
+    }
+  }
+  return { complete: issues.length === 0, issues };
+}
+
 async function attachManifest(
   testInfo: TestInfo,
   manifest: CleanupManifest,
@@ -1229,6 +2624,9 @@ async function cleanupResources(
   const statuses: Record<string, string> = {};
   let observedEventRows = 0;
   let exactScopeDiscoveryComplete = true;
+  const targetRecovery = await recoverUnresolvedTargetIntents(page, state);
+  issues.push(...targetRecovery.issues);
+  const exactTargetDiscoveryComplete = targetRecovery.complete;
 
   // 응답 유실 뒤 서버에는 request가 생긴 경우도 target보다 먼저 회수한다.
   const activeDiscoveries = await Promise.allSettled(
@@ -1355,25 +2753,65 @@ async function cleanupResources(
   await writeDurableJournal(state, "cleanup_terminal_checked");
 
   // 하나라도 terminal을 증명하지 못하면 어떤 target도 삭제하지 않는다.
-  const canDeleteTargets = everyRequestTerminal && exactScopeDiscoveryComplete;
+  const canDeleteTargets =
+    everyRequestTerminal &&
+    exactScopeDiscoveryComplete &&
+    exactTargetDiscoveryComplete;
   if (canDeleteTargets) {
     const targets = [...state.targets].reverse();
     const batchSize = 3;
     for (let offset = 0; offset < targets.length; offset += batchSize) {
       const batch = targets.slice(offset, offset + batchSize);
       for (const target of batch) {
-        state.targetStatuses.set(targetJournalKey(target), "delete_pending");
+        setTargetStatus(state, target, "ownership_recheck_pending");
       }
-      await writeDurableJournal(state, "cleanup_target_batch_pending");
+      await writeDurableJournal(state, "cleanup_target_ownership_recheck");
       const deletions = await Promise.allSettled(
-        batch.map(async (target) => ({
-          result: await deletePoiTarget(
+        batch.map(async (target) => {
+          const ownership = await verifyOwnedTargetStillExact(page, target);
+          if (ownership.status === "deleted") {
+            return {
+              result: { body: null, entityTag: null, status: 404 },
+              target,
+            };
+          }
+          setTargetStatus(state, target, "delete_pending");
+          const result = await deletePoiTarget(
             page,
             target.externalSystem,
             target.targetKey,
-          ),
-          target,
-        })),
+            ownership.entityTag,
+          );
+          if (
+            result.status === 200 &&
+            result.body !== null &&
+            result.body.data.target_id !== target.targetId
+          ) {
+            throw new Error("cleanup target delete UUID ownership 불일치");
+          }
+          if (result.status === 200 && result.body !== null) {
+            const deletedIdentity = requireResponseEntityIdentity(
+              result,
+              result.body,
+              target.targetId,
+            );
+            if (deletedIdentity.lockVersion <= ownership.lockVersion) {
+              throw new Error(
+                "cleanup target delete lock version이 전진하지 않았습니다",
+              );
+            }
+            target.entityTag = deletedIdentity.entityTag;
+            target.lockVersion = deletedIdentity.lockVersion;
+          }
+          if (result.status === 412) {
+            setTargetStatus(state, target, "delete_conflict");
+            await writeDurableJournal(state, "cleanup_target_delete_conflict");
+            throw new Error(
+              "cleanup target DELETE가 412를 반환해 concurrent update 삭제를 차단했습니다",
+            );
+          }
+          return { result, target };
+        }),
       );
       for (const settled of deletions) {
         if (settled.status === "rejected") {
@@ -1388,7 +2826,7 @@ async function cleanupResources(
             resource: `${target.externalSystem}/${target.targetKey}`,
           });
         } else {
-          state.targetStatuses.set(targetJournalKey(target), "deleted");
+          setTargetStatus(state, target, "deleted");
         }
       }
       await writeDurableJournal(state, "cleanup_target_batch_deleted");
@@ -1444,7 +2882,19 @@ async function cleanupResources(
     request_terminal_statuses: statuses,
     run_id: state.runId,
     scenario: state.scenario,
-    target_refs: [...state.targets],
+    target_refs: state.targets.map(({
+      entityTag,
+      externalSystem,
+      lockVersion,
+      targetId,
+      targetKey,
+    }) => ({
+      entityTag,
+      externalSystem,
+      lockVersion,
+      targetId,
+      targetKey,
+    })),
     version: 1,
   };
   await writeDurableJournal(
@@ -1501,7 +2951,15 @@ export async function withC7Cleanup(
         request_terminal_statuses: {},
         run_id: state.runId,
         scenario: state.scenario,
-        target_refs: [...state.targets],
+        target_refs: state.targets.map(
+          ({ entityTag, externalSystem, lockVersion, targetId, targetKey }) => ({
+            entityTag,
+            externalSystem,
+            lockVersion,
+            targetId,
+            targetKey,
+          }),
+        ),
         version: 1,
       };
       await writeDurableJournal(state, "cleanup_boundary_failed").catch(

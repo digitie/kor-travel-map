@@ -268,6 +268,9 @@ export function PipelineEventsPanel({
           emptyMessage="조건에 맞는 이벤트가 없습니다."
           getRowId={(row) => row.event_id}
           isLoading={events.isLoading}
+          rowIdentity={(row) =>
+            JSON.stringify([row.occurred_at, row.event_id])
+          }
         />
 
         <CursorPager

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   expect,
   test,
   type Page,
+  type Request,
   type Response,
   type Route,
   type TestInfo,
@@ -26,18 +27,6 @@ type PipelineScheduleCommandResponse =
   components["schemas"]["PipelineScheduleCommandResponse"];
 
 type StableScheduleStatus = "RUNNING" | "STOPPED";
-type ScheduleTickIdentity = {
-  cursor: string | null;
-  endTimestamp: number | null;
-  errorClass: string | null;
-  errorMessage: string | null;
-  runIds: string[];
-  runKeys: string[];
-  skipReason: string | null;
-  status: string;
-  tickId: string;
-  timestamp: number;
-};
 type ScheduleSnapshot = {
   canReset: boolean;
   defaultCronSchedule: string;
@@ -47,7 +36,6 @@ type ScheduleSnapshot = {
   overrideCronSchedule: string | null;
   overrideEffective: boolean | null;
   overrideSaved: boolean;
-  recentTicks: ScheduleTickIdentity[];
   repositoryLocationName: string;
   repositoryName: string;
   selectorId: string;
@@ -99,6 +87,7 @@ const SAFE_SCHEDULE =
 const SCHEDULES_PATH = "/v1/ops/pipeline/schedules";
 const TEST_TIMEOUT = 12 * 60 * 1000;
 const STATE_WAIT_TIMEOUT = 2 * 60 * 1000;
+const UI_MUTATION_TIMEOUT = 30_000;
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
@@ -206,23 +195,6 @@ function requiredString(
   return value;
 }
 
-function tickIdentity(
-  tick: components["schemas"]["DagsterInstigationTick"],
-): ScheduleTickIdentity {
-  return {
-    cursor: tick.cursor ?? null,
-    endTimestamp: tick.end_timestamp ?? null,
-    errorClass: tick.error?.class_name ?? null,
-    errorMessage: tick.error?.message ?? null,
-    runIds: [...(tick.run_ids ?? [])],
-    runKeys: [...(tick.run_keys ?? [])],
-    skipReason: tick.skip_reason ?? null,
-    status: tick.status,
-    tickId: tick.tick_id,
-    timestamp: tick.timestamp,
-  };
-}
-
 function snapshotOf(schedule: PipelineSchedule): ScheduleSnapshot {
   const overrideCronSchedule = schedule.override_cron_schedule ?? null;
   const overrideEffective = schedule.override_effective;
@@ -248,7 +220,6 @@ function snapshotOf(schedule: PipelineSchedule): ScheduleSnapshot {
     overrideCronSchedule,
     overrideEffective,
     overrideSaved: schedule.override_saved,
-    recentTicks: (schedule.recent_ticks ?? []).map(tickIdentity),
     repositoryLocationName: requiredString(
       schedule.repository_location_name,
       "repository_location_name",
@@ -268,6 +239,124 @@ function sameSnapshot(
   right: ScheduleSnapshot,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  return (
+    JSON.stringify(Object.keys(value).sort()) ===
+    JSON.stringify([...expected].sort())
+  );
+}
+
+function isScheduleSnapshot(value: unknown): value is ScheduleSnapshot {
+  if (!isRecord(value)) return false;
+  const requiredStrings = [
+    "defaultCronSchedule",
+    "effectiveCronSchedule",
+    "name",
+    "repositoryLocationName",
+    "repositoryName",
+    "selectorId",
+    "stateId",
+  ] as const;
+  return (
+    hasExactKeys(value, [
+      "canReset",
+      "defaultCronSchedule",
+      "defaultStatus",
+      "effectiveCronSchedule",
+      "name",
+      "overrideCronSchedule",
+      "overrideEffective",
+      "overrideSaved",
+      "repositoryLocationName",
+      "repositoryName",
+      "selectorId",
+      "stateId",
+      "status",
+    ]) &&
+    typeof value.canReset === "boolean" &&
+    requiredStrings.every(
+      (field) =>
+        typeof value[field] === "string" && value[field].length > 0,
+    ) &&
+    ["RUNNING", "STOPPED"].includes(String(value.defaultStatus)) &&
+    (value.overrideCronSchedule === null ||
+      (typeof value.overrideCronSchedule === "string" &&
+        value.overrideCronSchedule.length > 0)) &&
+    (value.overrideEffective === null ||
+      typeof value.overrideEffective === "boolean") &&
+    typeof value.overrideSaved === "boolean" &&
+    ["RUNNING", "STOPPED"].includes(String(value.status))
+  );
+}
+
+async function assertScheduleStateFileClaimable(): Promise<void> {
+  const destination = stateFile();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(destination, "utf8"));
+  } catch {
+    throw new Error(
+      "schedule recovery journal placeholder를 읽을 수 없습니다; audited recovery가 필요합니다.",
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("schedule recovery journal 형식이 올바르지 않습니다.");
+  }
+  const attestation = dagsterAttestation();
+  if (
+    parsed.phase === "schedule_snapshot_pending" &&
+    parsed.version === 2 &&
+    parsed.dagsterGraphqlEndpointSha256 === attestation.actual &&
+    hasExactKeys(parsed, [
+      "dagsterGraphqlEndpointSha256",
+      "phase",
+      "version",
+    ])
+  ) {
+    return;
+  }
+  const initial = parsed.initial;
+  const current = parsed.current;
+  const ownedExpected = parsed.ownedExpected;
+  if (
+    parsed.phase === "restored" &&
+    parsed.version === 4 &&
+    parsed.dagsterGraphqlEndpointSha256 === attestation.actual &&
+    parsed.expectedDagsterGraphqlEndpointSha256 === attestation.expected &&
+    parsed.mutationIntent === null &&
+    typeof parsed.updatedAt === "string" &&
+    parsed.updatedAt.length > 0 &&
+    isScheduleSnapshot(initial) &&
+    isScheduleSnapshot(current) &&
+    isScheduleSnapshot(ownedExpected) &&
+    sameSnapshot(initial, current) &&
+    sameSnapshot(initial, ownedExpected) &&
+    hasExactKeys(parsed, [
+      "current",
+      "dagsterGraphqlEndpointSha256",
+      "expectedDagsterGraphqlEndpointSha256",
+      "initial",
+      "mutationIntent",
+      "ownedExpected",
+      "phase",
+      "updatedAt",
+      "version",
+    ])
+  ) {
+    return;
+  }
+  throw new Error(
+    "미복원 schedule recovery journal이 있어 새 실행이 덮어쓸 수 없습니다.",
+  );
 }
 
 async function persistRecoveryState(
@@ -298,8 +387,26 @@ async function persistRecoveryState(
       mode: 0o600,
     });
     await chmod(temporary, 0o600);
+    const temporaryHandle = await open(temporary, "r");
+    try {
+      await temporaryHandle.sync();
+    } finally {
+      await temporaryHandle.close();
+    }
     await rename(temporary, destination);
     await chmod(destination, 0o600);
+    const stateHandle = await open(destination, "r");
+    try {
+      await stateHandle.sync();
+    } finally {
+      await stateHandle.close();
+    }
+    const directoryHandle = await open(path.dirname(destination), "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
@@ -464,12 +571,30 @@ function requireConfirmedMutation(
 }
 
 async function responseBody(
-  response: Response,
+  response: Pick<Response, "json" | "status">,
 ): Promise<PipelineScheduleCommandResponse> {
   if (response.status() !== 200) {
     throw new Error("schedule UI mutation HTTP status가 200이 아닙니다.");
   }
   return (await response.json()) as PipelineScheduleCommandResponse;
+}
+
+async function bounded<T>(
+  promise: Promise<T>,
+  operation: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`${operation} 제한 시간 초과`)),
+        UI_MUTATION_TIMEOUT,
+      );
+      promise.then(resolve, reject);
+    });
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+  }
 }
 
 function requireIdempotencyKey(value: string | undefined): string {
@@ -664,18 +789,75 @@ async function directScheduleMutation(
   }
 }
 
-function isScheduleMutationResponse(
-  response: Response,
-  method: "PATCH" | "POST",
-  suffix: string,
-): boolean {
-  let pathname: string;
+function scheduleUiOrigin(): string {
+  const raw = process.env.E2E_BASE_URL;
+  if (!raw) throw new Error("E2E_BASE_URL이 없습니다.");
+  let url: URL;
   try {
-    pathname = new URL(response.url()).pathname;
+    url = new URL(raw);
+  } catch {
+    throw new Error("E2E_BASE_URL 형식이 올바르지 않습니다.");
+  }
+  const expectedHash = lowercaseSha256(
+    process.env.E2E_C7_EXPECTED_UI_ORIGIN_SHA256,
+    "E2E_C7_EXPECTED_UI_ORIGIN_SHA256",
+  );
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash ||
+    createHash("sha256").update(url.origin).digest("hex") !== expectedHash
+  ) {
+    throw new Error("schedule UI origin attestation이 불일치합니다.");
+  }
+  return url.origin;
+}
+
+function isExactScheduleMutationUrl(
+  rawUrl: string,
+  uiOrigin: string,
+  requestPath: string,
+): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.origin === uiOrigin &&
+      url.pathname === `/api/proxy${requestPath}` &&
+      url.search === "" &&
+      url.hash === ""
+    );
   } catch {
     return false;
   }
-  return response.request().method() === method && pathname.endsWith(suffix);
+}
+
+function assertExactScheduleMutationRequest(
+  request: Request,
+  uiOrigin: string,
+  method: "PATCH" | "POST",
+  requestPath: string,
+): void {
+  if (
+    request.method() !== method ||
+    !isExactScheduleMutationUrl(request.url(), uiOrigin, requestPath)
+  ) {
+    throw new Error("schedule UI mutation origin/path/method가 일치하지 않습니다.");
+  }
+}
+
+function isScheduleMutationResponse(
+  response: Response,
+  uiOrigin: string,
+  method: "PATCH" | "POST",
+  requestPath: string,
+): boolean {
+  return (
+    response.request().method() === method &&
+    isExactScheduleMutationUrl(response.url(), uiOrigin, requestPath)
+  );
 }
 
 async function submitUiMutation(
@@ -695,24 +877,46 @@ async function submitUiMutation(
     kind === "command"
       ? `${schedulePath(SAFE_SCHEDULE)}/commands`
       : schedulePath(SAFE_SCHEDULE);
+  const uiOrigin = scheduleUiOrigin();
   let interceptionStarted = false;
   let capturedIntent: ScheduleMutationIntent | null = null;
+  let captureOpen = true;
+  let initialAttemptCount = 0;
+  let postCommitConfirmed = false;
+  let replayAttemptCount = 0;
+  let replayHandlerError: unknown = null;
   let resolveIntent!: (intent: ScheduleMutationIntent) => void;
   let rejectIntent!: (error: unknown) => void;
   const intentPromise = new Promise<ScheduleMutationIntent>((resolve, reject) => {
     resolveIntent = resolve;
     rejectIntent = reject;
   });
+  void intentPromise.catch(() => undefined);
+  let resolveResponseLoss!: () => void;
+  let rejectResponseLoss!: (error: unknown) => void;
+  const responseLossPromise = new Promise<void>((resolve, reject) => {
+    resolveResponseLoss = resolve;
+    rejectResponseLoss = reject;
+  });
+  void responseLossPromise.catch(() => undefined);
+  let activeRouteHandlers = 0;
+  const routeHandlerWaiters = new Set<() => void>();
+  const waitForRouteHandlers = (): Promise<void> => {
+    if (activeRouteHandlers === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => routeHandlerWaiters.add(resolve));
+  };
   const routeMatcher = (url: URL): boolean =>
-    url.pathname.endsWith(requestPath);
-  const routeHandler = async (route: Route): Promise<void> => {
+    isExactScheduleMutationUrl(url.href, uiOrigin, requestPath);
+  const handleRoute = async (route: Route): Promise<void> => {
     const request = route.request();
-    if (request.method() !== requestMethod) {
-      await route.continue();
-      return;
-    }
     if (capturedIntent) {
       try {
+        assertExactScheduleMutationRequest(
+          request,
+          uiOrigin,
+          requestMethod,
+          requestPath,
+        );
         exactMutationBody(request.postDataJSON(), capturedIntent.requestBody);
         if (
           requireIdempotencyKey(request.headers()["idempotency-key"]) !==
@@ -720,14 +924,29 @@ async function submitUiMutation(
         ) {
           throw new Error("schedule replay가 journal key와 일치하지 않습니다.");
         }
+        replayAttemptCount += 1;
+        if (replayAttemptCount !== 1) {
+          throw new Error("schedule frozen UI replay가 정확히 한 번이 아닙니다.");
+        }
         await route.continue();
-      } catch {
+      } catch (error) {
+        replayHandlerError = error;
         await route.abort("failed").catch(() => undefined);
       }
       return;
     }
     interceptionStarted = true;
     try {
+      assertExactScheduleMutationRequest(
+        request,
+        uiOrigin,
+        requestMethod,
+        requestPath,
+      );
+      initialAttemptCount += 1;
+      if (initialAttemptCount !== 1) {
+        throw new Error("schedule 최초 UI mutation이 정확히 한 번이 아닙니다.");
+      }
       const actualBody = exactMutationBody(
         request.postDataJSON(),
         expectedBody,
@@ -746,76 +965,171 @@ async function submitUiMutation(
         ownedExpected,
         intent,
       );
+      if (!captureOpen) {
+        rejectIntent(new Error("schedule intent capture가 이미 종료됐습니다."));
+        rejectResponseLoss(
+          new Error("schedule intent capture 종료 뒤 요청을 차단했습니다."),
+        );
+        await route.abort("failed").catch(() => undefined);
+        return;
+      }
       capturedIntent = intent;
       resolveIntent(intent);
-      await route.continue();
+      const upstreamResponse = await route.fetch();
+      if (
+        !isExactScheduleMutationUrl(
+          upstreamResponse.url(),
+          uiOrigin,
+          requestPath,
+        )
+      ) {
+        throw new Error("schedule post-commit response origin/path가 다릅니다.");
+      }
+      requireConfirmedMutation(
+        await responseBody(upstreamResponse),
+        intent,
+      );
+      postCommitConfirmed = true;
+      await route.abort("failed");
+      resolveResponseLoss();
     } catch (error) {
       rejectIntent(error);
+      rejectResponseLoss(error);
       await route.abort("failed").catch(() => undefined);
     }
   };
-  await page.route(routeMatcher, routeHandler);
-  const responsePromise = page.waitForResponse((response) =>
-    isScheduleMutationResponse(response, requestMethod, requestPath),
-  );
-  let responseConfirmed = false;
-  try {
-    await action();
-    const intent = await intentPromise;
-    requireConfirmedMutation(await responseBody(await responsePromise), intent);
-    responseConfirmed = true;
-  } catch {
-    void responsePromise.catch(() => undefined);
-    if (!capturedIntent && interceptionStarted) {
-      await intentPromise.catch(() => undefined);
-    }
-    if (!capturedIntent) {
-      await persistMutationState(initial, ownedExpected);
-      throw new Error(`${operation} 요청이 서버로 전송되기 전에 실패했습니다.`);
-    }
-    let replayConfirmed = false;
+  const routeHandler = async (route: Route): Promise<void> => {
+    activeRouteHandlers += 1;
     try {
-      await replayRecordedMutation(page, capturedIntent);
-      replayConfirmed = true;
+      await handleRoute(route);
+    } finally {
+      activeRouteHandlers -= 1;
+      if (activeRouteHandlers === 0) {
+        for (const resolve of routeHandlerWaiters) resolve();
+        routeHandlerWaiters.clear();
+      }
+    }
+  };
+  await page.route(routeMatcher, routeHandler);
+  let responseConfirmed = false;
+  let primaryError: unknown;
+  try {
+    try {
+      await action();
+      const intent = await bounded(intentPromise, `${operation} intent capture`);
+      await bounded(
+        responseLossPromise,
+        `${operation} post-commit browser response loss`,
+      );
+      if (!postCommitConfirmed || initialAttemptCount !== 1) {
+        throw new Error(`${operation} post-commit response-loss 증거가 없습니다.`);
+      }
       const frozenSubmission = page.getByTestId("schedule-frozen-submission");
-      if (await frozenSubmission.isVisible()) {
-        const frozenReplayResponse = page.waitForResponse((response) =>
-          isScheduleMutationResponse(response, requestMethod, requestPath),
-        );
-        await frozenSubmission
-          .getByRole("button", { name: "동일 요청 재확인", exact: true })
-          .click();
-        requireConfirmedMutation(
-          await responseBody(await frozenReplayResponse),
-          capturedIntent,
+      await expect(frozenSubmission).toBeVisible({
+        timeout: UI_MUTATION_TIMEOUT,
+      });
+      await expect(frozenSubmission).toContainText(SAFE_SCHEDULE);
+      await expect(frozenSubmission).toContainText(intent.idempotencyKey);
+      const replayResponsePromise = page.waitForResponse(
+        (response) =>
+          isScheduleMutationResponse(
+            response,
+            uiOrigin,
+            requestMethod,
+            requestPath,
+          ),
+        { timeout: UI_MUTATION_TIMEOUT },
+      );
+      await frozenSubmission
+        .getByRole("button", { name: "동일 요청 재확인", exact: true })
+        .click();
+      requireConfirmedMutation(
+        await responseBody(await replayResponsePromise),
+        intent,
+      );
+      if (replayHandlerError !== null || replayAttemptCount !== 1) {
+        throw new Error(`${operation} frozen UI same-key replay 증거가 없습니다.`);
+      }
+      await expect(frozenSubmission).toHaveCount(0, {
+        timeout: UI_MUTATION_TIMEOUT,
+      });
+      responseConfirmed = true;
+    } catch (error) {
+      captureOpen = false;
+      const recoveryIntent = capturedIntent as ScheduleMutationIntent | null;
+      if (capturedIntent && !postCommitConfirmed) {
+        await bounded(
+          responseLossPromise,
+          `${operation} in-flight post-commit 확인`,
+        ).catch(() => undefined);
+      }
+      if (!recoveryIntent) {
+        await persistMutationState(initial, ownedExpected);
+        throw new Error(
+          `${operation} 요청이 서버로 전송되기 전에 실패했습니다(interception=${interceptionStarted}).`,
+          { cause: error },
         );
       }
-      responseConfirmed = true;
-    } catch {
-      if (replayConfirmed) {
-        const observed = await waitForSchedule(
-          page,
-          capturedIntent.intendedAfter,
-        );
+      if (postCommitConfirmed) {
+        let observed: ScheduleSnapshot;
+        try {
+          observed = await waitForSchedule(
+            page,
+            recoveryIntent.intendedAfter,
+          );
+        } catch {
+          const drifted = await getScheduleSnapshot(page);
+          await persistRecoveryState(
+            "restore_failed",
+            initial,
+            drifted,
+            drifted,
+            recoveryIntent,
+          );
+          throw new ScheduleMutationRecoveryError(
+            drifted,
+            recoveryIntent,
+            `${operation}은 confirmed됐지만 intended state와 concurrent drift를 구분할 수 없습니다.`,
+          );
+        }
         await persistMutationState(initial, observed);
         throw new ScheduleMutationRecoveryError(
           observed,
           null,
-          `${operation} same-key replay는 confirmed됐지만 UI frozen 요청 해제에 실패했습니다.`,
+          `${operation}은 confirmed됐지만 exact frozen UI same-key recovery에 실패했습니다.`,
         );
       }
       const observed = await observeUnresolvedMutation(
         page,
         initial,
-        capturedIntent,
+        recoveryIntent,
       );
-      throw new ScheduleMutationRecoveryError(observed, capturedIntent);
+      throw new ScheduleMutationRecoveryError(observed, recoveryIntent);
     }
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await page.unroute(routeMatcher, routeHandler);
+    captureOpen = false;
+    const teardownErrors: unknown[] = [];
+    await bounded(
+      waitForRouteHandlers(),
+      `${operation} route handler settlement`,
+    ).catch((error: unknown) => teardownErrors.push(error));
+    await page
+      .unroute(routeMatcher, routeHandler)
+      .catch((error: unknown) => teardownErrors.push(error));
+    if (teardownErrors.length > 0) {
+      throw new AggregateError(
+        primaryError === undefined
+          ? teardownErrors
+          : [primaryError, ...teardownErrors],
+        `${operation} primary/route cleanup 실패`,
+      );
+    }
   }
 
-  const intent = capturedIntent;
+  const intent = capturedIntent as ScheduleMutationIntent | null;
   if (!responseConfirmed || !intent) {
     throw new Error(`${operation} 결과가 confirmed 상태가 아닙니다.`);
   }
@@ -1071,18 +1385,25 @@ test.describe("C7 schedule destructive live E2E", () => {
   }, testInfo) => {
     requireScheduleGates(testInfo);
     test.setTimeout(TEST_TIMEOUT);
+    await assertScheduleStateFileClaimable();
     await bootstrapC7SameOriginPage(
       page,
       `/ops/pipeline?tab=schedules&schedule=${SAFE_SCHEDULE}`,
     );
+    page.setDefaultTimeout(UI_MUTATION_TIMEOUT);
     await expect(page.getByRole("heading", { name: "파이프라인" })).toBeVisible();
 
-    const initial = await getScheduleSnapshot(page);
-    if (initial.recentTicks.some((tick) => tick.status === "STARTED")) {
+    const initialSchedule = await getSchedule(page);
+    if (
+      (initialSchedule.recent_ticks ?? []).some(
+        (tick) => tick.status === "STARTED",
+      )
+    ) {
       throw new Error(
         "schedule에 진행 중인 Dagster tick이 있어 destructive 조작을 차단했습니다.",
       );
     }
+    const initial = snapshotOf(initialSchedule);
     if (initial.overrideEffective === false) {
       throw new Error(
         "schedule cron override가 아직 실제 반영되지 않아 destructive 조작을 차단했습니다.",
@@ -1092,6 +1413,7 @@ test.describe("C7 schedule destructive live E2E", () => {
     let blockingIntent: ScheduleMutationIntent | null = null;
     await persistRecoveryState("snapshotted", initial, initial, ownedExpected);
     const temporaryCron = safeFutureCron(initial);
+    let primaryError: unknown;
 
     try {
       await persistRecoveryState("mutating", initial, initial, ownedExpected);
@@ -1114,7 +1436,6 @@ test.describe("C7 schedule destructive live E2E", () => {
         temporaryCron,
       );
       await persistMutationState(initial, ownedExpected);
-      const tickBaseline = ownedExpected.recentTicks;
       ownedExpected = await submitUiCommand(
         page,
         initial,
@@ -1129,7 +1450,6 @@ test.describe("C7 schedule destructive live E2E", () => {
         "stop",
       );
       await persistMutationState(initial, ownedExpected);
-      expect(ownedExpected.recentTicks).toEqual(tickBaseline);
 
       expect(ownedExpected.status).toBe("STOPPED");
       expect(ownedExpected.effectiveCronSchedule).toBe(temporaryCron);
@@ -1140,15 +1460,26 @@ test.describe("C7 schedule destructive live E2E", () => {
         ownedExpected = error.ownedSnapshot;
         blockingIntent = error.blockingIntent;
       }
+      primaryError = error;
       throw error;
     } finally {
-      const restored = await restoreExactSchedule(
-        page,
-        initial,
-        ownedExpected,
-        blockingIntent,
-      );
-      expect(restored).toEqual(initial);
+      try {
+        const restored = await restoreExactSchedule(
+          page,
+          initial,
+          ownedExpected,
+          blockingIntent,
+        );
+        expect(restored).toEqual(initial);
+      } catch (restoreError) {
+        if (primaryError !== undefined) {
+          throw new AggregateError(
+            [primaryError, restoreError],
+            "schedule primary/restore 실패",
+          );
+        }
+        throw restoreError;
+      }
     }
   });
 });

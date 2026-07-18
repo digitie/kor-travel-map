@@ -210,6 +210,48 @@ GraphQL 한 번만 읽고 실패 시 DB 그리드는 200을 유지한 채 `unkno
   승계. **쿼터-민감 provider(OpiNet 등) live 시나리오 금지 목록** 명시. dry_run 우선.
 - ETL live preview e2e는 쿼터 provider 제외.
 - n150 4코어 제약: per-file 저부하 실행 순서표를 검증 리포트에 포함(전체 스위트 full-run 금지).
+- 최종 runner는 고정 경로의 root-owned·비쓰기 가능 host attestation JSON으로 실제 machine-id,
+  hostname, UI/API-WS/Dagster origin을 함께 검증한다. 실행자가 URL과 그 hash를 동시에 바꾸는
+  self-attestation은 허용하지 않는다. 테스트 전 로그인 POST `200 + Set-Cookie`와 실행 중 UI
+  container의 `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH` non-empty도 확인한다.
+- POI target PUT은 자연키와 intended body를 응답 전에 durable journal에 기록하고, 응답 뒤
+  UUID·strong `entity_tag`·lock version을 보강한다. 삭제와 cleanup은 매번 직전 exact GET의
+  ETag만 `If-Match`로 쓰며 `412`에서 재시도 삭제하지 않는다. 같은 원본 WebSocket의 mutation
+  이후 `update` frame만 causal receipt 이상인지 인정하고 reconnect snapshot은 증거에서 제외한다.
+- KMA external-system scope 실행 전에는 서버 active list의 전체 key/UUID/ETag 집합이 owned
+  journal과 정확히 같은지 확인한다. history 다음 페이지는 request의 provider/dataset/scope/cursor와
+  response item tuple·다음 cursor를 함께 검증하며, route interception teardown은 in-flight handler
+  settlement 뒤에만 끝낸다.
+- 같은 자연키를 삭제 후 재생성한 경우 active 소유권은 반드시 새 UUID/ETag/version으로 교체하고 이전
+  객체는 삭제 상태의 history로 분리한다. PUT 응답 유실은 exact GET 재탐색, 부재 시 동일 PUT 1회 재생,
+  최종 exact identity 기반 cleanup으로만 수습한다. 불명확한 intent가 하나라도 남으면 restored 성공을
+  기록하지 않는다.
+- preview와 terminal의 eligible/skipped/executed scope 전체는 KMA exact pair만 허용하며 OpiNet과
+  다른 provider/dataset 혼입을 차단한다. membership fingerprint는 소문자 SHA-256, base datetime은
+  달력상 유효한 `YYYYMMDDHHmm`로 검증한다.
+- 복구 상태·lock·`BLOCKED.json`은 root-owned `0700` 고정 production 경로에만 두고 XDG override를
+  거부한다. 각 journal은 temp fsync→rename→최종 파일·부모 디렉터리 fsync를 완료해야 다음 mutation으로
+  진행한다.
+- 누적 KMA journal은 이전 payload가 독립적으로 restored임을 먼저 검증한 뒤 현재 state에 없는 이력만
+  합친다. 현재 scenario의 pending/active/terminal status를 이전 snapshot으로 되감지 않는다. 실제
+  run-now/provider dispatch 직전에도 create와 같은 서버 active 전체 집합 barrier를 다시 수행한다.
+- 자연키 recreate 성공은 삭제된 history UUID와 다른 새 UUID, 새 strong ETag/version을 요구한다.
+  최종 runner는 history가 비어 있으면 실패하고 모든 history 자연키가 current ref에 존재하면서 UUID가
+  current 전체 UUID 집합과 겹치지 않는지 교차 검증한다.
+- 고정 lock은 `O_NOFOLLOW|O_CREAT` safe open 뒤 regular root-owned `0600` fstat와 non-blocking flock으로
+  보유한다. standalone POI PUT 응답 유실은 intended body exact GET→404 single replay→exact 재검증만
+  허용하며 causal receipt 불명이나 body/identity drift에서는 BLOCKED한다. KMA cursor base datetime은
+  canonical 필수값이다.
+- owned target 전체 집합은 `external_system`별 500건 cursor를 두 페이지까지 완주해 최대 501건을
+  exact 비교한다. 빈 continuation, 반복 cursor, 다른 scope item과 미완주 cursor는 mutation 전
+  실패다. preview `matched_scope.provider_datasets`도 KMA exact pair 한 건과 effective scope·비음수
+  feature count를 필수로 한다.
+- execution/event continuation은 API 응답의 total-order identity tuple이 각 페이지에서 중복 없이
+  엄격히 정렬되고 페이지 간 서로소·경계 순서를 유지해야 한다. UI table 전체 DOM identity 배열도
+  현재 응답 배열과 순서까지 같아야 하며 일부 행 존재나 text 변화로 대체하지 않는다.
+- standalone POI 첫 create는 upstream commit 응답과 causal receipt를 route에서 보관한 뒤 client
+  response만 결정적으로 abort한다. exact rediscovery와 commit 증거가 일치할 때만 복구하고 모든
+  route handler settlement 뒤 interception을 제거한다.
 
 ## 6. 닫힌 결정 (초안 v1의 열린 질문)
 
