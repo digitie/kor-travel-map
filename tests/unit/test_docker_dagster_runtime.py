@@ -175,13 +175,25 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_DAGSTER_URL",
         "KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS",
         "KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS",
+        # ADR-066 T-VN-01 — production fail-closed 기본값과 hard-require
+        # service token은 compose environment가 정본으로 주입한다.
+        "KOR_TRAVEL_MAP_API_PROFILE",
+        "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
+        "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
+    # admin secret과 같은 hard-require 패턴 — host env 누락 시 compose 평가 실패.
+    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN is required" in str(
+        api["environment"]["KOR_TRAVEL_MAP_API_SERVICE_TOKEN"]
+    )
 
     root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
     assert root_api_keys == {
         "KOR_TRAVEL_MAP_API_PORT",
         "KOR_TRAVEL_MAP_API_INTERNAL_URL",
+        # compose interpolation이 root env에서 읽는 hard-require secret (T-VN-01).
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
     }
 
     package_api_keys = _assigned_env_keys(
@@ -189,12 +201,14 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         prefix="KOR_TRAVEL_MAP_API_",
     )
     assert {
+        "KOR_TRAVEL_MAP_API_PROFILE",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS",
         "KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED",
         "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
         "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
         "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",

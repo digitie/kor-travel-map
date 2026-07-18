@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude) — T-VN-01 production fail-closed 전환
+
+- `feat/t-vn-01-fail-closed`(target: `integration/t-vn`)에서 ADR-066 D-1의 T-VN-01을 구현했다.
+  `ApiSettings.profile`(`KOR_TRAVEL_MAP_API_PROFILE`, production|local-dev, 코드 기본 local-dev)을
+  추가하고 production은 기동 시점 fail-closed 검증을 수행한다: admin proxy secret(앞뒤 공백 없는
+  32자 이상), ops surface 활성 시 read/cancel token 쌍, features surface 활성 시
+  `public_api_key_required=true`와 service token(앞뒤 공백 없는 32자 이상), 인증 없는 `/debug`
+  라우터 비활성. 위반은 하나의 ValidationError에 함께 나열된다(기존 ops pair/shape 검증은 정의
+  순서상 먼저 단독 실패).
+- secret 미설정 local-dev fallback(admin actor `local-dev` pass-through)은 non-production 전용으로
+  격리했고, auth dependency도 production+secret 없음 비정상 상태를 403/None으로 방어적으로 닫는다.
+  flag 해석(`None`→features 추종)은 settings의 resolved 속성으로 단일화해 mount와 검증이 같은
+  해석을 공유한다.
+- Docker는 image ENV와 compose 기본값으로 production을 주입하고, compose가 `/debug` off·
+  `public_api_key_required=true`를 컨테이너 기본으로 강제한다(environment가 package .env보다
+  우선). service token은 admin secret과 같은 `${...:?}` hard-require로 전달한다. **배포 전제**:
+  n150은 다음 배포에서 root `.env`에 admin secret·ops token들과 다른 32자 이상
+  `KOR_TRAVEL_MAP_API_SERVICE_TOKEN`을 추가해야 한다. legacy `/v1/curated-*` keyless read는
+  T-VN-03 범위로 남긴다(F-3 잔여).
+- 적대 리뷰 PASS-WITH-FIXES 반영: features surface의 service token 필수화(공백/32자 미만 형태
+  거부 포함), root/package `.env.example`의 compose override 우선순위 문서화, wording(앞뒤 공백),
+  hermetic env 테스트 fixture. startup 거부/통과 matrix + dependency 격리 테스트를 추가했고
+  uvicorn import 경로로 거부·기동 양방향을 실검증했다.
+
 ## 2026-07-18 (codex) — C7 n150 runner Python preflight 보강
 
 - read-only n150 점검에서 SSH·Docker·Node·Playwright runner는 사용 가능하고 C7 residual state도

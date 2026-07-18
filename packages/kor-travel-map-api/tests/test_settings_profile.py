@@ -20,6 +20,31 @@ OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 
+# 명시하지 않은 필드에 ambient host env가 스며들어 기본값 검증을 오염시키지
+# 않도록, 이 파일의 모든 테스트에서 관련 env를 제거한다.
+_HERMETIC_ENV_VARS = (
+    "KOR_TRAVEL_MAP_API_PROFILE",
+    "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
+    "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+    "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
+    "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+    "KOR_TRAVEL_MAP_API_OPS_ACTOR",
+    "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+    "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _HERMETIC_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
 
 def _local_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
@@ -45,7 +70,7 @@ def _production_settings(**overrides: Any) -> ApiSettings:
         "ops_principal_required": True,
         "public_api_key_required": True,
         "debug_routes_enabled": False,
-        "service_token": None,
+        "service_token": SERVICE_TOKEN,
         "vworld_api_key": None,
     }
     values.update(overrides)
@@ -81,6 +106,7 @@ def test_profile_reads_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED", "false")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
 
@@ -103,8 +129,9 @@ def test_production_docker_compose_env_equivalent_boots(
     """compose environment + n150 package .env와 등가인 env 조합으로 기동한다.
 
     docker-compose.yml api service가 주입하는 PROFILE=production ·
-    DEBUG_ROUTES_ENABLED=false · PUBLIC_API_KEY_REQUIRED=true 기본값과,
-    n150이 package .env로 주입하는 admin secret/ops principal을 재현한다.
+    DEBUG_ROUTES_ENABLED=false · PUBLIC_API_KEY_REQUIRED=true 기본값과
+    hard-require SERVICE_TOKEN, 그리고 n150이 package .env로 주입하는
+    admin secret/ops principal을 재현한다.
     """
 
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PROFILE", "production")
@@ -117,6 +144,7 @@ def test_production_docker_compose_env_equivalent_boots(
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED", "true")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
     assert settings.debug_routes_enabled is False
@@ -125,14 +153,15 @@ def test_production_docker_compose_env_equivalent_boots(
 
 @pytest.mark.unit
 def test_production_without_any_surface_needs_only_admin_secret() -> None:
-    # DB 없는 부팅 검증형 배포: features/admin/ops 전부 off — public key와
-    # ops principal 요구는 사라지고 admin/operator secret만 남는다.
+    # DB 없는 부팅 검증형 배포: features/admin/ops 전부 off — public key·
+    # service token·ops principal 요구는 사라지고 admin/operator secret만 남는다.
     settings = _production_settings(
         features_routes_enabled=False,
         ops_read_token=None,
         ops_cancel_token=None,
         ops_principal_required=False,
         public_api_key_required=False,
+        service_token=None,
     )
     assert settings.is_production
     assert not settings.resolved_ops_routes_enabled
@@ -151,8 +180,8 @@ def test_production_ops_tokens_not_required_when_ops_surface_disabled() -> None:
 
 
 @pytest.mark.unit
-def test_production_accepts_valid_service_token() -> None:
-    settings = _production_settings(service_token=SERVICE_TOKEN)
+def test_production_accepts_service_token_at_32_char_boundary() -> None:
+    settings = _production_settings(service_token="s" * 32)
     assert settings.service_token is not None
 
 
@@ -241,10 +270,53 @@ def test_production_rejects_debug_routes_even_without_features_surface() -> None
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("service_token", ["", " ", f" {SERVICE_TOKEN}", f"{SERVICE_TOKEN} "])
-def test_production_rejects_blank_or_padded_service_token(service_token: str) -> None:
+def test_production_requires_service_token_while_features_surface_enabled() -> None:
+    # D-1-2의 service secret — 미설정이면 /v1/features/batch가 public key만으로
+    # 열리는 조용한 격하가 생기므로 features surface에서는 기동을 거부한다.
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(service_token=None)
+    message = str(excinfo.value)
+    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
+    assert "features surface is enabled" in message
+
+
+@pytest.mark.unit
+def test_production_service_token_not_required_without_features_surface() -> None:
+    settings = _production_settings(
+        features_routes_enabled=False,
+        ops_routes_enabled=True,
+        public_api_key_required=False,
+        service_token=None,
+    )
+    assert settings.service_token is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "service_token",
+    ["", " ", "abc", "s" * 31, f" {SERVICE_TOKEN}", f"{SERVICE_TOKEN} "],
+)
+def test_production_rejects_blank_padded_or_short_service_token(
+    service_token: str,
+) -> None:
     with pytest.raises(ValidationError) as excinfo:
         _production_settings(service_token=service_token)
+    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in str(excinfo.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("service_token", ["abc", "s" * 31, f" {SERVICE_TOKEN}"])
+def test_production_rejects_bad_service_token_shape_even_without_features(
+    service_token: str,
+) -> None:
+    # features off라도 설정된 token은 배포 가능한 형태여야 한다.
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(
+            features_routes_enabled=False,
+            ops_routes_enabled=True,
+            public_api_key_required=False,
+            service_token=service_token,
+        )
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in str(excinfo.value)
 
 
@@ -258,6 +330,7 @@ def test_production_error_aggregates_every_missing_requirement() -> None:
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in message
     assert "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" in message
     assert "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED" in message
+    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
     assert "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED" in message
 
 
