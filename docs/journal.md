@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증
+## 2026-07-18 (codex) — PR #708 정본 최신 코드 2차 재검증 (#730 병합)
 
 - PR #708은 이미 병합된 상태여서 최신 KTM `main@13eb8d40`과 PinVi
   `origin/main@48085afb`를 기준으로 후속 검토했다. C5~C7B의 route·migration·auth·actor·CAS·
@@ -13,6 +13,8 @@
 - PR #724가 legacy ops를 삭제했지만 PinVi admin client·proxy·test가 삭제 경로를 계속 호출하는
   cross-repo 계약 단절을 새 P0로 확정했다. `T-ADM-C6c`를 C7 선행 task로 만들고, canonical
   caller 전환·명시적 service/operator principal·양 저장소 contract smoke를 완료 조건으로 고정했다.
+- 위 문서 보강은 PR #730의 8개 CI 게이트가 모두 통과한 뒤 merge commit `d0609226`으로
+  `main`에 반영됐다. 후속 구현 범위를 넓히지 않고 #730 관련 문서 이력만 마감했다.
 
 ## 2026-07-18 (codex, agent B) — C7B-UI 적대 리뷰·전체 frontend gate 완료
 

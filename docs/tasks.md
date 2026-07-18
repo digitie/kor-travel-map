@@ -29,8 +29,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
 계열은 PinVi 계약으로 존치).
 
 - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
-  (C7 선행): PR #724가 `/v1/ops/dagster/summary`, `/v1/ops/providers*`,
-  `/v1/ops/import-jobs*`를 clean-cut한 뒤에도 PinVi 최신 main의 admin client·provider-sync
+  (C7 선행, PR #730 재검증에서 확정): PR #724가 `/v1/ops/dagster/summary`,
+  `/v1/ops/providers*`, `/v1/ops/import-jobs*`를 clean-cut한 뒤에도 PinVi 최신 main의
+  admin client·provider-sync
   proxy·unit test가 해당 경로를 호출하므로, PinVi caller를 `/v1/ops/datasets`와
   `/v1/ops/pipeline` 계약으로 전환하고 양 저장소 contract test를 같은 commit 조합으로 고정한다.
   KTM frontend BFF secret을 공유하거나 trusted frontend `/32`를 넓히지 말고, PinVi server에
