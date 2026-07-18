@@ -62,7 +62,12 @@ def test_weather_card_response_maps_metrics(
     async def _card(_s: Any, **_kw: Any) -> WeatherCard:
         return card
 
+    async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
+        assert feature_id == "f1"
+        return {"feature_id": "f1", "kind": "place", "status": "active"}
+
     monkeypatch.setattr(mod.weather_repo, "build_weather_card", _card)
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _public_row)
     _fake_session(client)
     try:
         r = client.get("/v1/features/f1/weather")
@@ -76,5 +81,29 @@ def test_weather_card_response_maps_metrics(
         assert m["metric_key"] == "TMP"
         assert m["value_number"] == 25.0  # Decimal → float
         assert m["unit"] == "deg_c"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_card_404_when_feature_not_public(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """비공개(draft/broken/inactive/hidden/삭제) parent feature의 weather payload는
+    노출되지 않는다 — ADR-067 단일 공개 projection, F-1 (T-VN-04)."""
+    from kortravelmap.api.routers import features as mod
+
+    async def _none(_s: Any, _fid: str) -> None:
+        return None
+
+    async def _card_should_not_run(_s: Any, **_kw: Any) -> Any:
+        raise AssertionError("build_weather_card must not run for non-public feature")
+
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _none)
+    monkeypatch.setattr(mod.weather_repo, "build_weather_card", _card_should_not_run)
+    _fake_session(client)
+    try:
+        r = client.get("/v1/features/hidden-f/weather")
+        assert r.status_code == 404
     finally:
         client.app.dependency_overrides.clear()

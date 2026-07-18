@@ -41,17 +41,17 @@ async def _ins(
 
 
 async def test_category_feature_counts(migrated_session: AsyncSession) -> None:
+    """counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다 (T-VN-04).
+
+    비공개(inactive/draft/hidden 등) feature는 공개 표면 집계에 포함되지 않는다 —
+    과거 ``active_only=False`` 경로가 비공개 분포를 노출했던 F-1 leak의 회귀 방지.
+    """
     await _ins(migrated_session, "cc:1", "01070100")
     await _ins(migrated_session, "cc:2", "01070100")
     await _ins(migrated_session, "cc:3", "01070100", status="inactive")
+    await _ins(migrated_session, "cc:5", "01070100", status="draft")
     await _ins(migrated_session, "cc:4", "06020000")
 
-    all_counts = await feature_repo.category_feature_counts(migrated_session)
-    assert all_counts["01070100"] == 3
-    assert all_counts["06020000"] == 1
-
-    active = await feature_repo.category_feature_counts(
-        migrated_session, active_only=True
-    )
-    assert active["01070100"] == 2
-    assert active["06020000"] == 1
+    counts = await feature_repo.category_feature_counts(migrated_session)
+    assert counts["01070100"] == 2
+    assert counts["06020000"] == 1

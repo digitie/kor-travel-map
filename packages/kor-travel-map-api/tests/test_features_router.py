@@ -148,7 +148,7 @@ def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.Mo
     async def _none_get_row(_session: Any, _fid: str) -> None:
         return None
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _none_get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _none_get_row)
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -183,7 +183,7 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
         assert feature_ids == ["notice-old"]
         return set()
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "public_active_notice_feature_ids",
@@ -545,7 +545,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert feature_id == "f1"
         return ()
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
         "list_curation_items_by_feature_ids",
@@ -629,7 +629,7 @@ def test_get_area_contained_features_maps_rows(
         assert kw["limit"] == 51
         return contained_rows
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "features_contained_in_area",
@@ -663,7 +663,7 @@ def test_get_area_contained_features_rejects_non_area(
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
         return {"feature_id": "place1", "kind": "place", "deleted_at": None}
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -724,7 +724,7 @@ def test_features_batch_returns_items_and_missing(
         assert feature_ids == ["f1", "missing"]
         return {}
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
     monkeypatch.setattr(
         features_mod.curation_repo,
         "list_curation_items_by_feature_ids",
@@ -783,7 +783,7 @@ def test_features_batch_reports_ended_or_non_latest_notice_as_missing(
     async def _empty(_session: Any, *args: Any, **kwargs: Any) -> dict[str, tuple[Any, ...]]:
         return {}
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "public_active_notice_feature_ids",

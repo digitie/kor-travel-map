@@ -767,11 +767,13 @@ async def _feature_or_404(
     curated_feature_id: str,
     *,
     include_archived: bool = False,
+    public_only: bool = False,
 ) -> curated_repo.CuratedFeature:
     row = await curated_repo.get_curated_feature(
         session,
         curated_feature_id=curated_feature_id,
         include_archived=include_archived,
+        public_only=public_only,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="curated feature 없음")
@@ -864,6 +866,7 @@ async def list_curated_features_route(
             display_title=display_title,
             page_size=page_size,
             cursor=cursor,
+            public_only=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -882,7 +885,8 @@ async def get_curated_feature_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
-    row = await _feature_or_404(session, curated_feature_id)
+    # 공개 표면 — underlying feature가 공개 projection에 없으면 404 (ADR-067).
+    row = await _feature_or_404(session, curated_feature_id, public_only=True)
     return CuratedFeatureResponse(
         data=_feature_view(row),
         meta=make_meta(started_at=started_at),

@@ -981,7 +981,7 @@ export function FeatureChangeRequestsClient({
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
-  const categories = useCategories({ active_only: false, include_counts: false });
+  const categories = useCategories({ include_counts: false });
   // update 대상 feature는 URL prefill뿐 아니라 폼의 Feature ID 입력에서도 조회한다 —
   // 폼이 실제 feature 값으로 채워져야 기본값 덮어쓰기(#613)를 막을 수 있다.
   const detailLookupId =

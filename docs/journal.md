@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 + 적대 리뷰 반영
+
+- ADR-067 Wave 0: alembic 0059가 `feature.public_features` VIEW(`status='active' AND
+  deleted_at IS NULL`, DDL은 CREATE VIEW만, partial index는 T-VN-34)를 만들고 bbox/cluster/
+  search/nearby/in-area/detail/batch/category counts/notice ids/weather anchor/public views/
+  curation·curated 공개 read를 전부 그 projection으로 수렴했다. F-1 양방향(provider-retired
+  은닉 vs admin-inactive/draft/broken 노출)을 endpoint별 술어 재구현 삭제로 동시 해소.
+- 적대 리뷰 BLOCK 반영: (S1) 무인증 `GET /v1/curations/collections/{id}`의 `_public_item`이
+  구 술어를 재구현해 비공개 연결 feature의 id/이름/좌표/주소가 새던 구멍을
+  `EXISTS(... public_features)` 컬럼(`linked_feature_is_public`)으로 봉인하고 8-state matrix
+  통합 테스트를 추가했다. (S2) 특보 이력 `/v1/features/weather/alerts`는 base features 대신
+  공개 projection에 LEFT JOIN — alert row는 생존, 비공개 anchor의 feature 필드는 NULL,
+  상수화된 `feature_status` 필드는 응답에서 제거(OpenAPI/TS 재생성). (S2) admin weather/price
+  panel은 404를 오류 Alert가 아니라 "공개 카드 없음" 빈 상태로 처리(전용 admin 카드 표면은
+  issue #741). (S2) batch 의미 변화(admin-inactive/draft → `missing`, resolver T-VN-11)를
+  `docs/integration-map.md` §3.2에 성문화 — PinVi trip view는 그 사이 false-broken 표시 가능.
+- batch `missing` 균일화, weather/price 카드 404 가드, categories `active_only` 파라미터 제거,
+  admin map viewport(`GET /v1/features`) active-only 전환이 소비자 가시 변경이다(CHANGELOG).
+- nearby `status` 파라미터는 동작 유지 + "공개 projection과 교집합, active 외 값은 빈 결과"
+  OpenAPI 설명만 추가(정리는 T-VN-11/34). notice lineage 경쟁자 `deleted_at IS NULL` 판정은
+  T-VN-06/37 소관으로 보류.
+
 ## 2026-07-19 (claude) — T-VN-01 production fail-closed 전환
 
 - `feat/t-vn-01-fail-closed`(target: `integration/t-vn`)에서 ADR-066 D-1의 T-VN-01을 구현했다.

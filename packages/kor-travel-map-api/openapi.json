@@ -21063,17 +21063,6 @@
             ],
             "title": "Feature Name"
           },
-          "feature_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Status"
-          },
           "fetched_at": {
             "anyOf": [
               {
@@ -28823,29 +28812,18 @@
     },
     "/v1/categories": {
       "get": {
+        "description": "counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다.\n\n과거의 ``active_only`` 스위치는 비공개(draft/hidden/inactive 등) 분포를 공개\n표면에 노출했기에 제거됐다(T-VN-04, F-1) — 미지정 query param은 무시되므로\n기존 caller는 깨지지 않는다.",
         "operationId": "list_categories_v1_categories_get",
         "parameters": [
           {
-            "description": "현재 DB feature 분포(category별 수)를 포함",
+            "description": "현재 DB 공개 feature 분포(category별 수)를 포함",
             "in": "query",
             "name": "include_counts",
             "required": false,
             "schema": {
               "default": false,
-              "description": "현재 DB feature 분포(category별 수)를 포함",
+              "description": "현재 DB 공개 feature 분포(category별 수)를 포함",
               "title": "Include Counts",
-              "type": "boolean"
-            }
-          },
-          {
-            "description": "counts를 status='active' feature만으로 집계",
-            "in": "query",
-            "name": "active_only",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "counts를 status='active' feature만으로 집계",
-              "title": "Active Only",
               "type": "boolean"
             }
           },
@@ -30078,7 +30056,7 @@
     },
     "/v1/features": {
       "get": {
-        "description": "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.",
+        "description": "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 (ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외).",
         "operationId": "list_features_in_bbox_v1_features_get",
         "parameters": [
           {
@@ -30688,7 +30666,7 @@
             }
           },
           {
-            "description": "feature status 반복 필터. 기본 active.",
+            "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
             "in": "query",
             "name": "status",
             "required": false,
@@ -30704,7 +30682,7 @@
                   "type": "null"
                 }
               ],
-              "description": "feature status 반복 필터. 기본 active.",
+              "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
               "title": "Status"
             }
           },
@@ -30922,7 +30900,7 @@
             }
           },
           {
-            "description": "feature status 반복 필터. 기본 active.",
+            "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
             "in": "query",
             "name": "status",
             "required": false,
@@ -30938,7 +30916,7 @@
                   "type": "null"
                 }
               ],
-              "description": "feature status 반복 필터. 기본 active.",
+              "description": "feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34).",
               "title": "Status"
             }
           },
@@ -32149,6 +32127,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -32239,6 +32227,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
           },
           "422": {
             "content": {

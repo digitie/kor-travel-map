@@ -103,19 +103,20 @@ _STATIC_CATEGORIES: tuple[CategorySummary, ...] = tuple(
 async def list_categories(
     session: Annotated[AsyncSession, Depends(get_session)],
     include_counts: Annotated[
-        bool, Query(description="현재 DB feature 분포(category별 수)를 포함")
-    ] = False,
-    active_only: Annotated[
-        bool, Query(description="counts를 status='active' feature만으로 집계")
+        bool, Query(description="현재 DB 공개 feature 분포(category별 수)를 포함")
     ] = False,
 ) -> CategoriesResponse:
+    """counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다.
+
+    과거의 ``active_only`` 스위치는 비공개(draft/hidden/inactive 등) 분포를 공개
+    표면에 노출했기에 제거됐다(T-VN-04, F-1) — 미지정 query param은 무시되므로
+    기존 caller는 깨지지 않는다.
+    """
     started_at = perf_counter()
     if not include_counts:
         items = list(_STATIC_CATEGORIES)
     else:
-        counts = await feature_repo.category_feature_counts(
-            session, active_only=active_only
-        )
+        counts = await feature_repo.category_feature_counts(session)
         items = [
             summary.model_copy(
                 update={

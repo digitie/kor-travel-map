@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
+
+- alembic 0059 `feature.public_features` VIEW로 공개 술어를 단일화하고 모든 공개 read 경로
+  (bbox/cluster/search/nearby/in-area/detail/batch/counts/notice/weather anchor/특보 이력/
+  public views/curation·curated)를 projection으로 수렴했다. 적대 리뷰 S1(collection item
+  연결 feature leak)·S2(특보 이력 base join, admin panel 404 처리, PinVi batch 계약 노트)·S3
+  전부 반영. 브랜치 `feat/t-vn-04-public-predicate`(base `integration/t-vn`).
+- 소비자 가시 변경: batch 비공개=`missing` 균일화(PinVi false-broken 가능 — resolver T-VN-11,
+  `docs/integration-map.md` §3.2), weather/price 카드 404, categories `active_only` 제거,
+  특보 응답 `feature_status` 제거. admin 전용 카드 표면은 issue #741로 분리.
+- **다음 한 작업**: 이 브랜치 PR 생성·CI green·`integration/t-vn` 머지(오케스트레이터 소관)
+  후, T-VN Wave 0의 다음 미착수 task를 `docs/tasks.md`에서 골라 진행한다.
+
 ## 2026-07-19 (claude) — T-VN-01 production fail-closed 전환 구현·리뷰 반영
 
 - `feat/t-vn-01-fail-closed`에 `KOR_TRAVEL_MAP_API_PROFILE`(production|local-dev)과 production

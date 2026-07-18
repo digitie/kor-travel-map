@@ -114,7 +114,7 @@ def test_feature_detail_returns_every_current_observation(
         )
         return _observation(), second
 
-    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
+    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
     monkeypatch.setattr(module.curation_repo, "list_curation_items_by_feature_ids", _curations)
     monkeypatch.setattr(module.observation_repo, "get_current_observations", _observations)
 
@@ -144,7 +144,7 @@ def test_observation_history_exposes_cursor_page(
         assert kwargs["limit"] == 1
         return ObservationHistoryPage(items=(_observation(current=False),), next_cursor="next")
 
-    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
+    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
     monkeypatch.setattr(module.observation_repo, "get_observation_history", _history)
 
     response = client.get(
@@ -165,28 +165,25 @@ def test_observation_history_exposes_cursor_page(
         "/v1/features/feature:multi/observations/se_mcst/history",
     ],
 )
-@pytest.mark.parametrize(
-    ("feature_status", "deleted"),
-    [("hidden", False), ("deleted", False), ("inactive", True)],
-)
 def test_public_feature_detail_and_history_hide_non_public_features(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
-    feature_status: str,
-    deleted: bool,
 ) -> None:
+    """비공개 feature는 detail/history에서 404다.
+
+    T-VN-04(ADR-067) 이후 공개 판정은 라우터가 아니라 ``feature.public_features``
+    projection이 내린다 — 비공개 row는 ``get_public_feature_row``가 ``None``을
+    돌려주고 라우터는 404로 응답한다. 상태별(hidden/deleted/retired/draft/broken/
+    admin-inactive) SQL 판정 자체는 통합 테스트
+    ``tests/integration/test_public_features_view.py``의 상태 matrix가 검증한다.
+    """
     from kortravelmap.api.routers import features as module
 
-    row = _feature_row()
-    row["status"] = feature_status
-    if deleted:
-        row["deleted_at"] = datetime(2026, 7, 13, tzinfo=UTC)
+    async def _row(_session: object, _feature_id: str) -> None:
+        return None
 
-    async def _row(_session: object, _feature_id: str) -> dict[str, Any]:
-        return row
-
-    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
+    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
 
     response = client.get(path)
 

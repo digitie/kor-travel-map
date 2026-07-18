@@ -151,7 +151,6 @@ def test_weather_alert_history_response(
                 source_record_key="sr_alert",
                 feature_id="f_notice",
                 feature_name="호우주의보",
-                feature_status="active",
                 region_code="11B10101",
                 region_name="서울특별시",
                 phenomenon="호우",
@@ -179,5 +178,7 @@ def test_weather_alert_history_response(
         assert item["source_record_key"] == "sr_alert"
         assert item["region_code"] == "11B10101"
         assert item["phenomenon"] == "호우"
+        # T-VN-04: 공개 join으로 상수화된 feature_status는 응답에서 제거됐다.
+        assert "feature_status" not in item
     finally:
         client.app.dependency_overrides.clear()

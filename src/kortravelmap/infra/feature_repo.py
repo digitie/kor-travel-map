@@ -75,6 +75,8 @@ __all__ = [
     "purge_expired_notices",
     "get_feature_row",
     "get_feature_rows_by_ids",
+    "get_public_feature_row",
+    "get_public_feature_rows_by_ids",
     "public_active_notice_feature_ids",
     "list_active_place_coords",
     "list_primary_place_locator",
@@ -378,8 +380,9 @@ ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
 RETURNING (xmax = 0) AS inserted
 """
 
-_GET_FEATURE_SQL: Final[str] = """
-SELECT
+# feature 상세 row projection — raw read(``feature.features``)와 공개
+# read(``feature.public_features``, ADR-067)가 같은 컬럼 목록을 공유한다.
+_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
@@ -394,27 +397,32 @@ SELECT
     marker_icon, marker_color, status,
     parent_feature_id, sibling_group_id,
     created_at, updated_at, deleted_at
+"""
+
+_GET_FEATURE_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features
 WHERE feature_id = :feature_id
 """
 
-_GET_FEATURES_BY_IDS_SQL: Final[str] = """
-SELECT
-    feature_id, kind, name, category,
-    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
-    coord_precision_digits,
-    CASE
-      WHEN kind = 'area' AND geom IS NOT NULL
-      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
-      ELSE NULL
-    END AS area_square_meters,
-    x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
-    address, detail, urls, raw_refs,
-    legal_dong_code, sido_code, sigungu_code,
-    marker_icon, marker_color, status,
-    parent_feature_id, sibling_group_id,
-    created_at, updated_at, deleted_at
+_GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+"""
+
+# 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
+# alembic 0059)만 조회한다. 술어(status='active' AND deleted_at IS NULL)는
+# VIEW 한 곳에만 정의되어 있고 여기서는 재구현하지 않는다.
+_GET_PUBLIC_FEATURE_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.public_features
+WHERE feature_id = :feature_id
+"""
+
+_GET_PUBLIC_FEATURES_BY_IDS_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.public_features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
@@ -635,15 +643,19 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
 # 지도 bbox뿐 아니라 cluster/search/nearby/area/count에도 같은 술어를 적용해야
 # legacy/current feature가 동시에 남은 기간에 목록·집계별 노출 결과가 어긋나지 않는다.
 # infra raw 단건/다건과 admin 감사 목록만 과거 계보/종료 notice 추적을 위해 제외한다.
+#
+# 공개 여부 자체는 ADR-067 ``feature.public_features`` projection이 정본이고, 이
+# 필터는 그 위에 겹치는 notice 전용 **추가 감산**이다(노출 확대 불가). 경쟁자 후보
+# 판정(``_LATEST_NOTICE_ONLY_SQL``의 ``other_f.deleted_at IS NULL``)은 reconcile
+# 의미론(T-VN-06/37 소유)이라 T-VN-04에서 view로 바꾸지 않았다 — 비공개 신규
+# feature가 구 feature를 계속 밀어내는 현행 동작 유지.
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
 
 _PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
 SELECT f.feature_id
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND f.kind = 'notice'
-  AND f.deleted_at IS NULL
-  AND f.status NOT IN ('hidden', 'deleted')
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 """
 
@@ -651,13 +663,16 @@ WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
 #
-# 정합성(issue #509 Problem B): 같은 안정 식별자에 inactive+deleted_at 구 feature와
-# active 신 feature가 둘 다 primary link로 남을 수 있다(re-key 정리 직전/직후). 따라서:
-#   - ``f.deleted_at IS NULL`` — soft-delete된 구 feature 제외.
-#   - 결정적 ``ORDER BY`` (active 우선 → imported_at 최신 → feature_id) 후 LIMIT 1 —
-#     동률 시에도 deterministic하게 active 신 feature를 반환(admin_feature_repo.py /
-#     curated_repo.py의 동일 패턴 미러). caller(mois_detail)는 active-only 기대
-#     (test_mois_loader가 status='active' 단언).
+# 공개 표면(`/v1/mois/licenses/...`)이 소비하므로 ADR-067 공개 projection
+# (``feature.public_features``)만 조인한다 — 과거에는 ``deleted_at IS NULL``만
+# 요구하고 ``ORDER BY (status='active') DESC``로 active를 우선했을 뿐이라, active
+# 후보가 없으면 draft/inactive feature가 그대로 노출됐다(F-1). caller(mois_detail)는
+# 원래 active-only를 기대한다(test_mois_loader가 status='active' 단언).
+#
+# 정합성(issue #509 Problem B): 같은 안정 식별자에 구/신 feature가 둘 다 primary
+# link로 남을 수 있다(re-key 정리 직전/직후). view가 non-active를 제거한 뒤에도
+# active 동률이 남을 수 있으므로 결정적 ``ORDER BY``(imported_at 최신 → feature_id)
+# 후 LIMIT 1로 deterministic하게 반환한다.
 _GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
 SELECT
     f.feature_id, f.kind, f.name, f.category, f.status,
@@ -672,19 +687,21 @@ JOIN provider_sync.source_records AS sr
   ON sr.source_record_key = se.current_source_record_key
 JOIN provider_sync.source_links AS sl
   ON sl.source_entity_key = se.source_entity_key
-JOIN feature.features AS f
+JOIN feature.public_features AS f
   ON f.feature_id = sl.feature_id
 WHERE sr.provider = :provider
   AND sr.dataset_key = :dataset_key
   AND sr.source_entity_type = :source_entity_type
   AND sr.source_entity_id = :source_entity_id
   AND sl.is_primary_source
-  AND f.deleted_at IS NULL
-ORDER BY (f.status = 'active') DESC, sr.imported_at DESC NULLS LAST, f.feature_id
+ORDER BY sr.imported_at DESC NULLS LAST, f.feature_id
 LIMIT 1
 """
 
-# bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
+# bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. 공개 여부는
+# ADR-067 단일 projection(``feature.public_features``)이 결정한다 — 이 파일의
+# 공개 read SQL은 술어를 재구현하지 않는다. view 술어가 ``deleted_at IS NULL``을
+# 함의하므로 partial GiST 인덱스는 그대로 사용된다.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = f"""
 SELECT
@@ -693,7 +710,7 @@ SELECT
     f.marker_icon, f.marker_color, f.status,
     ps.price_summary,
     ws.weather_summary
-FROM feature.features AS f
+FROM feature.public_features AS f
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(
         jsonb_build_object(
@@ -794,8 +811,7 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+WHERE f.coord IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
@@ -848,7 +864,7 @@ SELECT
       THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
       ELSE NULL
     END AS area_square_meters
-FROM feature.features AS f
+FROM feature.public_features AS f
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(
         jsonb_build_object(
@@ -949,8 +965,7 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE f.deleted_at IS NULL
-  AND (
+WHERE (
     (
       f.coord IS NOT NULL
       AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
@@ -1003,9 +1018,8 @@ SELECT
     count(*) AS feature_count,
     avg(x_extension.ST_X(f.coord)) AS lon,
     avg(x_extension.ST_Y(f.coord)) AS lat
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+FROM feature.public_features AS f
+WHERE f.coord IS NOT NULL
   AND f.{code_col} IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
@@ -1115,9 +1129,8 @@ WITH candidates AS (
             WHEN CAST(:q AS text) IS NULL THEN NULL
             ELSE x_extension.similarity(f.name, CAST(:q AS text))
         END AS score
-    FROM feature.features AS f
-    WHERE f.deleted_at IS NULL
-      AND (
+    FROM feature.public_features AS f
+    WHERE (
         CAST(:q AS text) IS NULL
         OR f.name OPERATOR(x_extension.%) CAST(:q AS text)
       )
@@ -1154,9 +1167,8 @@ WITH name_candidates AS MATERIALIZED (
         f.marker_icon,
         f.marker_color,
         f.status,
-        f.deleted_at,
         x_extension.similarity(f.name, CAST(:q AS text)) AS score
-    FROM feature.features AS f
+    FROM feature.public_features AS f
     WHERE f.name OPERATOR(x_extension.%) CAST(:q AS text)
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
@@ -1173,8 +1185,7 @@ candidates AS (
         status,
         score
     FROM name_candidates
-    WHERE deleted_at IS NULL
-      AND (
+    WHERE (
         CAST(:bbox_enabled AS boolean) IS FALSE
         OR (
           coord IS NOT NULL
@@ -1271,9 +1282,8 @@ candidates AS (
         ps.dataset_key AS primary_dataset_key,
         f.updated_at AS last_updated_at
     FROM target AS t
-    JOIN feature.features AS f
-      ON f.deleted_at IS NULL
-     AND f.coord IS NOT NULL
+    JOIN feature.public_features AS f
+      ON f.coord IS NOT NULL
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
     LEFT JOIN LATERAL (
@@ -1389,9 +1399,8 @@ candidates AS (
         ps.dataset_key AS primary_dataset_key,
         f.updated_at AS last_updated_at
     FROM origin AS o
-    JOIN feature.features AS f
-      ON f.deleted_at IS NULL
-     AND f.coord IS NOT NULL
+    JOIN feature.public_features AS f
+      ON f.coord IS NOT NULL
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
     LEFT JOIN LATERAL (
@@ -3269,15 +3278,53 @@ async def get_feature_rows_by_ids(
     """여러 feature 상세 row를 한 번에 조회한다.
 
     ``feature_ids`` 순서는 반환 dict에서 보장하지 않는다. 호출자는 입력 순서와
-    key 존재 여부를 비교해 missing 목록을 만든다. soft-deleted(inactive) feature도
-    status와 함께 반환한다(D-12, 2026-06-10) — 단건 ``get_feature_row``와 동일 정책.
-    소비자는 ``missing``(미존재)과 ``status='inactive'``("철회/폐업됨")를 구분할 수
-    있어야 한다. 목록/검색 read(search/in-bounds/nearby)는 기존대로 기본 active만.
+    key 존재 여부를 비교해 missing 목록을 만든다. **admin/감사·내부 파이프라인용
+    raw read** — soft-deleted/inactive feature도 status와 함께 반환한다(단건
+    ``get_feature_row``와 동일 정책). 공개/서비스 read는 ADR-067 projection을 쓰는
+    ``get_public_feature_rows_by_ids``를 사용한다.
     """
     normalized = _normalized_filter(feature_ids)
     if normalized is None:
         return {}
     result = await session.execute(text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized})
+    rows = result.mappings().all()
+    return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
+
+
+async def get_public_feature_row(
+    session: AsyncSession, feature_id: str
+) -> dict[str, Any] | None:
+    """공개 feature 단건 조회 — ADR-067 ``feature.public_features`` projection.
+
+    공개 API 단건 상세가 사용한다. 비공개(draft/broken/hidden/inactive/soft-deleted)
+    row는 존재하지 않는 것으로 취급되어 ``None``을 반환한다 — 공개 술어는 VIEW
+    (alembic 0059) 한 곳에만 정의되어 있고 여기서 재구현하지 않는다(F-1 재발 방지).
+    row shape은 ``get_feature_row``와 동일하다. admin/감사용 raw read는 기존
+    ``get_feature_row``를 그대로 사용한다.
+    """
+    result = await session.execute(text(_GET_PUBLIC_FEATURE_SQL), {"feature_id": feature_id})
+    row = result.mappings().first()
+    if row is None:
+        return None
+    return _deserialize_feature_row(row)
+
+
+async def get_public_feature_rows_by_ids(
+    session: AsyncSession, feature_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """여러 공개 feature 상세 row를 한 번에 조회한다 (ADR-067 projection).
+
+    공개/service batch read가 사용한다. 반환 dict에 없는 ID는 "공개 row 없음"
+    (미존재·retired·suppressed 구분 없이)이며, 상태 구분이 필요한 service batch
+    item-state 계약은 T-VN-11에서 이 projection과 base 상태를 조합해 구현한다.
+    row shape·순서 계약은 ``get_feature_rows_by_ids``와 동일하다.
+    """
+    normalized = _normalized_filter(feature_ids)
+    if normalized is None:
+        return {}
+    result = await session.execute(
+        text(_GET_PUBLIC_FEATURES_BY_IDS_SQL), {"feature_ids": normalized}
+    )
     rows = result.mappings().all()
     return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
 
@@ -3521,7 +3568,8 @@ async def features_in_bbox(
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
-    사용하는 ``&&`` 연산. ``deleted_at IS NULL`` + ``coord IS NOT NULL``만. ``kinds``가
+    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection이
+    결정하고(``coord IS NOT NULL`` 추가), ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
     ``include_geometry``가 true이면 route/area용 ``geom``도 bbox 후보에 포함해
     지도 표시용 GeoJSON/면적을 반환한다. ``providers``가 주어지면 primary source
@@ -3552,9 +3600,8 @@ async def features_in_bbox(
 _FEATURES_CONTAINED_IN_AREA_SQL: Final[str] = f"""
 WITH area_feature AS (
     SELECT feature_id, geom
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND kind = 'area'
       AND geom IS NOT NULL
 )
@@ -3569,9 +3616,8 @@ SELECT
     f.marker_color,
     f.status
 FROM area_feature AS a
-JOIN feature.features AS f
-  ON f.deleted_at IS NULL
- AND f.feature_id <> a.feature_id
+JOIN feature.public_features AS f
+  ON f.feature_id <> a.feature_id
  AND f.coord IS NOT NULL
  AND a.geom OPERATOR(x_extension.&&) f.coord
  AND x_extension.ST_Covers(a.geom, f.coord)
@@ -3899,6 +3945,11 @@ async def features_nearby_poi_cache_target(
 
     ADR-012: 반경 술어는 target과 feature의 STORED ``coord_5179`` 컬럼에 직접
     적용한다. 입력 좌표 변환이나 ``ST_Transform``은 WHERE 술어에 두지 않는다.
+
+    공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
+    조회한다. ``statuses``는 그 projection과 **교집합**으로만 동작한다 —
+    projection에는 ``status='active'`` row만 있으므로 active 외 값을 넘기면
+    빈 결과가 된다(비공개 status 노출 금지, F-1).
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -3957,6 +4008,8 @@ async def features_nearby(
     직접 ``ST_DWithin``/``ST_Distance``를 적용한다(GiST ``idx_features_coord_5179_gist``).
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
+    공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
+    조회하고, ``statuses``는 projection과 교집합으로만 동작한다(위 함수와 동일).
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -3997,25 +4050,22 @@ async def features_nearby(
 
 _CATEGORY_FEATURE_COUNTS_SQL: Final[str] = f"""
 SELECT f.category, count(*) AS n
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND (NOT CAST(:active_only AS boolean) OR f.status = 'active')
+FROM feature.public_features AS f
+WHERE TRUE
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 GROUP BY f.category
 """
 
 
-async def category_feature_counts(
-    session: AsyncSession, *, active_only: bool = False
-) -> dict[str, int]:
-    """category code → 적재 feature 수 (soft-deleted 제외).
+async def category_feature_counts(session: AsyncSession) -> dict[str, int]:
+    """category code → 공개 feature 수 (ADR-067 ``public_features`` projection).
 
-    ``active_only=True``면 ``status='active'``만 센다. ``GET /categories?include_counts``
-    (T-213f)에서 정적 카탈로그(144건)에 현재 DB 분포를 합쳐 보여주기 위한 집계.
-    카탈로그에 없는(미지정/legacy) category code도 그대로 반환하므로 호출자가
-    카탈로그와 교차한다.
+    ``GET /categories?include_counts``(T-213f)에서 정적 카탈로그(144건)에 현재 DB
+    분포를 합쳐 보여주기 위한 집계. 공개 표면이므로 비공개(draft/broken/hidden/
+    inactive/soft-deleted) feature는 집계에 포함하지 않는다 — 과거의
+    ``active_only`` 스위치는 비공개 분포를 공개 counts로 노출했기에 제거됐다
+    (T-VN-04, F-1). 카탈로그에 없는(미지정/legacy) category code도 그대로
+    반환하므로 호출자가 카탈로그와 교차한다.
     """
-    rows = (
-        await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL), {"active_only": active_only})
-    ).all()
+    rows = (await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL))).all()
     return {str(row[0]): int(row[1]) for row in rows}

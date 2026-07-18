@@ -143,6 +143,17 @@ write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 de
 현재 공개 read·weather·batch 경로를 목표 계약으로 바꾸는 호환 alias는 두지 않는다. 변경 시점은
 각 T-VN task와 PinVi mirror task가 소유하며, 이 문서는 조건만 고정한다.
 
+### 3.2 T-VN-04 batch 의미 변화 (PinVi 조정 대기, resolver = T-VN-11)
+
+T-VN-04(공개 predicate를 `feature.public_features` view로 단일화)로
+`POST /v1/features/batch`의 분류가 바뀌었다: 이전에는 admin-inactive feature가
+`found`(status `inactive`)로 내려갔지만(구 D-12 분기), 이제 admin-inactive/draft/broken 등
+모든 비공개 feature는 균일하게 `missing`이다. PinVi trip view는 `missing`을 깨진 참조로
+표시하므로, 그 사이 admin-inactive place가 일시적으로 false-broken으로 보일 수 있다.
+PinVi 측 `kor_travel_map.py`의 batch docstring은 구 D-12 분기를 성문화하고 있어 현재
+stale이다. 해소는 **T-VN-11 5-state typed DTO**(§3.1 feature batch 행)가 소유한다 —
+그 전까지 PinVi는 `missing`을 "비공개 또는 미존재"로 읽어야 한다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
