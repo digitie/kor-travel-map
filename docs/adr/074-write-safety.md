@@ -13,11 +13,11 @@
 
 ## 결정
 
-1. 재시도가 필요한 각 command domain은 `(principal namespace, Idempotency-Key)`와 정규화 body
-   fingerprint, 최초 결과를 저장하는 append-only ledger를 소유한다. 같은 key/같은 body는 결과를
-   replay하고 다른 body는 409다.
-2. mutable resource는 단조 `row_revision`과 `If-Match`를 사용하며 stale write는 412다.
-   기존 policy revision은 resource-specific 선례로 유지한다.
+1. 재시도가 필요한 각 command domain은 `(principal namespace, operation, Idempotency-Key)`와
+   정규화 body fingerprint, 최초 결과를 저장하는 append-only ledger를 소유한다(D-10-1 3요소 key).
+   같은 key/같은 body는 결과를 replay하고 다른 body는 409다.
+2. mutable resource는 단조 `row_revision`과 `If-Match`를 사용한다. `If-Match` 누락은 428,
+   stale write는 412다(D-10-3). 기존 policy revision은 resource-specific 선례로 유지한다.
 3. cache target은 `(external_system, target_key)` identity, 단일 canonical coordinate,
    `source_generation`과 restore epoch을 가진다. 낮은 generation은 적용하지 않는다.
 4. DB commit 뒤 외부 전파는 transactional outbox와 멱등 relay가 담당한다. critical write path에서

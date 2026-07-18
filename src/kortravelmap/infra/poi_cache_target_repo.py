@@ -52,6 +52,10 @@ __all__ = [
 
 OnConflict = Literal["reject", "move"]
 
+# create 경합(패자 DO NOTHING → 재-lock)이 극단적으로 반복될 때의 상한.
+# 소진되면 잠금 없는 DO UPDATE fall-through 대신 명확한 실패로 닫는다.
+_CREATE_RACE_MAX_ATTEMPTS: Final[int] = 3
+
 _LIST_ACTIVE_TARGET_COORDS_SQL: Final[str] = """
 SELECT lon, lat
 FROM ops.poi_cache_targets
@@ -381,15 +385,10 @@ def _validate_target(
         raise ValueError("on_conflict must be 'reject' or 'move'")
 
 
-_EXISTING_BY_KEY_SQL: Final[str] = """
-SELECT target_id, coord_key
-FROM ops.poi_cache_targets
-WHERE external_system = :external_system
-  AND target_key = :target_key
-  AND deleted_at IS NULL
-"""
-
-_UPSERT_TARGET_SQL: Final[str] = f"""
+# upsert의 moved/reject 판정과 실제 write 사이 TOCTOU를 막기 위해 INSERT 본체를
+# 공유하고 conflict tail만 나눈다. reject create 경합의 패자는 DO NOTHING 뒤
+# `_LOCK_ACTIVE_TARGET_SQL` 재획득으로 stable row에서 다시 판정한다.
+_INSERT_TARGET_CONFLICT_PREFIX_SQL: Final[str] = """
 INSERT INTO ops.poi_cache_targets (
     external_system, target_key, name, lon, lat, coord, coord_precision_digits,
     coord_key, radius_km, scope_mode, update_enabled, refresh_policy,
@@ -407,7 +406,14 @@ INSERT INTO ops.poi_cache_targets (
     :update_enabled, :refresh_policy, CAST(:provider_overrides AS jsonb),
     CAST(:metadata_json AS jsonb), now(), now()
 )
-ON CONFLICT (external_system, target_key) WHERE deleted_at IS NULL DO UPDATE SET
+ON CONFLICT (external_system, target_key) WHERE deleted_at IS NULL
+"""
+
+_CREATE_TARGET_SQL: Final[str] = f"""{_INSERT_TARGET_CONFLICT_PREFIX_SQL} DO NOTHING
+RETURNING {_TARGET_COLUMNS}
+"""
+
+_UPSERT_TARGET_SQL: Final[str] = f"""{_INSERT_TARGET_CONFLICT_PREFIX_SQL} DO UPDATE SET
     name = EXCLUDED.name,
     lon = EXCLUDED.lon,
     lat = EXCLUDED.lat,
@@ -462,7 +468,7 @@ LIMIT :limit_plus_one
 """
 
 _LOCK_ACTIVE_TARGET_SQL: Final[str] = """
-SELECT target_id, lock_version
+SELECT target_id, lock_version, coord_key
 FROM ops.poi_cache_targets
 WHERE external_system = :external_system
   AND target_key = :target_key
@@ -507,12 +513,17 @@ ORDER BY target_id
 FOR KEY SHARE
 """
 
+# snapshot sync는 resolver 계산 link만 교체한다. 운영자가 직접 기록한
+# ``relation='manual'`` link는 resolver 재계산 대상이 아니므로 보존한다(#699 패턴).
+# 단건 ``_DEACTIVATE_LINKS_SQL``(delete/move 경로)은 target 자체가 무효화되므로
+# manual link도 함께 비활성화한다.
 _DEACTIVATE_LINKS_FOR_TARGETS_SQL: Final[str] = """
 UPDATE ops.poi_cache_target_feature_links
 SET active = false,
     last_seen_at = now()
 WHERE target_id = ANY(CAST(:target_ids AS uuid[]))
   AND active
+  AND relation <> 'manual'
 RETURNING 1
 """
 
@@ -523,6 +534,15 @@ WHERE target_id = ANY(CAST(:target_ids AS uuid[]))
 ORDER BY target_id, feature_id
 FOR UPDATE
 """
+
+# 기존 row가 운영자 ``relation='manual'``이면 resolver 재-upsert가 분류를 되돌리지
+# 못한다(#699 패턴) — 되돌아가면 다음 snapshot sync가 manual link를 비활성화한다.
+# 재분류가 필요하면 운영자가 link를 명시적으로 비활성화/삭제한 뒤 다시 만든다.
+_LINK_RELATION_PRESERVE_MANUAL_SQL: Final[str] = """CASE
+        WHEN poi_cache_target_feature_links.relation = 'manual'
+            THEN poi_cache_target_feature_links.relation
+        ELSE EXCLUDED.relation
+    END"""
 
 _UPSERT_LINK_SQL: Final[str] = f"""
 WITH active_target AS (
@@ -543,7 +563,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = EXCLUDED.relation,
+    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}
@@ -561,7 +581,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = EXCLUDED.relation,
+    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}
@@ -627,6 +647,14 @@ async def upsert_poi_cache_target(
     같은 ``external_system + target_key``가 다른 normalized 좌표로 들어오면 기본은
     ``PoiCacheTargetConflict``다. ``on_conflict='move'``면 좌표를 갱신하고 기존
     active feature link를 비활성화해 후속 resolver가 다시 계산하게 한다.
+
+    moved/reject 판정은 항상 active natural-key row의 ``FOR UPDATE`` lock 아래에서
+    계산한다(DELETE 경로와 같은 ``_LOCK_ACTIVE_TARGET_SQL`` 패턴). unlocked read로
+    판정하면 동시 PUT의 패자가 ``ON CONFLICT UPDATE``로 승자의 좌표를 조용히
+    덮어쓰거나, stale ``moved=False``로 이전 좌표의 active link를 남길 수 있다.
+    create 경합의 패자는 ``DO NOTHING`` insert 뒤 lock을 재획득해 재판정한다.
+    이 create→재-lock은 상한(``_CREATE_RACE_MAX_ATTEMPTS``) 있는 반복이며, 소진 시
+    ``RuntimeError``로 실패한다 — ``DO UPDATE``는 lock 보유 없이는 실행되지 않는다.
     """
     _validate_target(
         external_system=external_system,
@@ -640,53 +668,80 @@ async def upsert_poi_cache_target(
         on_conflict=on_conflict,
     )
     coord_key = _coord_key(lon=lon, lat=lat, precision=coord_precision_digits)
-    existing = (
-        (
-            await session.execute(
-                text(_EXISTING_BY_KEY_SQL),
-                {"external_system": external_system, "target_key": target_key},
+
+    async def _lock_existing() -> Any:
+        return (
+            (
+                await session.execute(
+                    text(_LOCK_ACTIVE_TARGET_SQL),
+                    {"external_system": external_system, "target_key": target_key},
+                )
             )
-        )
-        .mappings()
-        .one_or_none()
-    )
-    moved = existing is not None and existing["coord_key"] != coord_key
-    if moved and on_conflict == "reject":
-        raise PoiCacheTargetConflict(
-            f"active target {external_system}:{target_key} has different coord_key"
+            .mappings()
+            .one_or_none()
         )
 
-    target = _row_to_target(
-        (
-            await session.execute(
-                text(_UPSERT_TARGET_SQL),
-                {
-                    "external_system": external_system,
-                    "target_key": target_key,
-                    "name": name,
-                    "lon": lon,
-                    "lat": lat,
-                    "lon_geom": lon,
-                    "lat_geom": lat,
-                    "coord_precision_digits": coord_precision_digits,
-                    "coord_key": coord_key,
-                    "radius_km": radius_km,
-                    "scope_mode": scope_mode,
-                    "update_enabled": update_enabled,
-                    "refresh_policy": refresh_policy,
-                    "provider_overrides": json.dumps(
-                        dict(provider_overrides) if provider_overrides else {},
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                    "metadata_json": json.dumps(
-                        dict(metadata) if metadata else {},
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                },
+    def _moved(locked_row: Any) -> bool:
+        moved_now = locked_row is not None and locked_row["coord_key"] != coord_key
+        if moved_now and on_conflict == "reject":
+            raise PoiCacheTargetConflict(
+                f"active target {external_system}:{target_key} has different coord_key"
             )
+        return moved_now
+
+    write_params = {
+        "external_system": external_system,
+        "target_key": target_key,
+        "name": name,
+        "lon": lon,
+        "lat": lat,
+        "lon_geom": lon,
+        "lat_geom": lat,
+        "coord_precision_digits": coord_precision_digits,
+        "coord_key": coord_key,
+        "radius_km": radius_km,
+        "scope_mode": scope_mode,
+        "update_enabled": update_enabled,
+        "refresh_policy": refresh_policy,
+        "provider_overrides": json.dumps(
+            dict(provider_overrides) if provider_overrides else {},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "metadata_json": json.dumps(
+            dict(metadata) if metadata else {},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    }
+
+    existing = await _lock_existing()
+    moved = _moved(existing)
+    # DO UPDATE tail은 active row의 FOR UPDATE lock을 보유했을 때만 실행한다.
+    # create 경합에서 밀린 뒤 재-lock이 다시 비면(winner commit 직후 동시
+    # soft-delete) create→재-lock을 유한 반복하고, 소진 시 조용한 덮어쓰기 대신
+    # 명확히 실패한다 — 잠금 없는 fall-through로 3자 경합 clobber를 열지 않는다.
+    attempts_remaining = _CREATE_RACE_MAX_ATTEMPTS
+    while existing is None:
+        if attempts_remaining <= 0:
+            raise RuntimeError(
+                "poi cache target create race did not stabilize; retry the upsert"
+            )
+        attempts_remaining -= 1
+        created = (
+            (await session.execute(text(_CREATE_TARGET_SQL), write_params))
+            .mappings()
+            .one_or_none()
         )
+        if created is not None:
+            return _row_to_target(created)
+        # create 경합에서 밀렸다 — winner commit까지 lock 획득이 블록되고, 그 뒤
+        # stable row로 moved/reject를 다시 판정한다.
+        existing = await _lock_existing()
+        moved = _moved(existing)
+
+    target = _row_to_target(
+        (await session.execute(text(_UPSERT_TARGET_SQL), write_params))
         .mappings()
         .one()
     )
@@ -894,8 +949,9 @@ async def sync_poi_cache_target_feature_links(
     """active parent 전체를 먼저 잠근 뒤 link snapshot을 원자적으로 교체한다.
 
     caller transaction 안에서 canonical UUID 순서로 모든 parent ``KEY SHARE`` lock을
-    획득한다. 이후에만 기존 link를 비활성화하고 ``target_id, feature_id`` 순서로 새
-    link를 upsert한다. target delete도 parent ``FOR UPDATE`` 뒤 link를 갱신하므로 두
+    획득한다. 이후에만 기존 resolver link를 비활성화하고(운영자 ``relation='manual'``
+    link는 보존) ``target_id, feature_id`` 순서로 새 link를 upsert한다.
+    target delete도 parent ``FOR UPDATE`` 뒤 link를 갱신하므로 두
     경로의 잠금 순서는 항상 parent → link다.
     """
     canonical_target_ids = tuple(
