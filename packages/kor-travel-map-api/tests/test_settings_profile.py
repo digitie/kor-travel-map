@@ -185,6 +185,15 @@ def test_production_accepts_service_token_at_32_char_boundary() -> None:
     assert settings.service_token is not None
 
 
+@pytest.mark.unit
+def test_production_rejects_service_token_reused_as_admin_secret() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(service_token=ADMIN_PROXY_SECRET)
+    message = str(excinfo.value)
+    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
+    assert "distinct from KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in message
+
+
 # ── production 거부 matrix ───────────────────────────────────────────────────
 
 
@@ -365,3 +374,21 @@ def test_create_app_boots_with_production_settings_and_omits_debug_routes() -> N
     assert any(path.startswith("/v1/features") for path in paths)
     assert any(path.startswith("/v1/admin") for path in paths)
     assert any(path.startswith("/v1/ops") for path in paths)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("updates", "expected_problem"),
+    [
+        ({"service_token": None}, "KOR_TRAVEL_MAP_API_SERVICE_TOKEN"),
+        ({"public_api_key_required": False}, "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED"),
+        ({"debug_routes_enabled": True}, "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED"),
+    ],
+)
+def test_create_app_revalidates_bypassed_production_settings(
+    updates: dict[str, Any],
+    expected_problem: str,
+) -> None:
+    bypassed = _production_settings().model_copy(update=updates)
+    with pytest.raises(ValueError, match=expected_problem):
+        create_app(settings=bypassed)

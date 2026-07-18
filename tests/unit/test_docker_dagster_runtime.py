@@ -761,6 +761,14 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
             },
             "distinct from the service token",
         ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": (
+                    "shared-secret-at-least-32-characters"
+                ),
+            },
+            "must be distinct from KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        ),
     ],
 )
 def test_api_container_rejects_invalid_ops_principal_pair(

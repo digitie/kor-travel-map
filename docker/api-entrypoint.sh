@@ -42,6 +42,11 @@ if [ "$api_proxy_secret" != "$trimmed_api_proxy_secret" ] || [ "${#api_proxy_sec
   echo "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be at least 32 characters without surrounding whitespace" >&2
   exit 1
 fi
+api_service_token="${KOR_TRAVEL_MAP_API_SERVICE_TOKEN:-}"
+if [ -n "$api_service_token" ] && [ "$api_service_token" = "$api_proxy_secret" ]; then
+  echo "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be distinct from KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" >&2
+  exit 1
+fi
 
 ops_read_is_set="${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN+x}"
 ops_cancel_is_set="${KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN+x}"
@@ -106,7 +111,6 @@ else
       echo "ops read/cancel tokens must be distinct from the admin proxy secret" >&2
       exit 1
     fi
-    api_service_token="${KOR_TRAVEL_MAP_API_SERVICE_TOKEN:-}"
     if [ -n "$api_service_token" ]; then
       if [ "$ops_read_token" = "$api_service_token" ] || [ "$ops_cancel_token" = "$api_service_token" ]; then
         echo "ops read/cancel tokens must be distinct from the service token" >&2

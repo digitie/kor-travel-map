@@ -519,9 +519,8 @@ class ApiSettings(BaseSettings):
             return self.features_routes_enabled
         return self.ops_routes_enabled
 
-    @model_validator(mode="after")
-    def _validate_production_fail_closed(self) -> ApiSettings:
-        """ADR-066 D-1 (T-VN-01): production profile은 필수 secret 없이 기동을 거부한다.
+    def assert_production_ready(self) -> None:
+        """ADR-066 D-1의 production 불변식을 검증한다.
 
         secret 미설정 fallback(admin actor ``local-dev`` 통과, keyless public read,
         인증 없는 ``/debug``)은 non-production profile에서만 허용한다. Docker 밖
@@ -531,7 +530,7 @@ class ApiSettings(BaseSettings):
         """
 
         if not self.is_production:
-            return self
+            return
 
         problems: list[str] = []
 
@@ -570,6 +569,11 @@ class ApiSettings(BaseSettings):
         service_token_raw = (
             None if self.service_token is None else self.service_token.get_secret_value()
         )
+        if admin_secret is not None and admin_secret == service_token_raw:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be distinct from "
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"
+            )
         if self.features_routes_enabled:
             # D-1-2의 service secret: `/v1/features/batch` 같은 service surface가
             # public key로만 조용히 격하되지 않도록 features surface에서는 필수다.
@@ -591,4 +595,10 @@ class ApiSettings(BaseSettings):
             raise ValueError(
                 "production profile is fail-closed (ADR-066): " + "; ".join(problems)
             )
+
+    @model_validator(mode="after")
+    def _validate_production_fail_closed(self) -> ApiSettings:
+        """정상 settings 생성 시 production 불변식을 적용한다."""
+
+        self.assert_production_ready()
         return self
