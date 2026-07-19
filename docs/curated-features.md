@@ -307,6 +307,21 @@ GET /v1/curated-features/{curated_feature_id}
 GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 ```
 
+`GET /v1/curated-features*`는 admin overlay DTO를 재사용하지 않는다. 공개 전용
+`PublicCuratedFeatureView`가 다음 정보만 허용한다.
+
+- 큐레이션/테마 표시: `curated_feature_id`, `theme_slug/name/group`,
+  `display_title/summary`, `curation_relation`, `reuse_policy`, `content_version`,
+  `updated_at`
+- Feature 표시: `feature_id/name/category/kind`, 좌표·행정코드, `address`, `detail`
+- 출처 표시: `source_name`, `source_url`
+
+`detail`은 Feature kind별 typed 필드 allowlist를 거치며 자유형 `payload`와 raw
+lineage 키는 통과하지 않는다. `theme_id`, `source_id`, `provider`, `dataset_key`,
+`source_record_key`, 선정/제외 actor·시각, `metadata` 같은 DB/source identity와 감사
+필드는 공개 schema에 없다. 이 값들은 `/v1/admin/features/curated*`의
+`CuratedFeatureView`에 그대로 남겨 운영 감사에 사용한다(T-VN-05R, ADR-073).
+
 `GET /v1/curated-features` 주요 query:
 
 - `theme_slug`

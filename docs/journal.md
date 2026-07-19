@@ -32,6 +32,16 @@
   cluster EXPLAIN 2건, tier-1 성능 12건, public view/cluster 회귀 17건이 통과했다.
   OpenAPI admin/user drift, admin/user TypeScript type-check, E2E ESLint, Ruff, main strict
   mypy, 변경 API strict mypy, import-linter 4계약, redaction도 통과했다.
+## 2026-07-19 (codex, agent B) — T-VN-05R public curated allowlist
+
+- PR #752의 T-VN-05가 feature detail/batch에서 제거한 raw 경계를 public curated
+  list/detail이 기존 admin DTO 재사용으로 우회하던 issue #765를 구현했다.
+- 공개 전용 DTO와 명시 mapper를 추가해 표시·위치·큐레이션·출처 표시 필드만
+  직렬화한다. detail은 kind별 typed allowlist라 `payload`와 신규 미승인 필드는 기본
+  비공개이고, source/DB identity·감사값·metadata는 admin DTO에만 남는다.
+- 공개 list/detail에 같은 raw sentinel row를 주입하는 회귀, admin raw 보존,
+  full/user OpenAPI의 public/admin schema 분리와 user generated type drift를 함께 고정했다.
+  테스트와 커밋은 단일 전문 리뷰어의 테스트 전 검토 뒤 수행한다.
 
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 단일 적대 리뷰
 

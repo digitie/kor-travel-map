@@ -3896,7 +3896,7 @@ export interface components {
         };
         /**
          * CuratedFeatureView
-         * @description curated feature overlay view.
+         * @description admin/operator curated feature overlay view.
          */
         CuratedFeatureView: {
             /** Address */
@@ -9103,6 +9103,83 @@ export interface components {
             data: components["schemas"]["PublicBeachListData"];
             meta: components["schemas"]["Meta"];
         };
+        /** PublicCuratedFeatureResponse */
+        PublicCuratedFeatureResponse: {
+            data: components["schemas"]["PublicCuratedFeatureView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicCuratedFeatureView
+         * @description 공개 curated feature allowlist view.
+         *
+         *     DB/source identity와 선정 감사 필드는 admin ``CuratedFeatureView``에만 둔다.
+         *     ``detail``도 kind별 allowlist projection을 거친 값만 받는다.
+         */
+        PublicCuratedFeatureView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Kind */
+            feature_kind: string;
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedFeaturesData */
+        PublicCuratedFeaturesData: {
+            /** Items */
+            items: components["schemas"]["PublicCuratedFeatureView"][];
+        };
+        /** PublicCuratedFeaturesResponse */
+        PublicCuratedFeaturesResponse: {
+            data: components["schemas"]["PublicCuratedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * PublicFeatureListData
          * @description public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
@@ -13612,7 +13689,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeaturesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13652,7 +13729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeatureResponse"];
                 };
             };
             /** @description Validation Error */

@@ -5164,7 +5164,7 @@
       },
       "CuratedFeatureView": {
         "additionalProperties": false,
-        "description": "curated feature overlay view.",
+        "description": "admin/operator curated feature overlay view.",
         "properties": {
           "address": {
             "additionalProperties": true,
@@ -19882,6 +19882,233 @@
         "title": "PublicBeachListResponse",
         "type": "object"
       },
+      "PublicCuratedFeatureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicCuratedFeatureView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicCuratedFeatureResponse",
+        "type": "object"
+      },
+      "PublicCuratedFeatureView": {
+        "additionalProperties": false,
+        "description": "공개 curated feature allowlist view.\n\nDB/source identity와 선정 감사 필드는 admin ``CuratedFeatureView``에만 둔다.\n``detail``도 kind별 allowlist projection을 거친 값만 받는다.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "integer"
+          },
+          "curated_feature_id": {
+            "title": "Curated Feature Id",
+            "type": "string"
+          },
+          "curation_relation": {
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "display_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Summary"
+          },
+          "display_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Title"
+          },
+          "feature_category": {
+            "title": "Feature Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_kind": {
+            "title": "Feature Kind",
+            "type": "string"
+          },
+          "feature_name": {
+            "title": "Feature Name",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "reuse_policy": {
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curated_feature_id",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "feature_id",
+          "feature_name",
+          "feature_category",
+          "feature_kind",
+          "address",
+          "detail",
+          "source_name",
+          "curation_relation",
+          "reuse_policy",
+          "content_version",
+          "updated_at"
+        ],
+        "title": "PublicCuratedFeatureView",
+        "type": "object"
+      },
+      "PublicCuratedFeaturesData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicCuratedFeatureView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PublicCuratedFeaturesData",
+        "type": "object"
+      },
+      "PublicCuratedFeaturesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicCuratedFeaturesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicCuratedFeaturesResponse",
+        "type": "object"
+      },
       "PublicFeatureListData": {
         "additionalProperties": false,
         "description": "public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).\n\n``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역\nrollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``\n상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는\n결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용\n``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에\n일원화한다.",
@@ -29351,7 +29578,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CuratedFeaturesResponse"
+                  "$ref": "#/components/schemas/PublicCuratedFeaturesResponse"
                 }
               }
             },
@@ -29403,7 +29630,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CuratedFeatureResponse"
+                  "$ref": "#/components/schemas/PublicCuratedFeatureResponse"
                 }
               }
             },

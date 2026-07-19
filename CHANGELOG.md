@@ -124,6 +124,15 @@
   `uq_curated_features_theme_feature_active`의 잘못된 `NULLS NOT DISTINCT` metadata 옵션은
   제거해 migration과 일치시키고 Alembic 일반 비교 대상으로 복귀시켰다.
 
+### 공개 curated raw lineage 우회 차단 (2026-07-19, ADR-073 T-VN-05R)
+
+- **SECURITY**: `GET /v1/curated-features`와 단건 상세가 admin DTO를 재사용하지 않고
+  공개 전용 `PublicCuratedFeatureView` allowlist를 반환한다. `detail.payload`,
+  `source_record_key`, DB/source identity, 선정 감사값, 자유형 metadata는 공개 응답과
+  `openapi.user.json`/user 생성 타입에서 제거했다.
+- **UNCHANGED**: `/v1/admin/features/curated*`는 기존 `CuratedFeatureView`를 계속 사용해
+  source record와 raw detail, 감사 actor/시각을 보존한다.
+
 ### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
 
 - **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,

@@ -18,6 +18,17 @@
 - 전체 main unit 1,503건, API router 26건, PostGIS/성능/공개 회귀 34건과 OpenAPI·TS·
   Ruff·mypy·import-linter·redaction 게이트가 통과했다.
 - **다음 한 작업**: 후속 PR을 CI green 뒤 `integration/t-vn`에 병합한다.
+## 2026-07-19 (codex, agent B) — T-VN-05R 공개 curated raw 경계 보강
+
+- issue #765의 우회 경로를 닫기 위해 공개 curated list/detail을 admin
+  `CuratedFeatureView`에서 분리한 `PublicCuratedFeatureView` allowlist로 전환했다.
+  kind별 detail allowlist가 `payload`와 미승인 raw 키를 fail-closed로 제거하고,
+  source/DB identity·감사값·자유형 metadata도 공개 schema에서 제외한다.
+- admin `/v1/admin/features/curated*`는 기존 전체 DTO와 raw 감사값을 유지한다. 공개
+  list/detail sentinel 회귀와 full/user OpenAPI schema 분리, admin/user 생성 타입 갱신을
+  같은 변경에 포함한다.
+- **다음 한 작업**: 동일 전문 리뷰어 1명의 테스트 전 검토를 받은 뒤 지적을 반영하고,
+  로컬 gate→PR→CI green→`integration/t-vn` 병합→#765 닫기를 진행한다.
 
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
 

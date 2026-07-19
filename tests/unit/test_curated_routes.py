@@ -2,18 +2,95 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from kortravelmap.api.app import create_app
+from kortravelmap.api.db import get_session
 from kortravelmap.api.routers import curated
+from kortravelmap.api.settings import ApiSettings
+from kortravelmap.infra.curated_repo import CuratedFeature, CuratedFeaturePage
 from pydantic import SecretStr
 
 from kortravelmap.settings import KorTravelMapSettings
 
 pytestmark = pytest.mark.unit
+
+
+def _raw_curated_feature() -> CuratedFeature:
+    now = datetime(2026, 7, 19, tzinfo=UTC)
+    return CuratedFeature(
+        curated_feature_id="11111111-1111-4111-8111-111111111111",
+        theme_id="22222222-2222-4222-8222-222222222222",
+        theme_slug="public-raw-boundary",
+        theme_name="공개 raw 경계",
+        theme_group="test",
+        feature_id="feature:public-curated",
+        feature_name="공개 큐레이션 장소",
+        feature_category="01070100",
+        feature_kind="place",
+        lon=126.978,
+        lat=37.566,
+        sido_code="11",
+        sigungu_code="11110",
+        legal_dong_code="1111010100",
+        address={"road": "서울특별시 공개로 1"},
+        detail={
+            "feature_id": "feature:public-curated",
+            "place_kind": "museum",
+            "phones": ["02-0000-0000"],
+            "facility_info": {"wheelchair": True},
+            "payload": {
+                "sentinel": "RAW_DETAIL_PAYLOAD",
+                "source_record_key": "RAW_NESTED_SOURCE_RECORD_KEY",
+                "raw_payload_hash": "RAW_NESTED_HASH",
+            },
+            "raw_data": {"sentinel": "RAW_DETAIL_ROOT"},
+        },
+        source_id="33333333-3333-4333-8333-333333333333",
+        provider="raw-provider-internal",
+        dataset_key="raw-dataset-internal",
+        source_name="공개 출처명",
+        source_url="https://example.test/source",
+        source_record_key="RAW_TOP_LEVEL_SOURCE_RECORD_KEY",
+        curation_status="curated",
+        selection_origin="source_rule",
+        selected_by="RAW_ADMIN_ACTOR",
+        selected_at=now,
+        rejected_by=None,
+        rejected_at=None,
+        rejection_reason=None,
+        rank_score=99.0,
+        display_title="공개 제목",
+        display_summary="공개 요약",
+        curation_relation="nearby_option",
+        reuse_policy="allowed",
+        content_version=3,
+        metadata={"raw_external_id": "RAW_METADATA_ID"},
+        created_at=now,
+        updated_at=now,
+        archived_at=None,
+    )
+
+
+def _nested_keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {
+            nested_key
+            for nested_value in value.values()
+            for nested_key in _nested_keys(nested_value)
+        }
+    if isinstance(value, list):
+        return {
+            nested_key
+            for nested_value in value
+            for nested_key in _nested_keys(nested_value)
+        }
+    return set()
 
 
 def test_curated_routes_are_in_openapi() -> None:
@@ -60,6 +137,66 @@ def test_curated_source_rule_view_accepts_detail_selector() -> None:
         "path": ["payload", "channel_id"],
         "value": "channel-A",
     }
+
+
+def test_public_curated_list_and_detail_strip_raw_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#765: 공개 list/detail은 같은 fail-closed allowlist를 사용한다."""
+
+    row = _raw_curated_feature()
+
+    async def _list(_session: object, **kwargs: Any) -> CuratedFeaturePage:
+        assert kwargs["public_only"] is True
+        return CuratedFeaturePage(items=(row,), next_cursor=None)
+
+    async def _get(_session: object, **kwargs: Any) -> CuratedFeature:
+        assert kwargs["public_only"] is True
+        return row
+
+    monkeypatch.setattr(curated.curated_repo, "list_curated_features", _list)
+    monkeypatch.setattr(curated.curated_repo, "get_curated_feature", _get)
+
+    app = create_app(
+        ApiSettings(public_api_key_required=False, vworld_api_key=None)
+    )
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    listed = client.get("/v1/curated-features")
+    detailed = client.get(f"/v1/curated-features/{row.curated_feature_id}")
+
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    list_item = listed.json()["data"]["items"][0]
+    detail_item = detailed.json()["data"]
+    assert list_item == detail_item
+    assert set(detail_item) == set(curated.PublicCuratedFeatureView.model_fields)
+    assert detail_item["detail"] == {
+        "feature_id": "feature:public-curated",
+        "place_kind": "museum",
+        "phones": ["02-0000-0000"],
+        "facility_info": {"wheelchair": True},
+    }
+    assert {
+        "payload",
+        "raw_data",
+        "raw_payload_hash",
+        "source_record_key",
+        "source_id",
+        "metadata",
+        "selected_by",
+    }.isdisjoint(_nested_keys(detail_item))
+
+    # 같은 repository row의 admin/operator projection은 감사 원문을 그대로 유지한다.
+    admin_item = curated._feature_view(row).model_dump(mode="json")
+    assert admin_item["source_record_key"] == "RAW_TOP_LEVEL_SOURCE_RECORD_KEY"
+    assert admin_item["detail"]["payload"]["sentinel"] == "RAW_DETAIL_PAYLOAD"
+    assert admin_item["metadata"]["raw_external_id"] == "RAW_METADATA_ID"
 
 
 class _FakePlaceSearchClient:

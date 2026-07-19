@@ -60,6 +60,69 @@ ProviderStatus = Literal[
 ]
 RuleAction = Literal["candidate", "curated", "ignore"]
 
+# 공개 curated detail은 feature kind별 typed 필드만 명시적으로 통과시킨다. 새 detail
+# 필드가 provider raw lineage인지 검토되지 않은 채 공개되는 것을 막기 위해 denylist가
+# 아니라 fail-closed allowlist를 쓴다(T-VN-05R, ADR-073).
+_PUBLIC_DETAIL_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
+    "place": (
+        "feature_id",
+        "place_kind",
+        "phones",
+        "reviews_link",
+        "business_hours",
+        "facility_info",
+        "license_date",
+        "biz_number",
+    ),
+    "event": (
+        "feature_id",
+        "event_kind",
+        "starts_on",
+        "ends_on",
+        "timezone",
+        "opening_hours",
+        "venue_name",
+        "tel",
+        "content_id",
+        "content_type_id",
+        "area_code",
+        "sigungu_code",
+    ),
+    "notice": (
+        "feature_id",
+        "notice_type",
+        "severity",
+        "valid_start_time",
+        "valid_end_time",
+        "source_agency",
+        "officer_name",
+    ),
+    "area": (
+        "feature_id",
+        "area_kind",
+        "boundary_source",
+        "area_square_meters",
+        "regulation_scope",
+        "administrative_office",
+        "description",
+    ),
+    "route": (
+        "feature_id",
+        "route_type",
+        "geometry_source",
+        "geometry_status",
+        "total_distance_meters",
+        "expected_duration_minutes",
+        "difficulty",
+        "begin_name",
+        "begin_address",
+        "end_name",
+        "end_address",
+    ),
+    "price": (),
+    "weather": (),
+}
+
 PLACE_SEARCH_LIMIT = 5
 KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
@@ -138,7 +201,7 @@ class CuratedSourceRuleView(BaseModel):
 
 
 class CuratedFeatureView(BaseModel):
-    """curated feature overlay view."""
+    """admin/operator curated feature overlay view."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -183,6 +246,40 @@ class CuratedFeatureView(BaseModel):
     archived_at: datetime | None = None
 
 
+class PublicCuratedFeatureView(BaseModel):
+    """공개 curated feature allowlist view.
+
+    DB/source identity와 선정 감사 필드는 admin ``CuratedFeatureView``에만 둔다.
+    ``detail``도 kind별 allowlist projection을 거친 값만 받는다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    curated_feature_id: str
+    theme_slug: str
+    theme_name: str
+    theme_group: str
+    feature_id: str
+    feature_name: str
+    feature_category: str
+    feature_kind: str
+    lon: float | None = None
+    lat: float | None = None
+    sido_code: str | None = None
+    sigungu_code: str | None = None
+    legal_dong_code: str | None = None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    source_name: str
+    source_url: str | None = None
+    display_title: str | None = None
+    display_summary: str | None = None
+    curation_relation: str
+    reuse_policy: str
+    content_version: int
+    updated_at: datetime
+
+
 class CuratedThemesData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -205,6 +302,12 @@ class CuratedFeaturesData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[CuratedFeatureView]
+
+
+class PublicCuratedFeaturesData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PublicCuratedFeatureView]
 
 
 class CuratedThemesResponse(BaseModel):
@@ -260,6 +363,20 @@ class CuratedFeatureResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: CuratedFeatureView
+    meta: Meta
+
+
+class PublicCuratedFeaturesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: PublicCuratedFeaturesData
+    meta: Meta
+
+
+class PublicCuratedFeatureResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: PublicCuratedFeatureView
     meta: Meta
 
 
@@ -492,6 +609,53 @@ def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
     return CuratedFeatureView(**row.__dict__)
+
+
+def _public_detail(feature_kind: str, detail: dict[str, Any]) -> dict[str, Any]:
+    """kind별 공개 허용 필드만 복사한다.
+
+    ``payload``와 ``source_record_key``/hash 같은 raw lineage 키는 어느 kind의
+    allowlist에도 없으므로 중첩 provider payload가 공개 curated 경로로 우회하지
+    못한다. 알 수 없는 kind는 빈 detail로 fail-closed 처리한다.
+    """
+
+    return {
+        field: detail[field]
+        for field in _PUBLIC_DETAIL_FIELDS_BY_KIND.get(feature_kind, ())
+        if field in detail
+    }
+
+
+def _public_feature_view(
+    row: curated_repo.CuratedFeature,
+) -> PublicCuratedFeatureView:
+    """repository의 admin projection에서 공개 allowlist만 명시적으로 옮긴다."""
+
+    return PublicCuratedFeatureView(
+        curated_feature_id=row.curated_feature_id,
+        theme_slug=row.theme_slug,
+        theme_name=row.theme_name,
+        theme_group=row.theme_group,
+        feature_id=row.feature_id,
+        feature_name=row.feature_name,
+        feature_category=row.feature_category,
+        feature_kind=row.feature_kind,
+        lon=row.lon,
+        lat=row.lat,
+        sido_code=row.sido_code,
+        sigungu_code=row.sigungu_code,
+        legal_dong_code=row.legal_dong_code,
+        address=row.address,
+        detail=_public_detail(row.feature_kind, row.detail),
+        source_name=row.source_name,
+        source_url=row.source_url,
+        display_title=row.display_title,
+        display_summary=row.display_summary,
+        curation_relation=row.curation_relation,
+        reuse_policy=row.reuse_policy,
+        content_version=row.content_version,
+        updated_at=row.updated_at,
+    )
 
 
 def _snapshot_view(
@@ -839,7 +1003,7 @@ async def list_curated_sources_route(
     )
 
 
-@router.get("/curated-features", response_model=CuratedFeaturesResponse)
+@router.get("/curated-features", response_model=PublicCuratedFeaturesResponse)
 async def list_curated_features_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     theme_id: Annotated[str | None, Query()] = None,
@@ -859,7 +1023,7 @@ async def list_curated_features_route(
     display_title: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
-) -> CuratedFeaturesResponse:
+) -> PublicCuratedFeaturesResponse:
     started_at = perf_counter()
     try:
         page = await curated_repo.list_curated_features(
@@ -886,25 +1050,27 @@ async def list_curated_features_route(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return CuratedFeaturesResponse(
-        data=CuratedFeaturesData(items=[_feature_view(row) for row in page.items]),
+    return PublicCuratedFeaturesResponse(
+        data=PublicCuratedFeaturesData(
+            items=[_public_feature_view(row) for row in page.items]
+        ),
         meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
     )
 
 
 @router.get(
     "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
+    response_model=PublicCuratedFeatureResponse,
 )
 async def get_curated_feature_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
+) -> PublicCuratedFeatureResponse:
     started_at = perf_counter()
     # 공개 표면 — underlying feature가 공개 projection에 없으면 404 (ADR-067).
     row = await _feature_or_404(session, curated_feature_id, public_only=True)
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
+    return PublicCuratedFeatureResponse(
+        data=_public_feature_view(row),
         meta=make_meta(started_at=started_at),
     )
 

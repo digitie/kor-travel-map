@@ -69,6 +69,19 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "curation_status" in _query_parameter_names(
         full, "/v1/admin/features/curated"
     )
+    assert _refs(
+        full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]
+    ) == {"PublicCuratedFeaturesResponse"}
+    assert _refs(
+        full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]
+    ) == {"CuratedFeaturesResponse"}
+    full_schemas = full["components"]["schemas"]
+    assert "source_record_key" not in _schema_properties(
+        full, "PublicCuratedFeatureView"
+    )
+    assert "source_record_key" in _schema_properties(full, "CuratedFeatureView")
+    assert "PublicCuratedFeatureView" in full_schemas
+    assert "CuratedFeatureView" in full_schemas
 
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {
@@ -110,7 +123,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "FeatureBatchResponse" in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
-    assert "CuratedFeatureView" in schemas
+    assert "PublicCuratedFeatureView" in schemas
+    assert "CuratedFeatureView" not in schemas
     assert "FeatureCurationGroupsResponse" in schemas
     assert "CurationCollectionResponse" in schemas
     assert "FeatureCurationGroupResponse" in schemas
@@ -122,6 +136,33 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "FeatureObservationView" not in schemas
     assert "FeatureSourcesResponse" not in schemas
     assert "FeatureSourcesData" not in schemas
+    # T-VN-05R: 공개 curated schema는 admin/source identity와 raw lineage를
+    # 애초에 선언하지 않는 별도 allowlist DTO다. user 생성 타입도 이 schema만 따른다.
+    assert {
+        "theme_id",
+        "source_id",
+        "provider",
+        "dataset_key",
+        "source_record_key",
+        "selection_origin",
+        "selected_by",
+        "selected_at",
+        "rejected_by",
+        "rejected_at",
+        "rejection_reason",
+        "metadata",
+        "created_at",
+        "archived_at",
+    }.isdisjoint(_schema_properties(user, "PublicCuratedFeatureView"))
+    assert {
+        "curated_feature_id",
+        "theme_slug",
+        "feature_id",
+        "detail",
+        "source_name",
+        "content_version",
+        "updated_at",
+    } <= _schema_properties(user, "PublicCuratedFeatureView")
     assert _refs(user["paths"]) <= set(schemas)
     assert {
         "coord_5179_srid",

@@ -36,6 +36,9 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
 
 공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough가 없다.
+공개 curated list/detail도 admin overlay DTO와 분리한 명시적 allowlist를 사용한다.
+따라서 `detail.payload`, DB/source identity, 선정 감사 필드는 직렬화되지 않고
+`/v1/admin/features/curated*`에만 남는다(T-VN-05R).
 `include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
 실행하지 않는다. cursor는 version과 정규화 query fingerprint가 다르면
 `CURSOR_QUERY_MISMATCH`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
