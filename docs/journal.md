@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex agent B) — #741·#785 live 인수 경계 문서화
+
+- issue #741·#785의 구현은 main에 있지만 production browser가 보낸 stale raw
+  `If-Match`와 비공개 status marker를 owned fixture로 끝까지 증명하는 live lane이 없었다.
+- strict C7 runner에는 새 feature mutation을 넣지 않는다. 별도 opt-in·serial lane에서 실행별
+  고유 user-request Feature만 만들고, 모든 종료 경로는 직전 revision header의 raw ETag로
+  delete 요청을 만든 뒤 승인·삭제 확인까지 실패를 전파한다.
+- #785 competing write는 승인된 change request로 만들어 실제 revision을 전진시킨다. UI가
+  최초 basis ETag로 412를 받은 뒤 dirty draft를 유지하고 명시적 reload 전 자동 rebase하지
+  않는 것을 wire와 DOM에서 함께 단언한다.
+- #741은 draft/inactive/hidden 세 owned marker를 admin bbox·지도에서 확인하고 public
+  active-only 경계의 404/미포함을 함께 단언한다. weather/price는 admin API가 kind 생성을
+  지원하지 않으므로 root-owned BLOCKED/journal과 recovery-only 경계를 먼저 만든 뒤 exact
+  owned ID의 non-empty value fixture만 직접 만들고 UI panel·admin card·public 음성을 검증한다.
+- 이 문서 단계에서는 테스트·lint·build를 실행하지 않았다.
+
 ## 2026-07-20 (codex) — n150 0062 전환과 PostGIS topology check 오탐 발견
 
 - 최종 main·PinVi·Manager exact clone과 fresh root-owned backup을 확인하고 C6c capture를

@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent B) — #741·#785 targeted live 인수 보강 착수
+
+- `main@700c8ccd` 기준으로 두 이슈의 미완료 조건이 n150 live 증거임을 확인했다. strict C7
+  runner의 복구 journal에 feature correction mutation을 섞지 않고 별도 serial lane으로
+  분리한다.
+- #785는 owned Feature의 UI basis raw ETag, 승인된 경쟁 update, stale UI `If-Match` 412,
+  dirty draft 보존, 명시적 reload, current-ETag cleanup을 한 흐름으로 증명한다.
+- #741은 `draft`·`inactive`·`hidden` owned marker의 admin UI/API 노출과 public active-only
+  음성 계약을 증명한다. admin API가 만들 수 없는 weather/price kind는 runner가 mutation 전에
+  root-owned BLOCKED/journal을 만든 뒤 전용 helper로 고유 fixture를 넣고, UI panel·non-empty
+  card·public 음성 계약을 확인한 뒤 exact ID만 물리 삭제한다.
+- **다음 한 작업**: docs-first commit과 draft PR을 공개한 뒤 구현 exact head를 단일 적대
+  리뷰어에게 제출한다. 승인 전에는 test·lint·build를 실행하지 않는다.
+
 ## 2026-07-20 (codex) — T-ADM-C7F prod topology Alembic check 보강 착수
 
 - n150 최종 main 배포에서 실제 DB를 `0023`에서 `0062_feature_row_revision`까지

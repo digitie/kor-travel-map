@@ -262,7 +262,9 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
     생성 TypeScript, repository/router/frontend/PostGIS 회귀를 PR #779로
     `integration/t-vn@21ad4e31`에 병합했다.
   - [ ] n150 live UI에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증하고
-    issue #741을 닫는다.
+    issue #741을 닫는다. strict C7 runner와 분리한
+    [targeted live lane](reports/t-vn-live-acceptance-741-785-2026-07-20.md)은 상태별 owned
+    fixture, public active-only 음성 단언, current-ETag cleanup을 사용한다.
 
 - [ ] T-VN-58 — **correction 편집 기준 ETag 고정** (#785)
 
@@ -282,6 +284,9 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   - [ ] frontend client/component 회귀, mocked Playwright의 stale 412→reload 흐름, live cleanup의
     직전 revision ETag 기반 DELETE를 추가한다. 단일 적대 리뷰 승인 전에는 test·lint·build를
     실행하지 않는다.
+  - [ ] [targeted n150 live lane](reports/t-vn-live-acceptance-741-785-2026-07-20.md)에서 승인된
+    competing update 뒤 UI가 최초 raw `If-Match`로 412를 받고 dirty draft를 보존하며,
+    명시적 reload 전에는 basis를 바꾸지 않는 것을 증명한다.
 
 - [ ] T-VN-08 — **PinVi false-broken 수정**
 
