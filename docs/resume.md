@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate 구현
+
+- `feat/t-vn-19-alembic-check`(base `integration/t-vn`)에서 빈 PostGIS DB의 `alembic
+  upgrade head && alembic check` diff 0건 gate를 구현했다(ADR-075 D-12-2, §8.1). env.py
+  `include_object`로 PostGIS·미모델 app table 8개·round-trip 불가 index 5개를 이름으로 명시
+  제외하고, models.py를 배포 DB에 정합화(String→Text 27컬럼, dagster claim 누락 컬럼/CHECK/
+  기본값, source_records·curated_themes 제약명 정정, import_jobs SERIAL 위양성 제거).
+  `tests/integration/test_alembic_metadata_consistency.py`가 기존 integration CI에서 상시
+  실행하고, 제외한 5개 index의 존재는 test_alembic_upgrade.py + test_t212d_perf_explain.py가
+  단언한다. **마이그레이션 없음**(scope guard 준수) — 배포 DB 자체 drift는 발견되지 않았다.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. 비차단
+  후속 관찰(별도 migration task 후보): DB의 varchar/text 혼재 정규화, curated_themes·
+  source_records 제약의 naming-convention rename.
+
 ## 2026-07-19 (codex) — Agent A T-VN-07 소비자 clean-cut 리뷰 보완
 
 - PR #748의 단일 전문 리뷰에서 삭제된 beach no-op query가 이 저장소의 구현 사양과
@@ -18,8 +32,6 @@
   고치고, metrics token 설정을 RFC 6750 `b64token` ASCII로 제한했다.
 - 같은 리뷰어가 기존 S2/S3 해소를 확인했고, 남은 import 순서 1건은 사용자 지침의
   기계적 변경으로 정리했다. 관련 API unit 87건과 Ruff가 통과했다.
-- **다음 한 작업**: 후속 PR의 전체 CI를 통과시켜 `integration/t-vn`에만 머지하고,
-  최근 Agent A PR을 다시 검색한다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-05 공개 raw payload 경계 제거 완료
 

@@ -22,6 +22,23 @@
   제외했다(admin spec에는 유지). service batch는 요청 스키마가 `extra=forbid`라
   raw opt-in이 불가하고 고정 typed payload만 반환한다.
 
+### Alembic metadata 정합 CI gate (2026-07-19, ADR-075 D-12-2 T-VN-19)
+
+- **ADDED**: `tests/integration/test_alembic_metadata_consistency.py` — 빈 PostGIS DB →
+  `alembic upgrade head` → `alembic check` diff 0건을 상시 검증하는 §8.1 gate. 기존
+  integration CI job이 실행하며, 새 migration/table이 metadata 매핑이나 env.py 제외
+  목록에서 빠지면 실패해 F-10 회귀를 차단한다.
+- **CHANGED (internal)**: `alembic/env.py`에 `include_object` 필터를 추가해 비-app·미모델
+  객체를 비교에서 명시 제외한다(blanket ignore 아님, 이름 나열): PostGIS `spatial_ref_sys`,
+  ORM 모델이 아직 없는 app table 8개(weather/price/log/api-key/auth-event 계열 + ops-live
+  claim/topic), alembic이 round-trip 못하는 partial/expression index 5개.
+- **FIXED (internal)**: `models.py` metadata를 배포 DB에 정합화(마이그레이션 없음) —
+  DB가 TEXT인데 모델이 String이던 27개 컬럼 Text화, `dagster_schedule_active_claims`의
+  누락 컬럼 2개·CHECK 2개·`created_at` 기본값(now→clock_timestamp), `source_records`
+  unique 제약명(→`uq_source_records`), `curated_themes.theme_slug` 제약명 명시,
+  `import_jobs.queue_sequence`의 SERIAL 위양성 server_default 제거. 런타임 동작 불변
+  (repo는 raw SQL 사용, DDL은 migration 소유).
+
 ### notice timestamp 방어적 cast (2026-07-19, report §2 D-9-7 (+ T-VN-06 row))
 
 - **FIXED**: `detail->>'valid_end_time'`이 오염된 notice 한 행이 공개 read

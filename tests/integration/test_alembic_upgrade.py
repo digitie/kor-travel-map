@@ -287,3 +287,40 @@ async def test_alembic_creates_feature_merge_history(
             )
         ).scalar_one()
     assert exists is not None
+
+
+async def test_alembic_excluded_indexes_still_exist(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """T-VN-19 — alembic check 비교에서 제외한 index의 실제 존재를 지킨다.
+
+    ``alembic/env.py``의 ``_UNCOMPARED_INDEXES``는 partial/expression index와
+    ``UUID(as_uuid=False)`` reflection 위양성 때문에 이 index들을 metadata 비교에서
+    뺀다. 그러면 gate가 이들의 삭제를 잡지 못하므로, 존재를 여기서 직접 단언해
+    exclusion이 연 커버리지 공백을 메운다. ``idx_features_dedup_refresh_keyset``는
+    ``test_t212d_perf_explain.py``의 EXPLAIN 검증이 이미 존재를 지키므로 제외.
+    """
+    excluded = {
+        ("feature", "idx_features_yt_channel_id"),
+        ("feature", "idx_features_yt_playlist_id"),
+        ("provider_sync", "idx_source_records_kma_alert_history"),
+        ("feature", "uq_curated_features_theme_feature_active"),
+    }
+    async with pg_engine_with_migrations.connect() as conn:
+        present = {
+            (row.schemaname, row.indexname)
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT schemaname, indexname FROM pg_indexes "
+                        "WHERE (schemaname, indexname) IN ("
+                        "('feature','idx_features_yt_channel_id'),"
+                        "('feature','idx_features_yt_playlist_id'),"
+                        "('provider_sync','idx_source_records_kma_alert_history'),"
+                        "('feature','uq_curated_features_theme_feature_active'))"
+                    )
+                )
+            )
+        }
+    missing = excluded - present
+    assert not missing, f"excluded index(es) missing from DB: {sorted(missing)}"
