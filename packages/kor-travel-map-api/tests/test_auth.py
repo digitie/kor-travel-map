@@ -896,18 +896,22 @@ def test_ops_observability_health_accepts_bff_and_read_principal(
 
 
 @pytest.mark.unit
-def test_openapi_declares_service_token_scheme() -> None:
+def test_openapi_declares_service_and_public_key_security_schemes() -> None:
     client = _client(_api_settings(service_token=SecretStr("tok")))
     spec = client.get("/openapi.json").json()
     assert "ServiceToken" in spec["components"]["securitySchemes"]
     scheme = spec["components"]["securitySchemes"]["ServiceToken"]
     assert scheme["in"] == "header"
     assert scheme["name"] == SERVICE_TOKEN_HEADER
-    # /features/batch service read는 security 요구, /features 공용 GET read는 없음.
+    # service operation은 service token만, public-keyed operation은 public key 또는
+    # service token 중 하나를 요구한다.
     tri = spec["paths"]["/v1/features/batch"]["post"]
-    assert tri.get("security")
+    assert tri["security"] == [{"ServiceToken": []}]
     feat = spec["paths"]["/v1/features"]["get"]
-    assert not feat.get("security")
+    assert feat["security"] == [
+        {"PublicApiKey": []},
+        {"ServiceToken": []},
+    ]
 
 
 @pytest.mark.unit

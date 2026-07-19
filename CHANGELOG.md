@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Public route security·user OpenAPI 단일 정본 (2026-07-20, T-VN-57)
+
+- **SECURITY**: 조립된 route policy matrix에서 모든 `public-keyed` operation의
+  `PublicApiKey OR ServiceToken`, `public-unauthenticated`의 무인증, `service`의
+  `ServiceToken` OpenAPI 계약을 자동 파생한다. curated 4경로만 별도 처리하던 수동 목록을
+  제거했다.
+- **CHANGED (breaking)**: user OpenAPI 표면도 같은 route policy와 method metadata에서
+  자동 파생한다. 기존 수동 목록에서 누락됐던 `GET /v1/features`와
+  `GET /v1/features/{feature_id}/contained-features`가 user spec과 생성 TypeScript에
+  포함된다.
+- **TEST**: 조립 route ↔ full OpenAPI ↔ user OpenAPI의 path/method/security를 양방향
+  비교해 누락·과포함·method/security drift를 거부한다.
+
 ### T-VN-03 잔여 route 인증 경계 clean-cut (2026-07-19)
 
 - **SECURITY**: public curated GET 4개를 public API key 경계로, ops metrics/log/

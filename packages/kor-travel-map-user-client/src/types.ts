@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * bbox 안 feature 목록 (지도 뷰포트)
+         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 (ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외).
+         */
+        get: operations["list_features_in_bbox_v1_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/batch": {
         parameters: {
             query?: never;
@@ -312,6 +332,23 @@ export interface paths {
         };
         /** feature 단건 상세 */
         get: operations["get_feature_v1_features__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/contained-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** area feature 안에 포함된 point feature 목록 */
+        get: operations["get_area_contained_features_v1_features__feature_id__contained_features_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -552,6 +589,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AreaContainedFeaturesData
+         * @description ``GET /features/{feature_id}/contained-features`` data payload.
+         */
+        AreaContainedFeaturesData: {
+            /** Area Feature Id */
+            area_feature_id: string;
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Items */
+            items: components["schemas"]["FeatureSummary"][];
+        };
+        /**
+         * AreaContainedFeaturesResponse
+         * @description area feature 안에 포함된 point feature 목록 응답.
+         */
+        AreaContainedFeaturesResponse: {
+            data: components["schemas"]["AreaContainedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * BeachPublicView
          * @description 해수욕장 공개 상세/목록 view.
@@ -1254,6 +1311,22 @@ export interface components {
          */
         FeatureWeatherResponse: {
             data: components["schemas"]["WeatherCardData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeaturesInBboxData
+         * @description ``GET /features`` data payload.
+         */
+        FeaturesInBboxData: {
+            /** Items */
+            items: components["schemas"]["FeatureSummary"][];
+        };
+        /**
+         * FeaturesInBboxResponse
+         * @description ``GET /features`` 응답 — bbox 안 feature 목록.
+         */
+        FeaturesInBboxResponse: {
+            data: components["schemas"]["FeaturesInBboxData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -3162,6 +3235,66 @@ export interface operations {
             };
         };
     };
+    list_features_in_bbox_v1_features_get: {
+        parameters: {
+            query: {
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon: number;
+                /** @description bbox 최소 위도. */
+                min_lat: number;
+                /** @description bbox 최대 경도. */
+                max_lon: number;
+                /** @description bbox 최대 위도. */
+                max_lat: number;
+                /** @description feature kind 필터 (반복 가능). 미지정 시 전체. */
+                kind?: string[] | null;
+                /** @description category code 필터 (반복 가능). 미지정 시 전체. */
+                category?: string[] | null;
+                /** @description primary provider(소스) 필터 (반복 가능). 미지정 시 전체. primary source(provider_sync.is_primary_source) 기준. */
+                provider?: string[] | null;
+                /** @description 페이지 크기. */
+                page_size?: number;
+                cursor?: string | null;
+                /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
+                include_geometry?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesInBboxResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_features_batch_v1_features_batch_post: {
         parameters: {
             query?: {
@@ -3610,6 +3743,61 @@ export interface operations {
                 };
             };
             /** @description If-None-Match가 canonical strong ETag가 아님 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_area_contained_features_v1_features__feature_id__contained_features_get: {
+        parameters: {
+            query?: {
+                /** @description 포함 feature kind 필터 (반복 가능). 미지정 시 전체. */
+                kind?: string[] | null;
+                page_size?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaContainedFeaturesResponse"];
+                };
+            };
+            /** @description feature_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description area feature가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;
