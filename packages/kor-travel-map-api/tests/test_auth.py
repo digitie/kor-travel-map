@@ -18,6 +18,7 @@ from kortravelmap.api.auth import (
     OPS_ACTOR,
     OPS_SCOPE_HEADER,
     OPS_TOKEN_HEADER,
+    PUBLIC_API_KEY_HEADER,
     SERVICE_TOKEN_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
@@ -800,11 +801,13 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
     public_key = schemes["PublicApiKey"]
     assert public_key == {
         "type": "apiKey",
-        "in": "query",
-        "name": "key",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Api-Key",
         "description": (
-            "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 "
-            "같은 runtime dependency에서 별도 principal로 허용한다."
+            "외부/비신뢰 public read용 VWorld 호환 API key를 X-Kor-Travel-Map-Api-Key "
+            "헤더로 전달한다. ServiceToken 요청은 같은 runtime dependency에서 별도 "
+            "principal로 허용한다. T-VN-H01 — 접근 로그·Referer 유출을 막기 위해 이전 "
+            "?key= 쿼리 파라미터는 제거됐다."
         ),
     }
     for path in {
@@ -951,9 +954,23 @@ def test_public_api_key_required_accepts_vworld_fallback() -> None:
             vworld_api_key=SecretStr("vw-test-key"),
         )
     )
-    assert client.get("/v1/categories?key=vw-test-key").status_code == 200
-    assert client.get("/v1/categories?key=wrong").status_code == 401
+    assert (
+        client.get(
+            "/v1/categories",
+            headers={PUBLIC_API_KEY_HEADER: "vw-test-key"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/v1/categories",
+            headers={PUBLIC_API_KEY_HEADER: "wrong"},
+        ).status_code
+        == 401
+    )
     assert client.get("/v1/categories").status_code == 401
+    # T-VN-H01: query 파라미터로는 더 이상 인증되지 않는다(header-only).
+    assert client.get("/v1/categories?key=vw-test-key").status_code == 401
 
 
 @pytest.mark.unit

@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, Header, HTTPException, Query, Request, Security, status
+from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from kortravelmap.api.settings import ApiSettings
 
 from kortravelmap.infra.public_api_keys import (
-    PUBLIC_API_KEY_QUERY_PARAM,
     cached_active_public_api_key_hashes,
     hash_public_api_key,
     public_api_key_matches,
@@ -48,6 +47,7 @@ __all__ = [
     "OPS_SCOPE_HEADER",
     "OPS_TOKEN_HEADER",
     "OPS_AUTH_ERROR_RESPONSES",
+    "PUBLIC_API_KEY_HEADER",
     "SERVICE_TOKEN_HEADER",
     "AdminProxyContext",
     "OpsOperatorContext",
@@ -67,6 +67,7 @@ METRICS_AUTHORIZATION_SCHEME = "Bearer"
 OPS_ACTOR = "service:pinvi"
 OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
 OPS_TOKEN_HEADER = "X-Kor-Travel-Map-Ops-Token"
+PUBLIC_API_KEY_HEADER = "X-Kor-Travel-Map-Api-Key"
 SERVICE_TOKEN_HEADER = "X-Kor-Travel-Map-Service-Token"
 
 OPS_AUTH_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
@@ -386,20 +387,13 @@ async def require_service_token(
 async def require_public_api_key(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    key: Annotated[
-        str | None,
-        Query(
-            alias=PUBLIC_API_KEY_QUERY_PARAM,
-            description=(
-                "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. "
-                "trusted admin proxy 또는 service token 요청은 검증을 우회한다."
-            ),
-            min_length=1,
-            max_length=128,
-        ),
-    ] = None,
 ) -> None:
-    """public REST surface용 VWorld 호환 API key를 검증한다."""
+    """public REST surface용 VWorld 호환 API key를 검증한다.
+
+    ADR-066/T-VN-H01 — key는 X-Kor-Travel-Map-Api-Key 헤더로만 받는다. 이전의
+    ?key= 쿼리 파라미터는 access log와 Referer 헤더로 새어 나갈 수 있어 제거됐다
+    (breaking change). trusted admin proxy 또는 service token 요청은 검증을 우회한다.
+    """
 
     settings = _settings(request)
     if not settings.public_api_key_required:
@@ -411,10 +405,11 @@ async def require_public_api_key(
         return
     if service_token_matches(request):
         return
-    if key is None:
+    key = (request.headers.get(PUBLIC_API_KEY_HEADER) or "").strip()
+    if not key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"유효한 {PUBLIC_API_KEY_QUERY_PARAM} 쿼리 파라미터가 필요합니다.",
+            detail=f"유효한 {PUBLIC_API_KEY_HEADER} 헤더가 필요합니다.",
         )
     active_hashes = await cached_active_public_api_key_hashes(
         session,
