@@ -385,6 +385,58 @@ def test_public_curated_routes_hide_unknown_kind(
     assert detailed.status_code == 404
 
 
+def test_public_curated_routes_fail_closed_on_malformed_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _raw_curated_feature()
+    malformed_detail = {
+        **base.detail,
+        "reviews_link": {
+            "naver": "https://example.test:99999/review",
+        },
+        "facility_info": {
+            "description": "URL 오류와 무관한 공개 설명",
+            "homepage_url": "https://example.test:99999/home",
+            "image_url": "https://[malformed-ipv6",
+        },
+    }
+    row = replace(
+        base,
+        source_url="https://[malformed-ipv6",
+        detail=malformed_detail,
+    )
+
+    async def _list(_session: object, **_kwargs: Any) -> CuratedFeaturePage:
+        return CuratedFeaturePage(items=(row,), next_cursor=None)
+
+    async def _get(_session: object, **_kwargs: Any) -> CuratedFeature:
+        return row
+
+    monkeypatch.setattr(curated.curated_repo, "list_curated_features", _list)
+    monkeypatch.setattr(curated.curated_repo, "get_curated_feature", _get)
+    app = create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    listed = client.get("/v1/curated-features")
+    detailed = client.get(f"/v1/curated-features/{row.curated_feature_id}")
+
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    list_item = listed.json()["data"]["items"][0]
+    detail_item = detailed.json()["data"]
+    assert list_item == detail_item
+    assert "source_url" not in detail_item
+    assert detail_item["detail"]["reviews_link"] == {}
+    assert detail_item["detail"]["facility_info"] == {
+        "description": "URL 오류와 무관한 공개 설명"
+    }
+
+
 class _FakePlaceSearchClient:
     calls: list[tuple[str, str, dict[str, Any]]] = []
 

@@ -16,13 +16,22 @@ from typing import Annotated, Any, Literal, TypeAlias
 from urllib.parse import urlsplit
 
 from kortravelmap.infra.curated_repo import CuratedFeature
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, RootModel
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+)
 
 from kortravelmap.api.response import Meta
 
 _PHONE_PATTERN = r"^\+?[0-9][0-9() -]{2,30}$"
 _PHONE_RE = re.compile(_PHONE_PATTERN)
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3])[0-5]\d$")
+_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 PublicPhone: TypeAlias = Annotated[str, Field(pattern=_PHONE_PATTERN)]
 
 
@@ -339,12 +348,21 @@ def _datetime(value: object) -> datetime | None:
     return result if result.tzinfo is not None else None
 
 
-def _http_url(value: object) -> str | None:
+def _http_url(value: object) -> AnyHttpUrl | None:
     text = _text(value)
     if text is None:
         return None
-    parsed = urlsplit(text)
-    return text if parsed.scheme in {"http", "https"} and parsed.hostname else None
+    try:
+        parsed = urlsplit(text)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or hostname is None:
+        return None
+    try:
+        return _HTTP_URL_ADAPTER.validate_python(text)
+    except ValidationError:
+        return None
 
 
 def _phone(value: object) -> str | None:
@@ -489,7 +507,7 @@ _FACILITY_BOOL_FIELDS = ("wheelchair", "lpg_yn")
 
 def _facility_info(value: object) -> PublicCuratedPlaceFacilityInfo:
     raw = _mapping(value)
-    projected: dict[str, str | bool | int | float] = {}
+    projected: dict[str, object] = {}
     for field in _FACILITY_TEXT_FIELDS:
         if (text := _text(raw.get(field))) is not None:
             projected[field] = text
