@@ -104,6 +104,7 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "name",
         "parent_feature_id",
         "raw_refs",
+        "row_revision",
         "sibling_group_id",
         "sido_code",
         "sigungu_code",
