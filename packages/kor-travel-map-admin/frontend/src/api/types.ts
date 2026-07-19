@@ -2147,8 +2147,6 @@ export interface components {
          * @description Next.js login/logout API가 남기는 감사 이벤트.
          */
         AdminAuthEventCreateRequest: {
-            /** Actor */
-            actor?: string | null;
             /** Attempted Username */
             attempted_username?: string | null;
             /** Client Ip */
@@ -2558,7 +2556,11 @@ export interface components {
             marker_icon: string;
             /** Name */
             name: string;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
@@ -2605,7 +2607,11 @@ export interface components {
          * @description ``POST /admin/features/{feature_id}/deactivate`` body.
          */
         AdminFeatureDeactivateRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /**
              * Prevent Provider Reactivation
@@ -2628,7 +2634,11 @@ export interface components {
          * @description ``DELETE /admin/features/{feature_id}`` body.
          */
         AdminFeatureDeleteRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Reason */
             reason: string;
@@ -3030,7 +3040,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name?: string | null;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
@@ -3096,7 +3110,11 @@ export interface components {
          * @description approve/reject body.
          */
         AdminFeatureReviewActionRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Reason */
             reason?: string | null;
@@ -3212,7 +3230,11 @@ export interface components {
             coord?: components["schemas"]["IssueCoordBody"] | null;
             /** Legal Dong Code */
             legal_dong_code?: string | null;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /**
              * Prevent Provider Reactivation
@@ -3564,8 +3586,6 @@ export interface components {
         };
         /** Body_create_offline_upload_request_v1_admin_offline_uploads_post */
         Body_create_offline_upload_request_v1_admin_offline_uploads_post: {
-            /** Created By */
-            created_by?: string | null;
             /** Dataset Key */
             dataset_key: string;
             /**
@@ -3862,8 +3882,6 @@ export interface components {
         };
         /** CuratedFeatureStatusRequest */
         CuratedFeatureStatusRequest: {
-            /** Actor */
-            actor?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -5111,7 +5129,11 @@ export interface components {
             decision_reason?: string | null;
             /** Master Feature Id */
             master_feature_id?: string | null;
-            /** Reviewed By */
+            /**
+             * Reviewed By
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             reviewed_by?: string | null;
         };
         /**
@@ -5253,8 +5275,6 @@ export interface components {
             decision: "accepted" | "rejected" | "ignored";
             /** Decision Reason */
             decision_reason?: string | null;
-            /** Reviewed By */
-            reviewed_by?: string | null;
             /**
              * Selected Detail Source
              * @description 운영자가 비교 다이얼로그에서 선택한 상세 source. 현재 accept 적용 데이터는 바꾸지 않고 decision_reason audit marker로만 기록한다.
@@ -6697,8 +6717,6 @@ export interface components {
          */
         OfflineUploadValidationRequest: {
             column_mapping: components["schemas"]["OfflineUploadColumnMappingRecord"];
-            /** Operator */
-            operator?: string | null;
             /**
              * Sample Size
              * @default 1000

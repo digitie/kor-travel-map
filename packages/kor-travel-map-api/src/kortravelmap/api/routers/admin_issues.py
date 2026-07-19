@@ -40,6 +40,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 
@@ -185,7 +186,15 @@ class AdminIssuePatchRequest(BaseModel):
 
     action: IssueAction
     reason: str | None = None
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     address: dict[str, Any] | None = None
     coord: IssueCoordBody | None = None
     legal_dong_code: str | None = None
@@ -434,8 +443,11 @@ def _require_feature_id(issue: DataIntegrityViolation) -> str:
     return issue.feature_id
 
 
-def _resolution_payload(action: str, body: AdminIssuePatchRequest) -> dict[str, Any]:
-    return {"action": action, "operator": body.operator, "reason": body.reason}
+def _resolution_payload(
+    action: str, body: AdminIssuePatchRequest, *, actor: str
+) -> dict[str, Any]:
+    # ADR-066 D-2 (T-VN-20): 감사 operator는 인증 principal(actor)에서만 파생한다.
+    return {"action": action, "operator": actor, "reason": body.reason}
 
 
 @router.patch(
@@ -450,6 +462,7 @@ def _resolution_payload(action: str, body: AdminIssuePatchRequest) -> dict[str, 
 async def patch_admin_issue(
     issue_id: str,
     body: AdminIssuePatchRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminIssueActionResponse:
     """이슈 상태 전이 + kor-travel-geo 재지오코딩/주소 덮어쓰기."""
@@ -466,6 +479,7 @@ async def patch_admin_issue(
             issue_id=issue_id,
             issue=issue,
             body=body,
+            actor=context.actor,
             started_at=started_at,
         )
     except _KorTravelGeoUnavailable as exc:
@@ -493,6 +507,7 @@ async def _dispatch_action(
     issue_id: str,
     issue: DataIntegrityViolation,
     body: AdminIssuePatchRequest,
+    actor: str,
     started_at: float,
 ) -> AdminIssueActionResponse:
     action = body.action
@@ -504,7 +519,7 @@ async def _dispatch_action(
                 session,
                 issue_id,
                 status=target_status,
-                resolution_payload=_resolution_payload(action, body),
+                resolution_payload=_resolution_payload(action, body, actor=actor),
             )
         if updated is None:
             raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")
@@ -564,7 +579,7 @@ async def _dispatch_action(
                 sigungu_code=candidate.get("sigungu_code"),
                 road_address_management_no=candidate.get("road_address_management_no"),
                 reason=body.reason,
-                operator=body.operator,
+                operator=actor,
                 prevent_provider_reactivation=body.prevent_provider_reactivation,
             )
             if result is None:
@@ -575,7 +590,7 @@ async def _dispatch_action(
                 session,
                 issue_id,
                 status="resolved",
-                resolution_payload=_resolution_payload(action, body),
+                resolution_payload=_resolution_payload(action, body, actor=actor),
             )
         if updated is None:
             raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")
@@ -613,7 +628,7 @@ async def _dispatch_action(
             sigungu_code=body.sigungu_code,
             road_address_management_no=body.road_address_management_no,
             reason=body.reason,
-            operator=body.operator,
+            operator=actor,
             prevent_provider_reactivation=body.prevent_provider_reactivation,
         )
         if result is None:
@@ -622,7 +637,7 @@ async def _dispatch_action(
             session,
             issue_id,
             status="resolved",
-            resolution_payload=_resolution_payload(action, body),
+            resolution_payload=_resolution_payload(action, body, actor=actor),
         )
     if updated is None:
         raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")

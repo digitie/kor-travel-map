@@ -36,7 +36,11 @@ from kortravelmap.infra.admin_feature_repo import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_admin_destructive_enabled
+from kortravelmap.api.auth import (
+    AdminProxyContext,
+    require_admin_destructive_enabled,
+    require_admin_frontend,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
@@ -143,7 +147,15 @@ class AdminFeatureDeactivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     prevent_provider_reactivation: bool = True
 
 
@@ -259,7 +271,15 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     marker_color: str = Field(pattern=r"^P-(0[1-9]|1[0-6])$")
     status: Literal["draft", "active", "inactive", "hidden"] = "active"
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     idempotency_key: str | None = Field(
         default=None,
         description="feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
@@ -270,7 +290,15 @@ class AdminFeaturePatchRequest(AdminFeatureBaseMutation):
     """``PATCH /admin/features/{feature_id}`` body."""
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _at_least_one_patch_field(self) -> AdminFeaturePatchRequest:
@@ -286,7 +314,15 @@ class AdminFeatureDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
 
 
 class AdminFeatureChangeRequestRecord(BaseModel):
@@ -520,7 +556,15 @@ class AdminFeatureReviewActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     reason: str | None = None
 
 
@@ -853,6 +897,7 @@ async def get_feature_detail_route(
 @router.post("", response_model=AdminFeatureChangeResponse)
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
@@ -869,7 +914,7 @@ async def create_feature_route(
                 payload=payload,
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
             )
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
@@ -884,6 +929,7 @@ async def create_feature_route(
 async def patch_feature_route(
     feature_id: str,
     body: AdminFeaturePatchRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
@@ -897,7 +943,7 @@ async def patch_feature_route(
                 payload=_payload(body),
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
             )
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
@@ -912,6 +958,7 @@ async def patch_feature_route(
 async def delete_feature_route(
     feature_id: str,
     body: AdminFeatureDeleteRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
@@ -925,7 +972,7 @@ async def delete_feature_route(
                 payload={},
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
             )
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
@@ -940,6 +987,7 @@ async def delete_feature_route(
 async def approve_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
@@ -948,7 +996,7 @@ async def approve_feature_change_request_route(
             result = await apply_feature_change_request(
                 session,
                 request_id,
-                operator=body.operator,
+                operator=context.actor,
             )
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
@@ -968,6 +1016,7 @@ async def approve_feature_change_request_route(
 async def reject_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
@@ -975,7 +1024,7 @@ async def reject_feature_change_request_route(
         result = await reject_feature_change_request(
             session,
             request_id,
-            operator=body.operator,
+            operator=context.actor,
             reason=body.reason,
         )
     if result is None:
@@ -999,6 +1048,7 @@ async def reject_feature_change_request_route(
 async def deactivate_feature_route(
     feature_id: str,
     body: AdminFeatureDeactivateRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureDeactivateResponse:
     started_at = perf_counter()
@@ -1008,7 +1058,7 @@ async def deactivate_feature_route(
                 session,
                 feature_id,
                 reason=body.reason,
-                operator=body.operator,
+                operator=context.actor,
                 prevent_provider_reactivation=body.prevent_provider_reactivation,
             )
         except FeatureStateConflict as exc:

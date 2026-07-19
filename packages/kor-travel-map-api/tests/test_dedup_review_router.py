@@ -285,7 +285,9 @@ def test_patch_accepted_uses_transaction(
     async def _set(_session: Any, review_id: str, **kwargs: Any) -> bool:
         assert review_id == "review-1"
         assert kwargs["decision"] == "accepted"
-        assert kwargs["reviewed_by"] == "local-admin"
+        # T-VN-20 (ADR-066 D-2): body가 "local-admin"을 보내도(수용·무시) 저장
+        # reviewed_by는 인증 principal(local-dev)이어야 한다.
+        assert kwargs["reviewed_by"] == "local-dev"
         return True
 
     monkeypatch.setattr(router_mod, "set_dedup_review_decision", _set)
@@ -322,6 +324,8 @@ def test_patch_merged_uses_advisory_lock(
     async def _merge(_session: Any, review_id: str, **kwargs: Any) -> MergeOutcome:
         assert review_id == "review-1"
         assert kwargs["master_feature_id"] == "feature-a"
+        # T-VN-20: merged_by도 인증 principal에서만 파생한다 (body 무시).
+        assert kwargs["merged_by"] == "local-dev"
         return MergeOutcome(
             master_feature_id="feature-a",
             loser_feature_id="feature-b",

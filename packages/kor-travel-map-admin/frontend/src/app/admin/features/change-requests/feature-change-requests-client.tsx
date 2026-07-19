@@ -167,7 +167,6 @@ interface FeatureChangeFormState {
   markerColor: string;
   markerIcon: string;
   name: string;
-  operator: string;
   organizer: string;
   parentFeatureId: string;
   phone: string;
@@ -218,7 +217,6 @@ function initialForm(): FeatureChangeFormState {
     markerColor: "P-01",
     markerIcon: "marker",
     name: "",
-    operator: "local-admin",
     organizer: "",
     parentFeatureId: "",
     phone: "",
@@ -597,7 +595,6 @@ function buildCreatePayload(
     marker_color: form.markerColor.trim(),
     status: form.status,
     reason: form.reason.trim(),
-    operator: optionalString(form.operator),
     feature_id: optionalString(form.featureId),
     idempotency_key: optionalString(form.idempotencyKey),
     sido_code: optionalString(form.sidoCode),
@@ -642,7 +639,6 @@ function buildPatchPayload(
   const coord = parseOptionalCoord(form.lon, form.lat);
   return {
     reason: form.reason.trim(),
-    operator: optionalString(form.operator),
     name: optionalString(form.name),
     category: patchDefaultedField(form.category, baseline?.category, baseline),
     coord,
@@ -1159,7 +1155,6 @@ export function FeatureChangeRequestsClient({
         const response = await deleteFeature.mutateAsync({
           featureId,
           body: {
-            operator: optionalString(form.operator),
             reason: form.reason.trim(),
           },
         });
@@ -1174,7 +1169,7 @@ export function FeatureChangeRequestsClient({
     approveChangeRequest(
       {
         requestId: request.request_id,
-        body: { operator: "local-admin", reason: "admin-ui approve" },
+        body: { reason: "admin-ui approve" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
@@ -1184,7 +1179,7 @@ export function FeatureChangeRequestsClient({
     rejectChangeRequest(
       {
         requestId: request.request_id,
-        body: { operator: "local-admin", reason: "admin-ui reject" },
+        body: { reason: "admin-ui reject" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
@@ -1470,13 +1465,6 @@ export function FeatureChangeRequestsClient({
                 placeholder="예: 전화번호 수정"
                 value={form.reason}
                 onChange={(event) => updateForm("reason", event.target.value)}
-              />
-              <FormField
-                aria-label="change operator"
-                id="change-operator"
-                label="담당자"
-                value={form.operator}
-                onChange={(event) => updateForm("operator", event.target.value)}
               />
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-4">

@@ -19,6 +19,29 @@
   중복이 이제 흡수된다. migration이 기존 중복을 먼저 dedup(최신 collected_at 우선)
   한 뒤 unique index를 만든다.
 
+### body actor 제거 — 감사 actor는 인증 principal에서만 파생 (2026-07-19, ADR-066 D-2 T-VN-20)
+
+- **SECURITY**: 모든 admin write의 감사 actor(operator/actor/created_by/reviewed_by)를
+  request body가 아니라 인증 principal(admin BFF의 `X-Kor-Travel-Map-Actor` →
+  `AdminProxyContext.actor`)에서만 파생하도록 완결했다(ADR-066 D-2, T-VN-07 slice 완성).
+  신뢰 경계 안에서 body가 감사 주체를 위조하던 경로를 제거한다. 대상: admin feature
+  create/patch/delete·change-request approve/reject·deactivate(operator), admin issue
+  조치(operator), dedup review(reviewed_by), auth-event(actor), curated select/unselect
+  (actor), enrichment review(reviewed_by), offline upload create(created_by)·validate
+  (operator). 제출·승인이 분리된 흐름(feature change-request)은 제출 principal과 승인
+  principal을 각각 그 시점의 principal에서 보존한다.
+- **REMOVED (breaking, admin-frontend-only)**: PinVi가 호출하지 않는 admin frontend 전용
+  write는 body actor 필드를 schema에서 제거했다 — auth-event `actor`, curated
+  select/unselect `actor`, enrichment review `reviewed_by`, offline upload
+  `created_by`·validate `operator`. `extra="forbid"`라 옛 caller가 이 필드를 보내면 `422`다.
+  admin frontend는 전송을 중단했다(BFF actor header만 사용).
+- **DEPRECATED (accept-and-ignore, PinVi 호환)**: PinVi `origin/main` client가 아직 body로
+  보내는 필드는 수용하되 무시한다(OpenAPI `deprecated: true`) — admin feature/issue의
+  `operator`, dedup review의 `reviewed_by`. 저장 actor는 principal이며 body 값은 무시된다.
+  PinVi가 전송을 중단하면(별도 PR, `docs/integration-map.md` §3.3) 제거한다.
+
+### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
+
 - **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,
   `POST /v1/features/batch`)에서 provider raw 경계를 제거했다. raw observation
   lineage(`observations`: raw_data/raw_payload_hash/source_record_key)와

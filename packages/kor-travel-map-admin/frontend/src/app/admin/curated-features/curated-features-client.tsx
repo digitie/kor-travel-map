@@ -1339,7 +1339,6 @@ export function CuratedFeaturesClient() {
       {
         curatedFeatureId: feature.curated_feature_id,
         body: {
-          actor: "admin-ui",
           reason: "admin curated selection",
         },
       },
@@ -1359,7 +1358,6 @@ export function CuratedFeaturesClient() {
       {
         curatedFeatureId: feature.curated_feature_id,
         body: {
-          actor: "admin-ui",
           reason: "admin curated unselect",
         },
       },
@@ -1387,7 +1385,6 @@ export function CuratedFeaturesClient() {
       {
         curatedFeatureId: feature.curated_feature_id,
         body: {
-          actor: "admin-ui",
           reason: "admin curated archive",
         },
       },
@@ -1415,7 +1412,7 @@ export function CuratedFeaturesClient() {
       rows.map((row) =>
         mutateAsync({
           curatedFeatureId: row.original.curated_feature_id,
-          body: { actor: "admin-ui", reason },
+          body: { reason },
         }),
       ),
     );

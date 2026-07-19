@@ -160,6 +160,31 @@ PinVi 측 `kor_travel_map.py`의 batch docstring은 구 D-12 분기를 성문화
 stale이다. 해소는 **T-VN-11 5-state typed DTO**(§3.1 feature batch 행)가 소유한다 —
 그 전까지 PinVi는 `missing`을 "비공개 또는 미존재"로 읽어야 한다.
 
+### 3.3 body actor 제거 (T-VN-20, ADR-066 D-2) — PinVi 전송 중단 필요
+
+T-VN-20이 모든 admin write의 감사 actor를 인증 principal(admin BFF의
+`X-Kor-Travel-Map-Actor`)에서만 파생하도록 완결했다. request body의
+`operator`/`actor`/`created_by`/`reviewed_by`는 더 이상 감사 actor 원천이 아니다.
+
+PinVi `origin/main`의 `apps/api/app/clients/kor_travel_map_admin.py`가 아직 body로
+보내는 필드는 **수용하되 무시**(accept-and-ignore)한다 — 아래 endpoint는 body에
+해당 필드가 있어도 `422`가 아니고, 값은 무시되며 저장 actor는 principal이다:
+
+| KTM endpoint | PinVi가 보내는 body 필드 | 처리 |
+|---|---|---|
+| `POST/PATCH/DELETE /v1/admin/features*`, `.../change-requests/{id}/approve\|reject` | `operator`(고정 `"pinvi-admin"`) | 수용·무시, actor=principal |
+| `PATCH /v1/admin/issues/{id}` | `operator` | 수용·무시, actor=principal |
+| `PATCH /v1/admin/dedup-reviews/{id}` | `reviewed_by` | 수용·무시, actor=principal |
+
+**PinVi follow-up (별도 PR)**: 위 3개 client 메서드에서 `operator`/`reviewed_by`
+body 전송을 제거한다(감사 actor는 KTM이 BFF principal로 기록하므로 불필요). 제거 전까지
+KTM은 deprecated 필드로 수용하며, 두 필드 모두 OpenAPI에 `deprecated: true`로 표기된다.
+
+반면 PinVi가 **호출하지 않는** admin frontend 전용 write(auth-event `actor`, curated
+select/unselect `actor`, enrichment review `reviewed_by`, offline upload
+`created_by`·validate `operator`)는 body 필드를 **schema에서 제거**했다 — 옛 caller가
+보내면 `422`다(admin frontend는 이미 전송 중단, BFF actor header만 사용).
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |

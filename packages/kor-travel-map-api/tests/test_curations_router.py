@@ -588,3 +588,37 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
         "content"
     ]
     assert set(template_content) == {"text/csv"}
+
+
+@pytest.mark.unit
+def test_curated_select_records_principal_not_body_actor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # T-VN-20 (ADR-066 D-2): curated select는 인증 principal(local-dev)을 actor로
+    # 넘겨야 한다. row None → 404지만 repo가 받은 actor kwarg로 검증한다.
+    from kortravelmap.api.routers import curated as module
+
+    captured: dict[str, Any] = {}
+
+    async def _set(_session: object, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        return
+
+    monkeypatch.setattr(module.curated_repo, "set_curated_feature_status", _set)
+    response = client.post(
+        "/v1/admin/features/curated/cf-1/select",
+        json={"reason": "admin select"},
+    )
+    assert response.status_code == 404
+    assert captured["actor"] == "local-dev"
+    assert captured["curation_status"] == "curated"
+
+
+@pytest.mark.unit
+def test_curated_select_rejects_removed_actor_field(client: TestClient) -> None:
+    # T-VN-20 (ADR-066 D-2): 제거된 body actor 필드를 보내면 extra="forbid"로 422.
+    response = client.post(
+        "/v1/admin/features/curated/cf-1/select",
+        json={"actor": "attacker", "reason": "x"},
+    )
+    assert response.status_code == 422

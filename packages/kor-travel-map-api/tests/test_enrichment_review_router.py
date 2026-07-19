@@ -317,7 +317,9 @@ def test_patch_accepted_applies_and_uses_transaction(
     ) -> EnrichmentDecisionResult:
         assert review_id == "review-1"
         assert decision == "accepted"
-        assert kwargs["reviewed_by"] == "local-admin"
+        # T-VN-20 (ADR-066 D-2): reviewed_by는 인증 principal(local-dev)에서만
+        # 파생한다. body의 reviewed_by 필드는 제거돼 더 이상 보낼 수 없다.
+        assert kwargs["reviewed_by"] == "local-dev"
         assert kwargs["reason"] == "같은 축제; detail_source=visitkorea"
         return EnrichmentDecisionResult(
             review_id="review-1",
@@ -340,7 +342,6 @@ def test_patch_accepted_applies_and_uses_transaction(
             "decision": "accepted",
             "decision_reason": "같은 축제",
             "selected_detail_source": "visitkorea",
-            "reviewed_by": "local-admin",
         },
     )
 
@@ -352,6 +353,18 @@ def test_patch_accepted_applies_and_uses_transaction(
     assert data["detail_source_effect"] == "audit_only"
     assert data["source_links_inserted"] == 1
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_patch_rejects_removed_reviewed_by_body_field(
+    client: TestClient,
+) -> None:
+    # T-VN-20 (ADR-066 D-2): 제거된 body actor 필드를 보내면 extra="forbid"로 422.
+    response = client.patch(
+        "/v1/admin/features/enrichment-reviews/review-1",
+        json={"decision": "accepted", "reviewed_by": "attacker"},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

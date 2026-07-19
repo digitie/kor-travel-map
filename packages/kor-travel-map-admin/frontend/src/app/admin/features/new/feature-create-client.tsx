@@ -108,7 +108,6 @@ interface FeatureCreateFormState {
   markerColor: string;
   markerIcon: string;
   name: string;
-  operator: string;
   organizer: string;
   phone: string;
   placeKind: string;
@@ -148,7 +147,6 @@ function initialForm(): FeatureCreateFormState {
     markerColor: "P-01",
     markerIcon: "marker",
     name: "",
-    operator: "local-admin",
     organizer: "",
     phone: "",
     placeKind: "",
@@ -322,7 +320,6 @@ function buildCreatePayload(
     marker_color: form.markerColor.trim(),
     status: form.status,
     reason: form.reason.trim(),
-    operator: optionalString(form.operator),
     feature_id: optionalString(form.featureId),
     idempotency_key: optionalString(form.idempotencyKey),
     sigungu_code: optionalString(form.sigunguCode),
@@ -919,11 +916,6 @@ export function FeatureCreateClient() {
               required
               value={form.reason}
               onChange={(event) => updateForm("reason", event.target.value)}
-            />
-            <FormField
-              label="운영자"
-              value={form.operator}
-              onChange={(event) => updateForm("operator", event.target.value)}
             />
             <FormField
               label="Feature ID"

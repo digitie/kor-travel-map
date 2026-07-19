@@ -68,7 +68,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_graphql
-from kortravelmap.api.auth import require_admin_destructive_enabled
+from kortravelmap.api.auth import (
+    AdminProxyContext,
+    require_admin_destructive_enabled,
+    require_admin_frontend,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
@@ -238,7 +242,9 @@ class OfflineUploadValidationRequest(BaseModel):
 
     sample_size: int = Field(default=1000, ge=1, le=10_000)
     column_mapping: OfflineUploadColumnMappingRecord
-    operator: str | None = None
+    # ADR-066 D-2 (T-VN-20): 감사 actor는 인증 principal에서만 파생한다. body의
+    # operator 필드는 제거했다(옛 caller가 보내면 extra="forbid"로 422). offline
+    # upload은 admin frontend 전용이고 PinVi는 호출하지 않는다.
 
 
 class OfflineUploadValidationMeta(OfflineUploadPreviewMeta):
@@ -769,6 +775,7 @@ async def launch_offline_upload_load(
 )
 async def create_offline_upload_request(
     request: Request,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     file: Annotated[
         UploadFile,
@@ -777,7 +784,6 @@ async def create_offline_upload_request(
     provider: Annotated[str, Form(min_length=1)],
     dataset_key: Annotated[str, Form(min_length=1)],
     sync_scope: Annotated[str, Form(min_length=1)] = "default",
-    created_by: Annotated[str | None, Form()] = None,
 ) -> OfflineUploadWriteResponse:
     started_at = perf_counter()
     settings = _kor_travel_map_settings_from_request(request)
@@ -835,7 +841,7 @@ async def create_offline_upload_request(
                 checksum_sha256=checksum_sha256,
                 detected_format=detected_format,
                 detected_encoding=None,
-                created_by=created_by,
+                created_by=context.actor,
             )
     except IntegrityError as exc:
         await _rollback_uploaded_object(store, stored.object_key)
@@ -1114,6 +1120,7 @@ async def validate_offline_upload_request(
     upload_id: str,
     request: Request,
     request_body: OfflineUploadValidationRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OfflineUploadValidationResponse:
     started_at = perf_counter()
@@ -1143,7 +1150,7 @@ async def validate_offline_upload_request(
                         store=store,
                         column_mapping=request_body.column_mapping.model_dump(),
                         sample_size=request_body.sample_size,
-                        operator=request_body.operator,
+                        operator=context.actor,
                         address_resolver=kor_travel_geo_address_resolver(kraddr, fallback="api"),
                         reverse_geocoder=kor_travel_geo_reverse_geocoder(kraddr),
                     )
@@ -1162,7 +1169,7 @@ async def validate_offline_upload_request(
                     store=store,
                     column_mapping=request_body.column_mapping.model_dump(),
                     sample_size=request_body.sample_size,
-                    operator=request_body.operator,
+                    operator=context.actor,
                 )
     except HTTPException:
         raise

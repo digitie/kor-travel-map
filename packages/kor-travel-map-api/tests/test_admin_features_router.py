@@ -446,7 +446,7 @@ def test_create_feature_request_uses_review_required_by_default(
         assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
         assert kwargs["payload"]["feature_id"] == kwargs["feature_id"]
         assert kwargs["reason"] == "사용자 제보"
-        assert kwargs["requested_by"] == "admin-user"
+        assert kwargs["requested_by"] == "local-dev"  # T-VN-20: principal, not body operator
         return _change_request(
             feature_id=kwargs["feature_id"],
             action=kwargs["action"],
@@ -568,7 +568,7 @@ def test_approve_and_reject_feature_change_requests(
         **kwargs: Any,
     ) -> FeatureChangeRequest:
         assert request_id == "change-1"
-        assert kwargs["operator"] == "reviewer"
+        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
         return _change_request(
             request_id=request_id,
             state="applied",
@@ -582,7 +582,7 @@ def test_approve_and_reject_feature_change_requests(
         **kwargs: Any,
     ) -> FeatureChangeRequest:
         assert request_id == "change-2"
-        assert kwargs["operator"] == "reviewer"
+        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
         assert kwargs["reason"] == "중복"
         return _change_request(
             request_id=request_id,
@@ -623,7 +623,7 @@ def test_deactivate_feature_uses_transaction(
     async def _deactivate(_session: Any, feature_id: str, **kwargs: Any) -> Any:
         assert feature_id == "feature-1"
         assert kwargs["reason"] == "운영상 제외"
-        assert kwargs["operator"] == "local-admin"
+        assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
         assert kwargs["prevent_provider_reactivation"] is True
         return FeatureDeactivateResult(
             feature_id="feature-1",

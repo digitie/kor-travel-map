@@ -26,6 +26,7 @@ from kortravelmap.infra.enrichment_review_repo import decide_enrichment_review
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, OffsetMeta, make_meta, make_offset_meta
 from kortravelmap.api.routers.dedup_review import (
@@ -163,7 +164,9 @@ class EnrichmentReviewDecisionRequest(BaseModel):
             "바꾸지 않고 decision_reason audit marker로만 기록한다."
         ),
     )
-    reviewed_by: str | None = None
+    # ADR-066 D-2 (T-VN-20): 감사 actor는 인증 principal에서만 파생한다. body의
+    # reviewed_by 필드는 제거했다(옛 caller가 보내면 extra="forbid"로 422). enrichment
+    # 검수는 admin frontend 전용이고 PinVi는 호출하지 않는다.
 
 
 class EnrichmentReviewDecisionData(BaseModel):
@@ -370,6 +373,7 @@ async def decide_review(
     request: Request,
     review_id: str,
     body: EnrichmentReviewDecisionRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EnrichmentReviewDecisionResponse:
     started_at = perf_counter()
@@ -378,7 +382,7 @@ async def decide_review(
             session,
             review_id,
             body.decision,
-            reviewed_by=body.reviewed_by,
+            reviewed_by=context.actor,
             reason=_reason_with_detail_source(
                 body.decision_reason,
                 body.selected_detail_source,
