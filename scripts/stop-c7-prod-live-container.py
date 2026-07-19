@@ -318,11 +318,20 @@ def stop_residual_container(root: Path) -> tuple[bool, bool]:
         reference_paths = [
             path for path in root.iterdir() if _REFERENCE_NAME.fullmatch(path.name)
         ]
+        if len(reference_paths) != 1:
+            raise RuntimeError("exactly one creator reference is required")
+        reference = _read_reference(reference_paths[0])
+        _terminate_creator(reference)
+        creator_active = reference.phase == "creating" and _creator_matches(reference)
+        if creator_active:
+            raise RuntimeError("Docker creator remains after termination")
+
+        # creator group이 완전히 끝난 뒤에만 create 결과 파일을 snapshot한다. 종료 직전
+        # child가 CID를 open하거나 outcome을 rename한 경합도 이 목록에 반드시 포함된다.
         cid_paths = [path for path in root.iterdir() if _CID_NAME.fullmatch(path.name)]
         outcome_paths = list(root.glob("container-*.outcome.json"))
-        if len(reference_paths) != 1 or len(cid_paths) > 1 or len(outcome_paths) > 1:
-            raise RuntimeError("exactly one creator reference and at most one CID are required")
-        reference = _read_reference(reference_paths[0])
+        if len(cid_paths) > 1 or len(outcome_paths) > 1:
+            raise RuntimeError("at most one CID and create outcome are required")
         if cid_paths and cid_paths[0].stem != reference_paths[0].stem:
             raise RuntimeError("CID/reference identity mismatch")
         if outcome_paths and outcome_paths[0].name != reference_paths[0].name.replace(
@@ -333,7 +342,6 @@ def stop_residual_container(root: Path) -> tuple[bool, bool]:
         recorded_cid = _read_cid(cid_paths[0]) if cid_paths else None
         if reference.phase == "created" and (recorded_cid is None or outcome != 0):
             raise RuntimeError("created reference lacks successful durable outcome/CID")
-        _terminate_creator(reference)
         container_id = _find_named_container(reference)
         removed_by_cid = False
         if recorded_cid is not None:
@@ -360,11 +368,19 @@ def stop_residual_container(root: Path) -> tuple[bool, bool]:
             removed_by_cid = True
         if _find_named_container(reference) is not None:
             raise RuntimeError("container remains after exact removal")
+        resolved_unstarted = (
+            reference.phase == "creating"
+            and not cid_paths
+            and not outcome_paths
+            and not creator_active
+            and container_id is None
+        )
         create_resolved = (
             reference.phase == "created"
             or recorded_cid is not None
             or container_id is not None
             or outcome is not None
+            or resolved_unstarted
         )
         if not create_resolved:
             return (False, False)

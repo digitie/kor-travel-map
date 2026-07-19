@@ -176,8 +176,10 @@ SIGKILL 뒤에는 `container-*.json` creator ref와 `container-*.outcome.json`, 
 `container-*.cid`를 함께 확인한다. 도구는 creator PID/PGID/session ID/start ticks와 같은 process
 group의 잔존 descendant까지 대조해 종료하고, exact
 name 또는 valid CID의 container가 `io.kortravelmap.c7.runner=prod-live-e2e` label과 동일한
-`runtime.*` bind mount를 가졌을 때만 stop/remove한다. create outcome도 없고 CID/name도 아직 없으면
-late create가 끝났다고 추측하지 않고 ref를 보존한 채 exit `4`로 남긴다. 이 경우 audit/stop을
+`runtime.*` bind mount를 가졌을 때만 stop/remove한다. creator가 종료됐고 CID **경로 자체**와 outcome,
+name이 모두 없으면 FIFO release 전에 끝난 `resolved-unstarted`로 판정해 ref만 제거한다. empty/partial
+CID 경로가 있고 conclusive outcome이나 검증된 exact-name container도 없거나 creator/container 존재 여부가
+불확실하면 late create가 끝났다고 추측하지 않고 ref를 보존한 채 exit `4`로 남긴다. 이 경우 audit/stop을
 반복하고 ref를 수동 삭제하지 않는다.
 그 뒤 `runtime.*`의 auth storage를 root-only로 격리해 cookie 파일을 폐기한다. Playwright trace
 ZIP은 cookie를 포함할 수 있으므로 보존하지 않는다.

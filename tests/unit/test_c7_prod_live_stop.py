@@ -100,6 +100,36 @@ def test_unresolved_create_without_outcome_preserves_intent(
     assert (root / "container-23.cid").exists()
 
 
+def test_creator_stopped_before_cid_open_removes_unstarted_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopper, root = _state(
+        tmp_path, monkeypatch, phase="creating", cid=None, outcome=None
+    )
+    monkeypatch.setattr(stopper, "_find_named_container", lambda _reference: None)
+
+    assert stopper.stop_residual_container(root) == (False, True)
+    assert not (root / "container-23.json").exists()
+
+
+def test_cid_opened_while_creator_stops_preserves_create_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopper, root = _state(
+        tmp_path, monkeypatch, phase="creating", cid=None, outcome=None
+    )
+
+    def stop_after_cid_open(_reference: object) -> None:
+        _write(root / "container-23.cid", "")
+
+    monkeypatch.setattr(stopper, "_terminate_creator", stop_after_cid_open)
+    monkeypatch.setattr(stopper, "_find_named_container", lambda _reference: None)
+
+    assert stopper.stop_residual_container(root) == (False, False)
+    assert (root / "container-23.json").exists()
+    assert (root / "container-23.cid").exists()
+
+
 def test_failed_create_outcome_allows_reference_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
