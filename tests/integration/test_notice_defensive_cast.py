@@ -235,7 +235,7 @@ async def test_admin_notice_list_survives_corrupted_timestamp(
 # #745가 `public_active_notice_filter_sql`을 curated-features/curations/collections
 # 공개 read의 notice 감산 정본으로 만들면서 naked cast를 그 표면들로 확산시켰다.
 # T-VN-06 가드를 그 함수 본문에 이식했으므로 아래 표면들도 오염 row에 500 없이
-# 동작하고 오염 notice가 제외/숨김돼야 한다(충돌 리뷰 S2 payoff).
+# 동작하고 오염 notice가 제외/숨김돼야 한다(충돌 리뷰 S1 payoff).
 
 
 async def _seed_public_curation_foundation(session: AsyncSession) -> tuple[str, str]:
@@ -303,8 +303,9 @@ async def test_curated_features_read_survives_corrupted_notice(
     """``/v1/curated-features`` 공개 read가 오염 notice에 500 없이 동작·제외한다."""
     theme_id, source_id = await _seed_public_curation_foundation(migrated_session)
     healthy_id, corrupt_id = await _seed_two_notices(migrated_session)
+    overlays = {}
     for fid in (healthy_id, corrupt_id):
-        await curated_repo.create_curated_feature(
+        overlays[fid] = await curated_repo.create_curated_feature(
             migrated_session,
             theme_id=theme_id,
             feature_id=fid,
@@ -317,6 +318,14 @@ async def test_curated_features_read_survives_corrupted_notice(
     )
     listed = {row.feature_id for row in page.items}
     assert listed == {healthy_id}  # 오염 notice는 종료 취급으로 제외, 500 없음.
+    assert (
+        await curated_repo.get_curated_feature(
+            migrated_session,
+            curated_feature_id=overlays[corrupt_id].curated_feature_id,
+            public_only=True,
+        )
+        is None
+    )
 
 
 async def test_curation_collection_read_survives_corrupted_notice(
@@ -349,7 +358,9 @@ async def test_curation_collection_read_survives_corrupted_notice(
         migrated_session, collection_id=collection.collection_id, public_only=True
     )
     assert result is not None
-    _row, items = result
+    public_row, items = result
+    assert public_row.item_count == 1
+    assert public_row.public_item_count == 1
     by_external = {item.external_item_id: item for item in items}
     # #745의 공개 item 목록은 비공개-notice item을 행째 제외한다(redact보다 강한
     # 제외 방향). 정상 notice item만 남고, 오염 notice item은 500 없이 사라진다.
@@ -360,7 +371,11 @@ async def test_curation_collection_read_survives_corrupted_notice(
     collections, _cursor = await curation_repo.list_curation_collections(
         migrated_session, public_only=True, theme_slug="ndc-theme"
     )
-    assert any(c.collection_id == collection.collection_id for c in collections)
+    listed_collection = next(
+        c for c in collections if c.collection_id == collection.collection_id
+    )
+    assert listed_collection.item_count == 1
+    assert listed_collection.public_item_count == 1
 
 
 async def test_curation_feature_groups_read_survives_corrupted_notice(

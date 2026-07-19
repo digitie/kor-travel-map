@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A T-VN-06 심층 리뷰 보완
+
+- PR #746의 단일 전문 리뷰에서 #745 이후 alias-aware notice 필터 충돌(S1)을 확인해
+  공유 helper에 방어 cast를 이식했다. 동시 head 갱신도 같은 리뷰어가 재검토해 문서 정본
+  회귀(S2)와 curated 단건·collection count 테스트 공백(S3)을 추가로 확인하고 보완했다.
+- **다음 한 작업**: 같은 리뷰어의 최종 승인 후 전체 CI를 통과시키고 PR #746을
+  `integration/t-vn`에만 머지한다. 이후 최근 Agent A PR을 다시 검색한다.
+
 ## 2026-07-19 (codex) — Agent A T-VN-04 심층 리뷰 보완 완료
 
 - PR #743의 공개 경계를 전문 리뷰어 1명이 재검증해 `admin_only` theme/비공개 overlay,
@@ -19,8 +27,8 @@
   500으로 만들던 F-9를 완화했다(fail-closed 제외, 스키마/migration 0).
   브랜치 ``feat/t-vn-06-notice-cast``(base ``integration/t-vn``).
 - 오염 4종 상태 matrix 통합 테스트 + 수정 전 SQL 재현 확인, notice lifecycle/
-  public view/perf EXPLAIN 회귀 green. ETL purge·reconcile·admin read의 잔여
-  cast와 관측(카운터)·typed 재설계는 T-VN-37 소유로 명시.
+  public view/perf EXPLAIN 회귀 green. ETL purge·reconcile의 잔여 cast와
+  관측(카운터)·typed 재설계는 T-VN-37 소유로 명시.
 - **다음 한 작업**: 이 브랜치 전체 게이트·리뷰·PR·머지(오케스트레이터 소관)
   후 다음 T-VN 배정 task를 진행한다.
 

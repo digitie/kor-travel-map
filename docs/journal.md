@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #746 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 최신 `integration/t-vn` 기준으로 PR #746을 재검토해 #745의
+  alias-aware notice 필터와 충돌하는 S1을 확인했다. 방어 cast를 공유 helper에 이식해
+  `f`, `pf`, `count_pf`, `public_count_pf` 공개 소비자가 같은 fail-closed 경계를 쓰게 했다.
+- Agent A의 동시 head 갱신 뒤 같은 리뷰어가 현재 diff를 다시 확인해, 리뷰 기록·현재 진행
+  정본이 사라진 문서 회귀(S2)와 corrupted curated 단건 및 collection count가 실제로
+  검증되지 않는 테스트 공백(S3)을 확인했다. 단건은 `None`, collection detail/list는 정상
+  item 1건만 집계하는지 직접 단언하도록 보완했다.
+
 ## 2026-07-19 (codex) — Agent A PR #743 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 PR #743 최신 head를 테스트 전에 독립 검토해 `admin_only` theme의 공개
@@ -29,7 +39,7 @@
   curated_repo(``/v1/curated-features``·``/v1/curations``·``/v1/curations/
   collections/{id}``)까지 정본으로 확산시켰다 — 단, **naked** cast로. 내 가드를
   그 함수 본문에 이식(``f`` → ``{feature_alias}``)해 그 6개 신규 표면까지 한
-  곳으로 동시에 방어했다(충돌 리뷰가 지적한 S2 blast-radius를 닫음). 가드 존재
+  곳으로 동시에 방어했다(충돌 리뷰가 지적한 S1 blast-radius를 닫음). 가드 존재
   단위 단언과 통합 테스트를 새 함수/표면 기준으로 갱신했다.
 - 리뷰 S3 반영: (1) ADR-073 인용 정정 — ADR-073 결정 목록에 D-9-7이 없어
   코드 주석·CHANGELOG를 "report §2 D-9-7 (+ T-VN-06 row)"로 교체(ADR-073
