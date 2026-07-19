@@ -49,7 +49,6 @@
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
-  - [ ] `T-VN-H01` — **public API key header 전환**
   - [ ] `T-VN-H02` — **destructive admin 기본값 fail-closed**
   - [ ] `T-VN-H03` — **surface별 CORS 분리**
   - [ ] `T-VN-H04` — **PROJ pin·drift·REINDEX runbook**
@@ -408,11 +407,6 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   주기를 확정한다.
 
 ### 독립 하드닝 — 각 항목 PR 1개
-
-- [ ] T-VN-H01 — **public API key header 전환**
-
-  URL query key를 header로 clean-cut해 로그·referrer 노출을 막고 public OpenAPI와 consumer를 함께
-  갱신한다.
 
 - [ ] T-VN-H02 — **destructive admin 기본값 fail-closed**
 

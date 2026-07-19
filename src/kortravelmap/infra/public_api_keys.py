@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "PUBLIC_API_KEY_QUERY_PARAM",
     "PublicApiKeyCreateResult",
     "PublicApiKeyRow",
     "PublicApiKeyState",
@@ -34,7 +33,6 @@ __all__ = [
     "revoke_public_api_key",
 ]
 
-PUBLIC_API_KEY_QUERY_PARAM: Final[str] = "key"
 PUBLIC_API_KEY_LENGTH: Final[int] = 32
 PUBLIC_API_KEY_ALPHABET: Final[str] = string.ascii_letters + string.digits
 PublicApiKeyState = Literal["active", "revoked"]

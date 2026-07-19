@@ -32,13 +32,13 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from kortravelmap.infra.log_repo import record_api_call
-from kortravelmap.infra.public_api_keys import PUBLIC_API_KEY_QUERY_PARAM
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
 from kortravelmap.api import __version__
 from kortravelmap.api.auth import (
     OPS_SCOPE_HEADER,
+    PUBLIC_API_KEY_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
     require_metrics_token,
@@ -163,11 +163,13 @@ _OPS_SCOPE_SECURITY_SCHEME: dict[str, str] = {
 }
 _PUBLIC_API_KEY_SECURITY_SCHEME: dict[str, str] = {
     "type": "apiKey",
-    "in": "query",
-    "name": PUBLIC_API_KEY_QUERY_PARAM,
+    "in": "header",
+    "name": PUBLIC_API_KEY_HEADER,
     "description": (
-        "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 "
-        "같은 runtime dependency에서 별도 principal로 허용한다."
+        "외부/비신뢰 public read용 VWorld 호환 API key를 X-Kor-Travel-Map-Api-Key "
+        "헤더로 전달한다. ServiceToken 요청은 같은 runtime dependency에서 별도 "
+        "principal로 허용한다. T-VN-H01 — 접근 로그·Referer 유출을 막기 위해 이전 "
+        "?key= 쿼리 파라미터는 제거됐다."
     ),
 }
 

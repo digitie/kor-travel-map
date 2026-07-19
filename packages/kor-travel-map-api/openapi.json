@@ -24921,9 +24921,9 @@
         "type": "apiKey"
       },
       "PublicApiKey": {
-        "description": "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 같은 runtime dependency에서 별도 principal로 허용한다.",
-        "in": "query",
-        "name": "key",
+        "description": "외부/비신뢰 public read용 VWorld 호환 API key를 X-Kor-Travel-Map-Api-Key 헤더로 전달한다. ServiceToken 요청은 같은 runtime dependency에서 별도 principal로 허용한다. T-VN-H01 — 접근 로그·Referer 유출을 막기 위해 이전 ?key= 쿼리 파라미터는 제거됐다.",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Api-Key",
         "type": "apiKey"
       },
       "ServiceToken": {
@@ -32647,26 +32647,6 @@
               "title": "Include Counts",
               "type": "boolean"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -32922,26 +32902,6 @@
               ],
               "title": "Cursor"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -33001,26 +32961,6 @@
             "schema": {
               "title": "Curated Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -33139,26 +33079,6 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -33237,26 +33157,6 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -33465,26 +33365,6 @@
               ],
               "title": "Cursor"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -33628,26 +33508,6 @@
               ],
               "title": "Cursor"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -33709,26 +33569,6 @@
               "title": "Collection Id",
               "type": "string"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -33788,26 +33628,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -34078,26 +33898,6 @@
               "title": "Include Geometry",
               "type": "boolean"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -34149,28 +33949,6 @@
     "/v1/features/batch": {
       "post": {
         "operationId": "get_features_batch_v1_features_batch_post",
-        "parameters": [
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -34399,26 +34177,6 @@
               "title": "Include Geometry",
               "type": "boolean"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -34635,26 +34393,6 @@
               ],
               "title": "Sort",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -34877,26 +34615,6 @@
               ],
               "title": "Sort",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -35131,26 +34849,6 @@
               "title": "Include Total",
               "type": "boolean"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -35317,26 +35015,6 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -35592,26 +35270,6 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -35671,26 +35329,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -35806,26 +35444,6 @@
               "title": "Page Size",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -35933,26 +35551,6 @@
               ],
               "title": "Cursor"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -36053,26 +35651,6 @@
               "title": "History Limit",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -36143,26 +35721,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -36249,26 +35807,6 @@
               ],
               "description": "이 시점 이하 weather만(미래 예보 제외).",
               "title": "Asof"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -36516,26 +36054,6 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -40135,28 +39653,6 @@
       "get": {
         "description": "bounded provider×dataset×scope 신선도 목록을 반환한다.",
         "operationId": "list_providers_freshness_v1_providers_get",
-        "parameters": [
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -40167,16 +39663,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
           },
           "default": {
             "content": {
@@ -40250,26 +39736,6 @@
               ],
               "description": "sync_scope 필터",
               "title": "Sync Scope"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -40413,26 +39879,6 @@
                 }
               ],
               "title": "Cursor"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -40606,26 +40052,6 @@
               "title": "Max Items",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -40686,26 +40112,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
@@ -40879,26 +40285,6 @@
               "title": "Max Items",
               "type": "integer"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -41061,26 +40447,6 @@
               "title": "Include Months",
               "type": "boolean"
             }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
-            }
           }
         ],
         "responses": {
@@ -41141,26 +40507,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
-              "title": "Key"
             }
           }
         ],
