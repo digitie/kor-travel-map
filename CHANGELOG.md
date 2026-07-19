@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### notice timestamp 방어적 cast (2026-07-19, ADR-073 T-VN-06)
+
+- **FIXED**: `detail->>'valid_end_time'`이 오염된 notice 한 행이 공개 read
+  전체(bbox/search/nearby/in-area/cluster/counts/notice detail·batch)를 500으로
+  만들지 않는다. 종료 필터가 `pg_input_is_valid`(PostgreSQL 16+) 가드로
+  파싱 가능한 값만 cast한다.
+- **CHANGED**: 파싱 불가한 `valid_end_time`을 가진 notice는 fail-closed로 공개
+  표면에서 제외된다(이전: 500, 노출 아님). JSON null/키 부재는 기존 의미
+  (종료시각 없음 = 활성)를 유지한다. typed notice 재설계·오염 관측은 T-VN-37.
+
 ### 공개 predicate 단일화 — `feature.public_features` view (2026-07-19, ADR-067 T-VN-04)
 
 - **ADDED**: migration 0059가 공개 정본 projection `feature.public_features`

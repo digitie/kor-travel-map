@@ -14,6 +14,24 @@
 - 승인 뒤 unit/API 70건과 PostGIS 공개 경계 15건, Ruff를 통과했다. pytest 첫 실행의 WSL 3.14
   capture 임시파일 오류는 전용 `/tmp`와 capture-off 재실행으로 코드 실패가 아님을 확인했다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-06 notice timestamp 방어적 cast
+
+- F-9: ``detail->>'valid_end_time'`` 직접 CAST 때문에 오염된 notice 한 행이
+  ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유하는 모든 공개 read(bbox/search/
+  nearby/in-area/cluster/counts/notice IDs + notice detail·batch 가시성)를
+  500으로 만들었다. Wave 0 완화로 ``_ENDED_NOTICE_HIDDEN_SQL`` 한 곳에
+  ``pg_input_is_valid``(PG16+, 배포·테스트 이미지 모두 16 고정) 가드 CASE를
+  넣었다 — 파싱 불가 row는 fail-closed로 "notice 없음" 강등(노출 아님),
+  JSON null/키 부재는 기존 의미(활성) 유지. 스키마 변경 0, migration 0.
+- 통합 테스트: 오염 4종(빈 문자열/garbage/달력 불가값/불가능 timezone) ×
+  bbox(경량/geometry)/search/notice IDs/단건 가시성 — 수정 전 SQL로는
+  ``InvalidDatetimeFormatError`` 재현을 확인했다. notice lifecycle·public view
+  matrix·perf EXPLAIN 회귀 green.
+- 범위 외로 남긴 cast: ``_PURGE_EXPIRED_NOTICES_SQL``(ETL maintenance)·notice
+  reconcile CTE(write 경로)·``admin_feature_repo``(admin read) — 공개 read가
+  아니며 typed 재설계·관측은 T-VN-37 소유. lineage anti-join 상시 비용도
+  T-VN-37(불변).
+
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 + 적대 리뷰 반영
 
 - ADR-067 Wave 0: alembic 0059가 `feature.public_features` VIEW(`status='active' AND

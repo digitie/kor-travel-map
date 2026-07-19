@@ -10,6 +10,20 @@
 - **다음 한 작업**: 최근 Agent A PR 추가분을 다시 점검한 뒤 C6c compatible-pair와 C7 n150
   live E2E를 종결한다. Agent B lane은 C7 완료 전 시작하지 않는다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-06 notice 방어적 cast 완료
+
+- T-VN-04는 #743으로 integration/t-vn에 병합됐다. 이어 T-VN-06:
+  ``_ended_notice_hidden_sql``(#745가 curated/curation/collection 공개 표면의
+  notice 감산 정본으로 만든 함수)의 valid_end_time 직접 CAST를
+  ``pg_input_is_valid`` 가드 CASE로 교체해 오염 row 1건이 전체 공개 read를
+  500으로 만들던 F-9를 완화했다(fail-closed 제외, 스키마/migration 0).
+  브랜치 ``feat/t-vn-06-notice-cast``(base ``integration/t-vn``).
+- 오염 4종 상태 matrix 통합 테스트 + 수정 전 SQL 재현 확인, notice lifecycle/
+  public view/perf EXPLAIN 회귀 green. ETL purge·reconcile·admin read의 잔여
+  cast와 관측(카운터)·typed 재설계는 T-VN-37 소유로 명시.
+- **다음 한 작업**: 이 브랜치 전체 게이트·리뷰·PR·머지(오케스트레이터 소관)
+  후 다음 T-VN 배정 task를 진행한다.
+
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
 
 - alembic 0059 `feature.public_features` VIEW로 공개 술어를 단일화하고 모든 공개 read 경로
