@@ -3933,9 +3933,9 @@ def _search_cursor_payload(
     contract: _FeatureSearchContract,
     signing_key: bytes,
 ) -> dict[str, Any]:
+    _search_cursor_signing_key(signing_key)
     if cursor is None:
         return {}
-    _search_cursor_signing_key(signing_key)
     if len(cursor) > _SEARCH_CURSOR_MAX_LENGTH or cursor.count(".") != 1:
         raise FeatureSearchCursorInvalidError("invalid feature search cursor")
     payload_segment, signature_segment = cursor.split(".", 1)

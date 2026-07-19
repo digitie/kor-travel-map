@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
@@ -21,6 +21,7 @@ OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
+PUBLIC_API_KEY = "public-api-key-0000000000000000000000000000"
 
 # 명시하지 않은 필드에 ambient host env가 스며들어 기본값 검증을 오염시키지
 # 않도록, 이 파일의 모든 테스트에서 관련 env를 제거한다.
@@ -388,7 +389,7 @@ def test_cursor_signing_secret_must_be_distinct_from_other_secrets(
 
 @pytest.mark.unit
 def test_cursor_signing_secret_must_be_distinct_from_ops_tokens() -> None:
-    with pytest.raises(ValidationError, match="distinct from cursor signing secret"):
+    with pytest.raises(ValidationError, match="distinct from ops read token"):
         _local_settings(
             cursor_signing_secret=OPS_READ_TOKEN,
             ops_read_token=OPS_READ_TOKEN,
@@ -585,6 +586,47 @@ def test_create_app_boots_with_production_settings_and_omits_debug_routes() -> N
         ({"service_token": None}, "KOR_TRAVEL_MAP_API_SERVICE_TOKEN"),
         ({"public_api_key_required": False}, "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED"),
         ({"debug_routes_enabled": True}, "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED"),
+        ({"cursor_signing_secret": None}, "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"),
+        (
+            {"cursor_signing_secret": SecretStr("short")},
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        ),
+        (
+            {
+                "cursor_signing_secret": SecretStr(
+                    "cursor signing secret " + "c" * 32
+                )
+            },
+            "contain no whitespace",
+        ),
+        (
+            {"cursor_signing_secret": SERVICE_TOKEN},
+            "distinct from service token",
+        ),
+        (
+            {"cursor_signing_secret": ADMIN_PROXY_SECRET},
+            "distinct from admin proxy secret",
+        ),
+        (
+            {"cursor_signing_secret": OPS_READ_TOKEN},
+            "distinct from ops read token",
+        ),
+        (
+            {"cursor_signing_secret": OPS_CANCEL_TOKEN},
+            "distinct from ops cancel token",
+        ),
+        (
+            {"cursor_signing_secret": METRICS_TOKEN},
+            "distinct from metrics token",
+        ),
+        (
+            {
+                "cursor_signing_secret": PUBLIC_API_KEY,
+                "vworld_api_key": SecretStr(PUBLIC_API_KEY),
+            },
+            "distinct from public API key",
+        ),
+        ({"cursor_signing_secret": 123}, "must be a string when set"),
     ],
 )
 def test_create_app_revalidates_bypassed_production_settings(
@@ -593,4 +635,70 @@ def test_create_app_revalidates_bypassed_production_settings(
 ) -> None:
     bypassed = _production_settings().model_copy(update=updates)
     with pytest.raises(ValueError, match=expected_problem):
+        create_app(settings=bypassed)
+
+
+@pytest.mark.unit
+def test_create_app_accepts_plain_valid_cursor_secret_from_model_copy() -> None:
+    bypassed = _production_settings().model_copy(
+        update={"cursor_signing_secret": CURSOR_SIGNING_SECRET}
+    )
+    application = create_app(settings=bypassed)
+    assert (
+        application.state.settings.cursor_signing_key
+        == CURSOR_SIGNING_SECRET.encode()
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("updates", "expected_problem"),
+    [
+        (
+            {"cursor_signing_secret": SecretStr("short")},
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        ),
+        (
+            {
+                "cursor_signing_secret": SecretStr(
+                    "cursor signing secret " + "c" * 32
+                )
+            },
+            "contain no whitespace",
+        ),
+        (
+            {"cursor_signing_secret": SERVICE_TOKEN},
+            "distinct from service token",
+        ),
+        ({"cursor_signing_secret": 123}, "must be a string when set"),
+        ({"cursor_signing_secret": None}, "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"),
+    ],
+)
+def test_create_app_revalidates_model_construct_cursor_secret(
+    updates: dict[str, Any],
+    expected_problem: str,
+) -> None:
+    values = _production_settings().model_dump()
+    values.update(updates)
+    bypassed = ApiSettings.model_construct(**values)
+    with pytest.raises(ValueError, match=expected_problem):
+        create_app(settings=bypassed)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"cursor_signing_secret": SecretStr("short")},
+        {
+            "cursor_signing_secret": SERVICE_TOKEN,
+            "service_token": SecretStr(SERVICE_TOKEN),
+        },
+    ],
+)
+def test_create_app_revalidates_local_dev_cursor_secret(
+    updates: dict[str, Any],
+) -> None:
+    bypassed = _local_settings().model_copy(update=updates)
+    with pytest.raises(ValueError, match="runtime settings are invalid"):
         create_app(settings=bypassed)

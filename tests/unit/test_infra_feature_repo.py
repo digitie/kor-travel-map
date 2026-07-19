@@ -576,6 +576,12 @@ async def test_search_features_validates_before_db_call() -> None:
             _Session(),
             cursor_signing_key=_SEARCH_CURSOR_KEY,
         )
+    with pytest.raises(ValueError, match="signing key must be at least 32 bytes"):
+        await feature_repo.search_features(  # type: ignore[arg-type]
+            _Session(),
+            q="경복궁",
+            cursor_signing_key=b"short",
+        )
     with pytest.raises(ValueError, match="page_size must be greater than 0"):
         await feature_repo.search_features(
             _Session(),  # type: ignore[arg-type]

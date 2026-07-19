@@ -1237,6 +1237,32 @@ def test_ops_pair_validation_messages_are_lockstep_across_layers() -> None:
 
 
 @pytest.mark.unit
+def test_cursor_signing_secret_messages_are_lockstep_across_runtime_layers() -> None:
+    settings_source = (
+        ROOT
+        / "packages"
+        / "kor-travel-map-api"
+        / "src"
+        / "kortravelmap"
+        / "api"
+        / "settings.py"
+    ).read_text(encoding="utf-8")
+    entrypoint = _script("docker/api-entrypoint.sh")
+    launcher = _script("scripts/run-admin-stack.sh")
+
+    for shared_phrase in (
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        "must be at least 32 characters",
+        "contain no whitespace",
+        "must be distinct from",
+        "while the public features surface is enabled",
+    ):
+        assert shared_phrase in settings_source, shared_phrase
+        assert shared_phrase in entrypoint, shared_phrase
+        assert shared_phrase in launcher, shared_phrase
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "key",
     [
