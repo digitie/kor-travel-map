@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #748 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 PR #748을 최신 `integration/t-vn`에서 재검토해, 서버/OpenAPI에서
+  삭제한 beach no-op query 두 개가 구현 사양과 PinVi primary consumer에 남은 S2
+  clean-cut 누락을 확인했다.
+- 이 저장소의 `public-views-api` query 표를 실제 route/OpenAPI와 맞췄다. PinVi의
+  route·Python/TS client·vendored OpenAPI와 query-shape drift gate는 cross-repo 후속
+  PR로 함께 정리한다.
+- 같은 전문 리뷰어가 양 저장소 최종 diff를 승인했다. 이 문서 후속은 diff whitespace와
+  prod redaction gate를 통과했고, PinVi 관련 Python 테스트 31개와 정적 gate도 통과했다.
+
 ## 2026-07-19 (codex) — Agent A PR #747 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 PR #747의 route matrix와 `/metrics` 경계를 최신
