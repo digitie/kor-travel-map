@@ -10,6 +10,7 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
+  - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
@@ -118,6 +119,15 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   하나의 소스 tree로 만들고, `T-VN-03`·`T-VN-15`·잔여 admin 비공개 feature
   blocker를 닫은 뒤 integration을 main에 병합한다. 이 최종 main·PinVi·manager
   조합으로 C6c v4 capture를 수행한 뒤에만 C7 live를 실행한다.
+
+- [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
+  (C7 n150 전환 중 발견): shared PostgreSQL의 infra owner가 설치한
+  `postgis_topology`는 `topology.layer`와 `topology.topology`를 소유한다. 앱 metadata가
+  이를 관리하지 않는데도 `include_schemas=True` autogenerate가 삭제 대상으로 판정해
+  `alembic current == head` 뒤 `alembic check`가 실패한다. `topology` schema의
+  extension-owned 객체만 명시 제외하고, head migration 뒤 topology extension을 설치한
+  production-equivalent integration gate로 오탐과 app schema drift 감지를 함께 고정한다.
+  단일 적대 리뷰와 CI를 통과해 main에 병합한 뒤 exact image를 다시 빌드·capture한다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
