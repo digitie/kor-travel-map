@@ -92,17 +92,32 @@
   미실행(정적으로는 partial index 단언이라 호환). C: 확보 후 재실행 + 최종 rebase
   검증 필요.
 - **다음 한 작업**: C: 디스크 확보 → weather 회귀 재실행 → orchestrator 리뷰·PR·머지.
+## 2026-07-19 (codex) — Agent A T-VN-19 심층 리뷰 보완
+
+- PR #753의 단일 전문 리뷰에서 metadata 비교 제외 table 8개의 구조 gate 부재와,
+  제외 index가 이름만 같으면 잘못된 UNIQUE·키·predicate도 통과하는 S2 두 건을
+  확인했다. 전체 column type/nullability, 핵심 constraint/index, 인증·운영 CHECK
+  거부 동작과 index 의미를 빈 DB migration 뒤 검증하도록 보완했다.
+- 새 ORM mapping이 임시 제외 목록에 남으면 Alembic 시작 시 실패하는 stale-exclusion
+  guard도 추가했다. env와 테스트는 schema-qualified 공용 ledger를 사용하며 대체 계약
+  집합의 정확한 일치를 검증한다. migration에 없던 curated feature index의
+  `NULLS NOT DISTINCT` metadata 옵션은 제거해 일반 Alembic 비교로 복귀시켰다.
+- 같은 전문 리뷰어의 재검토 승인을 받았고 변경 대상 통합 테스트 13개, unit 1,503개,
+  ruff, mypy strict, import-linter를 통과했다. 전체 integration 재실행은 Docker Desktop의
+  containerd metadata filesystem read-only 장애로 중단했으므로 원격 CI에서 재검증한다.
+- **다음 한 작업**: 후속 PR을 `integration/t-vn`에만 열어 CI green 뒤 머지하고, Agent A
+  PR #754의 갱신 head를 같은 전문 리뷰어로 재검토해 보안 finding을 보완한다.
 
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate 구현
 
 - `feat/t-vn-19-alembic-check`(base `integration/t-vn`)에서 빈 PostGIS DB의 `alembic
   upgrade head && alembic check` diff 0건 gate를 구현했다(ADR-075 D-12-2, §8.1). env.py
-  `include_object`로 PostGIS·미모델 app table 8개·round-trip 불가 index 5개를 이름으로 명시
+  `include_object`로 PostGIS·미모델 app table 8개·round-trip 불가 index 4개를 이름으로 명시
   제외하고, models.py를 배포 DB에 정합화(String→Text 27컬럼, dagster claim 누락 컬럼/CHECK/
   기본값, source_records·curated_themes 제약명 정정, import_jobs SERIAL 위양성 제거).
   `tests/integration/test_alembic_metadata_consistency.py`가 기존 integration CI에서 상시
-  실행하고, 제외한 5개 index의 존재는 test_alembic_upgrade.py + test_t212d_perf_explain.py가
-  단언한다. **마이그레이션 없음**(scope guard 준수) — 배포 DB 자체 drift는 발견되지 않았다.
+  실행하고, 제외 index 4개의 구조 의미는 test_alembic_upgrade.py가 catalog로 단언한다.
+  **마이그레이션 없음**(scope guard 준수) — 배포 DB 자체 drift는 발견되지 않았다.
 - **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. 비차단
   후속 관찰(별도 migration task 후보): DB의 varchar/text 혼재 정규화, curated_themes·
   source_records 제약의 naming-convention rename.

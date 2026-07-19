@@ -105,6 +105,16 @@
   보내는 필드는 수용하되 무시한다(OpenAPI `deprecated: true`) — admin feature/issue의
   `operator`, dedup review의 `reviewed_by`. 저장 actor는 principal이며 body 값은 무시된다.
   PinVi가 전송을 중단하면(별도 PR, `docs/integration-map.md` §3.3) 제거한다.
+### Alembic 제외 정책 구조 검증 보완 (2026-07-19, T-VN-19 리뷰 후속)
+
+- **FIXED (internal)**: metadata 비교에서 임시 제외한 app-owned table 8개의 전체
+  column type/nullability와 핵심 constraint/index를 빈 DB migration 통합 테스트로
+  고정했다. 인증·운영 table의 핵심 CHECK도 잘못된 row를 실제 거부하는지 검증한다.
+- **FIXED (internal)**: 비교 제외 index 4개를 이름 존재만 확인하지 않고 UNIQUE 여부,
+  key 순서·표현식, partial predicate까지 PostgreSQL catalog 기준으로 검증한다. 새 ORM
+  mapping이 생긴 table이 제외 목록에 남으면 Alembic 시작 단계에서 실패한다.
+  `uq_curated_features_theme_feature_active`의 잘못된 `NULLS NOT DISTINCT` metadata 옵션은
+  제거해 migration과 일치시키고 Alembic 일반 비교 대상으로 복귀시켰다.
 
 ### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
 
@@ -132,7 +142,7 @@
 - **CHANGED (internal)**: `alembic/env.py`에 `include_object` 필터를 추가해 비-app·미모델
   객체를 비교에서 명시 제외한다(blanket ignore 아님, 이름 나열): PostGIS `spatial_ref_sys`,
   ORM 모델이 아직 없는 app table 8개(weather/price/log/api-key/auth-event 계열 + ops-live
-  claim/topic), alembic이 round-trip 못하는 partial/expression index 5개.
+  claim/topic), alembic이 round-trip 못하는 partial/expression index 4개.
 - **FIXED (internal)**: `models.py` metadata를 배포 DB에 정합화(마이그레이션 없음) —
   DB가 TEXT인데 모델이 String이던 27개 컬럼 Text화, `dagster_schedule_active_claims`의
   누락 컬럼 2개·CHECK 2개·`created_at` 기본값(now→clock_timestamp), `source_records`

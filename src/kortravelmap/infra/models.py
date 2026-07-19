@@ -982,7 +982,6 @@ class CuratedFeatureRow(Base):
             "feature_id",
             unique=True,
             postgresql_where=text("archived_at IS NULL"),
-            postgresql_nulls_not_distinct=True,
         ),
         Index(
             "idx_curated_features_status_keyset",
