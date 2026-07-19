@@ -49,7 +49,12 @@ from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
-from kortravelmap.api.route_policy import assert_routes_classified
+from kortravelmap.api.route_policy import (
+    RoutePolicy,
+    RoutePolicyMatrixRow,
+    assert_routes_classified,
+    build_route_policy_matrix,
+)
 from kortravelmap.api.routers import (
     admin_auth_router,
     admin_backups_router,
@@ -124,14 +129,6 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
         "/v1/ops/health-deep",
         "/v1/ops/metrics",
         "/v1/ops/system-logs",
-    }
-)
-_PUBLIC_CURATED_PATHS = frozenset(
-    {
-        "/v1/curated-features",
-        "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-sources",
-        "/v1/curated-themes",
     }
 )
 _MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
@@ -283,15 +280,20 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
         components.pop(orphan, None)
 
 
-def _apply_route_security_contract(schema: dict[str, Any]) -> None:
+def _apply_route_security_contract(
+    schema: dict[str, Any],
+    route_matrix: tuple[RoutePolicyMatrixRow, ...],
+) -> None:
     """public/operator route별 실제 principal 대안을 OpenAPI에 선언한다.
 
     FastAPI는 router dependency의 여러 ``Security`` scheme을 operation 단위 권한으로
     정확히 분리하지 못한다. canonical ops와 잔여 관측 GET은 BFF 또는 read
     principal, exact import-job cancel만 cancel principal, 나머지 ops mutation과
-    MOIS raw debug는 BFF만 허용한다. curated public GET은 public key와 기존 trusted
-    service principal을 같은 public operation의 대안으로 명시한다. trusted admin
-    BFF 우회는 public consumer 계약에 노출하지 않는다.
+    MOIS raw debug는 BFF만 허용한다. 조립된 route policy matrix의 모든
+    ``public-keyed`` operation은 public key와 trusted service principal을 OR로,
+    ``service`` operation은 service principal만으로 선언한다.
+    ``public-unauthenticated`` operation은 security 요구를 제거한다. trusted admin BFF
+    우회는 public consumer 계약에 노출하지 않는다.
     """
 
     components = schema.setdefault("components", {})
@@ -307,6 +309,30 @@ def _apply_route_security_contract(schema: dict[str, Any]) -> None:
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return
+
+    public_security_by_policy: dict[RoutePolicy, list[dict[str, list[str]]]] = {
+        RoutePolicy.PUBLIC_UNAUTHENTICATED: [],
+        RoutePolicy.PUBLIC_KEYED: _PUBLIC_READ_SECURITY,
+        RoutePolicy.SERVICE: [{"ServiceToken": []}],
+    }
+    for row in route_matrix:
+        security = public_security_by_policy.get(row.policy)
+        if security is None or row.is_websocket or not row.include_in_schema:
+            continue
+        path_item = paths.get(row.schema_path)
+        if not isinstance(path_item, dict):
+            continue
+        for method in row.methods:
+            operation = path_item.get(method.lower())
+            if not isinstance(operation, dict):
+                continue
+            if security:
+                operation["security"] = [
+                    dict(requirement) for requirement in security
+                ]
+            else:
+                operation.pop("security", None)
+
     for path, path_item in paths.items():
         if not isinstance(path, str):
             continue
@@ -314,11 +340,6 @@ def _apply_route_security_contract(schema: dict[str, Any]) -> None:
             continue
         canonical_ops = path.startswith(_OPS_CANONICAL_PREFIXES)
         observability_ops = path in _OPS_OBSERVABILITY_PATHS
-        if path in _PUBLIC_CURATED_PATHS:
-            operation = path_item.get("get")
-            if isinstance(operation, dict):
-                operation["security"] = _PUBLIC_READ_SECURITY
-            continue
         if path == _MOIS_DEBUG_PATH:
             operation = path_item.get("get")
             if isinstance(operation, dict):
@@ -848,7 +869,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             return application.openapi_schema
         schema = _default_openapi()
         _augment_problem_responses(schema)
-        _apply_route_security_contract(schema)
+        _apply_route_security_contract(schema, build_route_policy_matrix(application))
         application.openapi_schema = schema
         return schema
 

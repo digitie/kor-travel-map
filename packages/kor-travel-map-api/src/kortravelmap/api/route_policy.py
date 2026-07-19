@@ -102,8 +102,10 @@ class RoutePolicyMatrixRow:
     """route policy matrix 1행 — route, methods, 정책, 관측된 enforcement."""
 
     path: str
+    schema_path: str
     methods: tuple[str, ...]
     is_websocket: bool
+    include_in_schema: bool
     policy: RoutePolicy
     observed_enforcement: tuple[str, ...]
 
@@ -345,8 +347,10 @@ def _observed_enforcement(dependant: Any) -> tuple[str, ...]:
     return tuple(sorted(observed))
 
 
-def _resolve_route(entry: Any) -> tuple[str | None, tuple[str, ...], bool, Any]:
-    """평탄화 entry 하나를 (path, methods, is_websocket, dependant)로 해석한다.
+def _resolve_route(
+    entry: Any,
+) -> tuple[str | None, str | None, tuple[str, ...], bool, bool, Any]:
+    """평탄화 entry를 path/method/schema 포함 여부/dependant로 해석한다.
 
     FastAPI 0.136+의 ``RouteContext``는 WebSocket/plain route의 해석 결과를
     ``starlette_route``에 담고(``path`` 필드는 비어 있음), APIRoute는 context
@@ -357,13 +361,15 @@ def _resolve_route(entry: Any) -> tuple[str | None, tuple[str, ...], bool, Any]:
     resolved = getattr(entry, "starlette_route", None) or entry
     original = getattr(entry, "original_route", entry)
     path = getattr(resolved, "path", None) or getattr(original, "path", None)
+    schema_path = getattr(resolved, "path_format", None) or path
     is_websocket = isinstance(original, APIWebSocketRoute | WebSocketRoute)
     methods_value = getattr(resolved, "methods", None)
     methods = tuple(sorted(methods_value)) if methods_value else ()
+    include_in_schema = bool(getattr(resolved, "include_in_schema", False))
     dependant = getattr(resolved, "dependant", None)
     if dependant is None:
         dependant = getattr(original, "dependant", None)
-    return path, methods, is_websocket, dependant
+    return path, schema_path, methods, is_websocket, include_in_schema, dependant
 
 
 def _registry_for_app(app: FastAPI) -> dict[str, RoutePolicy]:
@@ -394,7 +400,14 @@ def build_route_policy_matrix(app: FastAPI) -> tuple[RoutePolicyMatrixRow, ...]:
     rows: list[RoutePolicyMatrixRow] = []
     unclassified: list[str] = []
     for entry in _iter_flattened_routes(app):
-        path, methods, is_websocket, dependant = _resolve_route(entry)
+        (
+            path,
+            schema_path,
+            methods,
+            is_websocket,
+            include_in_schema,
+            dependant,
+        ) = _resolve_route(entry)
         if path is None:
             unclassified.append(f"<no path: {type(entry).__name__}>")
             continue
@@ -405,8 +418,10 @@ def build_route_policy_matrix(app: FastAPI) -> tuple[RoutePolicyMatrixRow, ...]:
         rows.append(
             RoutePolicyMatrixRow(
                 path=path,
+                schema_path=schema_path or path,
                 methods=methods,
                 is_websocket=is_websocket,
+                include_in_schema=include_in_schema,
                 policy=policy,
                 observed_enforcement=_observed_enforcement(dependant),
             )

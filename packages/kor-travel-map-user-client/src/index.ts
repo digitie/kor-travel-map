@@ -80,11 +80,13 @@ type _MetaHasCluster = _Assert<_Has<Meta, "cluster">>;
 type _PathsStable = _Assert<
   _Has<
     paths,
+    | "/v1/features"
     | "/v1/features/in-bounds"
     | "/v1/features/search"
     | "/v1/features/nearby"
     | "/v1/features/batch"
     | "/v1/features/{feature_id}"
+    | "/v1/features/{feature_id}/contained-features"
     | "/v1/features/{feature_id}/weather"
     | "/v1/public/beaches"
     | "/v1/public/beaches/map-markers"

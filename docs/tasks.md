@@ -13,6 +13,7 @@
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
+  - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
     ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
     [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
@@ -154,9 +155,31 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
   증명한다.
 - [ ] 코드 통합 diff는 단일 적대 리뷰어 승인을 받고, exact source revision을 고정한 merge
   commit으로 main에 합류한다. 문서 전용 후속은 추가 적대 재리뷰를 요구하지 않는다.
+- [ ] `T-VN-57`이 runtime route policy와 full/user OpenAPI security·user operation을
+  양방향 전수 대조한 뒤에만 최종 합류한다.
 - [ ] main 합류 뒤 PinVi PR #393과 docker-manager PR #64의 exact revision을 포함한 C6c
   compatible-pair v4를 capture하고, n150 C7 live E2E 전에는 `T-VN-03`·`T-VN-04A`·
   `T-VN-15`를 완료 아카이브하지 않는다.
+
+#### T-VN-57 — public route policy·OpenAPI security·user surface 단일 정본 (#784)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 production runtime의 public-key gate와 기계 계약 사이의
+구조적 drift를 확인했다. `RoutePolicy.PUBLIC_KEYED` 29개 GET은 runtime에서
+`require_public_api_key`를 적용하지만 full OpenAPI는 curated 4개만
+`PublicApiKey OR ServiceToken`을 선언해 25개가 무인증으로 기술된다. user OpenAPI도 노출한
+public-keyed 27개 중 같은 4개만 선언해 23개가 누락된다.
+
+- [ ] `ROUTE_POLICIES`와 조립된 route metadata를 runtime·full OpenAPI security·user surface의
+  단일 정본으로 사용하고 `_PUBLIC_CURATED_PATHS`·`USER_OPERATIONS` 수기 path 정본을 제거한다.
+- [ ] 모든 `PUBLIC_KEYED` operation은 `PublicApiKey OR ServiceToken`,
+  `PUBLIC_UNAUTHENTICATED`는 무인증, `SERVICE`는 service scheme으로 정확히 선언한다. trusted
+  Admin BFF의 내부 우회는 public consumer 계약에 노출하지 않는다.
+- [ ] runtime policy ↔ full spec ↔ user spec을 양방향 전수 비교해 path 누락·과포함·method drift와
+  잘못된 security를 CI에서 거부한다. full/user OpenAPI와 admin/user 생성 TypeScript도 같은
+  정본에서 재생성한다.
+- [ ] DB schema·REST path·DTO·runtime 인증 의미는 바꾸지 않는다. exact 구현 diff는 단일 적대
+  리뷰어가 승인한 뒤에만 test/lint/build/OpenAPI/frontend gate를 실행하고, 완료 전
+  T-VN-SYNC-02를 병합하지 않는다.
 
 #### Lane 분배 (2026-07-19, issue #738)
 

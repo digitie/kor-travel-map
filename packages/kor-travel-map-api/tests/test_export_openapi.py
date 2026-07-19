@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -59,9 +61,10 @@ def _query_parameter_names(spec: dict[str, Any], path: str) -> set[str]:
 @pytest.mark.unit
 def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     module = _load_script_module()
-    full = create_app(ApiSettings()).openapi()
+    app = create_app(ApiSettings())
+    full = app.openapi()
 
-    user = module.user_openapi_spec(full)
+    user = module.user_openapi_spec(full, app=app)
 
     assert "visibility" not in _query_parameter_names(full, "/v1/curated-themes")
     assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
@@ -100,11 +103,13 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/providers/{provider}/last-sync",
         "/health",
         "/version",
+        "/v1/features",
         "/v1/features/in-bounds",
         "/v1/features/nearby",
         "/v1/features/nearby/by-target",
         "/v1/features/search",
         "/v1/features/{feature_id}",
+        "/v1/features/{feature_id}/contained-features",
         "/v1/features/{feature_id}/price",
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/forecast",
@@ -133,16 +138,14 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "PublicApiKey",
         "ServiceToken",
     }
-    for path in {
-        "/v1/curated-features",
-        "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-sources",
-        "/v1/curated-themes",
-    }:
-        assert user["paths"][path]["get"]["security"] == [
-            {"PublicApiKey": []},
-            {"ServiceToken": []},
-        ]
+    for row in build_route_policy_matrix(app):
+        if not row.include_in_schema or row.policy is not RoutePolicy.PUBLIC_KEYED:
+            continue
+        for method in row.methods:
+            assert user["paths"][row.schema_path][method.lower()]["security"] == [
+                {"PublicApiKey": []},
+                {"ServiceToken": []},
+            ]
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
@@ -274,17 +277,77 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
 
 @pytest.mark.unit
-def test_user_operations_are_present_in_full_openapi() -> None:
+def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
     module = _load_script_module()
-    full = create_app(ApiSettings()).openapi()
+    app = create_app(ApiSettings())
+    full = app.openapi()
+    user = module.user_openapi_spec(full, app=app)
 
-    for path, methods in module.USER_OPERATIONS.items():
-        assert not path.startswith("/admin")
-        assert path in full["paths"]
-        path_item = full["paths"][path]
-        assert methods <= {
-            key for key in path_item if key in module.HTTP_METHODS
-        }
+    route_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema and not row.is_websocket
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
+    full_operations = module._openapi_operations(full)
+    expected_user_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema
+        and not row.is_websocket
+        and row.policy in module.USER_ROUTE_POLICIES
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
+
+    assert full_operations == route_operations
+    assert module._openapi_operations(user) == expected_user_operations
+
+
+@pytest.mark.unit
+def test_user_openapi_rejects_route_method_drift() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    full = copy.deepcopy(app.openapi())
+    del full["paths"]["/v1/features"]["get"]
+
+    with pytest.raises(ValueError, match="route/OpenAPI operation drift"):
+        module.user_openapi_spec(full, app=app)
+
+
+@pytest.mark.unit
+def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    full = app.openapi()
+    user = module.user_openapi_spec(full, app=app)
+    policies = {
+        row.schema_path: row.policy
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema and not row.is_websocket
+    }
+    expected_security = {
+        RoutePolicy.PUBLIC_UNAUTHENTICATED: [],
+        RoutePolicy.PUBLIC_KEYED: [
+            {"PublicApiKey": []},
+            {"ServiceToken": []},
+        ],
+        RoutePolicy.SERVICE: [{"ServiceToken": []}],
+    }
+
+    for spec in (full, user):
+        for path, method in module._openapi_operations(spec):
+            policy = policies[path]
+            operation = spec["paths"][path][method]
+            if policy in expected_security:
+                assert operation.get("security", []) == expected_security[policy], (
+                    path,
+                    method,
+                    policy,
+                )
+            if {"PublicApiKey": []} in operation.get("security", []):
+                assert policy is RoutePolicy.PUBLIC_KEYED
 
 
 @pytest.mark.unit

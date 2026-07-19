@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
+
+- T-VN-SYNC-02 적대적 리뷰에서 production runtime은 public-keyed GET 29개를 모두
+  `require_public_api_key`로 닫지만 full OpenAPI는 curated 4개만
+  `PublicApiKey OR ServiceToken`으로 선언하는 P1 drift를 확인했다. full 25개, user 23개
+  operation이 기계 계약상 무인증으로 기술된다.
+- 원인은 `app.py`의 `_PUBLIC_CURATED_PATHS`와 OpenAPI customizer, user export의
+  `USER_OPERATIONS`가 route policy와 별도 수기 정본인 구조다. `ROUTE_POLICIES`와 조립된
+  method metadata에서 full/user surface와 security를 파생하고 양방향 전수 비교로 회귀를 막는다.
+- DB schema·경로·DTO·runtime 인증 동작은 바꾸지 않는다. CodeGraph 영향도는
+  `ROUTE_POLICIES` 57개, `create_app` 176개, route wiring gate caller 5개다. 문서 선행 PR 뒤
+  구현을 추가하고 동일 단일 적대 리뷰 승인 전에는 테스트·lint·build·OpenAPI check를 실행하지
+  않는다.
+
 ## 2026-07-20 (codex) — vNext integration 병합·cross-repo cutover 상태 정리
 
 - main→integration 동기화 PR #781은 CI 8개 green 뒤 merge commit
