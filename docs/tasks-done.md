@@ -28,7 +28,7 @@
   표면은 `Access-Control-Allow-Origin`을 내보내지 않는다. app-global `CORSMiddleware`를 route
   policy로 게이트하는 표면 범위 미들웨어(`kortravelmap.api.cors.SurfaceScopedCORSMiddleware`)로
   구현했고, 경로 판정은 비-public 매칭 시 무조건 제외하는 security-safe 규칙을 쓴다. CORS는
-  미들웨어라 OpenAPI spec 무관(drift 없음). PR #(pending).
+  미들웨어라 OpenAPI spec 무관(drift 없음). PR #795.
 
 ## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
 
